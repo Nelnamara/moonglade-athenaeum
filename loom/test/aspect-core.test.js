@@ -67,6 +67,14 @@ describe("a typo is said, not silently searched", () => {
     assert.equal(aspectError("-ar:0:0"), AR_ERROR);
     assert.match(AR_ERROR, /W:H, square, portrait, landscape, tall, wide, >N or <N/);
   });
+  test("the token still being typed is left alone until it has been searched", () => {
+    assert.equal(aspectError("ar:ta", { ignoreLast: true }), "");
+    assert.equal(aspectError("night ar:1:", { ignoreLast: true }), "");
+    assert.equal(aspectError("ar:banana ", { ignoreLast: true }), AR_ERROR);          // finished with a space
+    assert.equal(aspectError("ar:banana night", { ignoreLast: true }), AR_ERROR);      // not the last token
+    assert.equal(aspectError("ar:banana", { ignoreLast: false }), AR_ERROR);           // searched: say so
+    assert.equal(aspectError("ar:banana"), AR_ERROR);
+  });
   test("a good one, a half-typed one and no ar: at all are quiet", () => {
     assert.equal(aspectError("ar:tall"), "");
     assert.equal(aspectError("ar:"), "");                    // still being typed

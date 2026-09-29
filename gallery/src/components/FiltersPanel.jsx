@@ -219,7 +219,7 @@ export function LibraryBar({
 }) {
   const {
     media, perPage, shelf,
-    query, setQuery, submitQuery, resetAll,
+    query, applied, setQuery, submitQuery, resetAll,
     selectMode, setSelectMode, selected, setSelected,
     adv, advCount, flyOpen, setFlyOpen, applyAdvanced,
   } = lib;
@@ -239,7 +239,7 @@ export function LibraryBar({
   const [acIdx, setAcIdx] = useState(-1);
   const [acOff, setAcOff] = useState(false);
   const sugg = focused && !acOff && !similar ? aspectSuggestions(query) : [];
-  const arErr = aspectError(query);
+  const arErr = aspectError(query, { ignoreLast: focused && query.trim() !== (applied || "").trim() });
   const takeSuggestion = (token) => { setQuery(applySuggestion(query, token)); setAcIdx(-1); };
 
   /* the pill's active-count badge: tray-visible filters (media/shelf) plus

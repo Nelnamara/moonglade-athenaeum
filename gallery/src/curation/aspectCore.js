@@ -77,9 +77,13 @@ export function withAspect(query, value) {
 }
 
 /* A message when the search holds an ar: token no value of which the server would take (it
-   would search it as a word and find nothing, which reads as "no such pictures"). "" if fine. */
-export function aspectError(query) {
-  for (const t of tokens(query)) {
+   would search it as a word and find nothing, which reads as "no such pictures"). "" if fine.
+   `ignoreLast` leaves the token being typed alone (`ar:ta` is on its way to `ar:tall`, not a
+   mistake yet): the field passes it while it has focus and the text has not been searched. */
+export function aspectError(query, opts) {
+  const all = tokens(query);
+  const list = opts && opts.ignoreLast && !/\s$/.test(String(query == null ? "" : query)) ? all.slice(0, -1) : all;
+  for (const t of list) {
     const m = t.match(AR_TOKEN);
     if (m && m[2] !== "" && !parseAspect(m[2]).ok) return AR_ERROR;
   }

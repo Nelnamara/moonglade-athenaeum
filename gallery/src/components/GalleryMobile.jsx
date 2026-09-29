@@ -105,7 +105,7 @@ export default function GalleryMobile({
       dateFrom: draft.dateFrom, dateTo: draft.dateTo,
       shelf: draft.shelf, perPage: draft.perPage,
     };
-    if ((draft.aspect || "") !== aspectIn(query)) patch.q = withAspect(query, draft.aspect);
+    if ((draft.aspect || "") !== aspectIn(query)) patch.q = withAspect(query, draft.aspect || "");
     applyAdvanced(patch);
     closeSheet();
   };
@@ -114,8 +114,9 @@ export default function GalleryMobile({
      has an operator -- as a smart collection. It stores the QUERY, never a list of pictures,
      and opens the new collection. The draft's own aspect and Collection choices are honoured
      (a smart collection open in the field is its own query, so it adds no collection: term). */
+  const aspectChanged = (draft.aspect || "") !== aspectIn(query);
   const sheetQuery = curation ? curation.composeView(
-    withAspect(query, draft.aspect || ""),
+    aspectChanged ? withAspect(query, draft.aspect || "") : query,
     { adv: { ...adv, ...draft }, shelf: draft.shelf }) : "";
   const canSaveThis = canSaveSmart(sheetQuery);
   const saveSmartFromSheet = async () => {
