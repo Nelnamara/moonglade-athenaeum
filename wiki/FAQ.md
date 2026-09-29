@@ -48,6 +48,10 @@ appears as a centred panel, with finger-sized dock and close buttons. (Before 20
 drawer left a dead strip down one side and the model browser opened half off the top of the
 screen — if that is what you remember seeing, update.)
 
+**Can I save data on a phone?** Yes: **Control → Data saver**. See
+[Control Panel](Control-Panel). On an iPhone the browser cannot tell Moonglade whether you are on a
+metered connection, so pick **Always** rather than **Auto**.
+
 **How the phone's Back gesture behaves.** Anything the phone opens *over* your library —
 a picture full-screen, a picture's own record, anything from the **☰** menu, the Folio, the
 contact sheet, the contest entry screen, and the composer's

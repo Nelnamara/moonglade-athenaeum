@@ -199,6 +199,64 @@ def test_escape_literal_round_trips_byte_for_byte(e):
     assert "".join(x["lit"] for x in p["parts"]) == e["text"]
 
 
+@pytest.mark.parametrize("t", VECTORS["trim"], ids=[ascii(t["raw"]) for t in VECTORS["trim"]])
+def test_options_and_list_items_trim_the_one_shared_set(t):
+    """Review N5: one explicit trim set in both halves (templateCore.js reads these too)."""
+    assert runs.trim(t["raw"]) == t["trimmed"]
+    assert runs.clean_list([t["raw"]]) == ([t["trimmed"]] if t["trimmed"] else [])
+    p = runs.parse("{" + t["raw"] + "|z}", {})
+    assert p["vars"][0]["options"] == ([t["trimmed"]] if t["trimmed"] else []) + ["z"]
+
+
+@pytest.mark.parametrize("t", VECTORS["invariant"], ids=[ascii(t) for t in VECTORS["invariant"]])
+def test_a_prompt_with_no_pipe_group_and_no_list_token_is_byte_identical(t):
+    """The S1 ruling's invariant: it never changes what PixAI receives, never needs a confirm."""
+    for vm in ("random", "matrix"):
+        got = runs.plan_jobs(t, VECTORS["lists"], vm, 1, 5)
+        assert got["mode"] == "single" and got["jobs"][0]["prompt"] == t
+    assert runs.parse(t, VECTORS["lists"])["syntax"] is False
+
+
+def _lcg_strings(alphabet, count, seed, max_len=14):
+    """Deterministic pseudo-random strings (the same generator loom/test/template-core.test.js
+    uses), so the two halves are driven by the same inputs."""
+    s = seed
+    out = []
+    for _ in range(count):
+        s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+        n = s % max_len
+        w = []
+        for _k in range(n):
+            s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+            w.append(alphabet[s % len(alphabet)])
+        out.append("".join(w))
+    return out
+
+
+PROPERTY_ALPHABET = ["{", "}", "\\", "_", "a", " ", "(", ")", ",", "__x__", "é"]
+
+
+def test_property_no_pipe_and_no_list_token_resolves_to_itself():
+    """Review S1: the invariant as a property -- any text with no `|` and no __name__ token,
+    whatever its braces and backslashes, resolves to itself byte for byte with no syntax."""
+    checked = 0
+    for t in _lcg_strings(PROPERTY_ALPHABET, 4000, 20260929):
+        if "|" in t or runs._LIST_TOKEN_RE.search(t):
+            continue
+        checked += 1
+        assert runs.parse(t, {})["syntax"] is False, t
+        assert runs.plan_jobs(t, {}, "matrix", 1, 1)["jobs"][0]["prompt"] == t, t
+    assert checked > 500
+
+
+def test_property_escape_literal_always_round_trips():
+    """History reuse: any text at all, escaped, parses back to exactly itself, no variable."""
+    for t in _lcg_strings(PROPERTY_ALPHABET + ["|"], 4000, 7):
+        p = runs.parse(runs.escape_literal(t), {"x": ["q"]})
+        assert p["error"] is None and not p["vars"], t
+        assert "".join(x["lit"] for x in p["parts"]) == t, t
+
+
 def test_the_keys_and_numbers_match_the_dock():
     js = open(os.path.join(HERE, "..", "gallery", "src", "gen", "templateCore.js"),
               encoding="utf-8").read()
@@ -229,12 +287,24 @@ def test_api_generate_refuses_more_than_one_with_nothing_sent(cli, rig, count):
     assert rig.network == 0
 
 
-@pytest.mark.parametrize("prompt", ["a {b|c}", "a __poses__", "a \\{b\\}", "{unclosed", "stray }"])
+@pytest.mark.parametrize("prompt", ["a {b|c}", "a __poses__", "a \\{b|c\\}", "{unclosed | pipe",
+                                    "{{nested|group}}", "\\__poses__"])
 def test_api_generate_refuses_the_template_syntax_with_nothing_sent(cli, rig, prompt):
     r = cli.post("/api/generate", json=dict(BASE, prompt=prompt, count=1))
     assert r.status_code == 400
     assert "template syntax" in r.get_json()["error"]
     assert rig.network == 0
+
+
+@pytest.mark.parametrize("prompt", VECTORS["invariant"] + [
+    "masterpiece, {{best quality}}, (smile:1.2), a | b, ¯\\_(ツ)_/¯"])
+def test_ordinary_braces_and_backslashes_reach_pixai_exactly_as_typed(cli, rig, prompt):
+    """The S1 ruling: a prompt with no `|` group and no __name__ token is an ordinary single
+    send -- /api/generate takes it and PixAI receives it byte for byte, braces and all."""
+    rig.card_default = None
+    d = cli.post("/api/generate", json=dict(BASE, prompt=prompt, count=1)).get_json()
+    assert d.get("task_id"), d
+    assert rig.mutations[-1]["prompts"] == prompt
 
 
 def test_the_upscale_road_keeps_its_stored_prompt_braces_and_all(cli, rig):
@@ -325,6 +395,61 @@ def test_a_matrix_never_asks_for_a_card(cli, rig):
     assert all("--no-card" in c["cli"]["command"] for c in d["cells"])
 
 
+def test_forces_no_card_only_for_a_matrix_of_two_or_more_cells():
+    assert runs.forces_no_card(runs.plan_jobs("{a|b} x", {}, "matrix", 1, 0)) is True
+    assert runs.forces_no_card(runs.plan_jobs("{a|} x", {}, "matrix", 1, 0)) is False
+    assert runs.forces_no_card(runs.plan_jobs("plain", {}, "matrix", 1, 0)) is False
+    assert runs.forces_no_card(runs.plan_jobs("{a|b} x", {}, "random", 2, 0)) is False
+    assert runs.forces_no_card({"error": "x"}) is False
+
+
+@pytest.mark.parametrize("prompt,lists", [("{solo|} glade", None),
+                                          ("__one__ glade", {"one": ["solo"]})],
+                         ids=["one-option-group", "one-item-list"])
+def test_a_one_cell_matrix_is_an_ordinary_single_send_and_its_card_applies(cli, rig, prompt, lists):
+    """Review B1: a Matrix that expands to ONE cell goes out as a single send (no confirm, no
+    acknowledgement), so it must be one: the held card applies exactly as it does for any
+    single send -- never a forced no_card the dock's badge did not price."""
+    if lists:
+        _lists(cli, lists)
+    rig.card_default = CARD
+    p = plan(cli, prompt=prompt, var_mode="matrix").get_json()
+    assert (p["mode"], p["count"], p["covered"], p["total"]) == ("matrix", 1, 1, 0)
+    assert "card_note" not in p and p["cells"][0]["no_card"] is False
+    rig.calls.clear()
+    d = run(cli, prompt=prompt, var_mode="matrix").get_json()
+    assert d["status"] == "sent" and len(rig.mutations) == 1
+    assert rig.count("price_task") == 0, "a single send is not quoted"
+    assert rig.count("match_kaisuuken") >= 1, "the card check a single send makes"
+    assert rig.mutations[0].get("kaisuukenId") == "K1"
+    # byte for byte what a plain single send of the same resolved prompt sends
+    single = cli.post("/api/generate", json=dict(BASE, prompt="solo glade", count=1)).get_json()
+    assert single.get("task_id"), single
+    assert rig.mutations[1] == rig.mutations[0]
+
+
+def test_a_matrix_of_two_cells_never_calls_the_card_check_at_plan_or_send(cli, rig):
+    rig.card_default = CARD
+    _, d, _ = plan_and_run(cli, rig, prompt="{a|b} x", var_mode="matrix")
+    assert d["status"] == "sent" and len(rig.mutations) == 2
+    assert rig.count("match_kaisuuken") == 0
+    assert all("kaisuukenId" not in m for m in rig.mutations)
+
+
+def test_a_fixed_seed_matrix_whose_cells_share_a_prompt_is_refused(cli, rig):
+    """Review N4: with the seed field set every cell carries that one seed, so two cells that
+    resolve to the same prompt are one picture paid for twice -- refused, locally."""
+    t = "{a|a b} {b c|c}"                       # cells 1 and 4 both read "a b c"
+    d = run(cli, prompt=t, var_mode="matrix", seed="77", run_seed=77,
+            ack={"count": 4, "jobs": 4}).get_json()
+    assert d["error"].startswith("Cells 1 and 4 would send the same prompt with the same seed")
+    assert rig.network == 0 and rig.mutations == []
+    assert "Cells 1 and 4" in plan(cli, prompt=t, var_mode="matrix", seed="77",
+                                   run_seed=77).get_json()["error"]
+    # with no fixed seed PixAI draws one per cell: four different pictures, allowed
+    assert plan(cli, prompt=t, var_mode="matrix").get_json()["count"] == 4
+
+
 def test_an_unreadable_price_refuses_the_plan(cli, rig):
     rig.price = None
     d = plan(cli, count=3).get_json()
@@ -364,7 +489,8 @@ def test_run_read_only_refuses_before_any_pixai_call(cli, rig, monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("kw,words", [
-    ({"prompt": "a {b"}, "Unclosed or nested brace"),
+    ({"prompt": "a {b|c"}, "Unclosed or nested brace"),
+    ({"prompt": "{{a|b}}"}, "Unclosed or nested brace"),
     ({"prompt": "__nope__ x"}, "No list named __nope__."),
     ({"prompt": "{a|b|c|d|e} {1|2|3|4|5}", "var_mode": "matrix"}, "over the 24-cell cap"),
     ({"count": 5}, "Pick 1 to 4 images."),
@@ -389,8 +515,21 @@ def test_a_25_cell_matrix_is_refused_whatever_the_client_claims(cli, rig):
     assert rig.network == 0 and rig.mutations == []
 
 
-@pytest.mark.parametrize("field,value", [("count", 3), ("jobs", 3), ("each", 1500),
-                                         ("covered", 1), ("total", 1), ("digest", "0" * 64)])
+@pytest.mark.parametrize("field", ["count", "jobs"])
+def test_ack_count_and_jobs_are_checked_before_any_pixai_call(cli, rig, field):
+    """Review N6: the acknowledgement's count and jobs against the local expansion, right after
+    it -- before the entitlement read, the builds and the quote."""
+    ack = {"count": 2, "jobs": 2, "each": 1600, "covered": 0, "total": 3200, "digest": "x"}
+    ack[field] = 3
+    d = run(cli, prompt="{a|b} x", count=2, ack=ack).get_json()
+    assert d["changed"] == field and "nothing was sent" in d["error"]
+    assert rig.network == 0 and rig.mutations == []
+
+
+# count and jobs are refused earlier, before the quote (review N6, the test above) -- so with no
+# fresh plan to hand back; every quoted field comes back with the fresh plan here.
+@pytest.mark.parametrize("field,value", [("each", 1500), ("covered", 1), ("total", 1),
+                                         ("digest", "0" * 64)])
 def test_any_acknowledgement_difference_refuses_with_the_fresh_plan(cli, rig, field, value):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     ack = dict(ack_of(p), **{field: value})
@@ -570,6 +709,41 @@ def test_a_second_run_while_one_is_sending_is_refused(tmp_path, cli, rig):
     assert len(rig.mutations) == 2
 
 
+def test_the_lock_is_install_wide_a_second_login_is_refused_mid_send(tmp_path, rig):
+    """Review S4 (F10): every gallery login spends the one PixAI wallet, so the one-run lock is
+    install-wide -- login B's run is refused while login A's is held mid-send."""
+    app = create_app(tmp_path)
+    a = login_test_client(app, username="alice")
+    a.csrf = _csrf(a)
+    b = login_test_client(app, username="bobby")
+    b.csrf = _csrf(b)
+    pa = plan(a, prompt="{a|b} x", count=2).get_json()
+    pb = plan(b, prompt="{c|d} y", count=2).get_json()
+    gate, entered = threading.Event(), threading.Event()
+
+    def hold(i, params):
+        entered.set()
+        gate.wait(10)
+    rig.on_mutate = hold
+    out = {}
+
+    def first():
+        out["r"] = run(a, run_id="a1" * 16, ack=ack_of(pa), prompt="{a|b} x", count=2).get_json()
+    t = threading.Thread(target=first)
+    t.start()
+    assert entered.wait(10)
+    try:
+        second = run(b, run_id="b2" * 16, ack=ack_of(pb), prompt="{c|d} y", count=2).get_json()
+        assert "A run is still being sent" in second["error"], second
+        assert b.get("/api/generate/runs/" + "b2" * 16).status_code == 404, "nothing reserved"
+    finally:
+        gate.set()
+        t.join(10)
+    assert out["r"]["status"] == "sent"
+    assert len(rig.mutations) == 2
+    assert all(m["prompts"] in ("a x", "b x") for m in rig.mutations)
+
+
 def test_the_in_flight_mark_is_released_after_an_exception(cli, rig, monkeypatch):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     real = core.send_run
@@ -691,6 +865,39 @@ def test_a_failed_task_id_write_still_answers_with_the_task_and_never_reads_not_
     assert logged and logged[0]["run"] == d["run_id"] and logged[0]["cell"] == 0
 
 
+def _unreadable_store(tmp_path):
+    (tmp_path / runs.RUNS_DB).write_bytes(b"this is not a SQLite database\n" * 64)
+
+
+def test_an_unreadable_store_is_not_no_such_run(cli, rig, tmp_path):
+    """Review N7: a store that exists but can't be read answers "couldn't read the run" --
+    never 404 (the dock would read "not received yet"), never a PixAI fallback, never a send
+    -- and the connection is closed either way (the file can be removed after)."""
+    _unreadable_store(tmp_path)
+    with pytest.raises(runs.RunsUnreadable):
+        runs.RunsStore(tmp_path).get("9" * 32)
+    with pytest.raises(runs.RunsUnreadable):
+        runs.RunsStore(tmp_path).find_task("424242")
+    g = cli.get("/api/generate/runs/" + "9" * 32)
+    assert g.status_code == 503 and g.get_json()["error"] == runs.RUN_UNREADABLE_WORDS
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "M1", "task_id": "424242", "filename": "2025-01/a.png"}])
+    r = cli.get("/api/generate/request/424242")
+    assert r.status_code == 503 and r.get_json()["error"] == runs.RUN_UNREADABLE_WORDS
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    assert "Couldn't read the run store" in d["error"]
+    assert rig.mutations == []
+    os.remove(tmp_path / runs.RUNS_DB)          # no connection left open on it
+
+
+def test_no_row_is_still_none_and_404(cli, rig, tmp_path):
+    runs.RunsStore(tmp_path).reserve("7" * 32, "someone", status="sent")
+    assert runs.RunsStore(tmp_path).get("8" * 32) is None
+    assert runs.RunsStore(tmp_path).find_task("555") is None
+    assert cli.get("/api/generate/runs/" + "8" * 32).status_code == 404
+
+
 def test_strip_secrets_removes_credential_keys_at_any_depth():
     got = runs.strip_secrets({"prompts": "x", "Authorization": "Bearer k", "csrf": "t",
                               "nested": {"apiKey": "k", "session_id": "s", "kaisuukenId": "K1",
@@ -793,8 +1000,10 @@ def test_a_cell_the_recipes_would_take_over_the_prompt_budget_is_named(cli, rig,
     """Review F7: checked on every resolved prompt before anything goes out."""
     monkeypatch.setattr(moonglade_recipes, "batch", lambda s, ids: [{"id": R1, "prompt_len": 4001}])
     long = "x" * 90
+    # count and jobs agree with the local expansion (review N6's early check), so the run
+    # reaches the recipe budget check, which refuses before any quote
     d = run(cli, prompt="{short|" + long + "} glade", var_mode="matrix", recipeIds=[R1],
-            ack={"count": 2}).get_json()
+            ack={"count": 2, "jobs": 2}).get_json()
     assert d["error"].startswith("Cell 2 (" + long + "): a recipe would make the prompt too long")
     assert rig.mutations == []
 
@@ -828,12 +1037,79 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
     assert "inferenceProfile" not in rig.mutations[1]
 
 
-def test_exact_turns_off_both_resubmits(rig):
-    def refuse(i, params):
-        raise core.PixAIError('GraphQL error: [{"message": "bad inferenceProfile"}]')
+@pytest.mark.parametrize("params,error", [
+    ({"prompts": "a", "inferenceProfile": "pro"},
+     'GraphQL error: [{"message": "bad inferenceProfile"}]'),
+    ({"prompts": "a", "priority": core.PRIORITY_TURBO},
+     'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
+], ids=["profile-drop", "turbo-to-low"])
+def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
+    """Review S5 (F6): BOTH refusal-only resubmits are real paths without exact=True -- the
+    profile drop and the REQUIRE_MEMBERSHIP / priority-500 Turbo -> Low one -- and exact=True
+    turns each off: exactly one mutation."""
+    monkeypatch.setitem(core._turbo_refused, "seen", False)
+
+    def refuse(i, p):
+        raise core.PixAIError(error)
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {"prompts": "a", "inferenceProfile": "pro"}, exact=True)
+        core.submit_generation(object(), dict(params))
+    assert len(rig.mutations) == 2, "without exact the resubmit fires (the path is real)"
+    del rig.mutations[:]
+    monkeypatch.setitem(core._turbo_refused, "seen", False)
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), dict(params), exact=True)
+    assert len(rig.mutations) == 1
+    assert rig.mutations[0] == params
+
+
+def test_exact_never_rewrites_the_priority_it_was_quoted_with(rig, monkeypatch):
+    """Review N1: a run job goes out with the priority it was quoted and digested with; the
+    Turbo -> Low downgrade is applied at the run's build, never again at its submit."""
+    monkeypatch.setitem(core._turbo_refused, "seen", True)
+    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO}, exact=True)
+    assert rig.mutations[0]["priority"] == core.PRIORITY_TURBO
+    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO})
+    assert rig.mutations[1]["priority"] == core.PRIORITY_LOW, "a single send keeps today's rule"
+
+
+def test_a_known_turbo_refusal_is_quoted_digested_and_sent_as_low(cli, rig, monkeypatch):
+    monkeypatch.setitem(core._turbo_refused, "seen", True)
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    assert {c["request"]["variables"]["parameters"]["priority"] for c in p["cells"]} \
+        == {core.PRIORITY_LOW}
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    assert d["status"] == "sent"
+    assert [m["priority"] for m in rig.mutations] == [core.PRIORITY_LOW] * 2
+
+
+class _NoHooks(object):
+    def sending(self, cell):
+        pass
+
+    def sent(self, cell, task_id, request_, card):
+        pass
+
+    def failed(self, cell, state, error, request_):
+        pass
+
+
+@pytest.mark.parametrize("data,state", [(None, "refused"),
+                                        ({"createGenerationTask": {"id": "77"}}, "may_have_started")],
+                         ids=["refused", "partial-success"])
+def test_a_lane_graphql_error_is_refused_only_when_it_is_definite(rig, data, state):
+    """Review N2: on the lane branch a GraphQL error is marked refused only when
+    definite_refusal() says so; a partial success (the mutation's data came back beside the
+    errors) may have made -- and charged for -- the task, so it reads may_have_started."""
+    def answer(i, params):
+        e = core.PixAIError('GraphQL error: [{"message": "late"}]')
+        e.graphql_data = data
+        raise e
+    rig.on_mutate = answer
+    req = core.GenerationRequest(mode="image", unlimited=True, parameters={
+        "prompts": "a", "modelId": "V", "lane": core.UNLIMITED_LANE})
+    res = core.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
+    assert res["jobs"][0]["state"] == state
     assert len(rig.mutations) == 1
 
 
@@ -958,13 +1234,34 @@ def test_powershell_quoting_doubles_every_single_quote_form():
     assert runs._ps_quote("no_space\\") == "'no_space\\'"
 
 
+def test_the_command_names_its_shell_because_cmd_exe_is_not_powershell():
+    """Review S3: Copy as CLI is quoted for ONE shell -- the server's (PowerShell on Windows,
+    bash elsewhere) -- and says which, beside the button. This documents why: cmd.exe has no
+    single quotes, so the word PowerShell reads as one inert literal carries live cmd.exe
+    metacharacters (`&` ends the command, `|` pipes it, `^` escapes, `%PATH%` expands). The
+    command is right for the shell it names and wrong for cmd.exe, by design."""
+    params = _web_params(prompt="a&b|c^d%PATH%")
+    ps = runs.cli_command(core, params, shell="powershell")
+    assert ps["shell_name"] == "PowerShell"
+    assert runs.cli_command(core, params, shell="posix")["shell_name"] == "bash"
+    assert runs.cli_command(core, params)["shell_name"] == (
+        "PowerShell" if os.name == "nt" else "bash")
+    word = ps["command"].split(" --prompt ", 1)[1].split(" ", 1)[0]
+    assert word == "'a&b|c^d%PATH%'"            # PowerShell: one literal word
+    assert all(ch in word for ch in "&|^%")     # cmd.exe: every one of these is live
+    js = open(os.path.join(HERE, "..", "gallery", "src", "components", "RunInspector.jsx"),
+              encoding="utf-8").read()
+    assert "entry.cli.shell_name" in js, "the Inspector names the shell beside Copy as CLI"
+
+
 @pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell.exe"),
                     reason="the server's own shell is Windows PowerShell only on Windows")
 @pytest.mark.parametrize("kw", [
     {"prompt": 'a "quoted" word, it\u2019s \u201cfancy\u201d, $HOME and `tick`'},
     {"prompt": "-dash first and a trailing backslash \\"},
     {"prompt": "{braces} and C:\\path\\ with spaces\\"},
-], ids=["quotes", "dash", "backslashes"])
+    {"prompt": "a&b|c^d %PATH% <e> (f) ;g"},
+], ids=["quotes", "dash", "backslashes", "cmd-metacharacters"])
 def test_the_powershell_command_survives_real_windows_powershell(tmp_path, cli_parser, kw):
     """Review F8: run the emitted line through real powershell.exe against a stub that dumps
     sys.argv, and check the CLI rebuilds the same parameters -- the JSON form too."""

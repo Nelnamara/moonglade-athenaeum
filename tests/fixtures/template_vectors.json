@@ -436,6 +436,9 @@
    "v197",
    "v198",
    "v199"
+  ],
+  "one": [
+   "only"
   ]
  },
  "cases": [
@@ -737,53 +740,30 @@
    }
   },
   {
-   "name": "matrix one-option variables",
+   "name": "a brace group with no | is literal (matrix)",
    "template": "{solo} and {only}",
    "var_mode": "matrix",
    "count": 1,
    "run_seed": null,
-   "syntax": true,
+   "syntax": false,
    "plan": {
-    "mode": "matrix",
+    "mode": "single",
     "images": 1,
     "product": 1,
     "jobs": [
      {
       "cell": 0,
-      "prompt": "solo and only",
-      "vars": [
-       {
-        "token": "{solo}",
-        "value": "solo"
-       },
-       {
-        "token": "{only}",
-        "value": "only"
-       }
-      ],
+      "prompt": "{solo} and {only}",
+      "vars": [],
       "seed": null,
       "batch": 1
-     }
-    ],
-    "axes": [
-     {
-      "token": "{solo}",
-      "values": [
-       "solo"
-      ]
-     },
-     {
-      "token": "{only}",
-      "values": [
-       "only"
-      ]
      }
     ]
    }
   },
   {
-   "name": "escapes are literal",
-   "template": "\\{not a var\\} and \\__poses__ and a\\_b",
+   "name": "escapes: dropped only where they change the parse",
+   "template": "\\{not a var\\} and \\{a|b\\} and \\__poses__ and a\\_b",
    "var_mode": "random",
    "count": 2,
    "run_seed": 9,
@@ -795,7 +775,7 @@
     "jobs": [
      {
       "cell": 0,
-      "prompt": "{not a var} and __poses__ and a_b",
+      "prompt": "\\{not a var\\} and {a|b} and __poses__ and a\\_b",
       "vars": [],
       "seed": null,
       "batch": 2
@@ -935,47 +915,91 @@
    }
   },
   {
-   "name": "unclosed",
+   "name": "an unclosed brace with no | after it is literal",
    "template": "a {b",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
-   "syntax": true,
+   "syntax": false,
    "plan": {
-    "error": "Unclosed or nested brace. Nesting isn’t supported."
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a {b",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
    }
   },
   {
-   "name": "nested",
+   "name": "nested braces with no | are literal",
    "template": "{a{b}c}",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
-   "syntax": true,
+   "syntax": false,
    "plan": {
-    "error": "Unclosed or nested brace. Nesting isn’t supported."
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a{b}c}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
    }
   },
   {
-   "name": "stray",
+   "name": "a stray closing brace is literal",
    "template": "a } b",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
-   "syntax": true,
+   "syntax": false,
    "plan": {
-    "error": "Stray closing brace — write \\} for a literal one."
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a } b",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
    }
   },
   {
-   "name": "empty group",
+   "name": "an empty brace pair is literal",
    "template": "x {} y",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
-   "syntax": true,
+   "syntax": false,
    "plan": {
-    "error": "Empty variable."
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "x {} y",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
    }
   },
   {
@@ -1328,13 +1352,13 @@
   },
   {
    "name": "first error by position",
-   "template": "} then {",
+   "template": "x __nope__ {a|{b}} y {c|",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
    "syntax": true,
    "plan": {
-    "error": "Stray closing brace — write \\} for a literal one."
+    "error": "No list named __nope__."
    }
   },
   {
@@ -1922,14 +1946,412 @@
    }
   },
   {
-   "name": "stray after escape",
+   "name": "a backslash before a brace group with no | stays",
    "template": "\\{x}",
    "var_mode": "random",
    "count": 1,
    "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "\\{x}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brace emphasis is literal, byte for byte",
+   "template": "{masterpiece}, {{best quality}}, 1girl",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "batch",
+    "images": 2,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{masterpiece}, {{best quality}}, 1girl",
+      "vars": [],
+      "seed": null,
+      "batch": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "a kaomoji's backslash and a\\_b stay",
+   "template": "¯\\_(ツ)_/¯ a\\_b \\x",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "¯\\_(ツ)_/¯ a\\_b \\x",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "pipes outside a brace group are literal",
+   "template": "(a|b) {x} | {y}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "(a|b) {x} | {y}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped | group is literal",
+   "template": "\\{a|b\\} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
    "syntax": true,
    "plan": {
-    "error": "Stray closing brace — write \\} for a literal one."
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped opener alone makes the group literal",
+   "template": "\\{a|b} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped closer makes the group literal",
+   "template": "{a|b\\} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a backslash before a backslash stays",
+   "template": "\\\\{a|b}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "\\{a|b}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an unclosed brace with a | after it is refused",
+   "template": "a {b|c",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "an escaped unclosed brace with a | is literal",
+   "template": "a \\{b|c",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a {b|c",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a | group inside braces is refused",
+   "template": "{{a|b}}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a | group holding braces is refused",
+   "template": "{a|{b}}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a | group inside a literal group is refused",
+   "template": "{x {a|b} y}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a list token inside literal braces",
+   "template": "{__lights__}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 3,
+    "product": 3,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{moonlight}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "moonlight"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "{lantern glow}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "lantern glow"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "{dawn haze}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "dawn haze"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "__lights__",
+      "values": [
+       "moonlight",
+       "lantern glow",
+       "dawn haze"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped list token is literal",
+   "template": "\\__lights__ and __lights__",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 2,
+    "product": 3,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "__lights__ and moonlight",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "moonlight"
+       }
+      ],
+      "seed": 5,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "__lights__ and dawn haze",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "dawn haze"
+       }
+      ],
+      "seed": 6,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "matrix one cell",
+   "template": "{solo|} and __one__",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "solo and only",
+      "vars": [
+       {
+        "token": "{solo|}",
+        "value": "solo"
+       },
+       {
+        "token": "__one__",
+        "value": "only"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "{solo|}",
+      "values": [
+       "solo"
+      ]
+     },
+     {
+      "token": "__one__",
+      "values": [
+       "only"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "a closing brace inside a literal pair keeps its backslash",
+   "template": "{a\\}|b}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a\\}|b}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
    }
   }
  ],
@@ -1940,31 +2362,31 @@
   },
   {
    "text": "{x}",
-   "escaped": "\\{x\\}"
+   "escaped": "{x}"
   },
   {
    "text": "{{x}}",
-   "escaped": "\\{\\{x\\}\\}"
+   "escaped": "{{x}}"
   },
   {
    "text": "a\\{b",
-   "escaped": "a\\\\{b"
+   "escaped": "a\\{b"
   },
   {
    "text": "long_hair, __x__",
-   "escaped": "long_hair, \\_\\_x\\_\\_"
+   "escaped": "long_hair, \\__x__"
   },
   {
    "text": "___y__",
-   "escaped": "\\_\\_\\_y\\_\\_"
+   "escaped": "\\___y__"
   },
   {
    "text": "a\\_b",
-   "escaped": "a\\\\_b"
+   "escaped": "a\\_b"
   },
   {
    "text": "\\\\{",
-   "escaped": "\\\\\\{"
+   "escaped": "\\\\{"
   },
   {
    "text": "end\\",
@@ -1972,7 +2394,7 @@
   },
   {
    "text": "}{",
-   "escaped": "\\}\\{"
+   "escaped": "}{"
   },
   {
    "text": "_",
@@ -1980,11 +2402,11 @@
   },
   {
    "text": "__",
-   "escaped": "\\_\\_"
+   "escaped": "__"
   },
   {
    "text": "a__b",
-   "escaped": "a\\_\\_b"
+   "escaped": "a__b"
   },
   {
    "text": "\\",
@@ -1992,7 +2414,210 @@
   },
   {
    "text": "mixed {a|b} __l__ \\x",
-   "escaped": "mixed \\{a|b\\} \\_\\_l\\_\\_ \\x"
+   "escaped": "mixed \\{a|b} \\__l__ \\x"
+  },
+  {
+   "text": "{masterpiece}, 1girl",
+   "escaped": "{masterpiece}, 1girl"
+  },
+  {
+   "text": "{{a|b}}",
+   "escaped": "{\\{a|b}}"
+  },
+  {
+   "text": "{a|{b}}",
+   "escaped": "\\{a|{b}}"
+  },
+  {
+   "text": "a {b|c",
+   "escaped": "a \\{b|c"
+  },
+  {
+   "text": "\\{a|b}",
+   "escaped": "\\\\{a|b}"
+  },
+  {
+   "text": "{a|b\\}",
+   "escaped": "\\{a|b\\\\}"
+  },
+  {
+   "text": "\\\\{a|b}",
+   "escaped": "\\\\\\{a|b}"
+  },
+  {
+   "text": "\\__x__",
+   "escaped": "\\\\__x__"
+  },
+  {
+   "text": "¯\\_(ツ)_/¯",
+   "escaped": "¯\\_(ツ)_/¯"
+  },
+  {
+   "text": "{a\\}|b}",
+   "escaped": "{a\\}|b}"
+  },
+  {
+   "text": "x {y",
+   "escaped": "x {y"
   }
+ ],
+ "trim": [
+  {
+   "raw": "\tx y\t\t",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\nx y\n\n",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u000bx y\u000b\u000b",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\fx y\f\f",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\rx y\r\r",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001cx y\u001c\u001c",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001dx y\u001d\u001d",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001ex y\u001e\u001e",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001fx y\u001f\u001f",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "x y",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "　x y　　",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "﻿x y﻿﻿",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "​x​",
+   "trimmed": "​x​"
+  },
+  {
+   "raw": "᠎x᠎",
+   "trimmed": "᠎x᠎"
+  },
+  {
+   "raw": "­x­",
+   "trimmed": "­x­"
+  },
+  {
+   "raw": "﻿\u001c\u001d\u001e\u001f",
+   "trimmed": ""
+  }
+ ],
+ "invariant": [
+  "{masterpiece}, 1girl",
+  "{{best quality}}",
+  "a } b",
+  "x {y",
+  "{}",
+  "\\{x\\}",
+  "(a|b)",
+  "a | b",
+  "{a} | {b}",
+  "a\\_b",
+  "¯\\_(ツ)_/¯",
+  "\\\\",
+  "__",
+  "a__b",
+  "{a\\}|b}",
+  "}{",
+  "{{}}",
+  "\\}",
+  "long_hair, {red eyes}"
  ]
 }

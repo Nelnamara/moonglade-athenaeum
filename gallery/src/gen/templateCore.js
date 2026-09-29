@@ -2,7 +2,8 @@
    (Session M, Generate power tools: NOTES 1, 2, 3, 8; Generate Power Tools Handoff).
 
    ONE SYNTAX for Random and Matrix: `{a|b|c}` is an inline variable, `__name__` reads a
-   saved list, `\{` `\}` `\_` are literal. This file is the dock's copy of the rule; the
+   saved list; a brace group with no `|` is literal text, and a backslash is dropped only
+   where it changes the parse (the S1 ruling, see parse). This file is the dock's copy of the rule; the
    server's is moonglade_runs.py, and tests/fixtures/template_vectors.json pins both to one
    set of answers (loom/test/template-core.test.js + tests/test_generate_runs.py), so the
    preview the dock draws is the set of jobs the server sends.
@@ -26,8 +27,16 @@ export const LIST_ITEM_MAX = 200;
 const BIG = 1000000;
 
 export const ERR_UNCLOSED = "Unclosed or nested brace. Nesting isn’t supported.";
-export const ERR_STRAY = "Stray closing brace — write \\} for a literal one.";
 export const ERR_EMPTY = "Empty variable.";
+
+/* What an option and a list item are trimmed of (review N5): ONE explicit set, the same as
+   moonglade_runs.TRIM_CHARS, because String.trim() and Python's str.strip() disagree (JS keeps
+   U+0085 and U+001C-U+001F, Python keeps U+FEFF). It is the union of the two. */
+export const TRIM_CHARS = "\t\n\u000b\u000c\r\u001c\u001d\u001e\u001f \u0085  "
+  + "           "
+  + "    　﻿";
+const TRIM_RE = new RegExp("^[" + TRIM_CHARS + "]+|[" + TRIM_CHARS + "]+$", "g");
+export function trim(text) { return String(text).replace(TRIM_RE, ""); }
 export const ERR_TOO_MANY_VARS = "Up to " + MAX_VARS + " variables in one prompt.";
 export const ERR_TOO_MANY_OPTS = "Up to " + MAX_OPTIONS + " options in one variable.";
 export const errUnknownList = (t) => "No list named " + t + ".";
@@ -58,7 +67,7 @@ export function cleanList(items) {
   const out = [];
   for (const it of items) {
     if (typeof it !== "string") return null;
-    const t = it.trim();
+    const t = trim(it);
     if (!t) continue;
     if (t.length > LIST_ITEM_MAX) return null;
     out.push(t);
@@ -77,7 +86,7 @@ export function listsFromPrefs(prefs) {
 
 /* The Lists sheet's text (one item per line) -> the items it saves. */
 export function listItemsFromText(text) {
-  return String(text || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  return String(text || "").split(/\r?\n/).map(trim).filter(Boolean);
 }
 
 /* Why the Lists sheet may not save this list, or "" (the same bounds the server expands by). */
@@ -92,14 +101,74 @@ export function listProblem(name, items, lists) {
   return "";
 }
 
+/* The raw brace structure, every backslash ignored (moonglade_runs._brace_structure):
+   {pairs: Map open -> close, parent: Map open -> enclosing open | null, unclosed: [opens]}. */
+function braceStructure(s) {
+  const stack = [], pairs = new Map(), parent = new Map();
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "{") { parent.set(i, stack.length ? stack[stack.length - 1] : null); stack.push(i); }
+    else if (c === "}" && stack.length) pairs.set(stack.pop(), i);
+  }
+  return { pairs, parent, unclosed: stack };
+}
+
+/* [has a top-level |, holds a nested pair] for the pair (o, c). */
+function pairShape(s, o, c, pairs) {
+  let i = o + 1, pipe = false, child = false;
+  while (i < c) {
+    const ch = s[i];
+    if (ch === "{") { child = true; i = pairs.get(i) + 1; continue; }
+    if (ch === "|") pipe = true;
+    i += 1;
+  }
+  return [pipe, child];
+}
+
+/* Where the template rule acts (moonglade_runs._template_marks): groups (open -> [kind,
+   close], kind live | escaped | nested) for every pair holding a top-level |, the backslash
+   positions dropped, and the unclosed { refused. Every other brace is literal text and every
+   other backslash stays. */
+function templateMarks(s) {
+  const { pairs, parent, unclosed } = braceStructure(s);
+  const groups = new Map(), consume = new Set(), badOpen = new Set();
+  const esc = (k) => k > 0 && s[k - 1] === "\\";
+  for (const [o, c] of pairs) {
+    const [pipe, child] = pairShape(s, o, c, pairs);
+    if (!pipe) continue;
+    if (esc(o) || esc(c)) {
+      groups.set(o, ["escaped", c]);
+      if (esc(o)) consume.add(o - 1);
+      if (esc(c)) consume.add(c - 1);
+    } else if (child || pairs.has(parent.get(o))) {
+      groups.set(o, ["nested", c]);
+    } else {
+      groups.set(o, ["live", c]);
+    }
+  }
+  for (const u of unclosed) {
+    if (s.indexOf("|", u + 1) >= 0) {
+      if (esc(u)) consume.add(u - 1);
+      else badOpen.add(u);
+    }
+  }
+  return { groups, consume, badOpen };
+}
+
 /* Scan left to right, once -> {parts, vars, error, syntax}. The same rule as
-   moonglade_runs.parse (see that docstring). */
+   moonglade_runs.parse (the S1 ruling -- see that docstring): a {...} group is a variable only
+   when it holds a top-level |; a brace group with no | is literal text, sent as typed; a
+   backslash is dropped only where it changes the parse (before the { or } of a | group,
+   before an unclosed { with a | after it, before the __ of a list token); an unclosed { with a
+   | after it and a nested | group are refused. A prompt with no | group and no __name__ token
+   resolves to itself byte for byte. */
 export function parse(template, lists) {
   const s = String(template == null ? "" : template);
   const L = lists || {};
   const parts = [];
   let error = null, syntax = false, nvars = 0;
   let buf = "";
+  const { groups, consume, badOpen } = templateMarks(s);
   const flush = () => { if (buf) { parts.push({ lit: buf }); buf = ""; } };
   const bad = (token, msg) => { flush(); parts.push({ bad: token, error: msg }); if (error === null) error = msg; };
   const addVar = (part) => {
@@ -116,23 +185,30 @@ export function parse(template, lists) {
   let i = 0;
   while (i < n) {
     const c = s[i];
-    if (c === "\\" && i + 1 < n && "{}_".includes(s[i + 1])) {
-      buf += s[i + 1]; syntax = true; i += 2; continue;
+    if (consume.has(i)) { syntax = true; i += 1; continue; }   // a backslash that changes the parse
+    if (c === "\\") {
+      LIST_TOKEN_RE.lastIndex = i + 1;
+      const m = LIST_TOKEN_RE.exec(s);
+      if (m) { buf += m[0]; syntax = true; i = LIST_TOKEN_RE.lastIndex; continue; }   // \__name__ is literal
+      buf += c; i += 1; continue;
     }
     if (c === "{") {
-      syntax = true;
-      let j = i + 1;
-      while (j < n && s[j] !== "{" && s[j] !== "}") j += 1;
-      if (j >= n || s[j] === "{") { bad("{", ERR_UNCLOSED); i += 1; continue; }
-      const token = s.slice(i, j + 1);
-      const opts = s.slice(i + 1, j).split("|").map((o) => o.trim()).filter(Boolean);
-      if (!opts.length) bad(token, ERR_EMPTY);
-      else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS);
-      else addVar({ var: token, options: opts, kind: "inline" });
-      i = j + 1;
-      continue;
+      const g = groups.get(i);
+      if (g && g[0] === "live") {
+        syntax = true;
+        const j = g[1];
+        const token = s.slice(i, j + 1);
+        const opts = s.slice(i + 1, j).split("|").map(trim).filter(Boolean);
+        if (!opts.length) bad(token, ERR_EMPTY);
+        else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS);
+        else addVar({ var: token, options: opts, kind: "inline" });
+        i = j + 1;
+        continue;
+      }
+      if (g && g[0] === "nested") { syntax = true; bad(s.slice(i, g[1] + 1), ERR_UNCLOSED); i = g[1] + 1; continue; }
+      if (badOpen.has(i)) { syntax = true; bad("{", ERR_UNCLOSED); i += 1; continue; }
+      buf += c; i += 1; continue;   // a literal brace (an escaped group's too)
     }
-    if (c === "}") { syntax = true; bad("}", ERR_STRAY); i += 1; continue; }
     if (c === "_") {
       LIST_TOKEN_RE.lastIndex = i;
       const m = LIST_TOKEN_RE.exec(s);
@@ -231,22 +307,47 @@ export function planJobs(template, lists, varMode, count, runSeed) {
     }
     mode = "random";
   }
-  for (const j of jobs) if (!j.prompt.trim()) return { error: errBlankCell(j.cell + 1) };
+  for (const j of jobs) if (!trim(j.prompt)) return { error: errBlankCell(j.cell + 1) };
   const out = { mode, images: jobs.length, product, jobs };
   if (axes) out.axes = axes;
   return out;
 }
 
-/* A plain prompt made safe to put back in the composer (moonglade_runs.escape_literal). */
+/* True when a send of `plan` goes out with no free card whatever the payload says: a Matrix of
+   2 or more cells (Settled 2). A one-cell matrix is an ordinary single send (review B1). The
+   dock's cost badge prices with no_card on exactly when this is true
+   (moonglade_runs.forces_no_card). */
+export function forcesNoCard(plan) {
+  return !!plan && !plan.error && plan.mode === "matrix" && Array.isArray(plan.jobs) && plan.jobs.length >= 2;
+}
+
+/* A plain prompt made safe to put back in the composer (moonglade_runs.escape_literal): only
+   what the rule would act on gets a backslash -- the { of every | group (and its } when a
+   backslash already sits before it), an unclosed { with a | after it, the first _ of every
+   list token. Ordinary braces, long_hair and a kaomoji's \_ stay exactly as they are. */
 export function escapeLiteral(text) {
   const s = String(text || "");
-  let out = "";
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === "{" || c === "}") out += "\\" + c;
-    else if (c === "_" && ((i > 0 && (s[i - 1] === "_" || s[i - 1] === "\\")) || s[i + 1] === "_")) out += "\\_";
-    else out += c;
+  const n = s.length;
+  const { pairs, unclosed } = braceStructure(s);
+  const ins = new Set();
+  for (const [o, c] of pairs) {
+    if (pairShape(s, o, c, pairs)[0]) {
+      ins.add(o);
+      if (s[c - 1] === "\\") ins.add(c);
+    }
   }
+  for (const u of unclosed) if (s.indexOf("|", u + 1) >= 0) ins.add(u);
+  let i = 0;
+  while (i < n) {
+    if (s[i] === "_") {
+      LIST_TOKEN_RE.lastIndex = i;
+      const m = LIST_TOKEN_RE.exec(s);
+      if (m) { ins.add(i); i = LIST_TOKEN_RE.lastIndex; continue; }
+    }
+    i += 1;
+  }
+  let out = "";
+  for (let k = 0; k < n; k++) out += (ins.has(k) ? "\\" : "") + s[k];
   return out;
 }
 
@@ -394,11 +495,15 @@ export const TERMINAL = ["sent", "stopped", "refused"];
 /* The run's read-back (review F4), a pure reducer. The dock POSTs /run ONCE and never again
    for that run_id; while the POST is out it reads GET /api/generate/runs/<id> every 2 s.
      state: {phase: "posting" | "reading" | "done" | "lost", since, run}
-     event: {type: "get404" | "get" | "post" | "postLost", run?, at}
+     event: {type: "get404" | "get" | "getFailed" | "post" | "postLost", run?, at}
    - a 404 while the POST is out means "not received yet" -- keep waiting;
    - a run from either answer that is terminal ends it ("done");
    - a lost POST (transport error) turns to reading back; a 404 that lasts READBACK_LOST_MS
-     after that is "lost": "may not have reached the server", never "not sent".
+     after that is "lost": "may not have reached the server", never "not sent";
+   - a read that FAILED (a transport error, a 5xx, a store that couldn't be read: getFailed)
+     counts toward the same window, from the last read that answered (review N8) -- so a
+     server that stopped answering never leaves Send disabled until a reload. After a run was
+     seen it ends "lost" with that run (LOST_SEEN_WORDS), never as "not sent".
    Send stays disabled until the phase is done or lost. */
 export function readBack(state, ev) {
   const s = state || { phase: "posting", since: ev && ev.at, run: null };
@@ -412,19 +517,48 @@ export function readBack(state, ev) {
     case "get": {
       const run = ev.run;
       if (run && TERMINAL.includes(run.status)) return { phase: "done", since: at, run };
-      return { ...s, run };
+      return { ...s, run, okAt: at };
     }
     case "get404":
       if (s.phase === "reading" && !s.run && at - s.since >= READBACK_LOST_MS) {
         return { phase: "lost", since: at, run: null };
       }
       return s;
+    case "getFailed": {
+      const from = Math.max(Number(s.since) || 0, Number(s.okAt) || 0);
+      if (s.phase === "reading" && at - from >= READBACK_LOST_MS) {
+        return { phase: "lost", since: at, run: s.run || null };
+      }
+      return s;
+    }
     default:
       return s;
   }
 }
 
+/* An apiGet answer from GET /api/generate/runs/<id> as a readBack event: a 404, a run, or a
+   read that failed (anything else: api.js's "network error: ..." body, a 5xx, the server's
+   "Couldn't read the run."). */
+export function readBackEvent(d, at) {
+  if (d && d.http_status === 404) return { type: "get404", at };
+  if (d && !d.error) return { type: "get", run: d, at };
+  return { type: "getFailed", at };
+}
+
 export const LOST_WORDS = "This run may not have reached the server — check the Activity tray before sending again.";
+export const LOST_SEEN_WORDS = "Lost touch with the server while this run was being sent — check the Activity tray before sending again.";
+
+/* The run's idempotency key: a uuid4 as 32 hex characters, drawn once per confirm (the
+   server's _RUN_ID_RE). Pure but for the random source. */
+export function newRunId() {
+  const c = (typeof crypto !== "undefined" && crypto) || null;
+  const bytes = new Uint8Array(16);
+  if (c && c.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;         // uuid4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /* The matrix reel grid (NOTES 8, page M6): the last axis across, the rest down. `cells`
    indexes by cell number. -> {across, rows: [{label, cells: [cell | null]}]} */

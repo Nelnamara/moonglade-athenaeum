@@ -140,13 +140,10 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
     : "Entries closed " + (dayOf(contest.end_at) || "—")
       + (contest.result_at ? " — results " + dayOf(contest.result_at) : "");
 
-  // 1ST / 2ND / 3RD / 4TH … (11-13 are TH, as English insists)
-  const rankLabel = (n) => {
-    const v = Number(n) || 0;
-    const tens = v % 100;
-    const suffix = (tens >= 11 && tens <= 13) ? "TH" : (["TH", "ST", "ND", "RD"][v % 10] || "TH");
-    return v + suffix;
-  };
+  // TIER 1 / TIER 2 / TIER 3. PixAI's `rank` on a winner is the PRIZE TIER (1, 2 or 3, shared
+  // by every winner in that tier), not a place in a numbered podium, so "1ST" x5 would claim
+  // a position nobody holds. 0 = the row carried no placement: no chip text rather than a guess.
+  const rankLabel = (n) => ((Number(n) || 0) > 0 ? "TIER " + Number(n) : "—");
 
   return (
     <>
@@ -352,10 +349,10 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
               <div key={w.id || i}
                 className={"mgct-winrow" + (w.mine ? " me" : w.rank === 1 ? " top" : "")}>
                 <span className={"mgct-rank" + (w.rank === 1 ? " first" : "")}>
-                  {rankLabel(w.rank || i + 1)}
+                  {rankLabel(w.rank)}
                 </span>
                 {w.thumb
-                  ? <img className={"mgct-winthumb" + (w.rank <= 3 ? " gold" : "")} src={w.thumb} alt="" />
+                  ? <img className={"mgct-winthumb" + (w.rank > 0 && w.rank <= 3 ? " gold" : "")} src={w.thumb} alt="" />
                   : <span className="mgct-winthumb" />}
                 <span className="mgct-winname">{w.author_name || "—"}</span>
                 {w.mine && <span className="mgct-you">YOU</span>}

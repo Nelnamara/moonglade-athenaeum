@@ -122,9 +122,9 @@ The filter bar:
   choice, being purely cosmetic, is still install-wide.)
 - **Layout** — four small marks sit beside the SIZE slider in the header: **▤** masonry,
   **▦** grid, **▣** hero, **≡** timeline. Hover one and it names itself. The layout you pick
-  is remembered the same way your thumbnail size is. **There is no switcher on a phone** —
-  the phone lays the library out one way, so a control that changed nothing was worse than
-  no control.
+  is remembered the same way your thumbnail size is. **A phone has no masonry / grid / hero /
+  timeline switcher** — it lays the library out in two staggered columns — but it has its own
+  two-way toggle, **▦ Grid | ▭ Feed**, in the pill row (see "The phone's reading feed" below).
 - When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
@@ -290,6 +290,62 @@ and the library is still deep when you come back. Turning the page with **‹ Pr
 media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
+
+### The phone's reading feed, what's new, and pull to refresh
+
+**▦ Grid | ▭ Feed.** The toggle sits in the pill row, beside **Sort**. **Feed** shows one picture per
+row, edge to edge, at its own shape, with its prompt and stars over the bottom edge; tapping a
+picture opens the viewer, and long-press still starts selecting. Your choice is remembered **on that
+phone** (in the browser, like the popup blur), not on your account.
+
+**"N new since 21:40".** When you leave the Gallery tab — or close or hide the page — the phone
+remembers the newest picture it showed you and the time. Next time, a lavender line reading **N new
+since HH:MM** marks where the new pictures end. There is no line when nothing is new, and none on a
+filtered view, a later page or the lookalikes view; those never change what the phone remembers. After
+one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top.
+
+**Pull to refresh.** At the very top of the Gallery, pull down: the moon fills as you pull (it is a real
+fraction of the distance to the release line — a full moon means "let go now"). Release past the line
+and the phone runs the same **Sync now** the Control tab has, spins the moon while it works, then
+re-reads the page you are on, so anything new lands above the line. Letting go short of the line does
+nothing. A pull is something you asked for, so it works even with **Data saver** on. **My Art** has
+the same pull; there it just re-reads your list and totals from this library (the published-artwork sync
+is the Control tab's, because it counts a view on each of your works).
+
+**In the phone's full-screen viewer:** under the picture sits the **placard** — the catalog number and
+date (*ACC. 2026·0918·4401 · 18 SEP*; the number is the last four characters of the picture's id) and
+the other pictures from the same batch. Tap one to swap to it in place; the current one is ringed. A
+picture on its own says *single image*. **▶ To Video** and, on a picture's record, **↻ Remix** and
+**▶ Send to Video** all only open the **Create** tab already filled in — Remix fills the Image form with
+the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
+Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
+Generate.
+
+### The phone turned sideways
+
+Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop
+one), laid out for a wide, short screen:
+
+- **The tab bar becomes a slim rail on the left** — Gallery, Create, Control as icons, the current one
+  tinted. The banner at the top folds to a single bar (name, your counts, the **◐ Saver** chip when Data
+  saver is on, credits and the icon buttons), and the search bar scrolls away with the list so the
+  pictures get the height.
+- **The gallery shows 4 columns** (3 on a screen under 700 px wide), each row lined up. **Feed** stays one
+  picture per row, but no picture is drawn taller than the screen. The **N new since** line, **↑ Newest**
+  and pull to refresh work exactly as upright.
+- **In the viewer the picture fits the height** and the actions — Edit, To Video, Similar, Upscale, Enter
+  contest, Details, Slideshow — are a column down the right edge, ahead of the placard, the prompt and the
+  film strip, which scroll beneath them.
+- **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the
+  model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
+  is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
+- **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
+  columns re-flow, and a picture you have open stays open. A notch or the home bar on either side is left
+  clear.
+
+A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
+wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks
+you to turn the phone.
 
 ## Editing & curating
 

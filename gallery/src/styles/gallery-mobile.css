@@ -158,8 +158,10 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   vertical-align: -2px; background: url(/branding/rewards/claim.png) center/contain no-repeat; }
 
 /* ---- body / tab content ---- */
+/* overscroll-behavior-y: contain (Session Q, Q6) keeps the BROWSER's own pull-to-reload out of the
+   way at the top of the tab, so the moon's pull (components/PullToRefresh.jsx) is the only one. */
 .glm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  position: relative; }
+  position: relative; overscroll-behavior-y: contain; }
 .glm-tab { min-height: 100%; }
 
 /* ---- tab bar (DC navStyle/navTabs, lines 275-283 & 1080-1086) ---- */
@@ -244,7 +246,6 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)),
     color-mix(in srgb, var(--lavender) 32%, var(--surface0));
   border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
-.glm-pill-auto { margin-left: auto; }
 .glm-selcount { font-size: 10.5px; color: var(--subtext); margin-left: auto; white-space: nowrap; }
 .glm-selcount b { color: var(--text); }
 

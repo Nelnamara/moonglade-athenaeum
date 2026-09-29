@@ -11282,7 +11282,11 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     # (a reference the backstop gate just converted), a lane or an upscale. No network.
     import moonglade_recipes as _recipes
     _recipes.check_params(params)
-    params = priority_for_submit(params)   # already known to be turbo-refused? use Low
+    if not exact:
+        # Already known to be turbo-refused? use Low. A run job (exact) never: the run applied
+        # this at build, so it was quoted and digested, and what is sent must equal what was
+        # quoted (review N1) -- a flag flipped since then would send an unquoted priority.
+        params = priority_for_submit(params)
     # Session H (BUILD-w2-gen §8, review S1): decided BEFORE the mutation, off the gate's own
     # cached profile read -- is the profile asked for one this version LISTS? A listed profile
     # PixAI refuses is an entitlement refusal (a non-member's Ultra), not "unsupported", so the
@@ -11307,11 +11311,14 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # below can read its words -- a recipe refusal is never retried as anything else.
             raise
         if lane:
-            # Never retried as anything else (§8.2). A GraphQL error is PixAI refusing the
-            # task, so nothing exists and nothing was spent; anything else is passed on as it
-            # came, because it does not prove that.
-            if str(e).startswith("GraphQL error"):
+            # Never retried as anything else (§8.2). A GraphQL error whose data resolved
+            # nothing is PixAI refusing the task, so nothing exists and nothing was spent;
+            # anything else -- a partial success (the mutation's data came back beside the
+            # errors, review N2), a timeout -- is passed on as it came, because it does not
+            # prove that and must read may_have_started, never refused.
+            if definite_refusal(e) and str(e).startswith("GraphQL error"):
                 refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+                refused.graphql_data = getattr(e, "graphql_data", None)
                 refused.refused = True       # a definite refusal, for a run's job state
                 raise refused
             raise
@@ -14668,6 +14675,11 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
                 "tack_name": r.get("proposedTackName") or "",
                 "desc_url": r.get("descUrl") or "",
                 "result_url": r.get("resultUrl") or "",
+                # Settlement (L3, PROBE 2026-09-29): `rewardStatus` reads "distributed" once
+                # the prizes have been paid out, which is the signal the win check uses to stop
+                # re-reading a contest early. Absent upstream -> "" (unknown, never a guess).
+                "reward_status": str(r.get("rewardStatus") or "").lower(),
+                "reward_distributed_at": r.get("rewardDistributedAt") or "",
             })
         total_page = int(d.get("totalPage") or 1)
         if page >= total_page:
@@ -14731,7 +14743,8 @@ def _contest_rows(payload):
     Each row is reduced to its SCALAR fields: the four the app actually uses (`id`,
     `authorId`, `mediaId`, `title`) plus whatever else came flat -- a winner's rank field,
     whose upstream name is unverified, therefore rides along untouched rather than being
-    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped."""
+    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped, except
+    its `entry`: the placement (kept as one small dict, see below)."""
     if isinstance(payload, dict):
         rows = payload.get("data") or []
     elif isinstance(payload, list):
@@ -14755,6 +14768,30 @@ def _contest_rows(payload):
             art = r.get("artwork")
             if isinstance(art, dict) and art.get("id"):
                 flat["artworkId"] = str(art["id"])
+        # L3 (PROBE 2026-09-29): the echoed `contest{}` block is NOT noise on these rows -- its
+        # nested `entry` carries the placement. `contest.entry = {rank, prizeAmount, source,
+        # submittedAt}`: `rank` is the PRIZE TIER (1/2/3, shared by every winner in that tier,
+        # null on a non-winner's entry), `prizeAmount` what that tier paid, `source` "manual"
+        # for a hand-picked winner and "tack" for an ordinary entry. Dropping it (the old
+        # scalars-only rule) is what made the app show list positions 1..65 and a prize of 0.
+        # Kept ADDITIVELY, and only when upstream sent it, so a row without the block maps
+        # exactly as it always did. `rank` stays an int or None -- a numeric string is NOT
+        # coerced, because "is this an integer rank" is the win check's whole question.
+        blk = r.get("contest")
+        ent = blk.get("entry") if isinstance(blk, dict) else None
+        if not isinstance(ent, dict):
+            ent = r.get("entry") if isinstance(r.get("entry"), dict) else None
+        if isinstance(ent, dict):
+            rank = ent.get("rank")
+            prize = ent.get("prizeAmount")
+            flat["entry"] = {
+                "rank": rank if (isinstance(rank, int) and not isinstance(rank, bool)) else None,
+                "prizeAmount": prize if (isinstance(prize, (int, float))
+                                         and not isinstance(prize, bool)) else 0,
+                "source": ent.get("source") if isinstance(ent.get("source"), str) else "",
+                "submittedAt": (ent.get("submittedAt")
+                                if isinstance(ent.get("submittedAt"), str) else ""),
+            }
         out.append(flat)
     return out
 
@@ -14778,8 +14815,11 @@ def contest_winners(session, slug):
 
     Verified live: a still-running contest answers with an EMPTY JSON array rather than an
     error, and the list populates at the contest's `resultAt` -- so an empty result means
-    "not decided yet", never "call failed". `authorId` identifies each winner; any rank
-    field upstream sends is preserved as-is (see _contest_rows). Read-only, no spend."""
+    "not decided yet", never "call failed". ONE unpaged list; each row is a winning artwork
+    (`id` is the artwork id, `authorId` its author) and its `entry` is the placement:
+    `entry.rank` is the prize TIER (1/2/3, shared by every winner in that tier) and
+    `entry.prizeAmount` what the tier paid (PROBE 2026-09-29; see _contest_rows). Read-only,
+    a GET and nothing else, no spend."""
     return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
 
 

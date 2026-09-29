@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { thumbSrc } from "../lib/phoneCore.js";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { qualifies } from "../hooks/useContests.js";
@@ -53,6 +55,7 @@ import "../styles/contest-mobile.css";
    what this is. */
 
 export default function ContestEntryMobile({ contest, preselectMediaId, onClose, onEntered }) {
+  const saver = useDataSaver().active;          // Q7: 256 px thumbnails while the saver acts
   const [items, setItems] = useState(null);
   const [csrf, setCsrf] = useState("");
   const [picked, setPicked] = useState([]);          // media_ids, in tap order
@@ -196,7 +199,7 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
               disabled={busy || (!on && atCap)}
               aria-pressed={on}
               onClick={() => toggle(it.media_id)}>
-              <img src={it.thumb} alt="" loading="lazy" decoding="async" />
+              <img src={thumbSrc(it.thumb, saver)} alt="" loading="lazy" decoding="async" />
               {on ? <span className="cmb-tick" aria-hidden="true">✓</span> : null}
             </button>
           );

@@ -34,6 +34,7 @@ from pathlib import Path
 
 import moonglade_assets
 import moonglade_container
+import moonglade_contest_wins as contest_wins
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -6323,7 +6324,7 @@ def set_telemetry_out(out_dir):
 
 
 _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
-                "day_lists": {}, "baselines": {}}
+                "day_lists": {}, "baselines": {}, "contest_results": {}}
 # `baselines` is the ONE section telemetry_metrics() deliberately ignores: it is
 # not a metric, it is remembered STATE -- a snapshot of what was already on disk
 # the first time a detector looked, so a later comparison can tell "this was
@@ -6333,6 +6334,12 @@ _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [
 # LIBRARY, the tree does not, so one library can legitimately hold one snapshot
 # per app folder it has been pointed at. A dict of named snapshots rather than a
 # bare map, so a second detector can never have to rename the first one's key.
+#
+# `contest_results` is the other structured section (L3, moonglade_contest_wins.py): the
+# VERIFIED contest wins ({"wins": {contest_id: {artwork_id: record}}}) and the schedule of the
+# automatic win check ({"checks": {contest_id: row}}). The contest-win metric counts `wins`
+# and nothing else; the flat `contest_win_keys` set an older sweep wrote is left in place,
+# untouched, as the record that a contest was once believed won.
 
 
 def load_telemetry(out_dir):
@@ -6613,7 +6620,13 @@ def telemetry_metrics(out_dir, telem=None):
     # count does. Deliberately NOT also counters: the assignment below would shadow a
     # same-named counter, and one source of truth is the point.
     m["contest_entries"] = _card("contest_entry_keys")
-    m["contest_wins"] = _card("contest_win_keys")
+    # VERIFIED wins only (L3). `contest_win_keys` is what the old sweep wrote when a winners
+    # row merely carried this account's authorId: no artwork id, no tier, no receipt. That set
+    # is kept on disk but no longer counted; a win counts once a check has matched the entry's
+    # artwork id to a row with an integer rank (moonglade_contest_wins.verify).
+    _cres = d.get("contest_results")
+    m["contest_wins"] = contest_wins.verified_count(
+        _cres.get("wins") if isinstance(_cres, dict) else None)
     # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
     # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
     # emotion in the universe has been used. The preset keys and the emotion-universe size come
@@ -6794,10 +6807,11 @@ def _contest_detection_sync(out_dir, force=False):
     Returns True when the sweep ran, False when it gave up.
 
     Per kept contest: the owner's own entries (`/contest/{slug}/artwork/{userId}`) become
-    contest_entry_keys, and -- only once the contest's result date has actually passed --
-    the winners list is checked for the owner's own authorId, which becomes a
-    contest_win_key. Winners are not polled before `result_at` because the endpoint answers
-    an empty array until then; asking early is a request that cannot inform anything.
+    contest_entry_keys. WINS ARE NOT READ HERE ANY MORE (L3): a win is a verified fact, and
+    the automatic check that establishes it (contest_win_pass, below) reads the winners list
+    once per contest at the result time and then daily, matching the entry's artwork id and
+    an integer tier rank. This sweep used to match the author alone, which recorded a win
+    with no artwork, no tier and no receipt, and read the winners list a second time.
 
     `force` drops the recent-window filter (every row the board returns is kept, ended ones
     still capped). The publish kick uses it: the app has just been TOLD an entry was made,
@@ -6877,17 +6891,16 @@ def _contest_detection_sync(out_dir, force=False):
                     if art_id and row_id and art_id != row_id:
                         telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
                                           out_dir=out_dir)
-                result_ts = _series_ts(c.get("result_at"))
-                if result_ts is None or result_ts > time.time():
-                    continue
-                for w in core.contest_winners(session, slug) or []:
-                    if str((w or {}).get("authorId") or "") == uid:
-                        telem_set_add("contest_win_keys", cid, out_dir=out_dir)
-                        break
             except Exception as e:                           # one bad contest, not the sweep
                 log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
                             _redact_host_paths_cli(out_dir, str(e))[:200])
                 continue
+        # The board this sweep just read also tells the win check when each contest's results
+        # land; a result time that moved is followed here (local, no network).
+        try:
+            contest_win_refresh(out_dir, contest_board(core, session) or [])
+        except Exception:                                     # noqa: BLE001
+            pass
         # Only a sweep that actually completed counts as recent -- a failed one must not
         # buy ten minutes of silence.
         _contest_sync_last_ok["at"] = time.time()
@@ -6910,6 +6923,319 @@ def _contest_sync_kick(out_dir, force=False):
         return _contest_detection_sync(out_dir, force=force)
     finally:
         _contest_sync_lock.release()
+
+
+# --- verified contest wins (L3) ------------------------------------------------------
+# A contest win is a fact PixAI states, so it is recorded only when PixAI's own winners list
+# says so: the entry's artwork id is in the list, its `entry.rank` is an integer, and the
+# author is this account. The rules live in moonglade_contest_wins.py (pure, tested); this is
+# the part that reads and writes.
+#
+#   * THE AUTOMATIC CHECK (contest_win_pass). For each contest the account entered, per the
+#     app's own entry record: one GET of the winners list at the contest's result time, then
+#     once a day for up to 14 days. An EMPTY list is undecided, never "lost". It stops early
+#     when the contest's rewardStatus is "distributed" and the entries are settled. It rides
+#     the scheduler's existing 60-second tick (see _contest_win_tick in create_app), reads
+#     nothing at import and nothing when a page opens, and is single-flight.
+#   * THE CHECK BUTTON (contest_win_check, POST /api/contest/check). The owner pastes an
+#     entry's link; one GET of that contest's winners; verified only when matched. The link is
+#     kept as the receipt.
+#
+# Both are GETs. Neither can write to PixAI: there is no such call on this road.
+_CW_PAUSE = 1.0                     # between two contests inside one pass
+_CW_BOARD_BACKOFF_S = 900.0         # a failed board read is not asked again for a quarter hour
+_cw_lock = threading.Lock()         # single flight, like the entry sweep's
+_cw_state = {"board_retry_at": 0.0, "manual": {}}
+
+
+def _cw_sections(d):
+    """The two sub-records of telemetry's `contest_results` section, made real dicts in place
+    (a hostile file can hold anything there) -> (wins, checks)."""
+    res = d.get("contest_results")
+    if not isinstance(res, dict):
+        res = d["contest_results"] = {}
+    for k in ("wins", "checks"):
+        if not isinstance(res.get(k), dict):
+            res[k] = {}
+    return res["wins"], res["checks"]
+
+
+def _cw_edit(out_dir, fn):
+    """fn(wins, checks) under the telemetry lock. Fail-soft, like every telemetry write."""
+    _telem_mutate(out_dir, lambda d: fn(*_cw_sections(d)))
+
+
+def _cw_inputs(d):
+    """(entries, legacy_wins, wins, checks) read from a loaded telemetry bundle. Copies:
+    nothing here writes through them."""
+    sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
+    entries = contest_wins.entries_by_contest(sets.get("contest_entry_keys"))
+    legacy = sets.get("contest_win_keys")
+    legacy = [str(x) for x in legacy] if isinstance(legacy, list) else []
+    res = d.get("contest_results") if isinstance(d.get("contest_results"), dict) else {}
+    wins = res.get("wins") if isinstance(res.get("wins"), dict) else {}
+    checks = res.get("checks") if isinstance(res.get("checks"), dict) else {}
+    checks = {str(k): dict(v) for k, v in checks.items() if isinstance(v, dict)}
+    return entries, legacy, wins, checks
+
+
+def contest_win_due(out_dir, now=None):
+    """Whether anything is worth waking the check for. LOCAL ONLY -- one small file read and
+    some arithmetic, so the 60-second tick can ask it every minute for nothing."""
+    now = time.time() if now is None else now
+    try:
+        entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+    except Exception:                                         # noqa: BLE001
+        return False
+    plan = contest_wins.plan_pass(entries, legacy, wins, checks, now)
+    if plan["due"]:
+        return True
+    # A seed needs the contest board; a board that just failed is left alone for a while.
+    return bool(plan["seed"] or plan["legacy"]) and now >= _cw_state["board_retry_at"]
+
+
+def contest_win_refresh(out_dir, board, now=None):
+    """Follow contests whose result time moved (local; no network). `board` is the list of
+    contest rows list_contests returns. Only rows that have not been checked yet move."""
+    now = time.time() if now is None else now
+    by_id = {str(c.get("id")): c for c in (board or []) if isinstance(c, dict) and c.get("id")}
+    if not by_id:
+        return
+
+    def _do(wins, checks):
+        for cid, st in checks.items():
+            c = by_id.get(str(cid))
+            if isinstance(st, dict) and c:
+                contest_wins.refresh_state(st, contest_wins.parse_ts(c.get("result_at")),
+                                           str(c.get("slug") or ""), now)
+    _cw_edit(out_dir, _do)
+
+
+def contest_win_pass(out_dir, now=None, pause=None):
+    """ONE automatic pass. Returns {ran, checked, recorded, errors} (for the log and the tests).
+
+    Decided from the local record first (moonglade_contest_wins.plan_pass): nothing due and
+    nothing to seed means no network at all. Otherwise the contest board is read ONCE (the
+    memoized snapshot every contest surface shares) to give new contests their schedule and
+    to learn each due contest's rewardStatus, and then each due contest's winners list is
+    read ONCE, `_CW_PAUSE` apart. A failed read is logged, pushed an hour out and never
+    retried in a loop; one bad contest does not stop the pass."""
+    import logging as _logging
+    import moonglade_backup as core
+    log = _logging.getLogger(__name__)
+    out = {"ran": False, "checked": [], "recorded": 0, "errors": 0}
+    clock = (lambda: now) if now is not None else time.time
+    pause = _CW_PAUSE if pause is None else pause
+    entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+    plan = contest_wins.plan_pass(entries, legacy, wins, checks, clock())
+    if not (plan["seed"] or plan["legacy"] or plan["due"]):
+        return out
+    try:
+        session = core._make_session(None)
+        uid = str(core._client_of(session).user_id or "")
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("contest win check: no session: %s: %s", type(e).__name__,
+                    _redact_host_paths_cli(out_dir, str(e))[:200])
+        return out
+    if not uid:
+        log.info("contest win check: no account id resolved -- nothing to verify")
+        return out
+    out["ran"] = True
+    board = {}
+    if clock() >= _cw_state["board_retry_at"]:
+        try:
+            board = {str(c.get("id")): c for c in (contest_board(core, session) or [])
+                     if isinstance(c, dict) and c.get("id")}
+        except Exception as e:                                # noqa: BLE001
+            _cw_state["board_retry_at"] = clock() + _CW_BOARD_BACKOFF_S
+            log.warning("contest win check: the board read failed: %s: %s", type(e).__name__,
+                        _redact_host_paths_cli(out_dir, str(e))[:200])
+    # -- give every entered contest (and every unverified legacy win) a schedule row
+    fresh = {}
+    if board:
+        for cid in list(plan["seed"]) + [c for c in plan["legacy"] if c not in plan["seed"]]:
+            c = board.get(cid)
+            is_legacy = cid in plan["legacy"]
+            if c is None and cid not in entries:
+                continue                         # a legacy win for a contest we cannot see
+            anchor = None if is_legacy else contest_wins.parse_ts((c or {}).get("result_at"))
+            fresh[cid] = contest_wins.new_state((c or {}).get("slug") or "", anchor, clock(),
+                                                legacy=is_legacy)
+    if fresh:
+        _cw_edit(out_dir, lambda w, ch: [ch.setdefault(k, v) for k, v in fresh.items()])
+        checks.update({k: v for k, v in fresh.items() if k not in checks})
+    now_t = clock()
+    due = [cid for cid, st in checks.items()
+           if (cid in entries or st.get("legacy")) and contest_wins.is_due(st, now_t)]
+    for i, cid in enumerate(due):
+        if i and pause:
+            time.sleep(pause)
+        st = dict(checks[cid])
+        c = board.get(cid) or {}
+        slug = str(st.get("slug") or c.get("slug") or "")
+        t = clock()
+        try:
+            if not slug:
+                raise ValueError("no slug known for this contest")
+            rows = core.contest_winners(session, slug)          # one GET, nothing else
+        except Exception as e:                                # noqa: BLE001
+            out["errors"] += 1
+            log.warning("contest win check: one contest failed: %s: %s", type(e).__name__,
+                        _redact_host_paths_cli(out_dir, str(e))[:200])
+            contest_wins.after_error(st, t)
+
+            def _fail(w, ch, cid=cid, st=st):
+                ch[cid] = st
+            _cw_edit(out_dir, _fail)
+            continue
+        st["slug"] = slug
+        res = contest_wins.verify(rows, uid, entries.get(cid) or None)
+        contest_wins.after_read(st, t, res, c.get("reward_status"))
+        fresh_wins = res["wins"]
+
+        def _ok(w, ch, cid=cid, st=st, fresh_wins=fresh_wins, t=t):
+            ch[cid] = st
+            for win in fresh_wins:
+                contest_wins.record_win(w, cid, win, "auto", t,
+                                        contest_wins.artwork_url(win["artwork_id"]))
+        _cw_edit(out_dir, _ok)
+        out["checked"].append(cid)
+        out["recorded"] += len(fresh_wins)
+    return out
+
+
+def contest_win_kick(out_dir, now=None):
+    """Start one pass OFF-THREAD if anything is due, under a single-flight lock. The tick calls
+    this every minute and it costs a local file read when there is nothing to do. Returns
+    whether a pass was started."""
+    if not contest_win_due(out_dir, now):
+        return False
+    if not _cw_lock.acquire(False):
+        return False
+
+    def _go():
+        try:
+            contest_win_pass(out_dir, now)
+        except Exception as e:                                # noqa: BLE001
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "contest win check: gave up: %s: %s", type(e).__name__,
+                _redact_host_paths_cli(out_dir, str(e))[:200])
+        finally:
+            _cw_lock.release()
+    try:
+        threading.Thread(target=_go, daemon=True).start()
+    except Exception:                                         # noqa: BLE001
+        _cw_lock.release()
+        return False
+    return True
+
+
+def contest_win_check(out_dir, body, now=None):
+    """The Check button. Returns (http status, payload). Verified ONLY when matched.
+
+    `body` carries `url` (a pasted pixai.art link: an entry's, or a contest's), and optionally
+    `contest_id` (a contest from the account's own entries) and `slug` (a contest typed in).
+    The artwork read the app already has does not carry the artwork's contest, so the contest
+    comes from the row's pick, a contest link, a typed slug, or the contest the app recorded
+    the linked artwork in -- in that order (moonglade_contest_wins.plan_manual). Then ONE GET
+    of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
+    """
+    import moonglade_backup as core
+    cw = contest_wins
+    now = time.time() if now is None else now
+    url_text = str((body or {}).get("url") or "").strip()
+    cid_in = str((body or {}).get("contest_id") or "").strip()
+    slug_in = str((body or {}).get("slug") or "").strip()
+
+    def _say(state, entry="", **extra):
+        p = {"verified": False, "state": state, "message": cw.message(state, entry), "wins": []}
+        p.update(extra)
+        return 200, p
+
+    parsed = {"ok": True, "receipt": "", "artwork_id": "", "slug": ""}
+    if url_text:
+        parsed = cw.parse_evidence(url_text)
+        if not parsed["ok"]:
+            return _say(parsed["reason"])
+    elif not (cid_in or slug_in):
+        return _say("no_link")
+    entries, _legacy, _wins, checks = _cw_inputs(load_telemetry(out_dir))
+    lazy = {"board": None}
+
+    def _board():
+        """The contest board by id, read at most once and only if a lookup needs it."""
+        if lazy["board"] is None:
+            try:
+                sess = core._make_session(None)
+                lazy["board"] = {str(c.get("id")): c for c in (contest_board(core, sess) or [])
+                                 if isinstance(c, dict) and c.get("id")}
+            except Exception:                                 # noqa: BLE001
+                lazy["board"] = {}
+        return lazy["board"]
+
+    def _slug_of(cid):
+        st = checks.get(str(cid)) or {}
+        return str(st.get("slug") or (_board().get(str(cid)) or {}).get("slug") or "")
+
+    def _cid_of(slug):
+        for k, st in checks.items():
+            if st.get("slug") == slug:
+                return k
+        for k, c in _board().items():
+            if c.get("slug") == slug:
+                return k
+        return ""
+
+    plan = cw.plan_manual(parsed, cid_in, slug_in, entries, _slug_of, _cid_of)
+    if not plan["ok"]:
+        return _say(plan["reason"])
+    slug, cid = plan["slug"], plan["cid"]
+    last = _cw_state["manual"].get(slug)
+    if last is not None and 0 <= now - last < cw.MANUAL_COOLDOWN_S:
+        return _say("cooldown", cid=cid, slug=slug)
+    _cw_state["manual"][slug] = now
+    ids = plan["entry_ids"]
+    entry = ids[0] if ids and len(ids) == 1 else ""
+    try:
+        session = core._make_session(None)
+        uid = str(core._client_of(session).user_id or "")
+        if not uid:
+            raise ValueError("no account id resolved")
+        rows = core.contest_winners(session, slug)              # one GET, nothing else
+    except Exception as e:                                    # noqa: BLE001
+        return _say("failed", entry, cid=cid, slug=slug,
+                    detail=_redact_host_paths_cli(out_dir, str(e))[:200])
+    res = cw.verify(rows, uid, ids)
+    if not res["wins"]:
+        return _say(res["outcome"], entry, cid=cid, slug=slug, decided=res["decided"])
+    reward = str(((_board().get(cid) if cid else None) or {}).get("reward_status") or "")
+
+    def _do(w, ch):
+        for win in res["wins"]:
+            cw.record_win(w, cid or slug, win, "check", now,
+                          parsed["receipt"] or cw.artwork_url(win["artwork_id"]))
+        st = ch.get(cid)
+        if isinstance(st, dict) and st.get("status") == cw.PENDING:
+            cw.after_read(st, now, res, reward)
+    _cw_edit(out_dir, _do)
+    listed = [{"artwork_id": x["artwork_id"], "tier": x["tier"], "prize_amount": x["prize"],
+               "label": cw.tier_label(x["tier"], x["prize"])} for x in res["wins"]]
+    return 200, {"verified": True, "state": "verified", "message": cw.message("verified"),
+                 "wins": listed, "cid": cid, "slug": slug,
+                 "receipt_url": parsed["receipt"] or cw.artwork_url(res["wins"][0]["artwork_id"])}
+
+
+def _cw_check_view(state, now):
+    """Where the daily check stands for one contest, for the My-entries row: {state, last_at,
+    next_at, until, decided}. `state` is "none" (no schedule yet), "pending", "settled" or
+    "expired"; times are epoch seconds (0 when not applicable)."""
+    if not isinstance(state, dict):
+        return {"state": "none", "last_at": 0, "next_at": 0, "until": 0, "decided": False}
+    status = contest_wins.effective_status(state, now)
+    return {"state": status, "last_at": float(state.get("last_at") or 0.0),
+            "next_at": float(state.get("next_at") or 0.0) if status == contest_wins.PENDING else 0,
+            "until": contest_wins.deadline(state), "decided": bool(state.get("decided"))}
 
 
 # ======================================================================================
@@ -12749,6 +13075,24 @@ def create_app(out_dir: Path):
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
+    def _contest_win_tick():
+        """The verified-contest-wins check (L3), on the scheduler's existing 60-second heartbeat
+        like the release check above: no thread or timer of its own. All this does each minute
+        is contest_win_kick's local look at the schedule (one small file read, no network); a
+        pass starts only when a contest's check is actually due, off-thread and single-flight,
+        because a pass paces itself between contests.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check, sampled above) for the same reason
+        the contest sweep and the release check do: it reaches PixAI with this machine's real
+        credentials, and the suite's conftest sets that flag precisely so create_app() cannot
+        make that request."""
+        if not _bg_release_check:
+            return
+        try:
+            contest_win_kick(out_dir)
+        except Exception:              # noqa: BLE001 -- a check must never kill the loop
+            pass
+
     def _living_tick():
         """THE LIVING LIBRARY'S HEARTBEAT -- the job LIST, riding the same sixty-second tick
         as everything else in this process. No new thread, no second poll loop: the standing
@@ -12843,6 +13187,8 @@ def create_app(out_dir: Path):
             # first `continue` down there (schedule disabled -- the default) would
             # otherwise skip the update tick on every install that never set one up.
             _update_check_tick()
+            # Same place, same reason: contest wins are verified on this heartbeat too.
+            _contest_win_tick()
             # Same reason, same place: the living library's job list is not the legacy
             # standing order, and that `continue` would skip it on every install that
             # never configured one.
@@ -15965,13 +16311,18 @@ def create_app(out_dir: Path):
     _STRIP_CACHE = _THUMB_CACHE   # same 300s as the 768: media_id is an identity, not a hash
     _STRIP_ID_OK = re.compile(r"[0-9A-Za-z_-]+")
 
-    def strip_cache_dir():
-        return out_dir / "gallery" / "cache" / "_strip"
+    # The allowlist of derived thumb sizes, ?s=<key> -> (longest side in px, cache folder).
+    # 32 is the Sibling Strip's; 256 is the phone's Data saver tier (Session Q, Q7): the
+    # same derive-from-the-768, cache-beside-the-badges, self-healing shape, additive and
+    # read-only -- an unlisted key still answers the plain 768 thumb.
+    _THUMB_TIERS = {"32": (32, "_strip"), "256": (256, "_t256")}
 
-    def _strip_thumb(media_id):
-        """Path of the cached 32px strip thumb for media_id, (re)cut from the 768
-        thumb when missing or stale. None when there is no 768 thumb to derive from
-        or the cut fails -- the caller then falls through to the normal thumb."""
+    def _sized_thumb(media_id, key):
+        """Path of the cached derived thumb (`key` names a tier in _THUMB_TIERS) for
+        media_id, (re)cut from the 768 thumb when missing or stale. None when there is
+        no 768 thumb to derive from or the cut fails -- the caller then falls through
+        to the normal thumb."""
+        side, folder = _THUMB_TIERS[key]
         # ALLOWLIST the id here, inside the helper, so every caller is covered. A
         # denylist of / \ .. missed the Windows drive letter: pathlib's `/` RESETS to
         # a drive-relative path when the right operand carries one, so
@@ -15983,7 +16334,7 @@ def create_app(out_dir: Path):
         src = thumb_dir / (media_id + ".jpg")
         if not src.is_file():
             return None
-        dst = strip_cache_dir() / (media_id + ".jpg")
+        dst = out_dir / "gallery" / "cache" / folder / (media_id + ".jpg")
         try:
             src_mtime = src.stat().st_mtime
             if dst.is_file() and dst.stat().st_mtime >= src_mtime:
@@ -15999,7 +16350,7 @@ def create_app(out_dir: Path):
             try:
                 with Image.open(src) as im:
                     im = im.convert("RGB")
-                    im.thumbnail((32, 32))
+                    im.thumbnail((side, side))
                     im.save(tmp, "JPEG", quality=80)
                 os.replace(tmp, dst)
             finally:
@@ -16015,10 +16366,11 @@ def create_app(out_dir: Path):
     @app.route("/thumbs/<media_id>.jpg")
     @tier(LOGIN)
     def thumb(media_id):
-        # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
-        if (request.args.get("s") or "") == "32" and "/" not in media_id \
+        # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
+        size_key = request.args.get("s") or ""
+        if size_key in _THUMB_TIERS and "/" not in media_id \
                 and "\\" not in media_id and ".." not in media_id:
-            p = _strip_thumb(media_id)
+            p = _sized_thumb(media_id, size_key)
             if p is not None:
                 resp = send_from_directory(str(p.parent), p.name, max_age=86400)
                 resp.headers["Cache-Control"] = _STRIP_CACHE
@@ -18169,10 +18521,12 @@ def create_app(out_dir: Path):
         passed; asking early is simply empty, never wrong.
 
         `mine` marks the owner's own row (the design's YOU chip) by comparing authorId to
-        the authenticated account -- the id never reaches the client. Rank comes from
-        whichever rank-ish field upstream sends, whose name was never verified against a
-        real decided contest, falling back to the row's position in a list PixAI returns
-        in podium order. Soft-error-as-200, like every other read on this surface."""
+        the authenticated account -- the id never reaches the client. `rank` is the row's
+        real PRIZE TIER (its `entry.rank`: 1, 2 or 3, shared by every winner in that tier)
+        and `prize_amount` what that tier paid (PROBE 2026-09-29). It used to be the row's
+        position in the list and 0, which on a 65-winner podium read as places 1 to 65 with
+        no prize. A row that carries no placement gets rank 0 (unknown), never a guess.
+        Soft-error-as-200, like every other read on this surface."""
         try:
             core, session = _gen_session()
             rows = core.contest_winners(session, slug)
@@ -18180,24 +18534,15 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
         winners = []
-        for i, w in enumerate(rows or []):
-            rank = 0
-            for key in ("rank", "place", "position"):
-                try:
-                    rank = int(w.get(key) or 0)
-                except (TypeError, ValueError):
-                    rank = 0
-                if rank:
-                    break
+        for w in rows or []:
+            ent = contest_wins.entry_of(w)
+            rank = ent["rank"] if ent and ent["rank"] else 0
+            prize = ent["prize"] if ent else 0
             mid = str(w.get("mediaId") or "")
             aid = str(w.get("authorId") or "")
-            try:
-                prize = int(w.get("prizeAmount") or 0)
-            except (TypeError, ValueError):
-                prize = 0
             winners.append({
                 "id": str(w.get("id") or ""),
-                "rank": rank or (i + 1),
+                "rank": rank,
                 "author_name": str(w.get("authorName") or ""),
                 "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
                 "prize_amount": prize,
@@ -18224,12 +18569,18 @@ def create_app(out_dir: Path):
         artwork the library does not hold gets no thumb rather than a broken image.
 
         `won` is contest FACT and belongs on this surface -- the DC's results rows show
-        it. No metric name and no ladder language appears in this payload."""
+        it -- and since L3 it means VERIFIED: PixAI's own winners list carried the entry
+        with an integer tier. `wins` lists them (tier, prize, how it was verified, the
+        receipt link), `check` says where the daily check stands for the contest, and
+        `unverified_legacy` marks a contest an older sweep once believed won that no check
+        has confirmed yet. No metric name and no ladder language appears in this payload."""
         d = load_telemetry(out_dir)
         sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
         raw_keys = sets.get("contest_entry_keys")
-        raw_wins = sets.get("contest_win_keys")
-        won_ids = {str(w) for w in raw_wins} if isinstance(raw_wins, list) else set()
+        raw_legacy = sets.get("contest_win_keys")
+        legacy_ids = {str(w) for w in raw_legacy} if isinstance(raw_legacy, list) else set()
+        _e, _l, verified, checks = _cw_inputs(d)
+        now_t = time.time()
         by_contest, order = {}, []
         for k in (raw_keys if isinstance(raw_keys, list) else []):
             cid, _, aid = str(k).partition(":")
@@ -18279,7 +18630,11 @@ def create_app(out_dir: Path):
                 "entries": [{"artwork_id": a, "media_id": thumbs.get(a, ""),
                              "thumb": ("/thumbs/%s.jpg" % thumbs[a]) if thumbs.get(a) else ""}
                             for a in shown],
-                "won": cid in won_ids,
+                "won": bool(contest_wins.wins_for(verified, cid)),
+                "wins": contest_wins.wins_for(verified, cid),
+                "check": _cw_check_view(checks.get(cid), now_t),
+                "unverified_legacy": bool(cid in legacy_ids
+                                          and not contest_wins.wins_for(verified, cid)),
             })
         return jsonify({"contests": rows,
                         "total_entries": sum(len(shown_by_contest[cid]) for cid in order),
@@ -18424,6 +18779,34 @@ def create_app(out_dir: Path):
                             "error": _redact_host_paths(str(e))[:200],
                             "contest_entries": entries}), 200
         return jsonify({"started": True, "contest_entries": entries})
+
+    @app.route("/api/contest/check", methods=["POST"])
+    @tier(LOGIN)
+    def api_contest_check():
+        """The Check button (E4, L3): "it won but isn't shown". The owner pastes the link to an
+        entry (or to its contest) and presses Check; the app reads that contest's winners
+        ONCE and records a win ONLY when the entry's artwork id is in the list with an integer
+        tier rank and the author is this account. The link is kept as the receipt. Nothing else
+        counts: no self-reported wins, no name-alike, no empty list read as "lost" (it reads as
+        "not published yet").
+
+        Body: {csrf, url, contest_id?, slug?}. `contest_id` is a contest from the account's
+        own entries (the picker); `slug` a contest typed in; either may be left off when the
+        link names the contest or the app already recorded the linked artwork's contest. The
+        answer is always 200 with {verified, state, message, wins[]} -- a miss is an answer,
+        not an error; `state` is one of verified, undecided, not_found, no_placement,
+        not_yours, not_pixai, no_link, no_contest, failed, cooldown.
+
+        LOGIN tier, CSRF required (it reaches PixAI with the owner's credentials on a
+        cross-site-triggerable POST, like /api/contest/sync). It is a GET of PixAI's winners
+        list and nothing else: there is no write to PixAI on this road, so READ_ONLY has
+        nothing to refuse. Only pixai.art links are accepted, the slug is shape-checked
+        before it becomes a path, and a contest is not re-read within a few seconds."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        status, payload = contest_win_check(out_dir, body)
+        return jsonify(payload), status
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -21634,7 +22017,7 @@ def create_app(out_dir: Path):
     # session["user"]. {run_id, account, done, total} while a run is planned or sent.
     _run_inflight = {}
     _SINGLE_COUNT_WORDS = "Send more than one through the confirm — nothing was sent."
-    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b}, __list__ or \\{) — "
+    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b} or __list__) — "
                        "send it from the Generate dock, which expands it first. Nothing was "
                        "sent.")
     _RUN_PAYLOAD_DROP = ("csrf", "run_id", "ack", "var_mode", "run_seed")
@@ -21778,6 +22161,13 @@ def create_app(out_dir: Path):
         plan = runs.plan_jobs(body.get("prompt") or "", lists, vm, count, run_seed)
         if plan.get("error"):
             raise _RunRefused(plan["error"])
+        # Review N4: with the seed field set, every matrix cell carries that one seed, so two
+        # cells that resolve to the same prompt are the same picture paid for twice.
+        same = runs.same_prompt_cells(plan) if dock_seed else None
+        if same:
+            raise _RunRefused("Cells {} and {} would send the same prompt with the same seed "
+                              "— that pays twice for one picture. Clear the seed or change a "
+                              "value.".format(*same))
         if plan["mode"] == "random" and run_seed is None:
             if dock_seed:
                 raise _RunRefused("A Random run's seed must be between 0 and "
@@ -21795,7 +22185,10 @@ def create_app(out_dir: Path):
         import moonglade_runs as runs
         import moonglade_recipes as rec
         plan, run_seed, dock_seed = _run_expand(body, user)
-        matrix = plan["mode"] == "matrix"
+        # Settled 2: never a card on a queued matrix cell -- a matrix of 2+ cells. A one-cell
+        # matrix is an ordinary single send and its card applies as for any single send
+        # (review B1: forcing it there charged a send the dock's badge showed as free).
+        no_card = runs.forces_no_card(plan)
         ent = _entitlements(core, gsession)
         rs = resolver(core, gsession)
         base = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
@@ -21804,8 +22197,8 @@ def create_app(out_dir: Path):
             jp = dict(base, prompt=job["prompt"], count=job["batch"])
             if job["seed"] is not None:
                 jp["seed"] = job["seed"]
-            if matrix:
-                jp["no_card"] = True          # Settled 2: never a card on a matrix cell
+            if no_card:
+                jp["no_card"] = True
             label = _cell_label(plan, job)
             try:
                 req = core.build_request(jp, mode="image", is_member=ent["is_member"],
@@ -21825,8 +22218,13 @@ def create_app(out_dir: Path):
                                   "remove {} to continue.".format(
                                       cap, "" if cap == 1 else "s",
                                       len(req.lora_version_ids) - cap))
+            # Review N1: the Turbo -> Low downgrade (priority_for_submit, once PixAI has said
+            # this account can't use Turbo) is applied HERE, at build, so it is quoted and
+            # digested; a run job's submit (exact=True) never applies it again, so what is
+            # sent is what was quoted.
+            req.parameters = core.priority_for_submit(req.parameters)
             built.append({"cell": job["cell"], "job": job, "req": req,
-                          "no_card": True if matrix else None})
+                          "no_card": True if no_card else None})
         if any(b["req"].unlimited for b in built) and len(built) > 1:
             raise _RunRefused("Unlimited Mode makes one picture at a time — switch it "
                               "off to send a run.")
@@ -21867,7 +22265,7 @@ def create_app(out_dir: Path):
                                   "— try again in a moment.")
             each = int(cost)
             covered = 0
-            if matrix:
+            if no_card:
                 card_note = "Free cards don’t cover queued matrix runs."
             elif not first.no_card:
                 try:
@@ -21988,7 +22386,10 @@ def create_app(out_dir: Path):
             try:
                 existing = store.get(run_id)
             except Exception:                                # noqa: BLE001
-                existing = None
+                # Review N7: a store that can't be read is not "no such run" -- the run id
+                # might be one already sent, so nothing goes out.
+                return jsonify({"error": "Couldn't read the run store, so nothing was "
+                                         "sent."}), 200
             if existing is not None:
                 if existing.get("account") != user:
                     return jsonify({"error": "That run id is taken — nothing was "
@@ -22030,6 +22431,13 @@ def create_app(out_dir: Path):
             if multi and not isinstance(ack, dict):
                 raise _RunRefused("Confirm the {} generations first — nothing was sent."
                                   .format(plan["images"]))
+            # Review N6: the acknowledgement's count and jobs against this local expansion,
+            # right here -- before the entitlement read, the builds and the quote (all checked
+            # again, with every other field, at step 10).
+            bad = runs.ack_count_problem(ack, plan) if multi else None
+            if bad:
+                raise _RunRefused("What would be sent changed since you confirmed — nothing "
+                                  "was sent.", changed=bad)
             # Step 6, the lane rule read off the app's own job log: one lane task at a time.
             if core.asks_unlimited(body) and _lane_job_running(core):
                 raise _RunRefused(core.UNLIMITED_BUSY)
@@ -22162,7 +22570,12 @@ def create_app(out_dir: Path):
         rid = str(run_id or "")
         if not _RUN_ID_RE.match(rid):
             return jsonify({"error": "not found"}), 404
-        run = runs.RunsStore(out_dir).get(rid)
+        try:
+            run = runs.RunsStore(out_dir).get(rid)
+        except runs.RunsUnreadable:
+            # Review N7: unreadable is not "not found" -- the dock's read-back counts this
+            # toward its lost window, never as "not received yet".
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
         if run is None or run.get("account") != user:
             return jsonify({"error": "not found"}), 404
         live = _run_inflight.get("run_id") == rid
@@ -22181,7 +22594,12 @@ def create_app(out_dir: Path):
         tid = str(task_id or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "not found"}), 404
-        found = runs.RunsStore(out_dir).find_task(tid)
+        try:
+            found = runs.RunsStore(out_dir).find_task(tid)
+        except runs.RunsUnreadable:
+            # Review N7: the record may be another account's; with the store unreadable,
+            # nothing is served and PixAI is not asked (review F9).
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
         import moonglade_backup as core
         if found is not None:
             run, job = found

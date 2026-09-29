@@ -1,20 +1,24 @@
 import React from "react";
 import { countdown, dayOf, tsOf } from "../hooks/useContests.js";
+import { bestWin, rowStatus, tierLabel } from "../lib/contestWinCore.js";
 import "../styles/myart-contests.css";
 
 /* MY ENTRIES — Contest Surface v2.dc.html E1-E4 (§8.2's tab), the contest workbench's
    first real slice: every contest this library has a piece in, with its deadlines and
    where it stands. Rows sort by nearest deadline and the list scrolls inside the modal.
 
-   Status is derived, not stored: running → awaiting results → results in (won / not
-   placed). A won row takes the gold treatment; the not-placed row stays deliberately
-   quiet. The achievement side of a win is the toast's business and appears nowhere here.
+   Status is derived, not stored (lib/contestWinCore.js rowStatus): running → awaiting results →
+   results in (a VERIFIED win / checking / not placed). A won row takes the gold treatment and
+   its pill reads the TIER ("🏆 TIER 2") with the prize under the name -- PixAI's rank is the
+   prize tier, so no row ever claims a numbered place. A win is verified only: the app's daily
+   check, or the Check fallback below, found the entry on PixAI's own winners list with a tier.
+   The achievement side of a win is the toast's business and appears nowhere here.
 
-   E4 (record a win manually) renders as the DC draws it and is DISABLED: its claim route
-   is design-gated and does not exist yet. Rendering it dimmed says the affordance is
-   coming; omitting it would quietly redesign the frame. */
+   THE FOOT LINK "It won but isn't shown…" (Small Calls Handoff, L3) opens the Record-a-win
+   dialog, whose Check button verifies a pasted pixai.art link; it is the E4 frame, no longer
+   dimmed, because its claim route now exists and verifies rather than trusts. */
 
-export default function ContestMyEntries({ rows, loaded = true, syncing, err, onOpen, onBrowse }) {
+export default function ContestMyEntries({ rows, loaded = true, syncing, err, onOpen, onBrowse, onRecord }) {
   const list = (rows || []).slice().sort((a, b) => {
     const ka = tsOf(a.end_at) ?? tsOf(a.result_at) ?? Infinity;
     const kb = tsOf(b.end_at) ?? tsOf(b.result_at) ?? Infinity;
@@ -88,10 +92,8 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
           const resultTs = tsOf(r.result_at);
           const decided = resultTs !== null && resultTs <= Date.now();
           const ends = r.active ? countdown(r.end_at) : null;
-          const status = r.active ? { cls: "", text: "RUNNING" }
-            : !decided ? { cls: "awaiting", text: "AWAITING RESULTS" }
-            : r.won ? { cls: "won", text: "🏆 WON" }
-            : { cls: "quiet", text: "NOT PLACED" };
+          const status = rowStatus(r);
+          const win = r.won ? bestWin(r) : null;
           return (
             <button type="button" key={r.contest_id}
               className={"mgcte-row" + (r.won && decided ? " won" : "")}
@@ -105,6 +107,7 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
                 </div>
                 <div className="mgcte-sub">
                   {n} {n === 1 ? "entry" : "entries"}
+                  {win ? <span className="win"> · {tierLabel(win.tier, win.prize_amount)}</span> : null}
                 </div>
               </div>
               <div className="mgcte-thumbs">
@@ -128,9 +131,12 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
         })}
       </div>
       <div className="mgcte-foot">
-        <div className="n">results land automatically at each contest's result date</div>
-        <button type="button" className="mgcte-record" disabled
-          title="coming with results season">record a win manually…</button>
+        <div className="n">
+          results land automatically at each contest's result date, then are re-checked daily
+        </div>
+        <button type="button" className="mgcte-record" onClick={() => onRecord && onRecord()}>
+          It won but isn't shown…
+        </button>
       </div>
     </>
   );

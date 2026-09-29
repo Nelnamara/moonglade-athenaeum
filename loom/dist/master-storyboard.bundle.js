@@ -634,9 +634,9 @@ var LoomBundle = (() => {
     if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
-  function buildShotListText(project, fmt4, actLetter2, shotText2) {
+  function buildShotListText(project, fmt5, actLetter2, shotText2) {
     let out = `${project.name}
-Runtime target ${fmt4(project.target)}
+Runtime target ${fmt5(project.target)}
 `;
     if ((project.assets || []).length) {
       out += `
@@ -881,21 +881,41 @@ ${"=".repeat(48)}
   var Component = React2.Component;
   var PureComponent = React2.PureComponent;
 
+  // ../gallery/src/lib/phoneCore.js
+  var LAYOUTS = Object.freeze(["grid", "feed"]);
+  var SAVER_MODES = Object.freeze(["off", "auto", "always"]);
+  var SAVER_LABELS = Object.freeze({ off: "Off", auto: "Auto on metered", always: "Always" });
+  var PHONE_MAX = 520;
+  function isPhoneViewport({ width, coarse, portrait, screenW, screenH, landscapePhones = true }) {
+    const w = Number(width);
+    if (Number.isFinite(w) && w <= PHONE_MAX) return true;
+    const sw = Number.isFinite(Number(screenW)) && Number(screenW) > 0 ? Number(screenW) : Infinity;
+    const sh = Number.isFinite(Number(screenH)) && Number(screenH) > 0 ? Number(screenH) : Infinity;
+    if (portrait) return !!coarse && sw <= PHONE_MAX;
+    return landscapePhones && Math.min(sw, sh) <= PHONE_MAX;
+  }
+
   // ../gallery/src/hooks/useIsMobile.js
   var MOBILE_QUERY = "(max-width: 520px)";
-  function detectMobile() {
+  function detectMobile(landscapePhones) {
     if (typeof window === "undefined" || !window.matchMedia) return false;
-    if (window.matchMedia(MOBILE_QUERY).matches) return true;
-    const coarse = window.matchMedia("(pointer: coarse)").matches;
-    const portrait = window.matchMedia("(orientation: portrait)").matches;
-    const screenW = window.screen && window.screen.width || Infinity;
-    return coarse && portrait && screenW <= 520;
+    const scr = window.screen || {};
+    return isPhoneViewport({
+      width: window.matchMedia(MOBILE_QUERY).matches ? 0 : Infinity,
+      // the one width line, as the query reads it
+      coarse: window.matchMedia("(pointer: coarse)").matches,
+      portrait: window.matchMedia("(orientation: portrait)").matches,
+      screenW: scr.width,
+      screenH: scr.height,
+      landscapePhones
+    });
   }
-  function useIsMobile() {
-    const [isMobile, setIsMobile] = useState(detectMobile);
+  function useIsMobile(opts) {
+    const landscapePhones = !(opts && opts.landscapePhones === false);
+    const [isMobile, setIsMobile] = useState(() => detectMobile(landscapePhones));
     useEffect(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
-      const sync2 = () => setIsMobile(detectMobile());
+      const sync2 = () => setIsMobile(detectMobile(landscapePhones));
       sync2();
       const mqls = [
         window.matchMedia(MOBILE_QUERY),
@@ -911,7 +931,7 @@ ${"=".repeat(48)}
         window.removeEventListener("resize", sync2);
         window.removeEventListener("orientationchange", sync2);
       };
-    }, []);
+    }, [landscapePhones]);
     return isMobile;
   }
 
@@ -1600,6 +1620,7 @@ ${"=".repeat(48)}
     } finally {
       if (timer2) clearTimeout(timer2);
     }
+    if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
     let d = null;
     try {
       d = await r.json();
@@ -3282,6 +3303,23 @@ ${"=".repeat(48)}
       if (onPhase) onPhase(phase, data2);
     }, count == null ? payload.count : count);
     return d.task_id;
+  }
+  async function submitRun(body) {
+    let r;
+    try {
+      r = await fetch("/api/generate/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch {
+      return { lost: true };
+    }
+    try {
+      return { data: await r.json() };
+    } catch {
+      return { lost: true };
+    }
   }
 
   // ../gallery/src/notify/pollCadence.js
@@ -5478,6 +5516,9 @@ ${"=".repeat(48)}
     } catch {
       return "";
     }
+  }
+  function accountCsrf() {
+    return _csrf || _bootCsrf();
   }
   function accountPrefs() {
     if (!_store2) {
@@ -9402,8 +9443,342 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/gen/templateCore.js
+  var MAX_VARS = 8;
+  var MAX_OPTIONS = 64;
+  var RUN_SEED_MAX = 2147483646;
+  var MAX_LIST_ITEMS = 200;
+  var LIST_ITEM_MAX = 200;
+  var ERR_UNCLOSED = "Unclosed or nested brace. Nesting isn\u2019t supported.";
+  var ERR_EMPTY = "Empty variable.";
+  var TRIM_CHARS = "	\n\v\f\r \x85\xA0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF";
+  var TRIM_RE = new RegExp("^[" + TRIM_CHARS + "]+|[" + TRIM_CHARS + "]+$", "g");
+  function trim(text) {
+    return String(text).replace(TRIM_RE, "");
+  }
+  var ERR_TOO_MANY_VARS = "Up to " + MAX_VARS + " variables in one prompt.";
+  var ERR_TOO_MANY_OPTS = "Up to " + MAX_OPTIONS + " options in one variable.";
+  var errUnknownList = (t) => "No list named " + t + ".";
+  var errEmptyList = (t) => "The list " + t + " is empty.";
+  var errLongList = (t) => "The list " + t + " is too long \u2014 up to " + MAX_LIST_ITEMS + " items of up to " + LIST_ITEM_MAX + " characters.";
+  function fmt3(n) {
+    const s = String(Math.trunc(Number(n) || 0));
+    const neg = s.startsWith("-");
+    const d = neg ? s.slice(1) : s;
+    return (neg ? "-" : "") + d.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  var LIST_TOKEN_RE = /__([a-z0-9_]+)__/y;
+  function cleanList(items) {
+    if (!Array.isArray(items)) return null;
+    const out = [];
+    for (const it of items) {
+      if (typeof it !== "string") return null;
+      const t = trim(it);
+      if (!t) continue;
+      if (t.length > LIST_ITEM_MAX) return null;
+      out.push(t);
+    }
+    return out.length > MAX_LIST_ITEMS ? null : out;
+  }
+  function braceStructure(s) {
+    const stack2 = [], pairs = /* @__PURE__ */ new Map(), parent = /* @__PURE__ */ new Map();
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "{") {
+        parent.set(i, stack2.length ? stack2[stack2.length - 1] : null);
+        stack2.push(i);
+      } else if (c === "}" && stack2.length) pairs.set(stack2.pop(), i);
+    }
+    return { pairs, parent, unclosed: stack2 };
+  }
+  function pairShape(s, o, c, pairs) {
+    let i = o + 1, pipe = false, child = false;
+    while (i < c) {
+      const ch = s[i];
+      if (ch === "{") {
+        child = true;
+        i = pairs.get(i) + 1;
+        continue;
+      }
+      if (ch === "|") pipe = true;
+      i += 1;
+    }
+    return [pipe, child];
+  }
+  function templateMarks(s) {
+    const { pairs, parent, unclosed } = braceStructure(s);
+    const groups = /* @__PURE__ */ new Map(), consume = /* @__PURE__ */ new Set(), badOpen = /* @__PURE__ */ new Set();
+    const esc2 = (k) => k > 0 && s[k - 1] === "\\";
+    for (const [o, c] of pairs) {
+      const [pipe, child] = pairShape(s, o, c, pairs);
+      if (!pipe) continue;
+      if (esc2(o) || esc2(c)) {
+        groups.set(o, ["escaped", c]);
+        if (esc2(o)) consume.add(o - 1);
+        if (esc2(c)) consume.add(c - 1);
+      } else if (child || pairs.has(parent.get(o))) {
+        groups.set(o, ["nested", c]);
+      } else {
+        groups.set(o, ["live", c]);
+      }
+    }
+    for (const u of unclosed) {
+      if (s.indexOf("|", u + 1) >= 0) {
+        if (esc2(u)) consume.add(u - 1);
+        else badOpen.add(u);
+      }
+    }
+    return { groups, consume, badOpen };
+  }
+  function parse(template, lists) {
+    const s = String(template == null ? "" : template);
+    const L = lists || {};
+    const parts = [];
+    let error = null, syntax = false, nvars = 0;
+    let buf = "";
+    const { groups, consume, badOpen } = templateMarks(s);
+    const flush = () => {
+      if (buf) {
+        parts.push({ lit: buf });
+        buf = "";
+      }
+    };
+    const bad = (token, msg) => {
+      flush();
+      parts.push({ bad: token, error: msg });
+      if (error === null) error = msg;
+    };
+    const addVar = (part) => {
+      flush();
+      nvars += 1;
+      if (nvars > MAX_VARS) {
+        parts.push({ bad: part.var, error: ERR_TOO_MANY_VARS });
+        if (error === null) error = ERR_TOO_MANY_VARS;
+        return;
+      }
+      parts.push(part);
+    };
+    const n = s.length;
+    let i = 0;
+    while (i < n) {
+      const c = s[i];
+      if (consume.has(i)) {
+        syntax = true;
+        i += 1;
+        continue;
+      }
+      if (c === "\\") {
+        LIST_TOKEN_RE.lastIndex = i + 1;
+        const m = LIST_TOKEN_RE.exec(s);
+        if (m) {
+          buf += m[0];
+          syntax = true;
+          i = LIST_TOKEN_RE.lastIndex;
+          continue;
+        }
+        buf += c;
+        i += 1;
+        continue;
+      }
+      if (c === "{") {
+        const g = groups.get(i);
+        if (g && g[0] === "live") {
+          syntax = true;
+          const j = g[1];
+          const token = s.slice(i, j + 1);
+          const opts = s.slice(i + 1, j).split("|").map(trim).filter(Boolean);
+          if (!opts.length) bad(token, ERR_EMPTY);
+          else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS);
+          else addVar({ var: token, options: opts, kind: "inline" });
+          i = j + 1;
+          continue;
+        }
+        if (g && g[0] === "nested") {
+          syntax = true;
+          bad(s.slice(i, g[1] + 1), ERR_UNCLOSED);
+          i = g[1] + 1;
+          continue;
+        }
+        if (badOpen.has(i)) {
+          syntax = true;
+          bad("{", ERR_UNCLOSED);
+          i += 1;
+          continue;
+        }
+        buf += c;
+        i += 1;
+        continue;
+      }
+      if (c === "_") {
+        LIST_TOKEN_RE.lastIndex = i;
+        const m = LIST_TOKEN_RE.exec(s);
+        if (m) {
+          syntax = true;
+          const token = m[0], name = m[1];
+          if (!Object.prototype.hasOwnProperty.call(L, name)) bad(token, errUnknownList(token));
+          else {
+            const items = cleanList(L[name]);
+            if (items === null) bad(token, errLongList(token));
+            else if (!items.length) bad(token, errEmptyList(token));
+            else addVar({ var: token, options: items, kind: "list", name });
+          }
+          i = LIST_TOKEN_RE.lastIndex;
+          continue;
+        }
+      }
+      buf += c;
+      i += 1;
+    }
+    flush();
+    return { parts, vars: parts.filter((p) => p.var != null), error, syntax };
+  }
+  function hasSyntax(template) {
+    return parse(template, null).syntax;
+  }
+  function runSeedOf(seedField, roll) {
+    const f = String(seedField == null ? "" : seedField).trim();
+    if (/^-?\d{1,12}$/.test(f)) {
+      const v = Number(f);
+      return v >= 0 && v <= RUN_SEED_MAX ? v : null;
+    }
+    const r = Number(roll);
+    return Number.isInteger(r) && r >= 0 && r <= RUN_SEED_MAX ? r : null;
+  }
+  function newRoll(rand) {
+    const r = typeof rand === "function" ? rand() : Math.random();
+    return Math.floor(r * (RUN_SEED_MAX + 1));
+  }
+  function ackOf(plan) {
+    return {
+      count: plan.count,
+      jobs: plan.jobs,
+      each: plan.each,
+      covered: plan.covered,
+      total: plan.total,
+      digest: plan.digest
+    };
+  }
+  function confirmCopy(plan) {
+    const p = plan || {};
+    const n = Number(p.count) || 0;
+    const jobs2 = Number(p.jobs) || 0;
+    const matrix = p.mode === "matrix";
+    const title = "Send " + n + " generations?" + (matrix ? " (matrix, queued)" : "");
+    let credits;
+    if (p.unlimited) credits = "free \xB7 Unlimited Mode";
+    else if (p.mode === "batch") credits = "\u2248 " + fmt3(p.total) + " credits in total \xB7 one task of " + n + " images";
+    else credits = "\u2248 " + fmt3(p.total) + " credits in total \xB7 " + fmt3(p.each) + " each \xD7 " + (jobs2 - (Number(p.covered) || 0));
+    let cards;
+    const covered = Number(p.covered) || 0;
+    const left = p.card && p.card.left_after != null ? " \xB7 " + fmt3(p.card.left_after) + " left after" : "";
+    if (p.unlimited) cards = "No free card is used in Unlimited Mode.";
+    else if (matrix) cards = "Free cards don\u2019t cover queued matrix runs.";
+    else if (covered && p.mode === "batch") cards = "A free card covers this batch" + left;
+    else if (covered) cards = covered + " free card" + (covered > 1 ? "s cover the first " + covered : " covers the first") + left;
+    else cards = "No free card covers this.";
+    if (p.card_note && p.card_note !== cards) cards += " (" + p.card_note + ")";
+    const notes = [];
+    if (jobs2 > 1) notes.push("Each prompt is checked by PixAI as it goes out; if it refuses one, the rest aren\u2019t sent.");
+    if (p.read_only) notes.push("READ_ONLY is on in config.json, so nothing can be sent.");
+    return { title, credits, cards, note: notes.join(" "), go: "Send " + n, blocked: !!p.read_only };
+  }
+  var cellName = (j) => "Cell " + (Number(j.cell) + 1);
+  function range(a, b) {
+    return a === b ? "Cell " + a + " was" : "Cells " + a + "\u2013" + b + " were";
+  }
+  function runLine(res) {
+    const r = res || {};
+    const jobs2 = Array.isArray(r.jobs) ? r.jobs : [];
+    const total = jobs2.length;
+    const sent = jobs2.filter((j) => j.state === "sent").length;
+    if (r.error && !jobs2.length) return { text: r.error, kind: "warn" };
+    if (total <= 1) {
+      const j = jobs2[0] || {};
+      if (j.state === "sent") return { text: r.mode === "batch" ? "Sent \u2014 " + (r.count || 1) + " images in one task." : "Sent.", kind: "ok" };
+      if (j.state === "refused") return { text: "PixAI refused it: " + (j.error || "no reason given") + ". Nothing was made.", kind: "warn" };
+      if (j.state === "may_have_started") return { text: "This one may have started on PixAI \u2014 check the Activity tray before sending again.", kind: "warn" };
+      return { text: "Not sent: " + (j.error || r.reason || "stopped") + ".", kind: "warn" };
+    }
+    const bits = ["Sent " + sent + " of " + total + "."];
+    const fail = jobs2.find((j) => j.state === "refused" || j.state === "may_have_started" || j.state === "not_sent" && j.error);
+    if (fail) {
+      if (fail.state === "refused") bits.push(cellName(fail) + " was refused by PixAI: " + (fail.error || "no reason given") + ".");
+      else if (fail.state === "may_have_started") bits.push(cellName(fail) + " may have started on PixAI \u2014 check the Activity tray before sending again.");
+      else bits.push(cellName(fail) + " was not sent: " + fail.error);
+    } else if (r.status === "stopped" && r.reason) {
+      bits.push(r.reason);
+    }
+    const rest = jobs2.filter((j) => j.state === "not_sent" && j !== fail).map((j) => Number(j.cell) + 1);
+    if (rest.length) bits.push(range(rest[0], rest[rest.length - 1]) + " not sent.");
+    return { text: bits.join(" "), kind: sent === total ? "ok" : "warn" };
+  }
+  function newRunId() {
+    const c = typeof crypto !== "undefined" && crypto || null;
+    const bytes = new Uint8Array(16);
+    if (c && c.getRandomValues) c.getRandomValues(bytes);
+    else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // src/loom-run.js
+  var PLAN_PATH = "/api/generate/plan";
+  function imgSendRoute(body) {
+    const n = Number(body && body.count) || 1;
+    return n > 1 || hasSyntax(body && body.prompt) ? "run" : "generate";
+  }
+  function imgRunBody(body, roll) {
+    const rs = runSeedOf(body && body.seed, roll);
+    return { ...body, var_mode: "random", ...rs != null ? { run_seed: rs } : {} };
+  }
+  function runConfirmText(plan, label) {
+    const c = confirmCopy(plan);
+    const lines = [label, "", c.title, c.credits, c.cards];
+    if (c.note) lines.push(c.note);
+    lines.push("", "Generate?");
+    return lines.join("\n");
+  }
+  var LOST_POST_WORDS = "No answer from the server \u2014 this may have started on PixAI. Check the Activity tray before sending again.";
+  var inflight = /* @__PURE__ */ new Set();
+  async function sendImgRun(body, label, deps, opts = {}) {
+    const key = opts.key || "img";
+    if (inflight.has(key)) return { ok: false, error: "Still sending the last one \u2014 wait for it." };
+    inflight.add(key);
+    try {
+      const csrf = await deps.csrf();
+      const rb = imgRunBody(body, opts.roll != null ? opts.roll : newRoll());
+      const plan = await deps.post(PLAN_PATH, { ...rb, csrf });
+      if (!plan || plan.error) return { ok: false, error: plan && plan.error || "Couldn't price this \u2014 nothing was sent." };
+      if (plan.read_only) return { ok: false, error: "READ_ONLY is on in config.json, so nothing can be sent." };
+      const multi = Number(plan.count) > 1;
+      if ((multi || Number(plan.total) > 0) && !deps.confirm(runConfirmText(plan, label))) return { ok: false };
+      if (opts.onSending) opts.onSending();
+      const runId = opts.runId || newRunId();
+      const ans = await deps.run({ ...rb, csrf, run_id: runId, ...multi ? { ack: ackOf(plan) } : {} });
+      if (!ans || ans.lost) return { ok: false, error: LOST_POST_WORDS };
+      const d = ans.data || {};
+      const jobs2 = Array.isArray(d.jobs) ? d.jobs : [];
+      const taskIds = jobs2.filter((j) => j && j.task_id).map((j) => String(j.task_id));
+      if (!taskIds.length) return { ok: false, error: d.error || runLine(d).text };
+      const line = runLine(d);
+      return { ok: true, taskIds, note: line.kind === "warn" ? line.text : "" };
+    } finally {
+      inflight.delete(key);
+    }
+  }
+
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
+  var LOOM_RUN_DEPS = {
+    post: apiPost,
+    run: submitRun,
+    confirm: (text) => window.confirm(text),
+    csrf: async () => {
+      await accountPrefs().ensureLoaded();
+      return accountCsrf();
+    }
+  };
   installNotify();
   var priceBody = async (body) => {
     const { response, failed } = await requestPrice(body);
@@ -9659,7 +10034,7 @@ ${"=".repeat(48)}
     }));
   };
   var uid = () => Math.random().toString(36).slice(2, 9);
-  var fmt3 = (s) => {
+  var fmt4 = (s) => {
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
@@ -14996,6 +15371,26 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setTimeout(tick, 2500);
     };
     const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+    const genImageRun = async (entry, body) => {
+      const c = entry.c;
+      const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
+      const out = await sendImgRun(body, label, LOOM_RUN_DEPS, {
+        key: c.id,
+        onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }))
+      });
+      if (!out.ok) {
+        if (out.error) setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: out.error } }));
+        return;
+      }
+      const jobLabel = "Image \xB7 " + entry.code + " \xB7 " + (c.title || "untitled");
+      setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: out.note || "Generating\u2026" } }));
+      out.taskIds.forEach((tid, k) => {
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(tid, jobLabel);
+        if (k === 0) pollImg(c.id, tid);
+        else pollTaskWithCeiling(tid, () => {
+        }, c.id);
+      });
+    };
     const genImage = async (entry) => {
       const c = entry.c;
       const prompt = (c.imgPrompt || "").trim();
@@ -15011,6 +15406,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } }));
         return;
       }
+      const asked2 = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+      if (imgSendRoute(asked2) === "run") return genImageRun(entry, asked2);
       const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
       if (!await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`)) return;
       setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
@@ -15329,7 +15726,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     };
     const exportAll = () => download(
-      buildShotListText(project, fmt3, actLetter, shotText),
+      buildShotListText(project, fmt4, actLetter, shotText),
       `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
       "text/plain"
     );
@@ -15421,7 +15818,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function App() {
     const [selShot, setSelShot] = useState2(null);
-    const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
+    const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
     const [draftCard, setDraftCard] = useState2(() => ({
       id: "__draft__",
       mode: "R2V",
@@ -15801,12 +16198,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef2(null), trackRef = useRef2(null);
     const [dur, setDur] = useState2(0);
-    const [range, setRange] = useState2({ in: trimIn || 0, out: trimOut });
+    const [range2, setRange] = useState2({ in: trimIn || 0, out: trimOut });
     const [playing, setPlaying] = useState2(false);
     const [soundOn, setSoundOn] = useState2(false);
     const [cropping, setCropping] = useState2(false);
-    const rangeRef = useRef2(range);
-    rangeRef.current = range;
+    const rangeRef = useRef2(range2);
+    rangeRef.current = range2;
     const durRef = useRef2(0);
     durRef.current = dur;
     const dragRef = useRef2(null);
@@ -15817,7 +16214,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const v = vidRef.current;
       if (v) v.muted = !(soundOn && playing);
     }, [soundOn, playing]);
-    const effOut = (range.out == null ? dur : range.out) || dur;
+    const effOut = (range2.out == null ? dur : range2.out) || dur;
     const pct = (s) => dur ? Math.max(0, Math.min(100, s / dur * 100)) : 0;
     const fT = (s) => (s || 0).toFixed(1) + "s";
     const secAt = (clientX) => {
@@ -15830,7 +16227,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (!v || !dur) return;
       const r = e.currentTarget.getBoundingClientRect();
       const t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-      v.currentTime = range.in + t * Math.max(0.01, effOut - range.in);
+      v.currentTime = range2.in + t * Math.max(0.01, effOut - range2.in);
     };
     const togglePlay = (e) => {
       e.stopPropagation();
@@ -15841,14 +16238,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setPlaying(false);
         return;
       }
-      if (v.currentTime < range.in || v.currentTime >= effOut) v.currentTime = range.in;
+      if (v.currentTime < range2.in || v.currentTime >= effOut) v.currentTime = range2.in;
       v.play();
       setPlaying(true);
     };
     const onTimeUpdate = (e) => {
       if (playing && e.currentTarget.currentTime >= effOut) {
         e.currentTarget.pause();
-        e.currentTarget.currentTime = range.in;
+        e.currentTarget.currentTime = range2.in;
         setPlaying(false);
       }
     };
@@ -15893,7 +16290,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const v = vidRef.current;
       if (!v || !onSplit) return;
       const t = v.currentTime;
-      if (t > range.in + 0.15 && t < effOut - 0.15) onSplit(t);
+      if (t > range2.in + 0.15 && t < effOut - 0.15) onSplit(t);
       else alert("Move the playhead to where you want the cut first (not at either edge).");
     };
     const cropRef = useRef2(null);
@@ -15925,7 +16322,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       window.addEventListener("pointerup", up);
     };
     const shownCrop = cropDraft || crop;
-    const trimmed = range.in > 0 || range.out != null;
+    const trimmed = range2.in > 0 || range2.out != null;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-wrap" }, /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -15934,7 +16331,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onMouseLeave: () => {
           if (playing || cropping) return;
           const v = vidRef.current;
-          if (v) v.currentTime = range.in;
+          if (v) v.currentTime = range2.in;
         }
       },
       /* @__PURE__ */ React.createElement(
@@ -15989,10 +16386,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           if (v && dur) v.currentTime = secAt(e.clientX);
         }
       },
-      /* @__PURE__ */ React.createElement("div", { className: "sb-trim-sel", style: { left: pct(range.in) + "%", right: 100 - pct(effOut) + "%" } }),
-      /* @__PURE__ */ React.createElement("div", { className: "sb-trim-h", style: { left: pct(range.in) + "%" }, onPointerDown: startDrag("in"), title: "Trim in" }),
+      /* @__PURE__ */ React.createElement("div", { className: "sb-trim-sel", style: { left: pct(range2.in) + "%", right: 100 - pct(effOut) + "%" } }),
+      /* @__PURE__ */ React.createElement("div", { className: "sb-trim-h", style: { left: pct(range2.in) + "%" }, onPointerDown: startDrag("in"), title: "Trim in" }),
       /* @__PURE__ */ React.createElement("div", { className: "sb-trim-h", style: { left: pct(effOut) + "%" }, onPointerDown: startDrag("out"), title: "Trim out" })
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim-read" }, fT(range.in), " \u2192 ", fT(effOut), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fT(Math.max(0, effOut - range.in))), " kept", trimmed && /* @__PURE__ */ React.createElement("button", { className: "sb-trim-reset", onClick: () => onTrim(0, null) }, "reset"))));
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim-read" }, fT(range2.in), " \u2192 ", fT(effOut), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fT(Math.max(0, effOut - range2.in))), " kept", trimmed && /* @__PURE__ */ React.createElement("button", { className: "sb-trim-reset", onClick: () => onTrim(0, null) }, "reset"))));
   }
   function SequencePlayer({ clips, onClose }) {
     const vRef = useRef2(null);

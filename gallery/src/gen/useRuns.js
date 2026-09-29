@@ -3,8 +3,10 @@ import { apiGet, apiPost } from "../api.js";
 import { accountCsrf } from "../hooks/useAccountPrefs.js";
 import { submitRun } from "./submitTask.js";
 import {
-  LOST_WORDS, ackOf, chargeMismatch, readBack, runLine,
+  LOST_SEEN_WORDS, LOST_WORDS, ackOf, chargeMismatch, newRunId, readBack, readBackEvent, runLine,
 } from "./templateCore.js";
+
+export { newRunId };
 
 /* The Generate dock's run road (Session M, BUILD-w5-m s2-s4): every send of more than one
    generation, and one generation whose prompt uses the template syntax.
@@ -22,16 +24,6 @@ import {
    de-dupes), and a lost POST is never posted again -- it is read back until the run ends or
    the read-back gives up with "may not have reached the server" (review F4, templateCore's
    readBack). Send stays disabled (`busy`) until then. */
-
-export function newRunId() {
-  const c = (typeof crypto !== "undefined" && crypto) || null;
-  const bytes = new Uint8Array(16);
-  if (c && c.getRandomValues) c.getRandomValues(bytes);
-  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;         // uuid4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 const POLL_MS = 2000;
 
@@ -85,7 +77,7 @@ export default function useRuns({ openLine, onSettled }) {
     let timer = 0;
     let stopped = false;
     const paint = (s) => {
-      if (s.phase === "lost") { emit({ kind: "warn", text: LOST_WORDS }); return; }
+      if (s.phase === "lost") { emit({ kind: "warn", text: s.run ? LOST_SEEN_WORDS : LOST_WORDS }); return; }
       if (s.run) {
         track(s.run);
         const line = runLine(s.run);
@@ -97,9 +89,10 @@ export default function useRuns({ openLine, onSettled }) {
       if (stopped) return;
       const d = await apiGet("/api/generate/runs/" + runId);
       if (stopped) return;
-      const next = d && d.http_status === 404 ? readBack(state, { type: "get404", at: Date.now() })
-        : d && !d.error ? readBack(state, { type: "get", run: d, at: Date.now() }) : state;
-      state = next;
+      // A 404, a run, or a read that failed (a transport error, a 5xx, an unreadable store):
+      // the last counts toward the lost window like a 404 (review N8), so Send is never left
+      // disabled until a reload.
+      state = readBack(state, readBackEvent(d, Date.now()));
       paint(state);
       if (state.phase === "done" || state.phase === "lost") stopped = true;
       else timer = setTimeout(poll, POLL_MS);

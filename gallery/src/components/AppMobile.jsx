@@ -9,9 +9,15 @@ import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
-import { apiPost, fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections, rateImage } from "../api.js";
+import { apiGet, apiPost, fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections, rateImage } from "../api.js";
 import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
+import { invalidate } from "../hooks/swrCache.js";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { isFrontPage, makeMarker, syncOutcomeText } from "../lib/phoneCore.js";
+import { readMarker, writeMarker } from "../lib/phonePrefs.js";
+import { syncNow } from "../lib/syncNow.js";
+import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
 import { buildUrl, readPage, readImage } from "../gen/urlState.js";
 import { cameFromLoom, readLibraryReturn, setLibraryPlace } from "../lib/loomCrossing.js";
 import GalleryMobile from "./GalleryMobile.jsx";
@@ -53,6 +59,9 @@ import GuideHost from "../help/GuideHost.jsx";
 import { OPEN_SURFACE_EVENT } from "../help/helpStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
+/* Last, on purpose: the landscape rules re-flow rules from every sheet above, and at equal specificity
+   the later stylesheet wins (Session Q, Q4). */
+import "../styles/phone-landscape.css";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -500,6 +509,16 @@ export default function AppMobile({ boot }) {
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
   const edit = useEditGenerate({ costRef: editCostRef });
   const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
+  /* SESSION Q (2026-09-29), the phone. Data saver (Q7) is read by the shell once for the header chip and
+     for what counts as a background read; each surface that draws differently under it (the grid, the
+     Lightbox, the record) asks the same hook itself. `videoRef` is the video drawer's own handle, held
+     here so Send to Video and a video's Remix can prefill it (gen/phoneRemix.js) -- it sends nothing. */
+  const saver = useDataSaver();
+  const saverRef = useRef(false);
+  saverRef.current = saver.active;
+  const videoRef = useRef(null);
+  const [videoNote, setVideoNote] = useState("");
+  useEffect(() => { if (cmode !== "video") setVideoNote(""); }, [cmode]);
 
   // Image Details Mobile (2026-08-03) -- lifted HERE (not GalleryMobile.jsx)
   // for the identical reason `screen`/VideoMode/cmode are: it must survive
@@ -720,6 +739,46 @@ export default function AppMobile({ boot }) {
     };
   }, [lib.items.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Q5, "N new since": the marker is the newest picture seen when the gallery was last LEFT, read once
+     when the phone opens (a read; nothing is written) and measured against what page 1 holds now. It is
+     written only when the gallery is left -- a tap on another tab, or the page being hidden -- and only
+     from the library's own front page (page 1, newest first, unfiltered), so a filtered look never moves
+     it. A completed pull does NOT write it: the rule stays where it was until you leave. */
+  const [marker, setMarker] = useState(() => readMarker());
+  const libNowRef = useRef(lib);
+  libNowRef.current = lib;
+  const frontPage = isFrontPage({
+    page: lib.page, advCount: lib.advCount, applied: lib.applied, media: lib.media, shelf: lib.shelf,
+    similar: !!similarFor, loaded: lib.total != null,
+  });
+  const frontRef = useRef(false);
+  frontRef.current = frontPage;
+  const saveSeen = useCallback(() => {
+    if (!frontRef.current) return null;
+    const m = makeMarker(libNowRef.current.items, Date.now());
+    if (m) writeMarker(m);
+    return m;
+  }, []);
+  const prevTabRef = useRef(tab);
+  useEffect(() => {
+    const was = prevTabRef.current;
+    prevTabRef.current = tab;
+    if (was === "gallery" && tab !== "gallery") {
+      const m = saveSeen();
+      if (m) setMarker(m);
+    }
+  }, [tab, saveSeen]);
+  useEffect(() => {
+    const hide = () => { if (tabRef.current === "gallery") saveSeen(); };
+    const onVis = () => { if (document.visibilityState === "hidden") hide(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", hide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", hide);
+    };
+  }, [saveSeen]);
+
   const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
@@ -750,6 +809,42 @@ export default function AppMobile({ boot }) {
     setCmode("image");
     gen.tsubakiEdit(img);
   };
+  /* Q2: Remix and Send to Video (the record's foot, and the Lightbox's To Video chip). Both OPEN the
+     Create tab already filled in and stop there -- nothing here can send, price or submit a generation
+     (gen/phoneRemix.js says what it may reach, and a structural test holds it to that). A still remixes
+     into the Image composer (a Generate power tools run restores its template, anything else its
+     recorded prompt); a video's Remix fills the Video drawer's recipe; Send to Video puts the picture in
+     the drawer as its start frame. */
+  const leaveViewers = () => { setDetailsFor(null); setLbIndex(null); };
+  const remixPicture = async (mid, isVideo) => {
+    if (!mid) return;
+    leaveViewers();
+    setTab("create");
+    if (isVideo) {
+      setCmode("video");
+      setVideoNote("");
+      const r = await remixVideoInto(videoRef.current, mid);
+      if (!r.ok && window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that clip's settings", msg: r.error || "" });
+      else if (r.notes && r.notes.length && window.Toast) {
+        window.Toast.show({ kind: "info", title: "Remix is partial", msg: r.notes.join("; ") + " \u2014 review before generating." });
+      }
+      return;
+    }
+    setCmode("image");
+    const r = await remixImageInto(gen, mid);
+    if (!r.ok && window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that picture's settings", msg: r.error || "" });
+    else if (r.notes.length && window.Toast) {
+      window.Toast.show({ kind: "info", title: "Remix is partial", msg: r.notes.join("; ") + " \u2014 review before generating." });
+    }
+  };
+  const sendPictureToVideo = (mid) => {
+    if (!mid) return;
+    leaveViewers();
+    setTab("create");
+    setCmode("video");
+    if (sendStartFrame(videoRef.current, mid)) setVideoNote(VIDEO_NOTE);
+  };
+
   const openDetailsFromLightbox = (mid) => {
     setLbIndex(null);
     openDetails(mid);
@@ -892,6 +987,22 @@ export default function AppMobile({ boot }) {
     };
     return lib.load(p, replace).then((d) => { settle(d); return d; }, (e) => { settle(); throw e; });
   }, [lib.load]);
+  /* Q6: what a release past the line runs. The SAME Sync now job the Control tab runs (whitelisted, a
+     read of the owner's own history into the local catalog; lib/syncNow.js), then a reload of the page
+     in view through the owner's own road (userLoad: the intent goes on the record first). It works under
+     Data saver on purpose -- a pull is an explicit request. Whatever the ending, a job that started may
+     have brought pictures in, so the page is re-read unless the sync never started. */
+  const refreshFromPull = useCallback(async () => {
+    const out = await syncNow({ post: apiPost, get: apiGet });
+    if (out.state !== "error") {
+      invalidate(["/api/health", "/api/achievements", "/api/your-art", "/api/next/detail/"]);
+      const d = await userLoad(shownPageRef.current, true);
+      if (d) pruneSelected(setLibSelected, d.items);
+    }
+    const msg = syncOutcomeText(out);
+    if (msg && window.Toast) window.Toast.show({ title: "Sync", msg });
+    return out;
+  }, [userLoad]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     genLoadRef.current = lib.load;
     genSimilarRef.current = similarFor;
@@ -911,6 +1022,10 @@ export default function AppMobile({ boot }) {
          land, and the page he is leaving is not the perch. See navRef above. */
       const nav = navRef.current;
       if (nav.inFlight || nav.want !== 1) return;
+      /* Data saver (Q7): this reload is the phone's own BACKGROUND read -- nobody asked for it -- so it
+         waits while the saver acts. The new picture is one pull away (a pull is explicit and never
+         asks). The credits chip and the achievement check above are tiny and still run. */
+      if (saverRef.current) return;
       // ...and not under the ◈ token even at the perch: the library grid is not rendered
       // there at all, and the ✕ has to hand back exactly what was underneath.
       if (genSimilarRef.current) return;
@@ -1151,6 +1266,7 @@ export default function AppMobile({ boot }) {
             onClick={() => openSheet("menu")}>☰</button>
         </div>
         <div className="glm-hero-stats">
+          {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"\u25D0"} Saver</span> : null}
           <span><b>{Number(stats.images || 0).toLocaleString()}</b> img</span>
           <span><b>{Number(stats.videos || 0).toLocaleString()}</b> vid</span>
           <span><b>{Number(stats.collections || 0).toLocaleString()}</b> coll</span>
@@ -1191,6 +1307,7 @@ export default function AppMobile({ boot }) {
             onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet}
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar}
+            marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
             curation={{
               smart, curate, saveSmart, composeView,
               strip: (smartOpen || editingSmart) ? (
@@ -1230,7 +1347,8 @@ export default function AppMobile({ boot }) {
                   className={"cm-segbtn" + (k === "video" ? " on" : "")}>{label}</button>
               ))}
             </div>
-            <VideoMode visible={tab === "create" && cmode === "video"} />
+            <VideoMode visible={tab === "create" && cmode === "video"} drawerRef={videoRef}
+              note={videoNote} onDismissNote={() => setVideoNote("")} />
           </div>
         </div>
 
@@ -1310,6 +1428,7 @@ export default function AppMobile({ boot }) {
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
           onEnterContest={openContestFor}
           onTsubakiEdit={editWithTsubaki}
+          onRemix={remixPicture} onSendToVideo={sendPictureToVideo}
         />
       )}
 
@@ -1329,6 +1448,7 @@ export default function AppMobile({ boot }) {
           onSimilar={showSimilar}
           onEnterContest={openContestFor}
           member={account ? account.is_member : null}
+          onSendToVideo={sendPictureToVideo}
         />
       )}
 
@@ -1409,16 +1529,15 @@ export default function AppMobile({ boot }) {
       <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
-        {/* THE ROTATE LINE WAS TRUE UNTIL 2026-09-06 and is not any more: the Loom now
-            opens a phone layout by itself on a phone, built for a narrow screen. Telling
-            the owner to turn the phone right before the button that gives him a portrait
-            tool was the sheet contradicting the app. The wide four-panel board is still
-            there and still wants landscape -- but only once he has asked for it, so that
-            is what this now says. */}
+        {/* THE ROTATE LINE IS GONE (Session Q, Q4). It was untrue on 2026-09-06, when the Loom began
+            opening a phone layout by itself on a phone, and it is doubly so now that the phone has a
+            landscape of its own: nothing here asks the owner to turn the phone. The wide four-panel
+            board is still one tap away in the Loom's own bar, and it opens by itself when the phone is
+            already sideways. */}
         <div className="glm-loom-note">
-          Weave shots into a video sequence. On a phone it opens a <b>board and reel</b> view
-          built for the narrow screen. The wide four-panel board is still one tap away —
-          tap <b>🖥 Desktop</b> in the Loom's own bar, and turn the phone to landscape for it.
+          Weave shots into a video sequence. On a phone held upright it opens a <b>board and reel</b>{" "}
+          view built for the narrow screen; held sideways it opens the wide four-panel board. Either
+          way the other view is one tap away in the Loom's own bar (<b>🖥 Desktop</b> or <b>Mobile view</b>).
         </div>
         <div className="glm-sheet-actions">
           <a className="glm-primary glm-primary-loom" href="/loom">Open The Loom</a>

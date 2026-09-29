@@ -131,9 +131,11 @@ describe("every Loom image submit path registers its generation in the shared Jo
 // register. A block is a submit path if it either checks `!d.task_id` (it POSTed its own
 // generation) or writes `pendingTaskId: <resp>.task_id` (it adopted one the shared drawer
 // submitted). A new path that does neither is not a submit path; one that does either and
-// forgets Jobs.register() fails here.
+// forgets Jobs.register() fails here. Since review S2 (Session M) a third shape counts too: a
+// block that sends through the run road (`await sendImgRun(`, loom/src/loom-run.js -- the
+// Image tab's ×2-4 and template prompts) takes its task ids from that road's answer.
 // ---------------------------------------------------------------------------
-const IS_SUBMIT = /!d\.task_id|pendingTaskId: (?:d|detail)\.task_id/;
+const IS_SUBMIT = /!d\.task_id|pendingTaskId: (?:d|detail)\.task_id|await sendImgRun\(/;
 
 /** Split the file at its top-level `  const NAME = ` declarations -> [name, body] pairs. */
 function declaredBlocks() {
@@ -154,7 +156,7 @@ describe("no NEW Loom submit path can quietly skip the shared Job Tracker", () =
       "found only " + submitPaths.length + " submit paths (" + names.join(", ") + ") -- the " +
       "block splitter no longer matches how this file declares its functions, so this whole " +
       "guard is inert");
-    for (const expected of ["generateShot", "genImage", "runGen", "onVideoSubmit"]) {
+    for (const expected of ["generateShot", "genImage", "genImageRun", "runGen", "onVideoSubmit"]) {
       assert.ok(names.includes(expected),
         "expected " + expected + " to be recognised as a submit path; found: " + names.join(", "));
     }

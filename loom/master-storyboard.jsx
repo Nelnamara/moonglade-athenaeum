@@ -86,6 +86,18 @@ import useActivity from "../gallery/src/notify/useActivity.js";
 // The one price transport, shared with the gallery's own cost lines (gen/usePriceProbe.js
 // rides the same function). Imported the same way as VideoDrawer/CostBadge above.
 import { requestPrice } from "../gallery/src/gen/priceRequest.js";
+// Review S2 (Session M): the Image tab's ×2-4 and a prompt using the template syntax go through
+// the run road (/api/generate/plan -> the confirm -> /run), as the Generate dock's do --
+// /api/generate is a single send. The road's pieces are loom-run.js's; the transport is the
+// gallery's own (apiPost, and submitRun, the one poster of /api/generate/run).
+import { apiPost } from "../gallery/src/api.js";
+import { submitRun } from "../gallery/src/gen/submitTask.js";
+import { accountCsrf, accountPrefs } from "../gallery/src/hooks/useAccountPrefs.js";
+import { imgSendRoute, sendImgRun } from "./src/loom-run.js";
+const LOOM_RUN_DEPS = {
+  post: apiPost, run: submitRun, confirm: (text) => window.confirm(text),
+  csrf: async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); },
+};
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
@@ -6762,6 +6774,26 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     setTimeout(tick, 2500);
   };
   const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+  // Review S2 (Session M): the Image tab's ×2-4, or a prompt using the template syntax -- which
+  // /api/generate refuses -- goes through the run road, as the Generate dock's does: /plan, this
+  // file's window.confirm carrying the server's own quote, then ONE /run with the plan's
+  // acknowledgement (loom/src/loom-run.js). Every task it made is registered (register-ONLY, as
+  // genImage) and polled through pollTaskWithCeiling: the first drives this drawer, the others
+  // are polled quietly so each is collected and closed out in the tray.
+  const genImageRun = async (entry, body) => {
+    const c = entry.c;
+    const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
+    const out = await sendImgRun(body, label, LOOM_RUN_DEPS, { key: c.id,
+      onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } })) });
+    if (!out.ok) { if (out.error) setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: out.error } })); return; }
+    const jobLabel = "Image · " + entry.code + " · " + (c.title || "untitled");
+    setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: out.note || "Generating…" } }));
+    out.taskIds.forEach((tid, k) => {
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(tid, jobLabel);
+      if (k === 0) pollImg(c.id, tid);
+      else pollTaskWithCeiling(tid, () => {}, c.id);
+    });
+  };
   const genImage = async (entry) => {
     const c = entry.c;
     const prompt = (c.imgPrompt || "").trim();
@@ -6770,6 +6802,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     if (anyLoraUnresolved(imgLoras)) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } })); return; }
     // L536: ONE body, shared by the price check just below and the real submit two lines
     // later -- so the free-card/cost check the user is agreeing to is exactly what fires.
+    // Review S2: more than one image, or a template prompt, takes the run road (genImageRun).
+    const asked = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+    if (imgSendRoute(asked) === "run") return genImageRun(entry, asked);
     const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
     if (!(await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
@@ -7205,7 +7240,10 @@ export default function App() {
   // LoomMobile's own top bar). Since 2026-09-06 a PHONE opens LoomMobile by itself when
   // neither switch has ever been flipped -- see useLoomView above for the whole rule, and
   // useIsMobile for the phone test it defers to (a tablet fails it, deliberately).
-  const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
+  // `landscapePhones: false` (Session Q, Q4): the app's phone shell now claims a phone held sideways
+  // too, but THIS board is at home in landscape -- so a phone opened sideways gets the wide board and
+  // an upright one gets the board-and-reel view, which is what the Loom always did.
+  const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
   // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
   // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
   // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)

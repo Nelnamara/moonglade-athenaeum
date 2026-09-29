@@ -17,7 +17,7 @@ import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
 import { publishDockPrice, publishDockRequest } from "../recipes/recipesStore.js";
 import {
-  LISTS_KEY, listsFromPrefs, newRoll, parse, planJobs, runSeedOf, sendRoute,
+  LISTS_KEY, forcesNoCard, listsFromPrefs, newRoll, parse, planJobs, runSeedOf, sendRoute,
 } from "./templateCore.js";
 import useRuns from "./useRuns.js";
 
@@ -109,6 +109,21 @@ export default function useGenerate({ costRef, isMember }) {
     return () => clearTimeout(prefsTimer.current);
   }, [persistedKey]);
 
+  /* ---- Session M: the template, its lists, the run road ----
+     The account's saved lists (gen.lists) come from the shared account store; the dock
+     expands the prompt only to DRAW it (the tint, the preview, "Send N") and to know what the
+     send will force (below). The server re-expands everything itself. */
+  const lists = useMemo(() => listsFromPrefs(prefSnap.prefs), [prefSnap]);
+  const parsed = useMemo(() => parse(s.prompt, lists), [s.prompt, lists]);
+  const runSeed = runSeedOf(s.seed, s.roll);
+  const plan = useMemo(() => planJobs(s.prompt, lists, s.varMode || "random",
+    s.varMode === "matrix" ? 1 : Math.max(1, Math.min(4, Number(s.count) || 1)),
+    runSeed == null ? 0 : runSeed), [s.prompt, lists, s.varMode, s.count, runSeed]);
+  // Review B1: a Matrix of 2+ cells goes out with no free card (the server forces it), so the
+  // badge must price it with no_card on -- never a "free card covers it" the send won't honour.
+  // A one-cell matrix is an ordinary single send: its card applies and the badge says so.
+  const forceNoCard = forcesNoCard(plan);
+
   /* ---- price preview: the SAME payload builder the submit uses ---- */
   const build = useCallback(() => {
     const p = buildPayload(s);
@@ -116,8 +131,8 @@ export default function useGenerate({ costRef, isMember }) {
     // "Pick a model to see the cost." hint, exactly as this hook always did. That is
     // a verdict, not a gap -- goGate() is what refuses a submit in that state, and it
     // must stay reachable, so the gate below is never what silences it.
-    return { payload: p, idle: p.version_id ? null : true };
-  }, [s]);
+    return { payload: forceNoCard ? { ...p, no_card: true } : p, idle: p.version_id ? null : true };
+  }, [s, forceNoCard]);
   const probe = usePriceProbe({ build, costRef });
   const refreshPrice = probe.refresh;
   const priceOk = probe.canSubmit;   // the identity gate, ANDed into goGate at the buttons
@@ -141,8 +156,9 @@ export default function useGenerate({ costRef, isMember }) {
     s.mode, s.steps, s.unlimited, s.palette,
     s.inputs, s.ctx, s.auto, s.landscape, s.tier, s.creativity, s.recipes, s.member,
     // Session M: Matrix sends one image per cell, so switching the mode moves the payload's
-    // count -- a structural input like the count itself.
-    s.varMode,
+    // count -- a structural input like the count itself. And whether the send forces no card
+    // (a Matrix of 2+ cells, review B1) moves with the prompt's own text.
+    s.varMode, forceNoCard,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- model pick -> version resolve (seq-guarded) ---- */
@@ -358,17 +374,8 @@ export default function useGenerate({ costRef, isMember }) {
     }));
   }, []);
 
-  /* ---- Session M: the template, its lists, the run road ----
-     The account's saved lists (gen.lists) come from the shared account store; the dock
-     expands the prompt only to DRAW it (the tint, the preview, "Send N"). The server
-     re-expands everything itself. */
-  const lists = useMemo(() => listsFromPrefs(prefSnap.prefs), [prefSnap]);
+  /* ---- Session M: the run road (the template's lists, parse and plan are above) ---- */
   const saveLists = useCallback((next) => prefStore.set(LISTS_KEY, next), [prefStore]);
-  const parsed = useMemo(() => parse(s.prompt, lists), [s.prompt, lists]);
-  const runSeed = runSeedOf(s.seed, s.roll);
-  const plan = useMemo(() => planJobs(s.prompt, lists, s.varMode || "random",
-    s.varMode === "matrix" ? 1 : Math.max(1, Math.min(4, Number(s.count) || 1)),
-    runSeed == null ? 0 : runSeed), [s.prompt, lists, s.varMode, s.count, runSeed]);
   const route = sendRoute(plan, parsed.syntax);
   // A Random run needs a seed in range; the server refuses the same.
   const seedGate = plan && plan.mode === "random" && runSeed == null

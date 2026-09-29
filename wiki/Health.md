@@ -24,7 +24,7 @@ the ♡ Health pill in the gallery header.
 The old single "Storage used" number is now a row of stacked bars, each one a different way of
 cutting the same pictures. Sizes are the bytes each picture's file takes on disk (videos included).
 
-- **By type** — images, videos, and **Loom renders**, in fixed colours (lavender, cyan, gold). A
+- **By type** — images, videos, and **Loom renders**, coloured to follow your skin: images take the skin's accent, videos a darker tone of the same accent, and Loom renders are always the Loom's cyan, whichever skin is on. A
   Loom render is a picture or clip [The Loom](The-Loom) made, whether it is a still or a video, so
   the three add up to the whole with nothing counted twice.
 - **By model** — your four biggest models by size, and **Other** for the rest (and for pictures whose
