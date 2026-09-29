@@ -123,6 +123,50 @@ generations in parallel, so you can queue up several in a row (Generate, Edit, E
 Fix, and the Video tab all work this way) and each one tracks and reports its own result
 independently.
 
+### Several at once: variables, Random and Matrix — and the one confirm
+
+**Anything that sends more than one generation asks first, once.** A batch of 2–4, a Random
+run and every Matrix run open one confirm card under the prompt: how many, the total credits
+(PixAI's own price for what will actually be sent, checked on the server) and how many free
+cards cover it. **Cancel · nothing is sent** is exactly that. There is no "don't ask again".
+A single picture sends as it always has, with no confirm.
+
+**Variables in the prompt.** `{silver|cobalt|ember}` is a variable: each option is one value.
+`__poses__` reads one of your **saved lists** (the **Lists ▾** button beside the mode switch:
+a name, one item per line, saved with your Moonglade account so the phone sees them too).
+Variables work in the prompt only; the negative is sent as typed. They are tinted in the line
+under the prompt, and anything that can't be read — an unclosed or nested brace, a stray `}`,
+an empty `{}`, a list you don't have — is tinted peach and blocks Send until you fix it. To
+type a literal brace or underscore pair, put a backslash before it: `\{`, `\}`, `\_`.
+
+- **Random** draws one value per picture, ×1–4, from the run seed (the Seed field when it holds
+  a number, otherwise a draw of its own that **⚄ Reroll** changes), so the same prompt, settings
+  and seed give the same run again. Each picture is its own task and its own run.
+- **Matrix** sends every combination, one picture each, queued one after another — at most 24;
+  over that, Send says *narrow an axis* and nothing goes. The reel shows a matrix as a grid:
+  the last variable across, the rest down. **Free cards never cover matrix cells** — a card
+  belongs to a model and a function.
+
+The dock previews what each picture will get before you send. After Go, the pictures go out
+one at a time; if PixAI refuses one (moderation, a recipe that doesn't fit that cell's
+prompt) the rest are **not** sent and the result line says which cell and why. A cell whose
+answer never came back reads *may have started — check the Activity tray*; nothing is ever
+re-sent on its own. If the price, your free cards or anything about the request changed
+between the confirm and Go, nothing is sent and the confirm comes back with the new numbers.
+
+Reusing a run from the reel or History puts back its **template** (the variables, Random or
+Matrix, the count and the seed), not just one resolved prompt. An older picture's prompt comes
+back with its braces escaped, so sending it again sends exactly the same text.
+
+**Inspect `{ }`** (beside the snippets button, and on each finished tile in the reel) shows the
+exact request a picture was — or will be — sent with, after the variables were filled in, with
+the template and the drawn values beside it. The API key, cookies and session tokens are
+removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
+copies the matching `python moonglade_backup.py --generate …` command (quoted for the shell the
+server runs in — PowerShell on Windows). It never includes `--confirm`, so pasting it previews
+first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
+copies as `--params-json`.
+
 ### Tsubaki.3 Unlimited Mode
 
 When your account holds PixAI's **Unlimited Mode** for Tsubaki.3 (a time-limited grant you
@@ -882,8 +926,11 @@ the button comes back — the app will tell you it doesn't know rather than leav
 drawer is login-tier, the sliders and number boxes in your browser are the only limit a
 well-behaved client honours — and anything POSTing to `/api/generate` by hand honours none,
 so a width of 999,999,999 or 999,999 steps used to go straight through to PixAI and be
-priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150,
-CFG to 1–30 and count to 1–4, the same bounds the drawer's own controls carry. When a clamp
+priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150
+and CFG to 1–30, the same bounds the drawer's own controls carry. The count is not clamped
+at all: `/api/generate` sends exactly one generation and refuses any other count, and a
+prompt written with variables, because more than one — and every template — goes through the
+confirm above, where the server itself expands, counts, caps and prices the run. When a clamp
 actually fires the response says so and the drawer raises it — "Settings were adjusted
 before submitting … steps 200 → 150 — this generation used the adjusted values." — because
 that submit is already made and already charged, and quietly billing you for a different
