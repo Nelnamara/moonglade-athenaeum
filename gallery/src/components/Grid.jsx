@@ -4,6 +4,7 @@ import { buildUrl } from "../gen/urlState.js";
 import { fetchSiblings, fetchSeriesBatch } from "../api.js";
 import { seriesSuffix } from "../gen/seriesName.js";
 import Stars from "./Stars.jsx";
+import { ratioLabel } from "../curation/aspectCore.js";
 import "../styles/grid.css";
 import "../styles/curation.css";
 
@@ -794,6 +795,10 @@ function Grid({
           {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
+            {/* the picture's own shape (Session N7), the name the ar: operator searches by */}
+            {!stack && ratioLabel(it.w, it.h) ? (
+              <span className="mgg-ar" title={"Shape " + it.w + "×" + it.h + " · search it with ar:"}>{ratioLabel(it.w, it.h)}</span>
+            ) : null}
             <button
               type="button" className="mgg-chip open"
               title={stack ? "Open this session" : "Open the lightbox"}

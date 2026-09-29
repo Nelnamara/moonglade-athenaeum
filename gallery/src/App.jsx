@@ -49,6 +49,8 @@ import { isMomentUp } from "./moments/momentStore.js";
 import { installStarfallTrigger } from "./moments/starfallTrigger.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "./notify/panelRequest.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
+import { ADV_DEFAULTS } from "./hooks/useLibrary.js";
+import { storageFilterPatch } from "./curation/storageCore.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
@@ -1862,6 +1864,9 @@ export default function App({ boot }) {
           onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
           onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
           onOpenDuplicates={() => setOverlay("duprev")}
+          /* N6: a Storage segment closes Health and opens the library filtered to it; the whole
+             filter set starts over, because the bars measure the whole library */
+          onStoragePick={(f) => { setOverlay(null); applyAdvanced({ ...ADV_DEFAULTS, ...storageFilterPatch(f) }); }}
         />
       )}
       {overlay === "duprev" && (

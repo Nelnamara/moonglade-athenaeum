@@ -40,6 +40,9 @@ export default function useHealth() {
   // numbers; dup = the clickable Duplicate pair on desktop -- see
   // HealthMobile.jsx's own header comment for why mobile renders those two
   // as plain, non-clickable tiles this pass instead).
+  // Session N6: "Storage used" is no longer a tile. It became the three stacked bars (by type,
+  // by model, by collection) that StorageBars.jsx draws from `storage` below, so the tile the
+  // design's HEALTH_STATS names is deliberately absent from this list.
   // Frontend Gallery.dc.html's HEALTH_STATS (search that name) is the real order + the
   // real gold flag: Duplicates/Reclaimable sit at positions 9-10 (not last), only
   // Uncataloged is gold (was Published+Total likes instead, an unrelated substitution),
@@ -48,7 +51,6 @@ export default function useHealth() {
   // though it reads a little terse, since that's the design's own literal string).
   const stats = h ? [
     { label: "Images on disk", value: fmt(h.total_files) },
-    { label: "Storage used", value: h.total_size_h || "—" },
     { label: "Catalog rows", value: fmt(h.catalog_rows) },
     { label: "Full-meta", value: (h.full_meta_pct != null ? h.full_meta_pct + "%" : "—") },
     { label: "Model known", value: (h.model_pct != null ? h.model_pct + "%" : "—") },
@@ -73,5 +75,8 @@ export default function useHealth() {
 
   const buckets = h && h.per_bucket ? Object.entries(h.per_bucket) : [];
 
-  return { h, err, stats, monthMax, modelMax, tier, buckets };
+  // the storage block (bytes per type / model / collection) StorageBars draws; null until measured
+  const storage = h && h.storage ? h.storage : null;
+
+  return { h, err, stats, monthMax, modelMax, tier, buckets, storage };
 }
