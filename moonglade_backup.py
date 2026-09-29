@@ -1581,7 +1581,12 @@ class PixAIClient:
                 raise PixAIError("HTTP {} non-JSON response:\n{}".format(
                     r.status_code, r.text[:400]))
             if data.get("errors"):
-                raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+                err = PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+                # The WHOLE list rides on the error: the message keeps 500 characters, and a
+                # structured refusal (a recipe's RECIPE_* with its ids and reason) can be
+                # longer. Reading it changes nothing about what was sent or retried.
+                err.graphql_errors = data["errors"]
+                raise err
             return data.get("data") or {}
         raise RuntimeError("unreachable")
 
@@ -1673,7 +1678,7 @@ class PixAIClient:
         Single-attempt by construction, like `rest_post` -- see its note."""
         r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("GET", path, r)
         return r.json()
 
     def rest_post(self, path, body=None, timeout=60):
@@ -1685,7 +1690,7 @@ class PixAIClient:
         tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
         r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("POST", path, r)
         return r.json()
 
     # -- which credential a create rides -------------------------------------
@@ -1699,6 +1704,20 @@ class PixAIClient:
         if chosen is self:
             return self
         return PixAIClient(chosen, auth_kind="web-jwt")
+
+
+def _rest_error(verb, path, r):
+    """The PixAIError a non-2xx /v2 answer raises: the same message as always ("REST GET
+    <path> -> <status>: <first 300 characters>"), plus `http_status` and the parsed `body`
+    (None when it is not JSON) as attributes, so a caller can read a structured refusal --
+    an oRPC error's {code, data} -- without re-parsing a truncated string."""
+    err = PixAIError("REST {} {} -> {}: {}".format(verb, path, r.status_code, r.text[:300]))
+    err.http_status = r.status_code
+    try:
+        err.body = r.json()
+    except ValueError:
+        err.body = None
+    return err
 
 
 def _client_of(session):
@@ -11185,6 +11204,10 @@ def submit_generation(session, params):
     # priced shape. Fail-soft: an undetermined profile set returns params unchanged (today's
     # behavior).
     params = _gate_params_for_model(session, params)
+    # Lane w2-recipes: the dict about to go out may not carry recipes beside context images
+    # (a reference the backstop gate just converted), a lane or an upscale. No network.
+    import moonglade_recipes as _recipes
+    _recipes.check_params(params)
     params = priority_for_submit(params)   # already known to be turbo-refused? use Low
     # Session H (BUILD-w2-gen §8, review S1): decided BEFORE the mutation, off the gate's own
     # cached profile read -- is the profile asked for one this version LISTS? A listed profile
@@ -11197,6 +11220,10 @@ def submit_generation(session, params):
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
     except PixAIError as e:
+        if _recipes.refusal_from(e):
+            # PixAI refused a recipe: nothing was created. Re-raised BEFORE the two resubmits
+            # below can read its words -- a recipe refusal is never retried as anything else.
+            raise
         if lane:
             # Never retried as anything else (§8.2). A GraphQL error is PixAI refusing the
             # task, so nothing exists and nothing was spent; anything else is passed on as it
@@ -11941,6 +11968,12 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             raise
         adjusted = list(adjusted) + list(gate_adjusted or [])
         _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
+    # Recipes (lane w2-recipes): the payload's `recipeIds`, checked and attached in ONE call
+    # whose rules live in moonglade_recipes (after the gate so it sees the dict that is sent,
+    # before the lane check so Unlimited Mode still refuses a recipe). Returns `params`
+    # itself when the payload names none. Design: design/notes/recipes/BUILD-w2-recipes.md.
+    import moonglade_recipes as _recipes
+    params = _recipes.apply_to_params(params, p, gated=rs.gate is not None)
     # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode S3): checked AFTER the one gate and its
     # profile fill, on the dict that will be quoted and sent. A road without the entitlement
     # lookup, or without the gate, cannot vouch for the lane and refuses it (§8.4, §8.10).
@@ -12077,18 +12110,29 @@ def _price_answer(session, req):
             out["list_cost"] = listed
         return out
     cost = price_task(session, req.parameters)
+    recipes = bool(req.parameters.get("recipeIds"))
+    if recipes:
+        # Lane w2-recipes: a failed quote with recipes is PixAI's refusal (RECIPE_*) or
+        # "couldn't verify" -- and the card check is skipped, so FREE needs a read price.
+        import moonglade_recipes as _recipes
+        verdict = _recipes.price_verdict(session, req.parameters, cost)
+        if verdict is not None:
+            return verdict
     best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
     covered = card_covers(best)
-    return {"cost": cost, "free": covered,
-            "cards": (best or {}).get("total"),
-            "cards_held": (best or {}).get("total"),
-            "cards_needed": (best or {}).get("consumeAmount"),
-            "card_short": bool(best) and not covered,
-            "card_name": (best or {}).get("name"),
-            # The Loom's batch tally keys its per-template ticket pool on this (falls
-            # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
-            "card_template": (best or {}).get("templateId"),
-            "card_expires": (best or {}).get("expiresAt")}
+    out = {"cost": cost, "free": covered,
+           "cards": (best or {}).get("total"),
+           "cards_held": (best or {}).get("total"),
+           "cards_needed": (best or {}).get("consumeAmount"),
+           "card_short": bool(best) and not covered,
+           "card_name": (best or {}).get("name"),
+           # The Loom's batch tally keys its per-template ticket pool on this (falls
+           # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
+           "card_template": (best or {}).get("templateId"),
+           "card_expires": (best or {}).get("expiresAt")}
+    if recipes and covered:
+        out["card_note"] = _recipes.CARD_NOTE    # a card over a recipe's LoRAs: unobserved
+    return out
 
 
 def submit(session, req, *, no_card=None):
@@ -14632,13 +14676,40 @@ _PRICE_NESTED = frozenset((
     # it moves the price (live quote 2026-09-26: 5,100 for one image, 6,000 for two at
     # 1632x912 pro). Landed in the SAME commit as the gate that sends it, so the badge never
     # quotes a context-image job without its surcharge.
-    "contextImages"))
+    "contextImages",
+    # Lane w2-recipes: the contract's /task-price description lists recipeIds among the
+    # nested parameters "passed as URL-encoded JSON". Landed in the SAME commit as the build
+    # step that sends it, so the badge never quotes a recipe request without its recipes.
+    "recipeIds"))
 # The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
 # differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
 # upscaleSampler and qualityTag. They are real submit params, but they are not in this
 # endpoint's input schema and none of them changes the price (the cost is the same whichever
 # upscaler network runs), and an off-schema query param risks a 400 that would make
 # price_task fail soft and blank the badge. Add one only with a measurement showing it priced.
+
+
+def _task_price_query(session, params):
+    """THE /v2/task-price query for `params`: the backstop gate (so the quote prices the
+    shape that will be sent), then the allowlists above. {} when there is nothing to price,
+    None when the gate refuses. Shared by price_task and moonglade_recipes.price_refusal, so
+    the second read that asks WHY a recipe quote failed cannot ask about a different
+    request than the one that failed."""
+    if not params:
+        return None
+    try:
+        params = _gate_params_for_model(session, params)
+    except PixAIError:
+        return None
+    q = {}
+    for k, v in params.items():
+        if v is None:
+            continue
+        if k in _PRICE_NESTED:
+            q[k] = json.dumps(v)          # requests URL-encodes the JSON string
+        elif k in _PRICE_SCALARS:
+            q[k] = v
+    return q
 
 
 def price_task(session, params):
@@ -14652,18 +14723,7 @@ def price_task(session, params):
     # already gated at build, for which the gate returns the SAME object. Its one refusal (a
     # reference plus LoRAs on an MMDIT26B model) is "no price", never a raise -- this
     # function fails soft.
-    try:
-        params = _gate_params_for_model(session, params)
-    except PixAIError:
-        return None
-    q = {}
-    for k, v in params.items():
-        if v is None:
-            continue
-        if k in _PRICE_NESTED:
-            q[k] = json.dumps(v)          # requests URL-encodes the JSON string
-        elif k in _PRICE_SCALARS:
-            q[k] = v
+    q = _task_price_query(session, params)
     if not q:
         return None
     try:

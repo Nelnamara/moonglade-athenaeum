@@ -23,6 +23,8 @@ import FolioOverlay from "./components/FolioOverlay.jsx";
 import AiToolsModal from "./components/AiToolsModal.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
+import RecipesHost from "./recipes/RecipesHost.jsx";
+import { isRecipesOpen, openRecipes } from "./recipes/recipesStore.js";
 import ClaimModal from "./components/ClaimModal.jsx";
 import useClaimModal from "./hooks/useClaimModal.js";
 import { CommandPalette, ShortcutSheet, GPendingChip } from "./components/CommandPalette.jsx";
@@ -283,6 +285,7 @@ export default function App({ boot }) {
       if (isMomentUp()) return;                     // a clip moment ends FIRST (momentStore)
       if (overlayRef.current === "panel") return;   // panel runs its own ladder
       if (isPickerOpen()) return;                   // picker dismisses itself
+      if (isRecipesOpen()) return;                  // the recipes overlay runs its own ladder
       if (paletteUpRef.current) return;             // the palette/cheat-sheet close FIRST
       e.stopPropagation();
       setOverlay(null);
@@ -333,6 +336,7 @@ export default function App({ boot }) {
       if (isMomentUp()) return;                     // a click on a moment ends the moment only
       if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
       if (isPickerOpen()) return;
+      if (isRecipesOpen()) return;                  // the recipe picker adds TO the dock
       const host = dockHostRef.current;
       if (host && !host.contains(ev.target)) closeDock();
     };
@@ -1150,7 +1154,7 @@ export default function App({ boot }) {
     if (!similarFor) return undefined;
     const onKey = (e) => {
       if (e.key !== "Escape") return;
-      if (overlayRef.current || paletteUpRef.current || isPickerOpen()) return;
+      if (overlayRef.current || paletteUpRef.current || isPickerOpen() || isRecipesOpen()) return;
       e.stopPropagation();
       setSimilarFor(null);
     };
@@ -1328,6 +1332,11 @@ export default function App({ boot }) {
       keys: ["/"], hotkey: "/", run: jumpToSearch,
     });
     list.push({ id: "do.sync", group: "Do", icon: "⟳", label: "Sync now", keys: [], run: syncNow });
+    // K decision 1: the palette's "Browse recipes" opens the recipe picker at market size.
+    list.push({
+      id: "do.recipes", group: "Do", icon: "⁂", label: "Browse recipes", sub: "the recipe market",
+      keys: [], run: () => openRecipes({ view: "picker", size: "market" }),
+    });
     // Claimable credits: present ONLY while there are some, running the exact claim the
     // header pill runs (useClaimModal.claim -- POST /api/claim, then the account refetch
     // that drops claim_credits to 0 and takes this row away again).
@@ -1659,6 +1668,7 @@ export default function App({ boot }) {
           request={genRequest} />
       </div>
       <PickerHost />
+      <RecipesHost />
       {claimModal.open && (
         <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
           claiming={claimModal.claiming} error={claimModal.error}

@@ -66,6 +66,10 @@ def z():
         "ct_sub_host":   _z("styles/myart-contests.css", ".mgct-subhost"),
         "pal_c_scrim":   _z("styles/color-palette.css", ".cpal-scrim"),
         "pal_c_host":    _z("styles/color-palette.css", ".cpal-host"),
+        "recipes_scrim": _z("styles/recipes.css", ".rcp-scrim"),
+        "recipes_host":  _z("styles/recipes.css", ".rcp-host"),
+        "recipes_phone": _z("styles/recipes.css", ".rcp-m "),
+        "gallery_picker": _z("styles/gallery-picker.css", ".mg-gallery-picker"),
     }
 
 
@@ -139,6 +143,19 @@ def test_command_palette_band_clears_every_layer_it_opens_over(z):
     assert z["pal_scrim"] > z["claim_host"], "the command palette opens under the claim modal"
     assert z["pal_gchip"] > z["pal_host"], "the G… chip can be buried by the palette panel"
     assert z["ks_scrim"] > z["pal_host"], "the cheat-sheet opens behind the palette"
+
+
+def test_the_recipes_overlay_clears_the_lightbox_and_sits_under_its_own_pickers(z):
+    """The recipe picker, market and creator (lane w2-recipes). ⁂ Make a recipe opens the
+    creator FROM the Lightbox (desktop and phone), so the whole band must clear .lbx and
+    the shared slab it can also open over; the creator asks the gallery picker for
+    pictures, and the palette opens from any layer, so both stay above it. The scrim/host
+    pair moves together."""
+    assert z["recipes_scrim"] > z["lbx"] and z["recipes_scrim"] > z["mgv_host"]
+    assert z["recipes_host"] > z["recipes_scrim"]
+    assert z["recipes_phone"] == z["recipes_host"]
+    assert z["gallery_picker"] > z["recipes_host"], "the creator's picture picker opens behind it"
+    assert z["pal_scrim"] > z["recipes_host"], "the palette opens under the recipes overlay"
 
 
 def test_actions_menu_can_never_outgrow_the_viewport():
