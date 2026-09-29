@@ -56,6 +56,12 @@ import {
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
   classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
   splicePatch, unsendableImages, cardForSubmit, cardForTask,
+  // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
+  // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
+  // The pure Keep is renamed here because the click handler that applies it is `keepAnchor`.
+  takesOf, selectedTakeOf, selectedTakeView, takeView, inFlight,
+  selectTake, deleteTake, reuseSettingsPatch, cutPointOf,
+  anchorInfo, staleText, needsNewTake, reanchorPatch, keepAnchor as keepAnchorPatch,
 } from "./src/loom-takes-core.js";
 import { makeSaveQueue } from "./src/loom-store-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
@@ -762,6 +768,9 @@ const V2_STYLES = `
    single value rather than a layout change. */
 .lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;}
 .lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
+/* Session P (P2): a shot whose anchor went stale -- the page's peach card border (hover and the
+   selection outline still win over it). */
+.lv-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-card:hover{border-color:var(--accent);}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
@@ -802,10 +811,59 @@ const V2_STYLES = `
 .lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
   background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lv-unclearbtn:hover{border-color:var(--peach);}
+/* Session P, Stage A2 -- the page's section A card (Loom Handoff.dc.html): the takes strip with
+   Render / Re-render, the take line, the peach stale-anchor box and the new-take prompt. Sizes,
+   radii, weights and spacing are the page's; a chip shows its take's clip thumbnail where the
+   page draws a tint pair. The shipped card is lighter than the page's (surface1, not near-base),
+   so the page's outline buttons take var(--base) as a fill to stay visible, the row wraps inside
+   the narrowest (144px) card, and the grey lines use --subtext (--overlay0 on surface1 is ~2:1). */
+.lv-takes{display:flex;flex-direction:column;gap:7px;margin-top:7px;}
+.lv-takerow{display:flex;align-items:center;flex-wrap:wrap;gap:4px;cursor:default;}
+.lv-take{flex:none;width:26px;height:20px;box-sizing:border-box;border:0;padding:0;border-radius:4px;display:grid;place-items:center;
+  font:800 9px/1 system-ui;color:rgba(236,232,248,.9);text-shadow:0 1px 2px rgba(0,0,0,.85);cursor:pointer;
+  background:var(--surface0) center/cover no-repeat;}
+.lv-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lv-takemore{font:800 9px/1 system-ui;color:var(--subtext);}
+.lv-render{margin-left:auto;font:700 10px/1 system-ui;padding:4px 8px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface1);color:var(--subtext);background:var(--base);}
+.lv-render:hover:not(:disabled){border-color:var(--accent);color:var(--text);}
+.lv-render:disabled{opacity:.5;cursor:default;}
+.lv-takeline{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-stale{display:flex;flex-direction:column;gap:6px;padding:8px 9px;border-radius:9px;cursor:default;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lv-staletxt{font-size:10.5px;line-height:1.4;color:var(--peach);}
+.lv-stalebtns{display:flex;gap:5px;}
+.lv-reanchor{font:700 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:0;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lv-reanchor:disabled{opacity:.6;cursor:default;}
+.lv-keep{font:400 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:1px solid var(--surface1);color:var(--subtext);background:var(--base);cursor:pointer;}
+.lv-keep:hover{border-color:var(--accent);color:var(--text);}
+.lv-staleerr{font-size:9.5px;line-height:1.35;color:var(--peach);}
+.lv-needtake{font-size:9.5px;line-height:1.4;color:var(--subtext);}
+.lv-lastfail{font-size:9.5px;line-height:1.35;color:var(--peach);}
+/* A shot's take list (P1), beside the ★ clip's preview in the timeline's full view. Not drawn by
+   the page; the timeline's own row idiom. */
+.lv-tlprevrow{display:flex;gap:14px;height:100%;min-height:0;}
+.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:auto;}
+.lv-takelist{flex:0 0 300px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
+.lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
+.lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
+.lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
+.lv-takeitem .lv-take{cursor:default;}
+.lv-takeinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.lv-taketitle{font:600 11px/1.2 system-ui;color:var(--text);}
+.lv-takemeta{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-takebtns{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
+.lv-takebtn{font:600 10px/1 system-ui;padding:4px 8px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-takebtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+.lv-takebtn:disabled{opacity:.45;cursor:default;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
   display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+/* Session P (P2): the page's peach underline on a stale shot's segment. The segment's own
+   status bar sits on the same bottom 4px, so it steps up above the underline to keep both. */
+.lv-seg.stale{box-shadow:inset 0 -4px 0 var(--peach);}
+.lv-seg.stale .lv-segbar{bottom:4px;}
 .lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
@@ -1196,6 +1254,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
   // "attach to A·0n" (all useGenerationPipeline's).
   beginDrawerRender, recheckSubmit, releaseSubmit, attachDraftVideo,
+  // Session P, Stage A2 (the page's section A card): the card's own Render / Re-render calls
+  // generateShot -- its ONLY use in this component, pinned by loom-no-auto-render.test.js -- and
+  // the takes strip, the take list and the stale-anchor box call useTakeActions' board edits.
+  generateShot, selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -2116,7 +2178,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const el = genDrawerRef.current;
     if (el && el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
   }, [projectApi.activeId, active.c.id]);
-  const board = (
+  // Session P, Stage A2 (P2): anchors name a shot by its card ID; the page's words name it by its
+  // code. Both lookups are over this render's board and are read-only views.
+  const cardById = new Map(entries.map((x) => [x.c.id, x.c]));
+  const codeById = new Map(entries.map((x) => [x.c.id, x.code]));
+  const codeOf = (id) => codeById.get(id) || "the source shot";
+  const stopCard = (ev) => ev.stopPropagation();
+  // The board grid's JSX. Named boardGrid, not "board": a landing's {board: boardId} key is not
+  // this view, and the no-render walkers match names, so the two must not share one.
+  const boardGrid = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
         const items = entries.filter((e) => e.ai === ai);
@@ -2149,8 +2219,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 // connect:"new" (an intentional fresh look/place, per CONNECT.new's own hint),
                 // so a non-matching frame is usually the shot's INTENT, not a mistake to flag.
                 const linked = continuityLinked(entries, e.c.id);
+                // Session P, Stage A2 (P1/P2, the page's section A card): the shot's takes, its ★
+                // take, and whether its open frame's anchor has gone stale -- all pure views.
+                const shotTakes = takesOf(e.c);
+                const selN = selectedTakeOf(e.c);
+                const shownTakes = shotTakes.slice(-6);
+                const olderTakes = shotTakes.length - shownTakes.length;
+                const anchor = anchorInfo(e.c, cardById);
+                const stale = anchor.state === "stale";
+                const aw = anchorWork[e.c.id];
+                const renderBlocked = goBlocked(e.c, paused);
+                const openSet = !!(e.c.openFrame && (e.c.openFrame.mediaId || e.c.openFrame.thumbId || e.c.openFrame.source));
+                // Take numbers are never reused, so after a delete "take 3 of 2" would read as a
+                // miscount: the count is then said as a count.
+                const takeLine = selN == null
+                  ? "Not rendered yet · " + (openSet ? "open frame set" : "no open frame") + " · Play and Export skip it"
+                  : (shotTakes.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + shotTakes.length : "Take " + selN + " · " + shotTakes.length + " takes")
+                    + " ★ used by Play · Render · Export";
+                // Review F14: a shot with a ★ take stays done when a retake fails; the failure is
+                // recorded on the card instead.
+                const la = e.c.lastAttempt;
+                const retakeFailed = selN != null && !inFlight(e.c) && la && (la.state === "failed" || la.state === "refused");
                 return (
-                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
+                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : "")} onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
                     <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
                     <div className="lv-code">{e.code}</div>
@@ -2220,6 +2311,58 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         <button type="button" className="lv-unclearbtn" onClick={() => releaseSubmit(e.c.id)}>I checked Activity — release this shot</button>
                       </div>
                     )}
+                    {/* THE TAKES STRIP, RENDER / RE-RENDER AND THE STALE ANCHOR (Session P, Stage A2;
+                        Loom Handoff.dc.html section A's card). A take chip shows that take's clip
+                        thumbnail where the page draws a tint pair. Only the Render button can start a
+                        render -- generateShot, with its own price and confirm; ★, Re-anchor and Keep
+                        are board edits (loom-no-auto-render.test.js). Clicks here never select the
+                        card or open Deep Focus, like the .lv-crow row below. */}
+                    <div className="lv-takes">
+                      <div className="lv-takerow" onClick={stopCard} onDoubleClick={stopCard}>
+                        {olderTakes > 0 && (
+                          <span className="lv-takemore" title={olderTakes + " older take" + (olderTakes === 1 ? "" : "s") + " — the shot's full take list is under its preview in the timeline"}>+{olderTakes}</span>
+                        )}
+                        {shownTakes.map((t) => {
+                          const on = t.n === selN;
+                          return (
+                            <button type="button" key={t.id || "t" + t.n} className={"lv-take" + (on ? " on" : "")}
+                              style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}
+                              title={on ? "Take " + t.n + " (selected)" : "Take " + t.n + " · click to use"}
+                              aria-pressed={on} onClick={() => selectTakeOnCard(e.c.id, t.n)}>{on ? "★" : t.n}</button>
+                          );
+                        })}
+                        <button type="button" className="lv-render" disabled={renderBlocked}
+                          title={renderBlocked
+                            ? (sendUnclear(e.c) ? "The server didn't confirm this shot's last render — check it (or release it) first." : "This shot is already rendering.")
+                            : (shotTakes.length ? "Render a new take of this shot; it becomes the ★ take. Its price is shown before anything is sent." : "Render this shot. Its price is shown before anything is sent.")}
+                          onClick={() => generateShot(e)}>{shotTakes.length ? "Re-render" : "Render"}</button>
+                      </div>
+                      <div className="lv-takeline">{takeLine}</div>
+                      {stale && (
+                        <div className="lv-stale" role="status" onClick={stopCard} onDoubleClick={stopCard}>
+                          <div className="lv-staletxt">&#9888; anchor changed &middot; {staleText(anchor, codeOf)}</div>
+                          <div className="lv-stalebtns">
+                            <button type="button" className="lv-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
+                              title={!selectedTakeView(anchor.src)
+                                ? codeOf(anchor.src.id) + " has no rendered take to take a frame from."
+                                : "Swap in " + codeOf(anchor.src.id) + "'s frame from take " + anchor.to + ". Nothing is rendered; render a new take when you're ready."}
+                              onClick={() => reanchorShot(e.c.id)}>{aw && aw.phase === "wip" ? "Re-anchoring…" : "Re-anchor"}</button>
+                            <button type="button" className="lv-keep"
+                              title={"Keep this open frame for this pair of takes. It warns again if " + codeOf(anchor.src.id) + "'s take changes."}
+                              onClick={() => keepAnchor(e.c.id)}>Keep</button>
+                          </div>
+                          {aw && aw.phase === "err" && <div className="lv-staleerr">{aw.msg}</div>}
+                        </div>
+                      )}
+                      {!stale && needsNewTake(e.c) && (
+                        <div className="lv-needtake">Open frame updated. Render a new take to match it.</div>
+                      )}
+                      {retakeFailed && (
+                        <div className="lv-lastfail" title={"The last render of this shot didn't land. Take " + selN + " is still the ★ take."}>
+                          Last render didn't land &middot; {la.msg || (la.state === "refused" ? "refused" : "failed")}
+                        </div>
+                      )}
+                    </div>
                     <div className="lv-crow" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
@@ -2265,10 +2408,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               // pauses it (no pause event fires), leaving `playing` state stuck true (button
               // stuck on the pause icon, hover-scrub disabled) and `dur` stale until the new
               // clip's metadata loads. Forcing a remount resets all of that for free.
-              ? <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
-                  onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
-                  onSplit={(t) => splitShot(sel, t)}
-                  crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
+              // Session P, Stage A2 (P1): the shot's TAKE LIST sits beside the ★ clip's preview --
+              // ★ Use, Reuse settings and Delete per take. The page does not draw this surface.
+              ? <div className="lv-tlprevrow">
+                  <div className="lv-tlprevmain">
+                    <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
+                      onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
+                      onSplit={(t) => splitShot(sel, t)}
+                      crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
+                  </div>
+                  <TakeList card={sel.c} code={sel.code}
+                    onUse={(n) => selectTakeOnCard(sel.c.id, n)}
+                    onReuse={(n) => reuseTakeSettings(sel.c.id, n)}
+                    onDelete={(n) => deleteTakeOnCard(sel.c.id, n)} />
+                </div>
               : <div className="lv-tlpreviewbox lv-ph">{sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here."}</div>}
           </div>
         )}
@@ -2283,14 +2436,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 matched or exceeded the design. */}
             {entries.map((x, i) => {
               const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+              // Session P, Stage A2 (P2): a shot whose anchor went stale gets the page's peach
+              // underline, and its title says so.
+              const segStale = anchorInfo(x.c, cardById).state === "stale";
               return (
-                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "")}
+                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : "")}
                   style={{
                     width: `${(durOf(x.c) / scale) * 100}%`,
                     backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
                     backgroundSize: "25px 100%, 25px 100%", backgroundRepeat: "repeat-x, repeat-x",
                   }}
-                  title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)}>
+                  title={`${x.code} ${x.c.title || ""}` + (segStale ? " · ⚠ anchor changed" : "")} onClick={() => setSelShot(x.c.id)}>
                   <span className="lv-segcode">{x.code} · {durOf(x.c)}s</span>
                   <span className={"lv-segbar " + x.c.status} />
                 </div>
@@ -3312,7 +3468,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </>
         )}
 
-        <div className="lv-boardcol">{board}</div>
+        <div className="lv-boardcol">{boardGrid}</div>
 
         {(!rightCollapsed || rightClosing) && (
           <>
@@ -6545,7 +6701,9 @@ function useProjectStore(setSelShot) {
 
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
-  useEffect(() => {
+  // A NAMED function the effect calls (Session P, BUILD-w5-p §4): the never-auto-render test
+  // roots it by name, which it cannot do for an anonymous effect body.
+  const adoptCastHandoff = (project) => {
     if (!project || castImported.current) return;
     castImported.current = true;
     // Two filters, deliberately: parseCastIdsFromSearch is the URL *sanitiser* (safe
@@ -6567,7 +6725,8 @@ function useProjectStore(setSelShot) {
     // then gone -- but a bare pathname would also erase ?board=, which is precisely the
     // "one write throws another's away" bug gen/urlState.js was written to end.
     history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
-  }, [project]);
+  };
+  useEffect(() => { adoptCastHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* The 600 ms autosave (Session P, BUILD-w5-p §1.2 / §3.5). It writes ONLY when the board
      differs from the text last read or written for it, so opening, switching, duplicating,
@@ -6709,6 +6868,128 @@ function useShotMutations(project, setProject) {
   return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
+}
+
+// ---- 2b. useTakeActions: ★ select, delete a take, reuse a take's settings, Re-anchor, Keep ----
+// Session P, Stage A2 (NOTES P1/P2, BUILD-w5-p §1.4, §1.5, §2.3). Every one of these is a BOARD
+// EDIT through patchCardByIdWith and a pure reducer in loom/src/loom-takes-core.js -- nothing
+// here writes takes / selectedTake / takeSeq itself, and nothing here can price, submit or start
+// a render: they are roots of loom/test/loom-no-auto-render.test.js. The one network call is
+// Re-anchor's POST /api/loom/handoff, the same free frame handoff the ✂ splice already makes (a
+// local ffmpeg frame and one free upload; open call 3, owner-confirmed). Rendering a take from
+// the new frame stays the owner's own separate Render click.
+function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
+  // Re-anchor in progress / its last failure, per card: {phase:"wip"} | {phase:"err", msg}. The
+  // ref is the synchronous latch (a double click sends one handoff); the state is what the card shows.
+  const [anchorWork, setAnchorWork] = useState({});
+  const anchoringRef = useRef(new Set());
+  // Another storyboard open: its cards are other cards (a duplicate shares ids), so a note from
+  // this one must not show there.
+  useEffect(() => { setAnchorWork({}); }, [activeId]);
+  // The entry as the board holds it NOW (the store's synchronous ref), never a render's closure.
+  const entryNow = (id) => {
+    const p = projectRef.current;
+    return p ? (flat(p).find((x) => x.c.id === id) || null) : null;
+  };
+  // A refusal here is not an error (nothing went wrong with the owner's work), so it is the plain
+  // info toast, never the red one.
+  const sayTakes = (title, msg) => {
+    if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "", title, msg });
+    else window.alert(msg);
+  };
+
+  // ★ a take: it becomes the one Play, the local cut, Export and the ribbon use (the mirror).
+  // Never renders, prices or uploads.
+  const selectTakeOnCard = (cardId, n) => {
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => selectTake(c, n)) : p));
+  };
+
+  // Delete a take after the page's confirm. The ★ take is refused ("Select another take first.").
+  // The clip itself is an ordinary library video and is never touched; a billed take's clip moves
+  // to the ledger's attempts, so the spend is still counted.
+  const deleteTakeOnCard = (cardId, n) => {
+    const e = entryNow(cardId);
+    if (!e) return;
+    const probe = deleteTake(e.c, n, "");
+    if (probe.refused === "selected") { sayTakes("Can't delete take " + n, "Select another take first."); return; }
+    if (probe.refused) return;
+    if (!window.confirm("Delete take " + n + "? Its clip stays in your library.")) return;
+    const at = nowIso();
+    // Applied to the card as it is at the moment of the edit: if ★ moved onto this take while the
+    // confirm was open, the reducer refuses and the card is left as it is.
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => {
+      const r = deleteTake(c, n, at);
+      return r.refused ? c : r.card;
+    }) : p));
+  };
+
+  // "Reuse settings": that take's snapshot back onto the shot. A board edit only -- the owner
+  // still presses Render. Legacy and attached takes recorded no settings.
+  const reuseTakeSettings = (cardId, n) => {
+    const e = entryNow(cardId);
+    if (!e) return;
+    const t = takeView(e.c, n);
+    if (!t || !t.settings) { sayTakes("Nothing to reuse", "No settings were recorded for this take."); return; }
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => {
+      const tk = takeView(c, n);
+      return tk && tk.settings ? reuseSettingsPatch(c, tk) : c;
+    }) : p));
+    if (typeof window !== "undefined" && window.Toast) {
+      window.Toast.show({ kind: "ok", title: "Take " + n + "'s settings are back on " + e.code,
+        msg: "Nothing was rendered. Press Render when you want a take made with them." });
+    }
+  };
+
+  // Re-anchor (BUILD-w5-p §2.3): the source shot and ITS ★ take are read from the board as it is
+  // at the click; the frame is cut where that take is cut (the splice's own request); the answer
+  // patches ONLY the open frame, the anchor and anchorKept (reanchorPatch), and only if the
+  // anchor is still the one this click saw. Status, takes and every pending marker are untouched.
+  const reanchorShot = async (cardId) => {
+    const boardId = activeIdRef.current;
+    const e = entryNow(cardId);
+    if (!e || !e.c.anchor || !e.c.anchor.shot) return;
+    const src = entryNow(e.c.anchor.shot);
+    const view = src ? selectedTakeView(src.c) : null;
+    if (!src || !view || !view.mid) {
+      setAnchorWork((s) => ({ ...s, [cardId]: { phase: "err", msg: "The shot this frame came from has no rendered take to take a frame from." } }));
+      return;
+    }
+    if (anchoringRef.current.has(cardId)) return;
+    anchoringRef.current.add(cardId);
+    const expect = e.c.anchor;
+    setAnchorWork((s) => ({ ...s, [cardId]: { phase: "wip" } }));
+    let d = null;
+    try {
+      const r = await fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: view.mid, trim_out: cutPointOf(src.c) }) });
+      d = await r.json();
+    } catch (_e) { d = null; }
+    anchoringRef.current.delete(cardId);
+    // Another storyboard is open now: nothing is patched (a copy there may share this card's id).
+    if (activeIdRef.current !== boardId) return;
+    if (!d || d.error || !d.frame_media_id) {
+      setAnchorWork((s) => ({ ...s, [cardId]: { phase: "err",
+        msg: "Couldn't take the new frame" + (d && d.error ? " — " + d.error : " — the server didn't answer") + ". Nothing was changed." } }));
+      return;
+    }
+    setAnchorWork((s) => { const n = { ...s }; delete n[cardId]; return n; });
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) =>
+      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect })) : p));
+  };
+
+  // Keep: accept this pair of takes (and this cut) only; a later change of the source warns again.
+  const keepAnchor = (cardId) => {
+    setProject((p) => {
+      if (!p) return p;
+      const byId = new Map(flat(p).map((x) => [x.c.id, x.c]));
+      return patchCardByIdWith(p, cardId, (c) => {
+        const src = c.anchor ? byId.get(c.anchor.shot) : null;
+        return src ? keepAnchorPatch(c, src) : c;
+      });
+    });
+  };
+
+  return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork };
 }
 
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
@@ -8081,6 +8362,10 @@ export default function App() {
   const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
+  // Session P, Stage A2: the takes strip, a shot's take list and the stale-anchor box. Board edits
+  // only -- none of them can reach a render (loom/test/loom-no-auto-render.test.js).
+  const { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork }
+    = useTakeActions({ projectRef, activeIdRef, setProject, activeId });
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
@@ -8238,6 +8523,9 @@ export default function App() {
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
           beginDrawerRender={beginDrawerRender} recheckSubmit={recheckSubmit} releaseSubmit={releaseSubmit}
           attachDraftVideo={attachDraftVideo}
+          generateShot={generateShot}
+          selectTakeOnCard={selectTakeOnCard} deleteTakeOnCard={deleteTakeOnCard} reuseTakeSettings={reuseTakeSettings}
+          reanchorShot={reanchorShot} keepAnchor={keepAnchor} anchorWork={anchorWork}
           costEstimate={costEstimate} refreshEstimate={refreshEstimate}
           spend={spend} refreshSpend={refreshSpend}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
@@ -8323,6 +8611,59 @@ export default function App() {
    handles that store trimIn/trimOut (seconds) on the shot. Nothing is re-encoded
    here -- trims are just metadata that Play-sequence and Export will honor.
    /video-file/<id> supports Range requests, so every seek is instant. */
+/* A SHOT'S TAKE LIST (Session P, Stage A2 -- NOTES P1: "each take keeps its settings snapshot, so
+   Reuse settings works per take"; "deleting a take asks first; you can't delete the selected
+   take"). The Handoff page does not draw this surface, so it is kept small and in the timeline
+   drawer's own language, beside the ★ clip's preview: one row per take, newest first -- its clip
+   chip, its number, when it landed, what it was rendered with, and ★ Use / Reuse settings /
+   Delete…. Every button is a board edit handed in by LoomV2 (useTakeActions); none renders. */
+const takeWhen = (t) => {
+  if (t.source === "legacy" || !t.at) return "an earlier render";
+  const d = new Date(t.at);
+  if (Number.isNaN(d.getTime())) return "an earlier render";
+  const when = d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return (t.source === "attach" ? "attached " : "landed ") + when;
+};
+const takeSummary = (t) => {
+  const s = t.settings;
+  if (!s) return t.imported ? "from your library · no settings recorded" : "no settings recorded";
+  return [s.mode, s.duration != null ? s.duration + " s" : "", s.quality].filter(Boolean).join(" · ");
+};
+function TakeList({ card, code, onUse, onReuse, onDelete }) {
+  const list = takesOf(card);
+  const selN = selectedTakeOf(card);
+  if (!list.length) return null;
+  const rows = list.map((t) => (t.n === selN ? selectedTakeView(card) || t : t)).slice().reverse();
+  return (
+    <div className="lv-takelist" aria-label={"Takes of " + code}>
+      <div className="lv-takelist-h">{code} &middot; {list.length} take{list.length === 1 ? "" : "s"}</div>
+      {rows.map((t) => {
+        const on = t.n === selN;
+        return (
+          <div key={t.id || "t" + t.n} className={"lv-takeitem" + (on ? " on" : "")}>
+            <span className={"lv-take" + (on ? " on" : "")} aria-hidden="true"
+              style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}>{on ? "★" : t.n}</span>
+            <div className="lv-takeinfo">
+              <div className="lv-taketitle">take {t.n}{on ? " · ★ in use" : ""}</div>
+              <div className="lv-takemeta">{takeWhen(t)} &middot; {takeSummary(t)}</div>
+              <div className="lv-takebtns">
+                {!on && <button type="button" className="lv-takebtn" title={"Use take " + t.n + " for Play, Render and Export"}
+                  onClick={() => onUse(t.n)}>&#9733; Use</button>}
+                <button type="button" className="lv-takebtn" disabled={!t.settings}
+                  title={t.settings ? "Put take " + t.n + "'s settings back on this shot. Nothing is rendered." : "No settings were recorded for this take"}
+                  onClick={() => onReuse(t.n)}>Reuse settings</button>
+                <button type="button" className="lv-takebtn" disabled={on}
+                  title={on ? "Select another take first" : "Delete take " + t.n + " from this shot (its clip stays in your library)"}
+                  onClick={() => onDelete(t.n)}>Delete&hellip;</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const vidRef = useRef(null), trackRef = useRef(null);
   const [dur, setDur] = useState(0);

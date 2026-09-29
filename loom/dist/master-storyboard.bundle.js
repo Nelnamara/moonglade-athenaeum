@@ -89,6 +89,10 @@ var LoomBundle = (() => {
     else delete v.crop;
     return v;
   };
+  var takeView = (card, n) => {
+    if (n === selectedTakeOf(card)) return selectedTakeView(card);
+    return takesOf(card).find((t) => t.n === n) || null;
+  };
   var inFlight = (card) => !!(card && (card.pendingSubmitId || card.pendingTaskId));
   var goBlocked = (card, paused) => {
     if (!inFlight(card)) return false;
@@ -303,6 +307,18 @@ var LoomBundle = (() => {
     const next = mirrorOnto(base, base.takes.find((x) => x.n === n));
     return { ...next, status: inFlight(card) ? card.status : "done" };
   };
+  var deleteTake = (card, n, at) => {
+    if (!card) return { card, refused: "missing" };
+    if (n === selectedTakeOf(card)) return { card, refused: "selected" };
+    const c = withTakes(card);
+    const t = c.takes.find((x) => x.n === n);
+    if (!t) return { card, refused: "missing" };
+    const mid = str(t.mid);
+    const had = c.attempts || [];
+    const attempts = !t.imported && mid && !had.some((a) => a && str(a.media_id) === mid) ? had.concat([{ media_id: mid, at: str(at) }]) : had;
+    const tomb = (c.deletedTakes || []).includes(mid) ? c.deletedTakes || [] : (c.deletedTakes || []).concat([mid]);
+    return { card: { ...c, takes: c.takes.filter((x) => x.n !== n), attempts, deletedTakes: tomb } };
+  };
   var scrub = (v) => {
     if (typeof v === "string") return v.startsWith("data:") ? "" : v;
     if (Array.isArray(v)) return v.map(scrub);
@@ -349,6 +365,32 @@ var LoomBundle = (() => {
       closeFrame: frameRef(c.closeFrame),
       look: str((project || {}).look)
     });
+  };
+  var reuseSettingsPatch = (card, take2) => {
+    const s = take2 && take2.settings;
+    if (!card || !s) return card;
+    const next = {
+      ...card,
+      mode: s.mode || card.mode,
+      duration: s.duration != null ? s.duration : card.duration,
+      connect: s.connect || card.connect,
+      prompt: s.prompt,
+      promptOverride: !!s.promptOverride,
+      promptOverrideText: s.promptOverrideText || "",
+      camera: s.camera,
+      lighting: s.lighting,
+      audioCue: s.audioCue,
+      audioGen: !!s.audioGen,
+      audioLanguage: s.audioLanguage || "english",
+      isPrivate: !!s.isPrivate,
+      cast: (s.cast || []).slice(),
+      refs: (s.refs || []).map((r) => ({ role: "", ...r })),
+      openFrame: { ...card.openFrame || {}, ...s.openFrame },
+      closeFrame: { ...card.closeFrame || {}, ...s.closeFrame }
+    };
+    next.anchor = take2.anchor ? { ...take2.anchor } : null;
+    next.anchorKept = null;
+    return next;
   };
   var beginRender = (card, m, opts) => {
     if (!card) return null;
@@ -470,6 +512,7 @@ var LoomBundle = (() => {
     const d = num(card.actualDur);
     return d != null ? d : null;
   };
+  var sameAt = (a, b) => a == null || b == null ? true : Math.abs(Number(a) - Number(b)) < 0.05;
   var makeAnchor = (src, frameMid, via) => ({
     shot: str(src && src.id),
     take: selectedTakeOf(src),
@@ -477,6 +520,58 @@ var LoomBundle = (() => {
     frame: str(frameMid),
     via: via || "splice"
   });
+  var anchorInfo = (card, byId) => {
+    const a = card && card.anchor;
+    if (!a || !a.shot) return { state: "none" };
+    if (a.frame && str((card.openFrame || {}).mediaId) !== str(a.frame)) return { state: "none" };
+    const src = byId && (typeof byId.get === "function" ? byId.get(a.shot) : byId[a.shot]);
+    if (!src) return { state: "none" };
+    const to = selectedTakeOf(src);
+    if (to == null) return { state: "none" };
+    const at = cutPointOf(src);
+    const sameTake = to === a.take;
+    const sameCut = sameAt(a.at, at);
+    if (sameTake && sameCut) return { state: "ok", src, from: a.take, to };
+    const k = card.anchorKept;
+    if (k && k.from === a.take && k.to === to && sameAt(k.at, at)) return { state: "kept", src, from: a.take, to };
+    return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at, was: a.at };
+  };
+  var staleText = (info, codeOf) => {
+    if (!info || info.state !== "stale") return "";
+    const code = codeOf ? codeOf(info.src.id) : "the source shot";
+    if (info.reason === "cut") {
+      return `its open frame came from ${code} take ${info.from} at ${Number(info.was).toFixed(1)} s; ${code} is now cut at ${Number(info.at).toFixed(1)} s.`;
+    }
+    return `its open frame came from ${code} take ${info.from}; ${code} now uses take ${info.to}.`;
+  };
+  var needsNewTake = (card) => {
+    const a = card && card.anchor;
+    if (!a || a.via !== "reanchor") return false;
+    if (a.frame && str((card.openFrame || {}).mediaId) !== str(a.frame)) return false;
+    const v = selectedTakeView(card);
+    if (!v) return true;
+    const ta = v.anchor;
+    return !(ta && str(ta.shot) === str(a.shot) && ta.take === a.take && str(ta.frame || "") === str(a.frame || ""));
+  };
+  var reanchorPatch = (card, m) => {
+    const x = m || {};
+    if (!card || !x.frameMid || !x.src) return card;
+    if (JSON.stringify(card.anchor || null) !== JSON.stringify(x.expect === void 0 ? card.anchor || null : x.expect || null)) return card;
+    const anchor = makeAnchor(x.src, x.frameMid, "reanchor");
+    const of = card.openFrame || {};
+    return {
+      ...card,
+      openFrame: {
+        ...of,
+        mediaId: str(x.frameMid),
+        thumbId: "",
+        source: "",
+        desc: "handed off from " + str(x.srcCode || "the previous shot") + " take " + anchor.take
+      },
+      anchor,
+      anchorKept: null
+    };
+  };
   var splicePatch = (card, m) => {
     const x = m || {};
     if (!card || !x.frameMid) return card;
@@ -493,6 +588,12 @@ var LoomBundle = (() => {
       anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice") : null,
       anchorKept: null
     };
+  };
+  var keepAnchor = (card, src) => {
+    if (!card || !card.anchor || !src) return card;
+    const to = selectedTakeOf(src);
+    if (to == null) return card;
+    return { ...card, anchorKept: { from: card.anchor.take, to, at: cutPointOf(src) } };
   };
   var shouldSave = (json, lastSavedJson) => typeof json === "string" && json !== lastSavedJson;
   var cardsById = (project) => {
@@ -11103,6 +11204,9 @@ ${"=".repeat(48)}
    single value rather than a layout change. */
 .lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;}
 .lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
+/* Session P (P2): a shot whose anchor went stale -- the page's peach card border (hover and the
+   selection outline still win over it). */
+.lv-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-card:hover{border-color:var(--accent);}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
@@ -11143,10 +11247,59 @@ ${"=".repeat(48)}
 .lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
   background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lv-unclearbtn:hover{border-color:var(--peach);}
+/* Session P, Stage A2 -- the page's section A card (Loom Handoff.dc.html): the takes strip with
+   Render / Re-render, the take line, the peach stale-anchor box and the new-take prompt. Sizes,
+   radii, weights and spacing are the page's; a chip shows its take's clip thumbnail where the
+   page draws a tint pair. The shipped card is lighter than the page's (surface1, not near-base),
+   so the page's outline buttons take var(--base) as a fill to stay visible, the row wraps inside
+   the narrowest (144px) card, and the grey lines use --subtext (--overlay0 on surface1 is ~2:1). */
+.lv-takes{display:flex;flex-direction:column;gap:7px;margin-top:7px;}
+.lv-takerow{display:flex;align-items:center;flex-wrap:wrap;gap:4px;cursor:default;}
+.lv-take{flex:none;width:26px;height:20px;box-sizing:border-box;border:0;padding:0;border-radius:4px;display:grid;place-items:center;
+  font:800 9px/1 system-ui;color:rgba(236,232,248,.9);text-shadow:0 1px 2px rgba(0,0,0,.85);cursor:pointer;
+  background:var(--surface0) center/cover no-repeat;}
+.lv-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lv-takemore{font:800 9px/1 system-ui;color:var(--subtext);}
+.lv-render{margin-left:auto;font:700 10px/1 system-ui;padding:4px 8px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface1);color:var(--subtext);background:var(--base);}
+.lv-render:hover:not(:disabled){border-color:var(--accent);color:var(--text);}
+.lv-render:disabled{opacity:.5;cursor:default;}
+.lv-takeline{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-stale{display:flex;flex-direction:column;gap:6px;padding:8px 9px;border-radius:9px;cursor:default;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lv-staletxt{font-size:10.5px;line-height:1.4;color:var(--peach);}
+.lv-stalebtns{display:flex;gap:5px;}
+.lv-reanchor{font:700 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:0;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lv-reanchor:disabled{opacity:.6;cursor:default;}
+.lv-keep{font:400 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:1px solid var(--surface1);color:var(--subtext);background:var(--base);cursor:pointer;}
+.lv-keep:hover{border-color:var(--accent);color:var(--text);}
+.lv-staleerr{font-size:9.5px;line-height:1.35;color:var(--peach);}
+.lv-needtake{font-size:9.5px;line-height:1.4;color:var(--subtext);}
+.lv-lastfail{font-size:9.5px;line-height:1.35;color:var(--peach);}
+/* A shot's take list (P1), beside the \u2605 clip's preview in the timeline's full view. Not drawn by
+   the page; the timeline's own row idiom. */
+.lv-tlprevrow{display:flex;gap:14px;height:100%;min-height:0;}
+.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:auto;}
+.lv-takelist{flex:0 0 300px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
+.lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
+.lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
+.lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
+.lv-takeitem .lv-take{cursor:default;}
+.lv-takeinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.lv-taketitle{font:600 11px/1.2 system-ui;color:var(--text);}
+.lv-takemeta{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-takebtns{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
+.lv-takebtn{font:600 10px/1 system-ui;padding:4px 8px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-takebtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+.lv-takebtn:disabled{opacity:.45;cursor:default;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
   display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
+/* Session P (P2): the page's peach underline on a stale shot's segment. The segment's own
+   status bar sits on the same bottom 4px, so it steps up above the underline to keep both. */
+.lv-seg.stale{box-shadow:inset 0 -4px 0 var(--peach);}
+.lv-seg.stale .lv-segbar{bottom:4px;}
 .lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
@@ -11616,6 +11769,16 @@ ${"=".repeat(48)}
     recheckSubmit,
     releaseSubmit,
     attachDraftVideo,
+    // Session P, Stage A2 (the page's section A card): the card's own Render / Re-render calls
+    // generateShot -- its ONLY use in this component, pinned by loom-no-auto-render.test.js -- and
+    // the takes strip, the take list and the stale-anchor box call useTakeActions' board edits.
+    generateShot,
+    selectTakeOnCard,
+    deleteTakeOnCard,
+    reuseTakeSettings,
+    reanchorShot,
+    keepAnchor: keepAnchor2,
+    anchorWork,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
     // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -12282,18 +12445,34 @@ ${"=".repeat(48)}
       const el = genDrawerRef.current;
       if (el && el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
     }, [projectApi.activeId, active.c.id]);
-    const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
+    const cardById = new Map(entries.map((x) => [x.c.id, x.c]));
+    const codeById = new Map(entries.map((x) => [x.c.id, x.code]));
+    const codeOf = (id) => codeById.get(id) || "the source shot";
+    const stopCard = (ev) => ev.stopPropagation();
+    const boardGrid = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
       const items = entries.filter((e) => e.ai === ai);
       return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
         const gs = genState[e.c.id];
         const paused = gs && gs.phase === "paused";
         const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
         const linked = continuityLinked(entries, e.c.id);
+        const shotTakes = takesOf(e.c);
+        const selN = selectedTakeOf(e.c);
+        const shownTakes = shotTakes.slice(-6);
+        const olderTakes = shotTakes.length - shownTakes.length;
+        const anchor = anchorInfo(e.c, cardById);
+        const stale = anchor.state === "stale";
+        const aw = anchorWork[e.c.id];
+        const renderBlocked = goBlocked(e.c, paused);
+        const openSet = !!(e.c.openFrame && (e.c.openFrame.mediaId || e.c.openFrame.thumbId || e.c.openFrame.source));
+        const takeLine = selN == null ? "Not rendered yet \xB7 " + (openSet ? "open frame set" : "no open frame") + " \xB7 Play and Export skip it" : (shotTakes.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + shotTakes.length : "Take " + selN + " \xB7 " + shotTakes.length + " takes") + " \u2605 used by Play \xB7 Render \xB7 Export";
+        const la = e.c.lastAttempt;
+        const retakeFailed = selN != null && !inFlight(e.c) && la && (la.state === "failed" || la.state === "refused");
         return /* @__PURE__ */ React.createElement(
           "div",
           {
             key: e.c.id,
-            className: "lv-card " + (e.c.id === selShot ? "sel" : ""),
+            className: "lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : ""),
             onClick: () => setSelShot(e.c.id),
             onDoubleClick: () => setDeepFocus(e),
             title: "Double-click to open in Deep Focus"
@@ -12346,6 +12525,51 @@ ${"=".repeat(48)}
             gs && gs.msg ? gs.msg : st
           )),
           sendUnclear(e.c) && !(gs && gs.phase === "checking") && /* @__PURE__ */ React.createElement("div", { className: "lv-unclear", role: "status", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => recheckSubmit(e.c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => releaseSubmit(e.c.id) }, "I checked Activity \u2014 release this shot")),
+          /* @__PURE__ */ React.createElement("div", { className: "lv-takes" }, /* @__PURE__ */ React.createElement("div", { className: "lv-takerow", onClick: stopCard, onDoubleClick: stopCard }, olderTakes > 0 && /* @__PURE__ */ React.createElement("span", { className: "lv-takemore", title: olderTakes + " older take" + (olderTakes === 1 ? "" : "s") + " \u2014 the shot's full take list is under its preview in the timeline" }, "+", olderTakes), shownTakes.map((t) => {
+            const on = t.n === selN;
+            return /* @__PURE__ */ React.createElement(
+              "button",
+              {
+                type: "button",
+                key: t.id || "t" + t.n,
+                className: "lv-take" + (on ? " on" : ""),
+                style: t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : void 0,
+                title: on ? "Take " + t.n + " (selected)" : "Take " + t.n + " \xB7 click to use",
+                "aria-pressed": on,
+                onClick: () => selectTakeOnCard(e.c.id, t.n)
+              },
+              on ? "\u2605" : t.n
+            );
+          }), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "lv-render",
+              disabled: renderBlocked,
+              title: renderBlocked ? sendUnclear(e.c) ? "The server didn't confirm this shot's last render \u2014 check it (or release it) first." : "This shot is already rendering." : shotTakes.length ? "Render a new take of this shot; it becomes the \u2605 take. Its price is shown before anything is sent." : "Render this shot. Its price is shown before anything is sent.",
+              onClick: () => generateShot(e)
+            },
+            shotTakes.length ? "Re-render" : "Render"
+          )), /* @__PURE__ */ React.createElement("div", { className: "lv-takeline" }, takeLine), stale && /* @__PURE__ */ React.createElement("div", { className: "lv-stale", role: "status", onClick: stopCard, onDoubleClick: stopCard }, /* @__PURE__ */ React.createElement("div", { className: "lv-staletxt" }, "\u26A0 anchor changed \xB7 ", staleText(anchor, codeOf)), /* @__PURE__ */ React.createElement("div", { className: "lv-stalebtns" }, /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "lv-reanchor",
+              disabled: !!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src),
+              title: !selectedTakeView(anchor.src) ? codeOf(anchor.src.id) + " has no rendered take to take a frame from." : "Swap in " + codeOf(anchor.src.id) + "'s frame from take " + anchor.to + ". Nothing is rendered; render a new take when you're ready.",
+              onClick: () => reanchorShot(e.c.id)
+            },
+            aw && aw.phase === "wip" ? "Re-anchoring\u2026" : "Re-anchor"
+          ), /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "lv-keep",
+              title: "Keep this open frame for this pair of takes. It warns again if " + codeOf(anchor.src.id) + "'s take changes.",
+              onClick: () => keepAnchor2(e.c.id)
+            },
+            "Keep"
+          )), aw && aw.phase === "err" && /* @__PURE__ */ React.createElement("div", { className: "lv-staleerr" }, aw.msg)), !stale && needsNewTake(e.c) && /* @__PURE__ */ React.createElement("div", { className: "lv-needtake" }, "Open frame updated. Render a new take to match it."), retakeFailed && /* @__PURE__ */ React.createElement("div", { className: "lv-lastfail", title: "The last render of this shot didn't land. Take " + selN + " is still the \u2605 take." }, "Last render didn't land \xB7 ", la.msg || (la.state === "refused" ? "refused" : "failed"))),
           /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act2.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement(
             "button",
             {
@@ -12372,7 +12596,7 @@ ${"=".repeat(48)}
     }), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No acts yet \u2014 add one below."));
     const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
     const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
-    const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement(
+    const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevmain" }, /* @__PURE__ */ React.createElement(
       ShotPreview,
       {
         key: sel.c.id,
@@ -12384,20 +12608,30 @@ ${"=".repeat(48)}
         crop: sel.c.crop,
         onCrop: (rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))
       }
-    ) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => {
+    )), /* @__PURE__ */ React.createElement(
+      TakeList,
+      {
+        card: sel.c,
+        code: sel.code,
+        onUse: (n) => selectTakeOnCard(sel.c.id, n),
+        onReuse: (n) => reuseTakeSettings(sel.c.id, n),
+        onDelete: (n) => deleteTakeOnCard(sel.c.id, n)
+      }
+    )) : /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewbox lv-ph" }, sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here.")), /* @__PURE__ */ React.createElement("div", { className: "lv-tlreelzone" }, /* @__PURE__ */ React.createElement("div", { className: "lv-reel" }, entries.map((x, i) => {
       const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+      const segStale = anchorInfo(x.c, cardById).state === "stale";
       return /* @__PURE__ */ React.createElement(
         "div",
         {
           key: i,
-          className: "lv-seg" + (x.c.id === selShot ? " sel" : ""),
+          className: "lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : ""),
           style: {
             width: `${durOf2(x.c) / scale * 100}%`,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
             backgroundSize: "25px 100%, 25px 100%",
             backgroundRepeat: "repeat-x, repeat-x"
           },
-          title: `${x.code} ${x.c.title || ""}`,
+          title: `${x.code} ${x.c.title || ""}` + (segStale ? " \xB7 \u26A0 anchor changed" : ""),
           onClick: () => setSelShot(x.c.id)
         },
         /* @__PURE__ */ React.createElement("span", { className: "lv-segcode" }, x.code, " \xB7 ", durOf2(x.c), "s"),
@@ -13145,7 +13379,7 @@ ${"=".repeat(48)}
         }
       },
       "\u{1F3AC}"
-    )), (!leftCollapsed || leftClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (leftClosing ? " closing" : ""), onClick: closeLeftPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, board), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "collapse" }, "\u203A"), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
+    )), (!leftCollapsed || leftClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (leftClosing ? " closing" : ""), onClick: closeLeftPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, boardGrid), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "collapse" }, "\u203A"), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
       "button",
       {
         key: t,
@@ -15904,8 +16138,8 @@ ${"=".repeat(48)}
       } catch (e) {
       }
     }, [activeId]);
-    useEffect2(() => {
-      if (!project || castImported.current) return;
+    const adoptCastHandoff = (project2) => {
+      if (!project2 || castImported.current) return;
       castImported.current = true;
       const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
       if (!ids.length) return;
@@ -15925,6 +16159,9 @@ ${"=".repeat(48)}
         return { ...p, assets: [...existing, ...added] };
       });
       history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
+    };
+    useEffect2(() => {
+      adoptCastHandoff(project);
     }, [project]);
     useEffect2(() => {
       if (!project || !hasStore || !activeId) return void 0;
@@ -16094,6 +16331,112 @@ Your currently-open board is left untouched.`)) return;
       delRef,
       splitShot
     };
+  }
+  function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
+    const [anchorWork, setAnchorWork] = useState2({});
+    const anchoringRef = useRef2(/* @__PURE__ */ new Set());
+    useEffect2(() => {
+      setAnchorWork({});
+    }, [activeId]);
+    const entryNow = (id) => {
+      const p = projectRef.current;
+      return p ? flat(p).find((x) => x.c.id === id) || null : null;
+    };
+    const sayTakes = (title, msg) => {
+      if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "", title, msg });
+      else window.alert(msg);
+    };
+    const selectTakeOnCard = (cardId, n) => {
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => selectTake(c, n)) : p);
+    };
+    const deleteTakeOnCard = (cardId, n) => {
+      const e = entryNow(cardId);
+      if (!e) return;
+      const probe = deleteTake(e.c, n, "");
+      if (probe.refused === "selected") {
+        sayTakes("Can't delete take " + n, "Select another take first.");
+        return;
+      }
+      if (probe.refused) return;
+      if (!window.confirm("Delete take " + n + "? Its clip stays in your library.")) return;
+      const at = nowIso();
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => {
+        const r = deleteTake(c, n, at);
+        return r.refused ? c : r.card;
+      }) : p);
+    };
+    const reuseTakeSettings = (cardId, n) => {
+      const e = entryNow(cardId);
+      if (!e) return;
+      const t = takeView(e.c, n);
+      if (!t || !t.settings) {
+        sayTakes("Nothing to reuse", "No settings were recorded for this take.");
+        return;
+      }
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => {
+        const tk = takeView(c, n);
+        return tk && tk.settings ? reuseSettingsPatch(c, tk) : c;
+      }) : p);
+      if (typeof window !== "undefined" && window.Toast) {
+        window.Toast.show({
+          kind: "ok",
+          title: "Take " + n + "'s settings are back on " + e.code,
+          msg: "Nothing was rendered. Press Render when you want a take made with them."
+        });
+      }
+    };
+    const reanchorShot = async (cardId) => {
+      const boardId = activeIdRef.current;
+      const e = entryNow(cardId);
+      if (!e || !e.c.anchor || !e.c.anchor.shot) return;
+      const src = entryNow(e.c.anchor.shot);
+      const view = src ? selectedTakeView(src.c) : null;
+      if (!src || !view || !view.mid) {
+        setAnchorWork((s) => ({ ...s, [cardId]: { phase: "err", msg: "The shot this frame came from has no rendered take to take a frame from." } }));
+        return;
+      }
+      if (anchoringRef.current.has(cardId)) return;
+      anchoringRef.current.add(cardId);
+      const expect = e.c.anchor;
+      setAnchorWork((s) => ({ ...s, [cardId]: { phase: "wip" } }));
+      let d = null;
+      try {
+        const r = await fetch("/api/loom/handoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ video_media_id: view.mid, trim_out: cutPointOf(src.c) })
+        });
+        d = await r.json();
+      } catch (_e) {
+        d = null;
+      }
+      anchoringRef.current.delete(cardId);
+      if (activeIdRef.current !== boardId) return;
+      if (!d || d.error || !d.frame_media_id) {
+        setAnchorWork((s) => ({ ...s, [cardId]: {
+          phase: "err",
+          msg: "Couldn't take the new frame" + (d && d.error ? " \u2014 " + d.error : " \u2014 the server didn't answer") + ". Nothing was changed."
+        } }));
+        return;
+      }
+      setAnchorWork((s) => {
+        const n = { ...s };
+        delete n[cardId];
+        return n;
+      });
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect })) : p);
+    };
+    const keepAnchor2 = (cardId) => {
+      setProject((p) => {
+        if (!p) return p;
+        const byId = new Map(flat(p).map((x) => [x.c.id, x.c]));
+        return patchCardByIdWith(p, cardId, (c) => {
+          const src = c.anchor ? byId.get(c.anchor.shot) : null;
+          return src ? keepAnchor(c, src) : c;
+        });
+      });
+    };
+    return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor: keepAnchor2, anchorWork };
   }
   function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState2({});
@@ -17274,6 +17617,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       delRef,
       splitShot
     } = useShotMutations(project, setProject);
+    const { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor: keepAnchor2, anchorWork } = useTakeActions({ projectRef, activeIdRef, setProject, activeId });
     const [pickCb, setPickCb] = useState2(null);
     const [pickKind, setPickKind] = useState2("image");
     const [pickAllowType, setPickAllowType] = useState2(false);
@@ -17544,6 +17888,13 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         recheckSubmit,
         releaseSubmit,
         attachDraftVideo,
+        generateShot,
+        selectTakeOnCard,
+        deleteTakeOnCard,
+        reuseTakeSettings,
+        reanchorShot,
+        keepAnchor: keepAnchor2,
+        anchorWork,
         costEstimate,
         refreshEstimate,
         spend,
@@ -17571,6 +17922,65 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onClose: () => setPickCb(null)
       }
     ), importOpen && /* @__PURE__ */ React.createElement(ImportCollection, { onClose: () => setImportOpen(false), onImport: importCollection }));
+  }
+  var takeWhen = (t) => {
+    if (t.source === "legacy" || !t.at) return "an earlier render";
+    const d = new Date(t.at);
+    if (Number.isNaN(d.getTime())) return "an earlier render";
+    const when = d.toLocaleString(void 0, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return (t.source === "attach" ? "attached " : "landed ") + when;
+  };
+  var takeSummary = (t) => {
+    const s = t.settings;
+    if (!s) return t.imported ? "from your library \xB7 no settings recorded" : "no settings recorded";
+    return [s.mode, s.duration != null ? s.duration + " s" : "", s.quality].filter(Boolean).join(" \xB7 ");
+  };
+  function TakeList({ card, code, onUse, onReuse, onDelete }) {
+    const list = takesOf(card);
+    const selN = selectedTakeOf(card);
+    if (!list.length) return null;
+    const rows = list.map((t) => t.n === selN ? selectedTakeView(card) || t : t).slice().reverse();
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-takelist", "aria-label": "Takes of " + code }, /* @__PURE__ */ React.createElement("div", { className: "lv-takelist-h" }, code, " \xB7 ", list.length, " take", list.length === 1 ? "" : "s"), rows.map((t) => {
+      const on = t.n === selN;
+      return /* @__PURE__ */ React.createElement("div", { key: t.id || "t" + t.n, className: "lv-takeitem" + (on ? " on" : "") }, /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          className: "lv-take" + (on ? " on" : ""),
+          "aria-hidden": "true",
+          style: t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : void 0
+        },
+        on ? "\u2605" : t.n
+      ), /* @__PURE__ */ React.createElement("div", { className: "lv-takeinfo" }, /* @__PURE__ */ React.createElement("div", { className: "lv-taketitle" }, "take ", t.n, on ? " \xB7 \u2605 in use" : ""), /* @__PURE__ */ React.createElement("div", { className: "lv-takemeta" }, takeWhen(t), " \xB7 ", takeSummary(t)), /* @__PURE__ */ React.createElement("div", { className: "lv-takebtns" }, !on && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lv-takebtn",
+          title: "Use take " + t.n + " for Play, Render and Export",
+          onClick: () => onUse(t.n)
+        },
+        "\u2605 Use"
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lv-takebtn",
+          disabled: !t.settings,
+          title: t.settings ? "Put take " + t.n + "'s settings back on this shot. Nothing is rendered." : "No settings were recorded for this take",
+          onClick: () => onReuse(t.n)
+        },
+        "Reuse settings"
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lv-takebtn",
+          disabled: on,
+          title: on ? "Select another take first" : "Delete take " + t.n + " from this shot (its clip stays in your library)",
+          onClick: () => onDelete(t.n)
+        },
+        "Delete\u2026"
+      ))));
+    }));
   }
   function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
     const vidRef = useRef2(null), trackRef = useRef2(null);
