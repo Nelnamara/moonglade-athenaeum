@@ -21769,6 +21769,13 @@ def create_app(out_dir: Path):
         plan = runs.plan_jobs(body.get("prompt") or "", lists, vm, count, run_seed)
         if plan.get("error"):
             raise _RunRefused(plan["error"])
+        # Review N4: with the seed field set, every matrix cell carries that one seed, so two
+        # cells that resolve to the same prompt are the same picture paid for twice.
+        same = runs.same_prompt_cells(plan) if dock_seed else None
+        if same:
+            raise _RunRefused("Cells {} and {} would send the same prompt with the same seed "
+                              "— that pays twice for one picture. Clear the seed or change a "
+                              "value.".format(*same))
         if plan["mode"] == "random" and run_seed is None:
             if dock_seed:
                 raise _RunRefused("A Random run's seed must be between 0 and "
@@ -21786,7 +21793,10 @@ def create_app(out_dir: Path):
         import moonglade_runs as runs
         import moonglade_recipes as rec
         plan, run_seed, dock_seed = _run_expand(body, user)
-        matrix = plan["mode"] == "matrix"
+        # Settled 2: never a card on a queued matrix cell -- a matrix of 2+ cells. A one-cell
+        # matrix is an ordinary single send and its card applies as for any single send
+        # (review B1: forcing it there charged a send the dock's badge showed as free).
+        no_card = runs.forces_no_card(plan)
         ent = _entitlements(core, gsession)
         rs = resolver(core, gsession)
         base = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
@@ -21795,8 +21805,8 @@ def create_app(out_dir: Path):
             jp = dict(base, prompt=job["prompt"], count=job["batch"])
             if job["seed"] is not None:
                 jp["seed"] = job["seed"]
-            if matrix:
-                jp["no_card"] = True          # Settled 2: never a card on a matrix cell
+            if no_card:
+                jp["no_card"] = True
             label = _cell_label(plan, job)
             try:
                 req = core.build_request(jp, mode="image", is_member=ent["is_member"],
@@ -21858,7 +21868,7 @@ def create_app(out_dir: Path):
                                   "— try again in a moment.")
             each = int(cost)
             covered = 0
-            if matrix:
+            if no_card:
                 card_note = "Free cards don’t cover queued matrix runs."
             elif not first.no_card:
                 try:

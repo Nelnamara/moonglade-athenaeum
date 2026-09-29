@@ -395,6 +395,61 @@ def test_a_matrix_never_asks_for_a_card(cli, rig):
     assert all("--no-card" in c["cli"]["command"] for c in d["cells"])
 
 
+def test_forces_no_card_only_for_a_matrix_of_two_or_more_cells():
+    assert runs.forces_no_card(runs.plan_jobs("{a|b} x", {}, "matrix", 1, 0)) is True
+    assert runs.forces_no_card(runs.plan_jobs("{a|} x", {}, "matrix", 1, 0)) is False
+    assert runs.forces_no_card(runs.plan_jobs("plain", {}, "matrix", 1, 0)) is False
+    assert runs.forces_no_card(runs.plan_jobs("{a|b} x", {}, "random", 2, 0)) is False
+    assert runs.forces_no_card({"error": "x"}) is False
+
+
+@pytest.mark.parametrize("prompt,lists", [("{solo|} glade", None),
+                                          ("__one__ glade", {"one": ["solo"]})],
+                         ids=["one-option-group", "one-item-list"])
+def test_a_one_cell_matrix_is_an_ordinary_single_send_and_its_card_applies(cli, rig, prompt, lists):
+    """Review B1: a Matrix that expands to ONE cell goes out as a single send (no confirm, no
+    acknowledgement), so it must be one: the held card applies exactly as it does for any
+    single send -- never a forced no_card the dock's badge did not price."""
+    if lists:
+        _lists(cli, lists)
+    rig.card_default = CARD
+    p = plan(cli, prompt=prompt, var_mode="matrix").get_json()
+    assert (p["mode"], p["count"], p["covered"], p["total"]) == ("matrix", 1, 1, 0)
+    assert "card_note" not in p and p["cells"][0]["no_card"] is False
+    rig.calls.clear()
+    d = run(cli, prompt=prompt, var_mode="matrix").get_json()
+    assert d["status"] == "sent" and len(rig.mutations) == 1
+    assert rig.count("price_task") == 0, "a single send is not quoted"
+    assert rig.count("match_kaisuuken") >= 1, "the card check a single send makes"
+    assert rig.mutations[0].get("kaisuukenId") == "K1"
+    # byte for byte what a plain single send of the same resolved prompt sends
+    single = cli.post("/api/generate", json=dict(BASE, prompt="solo glade", count=1)).get_json()
+    assert single.get("task_id"), single
+    assert rig.mutations[1] == rig.mutations[0]
+
+
+def test_a_matrix_of_two_cells_never_calls_the_card_check_at_plan_or_send(cli, rig):
+    rig.card_default = CARD
+    _, d, _ = plan_and_run(cli, rig, prompt="{a|b} x", var_mode="matrix")
+    assert d["status"] == "sent" and len(rig.mutations) == 2
+    assert rig.count("match_kaisuuken") == 0
+    assert all("kaisuukenId" not in m for m in rig.mutations)
+
+
+def test_a_fixed_seed_matrix_whose_cells_share_a_prompt_is_refused(cli, rig):
+    """Review N4: with the seed field set every cell carries that one seed, so two cells that
+    resolve to the same prompt are one picture paid for twice -- refused, locally."""
+    t = "{a|a b} {b c|c}"                       # cells 1 and 4 both read "a b c"
+    d = run(cli, prompt=t, var_mode="matrix", seed="77", run_seed=77,
+            ack={"count": 4, "jobs": 4}).get_json()
+    assert d["error"].startswith("Cells 1 and 4 would send the same prompt with the same seed")
+    assert rig.network == 0 and rig.mutations == []
+    assert "Cells 1 and 4" in plan(cli, prompt=t, var_mode="matrix", seed="77",
+                                   run_seed=77).get_json()["error"]
+    # with no fixed seed PixAI draws one per cell: four different pictures, allowed
+    assert plan(cli, prompt=t, var_mode="matrix").get_json()["count"] == 4
+
+
 def test_an_unreadable_price_refuses_the_plan(cli, rig):
     rig.price = None
     d = plan(cli, count=3).get_json()
