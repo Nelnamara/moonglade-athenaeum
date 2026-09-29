@@ -89,6 +89,8 @@ import {
 import {
   RIBBON_GRID, ribbonPairs, frameUrl, meanDeltaE, pairFlagged, pairTitle,
 } from "./src/loom-ribbon-core.js";
+// Session P, Stage B2 (the page's P1 "Phone:" line): the phone's swipe / long-press take math.
+import { LONG_PRESS_MS, swipeDir, adjacentTakeN } from "./src/loom-phone-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -4565,6 +4567,73 @@ const LOOM_MOBILE_STYLES = `
 .lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
   color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
 .lm-actionrow.danger{color:var(--red);border-bottom:none;}
+/* ---- Session P, Stage B2: the phone for P1-P3, P8, P9 (the Handoff page's "Phone:" lines), in this
+   sheet's own language. Loom cyan, lavender for find and the ribbon, peach for a held state;
+   gold stays billing's (the ★ outline is the page's own P1 choice). ---- */
+.lm-actionrow:disabled{color:var(--overlay0);cursor:default;}
+.lm-bedbtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.lm-bedbtn.on{border-color:var(--loomc,#47cbc3);background:color-mix(in srgb,var(--loomc,#47cbc3) 12%,transparent);}
+.lm-bedbtn.busy{opacity:.6;}
+.lm-bednote{font-size:10.5px;color:var(--peach);margin-top:8px;line-height:1.4;}
+.lm-bedhead{font:600 13px/1.3 system-ui;color:var(--text);margin:2px 0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-bedlvl{display:flex;align-items:center;gap:10px;margin:2px 0 8px;}
+.lm-bedlvl input{flex:1;accent-color:var(--loomc,#47cbc3);}
+.lm-bedmono{font:11px/1 ui-monospace,monospace;color:var(--subtext);min-width:52px;text-align:right;}
+.lm-bedfades{font-size:11px;line-height:1.45;color:var(--subtext);margin:2px 0 8px;}
+/* P1: the ★ take's still (swipe it), its takes strip and a take's sheet. */
+.lm-takes{margin:8px 0 12px;}
+.lm-takeprev{position:relative;aspect-ratio:16/9;border-radius:11px;background:var(--base) center/cover no-repeat;
+  border:1px solid var(--surface1);touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;}
+.lm-takeprevlab{position:absolute;left:8px;bottom:7px;font:700 10px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);
+  border-radius:6px;padding:4px 7px;}
+.lm-takeswipe{position:absolute;right:8px;bottom:7px;font:600 9.5px/1 system-ui;color:rgba(255,255,255,.8);background:rgba(0,0,0,.45);
+  border-radius:6px;padding:4px 7px;}
+.lm-takestrip{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.lm-take{width:40px;height:30px;border-radius:6px;border:1px solid var(--surface1);display:grid;place-items:center;
+  font:800 11px/1 system-ui;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);background:var(--surface1) center/cover no-repeat;
+  cursor:pointer;padding:0;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;flex:none;}
+.lm-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lm-takemore{font:700 10px/1 system-ui;color:var(--overlay0);padding:0 2px;}
+.lm-takesheethead{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.lm-takesheettitle{font:600 13px/1.3 system-ui;color:var(--text);}
+/* P2: the peach underline on the scrub reel, the peach card edge, and Re-anchor / Keep. */
+.lm-seg.stale{box-shadow:inset 0 -3px 0 var(--peach);}
+.lm-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lm-stale{display:flex;flex-direction:column;gap:8px;padding:10px 11px;border-radius:11px;margin:0 0 12px;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lm-staletxt{font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-stalebtns{display:flex;gap:8px;}
+.lm-reanchor{font:700 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:none;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lm-reanchor:disabled{opacity:.55;cursor:default;}
+.lm-keep{font:600 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:1px solid var(--surface1);background:none;color:var(--subtext);cursor:pointer;}
+.lm-staleerr{font-size:10.5px;color:var(--peach);}
+.lm-needtake{font-size:11px;line-height:1.4;color:var(--subtext);margin:0 0 12px;}
+/* P8: the ⌕ in the header, the find field under it, and the reel's rings. */
+.lm-findbtn{font-size:12px;padding:5px 9px;}
+.lm-findbtn.open{border-color:var(--lavender);color:var(--lavender);}
+.lm-findbtn.finding{background:color-mix(in srgb,var(--lavender) 16%,transparent);}
+.lm-find{flex:none;display:flex;flex-direction:column;gap:6px;padding:0 16px 8px;}
+.lm-findpill{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 11px;border-radius:999px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 85%,transparent);}
+.lm-findpill.on{border-color:var(--lavender);}
+.lm-findico{font-size:12px;color:var(--overlay0);}
+.lm-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:13px/1.3 system-ui;padding:6px 0;}
+.lm-findin::placeholder{color:var(--overlay0);}
+.lm-findcount{font:10.5px/1 ui-monospace,monospace;color:var(--subtext);white-space:nowrap;}
+.lm-findstep{width:30px;height:30px;border:none;background:none;color:var(--subtext);font-size:13px;cursor:pointer;border-radius:50%;flex:none;}
+.lm-findchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
+.lm-findchip{flex:none;font:600 10.5px/1 system-ui;padding:6px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:none;color:var(--subtext);}
+.lm-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lm-seg{transition:opacity .2s;}
+.lm-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 70%,transparent);outline-offset:-1px;}
+.lm-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;}
+.lm-seg.fdim{opacity:.35;}
+.lm-cardrow{transition:opacity .2s;}
+.lm-cardrow[data-find="dim"]{opacity:.35;}
+.lm-card.fcur{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
+/* P9: the review panel's pair strip. */
+.lm-review .lv-ribbon{margin-top:18px;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -4579,6 +4648,11 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // Session P, Stage B2 (P7, "Phone: the cast sheet gets a Library tab beside Cast & assets /
   // Footage"): the same cast library view and owner actions LoomV2's Library tab uses.
   castApi,
+  // Session P, Stage B2 -- the phone for P1-P3 (the page's "Phone:" lines): the takes strip's ★ /
+  // Reuse / Delete, the stale anchor's Re-anchor / Keep (useTakeActions) and the music bed's
+  // pick / level / remove (useBedActions) -- the same board edits the desktop calls, none of
+  // which can render. activeId: another storyboard starts with no find.
+  selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork, bedApi, activeId,
   // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
   // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
   // (useShotMutations) -- not a re-derivation of the split logic.
@@ -5039,6 +5113,100 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     actionsCloseTimer.current = setTimeout(() => { setActionsOpen(false); setActionsClosing(false); }, 280);
   };
 
+  /* ---- SESSION P, STAGE B2: THE PHONE FOR P1, P2, P3, P8, P9 (the Handoff page's "Phone:" lines).
+     Every handler here is a board edit through the desktop's own reducers, a selection / find
+     change, or the music bed's local file -- none can price, upload to PixAI or render (roots of
+     loom/test/loom-no-auto-render.test.js; the handlers that share a desktop name are the same
+     root). ---- */
+  const phoneById = new Map(entries.map((x) => [x.c.id, x.c]));
+  const phoneCodeById = new Map(entries.map((x) => [x.c.id, x.code]));
+  const phoneCodeOf = (id) => phoneCodeById.get(id) || "the source shot";
+
+  // P1 -- "a takes strip under the shot sheet's preview; swipe the preview to change take;
+  // long-press to ★". A tap on a chip opens that take's sheet (★ Use / Reuse settings / Delete…,
+  // the sheet's own action rows); a long press stars it; a sideways swipe on the preview stars
+  // the next or previous take. Swiping never renders.
+  const [takeSheet, setTakeSheet] = useState(null);      // {cardId, n} | null
+  const pressRef = useRef({ timer: null, fired: false });
+  useEffect(() => () => clearTimeout(pressRef.current.timer), []);
+  const onTakeChipDown = (cardId, n) => {
+    clearTimeout(pressRef.current.timer);
+    pressRef.current.fired = false;
+    pressRef.current.timer = setTimeout(() => {
+      pressRef.current.fired = true;
+      selectTakeOnCard(cardId, n);
+      try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { /* no haptics here */ }
+    }, LONG_PRESS_MS);
+  };
+  const onTakeChipUp = () => { clearTimeout(pressRef.current.timer); };
+  const onTakeChipTap = (cardId, n) => {
+    if (pressRef.current.fired) { pressRef.current.fired = false; return; }   // that was the long press
+    setTakeSheet({ cardId, n });
+  };
+  const swipeRef = useRef(null);
+  const onTakeSwipeStart = (ev) => { swipeRef.current = { x: ev.clientX, y: ev.clientY }; };
+  const onTakeSwipeEnd = (ev, card) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || !card) return;
+    const n = adjacentTakeN(card, swipeDir(ev.clientX - s.x, ev.clientY - s.y));
+    if (n != null) selectTakeOnCard(card.id, n);
+  };
+  const takeSheetLive = takeSheet ? (() => {
+    const c = phoneById.get(takeSheet.cardId);
+    const t = c ? takesOf(c).find((x) => x.n === takeSheet.n) : null;
+    return c && t ? { c, t, selN: selectedTakeOf(c) } : null;
+  })() : null;
+  if (takeSheet && !takeSheetLive) { setTakeSheet(null); }
+
+  // P3 -- "'♪ Bed' in the review panel picks a file; the level and fades are in a sheet."
+  const [bedSheet, setBedSheet] = useState(false);
+  const openBedSheet = () => setBedSheet(true);
+  const phoneBed = bedOf(project);
+
+  // P8 -- "a ⌕ in the Loom header; matches highlight on the scrub reel". The same find core as the
+  // desktop; the chips ride under the field. Stepping selects the shot and scrolls to its card.
+  const [findOpen, setFindOpen] = useState(false);
+  const [find, setFind] = useState(emptyFind);
+  useEffect(() => { setFind(emptyFind()); }, [activeId]);
+  const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
+    || unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+  const findOn = findActive(find);
+  const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: phoneById, statusOf, warn: phoneWarns }) : [];
+  const findSet = new Set(findIds);
+  const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+  const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...(typeof next === "function" ? next(f) : { ...f, ...next }), cur: 0 }));
+  const scrollToPhoneCard = (id) => {
+    const el = typeof document !== "undefined" ? document.querySelector('.lm-card[data-card-id="' + id + '"]') : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  const stepFind = (dir) => {
+    if (!findIds.length) return;
+    const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+    const id = findIds[n];
+    setFind((f) => ({ ...f, cur: n }));
+    setSelShot(id);
+    scrollToPhoneCard(id);
+  };
+  const clearFind = () => { setFind(emptyFind()); };
+  const toggleFindBar = () => {
+    if (findOpen) { setFindOpen(false); clearFind(); } else setFindOpen(true);
+  };
+
+  // P9 -- "a swipeable pair strip in the review panel"; a tap opens both shots, as the desktop
+  // does: the pair's second shot is selected and find narrows to exactly the two (the reel and
+  // the board show them), and the review panel closes onto the board.
+  const openRibbonPair = (pair) => {
+    setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+    setFindOpen(true);
+    setSelShot(pair.b.cardId);
+    closeReview();
+  };
+  const phoneTintOf = (id) => {
+    const x = entries.find((e) => e.c.id === id);
+    return x ? LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length] : LV_TINTS[0];
+  };
+
   // ---- Generate screen helpers (third increment, 2026-08-03) ----
   const genTogglePal = (which) => setGenPalFor((p) => (p === which ? null : which));
   const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
@@ -5386,6 +5554,9 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <span className="lm-fill" />
         <span className="lm-title">&#9642; The Loom</span>
         <span className="lm-fill" />
+        {/* Session P (P8, "Phone: a ⌕ in the Loom header"): opens the find field under the bar. */}
+        <button type="button" className={"lm-chip lm-findbtn" + (findOpen ? " open" : "") + (findOn ? " finding" : "")}
+          aria-label="Find in storyboard" aria-expanded={findOpen} title="Find in storyboard" onClick={toggleFindBar}>&#8981;</button>
         <label className={"lm-chip" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />&#9889; Draft</label>
@@ -5397,12 +5568,39 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <button type="button" className="lm-chip" onClick={() => setMobileUI(false)}
           title="Switch back to the full desktop-style Loom">&#128421; Desktop</button>
       </div>
+      {findOpen && (
+        <div className="lm-find">
+          <div className={"lm-findpill" + (findOn ? " on" : "")}>
+            <span className="lm-findico" aria-hidden="true">&#8981;</span>
+            <input className="lm-findin" value={find.q} autoFocus aria-label="Find in storyboard" enterKeyHint="search"
+              placeholder={find.only && !find.q ? find.only.map(phoneCodeOf).join(" → ") + " (continuity pair)" : "find in storyboard"}
+              onChange={(ev) => runFind({ q: ev.target.value, only: null })}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") { ev.preventDefault(); stepFind(ev.shiftKey ? -1 : 1); }
+                else if (ev.key === "Escape") { ev.preventDefault(); clearFind(); }
+              }} />
+            <span className="lm-findcount">{findCountText(find, findIds.length)}</span>
+            <button type="button" className="lm-findstep" aria-label="Previous match" onClick={() => stepFind(-1)}>&#8593;</button>
+            <button type="button" className="lm-findstep" aria-label="Next match" onClick={() => stepFind(1)}>&#8595;</button>
+            <button type="button" className="lm-findstep" aria-label="Close find" onClick={toggleFindBar}>&#10005;</button>
+          </div>
+          <div className="lm-findchips">
+            {findChips(entries, { statusOf }).map((ch) => (
+              <button type="button" key={ch.kind + ch.key} className={"lm-findchip" + (chipOn(find, ch) ? " on" : "")}
+                aria-pressed={chipOn(find, ch)} onClick={() => runFind((f) => toggleChip(f, ch))}>{ch.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="lm-reelwrap">
         <div className="lm-reelbar"
           onPointerDown={onReelDown} onPointerMove={onReelMove} onPointerUp={onReelUp} onPointerLeave={onReelLeave}>
+          {/* Session P: P2's peach underline for a stale anchor, and P8's rings for find. */}
           {entries.map((x) => (
-            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")}
+            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")
+              + (anchorInfo(x.c, phoneById).state === "stale" ? " stale" : "")
+              + (findOn ? (findSet.has(x.c.id) ? (x.c.id === findCur ? " fcur" : " fmatch") : " fdim") : "")}
               style={{ flex: `${durOf(x.c) || 1} 1 0` }} />
           ))}
         </div>
@@ -5445,9 +5643,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 // invariant silently. Reuses `st` (statusOf(e.c)), already computed above for
                 // the status pill -- one statusOf() call, not a second copy.
                 const canReview = st === "done" && !!e.c.resultMid;
+                // Session P: P2's ⚠ for a stale anchor, and the imported-picture mark the desktop
+                // card carries (open call 4: rendering it is refused before anything is priced).
+                const stalePhone = anchorInfo(e.c, phoneById).state === "stale";
+                const unsendablePhone = unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
                 return (
-                  <div key={e.c.id} className="lm-cardrow">
-                    <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
+                  <div key={e.c.id} className="lm-cardrow" data-find={findOn ? (findSet.has(e.c.id) ? "match" : "dim") : undefined}>
+                    <button type="button" data-card-id={e.c.id}
+                      className={"lm-card" + (e.c.id === selShot ? " sel" : "") + (stalePhone ? " stale" : "") + (findOn && e.c.id === findCur ? " fcur" : "")}
                       onClick={() => { setSelShot(e.c.id); setDfOpen(true); }}
                       title="Open this shot — it binds to Generate">
                       <div className="lm-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
@@ -5465,6 +5668,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                           {miss.length > 0 && (
                             <span className="lm-warn" title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt.`}>
                               &#9888; {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                            </span>
+                          )}
+                          {stalePhone && (
+                            <span className="lm-warn" title="Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep.">
+                              &#9888; anchor changed
+                            </span>
+                          )}
+                          {unsendablePhone && (
+                            <span className="lm-warn" title="This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.">
+                              imported picture — can't be sent to PixAI yet
                             </span>
                           )}
                         </div>
@@ -5562,6 +5775,67 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               <button type="button" className="lm-df-close" title="Close" onClick={() => setDfOpen(false)}>&#10005;</button>
             </div>
             <div className="lm-df-body">
+              {(() => {
+                // Session P, Stage B2 -- P1 "a takes strip under the shot sheet's preview; swipe the
+                // preview to change take; long-press to ★" and P2 "the actions are in the shot sheet".
+                // The preview is the ★ take's still; the strip is the desktop card's chips, sized
+                // for a finger. Nothing here renders: ★, Reuse, Delete, Re-anchor and Keep are the
+                // desktop's own board edits.
+                const ts = takesOf(c);
+                const selN = selectedTakeOf(c);
+                const view = selectedTakeView(c);
+                const shown = ts.slice(-6);
+                const older = ts.length - shown.length;
+                const anchor = anchorInfo(c, phoneById);
+                const aw = anchorWork && anchorWork[c.id];
+                return (
+                  <>
+                    {view ? (
+                      <div className="lm-takes">
+                        <div className="lm-takeprev" style={{ backgroundImage: "url(/thumbs/" + view.mid + ".jpg)" }}
+                          onPointerDown={onTakeSwipeStart} onPointerUp={(ev) => onTakeSwipeEnd(ev, c)}
+                          onPointerCancel={() => { swipeRef.current = null; }}
+                          title="Swipe sideways to use the next or previous take">
+                          <span className="lm-takeprevlab">&#9733; take {selN}{ts.length > 1 ? " of " + ts.length : ""}</span>
+                          {ts.length > 1 && <span className="lm-takeswipe">&lsaquo; swipe &rsaquo;</span>}
+                        </div>
+                        <div className="lm-takestrip">
+                          {older > 0 && <span className="lm-takemore">+{older}</span>}
+                          {shown.map((t) => {
+                            const on = t.n === selN;
+                            return (
+                              <button type="button" key={t.id || "t" + t.n} className={"lm-take" + (on ? " on" : "")}
+                                style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}
+                                aria-pressed={on} title={on ? "Take " + t.n + " (selected)" : "Take " + t.n + " · tap for its actions, hold to use it"}
+                                onPointerDown={() => onTakeChipDown(c.id, t.n)} onPointerUp={onTakeChipUp}
+                                onPointerLeave={onTakeChipUp} onPointerCancel={onTakeChipUp}
+                                onContextMenu={(ev) => ev.preventDefault()}
+                                onClick={() => onTakeChipTap(c.id, t.n)}>{on ? "★" : t.n}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="lm-hint">
+                          {(ts.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + ts.length : "Take " + selN + " · " + ts.length + " takes")
+                            + " ★ used by Play · Render · Export"}</div>
+                      </div>
+                    ) : null}
+                    {anchor.state === "stale" && (
+                      <div className="lm-stale" role="status">
+                        <div className="lm-staletxt">&#9888; anchor changed &middot; {staleText(anchor, phoneCodeOf)}</div>
+                        <div className="lm-stalebtns">
+                          <button type="button" className="lm-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
+                            onClick={() => reanchorShot(c.id)}>{aw && aw.phase === "wip" ? "Re-anchoring…" : "Re-anchor"}</button>
+                          <button type="button" className="lm-keep" onClick={() => keepAnchor(c.id)}>Keep</button>
+                        </div>
+                        {aw && aw.phase === "err" && <div className="lm-staleerr">{aw.msg}</div>}
+                      </div>
+                    )}
+                    {anchor.state !== "stale" && needsNewTake(c) && (
+                      <div className="lm-needtake">Open frame updated. Render a new take to match it.</div>
+                    )}
+                  </>
+                );
+              })()}
               <span className="lm-microlab">Mode</span>
               <div className="lm-modechips">
                 {MODES.map((m) => (
@@ -5770,6 +6044,40 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 </div>
               </>
             )}
+
+            {/* Session P (P1): ONE TAKE'S SHEET -- a tapped chip's ★ Use / Reuse settings / Delete…
+                in the sheet's own action rows (the desktop take list's buttons and rules). */}
+            {takeSheetLive && takeSheetLive.c.id === c.id && (() => {
+              const { t, selN } = takeSheetLive;
+              const on = t.n === selN;
+              const tv = on ? (selectedTakeView(c) || t) : t;
+              const shut = () => setTakeSheet(null);
+              return (
+                <>
+                  <div className="lm-scrim" onClick={shut} />
+                  <div className="lm-sheet" role="dialog" aria-label={"Take " + t.n + " of " + dfLive.code}>
+                    <div className="lm-sheethandle" />
+                    <div className="lm-takesheethead">
+                      <span className={"lm-take" + (on ? " on" : "")} aria-hidden="true"
+                        style={tv.mid ? { backgroundImage: "url(/thumbs/" + tv.mid + ".jpg)" } : undefined}>{on ? "★" : t.n}</span>
+                      <div>
+                        <div className="lm-takesheettitle">{dfLive.code} &middot; take {t.n}{on ? " · ★ in use" : ""}</div>
+                        <div className="lm-hint">{takeWhen(tv)} &middot; {takeSummary(tv)}</div>
+                      </div>
+                    </div>
+                    <button type="button" className="lm-actionrow" disabled={on}
+                      onClick={() => { selectTakeOnCard(c.id, t.n); shut(); }}>&#9733; {on ? "In use for Play, Render and Export" : "Use this take"}</button>
+                    <button type="button" className="lm-actionrow" disabled={!tv.settings}
+                      onClick={() => { reuseTakeSettings(c.id, t.n); shut(); }}>
+                      Reuse settings{tv.settings ? "" : " — none were recorded for this take"}</button>
+                    <button type="button" className="lm-actionrow danger" disabled={on}
+                      onClick={() => { deleteTakeOnCard(c.id, t.n); shut(); }}>
+                      {on ? "Delete… — select another take first" : "Delete take " + t.n + "… (its clip stays in your library)"}</button>
+                    <button type="button" className="lm-sheetclose" onClick={shut}>Cancel</button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         );
       })()}
@@ -6627,8 +6935,53 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}>&#9986; Split at playhead</button>
                 <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
                   onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
+                {/* Session P (P3, "Phone: '♪ Bed' in the review panel picks a file; the level and
+                    fades are in a sheet"): no bed yet -> it picks a file (kept on this machine,
+                    never uploaded to PixAI); a bed -> its sheet. */}
+                {bedApi && (phoneBed ? (
+                  <button type="button" className="lm-addrefbtn lm-bedbtn on" onClick={openBedSheet}
+                    title={"Music bed: " + phoneBed.name + " — level and fades"}>&#9834; Bed</button>
+                ) : (
+                  <label className={"lm-addrefbtn lm-bedbtn" + (bedApi.bedWork.phase === "wip" ? " busy" : "")}
+                    title="Add one audio file under the whole cut — kept on this machine, never uploaded to PixAI">
+                    {bedApi.bedWork.phase === "wip" ? "♪ Adding…" : "♪ Bed"}
+                    <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }} disabled={bedApi.bedWork.phase === "wip"}
+                      onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) bedApi.pickBed(f); }} />
+                  </label>
+                ))}
               </div>
+              {bedApi && bedApi.bedWork.phase === "err" && <div className="lm-bednote" role="status">{bedApi.bedWork.msg}</div>}
+
+              {/* Session P (P9, "Phone: a swipeable pair strip in the review panel"): the same
+                  continuity ribbon as the desktop's full timeline, one pair per cut; a tap opens
+                  both shots on the board. */}
+              <RibbonStrip compact pairs={ribbonPairs(entries, phoneById)} tintOf={phoneTintOf} onOpen={openRibbonPair} />
             </div>
+
+            {bedSheet && phoneBed && bedApi && (
+              <>
+                <div className="lm-scrim" onClick={() => setBedSheet(false)} />
+                <div className="lm-sheet" role="dialog" aria-label="Music bed">
+                  <div className="lm-sheethandle" />
+                  <div className="lm-bedhead">&#9834; {phoneBed.name}{phoneBed.dur ? " · " + bedClock(phoneBed.dur) : ""}</div>
+                  <span className="lm-microlab">Level</span>
+                  <div className="lm-bedlvl">
+                    <input type="range" min={BED_DB_MIN} max={BED_DB_MAX} step={1} value={phoneBed.db} aria-label="Music bed level"
+                      onChange={(ev) => bedApi.setBedLevel(ev.target.value)} />
+                    <span className="lm-bedmono">{dbLabel(phoneBed.db)}</span>
+                  </div>
+                  <span className="lm-microlab">Fades</span>
+                  <div className="lm-bedfades">2 s in &middot; 3 s out &middot; ducks &minus;12 dB under shots with their own audio. A bed longer than the cut ends with the cut; a shorter one doesn't loop.</div>
+                  <label className="lm-actionrow">Pick a different file&hellip;
+                    <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }}
+                      onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) bedApi.pickBed(f); }} />
+                  </label>
+                  <button type="button" className="lm-actionrow danger" onClick={() => { bedApi.removeBed(); setBedSheet(false); }}>
+                    Remove the music bed (its file stays on this machine)</button>
+                  <button type="button" className="lm-sheetclose" onClick={() => setBedSheet(false)}>Done</button>
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
@@ -9374,6 +9727,8 @@ export default function App() {
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
           castApi={castApi}
+          selectTakeOnCard={selectTakeOnCard} deleteTakeOnCard={deleteTakeOnCard} reuseTakeSettings={reuseTakeSettings}
+          reanchorShot={reanchorShot} keepAnchor={keepAnchor} anchorWork={anchorWork} bedApi={bedApi} activeId={activeId}
           storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
           moveCard={moveCard} dupCard={dupCard} delCard={delCard}
           mobileUI={mobileUI} setMobileUI={setMobileUI}

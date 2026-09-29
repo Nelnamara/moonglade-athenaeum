@@ -407,6 +407,11 @@ const ROOTS = [
   "runFind", "stepFind", "clearFind",
   // Stage B2 -- P9, the continuity ribbon: a pair's "open both shots" (a selection / find change).
   "openRibbonPair",
+  // Stage B2 -- the PHONE (the page's "Phone:" lines). LoomMobile's own runFind / stepFind /
+  // clearFind / openRibbonPair share the desktop's names, so the roots above walk both. New here:
+  // P1's take chip (press, release, tap) and the preview swipe; P3's bed sheet; P8's ⌕.
+  "onTakeChipDown", "onTakeChipUp", "onTakeChipTap", "onTakeSwipeStart", "onTakeSwipeEnd",
+  "openBedSheet", "toggleFindBar",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -652,7 +657,9 @@ describe("the pure modules can reach nothing", () => {
     // Stage B2 -- find in storyboard (P8): the prompt text and the stale-anchor view only
     ["src/loom-find-core.js", ["./loom-core.js", "./loom-takes-core.js"]],
     // Stage B2 -- the continuity ribbon's pairs and colour measure (P9): the ★ take view only
-    ["src/loom-ribbon-core.js", ["./loom-core.js", "./loom-takes-core.js"]]]) {
+    ["src/loom-ribbon-core.js", ["./loom-core.js", "./loom-takes-core.js"]],
+    // Stage B2 -- the phone's swipe / long-press take math (P1): the take views only
+    ["src/loom-phone-core.js", ["./loom-takes-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {
@@ -688,6 +695,15 @@ describe("opening the cast library writes nothing (P7)", () => {
     for (const r of ["readCastLibrary", "readOtherBoards"]) {
       assert.ok(M.byName.has(r), r + " is the library's read -- renamed?");
       assert.equal(reach(M, r, KV_WRITERS), null, r + " must only read");
+    }
+  });
+  test("the phone's find and ribbon handlers share the desktop's root names (both are walked)", () => {
+    for (const name of ["runFind", "stepFind", "clearFind", "openRibbonPair"]) {
+      const inView = (view) => (M.byName.get(name) || []).some((d) => {
+        const v = (M.byName.get(view) || [])[0];
+        return v && d.start > v.start && d.end <= v.end;
+      });
+      assert.ok(inView("LoomV2") && inView("LoomMobile"), name + " must be defined in both LoomV2 and LoomMobile");
     }
   });
   test("the walk is not vacuous: the owner's library actions DO reach their writes", () => {
