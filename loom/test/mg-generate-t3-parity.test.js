@@ -83,14 +83,25 @@ describe("G2/G3/G4 -- buildPayload withholds what the drawer shows as not applyi
     assert.equal(open.negative, "<negative>");
   });
 
-  test("a reference on a context-image model sends no negative", () => {
+  test("a context-image model: the switch replaces the reference, the Context side holds the negative", () => {
+    // Session H decision 1 (Tsubaki3 Generate Handoff): on a context-image model the LoRAs |
+    // Context images switch REPLACES the single reference slot, so a reference left in the
+    // state from another model is neither shown nor sent there (it used to ride the gate into
+    // a context image nobody could see). The Context side sends its images and holds the
+    // negative; the LoRA side sends the negative as typed.
     const m = { version_id: "V", model_id: "M", context_images: true };
     const s = { ...base(), model: m, ref: { media_id: "M1" } };
     assert.equal(refIsContext(s), true);
-    assert.equal(buildPayload(s).negative, "");
-    assert.equal(buildPayload(s).ref_media_id, "M1");
-    assert.equal(refIsContext({ ...s, ref: null }), false);
-    assert.equal(refIsContext({ ...s, model: { ...m, context_images: false } }), false);
+    assert.equal(buildPayload(s).ref_media_id, null);
+    assert.equal(buildPayload(s).negative, "<negative>");
+    const ctx = { ...s, inputs: "context", ctx: [{ media_id: "701" }] };
+    assert.equal(buildPayload(ctx).negative, "");
+    assert.deepEqual(buildPayload(ctx).context_images, ["701"]);
+    // on a model WITHOUT context images the reference is img2img, as shipped
+    const sdxl = { ...s, model: { ...m, context_images: false } };
+    assert.equal(refIsContext(sdxl), false);
+    assert.equal(buildPayload(sdxl).ref_media_id, "M1");
+    assert.equal(buildPayload(sdxl).negative, "<negative>");
   });
 
   test("the Quality Tag tooltip reads from the version's own tag", () => {
@@ -131,16 +142,23 @@ describe("the drawer wiring (source reads -- no React harness in this runner)", 
   const phone = read("../../gallery/src/components/CreateMobile.jsx");
   const hook = read("../../gallery/src/gen/useGenerate.js");
 
-  test("STRENGTH and the negative box read disabled while a ref is a context image", () => {
-    assert.match(drawer, /disabled=\{refIsContext\(s\)\}/);
-    assert.match(drawer, /disabled=\{\(m && m\.compat_neg === false\) \|\| refIsContext\(s\)\}/);
-    assert.match(phone, /disabled=\{\(m && m\.compat_neg === false\) \|\| refIsContext\(s\)\}/);
+  test("the negative box reads held on the Context side; the reference slot is gone there", () => {
+    // Session H decision 1: held (disabled, dimmed, "· held") rather than a disabled STRENGTH --
+    // the single reference slot only renders on a model without context images.
+    assert.match(drawer, /disabled=\{\(m && m\.compat_neg === false\) \|\| ctxOn\}/);
+    assert.match(phone, /disabled=\{\(m && m\.compat_neg === false\) \|\| ctxOn\}/);
+    assert.match(drawer, /\{!contextModel\(m\) && \(\s*<div className="mgdock-refrow">/);
+    assert.match(phone, /\{!contextModel\(m\) && \(/);
   });
 
   test("the version fields ride every apply, explicitly", () => {
-    for (const f of ["compat_face:", "compat_quality:", "quality_tag:", "size_rule:", "context_images:"]) {
-      assert.ok(hook.includes(f), f);
+    const core = read("../../gallery/src/gen/genCore.js");
+    const patch = core.slice(core.indexOf("export function versionPatch"), core.indexOf("function cget"));
+    for (const f of ["compat_face:", "compat_quality:", "quality_tag:", "size_rule:", "context_images:",
+      "size_tiers:", "context_max:", "creativity:", "profile_rows:"]) {
+      assert.ok(patch.includes(f), f);
     }
+    assert.match(hook, /const applyFromVersion = \(v\) => versionPatch\(v\);/);
   });
 });
 

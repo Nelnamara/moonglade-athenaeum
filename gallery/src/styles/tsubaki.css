@@ -1,0 +1,284 @@
+/* tsubaki.css -- Session H, Tsubaki.3 in the Generate drawer (TsubakiControls.jsx, AtPrompt.jsx,
+   the Lightbox edit bar). Pixel source: moonglade-internal/design/handoff-2026-09-04/Tsubaki3
+   Generate Handoff.dc.html, frames A, B, E and G. Tokens only: peach for held and refused, gold
+   for billing (the Members tag and notice), --green for Unlimited, lavender for selection.
+   Motion: enter .42s, reduced motion at rest. Mono for counts, sizes and prices. */
+
+.mgts-mono, .mgts-sizeline, .mgts-tierdims, .mgts-profprice, .mgts-slotn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ---- T1a: profile rows under the model row ---- */
+.mgts-profiles { display: flex; flex-direction: column; gap: 6px; }
+.mgts-profrows { display: flex; flex-direction: column; border-radius: 10px;
+  border: 1px solid var(--surface1); overflow: hidden; }
+.mgts-profrow { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;
+  text-align: left; font-family: inherit; color: var(--text); cursor: pointer;
+  background: transparent; border: 0; border-top: 1px solid var(--surface0); }
+.mgts-profrow:first-child { border-top: 0; }
+.mgts-profrow.on { background: rgba(182, 146, 230, .14); }
+.mgts-profrow:disabled { opacity: .35; cursor: not-allowed; }
+.mgts-profmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mgts-profrow.locked .mgts-profmain { opacity: .5; }
+.mgts-profname { font-size: 11.5px; font-weight: 700; }
+.mgts-profprice { font-weight: 400; color: var(--overlay0); }
+.mgts-profprice.gold { color: var(--gold); }
+.mgts-profdesc { font-size: 10px; color: var(--subtext); line-height: 1.4; }
+.mgts-check { font-size: 11px; color: var(--lavender); }
+.mgts-memtag { flex: none; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--gold); color: var(--gold); background: var(--base); white-space: nowrap; }
+.mgts-profiles.phone .mgts-profrow { min-height: 44px; align-items: center; }
+
+/* the gold members notice (6c): opaque, gold border; pops toward open space (above) */
+.mgts-notice { position: absolute; z-index: 300; left: 0; bottom: calc(100% + 8px); width: 240px;
+  padding: 9px 11px; border-radius: 10px; background: var(--base); border: 1px solid var(--gold);
+  font-size: 10.5px; line-height: 1.5; color: var(--subtext);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .6); animation: mgtsPop .42s cubic-bezier(.2, .9, .24, 1) both; }
+.mgts-notice b { color: var(--text); }
+.mgts-notice.inline { position: static; width: auto; box-shadow: none; background: var(--mantle);
+  font-size: 11px; line-height: 1.45; }
+
+/* ---- decision 1: the two-way switch, the confirm card, the held notes ---- */
+.mgts-seg { display: flex; gap: 4px; padding: 3px; border-radius: 9px;
+  background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
+.mgts-segbtn { flex: 1 1 0; text-align: center; font-size: 10.5px; font-weight: 600; padding: 5px 0;
+  border-radius: 7px; cursor: pointer; white-space: nowrap; border: 0; background: transparent;
+  color: var(--subtext); font-family: inherit; transition: background .25s, color .25s; }
+.mgts-segbtn.on { font-weight: 700; background: rgba(182, 146, 230, .18); color: var(--text); }
+.mgts-seg.phone { border-radius: 12px; }
+.mgts-seg.phone .mgts-segbtn { min-height: 40px; font-size: 12px; border-radius: 9px; }
+
+.mgts-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 9px;
+  background: rgba(12, 10, 28, .92); border: 1px solid color-mix(in oklab, var(--peach) 40%, transparent);
+  animation: mgtsPop .42s cubic-bezier(.2, .9, .24, 1) both; }
+.mgts-confirm-t { font-size: 10.5px; font-weight: 700; color: var(--peach); }
+.mgts-confirm-b { font-size: 10px; line-height: 1.45; color: var(--subtext); }
+.mgts-confirm-acts { display: flex; gap: 6px; }
+.mgts-btn { font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  white-space: nowrap; border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  font-family: inherit; }
+.mgts-btn.primary { font-weight: 700; background: var(--lavender); border-color: var(--lavender); color: var(--base); }
+.mgts-confirm.sheet { border: 0; background: transparent; padding: 4px 16px 18px; gap: 10px; animation: none; }
+.mgts-confirm.sheet .mgts-confirm-t { font-size: 14px; }
+.mgts-confirm.sheet .mgts-confirm-b { font-size: 12.5px; }
+.mgts-confirm.sheet .mgts-btn { min-height: 44px; font-size: 13px; flex: 1 1 0; border-radius: 12px; }
+
+.mgts-held { opacity: .38; transition: opacity .3s; }
+.mgts-heldnote { font-size: 9.5px; color: var(--overlay0); }
+
+.mgts-unlheld { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px;
+  border: 1px dashed var(--surface1); font-size: 10.5px; color: var(--subtext); }
+.mgts-unlmark { font-size: 12px; color: var(--overlay0); }
+.mgts-unlheld.phone { font-size: 11px; padding: 8px 10px; }
+
+/* the context slots: 4:5, three to a row; slot 1 wears the selection ring */
+.mgts-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.mgts-slot { position: relative; aspect-ratio: 4 / 5; border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--surface1); background: rgba(12, 10, 28, .7); }
+.mgts-slot.first { border-color: var(--lavender); }
+.mgts-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mgts-slotn { position: absolute; left: 3px; bottom: 3px; font-size: 8px; padding: 1px 4px; border-radius: 3px;
+  background: rgba(5, 4, 13, .78); color: var(--mauve); }
+.mgts-slotx { position: absolute; right: 3px; top: 3px; width: 18px; height: 18px; display: grid;
+  place-items: center; border-radius: 6px; border: 0; background: rgba(5, 4, 13, .6); color: var(--text);
+  font-size: 11px; line-height: 1; cursor: pointer; padding: 0; }
+.mgts-slot.add { border-style: dashed; display: grid; place-items: center; font-size: 9.5px;
+  color: var(--subtext); text-align: center; line-height: 1.3; cursor: pointer; font-family: inherit; }
+.mgts-slot.add:hover { border-color: var(--lavender); color: var(--text); }
+.mgts-slots.phone { gap: 8px; }
+.mgts-slots.phone .mgts-slot { border-radius: 10px; }
+.mgts-slots.phone .mgts-slotx { width: 28px; height: 28px; font-size: 14px; }
+.mgts-slotnote { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
+.mgts-slotnote code { font-family: ui-monospace, monospace; color: var(--mauve); font-size: 1em; }
+
+/* ---- decision 5: creativity stops (8 px desktop, 12 px phone) ---- */
+.mgts-creat { display: flex; flex-direction: column; gap: 6px; }
+.mgts-creathead { display: flex; align-items: baseline; gap: 7px; }
+.mgts-creathead .sp { flex: 1 1 auto; }
+.mgts-creatname { font-size: 11px; font-weight: 600; color: var(--text); }
+.mgts-creatsub { font-size: 9.5px; color: var(--overlay0); }
+.mgts-settag { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 5px;
+  border: 1px solid var(--surface1); color: var(--overlay0); white-space: nowrap; }
+.mgts-stops { display: flex; gap: 3px; }
+.mgts-cstop { flex: 1 1 0; height: 8px; border-radius: 3px; border: 0; padding: 0; cursor: pointer;
+  background: var(--surface0); transition: background .25s, opacity .25s; }
+.mgts-cstop.lit { background: var(--lavender); }
+.mgts-cstop:disabled { cursor: not-allowed; }
+.mgts-cstop.locked { opacity: .35; }
+.mgts-stoplabels { display: flex; font-size: 8.5px; color: var(--overlay0); }
+.mgts-stoplabels span { flex: 1 1 0; }
+.mgts-stoplabels span:nth-child(2) { text-align: center; }
+.mgts-stoplabels span:nth-child(3) { text-align: right; }
+.mgts-creat.phone .mgts-creatname { font-size: 13px; }
+.mgts-creat.phone .mgts-creatsub { font-size: 11px; }
+.mgts-creat.phone .mgts-stops { gap: 4px; min-height: 44px; align-items: center; }
+.mgts-creat.phone .mgts-cstop { height: 12px; }
+
+/* ---- decisions 6 + 7: the Frame slab ---- */
+.mgts-orient { display: flex; gap: 4px; padding: 3px; border-radius: 10px;
+  background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); transition: opacity .3s; }
+.mgts-orbtn { flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 30px; font-size: 11px; font-weight: 600; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  border: 1px solid transparent; background: transparent; color: var(--subtext); font-family: inherit;
+  transition: background .25s, color .25s, border-color .25s; }
+.mgts-orbtn.on { font-weight: 700; border-color: var(--lavender); background: rgba(182, 146, 230, .2); color: var(--text); }
+.mgts-orient.phone .mgts-orbtn { min-height: 44px; font-size: 12px; }
+.mgts-glyph { display: block; border-radius: 3px; box-sizing: border-box; flex: none;
+  border: 1.5px solid var(--overlay0); background: transparent;
+  transition: width .3s, height .3s, border-color .2s, background .2s; }
+.mgts-glyph.on { border-color: var(--lavender); background: rgba(182, 146, 230, .22); }
+
+.mgts-ratios { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 6px; align-items: flex-end;
+  min-width: 0; }
+.mgts-ratio { position: relative; width: 36px; height: 46px; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-end; gap: 4px; cursor: pointer; padding: 0; border: 0;
+  background: none; font-family: inherit; }
+.mgts-ratio:hover { opacity: .85; }
+.mgts-ratio:disabled { opacity: .35; cursor: not-allowed; }
+.mgts-ratiolbl { font-size: 8.5px; color: var(--overlay0); font-family: ui-monospace, monospace; white-space: nowrap; }
+.mgts-ratio.on .mgts-ratiolbl { color: var(--text); }
+.mgts-dot { position: absolute; top: 0; right: 2px; width: 4px; height: 4px; border-radius: 50%; }
+.mgts-dot.web { background: var(--lavender); }
+.mgts-dot.new { background: var(--emerald); }
+.mgts-autoglyph { width: 28px; height: 28px; border-radius: 6px; box-sizing: border-box; display: grid;
+  place-items: center; font-size: 12px; border: 1.5px dashed var(--overlay0); color: var(--overlay0);
+  transition: all .2s; }
+.mgts-autoglyph.on { border: 1.5px solid var(--lavender); background: rgba(182, 146, 230, .22); color: var(--text); }
+.mgts-ratio.auto.on .mgts-ratiolbl { color: var(--text); }
+.mgts-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 8.5px; color: var(--overlay0); }
+.mgts-legend span { display: flex; align-items: center; gap: 4px; }
+.mgts-legend .mgts-dot { position: static; }
+/* phone: the same set in a two-row scroll strip */
+.mgts-ratios.phone { display: grid; grid-template-columns: repeat(6, 44px); justify-content: start;
+  overflow-x: auto; gap: 8px 10px; padding-bottom: 4px; scrollbar-width: none; }
+.mgts-ratios.phone .mgts-ratio { width: 44px; height: 52px; }
+
+.mgts-tiers { position: relative; display: flex; gap: 5px; padding-top: 6px; transition: opacity .3s; }
+.mgts-tier { position: relative; flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+  gap: 1px; padding: 5px 0; border-radius: 8px; cursor: pointer; font-family: inherit; color: var(--text);
+  border: 1px solid var(--surface1); background: transparent;
+  transition: border-color .2s, background .2s, transform .2s; }
+.mgts-tier.on { border-color: var(--lavender); background: rgba(182, 146, 230, .14); }
+.mgts-tier.lift { transform: translateY(-2px); z-index: 301; }
+.mgts-tier:disabled { cursor: not-allowed; }
+.mgts-tiername { font-size: 11px; font-weight: 700; }
+.mgts-tierdims { font-size: 8.5px; color: var(--overlay0); }
+.mgts-tier.locked .mgts-tiername, .mgts-tier.locked .mgts-tierdims { opacity: .45; }
+.mgts-memtag.tier { position: absolute; top: -7px; right: 4px; }
+.mgts-tiers.phone { gap: 6px; }
+.mgts-tiers.phone .mgts-tier { min-height: 48px; justify-content: center; border-radius: 10px; }
+.mgts-tiers.phone .mgts-tiername { font-size: 12px; }
+.mgts-tiers.phone .mgts-tier.locked .mgts-tiername { color: var(--overlay0); opacity: 1; }
+
+.mgts-sizeline { font-size: 10px; color: var(--overlay0); border-radius: 7px; }
+.mgts-sizeline.auto { padding: 5px 8px; background: rgba(182, 146, 230, .12); color: var(--mauve); }
+
+/* ---- decision 2: the @image composer ---- */
+.mgat { position: relative; }
+.mgat-ce { white-space: pre-wrap; word-break: break-word; outline: none; }
+.mgat-ce:empty::before { content: attr(data-placeholder); color: var(--overlay0); pointer-events: none; }
+.mgat-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px 1px 2px; margin: 0 2px;
+  border-radius: 6px; background: rgba(182, 146, 230, .18); border: 1px solid rgba(182, 146, 230, .45);
+  vertical-align: 1px; line-height: 1.3; user-select: all; cursor: default; }
+.mgat-chip img, .mgat-chipph { width: 14px; height: 14px; border-radius: 3px; object-fit: cover; display: inline-block; flex: none; }
+.mgat-chipph { background: var(--surface1); }
+.mgat-chiptag { font-size: .9em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--mauve); }
+.mgat-chip.dead { background: color-mix(in oklab, var(--peach) 12%, transparent);
+  border-color: color-mix(in oklab, var(--peach) 60%, transparent); }
+.mgat-chip.dead .mgat-chiptag { color: var(--peach); font-family: inherit; }
+.mgat-chip.dead .mgat-chipph { border: 1px dashed var(--peach); background: transparent; box-sizing: border-box; }
+.mgat-menu { position: absolute; z-index: 300; width: 190px; display: flex; flex-direction: column; padding: 4px;
+  border-radius: 10px; background: var(--base); border: 1px solid var(--surface1);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .6); animation: mgtsPop .42s cubic-bezier(.2, .9, .24, 1) both; }
+.mgat-menu.up { transform: translateY(-100%); animation: none; }
+.mgat-opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; border: 0;
+  background: transparent; color: var(--subtext); cursor: pointer; font-family: inherit; text-align: left; }
+.mgat-opt.on { background: rgba(182, 146, 230, .16); color: var(--text); }
+.mgat-opt .sp { flex: 1 1 auto; }
+.mgat-opt img, .mgat-optph { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex: none; display: block; }
+.mgat-optph { border: 1px dashed var(--surface1); box-sizing: border-box; }
+.mgat-opttag { font-size: 11px; font-family: ui-monospace, monospace; }
+.mgat-optkey { font-size: 9px; color: var(--overlay0); }
+.mgat-opt.add { border-top: 1px solid var(--surface0); border-radius: 0 0 7px 7px; color: var(--lavender); font-size: 11px; }
+/* phone: the suggestions as a chip row under the prompt while it has focus */
+.mgat-row { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
+.mgat-rowchip { min-height: 40px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 10px;
+  border: 1px solid var(--surface1); background: transparent; color: var(--text); font-size: 12px; font-family: inherit;
+  cursor: pointer; }
+.mgat-rowchip img, .mgat-rowchip .mgat-optph { width: 18px; height: 18px; border-radius: 4px; }
+
+@keyframes mgtsPop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .mgts-notice, .mgts-confirm, .mgat-menu { animation: none; }
+  .mgts-tier.lift { transform: none; }
+}
+
+/* ---- the RecipeRow STUB's look (lane w2-recipes replaces the row and its styles) ---- */
+.rcp-row { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid var(--surface0); }
+.rcp-head { display: flex; align-items: center; gap: 8px; padding-top: 6px; }
+.rcp-head .sp { flex: 1 1 auto; }
+.rcp-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.rcp-count { font-size: 9.5px; color: var(--overlay0); font-family: ui-monospace, monospace; }
+.rcp-chips { display: flex; gap: 6px; flex-wrap: wrap; transition: opacity .3s; }
+.rcp-chips.held { opacity: .38; }
+.rcp-chip { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border-radius: 8px;
+  border: 1px solid var(--surface1); }
+.rcp-chip img, .rcp-ph { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; display: block;
+  background: var(--surface1); }
+.rcp-name { font-size: 10.5px; white-space: nowrap; color: var(--text); }
+.rcp-x { border: 0; background: none; color: var(--overlay0); cursor: pointer; font-size: 10px; padding: 0; }
+.rcp-browse { font-size: 10.5px; padding: 5px 9px; border-radius: 8px; border: 1px dashed var(--surface1);
+  color: var(--lavender); background: transparent; font-family: inherit; white-space: nowrap; }
+.rcp-browse:disabled { opacity: .6; cursor: default; }
+.rcp-note { font-size: 9.5px; line-height: 1.45; color: var(--subtext); }
+.rcp-chips.held + .rcp-note { color: var(--overlay0); }
+
+/* ---- T3a: the Lightbox edit bar (handoff frame G): a pill over the stage foot, 72% wide, clear of
+   ‹ ›, above the prompt row; the price in mono before the send button ---- */
+.mgteb { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: 72%;
+  max-width: 760px; z-index: 4; display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  user-select: text; -webkit-user-select: text; }
+.mgteb-pill { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 16px; border-radius: 999px;
+  background: rgba(12, 10, 28, .94); border: 1px solid var(--surface1); box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
+  transition: border-color .2s; }
+.mgteb-pill:focus-within { border-color: var(--lavender); }
+.mgteb-input { flex: 1 1 auto; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text);
+  font-family: inherit; font-size: 13px; padding: 6px 0; }
+.mgteb-input::placeholder { color: var(--overlay0); }
+.mgteb-cost.cost-badge.compact { border: 0; background: transparent; padding: 0; min-height: 0; box-shadow: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--overlay0); }
+.mgteb-cost .mgc-div, .mgteb-cost .mgc-lab, .mgteb-cost .mgc-sub { display: none; }
+.mgteb-go { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; border: 0;
+  background: var(--lavender); color: var(--base); font-size: 14px; font-weight: 700; cursor: pointer; }
+.mgteb-go:disabled { opacity: .4; cursor: not-allowed; }
+.mgteb-line { align-self: center; max-width: 100%; font-size: 11px; line-height: 1.4; padding: 4px 10px; border-radius: 8px;
+  background: rgba(12, 10, 28, .9); color: var(--subtext); }
+.mgteb-line.err { color: var(--peach); }
+.mgteb-line.ok { color: var(--emerald); }
+/* phone: a 44 px pill between the stage and the action row */
+.mgteb.phone { position: static; transform: none; width: auto; max-width: none; margin: 8px 12px 0; }
+.mgteb.phone .mgteb-pill { min-height: 44px; box-sizing: border-box; padding: 5px 5px 5px 14px; }
+.mgteb.phone .mgteb-input { font-size: 16px; }
+.mgteb.phone .mgteb-go { width: 36px; height: 36px; }
+
+/* ---- the phone Create tab (frame E) ---- */
+.cm-at.mgat-ce { min-height: 6.4em; line-height: 1.9; }
+.cm-autorow { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px;
+  font-size: 12.5px; color: var(--text); cursor: pointer; }
+.cm-autorow span:first-child { flex: 1 1 auto; }
+.cm-autorow input { position: absolute; opacity: 0; width: 0; height: 0; }
+.cm-autotrack { position: relative; flex: none; width: 38px; height: 22px; border-radius: 999px;
+  background: var(--surface1); transition: background .25s; }
+.cm-autotrack i { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--base); transition: left .25s; }
+.cm-autorow input:checked + .cm-autotrack { background: var(--lavender); }
+.cm-autorow input:checked + .cm-autotrack i { left: 18px; }
+.cm-autorow input:focus-visible + .cm-autotrack { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.cm-sizeline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cm-tab .mgts-seg, .cm-tab .mgts-slots, .cm-tab .mgts-profiles, .cm-tab .mgts-unlheld,
+.cm-tab .rcp-row, .cm-tab .mgts-creat, .cm-tab .mgts-orient, .cm-tab .mgts-tiers { margin-bottom: 10px; }
+.cm-tab .rcp-row { border-top: 0; }
+/* the bar's field and the composer's @ prompt carry no ring of their own: the pill's and the
+   composer's borders are the focus ring (the dock's own rule, dock.css .mgdock-prompt) */
+.mgteb .mgteb-input, .mgteb .mgteb-input:focus { background: transparent; border: 0; box-shadow: none; }
+.mgteb .mgteb-input:focus-visible, .mgat-ce:focus-visible { outline: none; }
+.mgteb-cost .mgc-val { color: var(--overlay0); font-size: 11px; font-weight: 500; }
+.mgteb-cost[data-state="checking"] { font-size: 10px; }

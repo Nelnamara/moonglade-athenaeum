@@ -1891,7 +1891,10 @@ ${"=".repeat(48)}
         prompt: m.prompt || "",
         is_video: m.is_video === "1",
         duration: m.duration || "",
-        is_nsfw: m.is_nsfw === "1"
+        is_nsfw: m.is_nsfw === "1",
+        // the picture's size, when the catalog knows it (Session H: the dock's Auto frame)
+        w: Number(m.w) || 0,
+        h: Number(m.h) || 0
       });
     };
     const doUpload = () => {
@@ -2624,7 +2627,16 @@ ${"=".repeat(48)}
       main = note3 || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const adjTxt = state === "free" || state === "paid" ? adjustedText(d.adjusted) : "";
-    const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+    const adj0 = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+    const brk = [];
+    if (state === "paid" && Number(d.context_images) > 0) {
+      const n = Number(d.context_images);
+      brk.push(fmt2(n) + (n === 1 ? " context image" : " context images") + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt2(d.context_charge) : "") + (props.laneHeld ? " \xB7 not Unlimited" : ""));
+    }
+    if (state === "paid" && d.profile && Number(d.profile_extra) > 0) {
+      brk.push("profile " + d.profile + " +" + fmt2(d.profile_extra));
+    }
+    const adj = [brk.join(" \xB7 "), adj0].filter(Boolean).join(" \xB7 ");
     if (adj) tip = (tip ? tip + " " : "") + adj + ".";
     const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
     const text = main + (lane ? " \u221E" : "") + (noteLine ? " \xB7 " + noteLine.text : "");
@@ -2667,7 +2679,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack, count, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -2717,7 +2729,7 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
+    const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel, laneHeld });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;

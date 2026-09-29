@@ -51,8 +51,14 @@ describe("C1 / §8.1 -- the payload carries the flag whenever the switch is on",
   });
   test("applying a version sets the offer and never touches the switch", () => {
     const src = read("../../gallery/src/gen/useGenerate.js");
-    assert.match(src, /unlimited: v\.unlimited \|\| null/);
+    // The version's fields moved into genCore.versionPatch (Session H: the dock and the Lightbox
+    // edit bar read a version the same way); the hook still applies it on every seam.
+    const core = read("../../gallery/src/gen/genCore.js");
+    assert.match(core, /unlimited: v\.unlimited \|\| null/);
+    assert.match(src, /const applyFromVersion = \(v\) => versionPatch\(v\);/);
     assert.doesNotMatch(src, /unlimited: false/, "a model switch must not turn the lane off");
+    assert.doesNotMatch(core.slice(core.indexOf("export function versionPatch"),
+      core.indexOf("function cget")), /unlimited: false/);
     assert.match(src, /s\.mode, s\.steps, s\.unlimited,/, "the switch must re-price");
   });
 });

@@ -62,6 +62,8 @@ import "../styles/cost-badge.css";
      count      — (stack) how many images this job makes; >1 is named on the sub line.
      balance    — (stack) the account's credit balance, named last on the sub line.
      cardLabel  — fallback name for the covering card when the server didn't send one.
+     laneHeld   — (Session H) Unlimited Mode is offered on this model but not sent with this
+                  request (the Context side): the context-image note adds "not Unlimited".
      onCost     — called on every state push with the old mg-cost detail
                   {state, settled, cost, free, cards, card_name, card_expires, text, raw}
                   plus card_short (true only on the paid-because-short case above) and
@@ -221,7 +223,23 @@ function build(view, props) {
   // field the model does not take. Said on the settled states, in the note line, BEFORE the
   // spend, in the same words the submit's result line uses (genCore.adjustedText).
   const adjTxt = (state === "free" || state === "paid") ? adjustedText(d.adjusted) : "";
-  const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+  const adj0 = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+  // Session H (Tsubaki3 Generate Handoff, frame A + T1a): the server's price breakdown for a
+  // PAID image quote -- "N context images +X · not Unlimited" and "profile Ultra +X" -- in the
+  // SAME one note line as the receipt, never a line of its own. The figures are the server's
+  // (/api/price context_charge / profile_extra); the badge only words them. `laneHeld` is the
+  // host's fact that Unlimited Mode is offered but not sent here (the Context side).
+  const brk = [];
+  if (state === "paid" && Number(d.context_images) > 0) {
+    const n = Number(d.context_images);
+    brk.push(fmt(n) + (n === 1 ? " context image" : " context images")
+      + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt(d.context_charge) : "")
+      + (props.laneHeld ? " · not Unlimited" : ""));
+  }
+  if (state === "paid" && d.profile && Number(d.profile_extra) > 0) {
+    brk.push("profile " + d.profile + " +" + fmt(d.profile_extra));
+  }
+  const adj = [brk.join(" · "), adj0].filter(Boolean).join(" · ");
   if (adj) tip = (tip ? tip + " " : "") + adj + ".";
   // ONE note line, never a line of its own ("copy in an existing line"): the receipt joins
   // the block form's existing note -- after a free card's expiry or the card-short sentence,
@@ -281,7 +299,7 @@ function detailOf(m) {
 const IDLE = { state: "idle", note: "", msg: "", raw: null };
 
 const CostBadge = forwardRef(function CostBadge(props, ref) {
-  const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
+  const { hint, warn, compact, stack, count, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
   const [view, setView] = useState(IDLE);
 
   // Latest view/props/text for the imperative getters and the onCost effect (which fire
@@ -319,7 +337,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     }
   }, [view]);
 
-  const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
+  const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel, laneHeld });
   mRef.current = m;
   // Short borrows the amber warn treatment (settled paid, flagged) and adds its own attribute so
   // a host or test can tell "card short" from "host warned" without parsing the sentence.

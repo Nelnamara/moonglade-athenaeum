@@ -107,7 +107,7 @@ import "../styles/image-details-mobile.css";
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
-  onOpenLightbox, onPublish, onEnterContest,
+  onOpenLightbox, onPublish, onEnterContest, onTsubakiEdit,
 }) {
   const [closing, setClosing] = useState(false);
   const [mediaOk, setMediaOk] = useState(true);
@@ -269,6 +269,14 @@ export default function ImageDetailsMobile({
             ? <button type="button" className="idm-chip"
                 onClick={() => onEnterContest(row.media_id)}>★ Enter contest</button>
             : null}
+          {/* Session H decision 2: "Edit with Tsubaki" -- the Create tab on Tsubaki.3 with this
+              picture as @image1 and the prompt seeded. Stills only. */}
+          {onTsubakiEdit && row.is_video !== "1" ? (
+            <button type="button" className="idm-chip"
+              onClick={() => onTsubakiEdit({ media_id: row.media_id,
+                thumb: "/thumbs/" + encodeURIComponent(row.media_id) + ".jpg",
+                w: Number(row.width) || 0, h: Number(row.height) || 0 })}>✦ Edit with Tsubaki</button>
+          ) : null}
           <button type="button" className="idm-chip" onClick={() => copy(promptText, "prompt")}>
             {copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}
           </button>

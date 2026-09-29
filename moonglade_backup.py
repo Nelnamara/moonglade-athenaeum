@@ -3779,7 +3779,8 @@ def _empty_version_meta():
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
             "compatibility": {}, "restrictions": {}, "profiles": None,
             "quality_tag": None, "size_rule": None, "context_images": None,
-            "unlimited": None}
+            "unlimited": None, "profile_rows": None, "size_tiers": None,
+            "context_max": None, "creativity": False}
 
 
 def _version_quality_tag(extra):
@@ -3878,6 +3879,10 @@ def _version_row_to_meta(r):
         "size_rule": None,
         "context_images": None,
         "unlimited": None,
+        "profile_rows": None,
+        "size_tiers": None,
+        "context_max": None,
+        "creativity": False,
     }
 
 
@@ -3919,7 +3924,28 @@ def _attach_profiles(session, meta):
     meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
                         if isinstance(p, dict) and p.get("profileName")
                         and p.get("profileFlag") != "hidden"]
+    # Session H T1a: the same rows as the Pro / Ultra rows under the model -- name, PixAI's
+    # title and description, the live base price (the rows' "+N" is its difference from the
+    # default row's) and the membership flags. Hidden rows are left out exactly as above.
+    meta["profile_rows"] = [_profile_row(p) for p in rows
+                            if isinstance(p, dict) and p.get("profileName")
+                            and p.get("profileFlag") != "hidden"]
     return meta
+
+
+def _profile_row(p):
+    """One /inference-profiles row -> the drawer's profile row (Session H T1a)."""
+    def _num(v):
+        try:
+            return int(v) if v is not None and not isinstance(v, bool) else None
+        except (TypeError, ValueError):
+            return None
+    return {"name": str(p.get("profileName")).strip(),
+            "title": str(p.get("title") or p.get("profileName") or "").strip()[:40],
+            "desc": str(p.get("desc") or "").strip()[:200],
+            "base_price": _num(p.get("basePrice")),
+            "flag": str(p.get("profileFlag") or ""),
+            "required_tier": _num(p.get("requiredMembershipTier")) or 0}
 
 
 def _attach_features(session, meta):
@@ -3969,6 +3995,13 @@ def _attach_features(session, meta):
     # step-8 rule), so the drawer carries a rule exactly then.
     meta["size_rule"] = (_size_rule(mtype, ranges, meta.get("restrictions"))
                          if feats is not None else None)
+    # Session H: the named tiers off the SAME cached /size-config read (decision 6), the live
+    # context-image max (decision 1), and whether the prompt helper is a creativity level
+    # (decision 5 -- MMDIT26B, the same /features answer the build and the gate read).
+    meta["size_tiers"] = [dict(t) for t in getattr(ranges, "tiers", ())] or None
+    meta["context_max"] = (_model_context_max(session, vid) or CONTEXT_IMAGES_FALLBACK_MAX) \
+        if meta["context_images"] else None
+    meta["creativity"] = mtype == "MMDIT26B_MODEL"
     return meta
 
 
@@ -8020,6 +8053,12 @@ def _gen_parameters(args):
     else:
         params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
                                   "forcePromptHelperDetectionSide": "server"}
+    # Session H: the drawer's context images go out as they are (catalog / upload ids, never
+    # through an input resolver -- the quote and the spend build the identical list). Only the
+    # web namespace carries the attribute, so the CLI's shape is unchanged.
+    ctx_ids = list(getattr(args, "context_images", None) or [])
+    if ctx_ids:
+        params["contextImages"] = ctx_ids
     # Reference image (the site's "use as reference" = plain img2img): a top-level
     # mediaId + strength on an otherwise standard submit. Banked from a real capture
     # 2026-07-04 (task 2030052367400863154): {..., mediaId, strength: 0.55}.
@@ -10048,6 +10087,8 @@ _features_cache = {}                        # version_id -> (fetched_at_monotoni
 _size_config_cache = {}                     # version_id -> (fetched_at_monotonic, ranges|None)
 _CONTEXT_REF_LORA_REFUSAL = ("Tsubaki.3 can't combine a reference image with LoRAs "
                              "— remove one")
+_CONTEXT_LORA_REFUSAL = ("Tsubaki.3 can't combine context images with LoRAs — switch to "
+                         "LoRAs or remove them")
 
 
 def _cached_version_read(cache, session, version_id, suffix, parse):
@@ -10086,21 +10127,75 @@ def _parse_features(data):
     return {"model_type": str(data.get("modelType") or "").strip().upper(), "status": status}
 
 
+class _SizeRanges(list):
+    """The gate's /size-config answer: a plain list of (minWidth, maxWidth, minHeight,
+    maxHeight) tuples -- everything that reads ranges sees exactly that -- carrying the same
+    body's named tiers on `.tiers` for the drawer (Session H decision 6, _size_tiers_meta), so
+    the one cached GET feeds both and the drawer's tier row costs no second read."""
+    tiers = ()
+
+
 def _parse_size_config(data):
     """/size-config body -> [(minWidth, maxWidth, minHeight, maxHeight), ...], or None for a
-    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges)."""
+    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges). The list
+    is a _SizeRanges whose `.tiers` keeps each named range with its presets (Session H)."""
     if not isinstance(data, dict) or not isinstance(data.get("ranges"), list):
         return None
-    out = []
+    out = _SizeRanges()
+    tiers = []
     for r in data["ranges"]:
         if not isinstance(r, dict):
             continue
         try:
-            out.append((int(r["minWidth"]), int(r["maxWidth"]),
-                        int(r["minHeight"]), int(r["maxHeight"])))
+            rng = (int(r["minWidth"]), int(r["maxWidth"]),
+                   int(r["minHeight"]), int(r["maxHeight"]))
         except (KeyError, TypeError, ValueError):
             continue
+        out.append(rng)
+        tier = _size_tier_row(r, rng)
+        if tier is not None:
+            tiers.append(tier)
+    out.tiers = tuple(tiers)
     return out
+
+
+def _size_tier_row(r, rng):
+    """One /size-config range -> the drawer's tier row, or None when it is not a named range
+    with a usable default preset. Presets keep PixAI's portrait labels ("3:5", "9:16", ...)."""
+    name = str(r.get("name") or "").strip()
+    if not name or len(name) > 8:
+        return None
+    try:
+        step = int(r.get("step") or 16)
+    except (TypeError, ValueError):
+        step = 16
+    presets = []
+    default = None
+    for pr in r.get("presets") or []:
+        if not isinstance(pr, dict):
+            continue
+        try:
+            w, h = int(pr["width"]), int(pr["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        row = {"ratio": str(pr.get("ratioLabel") or "").strip(), "width": w, "height": h}
+        presets.append(row)
+        if pr.get("id") and pr.get("id") == r.get("defaultPresetId"):
+            default = [w, h]
+    if default is None and presets:
+        default = [presets[0]["width"], presets[0]["height"]]
+    if default is None:
+        return None
+    try:
+        required = int(r.get("requiredMembershipTier") or 0)
+    except (TypeError, ValueError):
+        required = 0
+    return {"name": name, "min": min(rng[0], rng[2]), "max": max(rng[1], rng[3]),
+            "step": step if step > 0 else 16, "required_tier": required,
+            "access": str(r.get("accessStatus") or ""), "default": default,
+            "presets": presets}
 
 
 def _model_features(session, version_id):
@@ -10115,6 +10210,53 @@ def _model_size_config(session, version_id):
     its own per-range rules, and its projected XL range equals /size-config's."""
     return _cached_version_read(_size_config_cache, session, version_id, "/size-config",
                                 _parse_size_config)
+
+
+_model_config_cache = {}                    # version_id -> (fetched_at_monotonic, parsed|None)
+
+
+def _parse_model_config_context_max(data):
+    """/v2/model-config/<version>?source=pixai-app -> contextImages.media.maxCount (int >= 1),
+    or None when the body does not carry it."""
+    try:
+        cfg = data["configs"]["pixai-app"]["params"]["contextImages"]["media"]["maxCount"]
+        n = int(cfg)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return n if n >= 1 else None
+
+
+def _model_context_max(session, version_id):
+    """The live context-image max for a version (Session H decision 1: "up to 3 slots, live
+    max"), read from GET /v2/model-config/<version>?source=pixai-app with the gate's cache
+    discipline (an hour on success, a minute on failure, short timeout, fail soft to None --
+    the caller then uses CONTEXT_IMAGES_FALLBACK_MAX). Read-only."""
+    vid = str(version_id or "").strip()
+    if not vid:
+        return None
+    now = time.monotonic()
+    hit = _model_config_cache.get(vid)
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    try:
+        value = _parse_model_config_context_max(
+            _rest_get(session, "/model-config/" + vid, params={"source": "pixai-app"},
+                      timeout=_GATE_READ_TIMEOUT))
+    except Exception:
+        value = None
+    _model_config_cache[vid] = (now, value)
+    return value
+
+
+def features_resolver(session):
+    """RequestResolver.features: version_id -> the gate's own cached /features read (see
+    _parse_features), or None. Session H: build_request decides the creativity shape from the
+    SAME architecture the gate reads (review B3), never from the version row's own type."""
+    def _feats(version_id):
+        return _model_features(session, version_id)
+    return _feats
 
 
 def _context_images_on(feats):
@@ -10203,6 +10345,51 @@ def _lora_out_of_range(weight, lo, hi):
     return max(lo, min(hi, w))
 
 
+_CREATIVITY_LEVELS = ("off", "low", "medium")
+# Tsubaki.3's live context-image max is model-config's contextImages.media.maxCount; this is the
+# value every capture shows, used only when that read fails (BUILD-w2-gen §5).
+CONTEXT_IMAGES_FALLBACK_MAX = 3
+_CONTEXT_UNREAD = ("Couldn't read this model's settings from PixAI, so context images can't be "
+                   "checked — try again in a minute")
+_CONTEXT_NOT_TAKEN = "This model doesn't take context images"
+
+
+def _check_context_images(session, p):
+    """Session H (BUILD-w2-gen §5, review S2/S4): refuse a dict carrying `contextImages` that
+    PixAI's own site would never send. Raises PixAIError; returns nothing. Order: the shape of
+    the list, then the model (/features must answer MMDIT26B with contextImages on), then the
+    combinations the feature excludes, then the live max."""
+    ids = p.get("contextImages")
+    if not isinstance(ids, list) or not ids \
+            or not all(isinstance(x, str) and x.strip() for x in ids):
+        raise PixAIError("context images must be a list of picture ids")
+    if len(set(ids)) != len(ids):
+        raise PixAIError("The same picture is in two context slots — remove one")
+    if "chat" in p or p.get("enlarge") or p.get("upscale"):
+        raise PixAIError("An edit or an upscale can't carry context images")
+    if p.get("mediaId") or "strength" in p:
+        raise PixAIError("Send context images or a reference picture, not both")
+    lmap, lpar = p.get("lora"), p.get("loraParameters")
+    if (isinstance(lmap, dict) and lmap) or (isinstance(lpar, list) and lpar):
+        raise PixAIError(_CONTEXT_LORA_REFUSAL)
+    if p.get("recipeIds"):
+        raise PixAIError("Recipes are held while context images are on — send one or the other")
+    if p.get("modelStyle"):
+        raise PixAIError("A style can't ride with context images — PixAI would drop the images")
+    if p.get("lane"):
+        raise PixAIError("Unlimited Mode can't use a reference picture — remove it")
+    feats = _model_features(session, p.get("modelId"))
+    if feats is None:
+        raise PixAIError(_CONTEXT_UNREAD)
+    if not _context_images_on(feats):
+        raise PixAIError(_CONTEXT_NOT_TAKEN)
+    mx = _model_context_max(session, p.get("modelId")) or CONTEXT_IMAGES_FALLBACK_MAX
+    if len(ids) > mx:
+        raise PixAIError("{} takes up to {} context images — remove {}".format(
+            "Tsubaki.3" if str(p.get("modelId")) in UNLIMITED_VERSIONS else "This model",
+            mx, len(ids) - mx))
+
+
 def _gate_image_params(session, params):
     """THE per-model image gate: params -> (params, adjusted). See the section comment.
 
@@ -10248,12 +10435,31 @@ def _gate_image_params(session, params):
                     break
             if default:
                 _own()["inferenceProfile"] = default
+        else:
+            # Session H (BUILD-w2-gen, review S1b): a profile the version does not LIST is
+            # refused here, at build, rather than quoted and then rejected and re-run on the
+            # default by submit_generation's fallback -- a quote for one job and a charge for
+            # another. The FULL list is the authority (hidden profiles included), so nothing
+            # the site itself would send is refused. An unreadable list (None) never refuses.
+            asked = str(p.get("inferenceProfile") or "").strip().lower()
+            names = {str(r.get("profileName") or "").strip().lower()
+                     for r in profiles if isinstance(r, dict)}
+            if asked and names and asked not in names:
+                raise PixAIError("This model doesn't offer the {} profile — pick one it "
+                                 "lists".format(p.get("inferenceProfile")))
         for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
             if k in p:
                 _own().pop(k)
     elif profiles is not None:
         if "inferenceProfile" in p:
             _own().pop("inferenceProfile")
+
+    # --- Session H: a request that already carries context images (BUILD-w2-gen, review S2) --
+    # Checked BEFORE the chat / Upscale / unknown-/features exits below, so no road -- the
+    # drawer, the Lightbox edit bar, a CLI --params-json -- sends a context-image dict that
+    # was not checked here. Every rule is a refusal that costs nothing.
+    if "contextImages" in p:
+        _check_context_images(session, p)
 
     # --- SCOPE_2026-09-26 rules --------------------------------------------------------
     # A chat-kind shape (the Fix's synthesized price shape carries a top-level modelId) is
@@ -10302,11 +10508,15 @@ def _gate_image_params(session, params):
         if "strength" in q:
             adjusted.append({"field": "strength", "asked": q.pop("strength"), "used": None,
                              "why": "a context image carries no strength"})
+    # Whichever road the context images came by (a converted reference above, or Session H's
+    # drawer building them itself), what the feature excludes is not sent -- each a receipt.
+    if p.get("contextImages"):
         for fld, why in (("negativePrompts", "a context image takes no negative prompt "
                                              "(PixAI drops it there too)"),
                          ("colorPalette", "a context image takes no colour palette")):
-            if fld in q:
-                adjusted.append({"field": fld, "asked": q.pop(fld), "used": None, "why": why})
+            if fld in p:
+                adjusted.append({"field": fld, "asked": p[fld], "used": None, "why": why})
+                _own().pop(fld)
 
     # G2 -- strip what the model does not take (T3-05/06/08/10/15).
     stripped = set()
@@ -10342,30 +10552,58 @@ def _gate_image_params(session, params):
         # off -> medium case (review F3). Without context images it is left absent.
         if "promptHelper" not in p and ctx and extra_ok:
             ph, asked = {}, None
-        if isinstance(ph, dict) and "creativity" not in ph and extra_ok:
-            on = bool(ph.get("userWantToEnable",
-                             ph.get("withStage", ph.get("enable", False))))
-            level = "medium" if (on or ctx) else "off"
-            new_ph = {k: v for k, v in ph.items()
-                      if k not in ("withStage", "enable", "userWantToEnable")}
-            new_ph["creativity"] = level
-            new_ph["forcePromptHelperDetectionSide"] = "server"
-            q = _own()
-            q["promptHelper"] = new_ph
-            if ctx and not on:
+        if isinstance(ph, dict) and extra_ok:
+            if "creativity" in ph:
+                # Session H: the drawer builds the creativity shape itself (decision 5's stops,
+                # build_request); a creativity already here is honoured as asked.
+                level = ph.get("creativity")
+                asked = level
+                if level not in _CREATIVITY_LEVELS:
+                    level = "medium"
+                    if not ctx:
+                        adjusted.append({"field": "promptHelper", "asked": asked,
+                                         "used": "medium",
+                                         "why": "the prompt helper runs off, low or medium"})
+            else:
+                on = bool(ph.get("userWantToEnable",
+                                 ph.get("withStage", ph.get("enable", False))))
+                level = "medium" if on else "off"
+                if asked is not None:
+                    asked = level
+            if ctx and level != "medium":
                 adjusted.append({"field": "promptHelper", "asked": asked, "used": "medium",
                                  "why": "a context image runs the prompt helper at medium, "
                                         "as PixAI's own site does"})
-            natural = q.pop("naturalPrompts", None)
-            extra = dict(q["extra"]) if isinstance(q.get("extra"), dict) else {}
+                level = "medium"
+            if "creativity" in ph:
+                # A creativity shape is kept as it came (a stored or --params-json one may
+                # carry the server's own `enable`); only the level can change, and only when
+                # context images force it or the value is not a level at all.
+                new_ph = dict(ph)
+                new_ph["creativity"] = level
+            else:
+                new_ph = {k: v for k, v in ph.items()
+                          if k not in ("withStage", "enable", "userWantToEnable")}
+                new_ph["creativity"] = level
+                new_ph["forcePromptHelperDetectionSide"] = "server"
+            natural = p.get("naturalPrompts")
+            extra = dict(p["extra"]) if isinstance(p.get("extra"), dict) else {}
             if level == "off":
                 extra.pop("naturalPrompts", None)
             elif natural:
                 extra["naturalPrompts"] = natural
-            if extra:
-                q["extra"] = extra
-            else:
-                q.pop("extra", None)
+            # Copy ONLY on a real difference (review S5): an already-gated dict re-gates to the
+            # SAME object, which the backstops in price_task and submit_generation rely on.
+            if new_ph != ph or "naturalPrompts" in p \
+                    or (extra or None) != (p.get("extra") if isinstance(p.get("extra"), dict)
+                                            and p.get("extra") else None):
+                q = _own()
+                q["promptHelper"] = new_ph
+                q.pop("naturalPrompts", None)
+                if extra:
+                    q["extra"] = extra
+                else:
+                    q.pop("extra", None)
 
     # G10 -- LoRA weights held to the architecture's range (T3-19 correction). Only when
     # /features supplied the modelType; lora_weight_range() gives the union -2..2 (today's
@@ -10507,6 +10745,13 @@ UNLIMITED_LANE = "infinite"
 # The versions the lane is offered on: PixAI's own site asks the status for Tsubaki.3's id and
 # no other (§8.4). Not "any MMDIT26B" -- Flash is MMDIT26B too and has no lane.
 UNLIMITED_VERSIONS = frozenset(("2024383379556065549",))
+# Session H (decision 2 / T3a): a Tsubaki edit runs on Tsubaki.3; the Lightbox edit bar is
+# offered on pictures made by Tsubaki.3 or Tsubaki.3 Flash (PixAI's own Edit dialog routes those
+# two to its Tsubaki entry). gallery/src/gen/tsubakiCore.js carries the same ids
+# (tests/test_tsubaki3_generate.py pins the copies together).
+TSUBAKI3_MODEL_ID = "2024383378759147749"
+TSUBAKI3_VERSION_ID = "2024383379556065549"
+TSUBAKI_EDIT_VERSIONS = frozenset(("2024383379556065549", "2050048243034896798"))
 # The status is cached RAW, keyed by (version, the identity that creates), and the expiry is
 # compared with the clock at every check (§8.8): an hour's success TTL is too long for a grant
 # that ends on a fixed date, so success keeps 5 minutes and a failure the gate's own minute.
@@ -10771,6 +11016,14 @@ def submit_generation(session, params):
     # behavior).
     params = _gate_params_for_model(session, params)
     params = priority_for_submit(params)   # already known to be turbo-refused? use Low
+    # Session H (BUILD-w2-gen §8, review S1): decided BEFORE the mutation, off the gate's own
+    # cached profile read -- is the profile asked for one this version LISTS? A listed profile
+    # PixAI refuses is an entitlement refusal (a non-member's Ultra), not "unsupported", so the
+    # drop-and-resubmit below must not turn it into a Pro job the quote never described; and
+    # a REQUIRE_MEMBERSHIP answer on a listed members-only profile is ambiguous between Ultra
+    # and Turbo, so the Turbo fallback stands down too. An unreadable list keeps today's
+    # self-heal (pinned since 2026-07-24).
+    listed, members_only = _profile_listing(session, params)
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
     except PixAIError as e:
@@ -10781,12 +11034,17 @@ def submit_generation(session, params):
             if str(e).startswith("GraphQL error"):
                 raise PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
             raise
+        if "inferenceProfile" in str(e) and "inferenceProfile" in params and listed:
+            raise PixAIError("PixAI refused the {} profile for this account, so nothing was "
+                             "made: {}".format(params.get("inferenceProfile"),
+                                               _graphql_reason(e)))
         if "inferenceProfile" in str(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
             created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
-        elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO:
+        elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO \
+                and not members_only:
             # Turbo (500) is members-only and this app asked for it on EVERY submit, so
             # the day a membership lapses every generate/edit/video/fix/upscale starts
             # failing at once. Safe to re-submit for the same reason the inferenceProfile
@@ -10805,6 +11063,28 @@ def submit_generation(session, params):
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
     _bump_card_use(params)
     return str(task_id)
+
+
+def _profile_listing(session, params):
+    """(listed, members_only) for the params' inferenceProfile, off _model_profiles (the
+    gate's cached read). (False, False) when there is no profile or the list is unreadable."""
+    prof = str((params or {}).get("inferenceProfile") or "").strip().lower()
+    if not prof or not (params or {}).get("modelId"):
+        return False, False
+    try:
+        rows = _model_profiles(session, params["modelId"])
+    except Exception:
+        rows = None
+    if not rows:
+        return False, False
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("profileName") or "").strip().lower() == prof:
+            try:
+                tier = int(r.get("requiredMembershipTier") or 0)
+            except (TypeError, ValueError):
+                tier = 0
+            return True, (r.get("profileFlag") == "membershipOnly" or tier > 0)
+    return False, False
 
 
 def clean_fix_boxes(boxes):
@@ -10973,6 +11253,10 @@ class RequestResolver:
     unlimited(params, version_id) -> lane params               -- the Unlimited Mode
                           check (see unlimited_resolver); absent = a lane request
                           is refused on this road
+    features(version_id) -> parsed /features or None           -- Session H: the
+                          architecture the creativity shape is decided on, the gate's
+                          own cached read (features_resolver); absent = the web
+                          payload's `creativity` is not honoured (legacy helper only)
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
@@ -10986,6 +11270,7 @@ class RequestResolver:
     gate: object = None
     video_duration: object = None
     unlimited: object = None
+    features: object = None
 
 
 def model_version_resolver(session):
@@ -11103,7 +11388,28 @@ def _gen_args_from_web_payload(p):
             loras.append((vid, (lo or {}).get("weight", 0.7)))
     seed_raw = str(p.get("seed") or "").strip()
     hp = p.get("high_priority") in (True, "1", "true", "on")
+    # Session H (BUILD-w2-gen §1): the drawer's context images, in slot order (slot N is the
+    # prompt's @imageN), and its creativity stop. Refused, never repaired: a malformed list or
+    # a repeated picture would change the count and the price.
+    ctx_raw = p.get("context_images")
+    context_images = []
+    if ctx_raw not in (None, "", []):
+        if not isinstance(ctx_raw, list):
+            raise PixAIError("context images must be a list of picture ids")
+        for x in ctx_raw:
+            v = str(x if x is not None else "").strip()
+            if not v.isdigit():
+                raise PixAIError("context images must be a list of picture ids")
+            context_images.append(v)
+        if len(set(context_images)) != len(context_images):
+            raise PixAIError("The same picture is in two context slots — remove one")
+    creativity = p.get("creativity")
+    if creativity in (None, ""):
+        creativity = None
+    elif creativity not in _CREATIVITY_LEVELS:
+        raise PixAIError("creativity must be off, low or medium")
     return SimpleNamespace(
+        context_images=context_images, creativity=creativity,
         params_json="", prompt=(p.get("prompt") or "").strip(),
         negative=(p.get("negative") or "").strip(),
         model=(p.get("version_id") or "").strip(),
@@ -11383,6 +11689,19 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
+    # Session H (BUILD-w2-gen §2): what a context-image request may not carry, refused at build.
+    if args.context_images:
+        if args.ref_media_id:
+            raise PixAIError("Send context images or a reference picture, not both")
+        if _upscale_ratio(args.enlarge) or _upscale_ratio(args.upscale):
+            raise PixAIError("An upscale can't carry context images")
+        bad = [n for n in _image_refs(args.prompt)
+               if n < 1 or n > len(args.context_images)]
+        if bad:
+            raise PixAIError("The prompt names @image{}, but only {} context image{} {} set"
+                             .format(bad[0], len(args.context_images),
+                                     "" if len(args.context_images) == 1 else "s",
+                                     "is" if len(args.context_images) == 1 else "are"))
     row = None
     if rs.model_version is not None:
         got = rs.model_version(p.get("model_id") or "", args.model)
@@ -11415,12 +11734,26 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             args.quality_tag = ""
     params = _gen_parameters(args)
     adjusted = args.clamped
+    # Session H decision 5 -- the creativity stop, shaped at BUILD on the architecture the
+    # gate itself reads (rs.features, the same cached /features; review B3). The gate's G6 then
+    # relocates naturalPrompts and forces medium beside context images, idempotently.
+    if args.creativity is not None:
+        _shape_creativity(params, args.creativity, rs, args.model, adjusted)
     # G7 -- ONE gate, applied ONCE, here. The gated dict IS req.parameters: price() prices and
     # card-matches it, submit() attaches the card to it and sends it, and the backstop gates
     # inside price_task/submit_generation return this same object. A gate refusal raises
     # PixAIError like any builder refusal (the badge's note; nothing is spent).
     if rs.gate is not None:
-        params, gate_adjusted = rs.gate(params)
+        try:
+            params, gate_adjusted = rs.gate(params)
+        except PixAIError:
+            # A lane request on another version is told so in the lane's own words, not in a
+            # gate refusal about its profile (Session H added the gate's unlisted-profile
+            # refusal, which a lane request on Flash -- "pro" is not Flash's -- reaches first).
+            if lane and rs.unlimited is not None \
+                    and str(args.model or "").strip() not in UNLIMITED_VERSIONS:
+                raise PixAIError(_UNLIMITED_T3_ONLY)
+            raise
         adjusted = list(adjusted) + list(gate_adjusted or [])
         _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
     # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode S3): checked AFTER the one gate and its
@@ -11433,6 +11766,51 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card or lane, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)
+
+
+_IMAGE_REF_RE = re.compile(r"@image(\d+)")
+
+
+def _image_refs(prompt):
+    """The @imageN numbers a prompt names, in order (Session H decision 2). The same rule as
+    the drawer's tsubakiCore.AT_REF_RE -- tests/test_tsubaki3_generate.py pins the two."""
+    return [int(m.group(1)) for m in _IMAGE_REF_RE.finditer(str(prompt or ""))]
+
+
+def _shape_creativity(params, level, rs, version_id, adjusted):
+    """Session H decision 5: the web payload's creativity stop onto the params, in place.
+
+    Only on MMDIT26B, decided by the gate's own /features read (review B3). /features
+    unreadable -> refuse (a creativity shape PixAI's site would never send beside an unchecked
+    architecture). Another architecture -> the legacy on/off shape the builder already made
+    stays, with a receipt entry. On MMDIT26B the level is the one asked, EXCEPT: context images
+    run it at medium, and recipes run it one step lower (medium -> low, low -> off), as PixAI's
+    own builder does (task-*.js). Both are receipt entries. The recipe step lives HERE, at
+    build, because the gate must stay idempotent; it reads the BUILT params' recipeIds, so it
+    fires only when recipes are really sent (review S3)."""
+    if rs.features is None:
+        return
+    feats = rs.features(version_id)
+    if feats is None:
+        raise PixAIError("Couldn't read this model's settings from PixAI, so its creativity "
+                         "can't be set — try again in a minute")
+    if feats.get("model_type") != "MMDIT26B_MODEL":
+        adjusted.append({"field": "creativity", "asked": level, "used": None,
+                         "why": "this model's prompt helper is on or off"})
+        return
+    used = level
+    if params.get("contextImages"):
+        used = "medium"
+        if level != "medium":
+            adjusted.append({"field": "promptHelper", "asked": level, "used": "medium",
+                             "why": "a context image runs the prompt helper at medium, as "
+                                    "PixAI's own site does"})
+    elif params.get("recipeIds") and level in ("medium", "low"):
+        used = "low" if level == "medium" else "off"
+        adjusted.append({"field": "promptHelper", "asked": level, "used": used,
+                         "why": "recipes run the prompt helper one step lower, as PixAI's "
+                                "own site does"})
+    params["promptHelper"] = {"creativity": used, "forcePromptHelperDetectionSide": "server"}
 
 
 def price(session, req):
@@ -11459,6 +11837,42 @@ def price(session, req):
     out = _price_answer(session, req)
     if req.adjusted:
         out["adjusted"] = list(req.adjusted)
+    # The breakdown notes ride a PAID quote only: on a card-covered one "+X" would read as a
+    # charge (review N1), and the extra reads would buy nothing.
+    if req.mode == "image" and req.parameters is not None and not req.unlimited \
+            and out.get("cost") is not None and not out.get("free"):
+        out.update(_price_breakdown(session, req.parameters, out["cost"]))
+    return out
+
+
+def _price_breakdown(session, params, cost):
+    """Session H: what the badge's one note line says (BUILD-w2-gen "Price"): the context
+    images' charge ("N context images +X") and a non-default profile's ("profile Ultra +X"),
+    each the difference between this request's price and the same request without it. The
+    variant dicts are PRICED only -- never card-checked, never submitted, never cached where a
+    submit reads. A read that fails leaves its figure out; nothing here can fail the quote."""
+    out = {}
+    ctx = params.get("contextImages")
+    if isinstance(ctx, list) and ctx:
+        out["context_images"] = len(ctx)
+        base = price_task(session, {k: v for k, v in params.items() if k != "contextImages"})
+        if base is not None and cost - base >= 0:
+            out["context_charge"] = cost - base
+    prof = str(params.get("inferenceProfile") or "").strip()
+    if prof:
+        try:
+            rows = _model_profiles(session, params.get("modelId")) or []
+        except Exception:
+            rows = []
+        default = next((str(r.get("profileName") or "").strip() for r in rows
+                        if isinstance(r, dict) and r.get("profileFlag") == "default"), "")
+        mine = next((r for r in rows if isinstance(r, dict)
+                     and str(r.get("profileName") or "").strip() == prof), None)
+        if default and mine is not None and prof != default:
+            out["profile"] = str(mine.get("title") or prof)[:40]
+            alt = price_task(session, dict(params, inferenceProfile=default))
+            if alt is not None and cost - alt >= 0:
+                out["profile_extra"] = cost - alt
     return out
 
 

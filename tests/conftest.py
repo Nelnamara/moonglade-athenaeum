@@ -479,14 +479,17 @@ def _clear_gate_caches():
     TTL). Same isolation: one test's model rules must never answer another test's gate.
     Both reads go through _rest_get, which _no_live_card_network already blocks. The
     Unlimited Mode status cache (SCOPE_2026-09-26_unlimited-mode) is the same kind of read
-    and is cleared with them."""
+    and is cleared with them, and so is Session H's /model-config read (the live context-image
+    max)."""
     core._features_cache.clear()
     core._size_config_cache.clear()
     core._unlimited_cache.clear()
+    core._model_config_cache.clear()
     yield
     core._features_cache.clear()
     core._size_config_cache.clear()
     core._unlimited_cache.clear()
+    core._model_config_cache.clear()
 
 
 @pytest.fixture(autouse=True)

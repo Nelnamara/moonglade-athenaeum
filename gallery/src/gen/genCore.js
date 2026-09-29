@@ -16,6 +16,12 @@
      silently burns credits.
    - A failed price check is "could not verify", NEVER "free" and never blank. */
 
+import {
+  accountSizeRule, autoActive, autoDims, contextMax, contextModel, creativityModel, deadRefs,
+  effectiveCreativity, effectiveTier, onContextSide, profileLocked, profileRows, ratioIndexOf,
+  sizeTiers, tierDims,
+} from "./tsubakiCore.js";
+
 // PixAI's own captured Enhance Details values (task 2039053268124647852,
 // 2026-07-28) -- same constants the classic chip carries.
 export const MG_HIRES = { ratio: 1.5, denoise: 0.6 };
@@ -110,9 +116,46 @@ export function snapSize(w, h, rule) {
    the size select; /8 snapped, 64..4096 -- the classic dims() contract -- and then onto
    the picked model's size rule when it has one (see snapSize). */
 export function dims(s) {
-  const rule = s.model && s.model.size_rule;
+  const info = sizeInfo(s);
+  return { width: info.width, height: info.height };
+}
+
+/* Is the frame landscape? The aspect decides when it is not square; a square frame keeps the
+   Portrait | Landscape switch's own state (decision 7: the switch flips every ratio, 1:1 too). */
+export function landscapeOf(s) {
+  const a = Number(s && s.aspect) || 1;
+  if (a > 1.0001) return true;
+  if (a < 0.9999) return false;
+  return !!(s && s.landscape);
+}
+
+/* dims() with its provenance, for the size line (decisions 6 + 7): what is sent and why.
+   source: "custom" (W × H typed, clamped to the account's limit on a tiered model), "auto"
+   (Context side, from @image1), "tier" (the ratio on the tier in force), "long" (a model
+   without tiers: the long-edge stops). `held` = decision 7's "short edge held at 512". */
+export function sizeInfo(s) {
+  const m = s.model;
+  const tiers = sizeTiers(m);
   const cw = parseInt(s.customW, 10), ch = parseInt(s.customH, 10);
-  if (cw > 0 && ch > 0) return snapSize(d8(cw), d8(ch), rule);
+  if (cw > 0 && ch > 0) {
+    const d = snapSize(d8(cw), d8(ch), tiers ? accountSizeRule(m, s.member) : (m && m.size_rule));
+    return { ...d, source: "custom", tier: null, held: false };
+  }
+  if (tiers) {
+    const tier = effectiveTier(m, s.tier, s.member);
+    if (autoActive(s)) {
+      const a = autoDims(m, tier, (s.ctx || [])[0]);
+      if (a) return { ...snapSize(a.width, a.height, m.size_rule), source: "auto", tier, held: a.held };
+    }
+    const i = Math.max(0, ratioIndexOf(s.aspect));
+    const t = tierDims(m, tier, i, landscapeOf(s));
+    return { ...snapSize(t.width, t.height, m.size_rule), source: "tier", tier, held: t.held };
+  }
+  return { ...legacyDims(s), source: "long", tier: null, held: false };
+}
+
+function legacyDims(s) {
+  const rule = s.model && s.model.size_rule;
   const r = s.aspect || 1;
   const size = s.size || 1024;
   return r >= 1
@@ -127,6 +170,13 @@ export function dims(s) {
    slider and the negative box read disabled while one is set, and the negative is not sent. */
 export function refIsContext(s) {
   return !!(s && s.ref && s.model && s.model.context_images === true);
+}
+
+/* Session H decision 1: on a context-image model the LoRAs | Context images switch REPLACES the
+   single reference slot, so a reference left in the state from another model is neither shown
+   nor sent there (it would otherwise ride the gate into a context image nobody can see). */
+export function refSent(s) {
+  return !!(s && s.ref && !contextModel(s.model));
 }
 
 /* The Quality Tag chip's tooltip, read from the picked version's own tag (G4). */
@@ -190,7 +240,7 @@ export function laneSizeOk(width, height, size) {
    size over the lane's limit. The same sentence rides the switch's title, the line under it
    and -- while the lane is on -- the Generate gate. */
 export function unlimitedBlock(s) {
-  if (s.ref) return "Remove the reference picture to use Unlimited Mode";
+  if (refSent(s)) return "Remove the reference picture to use Unlimited Mode";
   const size = laneSize(s.model);
   const d = dims(s);
   if (!laneSizeOk(d.width, d.height, size)) {
@@ -273,12 +323,34 @@ export function loraIncompat(lora, model) {
 export function goGate(s, loraCap) {
   if (!s.model || !s.model.version_id) return "Pick a model first";
   if (!s.prompt.trim()) return "Write a prompt";
-  if (s.loras.some((l) => l.failed)) return "A LoRA failed to resolve — remove it";
-  if (s.loras.some((l) => !l.version_id)) return "A LoRA is still resolving";
-  if (s.loras.some((l) => loraIncompat(l, s.model))) return "A LoRA does not match this model's architecture";
-  if (loraCap != null && s.loras.length > loraCap) return "Over your LoRA cap (" + loraCap + ")";
-  // Unlimited Mode on: what the server would refuse is refused here first, in its words.
-  if (s.unlimited) return unlimitedBlock(s);
+  // The LoRA checks judge what is SENT: on the Context side the LoRAs are held, not sent.
+  if (!onContextSide(s)) {
+    if (s.loras.some((l) => l.failed)) return "A LoRA failed to resolve — remove it";
+    if (s.loras.some((l) => !l.version_id)) return "A LoRA is still resolving";
+    if (s.loras.some((l) => loraIncompat(l, s.model))) return "A LoRA does not match this model's architecture";
+    if (loraCap != null && s.loras.length > loraCap) return "Over your LoRA cap (" + loraCap + ")";
+  }
+  // Session H decision 1: the Context side sends its images and holds the rest. With no image
+  // there is nothing of its own to send -- a plain run without the held LoRAs/recipes would be
+  // a different picture than the one set up, so it waits.
+  if (onContextSide(s)) {
+    const ctx = s.ctx || [];
+    if (!ctx.length) return "Add a context image — or switch back to LoRAs";
+    const max = contextMax(s.model);
+    if (ctx.length > max) return "Tsubaki.3 takes up to " + max + " context images — remove " + (ctx.length - max);
+    // Decision 2: a chip whose image is gone reads peach "no image" and Generate refuses.
+    const dead = deadRefs(s.prompt, ctx.length);
+    if (dead.length) return dead[0] === "@image0" ? "A chip points at a removed image — fix or delete it"
+      : dead[0] + " has no image — fix or delete it";
+  }
+  // T1a: a members-only profile is never picked for an account PixAI reports as non-member; one
+  // carried in from a member session waits here rather than quoting a tier it can't run.
+  const rows = profileRows(s.model);
+  const picked = rows && rows.find((r) => String(r.name).toLowerCase() === String(s.mode || "").toLowerCase());
+  if (picked && profileLocked(picked, s.member)) return (picked.title || picked.name) + " is for PixAI members — pick another profile";
+  // Unlimited Mode on: what the server would refuse is refused here first, in its words. Not on
+  // the Context side, where the lane is not sent at all (the row reads as a dashed line there).
+  if (s.unlimited && !onContextSide(s)) return unlimitedBlock(s);
   return null;
 }
 
@@ -292,7 +364,13 @@ export function buildPayload(s) {
   // payload withholds it -- and a negative typed into a disabled box stays in the box,
   // unsent.
   const m = s.model;
-  const noNeg = !!(m && m.compat_neg === false) || refIsContext(s);
+  // Session H decision 1: the Context side sends its images and HOLDS the LoRAs, recipes,
+  // palette and negative (kept in the state, not sent); the LoRA side never sends images.
+  const ctxOn = onContextSide(s);
+  const ctxIds = ctxOn ? (s.ctx || []).map((c) => c && c.media_id).filter(Boolean) : [];
+  const recipeIds = !ctxOn ? (s.recipes || []).map((r) => r && r.id).filter(Boolean).map(String) : [];
+  const creative = creativityModel(m);
+  const noNeg = !!(m && m.compat_neg === false) || ctxOn;
   const face = !!s.boosters.face && !(m && m.compat_face === false);
   const quality = !!s.boosters.quality && !(m && m.compat_quality === false);
   // One effective steps value for BOTH steps and the mirrored denoise steps --
@@ -311,9 +389,12 @@ export function buildPayload(s) {
     count: Math.max(1, Math.min(4, Number(s.count) || 1)),
     seed: s.seed === "" ? null : s.seed,
     high_priority: !!s.highPriority,
-    prompt_helper: !!s.promptHelper,
-    ref_media_id: s.ref ? s.ref.media_id : null,
-    ref_strength: s.ref ? Number(s.refStrength) : null,
+    // Decision 5: on a creativity model the three stops replace the on/off helper; the
+    // on/off still rides for the server's legacy fallback (off = "As written").
+    prompt_helper: creative ? effectiveCreativity(s) !== "off" : !!s.promptHelper,
+    ...(creative ? { creativity: effectiveCreativity(s) } : {}),
+    ref_media_id: refSent(s) ? s.ref.media_id : null,
+    ref_strength: refSent(s) ? Number(s.refStrength) : null,
     upscale: hires ? MG_HIRES.ratio : null,
     upscale_denoise: hires ? MG_HIRES.denoise : null,
     upscale_denoise_steps: hires ? eff : null,
@@ -322,12 +403,99 @@ export function buildPayload(s) {
     // version's own tag at build time (G4), and keeps this literal only when it could not
     // read the version row.
     quality_tag: quality ? "Masterpiece" : null,
-    loras: s.loras.filter((l) => l.version_id)
+    loras: ctxOn ? [] : s.loras.filter((l) => l.version_id)
       .map((l) => ({ version_id: l.version_id, weight: Number(l.weight) })),
     // Unlimited Mode: sent whenever the switch is on, offered or not (§8.1) -- the server
     // refuses what is not eligible; the drawer never drops the flag. Absent when off, so an
-    // ordinary payload is byte-identical to before.
-    ...(s.unlimited ? { unlimited: true } : {}),
+    // ordinary payload is byte-identical to before. The Context side does not send it: there
+    // the row is the dashed "for runs without context images" line and the switch is kept.
+    ...(s.unlimited && !ctxOn ? { unlimited: true } : {}),
+    // The context images, in slot order (slot N is the prompt's @imageN) -- and the @imageN
+    // numbers the prompt names, so an edit that changes them re-prices: the server refuses
+    // a ref with no slot, and that verdict must never outlive the prompt it was reached on
+    // (review B2). The server reads the prompt itself; this field only moves the identity.
+    ...(ctxIds.length ? { context_images: ctxIds, image_refs: imageRefs(s.prompt) } : {}),
+    // Recipes are lane w2-recipes'; the dock sends their ids on the LoRA side, never held ones.
+    ...(recipeIds.length ? { recipeIds } : {}),
+  };
+}
+
+/* The applied version's fields, as the drawer keeps them on `s.model` -- one function for
+   the dock's applyModelRow/pickVersion (useGenerate.js) and the Lightbox edit bar's Tsubaki.3
+   meta (TsubakiEditBar.jsx), so the bar's payload reads the version exactly as the dock does. */
+export function versionPatch(v) {
+  const patch = {
+    caps: v.capabilities || [],
+    compat_neg: cget(v, "negativePrompt"),
+    compat_steps: cget(v, "samplingSteps"),
+    compat_cfg: cget(v, "cfgScale"),
+    compat_upscale: cget(v, "upscale"),
+    // SCOPE_2026-09-26 (owner ruling 1): Face Fix and Quality Tag read disabled on a model
+    // that does not take them. Face Fix through the same cget -- the server merges
+    // /features' enableADetailer:false (and the MMDiT / user-DiT model-type rule) into
+    // `compatibility`. Quality Tag from the version's own tag (G4): a row that answered
+    // with no tag is false; a server without the field stays unknown (fail open).
+    compat_face: cget(v, "enableADetailer"),
+    compat_quality: "quality_tag" in v ? !!v.quality_tag : undefined,
+    quality_tag: v.quality_tag || null,
+    // The size rule the server's gate snaps to (G1) and whether a reference goes out as a
+    // context image (G3). Set explicitly on EVERY apply, so a version picked from the list
+    // without them (only the latest row carries them) never inherits the previous one's.
+    size_rule: v.size_rule || null,
+    context_images: v.context_images === true,
+    // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
+    // null = the server could not determine them -> the drawer dims nothing, exactly as
+    // before. An array (including []) is a real answer.
+    profiles: Array.isArray(v.profiles) ? v.profiles : null,
+    // Tsubaki.3 Unlimited Mode status for THIS version (SCOPE_2026-09-26_unlimited-mode S2),
+    // set on every apply like size_rule. It only decides whether the switch is OFFERED: the
+    // switch's own state (s.unlimited) survives a model switch -- only the user turns it off
+    // (§8.1), and the server refuses a lane request this version cannot run.
+    unlimited: v.unlimited || null,
+    // Session H: the live size tiers (/size-config), the live context-image max
+    // (/model-config), whether the helper is a creativity level, and the Pro / Ultra rows
+    // (/inference-profiles). Set on every apply like size_rule -- a version picked from the
+    // list without them (only the latest row carries them) never inherits the previous one's.
+    size_tiers: Array.isArray(v.size_tiers) && v.size_tiers.length ? v.size_tiers : null,
+    context_max: Number(v.context_max) > 0 ? Number(v.context_max) : null,
+    creativity: v.creativity === true,
+    profile_rows: Array.isArray(v.profile_rows) && v.profile_rows.length ? v.profile_rows : null,
+    restrictions: v.restrictions || {},
+    preset: {
+      negative: v.negative_prompt || "", steps: v.sampling_steps,
+      cfg: v.cfg_scale, sampler: v.sampling_method || "",
+    },
+  };
+  return patch;
+}
+
+function cget(v, key) {
+  const c = v.compatibility || {};
+  return key in c ? c[key] : undefined; // undefined = unknown = fail-open
+}
+
+/* The @imageN numbers a prompt names, sorted and unique (the price identity's copy of them). */
+export function imageRefs(prompt) {
+  const out = new Set();
+  const re = /@image(\d+)/g;
+  let mm;
+  while ((mm = re.exec(String(prompt || ""))) !== null) out.add(Number(mm[1]));
+  return Array.from(out).sort((a, b) => a - b);
+}
+
+/* The Tsubaki edit's state (Session H decision 2's menu item prefills the dock with it; T3a's
+   Lightbox bar builds its payload from it through buildPayload itself, so the bar can never
+   send a shape the dock would not): Tsubaki.3's applied meta, the picture as context slot 1,
+   Auto size, creativity medium, the given profile, count 1 -- and nothing else of the dock:
+   no LoRAs, no recipes, no negative, no boosters, no High priority, a random seed. */
+export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
+  return {
+    ...GEN_DEFAULTS, model, member: member === true ? true : member === false ? false : null,
+    inputs: "context", ctxWarned: true, auto: true,
+    ctx: image && image.media_id ? [{ media_id: String(image.media_id), thumb: image.thumb || "",
+      w: Number(image.w) || 0, h: Number(image.h) || 0 }] : [],
+    prompt: String(prompt || ""), mode: mode || "auto", tier: tier || "",
+    count: 1, creativity: "medium", highPriority: false, negative: "", seed: "",
   };
 }
 
@@ -393,4 +561,14 @@ export const GEN_DEFAULTS = {
   ref: null, refStrength: 0.55,
   boosters: { hires: false, quality: false, face: false },
   unlimited: false,     // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C1)
+  // ---- Session H (Tsubaki3 Generate Handoff) ----
+  inputs: "loras",      // the LoRAs | Context images switch (decision 1)
+  ctx: [],              // the context slots, in order: {media_id, thumb, w, h}
+  ctxWarned: false,     // the confirm card shows on the first switch of a session only
+  auto: true,           // Auto (size from @image1), the Frame row's first cell on the Context side
+  landscape: false,     // the Portrait | Landscape switch (decision 7)
+  tier: "",             // the picked live size tier ("" = the model's own default)
+  creativity: "medium", // decision 5's stops (off | low | medium)
+  recipes: [],          // lane w2-recipes' row: [{id, title, cover}]
+  member: null,         // PixAI membership (true / false / null = unknown), from /api/account
 };

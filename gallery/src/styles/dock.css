@@ -1157,3 +1157,27 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 }
 /* (The compare overlay's narrow-viewport rules moved into the Darkroom block above with
    the 2026-09-04 rebuild -- the room owns its own @media now, beside the rules it bends.) */
+
+/* ============================ SESSION H (Tsubaki3 Generate Handoff, frame A) ============== */
+/* slab 1's head: MODEL & INPUTS on the left, the count ("1 / 15 LoRAs" · "2 / 3 context") */
+.mgdock-slabhead { display: flex; align-items: center; gap: 8px; }
+.mgdock-slabhead .sp { flex: 1 1 auto; }
+.mgdock-slabcount { font-size: 9.5px; color: var(--overlay0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* the model row, frame A's compact form: a 30 px thumb, the name over "DiT.3 · profile Pro" */
+.mgdock-slabs .mgdock-modelrow { gap: 9px; padding: 6px 8px; border-radius: 10px;
+  background: rgba(12, 10, 28, .7); }
+.mgdock-slabs .mgdock-modelthumb { width: 30px; height: 30px; border-radius: 8px; }
+.mgdock-modeltext { display: flex; flex-direction: column; min-width: 0; }
+.mgdock-slabs .mgdock-modelname { font-size: 12px; }
+.mgdock-modelsub { font-size: 9.5px; color: var(--overlay0); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+/* SIZE · <model> <tier> */
+.mgdock-sizehead { display: flex; align-items: baseline; gap: 7px; padding-top: 2px; }
+.mgdock-tiername { font-size: 11px; font-weight: 600; color: var(--mauve); }
+/* the composer's @image prompt: the image textarea's skin, the video prompt's resting floor */
+.mgdock-composer .mgat-ce { width: 100%; box-sizing: border-box; color: var(--text);
+  font-size: 16px; line-height: 1.9; font-weight: 300; min-height: 6em;
+  max-height: calc(max(var(--mg-prompt-max, 8), 6) * 1.5em); overflow-y: auto; }
+.mgdock-heldtag { font-size: 9.5px; color: var(--overlay0); padding-top: 4px; flex: none; }
+.mgdock-negrow .mgts-held { opacity: .38; }

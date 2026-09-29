@@ -800,12 +800,16 @@ def test_enhance_details_is_gated_on_the_model_declaring_upscale_support():
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
+    # Since Session H the version's fields are genCore.versionPatch (the dock and the Lightbox
+    # edit bar read a version the same way); the hook applies it at both seams.
+    patch = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    assert "const applyFromVersion = (v) => versionPatch(v);" in use
     # PixAI's own field, read through the one capability accessor...
-    assert 'compat_upscale: cget(v, "upscale")' in use, \
+    assert 'compat_upscale: cget(v, "upscale")' in patch, \
         "Enhance Details must gate on compatibility.upscale, not on an architecture guess"
     # ...which fails OPEN: absent key -> undefined -> unknown, and every gate below
     # compares `=== false`, so only an explicit false disables anything.
-    assert "return key in c ? c[key] : undefined" in use, \
+    assert "return key in c ? c[key] : undefined" in patch, \
         "the capability accessor must fail OPEN on unknown data"
     # A booster armed before the model changed underneath it must be disarmed, or the
     # payload would still carry a ratio the new model cannot use -- on BOTH paths a
@@ -851,7 +855,11 @@ def test_booster_gate_disables_but_never_disarms_quality_tag_and_face_fix():
         assert "disabled={m && m.compat_face === false}" in face, rel[-1]
         assert "disabled={m && m.compat_quality === false}" in qual, rel[-1]
     # ...and the disarm-on-model-change patch still touches hires only.
-    use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
+    # the hook plus genCore.versionPatch -- the version's fields, applied at both seams since
+    # Session H (not the rest of genCore, whose GEN_DEFAULTS rightly starts both chips off)
+    _gc = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8") \
+        + _gc[_gc.index("export function versionPatch"):_gc.index("function cget")]
     assert "face: false" not in use and "quality: false" not in use, \
         "a model switch must disable, never disarm, Face Fix or Quality Tag"
     assert 'compat_face: cget(v, "enableADetailer")' in use

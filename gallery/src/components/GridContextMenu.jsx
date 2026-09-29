@@ -61,6 +61,9 @@ export default function GridContextMenu({ target, onClose, actions }) {
     // so the item is offered on every row -- the same reason the Details footer no longer
     // hides its Remix button on videos.
     ["↺", "Remix", () => actions.onRemix(target.mid)],
+    // Session H decision 2: a Tsubaki edit is an Image-tab run with this picture as @image1
+    // (the Edit card stays Edit Pro / Reference Pro). Stills only.
+    ...(!target.isVideo && actions.onTsubaki ? [["✦", "Edit with Tsubaki", () => actions.onTsubaki(target.mid)]] : []),
     // #28 scope-add: videos only -- re-extract this clip's poster on demand (same
     // POST /api/rebuild-poster route as Image Details' button). Gated on target.isVideo.
     ...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : []),
