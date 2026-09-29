@@ -53,7 +53,10 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "create_advanced_training_draft", "make_model_public",
                # Artwork mutations: no credits, but they change the public account and
                # a retry would publish twice / delete something already gone.
-               "publish_artwork_from_task", "update_artwork", "delete_artwork")
+               "publish_artwork_from_task", "update_artwork", "delete_artwork",
+               # Session M's run sender (2026-09-29): up to 24 generations, one after
+               # another, each through submit() -> submit_generation(exact=True).
+               "send_run")
 
 # A real call, not a mention: the comments in these functions name gql_adhoc on purpose
 # ("gql_mutate, never gql_adhoc") and must not trip the check.
@@ -241,6 +244,20 @@ class TestSpendingPathsAreSingleAttempt:
     def test_submit_generation(self, mock_session, gql_calls):
         core.submit_generation(mock_session, {"prompts": "a cat"})
         _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+
+    def test_send_run(self, mock_session, gql_calls, monkeypatch):
+        """Session M's run sender: N jobs, N mutations, each single-attempt through the one
+        verb that offers no retries (submit -> submit_generation(exact=True) -> gql_mutate)."""
+        monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+        hooks = SimpleNamespace(sending=lambda cell: None, sent=lambda *a: None,
+                                failed=lambda *a: None)
+        jobs = [{"cell": k, "req": core.GenerationRequest(mode="image",
+                                                          parameters={"prompts": p}),
+                 "no_card": None} for k, p in enumerate(("a cat", "a dog"))]
+        res = core.send_run(mock_session, jobs, hooks=hooks, gap_s=0)
+        assert res["status"] == "sent"
+        _assert_single_attempt(gql_calls, core._GEN_MUTATION)
+        assert len(gql_calls) == 2
 
     def test_run_generate(self, tmp_path, cli_stubs, gql_calls):
         _drive(core.run_generate, _cli_args(tmp_path))

@@ -39,6 +39,7 @@ __version__ = "3.14.0"
 
 import argparse
 import base64
+import copy
 import csv
 import datetime
 import getpass
@@ -11228,9 +11229,17 @@ def _graphql_reason(err):
     return s
 
 
-def submit_generation(session, params):
+def submit_generation(session, params, *, on_send=None, exact=False):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id.
+
+    Session M (BUILD-w5-m s3.4): `on_send(variables)` is called immediately before each
+    mutation with a deep COPY of what is about to go out -- observation only: its return is
+    ignored and an exception inside it is swallowed, so a recorder can never block or alter a
+    spend. It is how the Inspector learns the exact request PixAI got and how a run knows the
+    mutation was reached. `exact=True` (a run's jobs, review F6) turns off BOTH refusal-only
+    resubmits below: a job goes out once, exactly as it was quoted and confirmed, and PixAI's
+    refusal comes back as it came. Both default to today's behaviour, byte for byte.
 
     inferenceProfile (the Mode quality setting) is MODEL-TYPE-SPECIFIC on PixAI's side --
     some model types only accept lite/standard, others pro/ultra, and an unsupported value
@@ -11282,8 +11291,16 @@ def submit_generation(session, params):
     # and Turbo, so the Turbo fallback stands down too. An unreadable list keeps today's
     # self-heal (pinned since 2026-07-24).
     listed, members_only = _profile_listing(session, params)
+
+    def _send(p):
+        if on_send is not None:
+            try:
+                on_send(copy.deepcopy(p))
+            except Exception:                                # noqa: BLE001
+                pass                                         # a recorder never blocks a spend
+        return gql_mutate(session, _GEN_MUTATION, {"parameters": p})
     try:
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        created = _send(params)
     except PixAIError as e:
         if _recipes.refusal_from(e):
             # PixAI refused a recipe: nothing was created. Re-raised BEFORE the two resubmits
@@ -11294,17 +11311,26 @@ def submit_generation(session, params):
             # task, so nothing exists and nothing was spent; anything else is passed on as it
             # came, because it does not prove that.
             if str(e).startswith("GraphQL error"):
-                raise PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+                refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+                refused.refused = True       # a definite refusal, for a run's job state
+                raise refused
+            raise
+        if exact:
+            # A run job (review F6): never resubmitted on another profile or priority -- that
+            # would be a request nobody quoted, sent after the run's budget check. PixAI's
+            # answer comes back as it came; definite_refusal() reads it.
             raise
         if "inferenceProfile" in str(e) and "inferenceProfile" in params and listed:
-            raise PixAIError("PixAI refused the {} profile for this account, so nothing was "
-                             "made: {}".format(params.get("inferenceProfile"),
-                                               _graphql_reason(e)))
+            refused = PixAIError("PixAI refused the {} profile for this account, so nothing "
+                                 "was made: {}".format(params.get("inferenceProfile"),
+                                                       _graphql_reason(e)))
+            refused.refused = True
+            raise refused
         if "inferenceProfile" in str(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
-            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+            created = _send(params)
         elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO \
                 and not members_only:
             # Turbo (500) is members-only and this app asked for it on EVERY submit, so
@@ -11317,7 +11343,7 @@ def submit_generation(session, params):
             _turbo_refused["seen"] = True
             print("  turbo is members-only on this account; resubmitting at standard "
                   "speed (no extra cost).")
-            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+            created = _send(params)
         else:
             raise
     task_id = (created.get("createGenerationTask") or {}).get("id")
@@ -12215,9 +12241,15 @@ def _price_answer(session, req):
     return out
 
 
-def submit(session, req, *, no_card=None):
+def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=False):
     """Spend: READ_ONLY guard -> free card -> the one mutation this road's mode uses.
     Returns {"task_id": ...}.
+
+    Session M (BUILD-w5-m s3.4): `before_send(params)` runs after the card step and before
+    submit_generation on EVERY branch that reaches it (the lane branch too, review F13b); it
+    may raise to stop, and nothing has been sent when it does -- a run's budget check lives
+    there. `on_send` and `exact` are handed to submit_generation (see it). All three default
+    to today's behaviour, byte for byte.
 
     The READ_ONLY check is FIRST, ahead of the card match, and that ordering is the point
     of putting it here. `_apply_kaisuuken` calls /v2/kaisuuken/check -- a real network
@@ -12245,7 +12277,10 @@ def submit(session, req, *, no_card=None):
         # S5: the card step is skipped outright for a lane request -- keyed on req.unlimited,
         # which the `no_card` argument cannot override (§8.10). submit_generation guards the
         # params' own `lane` too, for every road that reaches it (§8.3).
-        return {"task_id": submit_generation(session, req.parameters)}
+        if before_send is not None:
+            before_send(req.parameters)
+        return {"task_id": submit_generation(session, req.parameters,
+                                             **_send_kwargs(on_send, exact))}
     from types import SimpleNamespace
     skip = req.no_card if no_card is None else bool(no_card)
     # Passing the flag through rather than branching around the call keeps
@@ -12253,7 +12288,126 @@ def submit(session, req, *, no_card=None):
     # spend log ("--no-card: this WILL spend credits") the single source of both.
     _apply_kaisuuken(session, req.parameters,
                      SimpleNamespace(kaisuuken_id="", no_card=skip))
-    return {"task_id": submit_generation(session, req.parameters)}
+    if before_send is not None:
+        before_send(req.parameters)
+    return {"task_id": submit_generation(session, req.parameters,
+                                         **_send_kwargs(on_send, exact))}
+
+
+def _send_kwargs(on_send, exact):
+    """submit_generation's Session M keywords, passed only when asked for: a default submit
+    calls it exactly as it always did."""
+    kw = {}
+    if on_send is not None:
+        kw["on_send"] = on_send
+    if exact:
+        kw["exact"] = True
+    return kw
+
+
+# Session M: the pause between one answered mutation and the next in a run ("be polite to
+# their servers"; the Loom's batch staggers 2.2 s). Nothing waits for a task to FINISH.
+RUN_SEND_GAP_S = 1.5
+
+
+def _run_budget_note(sent):
+    return ("The free card expected for image {} was used elsewhere, so it would cost more "
+            "than you confirmed. {} {} sent; the rest were not.".format(
+                sent + 1, sent, "was" if sent == 1 else "were"))
+
+
+def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
+    """THE run sender (Session M, BUILD-w5-m s4): a run's jobs, strictly one after another,
+    each through submit() -- READ_ONLY first, the card step, the budget check, then
+    submit_generation(exact=True), whose one gql_mutate is the only mutation a job can make.
+    The FIRST failure stops the rest; nothing is retried or resent.
+
+    `jobs`   [{"cell": int, "req": GenerationRequest, "no_card": True | None}] -- the very
+             objects the run quoted; nothing is rebuilt here.
+    `budget` {"each": credits per job, "total": the confirmed total} or None. Before each
+             job without a card: charged-so-far + each > total stops the run before that
+             job (a card spent in another tab, a card that expired). None = a single send,
+             which has no confirmed total (review F11): no check, the card auto-applies.
+    `hooks`  the Runs store's side, each call guarded here:
+               sending(cell)                        committed BEFORE the job's submit; if it
+                                                    raises, the run stops, nothing more sent
+               sent(cell, task_id, request, card)   after the mutation; a raise is swallowed
+                                                    (the task exists; the answer carries it)
+               failed(cell, state, error, request)  a job that did not go out cleanly
+    Returns {"status": "sent"|"stopped", "reason"?, "jobs": [{cell, state, task_id?, card,
+             error?, recipe_error?}]} with state sent | refused | may_have_started | not_sent.
+
+    State after a failure (s4.4): an exception before on_send fired means the mutation was
+    never reached -> not_sent; after it, a definite refusal (a GraphQL error, a 401, a local
+    refusal) -> refused; anything else (a timeout, a dropped connection, a 5xx, no task id)
+    -> may_have_started, never resent and never counted as refused."""
+    import moonglade_recipes as _recipes
+    gap = RUN_SEND_GAP_S if gap_s is None else gap_s
+    pause = sleep if sleep is not None else time.sleep
+    out = []
+    state = {"charged": 0, "sent": 0, "stop": None}
+
+    for idx, job in enumerate(jobs):
+        cell = job["cell"]
+        if state["stop"] is not None:
+            out.append({"cell": cell, "state": "not_sent", "card": False})
+            continue
+        if idx and gap:
+            pause(gap)
+        try:
+            hooks.sending(cell)
+        except Exception:                                    # noqa: BLE001
+            state["stop"] = ("Couldn't record cell {} before sending it, so it and the rest "
+                             "were not sent.".format(cell + 1))
+            out.append({"cell": cell, "state": "not_sent", "card": False})
+            continue
+        seen = {"request": None}
+
+        def _on_send(variables):
+            seen["request"] = variables
+
+        def _before(params):
+            if budget is None or params.get("kaisuukenId"):
+                return
+            if state["charged"] + int(budget["each"]) > int(budget["total"]):
+                raise LocalRefusal(_run_budget_note(state["sent"]))
+
+        try:
+            task_id = submit(session, job["req"], no_card=job.get("no_card"),
+                             before_send=_before, on_send=_on_send, exact=True)["task_id"]
+        except Exception as e:                               # noqa: BLE001
+            reached = seen["request"] is not None
+            if not reached:
+                st = "not_sent"
+            elif getattr(e, "refused", False) or definite_refusal(e):
+                st = "refused"
+            else:
+                st = "may_have_started"
+            refusal = _recipes.refusal_from(e) if reached else None
+            msg = refusal["copy"] if refusal else _graphql_reason(e)
+            rec = {"cell": cell, "state": st, "card": False, "error": str(msg)[:300]}
+            if refusal:
+                rec["recipe_error"] = refusal
+            out.append(rec)
+            try:
+                hooks.failed(cell, st, rec["error"], seen["request"])
+            except Exception:                                # noqa: BLE001
+                pass
+            state["stop"] = rec["error"]
+            continue
+        card = bool((seen["request"] or {}).get("kaisuukenId"))
+        if not card and budget is not None:
+            state["charged"] += int(budget["each"])
+        state["sent"] += 1
+        out.append({"cell": cell, "state": "sent", "task_id": str(task_id), "card": card})
+        try:
+            hooks.sent(cell, str(task_id), seen["request"], card)
+        except Exception:                                    # noqa: BLE001
+            pass
+    res = {"status": "stopped" if state["stop"] is not None else "sent", "jobs": out}
+    if state["stop"] is not None:
+        res["reason"] = state["stop"]
+    return res
 
 
 # =============================================================================
