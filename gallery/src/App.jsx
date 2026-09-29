@@ -336,6 +336,7 @@ export default function App({ boot }) {
       if (isMomentUp()) return;                     // a click on a moment ends the moment only
       if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
       if (isPickerOpen()) return;
+      if (isRecipesOpen()) return;                  // the recipe picker adds TO the dock
       const host = dockHostRef.current;
       if (host && !host.contains(ev.target)) closeDock();
     };

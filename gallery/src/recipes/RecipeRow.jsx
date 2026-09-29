@@ -31,6 +31,8 @@ export default function RecipeRow({ recipes, onChange, held, loraCount, modelTyp
   useEffect(() => {
     bindDock({ recipes: list, onChange, held: !!held, loraCount: Number(loraCount) || 0, modelType: modelType || "" });
   });
+  // A row that is gone (the dock unmounted it) can take no more adds: the picker says so.
+  useEffect(() => () => bindDock({ onChange: null }), []);
 
   // Chips restored with only {id, title, cover} (a reload) re-read their cards once.
   useEffect(() => {
