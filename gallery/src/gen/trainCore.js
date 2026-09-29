@@ -437,3 +437,11 @@ export function focusWindow(i, n, count = 10) {
   const start = Math.max(0, Math.min(n - k, i - Math.floor(k / 2) + 1));
   return Array.from({ length: k }, (_, j) => start + j);
 }
+
+/* A clause as its own sentence: capitalised, one full stop ("about 27–35 minutes" ->
+   "About 27–35 minutes."). "" stays "". */
+export function sentence(text) {
+  const t = String(text || "").trim();
+  if (!t) return "";
+  return t.charAt(0).toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".");
+}

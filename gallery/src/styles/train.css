@@ -363,6 +363,7 @@
   line-height: 1.55; padding: 9px; border-radius: 9px; border: 1px solid var(--lavender);
   background: rgba(12,10,28,.8); color: var(--text); outline: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mgtr-focus-text:focus, .mgtr-focus-text:focus-visible { outline: none; box-shadow: none; }
 .mgtr-focus-text:disabled { opacity: .8; }
 .mgtr-focus-text.none { color: var(--peach); border-color: var(--surface1); font-family: inherit; }
 .mgtr-focus-meta { display: flex; align-items: baseline; gap: 8px; font-size: 9.5px; color: var(--overlay0);

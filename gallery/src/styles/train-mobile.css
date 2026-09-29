@@ -76,10 +76,13 @@
 .trm-wrap .pubm-in.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .trm-wrap .pubm-lab { margin-top: 4px; }
 
-/* the strip (5c) at the phone's size: the page's one lavender line, the moon at 14 px */
-.mgtr-strip.trm-strip { padding: 9px 10px; border-radius: 10px; gap: 8px; }
-.trm-strip .mgtr-strip-name { font-size: 10.5px; color: var(--lavender); }
-.trm-strip .mgtr-strip-gauge { width: 64px; }
+/* the strip (5c) at the phone's size: the page's lavender strip with the moon at 14 px. The
+   gauge's moon and end caps need more room than one 390 px line leaves beside the name, so
+   the name takes the first line and the gauge, the reading and View share the second (the
+   first screenshot pass showed the gauge's cap drawn over the percentage on one line). */
+.mgtr-strip.trm-strip { padding: 9px 10px; border-radius: 10px; gap: 6px 8px; flex-wrap: wrap; }
+.trm-strip .mgtr-strip-name { flex: 1 1 100%; font-size: 10.5px; color: var(--lavender); }
+.trm-strip .mgtr-strip-gauge { flex: 1 1 auto; width: auto; min-width: 96px; }
 .trm-strip .mgtr-strip-view { min-height: 32px; }
 
 /* Basic review: the summary and the price before Start */

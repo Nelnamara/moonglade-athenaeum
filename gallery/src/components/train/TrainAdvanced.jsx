@@ -4,7 +4,7 @@ import { holdTrainEscape, useAdvancedTraining } from "./useTraining.js";
 import {
   ADVANCED_DEFAULTS, CAPTION_FILTERS, CAPTION_MAX, GOALS, LR_RANGE, MAX_IMAGES, MIN_IMAGES, RANKS,
   STEP_RANGE, addTag, advancedTriggerLine, captionCounts, captionFilter, captionState, credits,
-  describeLabel, etaForSteps, etaText, focusWindow, perImage, removeTag, replaceIn, stepFocus,
+  describeLabel, etaForSteps, etaText, sentence, focusWindow, perImage, removeTag, replaceIn, stepFocus,
   trackPercent,
 } from "../../gen/trainCore.js";
 
@@ -367,7 +367,7 @@ function Parameters({ a, title, baseName, onRuns }) {
       <div className="mgtr-quote">
         <div className="mgtr-quote-head"><span className="n">Quote</span>
           <span className="p">{ask ? (ask.is_free ? "free" : credits(ask.price)) : "—"}</span></div>
-        <div className="mgtr-note">PixAI's price for this run today, by its base. Free to ask; nothing is spent until Start. Describing was charged when it ran. {etaText(eta)}.</div>
+        <div className="mgtr-note">PixAI's price for this run today, by its base. Free to ask; nothing is spent until Start. Describing was charged when it ran. {sentence(etaText(eta))}</div>
       </div>
       {a.started ? (
         <div className="mgtr-ok">

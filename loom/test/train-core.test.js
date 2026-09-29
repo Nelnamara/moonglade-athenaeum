@@ -336,3 +336,13 @@ describe("Advanced: parameters", () => {
     assert.equal(trackPercent("x", STEP_RANGE), 0);
   });
 });
+
+import { sentence } from "../../gallery/src/gen/trainCore.js";
+
+describe("the estimate as a sentence", () => {
+  test("capitalised with one full stop; nothing stays nothing", () => {
+    assert.equal(sentence("about 27–35 minutes"), "About 27–35 minutes.");
+    assert.equal(sentence("Done."), "Done.");
+    assert.equal(sentence(""), "");
+  });
+});

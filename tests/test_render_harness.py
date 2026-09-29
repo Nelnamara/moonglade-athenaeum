@@ -5232,7 +5232,7 @@ def test_train_advanced_describes_once_at_pixais_quote_and_starts_at_its_price(
         page.wait_for_selector(".mgtr-adv-params")
         assert page.locator(".mgtr-param.locked").count() == 3
         assert page.locator(".mgtr-rank.on").inner_text() == "64"
-        assert "about 27–35 minutes" in page.locator(".mgtr-quote").inner_text()
+        assert "About 27–35 minutes." in page.locator(".mgtr-quote").inner_text()
         start = page.locator(".mgtr-adv-params .mgtr-go")
         assert start.inner_text() == "Start training · 100,000"
         assert not pixai.calls_for("/training-task/7700/submit"), "the quote is a read"
