@@ -158,11 +158,14 @@ def _panel_src(name):
 def test_the_train_panels_take_the_servers_default_base():
     """Source guard: the desktop Basic wizard and TrainMobile pre-select the server's
     default_version_id and no longer the first group's first model -- with Tsubaki.3 sorting
-    first, that rule would pre-select the 100,000-credit base."""
+    first, that rule would pre-select the 100,000-credit base. Since Session J the phone draws
+    the SAME Basic state as the desktop (useBasicTraining in train/useTraining.js), so the
+    guard follows it there and pins that the phone takes it rather than a copy of its own."""
     desk = _panel_src(_DESKTOP_TRAIN)
     assert "defaultBase(setup.cfg.groups || [], setup.cfg.default_version_id" in desk
     phone = _panel_src("TrainMobile.jsx")
-    assert "defaultBase(gs, d.default_version_id" in phone
+    assert "useBasicTraining(setup, csrf)" in phone
+    assert "function defaultBase" not in phone and "defaultBase(" not in phone
     for name, src in (("desktop", desk), ("TrainMobile.jsx", phone)):
         assert "setBaseModel(gs[0].models[0].version_id)" not in src, name
         assert "CANNOT quote" not in src and "check the price on PixAI" not in src, name
@@ -508,11 +511,13 @@ def test_the_acknowledged_amount_must_be_this_runs_price(tmp_path, monkeypatch):
 
 
 def test_the_panels_send_the_amount_and_drop_a_stale_quote():
-    """Source guard: both panels send acceptCostField (the amount), and the desktop panel --
-    whose base chips stay live under the confirm -- clears the quote on any form change."""
+    """Source guard: both panels send acceptCostField (the amount), and the Basic state --
+    whose base chips stay live under the confirm -- clears the quote on any form change. The
+    phone confirms through the same useBasicTraining().confirm as the desktop (Session J), so
+    it can send nothing of its own: no submit call and no acknowledgement in its file."""
     phone = _panel_src("TrainMobile.jsx")
-    assert "...acceptCostField(ask, acceptCost)" in phone
-    assert "accept_credit_cost: acceptCost" not in phone
+    assert "onClick={b.confirm}" in phone
+    assert "/api/train/submit" not in phone and "accept_credit_cost" not in phone
     desk = _panel_src(_DESKTOP_TRAIN)
     assert "...acceptCostField(ask, accepted)" in desk
     # never the tick itself as the acknowledgement (the retry sends `accepted ? price : false`)

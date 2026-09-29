@@ -5016,13 +5016,17 @@ def test_train_an_unclear_basic_start_says_it_may_have_started(
 
 
 def test_the_phone_train_grid_pages_by_task_past_the_first_18(
-        paged_library_server, render_browser, monkeypatch):
+        paged_library_server, render_browser, monkeypatch, pixai):
     """Issue #56: on the phone, Train a LoRA offered only the 18 most recent generations -- it
     read /api/train/recent-tasks?limit=18 once and never asked for more. The grid now pages BY
     TASK (a tile adds all of a generation's images) through the desktop pool's sentinel,
-    observed from the pushed screen's own scroller. The 120-row library is given one task per
-    picture here, so all 120 tasks must arrive, each once, across seven pages."""
+    observed from its own scroller. Since Session J the phone opens on a chooser and the
+    pictures come from "From history" in the add-images step's sources sheet, so that sheet is
+    the scroller now, and the first read is made when it opens (nothing is read before). The
+    120-row library is given one task per picture here, so all 120 tasks must arrive, each
+    once, across seven pages."""
     import sqlite3
+    _fake_training(pixai, monkeypatch)
     with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
         con.execute("UPDATE catalog SET task_id = 'T' || media_id")
     monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
@@ -5037,19 +5041,25 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
         _dismiss_any_achievement_toast(page)
         _settle(page)
         page.click('button[title="More"]')
+        page.click('.glm-menu-item:has-text("Train a LoRA")')
+        page.click(".trm-row:has-text('Basic training')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        page.click(".trm-row.goal:has-text('Character')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        page.click(".trm-row:has-text('From history')")
         # The first page is read off the wire, not off a tile count: the grid's sentinel has a
         # 600 px head start (TrainMobile.jsx), so on a tall enough screen page 2 is already on
         # its way as page 1's tiles land, and counting tiles at that instant raced it (36 == 18
         # on a warm run, 2026-09-29).
         with page.expect_response(lambda r: "/api/train/recent-tasks" in r.url) as first:
-            page.click('.glm-menu-item:has-text("Train a LoRA")')
+            page.click(".glm-sheet.trm-sheet .trm-row:has-text('From history')")
         page1 = first.value.json()
         assert "before_at" not in first.value.url, "the first read is the newest page"
         assert len(page1["tasks"]) == 18 and page1["next_before"], (
             "the first page is the 18 newest tasks, with a cursor for the next")
         page.wait_for_selector(".trm-tile")
         for _ in range(12):
-            page.evaluate("() => { const b = document.querySelector('.glm-screen-body'); "
+            page.evaluate("() => { const b = document.querySelector('.glm-sheet.trm-sheet'); "
                           "b.scrollTop = b.scrollHeight; }")
             page.wait_for_timeout(150)
             if page.locator(".trm-tile").count() >= 120:
@@ -5059,6 +5069,301 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
         assert len(srcs) == 120 and len(set(srcs)) == 120, (
             "the grid must page through every task, each once: {} tiles, {} distinct".format(
                 len(srcs), len(set(srcs))))
+    finally:
+        ctx.close()
+
+
+def _fake_advanced(pixai, monkeypatch):
+    """Two advanced drafts on top of _fake_training: 7700, the one "Next · creates a draft"
+    makes (empty until images are added), and 701, the Runs list's "Priestess set" draft with
+    24 images none of which is described yet. PixAI's side of each is a small state machine:
+    the set a PUT media replaces, a describe round that describes every image at 150 an image
+    (the per-task quote, not the config's 100), descriptions whose text is read from their
+    links (faked here -- the real read is a plain HTTPS GET), the 100,000 start quote. Returns
+    the task states."""
+    tasks = {"7700": {"status": "draft", "ids": [], "done": set(), "user": {}},
+             "701": {"status": "draft", "ids": [str(990000 + i) for i in range(24)],
+                     "done": set(), "user": {}}}
+    trig = "a moonlit night elf druid in the grove"
+
+    def task(call):
+        tid = call.variables["id"]
+        t = tasks.get(tid)
+        if t is None:
+            return {"trainingTask": {
+                "id": tid, "status": "running" if tid == "702" else "failed",
+                "trainingMode": "advanced", "type": "LORA",
+                "parameters": {"title": "run " + tid, "mediaIds": ["1000", "1001"],
+                               "category": "character", "baseModelId": _TRAIN_T3,
+                               "triggerWords": trig},
+                "extra": {"progress": 62 if tid == "702" else None,
+                          "estimatedTotalTime": 1800000 if tid == "702" else None},
+                "outputs": {"message": "" if tid == "702" else "out of memory"}}}
+        return {"trainingTask": {
+            "id": tid, "status": t["status"], "trainingMode": "advanced", "type": "LORA",
+            "parameters": {"title": "Nelnamara v3" if tid == "7700" else "Priestess set",
+                           "mediaIds": list(t["ids"]), "category": "character",
+                           "baseModelId": _TRAIN_T3, "triggerWords": trig},
+            "extra": {"progress": None, "estimatedTotalTime": None}, "outputs": {"message": ""}}}
+    pixai.on("trainingTask", task)
+
+    def create(call):
+        inp = call.variables["input"]
+        if inp.get("trainingMode") == "advanced":
+            return {"createTrainingTask": {"id": "7700", "refId": None}}
+        return {"createTrainingTask": {"id": "trn1", "refId": "m7"}}
+    pixai.on("createTrainingTask", create)
+
+    def register(tid):
+        t = tasks[tid]
+        base = "/training-task/%s" % tid
+
+        def put_media(call):
+            t["ids"] = [str(m) for m in call.body["mediaIds"]]
+            for m in t["ids"]:
+                pixai.on("PUT %s/captions/%s" % (base, m), {"mediaId": m})
+            return {"trainingTaskId": tid, "mediaIds": t["ids"]}
+        pixai.on("PUT " + base + "/media", put_media)
+        for m in t["ids"]:
+            pixai.on("PUT %s/captions/%s" % (base, m), {"mediaId": m})
+
+        def quote(call):
+            n = len([m for m in t["ids"] if m not in t["done"]])
+            return {"imageCount": n, "totalPrice": 150 * n}
+        pixai.on(base + "/caption-price", quote)
+
+        def describe(call):
+            t["done"] |= set(t["ids"])
+            t["status"] = "captionReady"
+            return {"trainingTaskId": tid, "status": "captioning"}
+        pixai.on(base + "/caption", describe)
+        pixai.on(base + "/captions", lambda call: {"items": [
+            {"mediaId": m, "source": "machine", "captionUrl": "https://c/%s/%s" % (tid, m)}
+            for m in t["ids"] if m in t["done"]]})
+        pixai.on(base + "/price", {"price": 100000})
+        pixai.on(base + "/submit", {"trainingTaskId": tid, "status": "waiting"})
+    for tid in tasks:
+        register(tid)
+    monkeypatch.setattr(core, "fetch_caption_text", lambda url, limit=0:
+                        "night elf, moonwell, image " + url.rsplit("/", 1)[-1])
+    return tasks
+
+
+def _posts_to(posts, part):
+    return [json.loads(b or "{}") for u, b in posts if part in u]
+
+
+def test_train_advanced_describes_once_at_pixais_quote_and_starts_at_its_price(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Decision 3c with the owner's 2026-09-28 corrections (BUILD section 5), end to end on the
+    desktop against a faked PixAI: "Next · creates a draft" creates ONE draft; the images are
+    added on the Descriptions step; PixAI describes first -- "Describe automatically (12
+    images)" names PixAI's own quote (150 an image, not the config's 100) and is the only way
+    in (no "Write them myself"), and "Next: parameters" stays off until every image is
+    described; one press sends that quote once. An edit saves after a pause; Esc leaves the
+    focus view for the grid without closing the overlay. The parameters are drawn locked, and
+    Start names PixAI's quote and sends it once, with PixAI's own default options."""
+    _fake_training(pixai, monkeypatch)
+    tasks = _fake_advanced(pixai, monkeypatch)
+    ctx, page, posts = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".mgtr-mode:has-text('Advanced training')")
+        page.wait_for_selector(".mgtr-adv-setup")
+        nxt = page.locator(".mgtr-adv-setup .mgtr-go")
+        assert nxt.inner_text() == "Next · creates a draft" and nxt.is_disabled()
+        assert "Tsubaki.3 · Recommended" in page.locator(".mgtr-advbase.on").inner_text()
+        page.fill("#mgtr-adv-name", "Nelnamara v3")
+        page.fill("#mgtr-adv-trig", "nelna druid")
+        assert "needs at least 30" in page.locator(".mgtr-hint.warn").inner_text()
+        assert nxt.is_disabled()
+        page.fill("#mgtr-adv-trig", "a moonlit night elf druid in the grove")
+        assert posts == [], "the set-up step sent something before its button"
+        nxt.click()
+        page.wait_for_selector(".mgtr-adv-desc")
+        assert pixai.mutations("createTrainingTask") == 1
+        made = pixai.calls_for("createTrainingTask")[0].variables["input"]
+        assert made["trainingMode"] == "advanced" and made["baseModelId"] == _TRAIN_T3
+
+        # the images are added on this step
+        page.click(".mgtr-src:has-text('From history')")
+        page.click(".mgtr-segbtn:has-text('All')")
+        page.wait_for_function("() => document.querySelectorAll('.mgtr-pool-tile').length >= 12")
+        tiles = page.locator(".mgtr-pool-tile")
+        for i in range(12):
+            tiles.nth(i).click()
+        page.click(".mgtr-pool-tray .mgtr-go")
+        page.wait_for_selector(".mgtr-capask")
+        assert len(tasks["7700"]["ids"]) == 12
+        assert page.locator("text=Write them myself").count() == 0
+        go_desc = page.locator(".mgtr-capask .mgtr-go")
+        assert go_desc.inner_text() == "Describe automatically (12 images) · 1,800"
+        assert page.locator(".mgtr-capask-head .p").inner_text() == "1,800"
+        assert page.locator(".mgtr-adv-desc .mgtr-row-end .mgtr-go").is_disabled(), \
+            "Next: parameters is off until every image is described"
+        assert not [c for c in pixai.calls if c.op.endswith("/caption")], "nothing described yet"
+
+        go_desc.click()
+        page.wait_for_function(
+            "() => document.querySelectorAll('.mgtr-dtile-text:not(.none)').length === 12")
+        sent = _posts_to(posts, "/7700/caption")
+        confirms = [b for b in sent if b.get("confirm")]
+        assert len(confirms) == 1 and confirms[0]["accept_credit_cost"] == 1800
+        assert len([c for c in pixai.calls if c.op == "/training-task/7700/caption"]) == 1
+        assert page.locator(".mgtr-capask").count() == 0
+
+        # an edit in the focus view saves after a pause; Esc returns to the grid only
+        page.locator(".mgtr-dtile-img").first.click()
+        box = page.locator(".mgtr-focus-text")
+        box.fill("my own words for this night elf")
+        page.wait_for_function(
+            "() => document.querySelector('.mgtr-focus-meta').textContent.includes('/ 1,000')")
+        page.wait_for_timeout(1300)
+        saves = [c for c in pixai.calls if c.verb == "rest_put" and "/captions/" in c.op]
+        assert len(saves) == 1 and saves[0].body == {"text": "my own words for this night elf"}
+        box.focus()
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".mgtr-dgrid")
+        assert page.locator(".mgtr-slab").count() == 1, "Esc in the focus view closed the overlay"
+        assert page.locator(".mgtr-dtile-dot").count() == 1
+        assert page.locator(".mgtr-chip:has-text('Edited')").inner_text() == "Edited 1"
+
+        # parameters: locked at PixAI's defaults; Start names the quote and sends it once
+        page.click(".mgtr-adv-desc .mgtr-row-end .mgtr-go")
+        page.wait_for_selector(".mgtr-adv-params")
+        assert page.locator(".mgtr-param.locked").count() == 3
+        assert page.locator(".mgtr-rank.on").inner_text() == "64"
+        assert "about 27–35 minutes" in page.locator(".mgtr-quote").inner_text()
+        start = page.locator(".mgtr-adv-params .mgtr-go")
+        assert start.inner_text() == "Start training · 100,000"
+        assert not pixai.calls_for("/training-task/7700/submit"), "the quote is a read"
+        start.click()
+        page.wait_for_selector(".mgtr-ok")
+        submits = pixai.calls_for("/training-task/7700/submit")
+        assert len(submits) == 1 and submits[0].body == {"trainingOptions": {
+            "trainingSteps": 325, "learningRate": 0.0006, "rank": 64, "gradAccum": 2}}
+        confirms = [b for b in _posts_to(posts, "/7700/submit") if b.get("confirm")]
+        assert len(confirms) == 1 and confirms[0]["accept_credit_cost"] == 100000
+        assert pixai.mutations() == 1, "only the draft was a GraphQL write"
+    finally:
+        ctx.close()
+
+
+def test_train_continue_opens_a_draft_at_its_descriptions_and_writes_nothing(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Runs' Continue (5c) opens the draft at its step -- the Descriptions step, with PixAI's
+    own describe quote for ITS set on the button -- and only reads."""
+    _fake_training(pixai, monkeypatch)
+    _fake_advanced(pixai, monkeypatch)
+    ctx, page, posts = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".mgtr-runsrow")
+        page.locator(".mgtr-run", has_text="Priestess set").locator(".mgtr-run-act").click()
+        page.wait_for_selector(".mgtr-capask")
+        assert page.locator(".mgtr-capask .mgtr-go").inner_text() == \
+            "Describe automatically (24 images) · 3,600"
+        assert "24 IMAGES" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
+        assert posts == [], "continuing a draft sent a training POST: %r" % posts
+        assert pixai.mutations() == 0
+        assert not [c for c in pixai.calls if c.verb in ("rest_post", "rest_put", "rest_patch")]
+    finally:
+        ctx.close()
+
+
+def _phone_train(paged_library_server, render_browser, monkeypatch):
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    page = ctx.new_page()
+    posts = []
+    page.on("request", lambda r: posts.append((r.url, r.post_data or ""))
+            if r.method == "POST" and "/api/train/" in r.url else None)
+    _login(page)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Train a LoRA")')
+    page.wait_for_selector(".trm-row")
+    return ctx, page, posts
+
+
+def test_phone_train_opens_on_the_chooser_and_its_back_steps_one_screen(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """The phone's Train a LoRA (Session J, handoff F): the chooser with the strip on top, one
+    step per screen with the step at the head's right, and the head's ‹ stepping back one
+    screen (only the chooser's closes it). Opening it reads only."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, posts = _phone_train(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.wait_for_selector(".trm-strip .mgm")
+        assert "--mgm-s: 14px" in (page.locator(".trm-strip .mgm").get_attribute("style") or "")
+        assert "1 draft" in page.locator(".trm-row:has-text('Runs')").inner_text()
+        page.click(".trm-row:has-text('Basic training')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        page.click(".trm-row.goal:has-text('Outfit')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        assert page.locator(".glm-screen-head .trm-step").inner_text() == "2 / 3"
+        cta = page.locator(".trm-cta-btn")
+        assert cta.inner_text() == "Add 10 more" and cta.is_disabled()
+        # the CTA is pinned inside the screen and is a 44 px target
+        g = page.evaluate("""() => { const b = document.querySelector('.trm-cta-btn').getBoundingClientRect();
+            const s = document.querySelector('.glm-screen-body').getBoundingClientRect();
+            return {h: b.height, bottom: b.bottom, sBottom: s.bottom}; }""")
+        assert g["h"] >= 44 and g["bottom"] <= g["sBottom"] + 1, g
+        page.click(".glm-screen-back")
+        assert page.locator(".glm-screen-head .trm-step").inner_text() == "1 / 3"
+        page.click(".glm-screen-back")
+        page.wait_for_selector(".trm-row:has-text('Advanced training')")
+        page.click(".glm-screen-back")
+        page.wait_for_selector(".glm-screen", state="detached")
+        assert posts == [], "the phone's train screens sent a training POST: %r" % posts
+        assert pixai.mutations() == 0
+    finally:
+        ctx.close()
+
+
+def test_phone_train_describe_asks_once_in_a_sheet_and_sends_pixais_quote(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """The phone's Advanced descriptions (3c corrected, handoff F3): Runs' Continue opens the
+    draft; its pinned CTA names PixAI's quote for the set ("Describe automatically (24 images)
+    · 3,600"), opens ONE confirm sheet (portalled out of the scrolling body, above the screen),
+    and its button sends that number once. Then image over text, the count out of 1,000."""
+    _fake_training(pixai, monkeypatch)
+    tasks = _fake_advanced(pixai, monkeypatch)
+    ctx, page, posts = _phone_train(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".trm-row:has-text('Runs')")
+        page.locator(".mgtr-run", has_text="Priestess set").locator(".mgtr-run-act").click()
+        cta = page.locator(".trm-cta-btn")
+        page.wait_for_function(
+            "() => document.querySelector('.trm-cta-btn').textContent.includes('3,600')")
+        assert cta.inner_text() == "Describe automatically (24 images) · 3,600"
+        assert posts == []
+        cta.click()
+        sheet = page.locator(".glm-sheet.trm-sheet")
+        sheet.wait_for()
+        geo = page.evaluate("""() => { const s = document.querySelector('.glm-sheet.trm-sheet');
+            return {inBody: !!s.closest('.glm-body'),
+                    z: +getComputedStyle(s).zIndex,
+                    screenZ: +getComputedStyle(document.querySelector('.glm-screen')).zIndex}; }""")
+        assert geo["inBody"] is False and geo["z"] > geo["screenZ"], geo
+        go = sheet.locator(".glm-primary")
+        assert go.inner_text() == "Describe · 3,600"
+        go.click()
+        page.wait_for_function(
+            "() => document.querySelectorAll('.trm-dtile-text:not(.none)').length === 24")
+        confirms = [b for b in _posts_to(posts, "/701/caption") if b.get("confirm")]
+        assert len(confirms) == 1 and confirms[0]["accept_credit_cost"] == 3600
+        assert len([c for c in pixai.calls if c.op == "/training-task/701/caption"]) == 1
+        assert tasks["701"]["status"] == "captionReady"
+        page.locator(".trm-dtile").first.click()
+        page.wait_for_selector(".trm-dtext")
+        assert "/ 1,000" in page.locator(".trm-dmeta").inner_text()
+        assert page.locator(".glm-screen-head .trm-step").inner_text() == "1 / 24"
+        assert page.locator(".trm-cta-btn").inner_text() == "Next: parameters"
+        assert page.locator(".trm-cta-btn").is_enabled()
     finally:
         ctx.close()
 
