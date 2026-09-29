@@ -93,6 +93,30 @@ A palette is sent only to a model that takes one, and never with a context image
 the row says **Held** and the palette stays picked for when it applies again. It does not change
 the price.
 
+### Recipes
+
+A **recipe** is PixAI's saved bundle of generation inputs (prompt words, LoRAs, pictures) made
+for one kind of model. The **RECIPES** row sits in the settings' first panel under the LoRAs |
+Context images switch (on a phone, under the LoRAs on the Create screen). **+ Browse** (or
+**browse ›**) opens the recipe picker — the market, your Sets, Mine and History, plus a
+**Style code** lookup that finds the recipe an old style code became — and **+ Add** puts a
+recipe in the row. The command palette's **Browse recipes** opens the full-size market, and
+**⁂ Make a recipe** in the Lightbox starts the recipe creator from that picture.
+
+- Up to **10** recipes, applied in the row's order; **×** removes one. The row is remembered with
+  your Moonglade account.
+- A recipe beside a LoRA warns (*A recipe beside a LoRA can fight it*) but still sends.
+- A recipe that doesn't fit the request — made for another model, no longer available, for the
+  author's followers only, a prompt that would run too long, or refused by PixAI when the price
+  was checked — turns **peach with "!"**, its reason on hover, and Generate waits until you fix
+  or remove it.
+- With context images the row is **held**: dimmed, *Held · not sent with context images*, and
+  sent again when you switch back to LoRAs.
+- On Tsubaki.3, recipes run **creativity one step lower**, as PixAI's own site does: Embellished
+  runs as Light touch and Light touch as As written. The cost badge names the change.
+- The cost badge prices the request **with** its recipes. If PixAI can't price it, the badge
+  says why (or *couldn't verify the price with these recipes*) and never reads FREE.
+
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
 generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,

@@ -9,6 +9,7 @@ import { accountPrefs } from "../hooks/useAccountPrefs.js";
 import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
+import { publishDockPrice, publishDockRequest } from "../recipes/recipesStore.js";
 
 /* The image-generation hook. Mirrors the classic Gen IIFE's timing contracts:
    - price: the shared price probe (gen/usePriceProbe.js) owns the 250ms debounce,
@@ -89,6 +90,15 @@ export default function useGenerate({ costRef, isMember }) {
   const probe = usePriceProbe({ build, costRef });
   const refreshPrice = probe.refresh;
   const priceOk = probe.canSubmit;   // the identity gate, ANDed into goGate at the buttons
+  const priceAnswer = probe.response;
+
+  // Lane w2-recipes' row and picker read the dock's request (the prompt budget, a candidate
+  // recipe priced against it) and its last price answer (PixAI's own recipe refusal paints
+  // the chip peach). One dock per page, so this hook is the one publisher.
+  useEffect(() => {
+    publishDockRequest(buildPayload(s), { modelTitle: (s.model && s.model.title) || "" });
+  }, [s]);
+  useEffect(() => { publishDockPrice(priceAnswer); }, [priceAnswer]);
 
   // Structural cost inputs only -- prompt/negative/seed text never refires,
   // matching the classic. steps IS structural (it changes the upscale pass too).
@@ -296,7 +306,7 @@ export default function useGenerate({ costRef, isMember }) {
   /* ---- submit: NO retries, body-keyed errors, adjusted always recorded ---- */
   const generate = useCallback(async (loraCap) => {
     if (busyRef.current) return;              // latch, independent of render timing
-    if (goGate(s, loraCap)) return;
+    if (goGate(s, loraCap, priceAnswer)) return;
     // PAYLOAD IDENTITY gate. The Generate buttons are already disabled on
     // g.canSubmit; this is the click that slips through a stale render (a keyboard
     // Enter needs no repaint to fire). The quote on the badge must have been priced
@@ -316,7 +326,7 @@ export default function useGenerate({ costRef, isMember }) {
     // change caused by our own submit. FORCED, or the short-circuit would swallow it
     // as "nothing changed" -- but the balance did.
     refreshPrice({ force: true });
-  }, [s, openLine, priceOk, refreshPrice]);
+  }, [s, openLine, priceOk, priceAnswer, refreshPrice]);
 
   /* ---- the context slots (Session H decision 1) ----
      addContext appends (a picture already in a slot is not added twice, and the live max is
@@ -368,7 +378,7 @@ export default function useGenerate({ costRef, isMember }) {
   return { s, set, busy, results, applyModelRow, pickVersion,
            addLora, removeLora, setLora, generate, refreshPrice,
            addContext, removeContext, sizeContext, tsubakiEdit,
-           canSubmit: priceOk };
+           canSubmit: priceOk, priceAnswer };
 }
 
 /* T1a: a members-only profile row is never picked for an account PixAI reports as non-member,

@@ -211,26 +211,6 @@
   .mgts-tier.lift { transform: none; }
 }
 
-/* ---- the RecipeRow STUB's look (lane w2-recipes replaces the row and its styles) ---- */
-.rcp-row { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid var(--surface0); }
-.rcp-head { display: flex; align-items: center; gap: 8px; padding-top: 6px; }
-.rcp-head .sp { flex: 1 1 auto; }
-.rcp-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
-.rcp-count { font-size: 9.5px; color: var(--overlay0); font-family: ui-monospace, monospace; }
-.rcp-chips { display: flex; gap: 6px; flex-wrap: wrap; transition: opacity .3s; }
-.rcp-chips.held { opacity: .38; }
-.rcp-chip { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border-radius: 8px;
-  border: 1px solid var(--surface1); }
-.rcp-chip img, .rcp-ph { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; display: block;
-  background: var(--surface1); }
-.rcp-name { font-size: 10.5px; white-space: nowrap; color: var(--text); }
-.rcp-x { border: 0; background: none; color: var(--overlay0); cursor: pointer; font-size: 10px; padding: 0; }
-.rcp-browse { font-size: 10.5px; padding: 5px 9px; border-radius: 8px; border: 1px dashed var(--surface1);
-  color: var(--lavender); background: transparent; font-family: inherit; white-space: nowrap; }
-.rcp-browse:disabled { opacity: .6; cursor: default; }
-.rcp-note { font-size: 9.5px; line-height: 1.45; color: var(--subtext); }
-.rcp-chips.held + .rcp-note { color: var(--overlay0); }
-
 /* ---- T3a: the Lightbox edit bar (handoff frame G): a pill over the stage foot, 72% wide, clear of
    ‹ ›, above the prompt row; the price in mono before the send button ---- */
 .mgteb { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: 72%;

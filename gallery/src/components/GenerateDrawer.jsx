@@ -287,7 +287,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
   // The Go gate, plus Unlimited Mode's one-at-a-time rule (SCOPE_2026-09-26_unlimited-mode
   // C3b): while this run list holds a lane task still waiting or running, Generate waits in
   // Unlimited Mode. The server refuses a second one off its own job log either way (§8.6).
-  const gate = goGate(s, loraCap) || (s.unlimited && laneBusy(jobs) ? UNLIMITED_BUSY : null);
+  const gate = goGate(s, loraCap, g.priceAnswer) || (s.unlimited && laneBusy(jobs) ? UNLIMITED_BUSY : null);
   useEffect(() => {
     if (!open && !runningCount) return;
     const t = setInterval(fetchJobs, open ? 4000 : 8000);

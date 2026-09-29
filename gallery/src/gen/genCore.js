@@ -22,6 +22,7 @@ import {
   sizeTiers, tierDims,
 } from "./tsubakiCore.js";
 import { paletteForPayload } from "./colorPaletteCore.js";
+import { recipeGate } from "../recipes/recipesCore.js";
 
 // PixAI's own captured Enhance Details values (task 2039053268124647852,
 // 2026-07-28) -- same constants the classic chip carries.
@@ -319,9 +320,26 @@ export function loraIncompat(lora, model) {
   return String(lora.lora_base_type).toUpperCase() !== String(model.model_type).toUpperCase();
 }
 
+/* What the recipe row's fit check reads off the dock (lane w2-recipes, H decision 10 / T2b):
+   the model, the prompt's length, and PixAI's own refusal on the dock's last price answer
+   (`recipe_error`, keyed by the recipe ids it names). The row paints the same verdict. */
+export function recipeFitCtx(s, priceAnswer) {
+  const refusals = {};
+  const re = priceAnswer && priceAnswer.recipe_error;
+  if (re) for (const id of re.recipe_ids || []) refusals[String(id)] = re;
+  return {
+    modelType: (s.model && s.model.model_type) || "",
+    modelTitle: (s.model && s.model.title) || "",
+    promptLen: typeof s.prompt === "string" ? s.prompt.length : null,
+    refusals,
+  };
+}
+
 /* The Go gate, classic chain: resolved version + prompt + no unresolved/failed
-   LoRA + no architecture mismatch + count within the account cap. */
-export function goGate(s, loraCap) {
+   LoRA + no architecture mismatch + count within the account cap + no recipe that doesn't
+   fit. `priceAnswer` (optional) is the dock's last /api/price answer, for PixAI's own recipe
+   refusal. */
+export function goGate(s, loraCap, priceAnswer) {
   if (!s.model || !s.model.version_id) return "Pick a model first";
   if (!s.prompt.trim()) return "Write a prompt";
   // The LoRA checks judge what is SENT: on the Context side the LoRAs are held, not sent.
@@ -330,6 +348,11 @@ export function goGate(s, loraCap) {
     if (s.loras.some((l) => !l.version_id)) return "A LoRA is still resolving";
     if (s.loras.some((l) => loraIncompat(l, s.model))) return "A LoRA does not match this model's architecture";
     if (loraCap != null && s.loras.length > loraCap) return "Over your LoRA cap (" + loraCap + ")";
+    // Recipes, like the LoRAs, are judged only where they are SENT (the LoRA side); a recipe
+    // that doesn't fit refuses in the row's own words (recipesCore.recipeGate, H T2b: "later
+    // changes turn the chip peach and Generate refuses").
+    const rg = recipeGate(s.recipes, recipeFitCtx(s, priceAnswer));
+    if (rg) return rg;
   }
   // Session H decision 1: the Context side sends its images and holds the rest. With no image
   // there is nothing of its own to send -- a plain run without the held LoRAs/recipes would be

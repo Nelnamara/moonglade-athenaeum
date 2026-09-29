@@ -260,7 +260,7 @@ export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
   addContext, removeContext, sizeContext,
-  canSubmit: priceOk,
+  canSubmit: priceOk, priceAnswer,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   // The model/LoRA sheet and its scrim are PORTALED out of the scrolling body (owner's 5059
@@ -296,7 +296,7 @@ export default function CreateMobile({
   const modelSheet = useSheet();
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
-  const gate = goGate(s, loraCap);
+  const gate = goGate(s, loraCap, priceAnswer);
   const m = s.model;
 
   /* Prime the Image cost chip when Image mode is (re)entered. <CostBadge>'s ref
