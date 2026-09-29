@@ -526,6 +526,9 @@ export default function useGenerate({ costRef, isMember }) {
       }
       setS((old) => ({
         ...old, ...restorePatch(snap, { withSeed }),
+        // Unlimited Mode makes one picture at a time (the lane's rule): a restore never asks
+        // for more than one while it is on.
+        ...(old.unlimited ? { count: 1, varMode: "random" } : {}),
         loras: [],
         mode: rowSafeMode(modeAfterApply(snap.mode, old.model && old.model.profiles), old.model, old.member),
         note: modelGone ? note + " " + MODEL_GONE : note,
