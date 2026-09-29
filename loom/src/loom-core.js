@@ -944,6 +944,11 @@ export const mediaRefIndex = (project) => {
       const title = (c.title || "").trim();
       const code = `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
       if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+      // Session P: every take's clip travels in the bundle (the server walks the same list).
+      (Array.isArray(c.takes) ? c.takes : []).forEach((t) => {
+        const m = t && t.mid ? String(t.mid) : "";
+        if (m && m !== String(c.resultMid || "")) note(m, `${code} (take ${t.n})`);
+      });
       ["openFrame", "closeFrame"].forEach((slot) => {
         const f = c[slot] || {};
         if (f.mediaId) note(f.mediaId, `${code} (${slot})`);

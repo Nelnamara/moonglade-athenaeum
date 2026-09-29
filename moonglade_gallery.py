@@ -10105,12 +10105,21 @@ __UPSCALE_CONST__
      of 2026-08-09 (Claude Design handoff, drift item 39): the Activity control is inline in
      the toolbar (master-storyboard.jsx's own .lv-top-act-wrap) now, not body-level. -->
 <script>
-window.storage = {
-  get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
-  set:function(k,v){ return fetch('/api/loom/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
-  list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
-  delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
-};
+/* Session P (BUILD-w5-p s3.5, review F15): every call now REJECTS on a failed answer instead
+   of reading one as "nothing there" -- a failed or unreadable get used to come back null, and
+   the boot path seeded a blank board over the key. get also hands back the board's rev (and
+   missing:true for an absent key); set takes an optional {base_rev} and resolves {ok, rev} or
+   {conflict, value, rev} (the server's compare-and-swap), throwing on anything else. */
+window.storage = (function(){
+  function fail(r, d){ var e = new Error((d && d.error) || ('HTTP ' + r.status)); e.status = r.status; e.unreadable = !!(d && d.error === 'unreadable'); throw e; }
+  function body(r){ return r.json().catch(function(){ return null; }); }
+  return {
+    get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){ return body(r).then(function(d){ if(!r.ok || !d) fail(r, d); if (d.value != null) return {value:d.value, rev:d.rev}; return d.missing ? {value:null, missing:true, rev:d.rev} : null; }); }); },
+    set:function(k,v,shared,opts){ var b={key:k,value:v}; if (opts && opts.base_rev != null) b.base_rev = opts.base_rev; return fetch('/api/loom/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){ return body(r).then(function(d){ if (r.status === 409 && d && d.conflict) return {conflict:true, value:d.value, rev:d.rev}; if(!r.ok || !d || d.ok === false) fail(r, d); return {ok:true, rev:d.rev}; }); }); },
+    list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){ return body(r).then(function(d){ if(!r.ok || !d) fail(r, d); return {keys:(d.keys)||[]}; }); }); },
+    delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}).then(function(r){ return body(r).then(function(d){ if(!r.ok || (d && d.ok === false)) fail(r, d); return d; }); }); }
+  };
+})();
 /* The feat beacon's per-render nonce (2026-09-07 ruling -- see api_ach_event()). Since
    Session I (2026-09-28) this shell posts NOTHING itself: the "?" below opens the guide, and
    the guide's own open sends the docs event through gallery/src/notify/achNonce.js, which the
@@ -22666,6 +22675,149 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
+    # ---- Board revisions (Session P, BUILD-w5-p §3.5, review N5) ------------------------
+    # rev = sha1 of the stored JSON text, resolved EXACTLY as _loom_kv_read resolves the value:
+    # the account's own file, else (not tombstoned) the legacy shared file, else missing. A
+    # board inherited from the legacy layer therefore has a real rev on its first save, and a
+    # missing key has one fixed sentinel. Unreadable (a file that exists but will not read or
+    # parse, in EITHER layer) is its own answer, never "missing": the client must not seed a
+    # blank board over a key it merely failed to read (review F15b).
+    _LOOM_REV_MISSING = "missing"
+
+    class _LoomUnreadable(Exception):
+        pass
+
+    def _loom_kv_text(user, key):
+        """(text, layer) for this account's view of `key`: layer "own" | "legacy" | None.
+        Raises _LoomUnreadable when the file that decides the answer exists but cannot be
+        read. Parse errors are checked here too, so a corrupt file is never served."""
+        own = _loom_kv_path(user, key)
+        if own.exists():
+            try:
+                t = own.read_text(encoding="utf-8")
+                json.loads(t)
+                return t, "own"
+            except (ValueError, OSError):
+                raise _LoomUnreadable(key)
+        if _loom_tomb_path(user, key).exists():
+            return None, None
+        leg = _legacy_loom_kv_path(key)
+        if not leg.exists():
+            return None, None
+        try:
+            t = leg.read_text(encoding="utf-8")
+            json.loads(t)
+            return t, "legacy"
+        except (ValueError, OSError):
+            raise _LoomUnreadable(key)
+
+    def _loom_rev_of(text):
+        return _LOOM_REV_MISSING if text is None else hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+    # ---- The Loom submit journal (Session P, BUILD-w5-p §3.2, review F2/F3/F8) ------------
+    # One append-only JSONL per account: out_dir/loom/_submits/<account key>.jsonl. Every state
+    # change of one Loom render is a line: sending -> submitted | refused | not_sent |
+    # may_have_started, then finished (reported by /api/task-status) or abandoned (the owner
+    # released an unclear send). It is what makes a double POST, a second tab, a lost answer
+    # and a server restart unable to send one shot twice. Local only, never PixAI.
+    _loom_journal_lock = threading.Lock()
+    _loom_journal = {}          # account key -> {"subs": {submit_id: entry}, "tasks": {task_id: submit_id}}
+    _LOOM_JOURNAL_KEEP_S = 14 * 24 * 3600
+    _LOOM_BLOCK_S = 6 * 3600    # the poll ceiling: one render per shot for this long
+    _LOOM_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+    def _loom_journal_path(user):
+        d = out_dir / "loom" / "_submits"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / (_account_key(user) + ".jsonl")
+
+    def _loom_journal_load(user):
+        """The account's index, read once (callers hold _loom_journal_lock). Entries older
+        than 14 days are dropped and the file rewritten, on this first read only."""
+        k = _account_key(user)
+        if k in _loom_journal:
+            return _loom_journal[k]
+        idx = {"subs": {}, "tasks": {}}
+        path = _loom_journal_path(user)
+        now = time.time()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for ln in lines:
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            sid = str(rec.get("submit_id") or "")
+            if not sid:
+                continue
+            cur = idx["subs"].setdefault(sid, {})
+            cur.update({k2: v for k2, v in rec.items() if v is not None})
+        for sid in list(idx["subs"]):
+            e = idx["subs"][sid]
+            if now - float(e.get("first_at") or e.get("at") or now) > _LOOM_JOURNAL_KEEP_S:
+                del idx["subs"][sid]
+        for sid, e in idx["subs"].items():
+            if e.get("task_id"):
+                idx["tasks"][str(e["task_id"])] = sid
+        if lines:
+            try:
+                tmp = path.with_name(path.name + ".tmp-%d" % os.getpid())
+                tmp.write_text("".join(json.dumps(e) + "\n" for e in idx["subs"].values()),
+                               encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError:
+                pass
+        _loom_journal[k] = idx
+        return idx
+
+    def _loom_journal_note(user, submit_id, **fields):
+        """Append one state line and fold it into the index (callers hold the lock)."""
+        idx = _loom_journal_load(user)
+        e = idx["subs"].setdefault(submit_id, {"submit_id": submit_id, "first_at": time.time()})
+        rec = {"submit_id": submit_id, "at": time.time(), "first_at": e["first_at"]}
+        rec.update({k2: v for k2, v in fields.items() if v is not None})
+        e.update(rec)
+        if e.get("task_id"):
+            idx["tasks"][str(e["task_id"])] = submit_id
+        try:
+            with open(_loom_journal_path(user), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec) + "\n")
+        except OSError:
+            pass
+        return e
+
+    def _loom_journal_live_for(user, board, card):
+        """The entry that still owns (board, card): sent or maybe sent, not finished, not
+        released, younger than the poll ceiling."""
+        idx = _loom_journal_load(user)
+        now = time.time()
+        for e in idx["subs"].values():
+            if e.get("board") != board or e.get("card") != card:
+                continue
+            if e.get("finished") or e.get("state") not in ("sending", "submitted", "may_have_started"):
+                continue
+            if now - float(e.get("first_at") or e.get("at") or 0) > _LOOM_BLOCK_S:
+                continue
+            return e
+        return None
+
+    def _loom_journal_finish_task(task_id):
+        """/api/task-status reported a journalled task done or failed: mark it finished, so
+        its shot may render again at once. A dict lookup; nothing for other tasks."""
+        tid = str(task_id or "")
+        user = str(session.get("user") or "")
+        if not tid or not user:
+            return
+        with _loom_journal_lock:
+            idx = _loom_journal_load(user)
+            sid = idx["tasks"].get(tid)
+            if sid and not idx["subs"].get(sid, {}).get("finished"):
+                _loom_journal_note(user, sid, finished=True)
+
     # ==== THE GALLERY -- the React front door ================================
     # "/" serves gallery/dist (Vite build: `npm run build` inside gallery/).
     # This is the FIRST-CLASS frontend the gallery UI migrated to -- real
@@ -23368,9 +23520,18 @@ __DESIGN_TOKENS__
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
+        key = request.args.get("key") or ""
         with _loom_lock:
             _loom_migrate()
-            return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
+            try:
+                text, _layer = _loom_kv_text(user, key)
+            except _LoomUnreadable:
+                # Session P (review F15): a board that exists but will not read is NOT a
+                # missing board -- the Loom would seed a blank one over it.
+                return jsonify({"error": "unreadable", "value": None}), 500
+            if text is None:
+                return jsonify({"value": None, "missing": True, "rev": _LOOM_REV_MISSING})
+            return jsonify({"value": json.loads(text), "rev": _loom_rev_of(text)})
 
     @app.route("/api/loom/set", methods=["POST"])
     @tier(LOGIN)
@@ -23382,13 +23543,28 @@ __DESIGN_TOKENS__
         k = p.get("key")
         if not k:
             return jsonify({"ok": False}), 400
+        base_rev = p.get("base_rev")
         with _loom_lock:
             _loom_migrate()
+            # Compare-and-swap (Session P, BUILD-w5-p §3.5): with a base_rev, the write lands
+            # only if the board is still the one the tab last read or wrote -- the check and
+            # the write are one step under this lock. Without one, today's last-writer-wins
+            # (ACTIVE_KEY, thumbs, every other caller).
+            if base_rev is not None:
+                try:
+                    cur_text, _layer = _loom_kv_text(user, k)
+                    cur_rev = _loom_rev_of(cur_text)
+                except _LoomUnreadable:
+                    cur_text, cur_rev = None, "unreadable"
+                if str(base_rev) != cur_rev:
+                    return jsonify({"conflict": True, "rev": cur_rev,
+                                    "value": json.loads(cur_text) if cur_text is not None else None}), 409
             try:
                 _loom_kv_write(user, k, p.get("value"))
             except OSError as e:
                 return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
-        return jsonify({"ok": True})
+            rev = _loom_rev_of(json.dumps(p.get("value")))
+        return jsonify({"ok": True, "rev": rev})
 
     @app.route("/api/loom/list")
     @tier(LOGIN)
@@ -23673,12 +23849,115 @@ __DESIGN_TOKENS__
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
         video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Login required
-        (any session, local or LAN)."""
+        (any session, local or LAN).
+
+        Session P (BUILD-w5-p §3.2; review F2, F3, F13, F16, N3) -- the guard order:
+          1. front door (LOGIN);
+          2. the Loom's own keys are POPPED so they never reach build_request, /api/price or
+             PixAI: loom_target {board_id, card_id}, submit_id, expect_free;
+          3. READ_ONLY, before the PixAI session is even made (no USER_ID lookup, no upload,
+             no card check) -- a READ_ONLY install talks to nobody before refusing;
+          4-6. ONE critical section under the journal lock: a replayed submit_id answers its
+             recorded outcome, a shot that already has a render out answers 409, a picture
+             that cannot be sent (an imported local_ id) is refused, and only then is
+             "sending" appended -- two POSTs racing each other cannot both pass;
+          7. the existing road: resolve_img -> build_request -> core.submit (READ_ONLY
+             again -> free card -> before_send -> ONE gql_mutate);
+          8. the outcome is journalled as submitted | refused | not_sent | may_have_started
+             from whether the mutation was reached (on_send) and whether PixAI's answer was
+             a definite refusal. A lost answer is NEVER recorded as a refusal: that would free
+             the shot for a second paid render while the first may exist.
+        A body with none of the keys (the gallery's own Video tab) skips 4-6 and 8 and is
+        today's request."""
+        import moonglade_backup as _core
+        p = request.get_json(silent=True) or {}
+        target = p.pop("loom_target", None)
+        submit_id = p.pop("submit_id", None)
+        expect_free = bool(p.pop("expect_free", False))
+        user = str(session.get("user") or "")
+        journalled = submit_id is not None or target is not None
+        board_id = card_id = None
+        if journalled:
+            if not isinstance(submit_id, str) or not _LOOM_ID_RE.match(submit_id):
+                return jsonify({"error": "This render has no valid submit id, so nothing was sent."}), 400
+            if target is not None:
+                t = target if isinstance(target, dict) else {}
+                board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
+                if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
+                    return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
+        try:
+            _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
+        except _core.PixAIError as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+        # Pictures the road cannot send (review F16). resolve_img below turns anything that is
+        # not a catalog id or a data: thumbnail into "", and the render then went out WITHOUT
+        # that frame -- paid for, and wrong. Refusing is not a new spend.
+        unsendable = [str(x) for x in (p.get("images") or [])
+                      if str(x or "").strip() and not str(x).strip().isdigit()
+                      and not str(x).strip().startswith("data:")]
+        if journalled:
+            with _loom_journal_lock:
+                idx = _loom_journal_load(user)
+                prev = idx["subs"].get(submit_id)
+                if prev:
+                    st = prev.get("state")
+                    if st == "submitted" and prev.get("task_id"):
+                        return jsonify({"task_id": prev["task_id"], "replay": True})
+                    if st == "sending":
+                        return jsonify({"state": "sending", "unclear": True,
+                                        "error": "This render is still being sent."}), 409
+                    if st == "may_have_started":
+                        return jsonify({"state": "may_have_started", "unclear": True,
+                                        "error": prev.get("error") or "No clear answer from PixAI."})
+                    if st == "abandoned":
+                        return jsonify({"state": "abandoned",
+                                        "error": "This render was released; press Render again."})
+                    return jsonify({"state": st or "refused", "replay": True,
+                                    "error": prev.get("error") or "This render was not sent."})
+                if board_id:
+                    live = _loom_journal_live_for(user, board_id, card_id)
+                    if live:
+                        tid = str(live.get("task_id") or "")
+                        return jsonify({
+                            "error": "This shot is already rendering"
+                                     + (" (task …%s)." % tid[-6:] if tid else "."),
+                            "busy_task_id": tid or None}), 409
+                if unsendable:
+                    msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
+                           "picture). Nothing was sent.")
+                    _loom_journal_note(user, submit_id, board=board_id, card=card_id,
+                                       state="not_sent", error=msg)
+                    return jsonify({"error": msg})
+                _loom_journal_note(user, submit_id, board=board_id, card=card_id, state="sending")
+        elif unsendable:
+            return jsonify({"error": "One of these pictures can't be sent to PixAI (an imported "
+                                     "picture). Nothing was sent."})
+
+        attempt = {"sent": False}
+
+        def _on_send(_params):
+            attempt["sent"] = True
+
+        def _before_send(params):
+            # Review F13: the confirm skipped because the shot priced FREE; if the card that
+            # quote found is gone by now, sending would charge credits nobody confirmed.
+            if expect_free and not params.get("kaisuukenId"):
+                raise _core.LocalRefusal(
+                    "The free card this render was priced with was used elsewhere, so it would "
+                    "spend credits. Nothing was sent. Press Render again to see the new price.")
+
+        hooks = {"before_send": _before_send, "on_send": _on_send} if journalled else {}
+
+        def _journal(**fields):
+            if journalled:
+                with _loom_journal_lock:
+                    _loom_journal_note(user, submit_id, **fields)
+
         try:
             import base64
             import hashlib
-            core, session = _gen_session()
-            p = request.get_json(silent=True) or {}
+            core, session_ = _gen_session()
             updir = out_dir / "loom" / "_uploads"
             updir.mkdir(parents=True, exist_ok=True)
 
@@ -23729,7 +24008,7 @@ __DESIGN_TOKENS__
                     fp = updir / (hashlib.sha1(raw).hexdigest()[:16] + ext)
                     if not fp.exists():
                         fp.write_bytes(raw)
-                    return core.upload_media(session, str(fp))
+                    return core.upload_media(session_, str(fp))
                 return ""                             # a bare filename/URL we can't fetch
 
             resolved = [(str(x or "").strip(), resolve_img(x)) for x in (p.get("images") or [])]
@@ -23755,7 +24034,8 @@ __DESIGN_TOKENS__
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()
             try:
-                task_id = core.submit(session, req)["task_id"]
+                attempt["sent"] = False
+                task_id = core.submit(session_, req, **hooks)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -23802,11 +24082,12 @@ __DESIGN_TOKENS__
                 # filename that resolved to "" -- keeps its first-pass result. Re-running
                 # the raw payload here threw the thumbnail's upload away and sent the
                 # base64 blob as a media id (adversarial review, 2026-08-22).
-                image_ids = [m for m in ((_input_media_id(core, session, raw) if raw.isdigit() else rid)
+                image_ids = [m for m in ((_input_media_id(core, session_, raw) if raw.isdigit() else rid)
                                          for raw, rid in resolved) if m]
                 req = _request_for(image_ids)
                 params = req.parameters   # rebound for the failure log below
-                task_id = core.submit(session, req)["task_id"]
+                attempt["sent"] = False
+                task_id = core.submit(session_, req, **hooks)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
@@ -23815,10 +24096,66 @@ __DESIGN_TOKENS__
                     telem_bump("storyboards", out_dir=out_dir)
             except Exception:
                 pass
+            _journal(state="submitted", task_id=str(task_id))
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            return jsonify({"error": _log_gen_failure(
-                "/api/loom/generate", e, locals().get("params"))[:300]}), 200
+            msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
+            if not journalled:
+                return jsonify({"error": msg}), 200
+            if not attempt["sent"]:
+                state = "not_sent"
+            elif getattr(e, "refused", False) or _core.definite_refusal(e):
+                state = "refused"
+            else:
+                state = "may_have_started"
+            _journal(state=state, error=msg)
+            if state == "may_have_started":
+                return jsonify({"error": msg, "unclear": True, "state": state}), 200
+            return jsonify({"error": msg, "state": state}), 200
+
+    @app.route("/api/loom/submit-status")
+    @tier(LOGIN)
+    def loom_submit_status():
+        """What the journal knows about one Loom render (Session P, BUILD-w5-p §3.3): the
+        client asks this -- never re-POSTs -- when its own POST got no answer. Local only.
+        {state: sending | submitted | refused | not_sent | may_have_started | abandoned |
+        unknown, task_id?, error?, finished?}"""
+        user = str(session.get("user") or "")
+        sid = str(request.args.get("submit_id") or "")
+        if not _LOOM_ID_RE.match(sid):
+            return jsonify({"state": "unknown"})
+        with _loom_journal_lock:
+            e = dict(_loom_journal_load(user)["subs"].get(sid) or {})
+        if not e:
+            return jsonify({"state": "unknown"})
+        out = {"state": e.get("state") or "unknown"}
+        for k in ("task_id", "error", "finished"):
+            if e.get(k):
+                out[k] = e[k]
+        return jsonify(out)
+
+    @app.route("/api/loom/submit-abandon", methods=["POST"])
+    @tier(LOGIN)
+    def loom_submit_abandon():
+        """The owner checked Activity and releases a shot whose render was never confirmed
+        (Session P, review F8): records `abandoned`, so the one-render-per-shot check stops
+        blocking it. Never re-sends, never calls PixAI. A render the journal knows was SENT
+        (it has a task id) cannot be released -- the client adopts that task instead."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "bad csrf"}), 403
+        user = str(session.get("user") or "")
+        sid = str(body.get("submit_id") or "")
+        if not _LOOM_ID_RE.match(sid):
+            return jsonify({"error": "submit_id required"}), 400
+        with _loom_journal_lock:
+            e = _loom_journal_load(user)["subs"].get(sid) or {}
+            if e.get("state") == "submitted" and e.get("task_id"):
+                return jsonify({"error": "That render was sent (task …%s), so it can't be released."
+                                         % str(e["task_id"])[-6:], "task_id": e["task_id"]}), 409
+            _loom_journal_note(user, sid, state="abandoned")
+        return jsonify({"ok": True})
+
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
@@ -24118,6 +24455,28 @@ __DESIGN_TOKENS__
     # LIBRARY SCAN section (it is the `"video"` kind), which is what backup.py now
     # imports -- so the reason for the copy is gone along with the copy.
 
+    _LOOM_PENDING_KEYS = ("pendingTaskId", "pendingSubmitId", "pendingSettings", "pendingAnchor",
+                          "pendingBoard", "pendingQuote", "genStartedAt", "supersededTasks")
+
+    def _loom_strip_in_flight(project):
+        """Python twin of loom-takes-core.js's stripInFlight: a copied board carries no render
+        in flight. A shot that was rendering is settled -- done with a selected take, error
+        without one."""
+        if not isinstance(project, dict):
+            return project
+        for act in (project.get("acts") or []):
+            for c in ((act or {}).get("cards") or []):
+                if not isinstance(c, dict):
+                    continue
+                busy = any(c.get(k) for k in _LOOM_PENDING_KEYS) or c.get("status") == "wip"
+                if not busy:
+                    continue
+                for k in _LOOM_PENDING_KEYS:
+                    c.pop(k, None)
+                if c.get("status") == "wip":
+                    c["status"] = "done" if c.get("resultMid") else "error"
+        return project
+
     def _loom_collect_media_ids(project):
         """Every real (catalog) media_id a project references -- resultMid, both frame
         slots, and every cast/asset entry -- mapped to WHERE each one was referenced from.
@@ -24149,6 +24508,13 @@ __DESIGN_TOKENS__
                 code = "%s %s" % (code, title) if title else code
                 if c.get("resultMid"):
                     _note(c["resultMid"], "%s (shot result)" % code)
+                # Session P (review F17): every take's clip travels, not only the selected
+                # one -- a restored board must be able to ★ any of them. Mirrors takesOf():
+                # the stored takes; resultMid above covers the derived/legacy take.
+                for t in (c.get("takes") if isinstance(c.get("takes"), list) else []):
+                    tm = str((t or {}).get("mid") or "")
+                    if tm and tm != str(c.get("resultMid") or ""):
+                        _note(tm, "%s (take %s)" % (code, (t or {}).get("n")))
                 for slot in ("openFrame", "closeFrame"):
                     f = c.get(slot) or {}
                     if f.get("mediaId"):
@@ -24330,6 +24696,10 @@ __DESIGN_TOKENS__
                 prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
             save_catalog(db_path, rows)
+        # Session P (review F4/F17): a board exported mid-render never imports with that
+        # render's markers -- the render belongs to the original. The client strips too
+        # (stripInFlight); this makes the bundle's own answer honest on its way out.
+        project = _loom_strip_in_flight(project)
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
                         "media_added": len(rows)})
 
@@ -24517,6 +24887,7 @@ __DESIGN_TOKENS__
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
                 _fire_enhance_telemetry(tid)
                 _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
+                _loom_journal_finish_task(tid)   # Session P: the shot may render again
                 done = {"phase": "done", "media_ids": got["media_ids"],
                         "is_video": got.get("is_video", False),
                         "duration": got.get("duration"),
@@ -24540,6 +24911,7 @@ __DESIGN_TOKENS__
                 detail = core.describe_failure(st.get("status"), reason,
                                                started=bool(st.get("started")))
                 _log_job(tid, status="failed", error=detail)
+                _loom_journal_finish_task(tid)
                 return jsonify({"phase": "failed", "status": st["status"],
                                 "reason": reason, "error": detail})
             # `started` distinguishes "queued, no worker has taken it" from real work --
@@ -24561,6 +24933,7 @@ __DESIGN_TOKENS__
             _drop_enhance_pending(tid)   # done-but-empty is a failure: it must NOT count
             _drop_scene_pending(tid)     # nor a done-but-empty scene
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
+            _loom_journal_finish_task(tid)
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:
             # A defect in THIS code, not a PixAI blip. The broad handler below deliberately

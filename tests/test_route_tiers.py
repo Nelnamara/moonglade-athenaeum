@@ -206,6 +206,8 @@ TIER_SNAPSHOT = [
     "/api/loom/list [GET] LOGIN",
     "/api/loom/set [POST] LOGIN",
     "/api/loom/spend [POST] LOGIN",
+    "/api/loom/submit-abandon [POST] LOGIN",
+    "/api/loom/submit-status [GET] LOGIN",
     "/api/loom/video-duration [GET] LOGIN",
     "/api/mirror/connect [POST] LOGIN",
     "/api/mirror/enable [POST] LOCALHOST",
@@ -983,7 +985,9 @@ def test_the_pilot_codename_has_no_page_route(app):
 _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
                   "/api/narrator",
                   # wave 5, Session N: bulk curation and the collections manager
-                  "/api/curate", "/api/collections/manage")
+                  "/api/curate", "/api/collections/manage",
+                  # wave 5, Session P: the Loom's new local routes
+                  "/api/loom/submit-abandon")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
