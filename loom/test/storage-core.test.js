@@ -103,7 +103,15 @@ describe("the screens use it", () => {
     assert.match(src("components/StorageBars.jsx"), /storageBars\(storage\)/);
     assert.match(src("hooks/useHealth.js"), /h\.storage/);
   });
-  test("the single Storage used tile is gone", () => {
-    assert.doesNotMatch(src("hooks/useHealth.js"), /label: "Storage used"/);
+  test("the single Storage used tile is gone from Health's tiles", () => {
+    const hook = src("hooks/useHealth.js");
+    const stats = hook.slice(hook.indexOf("const stats = h ? ["), hook.indexOf("] : [];"));
+    assert.doesNotMatch(stats, /Storage used/);
+  });
+  test("the Folio's Statistics tab keeps its Storage used figure, from the bars' own total", () => {
+    assert.match(src("hooks/useHealth.js"), /const storageStat = h \? \{ label: "Storage used", value: \(storage && storage\.total_h\)/);
+    const folio = src("components/FolioOverlay.jsx");
+    assert.match(folio, /storageStat/);
+    assert.match(folio, /\[\s*healthStats\.find\(\(s\) => s\.label === "Images on disk"\), storageStat,/);
   });
 });

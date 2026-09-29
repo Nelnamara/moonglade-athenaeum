@@ -77,6 +77,10 @@ export default function useHealth() {
 
   // the storage block (bytes per type / model / collection) StorageBars draws; null until measured
   const storage = h && h.storage ? h.storage : null;
+  // The one number the bars add up to, for the surface that still wants a single "Storage used"
+  // figure (the Folio's Statistics tab): the same total the bars' header shows, so the two can
+  // never disagree; the old images-only figure is the fallback for an older server.
+  const storageStat = h ? { label: "Storage used", value: (storage && storage.total_h) || h.total_size_h || "—" } : null;
 
-  return { h, err, stats, monthMax, modelMax, tier, buckets, storage };
+  return { h, err, stats, monthMax, modelMax, tier, buckets, storage, storageStat };
 }

@@ -203,10 +203,14 @@ export default function FolioOverlay({ onClose }) {
   // overlays.css) specifically so they read differently from the bar rows
   // already on this tab (By rarity/The buckets/Ladder completion) --
   // point values aren't comparative, so they don't get a bar.
-  const { h, stats: healthStats, monthMax, modelMax } = useHealth();
-  const LIBRARY_LABELS = ["Images on disk", "Storage used", "Catalog rows"];
+  const { h, stats: healthStats, storageStat, monthMax, modelMax } = useHealth();
+  // Session N6: Health's own "Storage used" tile became the storage bars, so this tab takes the
+  // single figure from the hook's storageStat (the bars' own total) and keeps its three tiles.
   const COVERAGE_LABELS = ["Full-meta", "Model known", "Uncataloged"];
-  const libraryStats = healthStats.filter((s) => LIBRARY_LABELS.includes(s.label));
+  const libraryStats = [
+    healthStats.find((s) => s.label === "Images on disk"), storageStat,
+    healthStats.find((s) => s.label === "Catalog rows"),
+  ].filter(Boolean);
   const coverageStats = healthStats.filter((s) => COVERAGE_LABELS.includes(s.label));
 
   return (
