@@ -540,3 +540,41 @@ def test_a_curated_picture_survives_a_repull_of_its_catalog_row(db):
     row["prompt_full"] = "re-pulled"
     save_catalog(db, [row])
     assert personal_get(db, ["1"])["1"] == {"tags": ["kept"], "mark": "keeper", "note": ""}
+
+
+# ------------------------------------------- a saved view's operators read what its chips read
+
+def test_the_operators_a_smart_collection_saves_match_the_controls_they_stand_for(tmp_path):
+    """gallery/src/curation/curationCore.js composeSmartQuery writes each chip and flyout filter
+    as a search operator. Each one has to select exactly the rows the control does, or a smart
+    collection would open on different pictures than the view it was saved from."""
+    p = tmp_path / "catalog.db"
+    save_catalog(p, [
+        _row(media_id="1", filename="a.png", model_name="Tsubaki.3", source="api", rating="5",
+             created_at="2026-01-15T00:00:00Z", is_published="1", art_tags="elf, moon", loras="Moon Light:0.7"),
+        _row(media_id="2", filename="b.png", model_name="Lucent Mix", source="local", rating="2",
+             created_at="2026-05-02T00:00:00Z", art_tags="owl"),
+        _row(media_id="3", filename="c.mp4", model_name="Tsubaki.3", source="online", rating="",
+             created_at="2026-08-20T00:00:00Z", is_video="1"),
+        _row(media_id="4", filename="d.png", model_name="Lucent Mix", source="deleted", rating="4",
+             created_at="2025-12-31T00:00:00Z", deleted_remote="1"),
+    ])
+    same = [
+        (dict(q="video:0"), dict(media_type="image")),
+        (dict(q="video:1"), dict(media_type="video")),
+        (dict(q="★4+"), dict(rating_min=4)),
+        (dict(q="source:api"), dict(source="api")),
+        (dict(q="source:local"), dict(source="local")),
+        (dict(q="source:deleted"), dict(source="deleted")),
+        (dict(q="art_tags:elf"), dict(art_tag="elf")),
+        (dict(q="published:1"), dict(published_only=True)),
+        (dict(q="created:>=2026-05"), dict(date_from="2026-05")),
+        (dict(q="created:<=2026-05"), dict(date_to="2026-05")),
+        (dict(q="created:>=2026-01 created:<=2026-05"), dict(date_from="2026-01", date_to="2026-05")),
+        (dict(q='collection:"A B"'), dict(collection="A B")),
+        (dict(q="lora:moon"), dict(lora="moon")),
+    ]
+    for op, chip in same:
+        assert _ids(p, **op) == _ids(p, **chip), (op, chip)
+    # model: and lora: are substring searches where their chips match the whole name
+    assert set(_ids(p, model="Tsubaki.3")) <= set(_ids(p, q="model:Tsubaki.3"))

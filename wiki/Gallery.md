@@ -112,7 +112,8 @@ The filter bar:
 - **Min rating**, **Tag / contest**, **LoRA**, **Published only**.
 - **Media** — All / Images / Videos.
 - **Source** — All / PixAI history / Generated / Imported / **Deleted on PixAI**.
-- **Collection** — filter to a named [collection](Collections).
+- **Collection** — the chip opens the list of your [collections](Collections), hand-picked and
+  smart, with Manage.
 - **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
 - Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
   views are stored server-side, so a view saved at the desktop is in the tablet's
@@ -152,7 +153,16 @@ collection:"Elf Portraits"       exact collection name, same as the dropdown
 source:api                       online / api / local / deleted, same as the dropdown
 tag:elf lora:detail sampler:euler title:grove batch:B1 filename:mp4
 task:900000001  media:100000003  exact ids (a bare long number still works as before)
+keeper  reject                   your own mark on a picture (see Collections & curation)
+tag:pose-study                   your own tag; tag: also still reads PixAI's published tags
+note:"good hands"                words in your own note
+★4+                              four stars or more (★4 means the same)
+keeper -reject  -tag:draft       a leading - leaves matches out, for any of the above
 ```
+
+`tag:` reads two stores: PixAI's published art tags (a substring, as it always did) and your own
+personal tags (a whole tag). `art_tags:` keeps the PixAI-only reading. Your marks, tags and notes
+live in your local catalog and are never sent to PixAI.
 
 Text operators match substrings, case-insensitively, and take the same `*` / `?`
 wildcards as free text (`model:eth*mix`). An unrecognized key (or a malformed value
@@ -259,6 +269,10 @@ when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes
   failure left the widget privately believing you'd set 4 stars while the display still read
   0, so clicking the same star again to retry was read as "you already rated it 4, clear
   it" and submitted a 0. Two clicks through one dropped connection unrated the image.
+- **Rating keys** — hover a picture (or open it, or tick several) and press **1–5** to rate it,
+  **0** to clear; a gold ★ flash confirms. See [Collections](Collections).
+- **Keeper / Reject, tags and notes** — your own layer over each picture, local to your catalog;
+  the Details page edits it. See [Collections](Collections).
 - **Edit Prompt** — fix/annotate a single image's prompt on its detail page.
 - **Find/Replace** — bulk substring replace across selected prompts.
 - **Download ZIP** — bundle the selected full-res images (selection persists across pages).
