@@ -126,6 +126,8 @@ export default function GalleryPicker({
     onPick && onPick({
       media_id: m.media_id, thumb: m.thumb, prompt: m.prompt || "",
       is_video: m.is_video === "1", duration: m.duration || "", is_nsfw: m.is_nsfw === "1",
+      // the picture's size, when the catalog knows it (Session H: the dock's Auto frame)
+      w: Number(m.w) || 0, h: Number(m.h) || 0,
     });
   };
 

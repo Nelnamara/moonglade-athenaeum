@@ -443,7 +443,7 @@ export default function AppMobile({ boot }) {
     cameFromLoom(document.referrer, window.location.origin));
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
   const costRef = useRef(null);
-  const gen = useGenerate({ costRef });
+  const gen = useGenerate({ costRef, isMember: account ? account.is_member : null });
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
   const edit = useEditGenerate({ costRef: editCostRef });
   const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
@@ -676,6 +676,17 @@ export default function AppMobile({ boot }) {
   // miss (page replaced mid-tap) it opens Details by id instead of toasting.
   const openLightboxFromGrid = (mid) => openLightbox(mid, openDetails);
   const closeLightbox = () => setLbIndex(null);
+  /* "Edit with Tsubaki" from Image Details (Session H decision 2, the phone's image menu): the
+     Create tab's Image mode on Tsubaki.3, the picture in context slot 1, the prompt seeded
+     "Use @image1 …". Prefill only -- the owner presses Generate. */
+  const editWithTsubaki = (img) => {
+    if (!img || !img.media_id) return;
+    setDetailsFor(null);
+    setLbIndex(null);
+    setTab("create");
+    setCmode("image");
+    gen.tsubakiEdit(img);
+  };
   const openDetailsFromLightbox = (mid) => {
     setLbIndex(null);
     openDetails(mid);
@@ -1131,6 +1142,7 @@ export default function AppMobile({ boot }) {
           onOpenLightbox={openLightbox}
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
           onEnterContest={openContestFor}
+          onTsubakiEdit={editWithTsubaki}
         />
       )}
 
@@ -1148,6 +1160,7 @@ export default function AppMobile({ boot }) {
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
           onEnterContest={openContestFor}
+          member={account ? account.is_member : null}
         />
       )}
 

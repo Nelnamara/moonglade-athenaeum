@@ -856,6 +856,17 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "remix", mid, nonce: Math.random() });
   };
+  /* "Edit with Tsubaki" (Session H decision 2): the Image tab on Tsubaki.3 with this picture in
+     context slot 1 and the prompt seeded "Use @image1 …". The same one-shot genRequest shape
+     as Edit / Video / Remix; the picture's size rides along for the dock's Auto frame. Prefill
+     only -- the owner presses Generate. */
+  const requestTsubaki = (mid) => {
+    const it = items.find((x) => x.media_id === mid) || {};
+    setLbIndex(null);
+    openDock();
+    setGenRequest({ tab: "tsubaki", mid, thumb: it.thumb || "/thumbs/" + mid + ".jpg",
+      w: Number(it.w) || 0, h: Number(it.h) || 0, nonce: Math.random() });
+  };
   /* "↻ Again — new seed" (the palette's R / its On-this-image row). Owner ruling,
      2026-08-31: SEND TO REMIX, NO INSTANT SPEND. This is the SAME shipped Remix path
      above -- the picture's full recipe prefilled into the composer -- with one field
@@ -886,6 +897,7 @@ export default function App({ boot }) {
     onEdit: requestEdit,
     onVideo: requestVideo,
     onRemix: requestRemix,
+    onTsubaki: requestTsubaki,
     // B2: the right-click row is a ◈ door like the other three, so it calls the SAME
     // verb rather than setting the state itself -- it used to be the one entry point
     // that skipped showSimilar's "close whatever is open first" step.
@@ -1344,6 +1356,7 @@ export default function App({ boot }) {
       // mirrors the buttons, so it wears the buttons' mark.
       img("similar", "◈", "Find similar", () => showSimilar(mid));
       img("edit", "✎", "Edit", () => ctxActions.onEdit(mid));
+      if (!focusItem.is_video) img("tsubaki", "✦", "Edit with Tsubaki", () => requestTsubaki(mid));
       img("details", "ⓘ", "Open details", () => ctxActions.onDetails(mid));
       img("copyid", "⎘", "Copy id", () => ctxActions.onCopyId(mid), { sub: shortId(mid) });
       img("publish", "☁", "Publish", () => openPublish(mid));
@@ -1554,6 +1567,7 @@ export default function App({ boot }) {
           onOpenDetails={openDetails}
           onPublish={openPublish}
           onSimilar={showSimilar}
+          member={account ? account.is_member : null}
         />
       )}
 

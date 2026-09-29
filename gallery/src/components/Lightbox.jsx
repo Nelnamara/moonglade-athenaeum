@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
+import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -29,7 +30,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails, onPublish, onSimilar,
+  onOpenDetails, onPublish, onSimilar, member,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -50,6 +51,7 @@ export default function Lightbox({
   const [dragDX, setDragDX] = useState(0);
   const [zoom, setZoom] = useState(false);   // classic's double-tap 2x
   const upEl = useRef(null);
+  const barRef = useRef(null);      // the Tsubaki edit bar (Session H T3a): E focuses it
   const closingRef = useRef(false);
   const drag = useRef({ active: false, moved: false });
   const touch = useRef({ x0: 0, dx: 0, live: false, lastTap: 0 });
@@ -110,6 +112,11 @@ export default function Lightbox({
       if (document.activeElement && /^(input|textarea|select)$/i.test(document.activeElement.tagName)) return;
       if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
+      else if ((e.key === "e" || e.key === "E") && !e.metaKey && !e.ctrlKey && !e.altKey
+               && barRef.current && items[index] && items[index].tsubaki_edit) {
+        e.preventDefault();
+        barRef.current.focus();
+      }
       else if (e.key === "f" || e.key === "F") setSlideOn((v) => !v);
       else if (e.key === "Escape") {
         // innermost-first still, with the prompt slab gone: a running slideshow or a
@@ -120,7 +127,7 @@ export default function Lightbox({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, step, slideOn, zoom]);
+  }, [close, step, slideOn, zoom, items, index]);
 
   /* 4200ms per slide (DC). A timeout keyed on the index, not an interval, so a
      manual step/filmstrip jump restarts the clock -- and the 2px progress bar
@@ -310,6 +317,9 @@ export default function Lightbox({
               ) : null}
             </div>
           </div>
+          {/* Session H T3a: the Tsubaki edit bar over the stage foot -- only for a picture
+              Tsubaki.3 / Flash made; it renders nothing otherwise. */}
+          <TsubakiEditBar ref={barRef} item={it} member={member} />
         </div>
 
         <div className="lbx-bottom">
@@ -330,7 +340,7 @@ export default function Lightbox({
                 );
               })}
             </div>
-            <div className="lbx-hint">← → to browse · F slideshow · Esc closes · swipe or double-tap on tablet</div>
+            <div className="lbx-hint">← → to browse · F slideshow{it.tsubaki_edit ? " · E edits with Tsubaki" : ""} · Esc closes · swipe or double-tap on tablet</div>
           </div>
         </div>
       </div>

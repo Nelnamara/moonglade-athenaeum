@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
+import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import { apiGet } from "../api.js";
 import "../styles/lightbox-mobile.css";
 
@@ -103,7 +104,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest,
+  onEnterContest, member,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -296,6 +297,9 @@ export default function LightboxMobile({
       </div>
 
       <div className="lbm-bottom">
+        {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
+            only for a picture Tsubaki.3 / Flash made (renders nothing otherwise). */}
+        <TsubakiEditBar item={it} member={member} phone />
         <div className="lbm-metarow">
           {it.model ? <b className="lbm-model">{it.model}</b> : null}
           {it.date ? <span>{it.date}</span> : null}

@@ -2,10 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
-  ASPECTS, MODES, SIZES, UNLIMITED_BUSY, UNLIMITED_PRO, dims, goGate, laneBusy,
+  MODES, SIZES, UNLIMITED_BUSY, UNLIMITED_PRO, dims, goGate, laneBusy,
   laneRefusesFrame, loraIncompat, loraRange, loraStep, modeOffered, planLoraRestore,
-  qualityTagTitle, refIsContext,
+  qualityTagTitle, sizeInfo, unlimitedOffered,
 } from "../gen/genCore.js";
+import {
+  autoActive, contextMax, contextModel, creativityModel, onContextSide, profilePicked, profileRows,
+  sizeTiers,
+} from "../gen/tsubakiCore.js";
+import {
+  ContextSlots, CreativityStops, InputsSwitch, OrientSwitch, ProfileRows, RatioRow, SizeLine,
+  SwitchConfirm, TierRow, UnlimitedHeldLine,
+} from "./TsubakiControls.jsx";
+import AtPrompt from "./AtPrompt.jsx";
+import RecipeRow from "../recipes/RecipeRow.jsx";
+import { pickContextImage } from "../gen/contextPick.js";
 import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
@@ -152,8 +163,10 @@ function GenerateDrawer({ open, onClose, account, request }) {
   const [prefillBusy, setPrefillBusy] = useState(false);
   const costRef = useRef(null);
   const drawerRef = useRef(null);
-  const g = useGenerate({ costRef });
+  const g = useGenerate({ costRef, isMember: account ? account.is_member : null });
   const { s, set } = g;
+  // Session H decision 1: the in-slab confirm card on the first switch to context images.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const balance = account && account.credits != null ? account.credits : null;
 
@@ -359,6 +372,17 @@ function GenerateDrawer({ open, onClose, account, request }) {
       // true`): the video slabs live behind ▲ now, and the frame this hand-off just
       // filled must be visible, not hidden behind a collapsed grid.
       if (request.mid) { setVideoPrefill({ mode: "i2v", images: [{ media_id: request.mid, thumb: request.thumb }] }); setExpanded(true); }
+    } else if (request.tab === "tsubaki") {
+      // Session H decision 2: "Edit with Tsubaki" -- the Image tab on Tsubaki.3, the picture
+      // in context slot 1, the prompt seeded "Use @image1 …". Prefill only; the owner presses
+      // Generate. The settings open so the slot this filled is visible.
+      if (request.mid) {
+        setTab("image");
+        setExpanded(true);
+        setHistoryOpen(false);
+        setReuseFrom(null);
+        g.tsubakiEdit({ media_id: request.mid, thumb: request.thumb, w: request.w, h: request.h });
+      }
     } else if (request.tab === "remix") {
       // Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the picture's
       // FULL recipe into the Generate drawer -- an image into the Image tab, a
@@ -680,10 +704,34 @@ function GenerateDrawer({ open, onClose, account, request }) {
 
   const d = dims(s);
   const custom = !!(parseInt(s.customW, 10) > 0 && parseInt(s.customH, 10) > 0);
+  // Session H: the Context side, the live tiers, Auto, the creativity stops, the profile rows
+  const ctxOn = onContextSide(s);
+  const tiers = sizeTiers(m);
+  const autoOn = autoActive(s);
+  const sizeNow = sizeInfoSafe(s);
+  const creative = creativityModel(m);
+  const rows = profileRows(m);
+  const pickedRow = rows ? rows.find((r) => profilePicked(r, rows, s.mode)) : null;
+  const modelSub = m && !m.resolving && m.version_id
+    ? [archLabel(m.model_type), pickedRow ? "profile " + (pickedRow.title || pickedRow.name) : ""]
+      .filter(Boolean).join(" · ")
+    : "";
+  /* + add on a context slot: history · gallery · upload through the one picker; a picture whose
+     size the picker could not say (an upload) is measured, for Auto. */
+  const addContextPick = useCallback(async () => {
+    const img = await pickContextImage();
+    if (!img) return 0;
+    g.addContext(img);
+    if (!(img.w > 0 && img.h > 0) && img.measure) {
+      img.measure.then((wh) => { if (wh) g.sizeContext(img.media_id, wh.w, wh.h); });
+    }
+    return Math.min((s.ctx || []).length + 1, contextMax(m));
+  }, [g, s.ctx, m]);
   // Frontend Gallery.dc.html:2893's own formula: "768×1024 · Auto · ×3" -- size, the
   // TUNING mode's display name, and the design's ×N count form (was "px" + "N images",
   // neither of which the design uses), with its no-model nudge prefix.
-  const modeName = (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1];
+  const modeName = rows ? (pickedRow ? pickedRow.title || pickedRow.name : "Auto")
+    : (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1];
   const frameSummary = (m ? "" : "pick a model · ") + d.width + "×" + d.height + " · " + modeName
     + (s.count > 1 ? " · ×" + s.count : "");
   // DC 3573-3576: the slab's model row says 'none — browse models', the composer pip
@@ -819,14 +867,24 @@ function GenerateDrawer({ open, onClose, account, request }) {
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">
-              {/* SLAB 1 — MODEL & LORAS */}
+              {/* SLAB 1 — MODEL & INPUTS (Session H decision 1: renamed; the LoRAs | Context
+                  images switch replaces the single reference slot on a context-image model) */}
               <div className="mgdock-slab" style={{ animationDelay: "0ms" }}>
-                <div className="mgdock-lbl">MODEL &amp; LORAS</div>
+                <div className="mgdock-slabhead">
+                  <span className="mgdock-lbl">MODEL &amp; INPUTS</span>
+                  <span className="sp" />
+                  <span className="mgdock-slabcount">{ctxOn
+                    ? (s.ctx || []).length + " / " + contextMax(m) + " context"
+                    : loraCap != null ? s.loras.length + " / " + loraCap + " LoRAs" : ""}</span>
+                </div>
                 <button type="button" className={"mgdock-modelrow" + (m ? "" : " empty")}
                   onClick={() => { setFiltersOpen(false); setFlyKind("base"); setFlyOpen(!flyOpen); }}
                   title="Browse the model catalog">
                   {m && m.thumb ? <img className="mgdock-modelthumb" src={m.thumb} alt="" /> : <span className="mgdock-modelthumb ph" />}
-                  <span className="mgdock-modelname">{modelName}</span>
+                  <span className="mgdock-modeltext">
+                    <span className="mgdock-modelname">{modelName}</span>
+                    {modelSub ? <span className="mgdock-modelsub">{modelSub}</span> : null}
+                  </span>
                   <span className="sp" />
                   <span className="mgdock-browse">browse</span>
                 </button>
@@ -838,119 +896,134 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     ))}
                   </select>
                 )}
+                {/* T1a: Pro / Ultra -- the live profile list as rows under the model */}
+                <ProfileRows s={s} set={set} />
                 {/* Tsubaki.3 Unlimited Mode's toggle row, under the model card (SCOPE_2026-09-26_
-                    unlimited-mode C2) -- only while the applied version offers the lane. */}
-                <UnlimitedRow s={s} set={set} />
+                    unlimited-mode C2) -- only while the applied version offers the lane; on the
+                    Context side it is the dashed "for runs without context images" line. */}
+                {ctxOn ? <UnlimitedHeldLine s={s} /> : <UnlimitedRow s={s} set={set} />}
                 {m && m.preset && m.preset.sampler ? (
                   <div className="mgdock-presetnote">
                     {m.title} ships its author's preset — applied on pick · sampler {m.preset.sampler}
                   </div>
                 ) : null}
-                {s.loras.map((l) => {
-                  const bad = loraIncompat(l, m);
-                  return (
-                    <div key={l.model_id} className={"gd-lora" + (bad || l.failed ? " bad" : "")}>
-                      {l.preview_url ? <img src={l.preview_url} alt="" /> : null}
-                      <span className="gd-lora-t" title={l.title}>{l.title}</span>
-                      {l.failed ? <span className="gd-warn">failed</span> :
-                        !l.version_id ? <span className="gd-note">resolving…</span> : null}
-                      {bad ? <span className="gd-warn">wrong architecture</span> : null}
-                      {/* The words go in BY THEMSELVES on pick now (issue #45, gen/
-                          loraTriggers.js). This button survives as the way BACK for words
-                          the user deleted on purpose -- and, because the rule dedupes, it
-                          is a no-op rather than a duplicator while they are still there. */}
-                      {l.trigger_words ? (
-                        <button className="gd-mini"
-                          title={"Re-insert this LoRA's trigger words if you deleted them: "
-                                 + l.trigger_words}
-                          onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
-                          +words
+                <InputsSwitch s={s} set={set} onAskConfirm={() => setConfirmOpen(true)} />
+                {confirmOpen && !ctxOn && (
+                  <SwitchConfirm s={s}
+                    onSwitch={() => { setConfirmOpen(false); set({ inputs: "context", ctxWarned: true }); }}
+                    onStay={() => setConfirmOpen(false)} />
+                )}
+                {ctxOn ? (
+                  <ContextSlots s={s} onAdd={addContextPick} onRemove={g.removeContext} />
+                ) : (
+                  <>
+                    {s.loras.map((l) => {
+                      const bad = loraIncompat(l, m);
+                      return (
+                        <div key={l.model_id} className={"gd-lora" + (bad || l.failed ? " bad" : "")}>
+                          {l.preview_url ? <img src={l.preview_url} alt="" /> : null}
+                          <span className="gd-lora-t" title={l.title}>{l.title}</span>
+                          {l.failed ? <span className="gd-warn">failed</span> :
+                            !l.version_id ? <span className="gd-note">resolving…</span> : null}
+                          {bad ? <span className="gd-warn">wrong architecture</span> : null}
+                          {/* The words go in BY THEMSELVES on pick now (issue #45, gen/
+                              loraTriggers.js). This button survives as the way BACK for words
+                              the user deleted on purpose -- and, because the rule dedupes, it
+                              is a no-op rather than a duplicator while they are still there. */}
+                          {l.trigger_words ? (
+                            <button className="gd-mini"
+                              title={"Re-insert this LoRA's trigger words if you deleted them: "
+                                     + l.trigger_words}
+                              onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
+                              +words
+                            </button>
+                          ) : null}
+                          <input type="range" min={lo} max={hi} step={loraStep()} value={l.weight}
+                            onChange={(e) => g.setLora(l.model_id, { weight: e.target.value })} />
+                          <b className="gd-w">{Number(l.weight).toFixed(2)}</b>
+                          <button className="gd-mini" onClick={() => removeLora(l.model_id)}>&times;</button>
+                        </div>
+                      );
+                    })}
+                    <button type="button" className="mgdock-addlora"
+                      onClick={() => { setFiltersOpen(false); setFlyKind("lora"); setFlyOpen(!flyOpen); }}>
+                      + Add LoRA{loraCap != null ? ` ${s.loras.length} / ${loraCap}` : s.loras.length ? " " + s.loras.length : ""}
+                    </button>
+                    {/* The single reference slot (img2img + strength) stays on a model WITHOUT
+                        context images; on one with them the switch above replaces it. */}
+                    {!contextModel(m) && (
+                      <div className="mgdock-refrow">
+                        <button type="button" className={"mgdock-refslot" + (s.ref ? " filled" : "")}
+                          onClick={pickRef} title="Pick from your gallery">
+                          {s.ref ? <img src={s.ref.thumb} alt="" /> : "+ ref"}
                         </button>
-                      ) : null}
-                      <input type="range" min={lo} max={hi} step={loraStep()} value={l.weight}
-                        onChange={(e) => g.setLora(l.model_id, { weight: e.target.value })} />
-                      <b className="gd-w">{Number(l.weight).toFixed(2)}</b>
-                      <button className="gd-mini" onClick={() => removeLora(l.model_id)}>&times;</button>
-                    </div>
-                  );
-                })}
-                <button type="button" className="mgdock-addlora"
-                  onClick={() => { setFiltersOpen(false); setFlyKind("lora"); setFlyOpen(!flyOpen); }}>
-                  + Add LoRA{loraCap != null ? ` ${s.loras.length} / ${loraCap}` : s.loras.length ? " " + s.loras.length : ""}
-                </button>
-                <div className="mgdock-refrow">
-                  <button type="button" className={"mgdock-refslot" + (s.ref ? " filled" : "")}
-                    onClick={pickRef} title="Pick from your gallery">
-                    {s.ref ? <img src={s.ref.thumb} alt="" /> : "+ ref"}
-                  </button>
-                  {s.ref && (
-                    <>
-                      <span className="mgdock-lbl">STRENGTH</span>
-                      {/* SCOPE_2026-09-26 G3: on a context-image model (Tsubaki.3 / Flash) the
-                          reference goes out as a context image, which carries no strength --
-                          the slider reads disabled rather than pretending to steer it. */}
-                      <input type="range" min="0.1" max="1" step="0.05" value={s.refStrength}
-                        disabled={refIsContext(s)}
-                        title={refIsContext(s)
-                          ? "This model uses the reference as a context image — strength doesn't apply"
-                          : "Reference strength"}
-                        onChange={(e) => set({ refStrength: e.target.value })} />
-                      <b className="gd-w">{Number(s.refStrength).toFixed(2)}</b>
-                      <button className="gd-mini" onClick={() => set({ ref: null })}>&times;</button>
-                    </>
-                  )}
-                </div>
+                        {s.ref && (
+                          <>
+                            <span className="mgdock-lbl">STRENGTH</span>
+                            <input type="range" min="0.1" max="1" step="0.05" value={s.refStrength}
+                              title="Reference strength"
+                              onChange={(e) => set({ refStrength: e.target.value })} />
+                            <b className="gd-w">{Number(s.refStrength).toFixed(2)}</b>
+                            <button className="gd-mini" onClick={() => set({ ref: null })}>&times;</button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* Recipes (lane w2-recipes' row): under the switch on both sides, held on the
+                    Context side. The dock owns the state and what is sent. */}
+                <RecipeRow recipes={s.recipes} onChange={(recipes) => set({ recipes })}
+                  held={ctxOn} loraCount={s.loras.length} modelType={m ? m.model_type : ""} />
               </div>
 
-              {/* SLAB 2 — FRAME */}
+              {/* SLAB 2 — FRAME (Session H decisions 6 + 7): one Portrait | Landscape switch
+                  over eleven ratios (Auto first on the Context side), the model's own live size
+                  tiers with the gold members notice, custom W × H clamped to the account's
+                  limit, and the size line -- what is sent. A model without tiers keeps the
+                  long-edge stops. */}
               <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
                 <div className="mgdock-lbl">FRAME</div>
-                <div className="mgdock-ratios">
-                  {ASPECTS.map(([label, r]) => {
-                    const on = !s.customW && !s.customH && Math.abs(s.aspect - r) < 0.001;
-                    const gw = r >= 1 ? 19 : Math.max(6, Math.round(19 * r));
-                    const gh = r >= 1 ? Math.max(6, Math.round(19 / r)) : 19;
-                    // Unlimited Mode on: a frame the lane would refuse reads disabled, judged on
-                    // the snapped size it would send (§8.5), never on its label.
-                    const laneOff = laneRefusesFrame(s, { aspect: r });
-                    return (
-                      <button key={label} type="button"
-                        className={"mgdock-ratio" + (on ? " on" : "")}
-                        disabled={laneOff}
-                        onClick={() => set({ aspect: r, customW: "", customH: "" })}
-                        title={laneOff ? "Too large for Unlimited Mode at this size" : label}>
-                        <i style={{ width: gw, height: gh }} />
-                        <span>{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mgdock-lbl">SIZE · LONG EDGE</div>
-                <div className="mgdock-stops">
-                  {SIZES.map((n, i) => {
-                    const laneOff = laneRefusesFrame(s, { size: n });
-                    return (
-                      <button key={n} type="button"
-                        className={"mgdock-stop" + (!custom && s.size === n ? " on" : "")}
-                        disabled={laneOff}
-                        onClick={() => set({ size: n, customW: "", customH: "" })}
-                        title={laneOff ? "Too large for Unlimited Mode" : n + "px"}>
-                        {["S", "M", "L", "XL"][i] || n}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mgdock-customrow">
-                  <input className={"mgdock-custom" + (custom ? " on" : "")} placeholder="W" value={s.customW}
-                    onChange={(e) => set({ customW: e.target.value.replace(/\D/g, "") })} />
+                <OrientSwitch s={s} set={set} dim={autoOn} />
+                <RatioRow s={s} set={set} />
+                {tiers ? (
+                  <>
+                    <div className="mgdock-sizehead">
+                      <span className="mgdock-lbl">SIZE · {(m && m.title) || "MODEL"}</span>
+                      <span className="mgdock-tiername">{autoOn ? "auto" : (sizeNow.tier && !custom ? sizeNow.tier.name : "custom")}</span>
+                    </div>
+                    <TierRow s={s} set={set} />
+                  </>
+                ) : (
+                  <>
+                    <div className="mgdock-lbl">SIZE · LONG EDGE</div>
+                    <div className="mgdock-stops">
+                      {SIZES.map((n, i) => {
+                        const laneOff = laneRefusesFrame(s, { size: n });
+                        return (
+                          <button key={n} type="button"
+                            className={"mgdock-stop" + (!custom && s.size === n ? " on" : "")}
+                            disabled={laneOff}
+                            onClick={() => set({ size: n, customW: "", customH: "" })}
+                            title={laneOff ? "Too large for Unlimited Mode" : n + "px"}>
+                            {["S", "M", "L", "XL"][i] || n}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                <div className="mgdock-customrow" style={autoOn ? { opacity: 0.38 } : undefined}>
+                  <input className={"mgdock-custom" + (custom ? " on" : "")} placeholder={String(d.width)} value={s.customW}
+                    aria-label="Custom width"
+                    onChange={(e) => set({ customW: e.target.value.replace(/\D/g, ""), auto: false })} />
                   ×
-                  <input className={"mgdock-custom" + (custom ? " on" : "")} placeholder="H" value={s.customH}
-                    onChange={(e) => set({ customH: e.target.value.replace(/\D/g, "") })} />
-                  <span className="mgdock-note-sm">overrides</span>
+                  <input className={"mgdock-custom" + (custom ? " on" : "")} placeholder={String(d.height)} value={s.customH}
+                    aria-label="Custom height"
+                    onChange={(e) => set({ customH: e.target.value.replace(/\D/g, ""), auto: false })} />
+                  <span className="mgdock-note-sm">{tiers ? "custom · clamped to your limit" : "overrides"}</span>
                 </div>
-                <div className="mgdock-dims">
-                  → {d.width} × {d.height} px{custom ? <span className="mauve"> · custom wins</span> : null}
-                </div>
+                <SizeLine s={s} className="mgdock-dims" />
                 <div className="mgdock-lbl">COUNT</div>
                 <div className="mgdock-stops">
                   {[1, 2, 3, 4].map((n) => (
@@ -963,101 +1036,114 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 </div>
               </div>
 
-              {/* SLAB 3 — TUNING */}
+              {/* SLAB 3 — TUNING. On a creativity model (Tsubaki.3) the three stops replace the
+                  Prompt helper switch (decision 5), the Pro / Ultra rows in slab 1 replace the
+                  mode bars (T1a), and what the model does not take is not drawn. */}
               <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
-                <div className="mgdock-lbl">TUNING · {(MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
+                <div className="mgdock-lbl">TUNING{rows ? "" : " · " + (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
+                {creative && <CreativityStops s={s} set={set} />}
                 {/* A bar for a profile this model does not offer is DIMMED, never removed
                     (SCOPE 2026-08-17 §4b) -- same disabled-control precedent as the STEPS
                     row just below. modeOffered fails open: `auto` always stands, and an
                     unknown profile set (m.profiles null) dims nothing. */}
-                <div className="mgdock-modebars">
-                  {MODES.map(([v, l], i) => {
-                    // Unlimited Mode on: the bar is fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3).
-                    const lanePinned = s.unlimited && v !== "pro";
-                    const off = !modeOffered(v, m && m.profiles) || lanePinned;
-                    return (
-                      <button key={v} type="button"
-                        title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
-                        disabled={off}
-                        className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
-                        onClick={() => set({ mode: v })} />
-                    );
-                  })}
-                </div>
-                <div className="mgdock-sliderrow">
-                  <span className="mgdock-lbl">STEPS</span>
-                  <input type="range"
-                    min={stepsR.min != null ? stepsR.min : 1}
-                    max={stepsR.max != null ? stepsR.max : 150}
-                    step="1" value={stepsVal}
-                    disabled={m && m.compat_steps === false}
-                    title={m && m.compat_steps === false ? (m.title + " doesn't take STEPS") : "Sampling steps"}
-                    onChange={(e) => set({ steps: e.target.value })} />
-                  <input className="gd-num" value={s.steps} disabled={m && m.compat_steps === false}
-                    placeholder={stepsR.min != null ? `${stepsR.min}–${stepsR.max}` : "25"}
-                    onChange={(e) => set({ steps: e.target.value.replace(/\D/g, "") })}
-                    onBlur={(e) => set({ steps: clampField(e.target.value, stepsR, 1, 150) })} />
-                </div>
-                <div className="mgdock-sliderrow">
-                  <span className="mgdock-lbl">CFG</span>
-                  <input type="range"
-                    min={cfgR.min != null ? cfgR.min : 1}
-                    max={cfgR.max != null ? cfgR.max : 30}
-                    step="0.5" value={cfgVal}
-                    disabled={m && m.compat_cfg === false}
-                    title={m && m.compat_cfg === false ? (m.title + " doesn't take CFG") : "CFG scale"}
-                    onChange={(e) => set({ cfg: e.target.value })} />
-                  <input className="gd-num" value={s.cfg} disabled={m && m.compat_cfg === false}
-                    placeholder={cfgR.min != null ? `${cfgR.min}–${cfgR.max}` : "auto"}
-                    onChange={(e) => set({ cfg: e.target.value.replace(/[^\d.]/g, "") })}
-                    onBlur={(e) => set({ cfg: clampField(e.target.value, cfgR, 1, 30) })} />
-                </div>
+                {!rows && (
+                  <div className="mgdock-modebars">
+                    {MODES.map(([v, l], i) => {
+                      // Unlimited Mode on: the bar is fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3).
+                      const lanePinned = s.unlimited && v !== "pro";
+                      const off = !modeOffered(v, m && m.profiles) || lanePinned;
+                      return (
+                        <button key={v} type="button"
+                          title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
+                          disabled={off}
+                          className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
+                          onClick={() => set({ mode: v })} />
+                      );
+                    })}
+                  </div>
+                )}
+                {!(creative && m && m.compat_steps === false) && (
+                  <div className="mgdock-sliderrow">
+                    <span className="mgdock-lbl">STEPS</span>
+                    <input type="range"
+                      min={stepsR.min != null ? stepsR.min : 1}
+                      max={stepsR.max != null ? stepsR.max : 150}
+                      step="1" value={stepsVal}
+                      disabled={m && m.compat_steps === false}
+                      title={m && m.compat_steps === false ? (m.title + " doesn't take STEPS") : "Sampling steps"}
+                      onChange={(e) => set({ steps: e.target.value })} />
+                    <input className="gd-num" value={s.steps} disabled={m && m.compat_steps === false}
+                      placeholder={stepsR.min != null ? `${stepsR.min}–${stepsR.max}` : "25"}
+                      onChange={(e) => set({ steps: e.target.value.replace(/\D/g, "") })}
+                      onBlur={(e) => set({ steps: clampField(e.target.value, stepsR, 1, 150) })} />
+                  </div>
+                )}
+                {!(creative && m && m.compat_cfg === false) && (
+                  <div className="mgdock-sliderrow">
+                    <span className="mgdock-lbl">CFG</span>
+                    <input type="range"
+                      min={cfgR.min != null ? cfgR.min : 1}
+                      max={cfgR.max != null ? cfgR.max : 30}
+                      step="0.5" value={cfgVal}
+                      disabled={m && m.compat_cfg === false}
+                      title={m && m.compat_cfg === false ? (m.title + " doesn't take CFG") : "CFG scale"}
+                      onChange={(e) => set({ cfg: e.target.value })} />
+                    <input className="gd-num" value={s.cfg} disabled={m && m.compat_cfg === false}
+                      placeholder={cfgR.min != null ? `${cfgR.min}–${cfgR.max}` : "auto"}
+                      onChange={(e) => set({ cfg: e.target.value.replace(/[^\d.]/g, "") })}
+                      onBlur={(e) => set({ cfg: clampField(e.target.value, cfgR, 1, 30) })} />
+                  </div>
+                )}
                 <div className="mgdock-sliderrow">
                   <span className="mgdock-lbl">SEED</span>
                   <input className="mgdock-seed" value={s.seed} placeholder="blank = random"
                     onChange={(e) => set({ seed: e.target.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "") })} />
                 </div>
-                <div className="mgdock-chips">
-                  {/* Owner ruling 1 (SCOPE_2026-09-26): Face Fix and Quality Tag read
-                      disabled on a model that does not take them. The chip's on/off STATE is
-                      kept across a model switch (never disarmed); buildPayload withholds it. */}
-                  <button type="button"
-                    className={"mgdock-chip" + (s.boosters.face ? " on" : "")}
-                    disabled={m && m.compat_face === false}
-                    title={m && m.compat_face === false ? "This model doesn't take Face Fix" : "Face Fix"}
-                    onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
-                    Face Fix
-                  </button>
-                  <button type="button"
-                    className={"mgdock-chip" + (s.boosters.quality ? " on" : "")}
-                    disabled={m && m.compat_quality === false}
-                    title={qualityTagTitle(m)}
-                    onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
-                    Quality Tag
-                  </button>
-                  <button type="button"
-                    className={"mgdock-chip" + (s.boosters.hires ? " on" : "")}
-                    disabled={m && m.compat_upscale === false}
-                    title={m && m.compat_upscale === false
-                      ? "This model's version does not support upscaling"
-                      : "Enhance Details — PixAI's own 1.5× / 0.6 denoise pass"}
-                    onClick={() => set({ boosters: { ...s.boosters, hires: !s.boosters.hires } })}>
-                    Enhance Details
-                  </button>
-                </div>
-                <label className={"mgdock-sw" + (s.unlimited ? " off" : "")}
-                  title={s.unlimited ? "Unlimited Mode runs without High priority" : "Faster queue · costs extra"}>
-                  <input type="checkbox" checked={s.highPriority} disabled={s.unlimited}
+                {!(creative && m && m.compat_face === false && m.compat_quality === false && m.compat_upscale === false) && (
+                  <div className="mgdock-chips">
+                    {/* Owner ruling 1 (SCOPE_2026-09-26): Face Fix and Quality Tag read
+                        disabled on a model that does not take them. The chip's on/off STATE is
+                        kept across a model switch (never disarmed); buildPayload withholds it. */}
+                    <button type="button"
+                      className={"mgdock-chip" + (s.boosters.face ? " on" : "")}
+                      disabled={m && m.compat_face === false}
+                      title={m && m.compat_face === false ? "This model doesn't take Face Fix" : "Face Fix"}
+                      onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
+                      Face Fix
+                    </button>
+                    <button type="button"
+                      className={"mgdock-chip" + (s.boosters.quality ? " on" : "")}
+                      disabled={m && m.compat_quality === false}
+                      title={qualityTagTitle(m)}
+                      onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
+                      Quality Tag
+                    </button>
+                    <button type="button"
+                      className={"mgdock-chip" + (s.boosters.hires ? " on" : "")}
+                      disabled={m && m.compat_upscale === false}
+                      title={m && m.compat_upscale === false
+                        ? "This model's version does not support upscaling"
+                        : "Enhance Details — PixAI's own 1.5× / 0.6 denoise pass"}
+                      onClick={() => set({ boosters: { ...s.boosters, hires: !s.boosters.hires } })}>
+                      Enhance Details
+                    </button>
+                  </div>
+                )}
+                <label className={"mgdock-sw" + (s.unlimited && !ctxOn ? " off" : "")}
+                  title={s.unlimited && !ctxOn ? "Unlimited Mode runs without High priority" : "Faster queue · costs extra"}>
+                  <input type="checkbox" checked={s.highPriority} disabled={s.unlimited && !ctxOn}
                     onChange={(e) => set({ highPriority: e.target.checked })} />
                   <span className="mgdock-swtrack"><i /></span>
                   <span className="mgdock-swlab">High priority</span>
                 </label>
-                <label className="mgdock-sw" title="PixAI's prompt helper (on by default, like the classic drawer)">
-                  <input type="checkbox" checked={s.promptHelper}
-                    onChange={(e) => set({ promptHelper: e.target.checked })} />
-                  <span className="mgdock-swtrack"><i /></span>
-                  <span className="mgdock-swlab">Prompt helper</span>
-                </label>
+                {!creative && (
+                  <label className="mgdock-sw" title="PixAI's prompt helper (on by default, like the classic drawer)">
+                    <input type="checkbox" checked={s.promptHelper}
+                      onChange={(e) => set({ promptHelper: e.target.checked })} />
+                    <span className="mgdock-swtrack"><i /></span>
+                    <span className="mgdock-swlab">Prompt helper</span>
+                  </label>
+                )}
               </div>
             </div>
           )}
@@ -1202,10 +1288,17 @@ function GenerateDrawer({ open, onClose, account, request }) {
             {/* the prompt (DC 1566): the image draft here; the video contenteditable and
                 the edit instruction portal into their slots; Fixer/Enhance carry a line
                 of copy instead of an empty box */}
-            {tab === "image" && (
+            {tab === "image" && !ctxOn && (
               <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
                 placeholder="Describe your image…"
                 onChange={(e) => set({ prompt: e.target.value })} />
+            )}
+            {/* Session H decision 2: on the Context side the prompt names the images as @image
+                chips (typing @ opens the menu); the string stays useGenerate's s.prompt. */}
+            {tab === "image" && ctxOn && (
+              <AtPrompt value={s.prompt} onChange={(v) => set({ prompt: v })} ctx={s.ctx}
+                onAddImage={addContextPick} className="mgdock-prompt-at"
+                placeholder="Use @ to reference your images, e.g. @image1 holding flowers" />
             )}
             <div ref={setVideoPromptEl} className="mgdock-slot" style={{ display: tab === "video" ? "" : "none" }} />
             <div ref={setEditPromptEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "" : "none" }} />
@@ -1256,11 +1349,13 @@ function GenerateDrawer({ open, onClose, account, request }) {
               <div className="mgdock-negrow">
                 <span className="mgdock-lbl">NEGATIVE</span>
                 {tab === "image" && (
-                  <textarea className="mgdock-neg" rows={1} value={s.negative}
+                  <textarea className={"mgdock-neg" + (ctxOn ? " mgts-held" : "")} rows={1} value={s.negative}
                     placeholder="lowres, text"
-                    disabled={(m && m.compat_neg === false) || refIsContext(s)}
+                    disabled={(m && m.compat_neg === false) || ctxOn}
+                    title={ctxOn ? "Held · not sent with context images" : undefined}
                     onChange={(e) => set({ negative: e.target.value })} />
                 )}
+                {tab === "image" && ctxOn && <span className="mgdock-heldtag">· held</span>}
                 <div ref={setVideoNegEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
               </div>
             )}
@@ -1277,6 +1372,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     no version_id to price), so the DC's nomodel sentence (3674) is the
                     idle hint -- via the badge's own hint API, never hand-written text */}
                 <CostBadge ref={costRef} stack count={s.count} balance={balance}
+                  laneHeld={ctxOn && unlimitedOffered(m)}
                   hint="Pick a model to see the cost." />
                 {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the
                     quote on the badge must have been priced off the payload this click submits
@@ -1329,6 +1425,21 @@ function GenerateDrawer({ open, onClose, account, request }) {
       {open && <RunTip tip={runTip} />}
     </>
   );
+}
+
+/* The architecture's display name for the model row's sub-line (Session H frame A: "DiT.3 ·
+   profile Pro"), PixAI's own labels; an unknown type shows nothing rather than a raw enum. */
+const ARCH_LABEL = {
+  MMDIT26B_MODEL: "DiT.3", MMDIT26A_MODEL: "DiT.2", DIT7_MODEL: "DiT.1", DIT7B_MODEL: "DiT.1",
+  SDXL_MODEL: "SDXL", SD_V1_MODEL: "SD 1.5", USER_DIT26B_MODEL: "Comm.DiT", USER_DIT26A_MODEL: "Comm.DiT",
+};
+function archLabel(t) {
+  return ARCH_LABEL[String(t || "").toUpperCase()] || "";
+}
+
+/* sizeInfo() never throws on a half-applied model; the header reads it every render. */
+function sizeInfoSafe(s) {
+  try { return sizeInfo(s); } catch { return { width: 0, height: 0, source: "long", tier: null }; }
 }
 
 /* Model-published restrictions REPLACE the field's default bounds (the classic's
