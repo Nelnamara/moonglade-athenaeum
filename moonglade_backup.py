@@ -14675,6 +14675,11 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
                 "tack_name": r.get("proposedTackName") or "",
                 "desc_url": r.get("descUrl") or "",
                 "result_url": r.get("resultUrl") or "",
+                # Settlement (L3, PROBE 2026-09-29): `rewardStatus` reads "distributed" once
+                # the prizes have been paid out, which is the signal the win check uses to stop
+                # re-reading a contest early. Absent upstream -> "" (unknown, never a guess).
+                "reward_status": str(r.get("rewardStatus") or "").lower(),
+                "reward_distributed_at": r.get("rewardDistributedAt") or "",
             })
         total_page = int(d.get("totalPage") or 1)
         if page >= total_page:
@@ -14738,7 +14743,8 @@ def _contest_rows(payload):
     Each row is reduced to its SCALAR fields: the four the app actually uses (`id`,
     `authorId`, `mediaId`, `title`) plus whatever else came flat -- a winner's rank field,
     whose upstream name is unverified, therefore rides along untouched rather than being
-    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped."""
+    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped, except
+    its `entry`: the placement (kept as one small dict, see below)."""
     if isinstance(payload, dict):
         rows = payload.get("data") or []
     elif isinstance(payload, list):
@@ -14762,6 +14768,30 @@ def _contest_rows(payload):
             art = r.get("artwork")
             if isinstance(art, dict) and art.get("id"):
                 flat["artworkId"] = str(art["id"])
+        # L3 (PROBE 2026-09-29): the echoed `contest{}` block is NOT noise on these rows -- its
+        # nested `entry` carries the placement. `contest.entry = {rank, prizeAmount, source,
+        # submittedAt}`: `rank` is the PRIZE TIER (1/2/3, shared by every winner in that tier,
+        # null on a non-winner's entry), `prizeAmount` what that tier paid, `source` "manual"
+        # for a hand-picked winner and "tack" for an ordinary entry. Dropping it (the old
+        # scalars-only rule) is what made the app show list positions 1..65 and a prize of 0.
+        # Kept ADDITIVELY, and only when upstream sent it, so a row without the block maps
+        # exactly as it always did. `rank` stays an int or None -- a numeric string is NOT
+        # coerced, because "is this an integer rank" is the win check's whole question.
+        blk = r.get("contest")
+        ent = blk.get("entry") if isinstance(blk, dict) else None
+        if not isinstance(ent, dict):
+            ent = r.get("entry") if isinstance(r.get("entry"), dict) else None
+        if isinstance(ent, dict):
+            rank = ent.get("rank")
+            prize = ent.get("prizeAmount")
+            flat["entry"] = {
+                "rank": rank if (isinstance(rank, int) and not isinstance(rank, bool)) else None,
+                "prizeAmount": prize if (isinstance(prize, (int, float))
+                                         and not isinstance(prize, bool)) else 0,
+                "source": ent.get("source") if isinstance(ent.get("source"), str) else "",
+                "submittedAt": (ent.get("submittedAt")
+                                if isinstance(ent.get("submittedAt"), str) else ""),
+            }
         out.append(flat)
     return out
 
@@ -14785,8 +14815,11 @@ def contest_winners(session, slug):
 
     Verified live: a still-running contest answers with an EMPTY JSON array rather than an
     error, and the list populates at the contest's `resultAt` -- so an empty result means
-    "not decided yet", never "call failed". `authorId` identifies each winner; any rank
-    field upstream sends is preserved as-is (see _contest_rows). Read-only, no spend."""
+    "not decided yet", never "call failed". ONE unpaged list; each row is a winning artwork
+    (`id` is the artwork id, `authorId` its author) and its `entry` is the placement:
+    `entry.rank` is the prize TIER (1/2/3, shared by every winner in that tier) and
+    `entry.prizeAmount` what the tier paid (PROBE 2026-09-29; see _contest_rows). Read-only,
+    a GET and nothing else, no spend."""
     return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
 
 
