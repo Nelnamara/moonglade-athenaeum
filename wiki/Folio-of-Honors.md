@@ -68,8 +68,10 @@ Every achievement carries a tier, and the tier sets a base score:
 Ladder rungs add **+5 per step up the track**, so a crown is worth more than the same
 tier sitting on its own. Feats score 0.
 
-The header keeps a running total: how many of the visible achievements you've earned,
-and your points out of the possible total.
+The header keeps a running total: how many of the ladder rungs, milestones and masteries
+you've earned, your points out of the possible total, and a **completion** meter (see
+*For completionists* below). Feats are never part of any total; they are shown only as how
+many you have found.
 
 ## Getting around the Folio
 
@@ -97,9 +99,11 @@ Three tabs across the top:
 The **search box** in the header filters by name, description or tier and jumps you to
 the **All** tab as you type. The right-hand rail's **Categories** list filters
 in place — click one to show only that category, click again to clear it — alongside
-**Within Reach** (the three locked achievements you're closest to finishing) and
-**Relics**, a read-only look at all five skins (locked ones dimmed with a lock icon,
-your active one checked). Picking a skin still only happens from the Control Panel.
+**Within Reach** (the three locked achievements you're closest to finishing, each with a
+moon that fills as you close in) and **Relics**: the rewards your honors have handed you,
+in up to three rows — **Skins**, **Banners** and **Marks**, newest first. A row with
+nothing in it simply isn't there, and nothing you haven't earned is shown as a locked
+tile. Tap a skin to wear it; a banner or a mark opens **✦ Branding** in the Control Panel.
 
 Unlocks announce themselves with a mid-screen moment — badge, chime, and flair that
 scales with rarity. If a whole stack lands at once (a first run over an existing
@@ -110,6 +114,43 @@ beside the count, to end the parade there and then. Every achievement is recorde
 earned whether or not its moment played. **Click any earned card to replay its
 celebration.**
 
+## For completionists
+
+The Folio also helps you finish the record, without ever counting the feats.
+
+- **N to go.** Every locked ladder rung, milestone and mastery that the app can measure
+  shows how many are left ("12 to go") beside a small moon that fills as you close in, and
+  a **→** that jumps to the place that advances it: Generate for images and videos, The
+  Loom for storyboards, Contests for entries, Publish for published works. An honor the app
+  can't measure shows no count, no moon and no jump. Feats never show one.
+- **Completion.** The meter in the header covers ladder rungs, milestones and masteries
+  only, rounded down, so 100% means everything in them is done. Finding a feat never moves
+  it; feats sit beside it as "N found", with no total.
+- **Sort.** The **All** tab can sort by **Default**, **Closest to earning** (what's nearest
+  first, then what's earned), **Rarest** or **Newest earned**. Feats are in none of the
+  orders. The choice is remembered on the device you made it on.
+- **Pin a goal.** The pin beside a row's **→** puts that honor in the app header, beside
+  your credits on the gallery, the Generate dock and The Loom: the moon, its name and how
+  many to go. One pin at a time — pinning another replaces it. Click the chip to open the
+  Folio on that row, ✕ to let it go. It clears itself when you earn the honor, as the
+  earn moment plays, and steps aside whenever a celebration is on screen. Your pin is
+  saved to your account, so it follows you between devices. On a phone it's a slim chip
+  above the tab bar, and you swipe it away to unpin.
+- **The Vigil.** A count of the days in a row you've made something: a day counts when at
+  least one generation was collected that day, by the clock of the machine running the
+  gallery. It's always in the Folio's header with your **best** run beside it, and a
+  switch there can show it in the app header too (on a phone, in the row above the tab bar
+  beside your pin). Miss a day and it simply starts again at day 1 — no message, no toast.
+- **The Honors card.** **⇩ Honors card** draws a 1200 × 630 picture on your own device:
+  your name and mark, your points, the completion percentage, your Vigil, and the three
+  rarest honors you've earned as their badge art, in the colours of the skin you're
+  wearing. Feats appear only as "N found" — never named or pictured. **Save** it or
+  **Copy** it; on a phone, **Share** opens the phone's own share sheet. Nothing is
+  uploaded anywhere.
+
+None of this writes anything when you merely look: your pin, the Vigil switch and your
+sort are saved only when you click them.
+
 ## Skins
 
 Some epic achievements unlock a **skin** — a palette swap applied across the whole
@@ -118,9 +159,10 @@ and the void-touched **Nightfallen**) and three earned. A card tells you up fron
 unlocks one (**❖ unlocks … skin**), so the Folio itself is the map — and unlocking all
 five earns **Skin-Changer**.
 
-Skins are applied from the **Control Panel**, in its **Identity** strip, not from the
-Hall — all the cosmetics live together, and the strip pairs the skins with the mark that
-sits beside the title so you can judge the two together. Your choice is saved server-side,
+Skins are applied from the **Control Panel**, in its **Identity** strip — all the
+cosmetics live together, and the strip pairs the skins with the mark that sits beside the
+title so you can judge the two together — or with a tap on the skin in the Folio's
+**Relics**. Your choice is saved server-side,
 so it follows you to every device and every page of the suite. Picking a locked skin is
 refused by the server, so there's nothing to cheat.
 
