@@ -490,6 +490,22 @@ def _clear_gate_caches():
 
 
 @pytest.fixture(autouse=True)
+def _no_live_recipes(monkeypatch):
+    """moonglade_recipes rides _rest_get/_rest_post (blocked below) plus one DELETE of its
+    own for a recipe set's item -- blocked the same way -- and keeps a module-level read
+    cache (categories, a model's capability, market pages) that must not carry one test's
+    fake answers into the next."""
+    import moonglade_recipes
+
+    def _blocked(*a, **k):
+        raise core.PixAIError("live /v2 REST blocked in tests")
+    monkeypatch.setattr(moonglade_recipes, "_rest_delete", _blocked, raising=False)
+    moonglade_recipes.clear_cache()
+    yield
+    moonglade_recipes.clear_cache()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->
