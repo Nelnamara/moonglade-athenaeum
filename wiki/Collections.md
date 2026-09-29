@@ -56,6 +56,28 @@ in or out on its own. **⟳ Refresh** runs it again while it is open.
   Smart collections can't merge (their tick box says why).
 - **Delete** always asks first, and the question says how many pictures stay. **Deleting a
   collection never deletes a picture**, and neither does merging: a collection is only a label.
+- **⇅ Order** on a hand-picked collection's row opens its [manual order](#manual-order).
+
+Renaming a collection keeps its manual order, deleting it drops the order with it, and merging
+keeps the order of the collection you ticked first (the pictures merged in go after).
+
+### Manual order
+
+A **hand-picked** collection can keep your own order. Open the collection and set the **Sort** chip
+to **manual order** (it is offered only while a hand-picked collection is open); **⇅ Order** then
+opens the order editor — or use **⇅ Order** on the collection's row in the manager. Drag a row to
+move it, or use its **▲ ▼** (with a row focused, **Alt+↑ / Alt+↓** move it too), then **Save
+order**. Opening the editor changes nothing; the order is written once, when you save.
+
+- Pictures you add to the collection later go **to the end**, oldest first.
+- **Smart collections can't be ordered by hand**: their membership is worked out live.
+- The order is used by **manual order** in the grid and the **Slideshow**, by **⎙ Print sheet**
+  (the contact sheet prints a collection in its own order), and by **▮ Send to The Loom · as
+  shots, in order**.
+
+Under the rows the editor carries both [Loom sends](The-Loom#sending-pictures-from-the-gallery):
+**▮ Send to The Loom · as shots, in order** and **▮ Send to The Loom · as cast**. Like every
+collection, the order lives in your local catalog and is never sent to PixAI.
 
 ## Your own layer: keepers, tags and notes
 
@@ -90,7 +112,9 @@ pictures. Smart collections can't merge, and **Delete** always asks first and sa
 stay. **Advanced** search has **Save as smart collection ⟳**, and smart collections are in its
 **Collection** list with a ⟳. Long-press a picture to select, then **Actions** starts with the stars,
 a tag box, **Keeper** and **Reject**; a note says what really changed and carries **Undo** for ten
-seconds. Nothing here deletes a picture or reaches PixAI.
+seconds. A hand-picked collection's row has **⇅ Order**: it opens its [manual
+order](#manual-order), where you **long-press a picture to drag it** (or use ▲ ▼), then **Save
+order**. Nothing here deletes a picture or reaches PixAI.
 
 ## Rating keys
 
@@ -116,7 +140,11 @@ holding everything below, rather than a row of separate buttons:
   of that one collection. A `catalog.db` label change only — no files are touched.
 - **Send to Video** loads the selection into the Generate drawer's Video tab as
   reference images (images only, up to 6) — see [Generating](Generating).
-- **Send to The Loom (cast)** sends the selected images to the Loom's cast.
+- **▮ Send to The Loom · as cast** sends the selected images to the Loom's cast (and its cast
+  library); **▮ Send to The Loom · as shots, in order** makes them a new act of image-to-video
+  shots, one per picture, in the order of the collection you're looking at (its manual order,
+  or oldest first) — up to 60 pictures, videos left out, and nothing rendered. See [The
+  Loom](The-Loom#sending-pictures-from-the-gallery).
 - **Print sheet** opens a print-ready contact sheet of the selection.
 - **Find/replace in prompts** across the selection.
 - **Download ZIP** of the selected full-res images.

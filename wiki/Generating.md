@@ -994,9 +994,10 @@ can meet this from the drawer itself, not only from a hand-rolled request: a mod
 publishes wider limits of its own widens the browser field to match.
 
 **The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
-frame handoff, and per-shot **Generate** on the same engine. It's a fixed 4-region shell
-(Cast & Assets / Footage on the left, the Acts & Shots board center, the Generate drawer
-right, a Timeline drawer across the top) with a "draft generation" mode for exploring a
-look before assigning it to a shot, multiple independently-saved storyboards, project-wide
-Draft-quality rendering, and a two-tier project export. Full manual: [The Loom](The-Loom) (or
-the ? button on the page).
+frame handoff, and per-shot **Render** on the same engine, every render kept as a take. It's a
+fixed 4-region shell (Cast & Assets / Footage / Library on the left, the Acts & Shots board
+center, the Generate drawer right, a Timeline drawer across the top) with a "draft generation"
+mode for exploring a look before assigning it to a shot, multiple independently-saved
+storyboards sharing one cast library, project-wide Draft-quality rendering, a music bed, find,
+a continuity ribbon, and a project export with an edit decision list for your editor. Full
+manual: [The Loom](The-Loom) (or the ? button on the page).

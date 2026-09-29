@@ -10,10 +10,15 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   one card each. The entry only appears once **Mirror to PixAI** is armed.
 - **the art pack** — the file the app's own art ships in, `moonglade.dat`, sitting beside the
   program. Also called the dat, the container, or just the pack.
+- **anchor** — where a Loom shot's spliced opening frame came from: the shot and the take before
+  it. When that shot changes take, the card says **⚠ anchor changed** and offers **Re-anchor** or
+  **Keep**. See [The Loom](The-Loom#re-anchor).
 - **badge** — the picture on an achievement's card in [The Folio of Honors](Folio-of-Honors), and
   the picture in the moment that plays when you earn one.
 - **the banner** — the wide art across the top of a screen: the gallery's, the sign-in page's and
   The Loom's.
+- **the cast library** — The Loom's shared list of cast members; each storyboard ticks the ones it
+  uses. The **Library** tab beside Cast & assets. See [The Loom](The-Loom#the-cast-library).
 - **collection** — a named set of pictures you gather yourself. Filter to one from the filter bar's
   **Collection** dropdown; see [Collections](Collections).
 - **composite** — the filtered image: the result pane the Darkroom hands you beside your source,
@@ -44,12 +49,17 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   machine-only buttons. Everything else, including watching a job run, works as normal.
 - **the launcher** — **`Serve Gallery.pyw`**, the double-click way to start the gallery with no
   console window. See [Setup](Setup).
+- **the continuity ribbon** — the strip of frame pairs under The Loom's reel, in the Timeline
+  drawer's full view: each shot's closing frame beside the next one's opening frame. See [The
+  Loom](The-Loom#the-continuity-ribbon).
 - **the Library** — the grid of your pictures: the gallery's home screen, and what a popup covers.
 - **the lightbox** — the full-screen picture you get by clicking a card in the Library.
 - **Live Mirror** — the Control Panel readout for the connection that pulls each finished PixAI
   generation into your library as it lands.
 - **The Loom** — the **▰** storyboard for multi-clip video: acts, shots, cast and the reel bar. See
   [The Loom](The-Loom).
+- **the music bed** — one audio file under a whole Loom storyboard, mixed under **▶▶ Play** and
+  **⇩ Render**; kept on your machine, never uploaded. See [The Loom](The-Loom#the-music-bed).
 - **the mark** — the small emblem beside the title, picked in the Control Panel: from the
   Control Panel's Identity strip.
 - **Mirror to PixAI** — the Maintenance switch that files what you make here out to your pixai.art
@@ -83,6 +93,8 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   the Control Panel's Identity strip.
 - **the standing order** — the single **⏱** scheduled job in the job console's **Ledger** view. It
   is older than Runs itself and separate from it.
+- **take** — one render of a Loom shot. Every render is kept; the **★** take is the one Play,
+  Render and Export use. See [The Loom](The-Loom#takes).
 - **toast** — a notice that appears in the corner and goes by itself: a finished generation, a work
   taking off, a job's result.
 - **the Trash** — the Control Panel tile listing everything you have deleted locally, with

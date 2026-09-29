@@ -380,7 +380,7 @@ an undo taxes only the mistake, where a prompt would tax every delete you meant.
 ### Sending a selection onward
 
 Selections persist across pages, which is the point of them — and it's also what made
-**Actions → ▮ Send to The Loom (cast)** miss a video. The cast is images only, but the check
+**Actions → ▮ Send to The Loom · as cast** miss a video. The cast is images only, but the check
 asked the *page you were looking at*, so a video ticked on page 2 and sent from page 1 was
 invisible to it and went through. The kinds are now remembered alongside the selection
 itself, so the exclusion holds wherever a video was picked.
