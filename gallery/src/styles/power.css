@@ -1,0 +1,132 @@
+/* Session M -- the account-side power tools (Generate Power Tools Handoff, frame A and rules
+   M2 default negative, M3 ↺ Last + Presets, M4 quick-pick chips; the Phone paragraph). Tokens
+   only; the page's own rgba tints are mixed from them. Refusals and held states are peach,
+   never ruby; gold stays the spend card (runs.css). */
+
+/* ---- the composer header: ↺ Last · Presets ▾ · Lists ▾ (page: lastBtnStyle, presetBtnStyle) ---- */
+.mgpow-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 5px 11px; border-radius: 8px;
+  border: 1px solid var(--surface1); background: transparent; color: var(--subtext); cursor: pointer;
+  white-space: nowrap; transition: border-color .2s, color .2s; }
+.mgpow-btn:hover:not(:disabled) { border-color: var(--lavender); color: var(--text); }
+.mgpow-btn.on { border-color: var(--lavender); color: var(--text); }
+.mgpow-btn.last { color: var(--text); }
+.mgpow-btn:disabled { color: var(--overlay0); opacity: .55; cursor: not-allowed; }
+
+.mgpow-anchor { position: relative; display: inline-block; }
+/* the popover (page: presets popover -- 300 wide, lavender border, mantle, 10 radius, 6 padding).
+   It opens DOWN like the page's; UP when the dock has no room below (the dock sits at the foot). */
+.mgpow-pop { position: absolute; right: 0; z-index: 40; width: 300px; box-sizing: border-box;
+  padding: 6px; border-radius: 10px; border: 1px solid var(--lavender); background: var(--mantle);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .6); }
+.mgpow-pop.wide { width: 340px; }
+.mgpow-pop.down { top: calc(100% + 6px); }
+.mgpow-pop.up { bottom: calc(100% + 6px); }
+
+.mgpow-panel { display: flex; flex-direction: column; gap: 3px; }
+.mgpow-list { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }
+.mgpow-item { display: flex; align-items: center; gap: 6px; padding: 0 2px; border-radius: 7px; }
+.mgpow-item:hover { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+.mgpow-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  font: inherit; text-align: left; padding: 6px 7px; border: 0; background: transparent; color: var(--text);
+  cursor: pointer; border-radius: 7px; }
+.mgpow-pick:disabled { opacity: .55; cursor: wait; }
+.mgpow-name { font-size: 11px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgpow-meta { font-size: 9.5px; color: var(--overlay0); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgpow-del { font: inherit; font-size: 10px; padding: 2px 5px; border: 0; background: transparent;
+  color: var(--overlay0); cursor: pointer; border-radius: 5px; }
+.mgpow-del:hover { color: var(--peach); }
+.mgpow-empty { font-size: 10.5px; color: var(--overlay0); padding: 8px 7px 4px; }
+.mgpow-save { display: flex; gap: 5px; padding: 6px 4px 2px; border-top: 1px solid var(--surface0); margin-top: 3px; }
+.mgpow-save input { flex: 1; min-width: 0; font: inherit; font-size: 11px; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--surface1); background: var(--base); color: var(--text); outline: none; }
+.mgpow-savebtn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 7px;
+  border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
+.mgpow-savebtn:disabled { background: var(--surface0); color: var(--overlay0); cursor: not-allowed; }
+.mgpow-foot { font-size: 9.5px; color: var(--overlay0); padding: 2px 6px 2px; }
+.mgpow-foot.bad { color: var(--peach); }
+
+/* the Lists sheet inside its popover has no second border */
+.mgrun-sheet.bare { margin: 0; padding: 4px; border: 0; background: transparent; }
+
+/* ---- MODELS / LORAS (page M4: 9px label 50 wide, chips 10.5 px pills, dimmed = off-family) ---- */
+.mgpow-rows { display: flex; flex-direction: column; gap: 5px; padding: 0 0 8px; }
+.mgpow-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mgpow-rowlbl { width: 50px; flex: none; font-size: 9px; }
+.mgpow-chip { font: inherit; font-size: 10.5px; padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  cursor: pointer; border: 1px solid var(--surface1); background: transparent; color: var(--subtext);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; transition: border-color .2s, background .2s; }
+.mgpow-chip:hover { border-color: var(--lavender); }
+.mgpow-chip.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, transparent);
+  color: var(--text); }
+.mgpow-chip.dim { opacity: .45; cursor: not-allowed; }
+.mgpow-chip.dim:hover { border-color: var(--surface1); }
+
+/* ---- the negative's default button (page: defaultBtnStyle) and the one plain line ---- */
+.mgpow-default { flex: none; font: inherit; font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 7px;
+  white-space: nowrap; cursor: pointer; border: 1px solid var(--surface1); background: transparent;
+  color: var(--lavender); }
+.mgpow-default.on { border-color: var(--lavender); color: var(--text);
+  background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+.mgpow-default:disabled { color: var(--overlay0); opacity: .55; cursor: not-allowed; }
+.mgpow-note { font-size: 10.5px; color: var(--subtext); padding: 6px 9px; margin-top: 8px; border-radius: 8px;
+  background: color-mix(in srgb, var(--lavender) 8%, transparent); }
+
+/* ---- the ☆ in the model and LoRA pickers ---- */
+.model-picker .mg-fav { position: absolute; top: 4px; right: 4px; z-index: 2; font: inherit; font-size: 13px;
+  line-height: 1; width: 24px; height: 24px; border-radius: 50%; border: 0; cursor: pointer; padding: 0;
+  display: grid; place-items: center; color: var(--subtext);
+  background: color-mix(in srgb, var(--base) 72%, transparent); }
+.model-picker .mg-fav.on { color: var(--gold); }
+.model-picker .mg-fav:hover { color: var(--text); }
+.model-picker .mg-fav.on:hover { color: var(--gold); }
+
+/* ---- the phone (create-mobile's tab): chips above the prompt, the 36 px scrolling row, the
+   prompt toolbar, the sheets ---- */
+.pm-chips { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.pm-chip { font: inherit; font-size: 12px; font-weight: 700; padding: 0 14px; height: 36px; border-radius: 999px;
+  border: 1px solid var(--surface1); background: transparent; color: var(--text); cursor: pointer;
+  white-space: nowrap; display: inline-flex; align-items: center; }
+.pm-chip:disabled { color: var(--overlay0); opacity: .55; }
+.pm-chip.on { border-color: var(--lavender); }
+.pm-quick { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 0 0 8px; margin: 0 -2px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.pm-quick::-webkit-scrollbar { display: none; }
+.pm-quick .pm-chip { flex: none; font-weight: 500; color: var(--subtext); max-width: 70vw;
+  overflow: hidden; text-overflow: ellipsis; }
+.pm-quick .pm-chip.on { color: var(--text); background: color-mix(in srgb, var(--lavender) 16%, transparent); }
+.pm-quick .pm-chip.dim { opacity: .45; }
+.pm-tools { display: flex; gap: 8px; align-items: center; margin: 6px 0 2px; }
+.pm-key { font: inherit; font-size: 12px; font-weight: 700; padding: 0 12px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--surface1); background: transparent; color: var(--lavender); cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pm-sheetbody { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 6px; }
+.pm-sheetbody .mgpow-panel { gap: 6px; }
+.pm-sheetbody .mgpow-list { max-height: 46vh; }
+.pm-sheetbody .mgpow-pick { padding: 10px 8px; }
+.pm-sheetbody .mgpow-name { font-size: 13px; }
+.pm-sheetbody .mgpow-meta { font-size: 11px; }
+.pm-sheetbody .mgpow-del { font-size: 14px; padding: 10px 12px; }
+.pm-sheetbody .mgpow-save input { font-size: 14px; padding: 10px 12px; }
+.pm-sheetbody .mgpow-savebtn { font-size: 13px; padding: 10px 16px; }
+.pm-sheetbody .mgpow-foot { font-size: 10.5px; }
+.pm-sheetbody .mgrun-sheet input, .pm-sheetbody .mgrun-sheet textarea { font-size: 14px; padding: 9px 11px; }
+.pm-sheetbody .mgrun-chip, .pm-sheetbody .mgrun-save, .pm-sheetbody .mgrun-ccancel { min-height: 36px; font-size: 12px; }
+.mgpow-note.phone { margin: 0 0 8px; }
+
+/* ---- the phone's matrix grid (setting one up is desktop-only; the results are viewable) ---- */
+.pm-grid { display: grid; gap: 6px; align-items: stretch; overflow-x: auto; padding: 2px 0 6px; }
+.pm-gridnote { font-size: 11px; color: var(--subtext); }
+.pm-cell { position: relative; border-radius: 8px; overflow: hidden; display: grid; place-items: center;
+  border: 1px solid var(--surface1); aspect-ratio: 832 / 1216; min-width: 58px;
+  background: color-mix(in srgb, var(--mantle) 90%, transparent); color: var(--overlay0); font: inherit; padding: 0; }
+.pm-cell.done { border-color: color-mix(in srgb, var(--lavender) 42%, transparent); cursor: pointer; }
+.pm-cell.held { border-color: color-mix(in srgb, var(--peach) 55%, transparent);
+  background: color-mix(in srgb, var(--peach) 8%, transparent); color: var(--peach); font-size: 14px; }
+.pm-cell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pm-axis { font-size: 10.5px; color: var(--mauve); text-align: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pm-rowlbl { font-size: 10.5px; color: var(--mauve); align-self: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pm-linkbtn { font: inherit; font-size: 12px; font-weight: 700; padding: 0 12px; height: 32px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: transparent; color: var(--lavender); cursor: pointer; margin-left: 6px; }
+.pm-tools .mgpow-default { height: 36px; font-size: 12px; padding: 0 12px; border-radius: 10px; }

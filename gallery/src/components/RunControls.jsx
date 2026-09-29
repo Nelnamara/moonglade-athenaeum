@@ -23,24 +23,29 @@ export function TokenLine({ parsed }) {
 }
 
 /* Random | Matrix · ×1–4 · ⚄ Reroll · the summary. Shown while the prompt uses the syntax (a
-   plain prompt is a plain send; its count stays the COUNT stops). */
-export function RunModeRow({ s, set, parsed, plan, onLists, listsOpen }) {
+   plain prompt is a plain send; its count stays the COUNT stops). The Lists ▾ button lives in
+   the composer's header beside Presets (PowerControls), so a first list can be made before any
+   prompt uses one. On the phone (`phone`) setting up a Matrix is desktop-only (Phone, NOTES):
+   the row is Random's count and Reroll and the summary; Matrix is not offered. */
+export function RunModeRow({ s, set, parsed, plan, phone }) {
   if (!parsed || !parsed.syntax) return null;
-  const matrix = s.varMode === "matrix";
-  const summary = sendSummary(parsed, plan, s.varMode || "random", s.count);
+  const matrix = !phone && s.varMode === "matrix";
+  const summary = sendSummary(parsed, plan, matrix ? "matrix" : "random", s.count);
   const bad = !!(parsed.error || (plan && plan.error));
   return (
     <>
-      <div className="mgrun-moderow">
-        <div className="mgrun-seg">
-          {[["random", "Random", "One value per image"], ["matrix", "Matrix", "Every combination, queued (cap " + CELL_CAP + ")"]]
-            .map(([k, l, t]) => (
-              <button key={k} type="button" title={t}
-                className={(s.varMode || "random") === k ? "on" : ""}
-                disabled={k === "matrix" && s.unlimited}
-                onClick={() => set({ varMode: k })}>{l}</button>
-            ))}
-        </div>
+      <div className={"mgrun-moderow" + (phone ? " phone" : "")}>
+        {!phone && (
+          <div className="mgrun-seg">
+            {[["random", "Random", "One value per image"], ["matrix", "Matrix", "Every combination, queued (cap " + CELL_CAP + ")"]]
+              .map(([k, l, t]) => (
+                <button key={k} type="button" title={t}
+                  className={(s.varMode || "random") === k ? "on" : ""}
+                  disabled={k === "matrix" && s.unlimited}
+                  onClick={() => set({ varMode: k })}>{l}</button>
+              ))}
+          </div>
+        )}
         {!matrix && (
           <>
             <div className="mgrun-seg">
@@ -54,10 +59,6 @@ export function RunModeRow({ s, set, parsed, plan, onLists, listsOpen }) {
             <button type="button" className="mgrun-reroll" title="Draw new values for the variables"
               onClick={() => set({ roll: nextRoll(s.roll) })}>⚄ Reroll</button>
           </>
-        )}
-        {onLists && (
-          <button type="button" className={"mgrun-lists" + (listsOpen ? " on" : "")}
-            onClick={onLists} title="Your saved lists — __name__ in a prompt">Lists ▾</button>
         )}
         <div className={"mgrun-summary" + (bad ? " bad" : "")}>{summary}</div>
       </div>
@@ -91,7 +92,7 @@ function nextRoll(roll) {
 /* The Lists sheet (page M1): a name and one item per line, saved to the account store
    (gen.lists) so the phone sees them too. Saving is a deliberate click; nothing is written
    on open. */
-export function ListsSheet({ lists, onSave, onClose }) {
+export function ListsSheet({ lists, onSave, onClose, bare }) {
   const names = Object.keys(lists || {}).sort();
   const [name, setName] = useState(names[0] || "");
   const [text, setText] = useState(names[0] ? (lists[names[0]] || []).join("\n") : "");
@@ -113,7 +114,7 @@ export function ListsSheet({ lists, onSave, onClose }) {
     if (d && d.error) { setMsg(d.error); setBad(true); } else { pick(""); setMsg("Deleted."); setBad(false); }
   };
   return (
-    <div className="mgrun-sheet" role="dialog" aria-label="Saved lists">
+    <div className={"mgrun-sheet" + (bare ? " bare" : "")} aria-label="Saved lists">
       <div className="mgrun-sheetrow">
         {names.map((n) => (
           <button key={n} type="button" className={"mgrun-chip" + (n === name ? " on" : "")}

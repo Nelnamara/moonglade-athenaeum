@@ -620,4 +620,8 @@ export const GEN_DEFAULTS = {
   // ---- Session M (Generate power tools) ----
   varMode: "random",    // Random (one value per image) | Matrix (every combination, cap 24)
   roll: 0,              // the run seed when the seed field is blank (useGenerate draws one)
+  // NOTES 4: the base family the applied model belongs to (powerCore.familyOf), kept across a
+  // model that is still resolving, so a family switch is compared with the family BEFORE it.
+  family: "",
+  note: "",             // the dock's one plain line after a default / Last / preset (cleared on typing)
 };

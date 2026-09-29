@@ -37,6 +37,8 @@ import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
 import HelpButton from "../help/HelpButton.jsx";
 import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./RunControls.jsx";
+import { ListsPop, NegDefaultButton, PowerHeader, PowerNote, QuickRows } from "./PowerControls.jsx";
+import { presetNegativeTail } from "../gen/powerCore.js";
 import RunInspector from "./RunInspector.jsx";
 import { escapeLiteral, newRoll } from "../gen/templateCore.js";
 import "../styles/dock.css";
@@ -354,8 +356,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
   const [runPx, setRunPx] = useState(0);
   const tokBoxRef = useRef(null);
   const runBoxRef = useRef(null);
+  const powBoxRef = useRef(null);
   useEffect(() => {
-    const els = [tokBoxRef.current, runBoxRef.current].filter(Boolean);
+    const els = [tokBoxRef.current, runBoxRef.current, powBoxRef.current].filter(Boolean);
     if (!els.length || typeof ResizeObserver === "undefined") return undefined;
     const measure = () => setRunPx(els.reduce((a, e) => a + Math.round(e.getBoundingClientRect().height), 0));
     const ro = new ResizeObserver(measure);
@@ -965,6 +968,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 {m && m.preset && m.preset.sampler ? (
                   <div className="mgdock-presetnote">
                     {m.title} ships its author's preset — applied on pick · sampler {m.preset.sampler}
+                    {presetNegativeTail(m, g.power.defaults)}
                   </div>
                 ) : null}
                 <InputsSwitch s={s} set={set} onAskConfirm={() => setConfirmOpen(true)} />
@@ -1339,6 +1343,16 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 </>
               )}
               <span className="sp" />
+              {/* Session M (NOTES 5, page frame A): ↺ Last and Presets ▾ in the composer header,
+                  and Lists ▾ (NOTES 1) beside them -- a saved list is made before any prompt
+                  uses one. Nothing here writes until a click. */}
+              {tab === "image" && (
+                <PowerHeader power={g.power} listsPop={(
+                  <ListsPop open={listsOpen} onToggle={() => setListsOpen((v) => !v)} onClose={() => setListsOpen(false)}>
+                    <ListsSheet bare lists={g.run.lists} onSave={g.run.saveLists} onClose={() => setListsOpen(false)} />
+                  </ListsPop>
+                )} />
+              )}
               {/* Session M (NOTES 7): { } Inspect -- the exact request per job, after the
                   variables are filled in; the preview before a send, the last send after. */}
               {tab === "image" && (
@@ -1353,13 +1367,22 @@ function GenerateDrawer({ open, onClose, account, request }) {
               )}
             </div>
 
+            {/* Session M (NOTES 6, page M4): MODELS / LORAS quick-pick chips above the prompt -- 3
+                recent + ★ favourites, at most 6 a row, then "+ more" into the picker. */}
+            {tab === "image" && (
+              <div ref={powBoxRef}>
+                <QuickRows power={g.power} ctxOn={ctxOn}
+                  onMoreModels={() => { setFiltersOpen(false); setFlyKind("base"); setFlyOpen(true); }}
+                  onMoreLoras={() => { setFiltersOpen(false); setFlyKind("lora"); setFlyOpen(true); }} />
+              </div>
+            )}
             {/* the prompt (DC 1566): the image draft here; the video contenteditable and
                 the edit instruction portal into their slots; Fixer/Enhance carry a line
                 of copy instead of an empty box */}
             {tab === "image" && !ctxOn && (
               <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
                 placeholder="Describe your image…"
-                onChange={(e) => set({ prompt: e.target.value })} />
+                onChange={(e) => set({ prompt: e.target.value, note: "" })} />
             )}
             {/* Session H decision 2: on the Context side the prompt names the images as @image
                 chips (typing @ opens the menu); the string stays useGenerate's s.prompt. */}
@@ -1426,18 +1449,18 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     onChange={(e) => set({ negative: e.target.value })} />
                 )}
                 {tab === "image" && ctxOn && <span className="mgdock-heldtag">· held</span>}
+                {/* Session M (NOTES 4, page M2): ☆ Set as default | ★ Default · <family> */}
+                {tab === "image" && !ctxOn && <NegDefaultButton power={g.power} negative={s.negative} />}
                 <div ref={setVideoNegEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
               </div>
             )}
-            {/* Session M (page A): Random | Matrix with its count and ⚄ Reroll, the preview, the
-                Lists sheet, and THE ONE confirm for any send of more than one generation. */}
+            {/* the one plain line after a default, ↺ Last or a preset ("Nothing was sent.") */}
+            {tab === "image" && <PowerNote note={s.note} />}
+            {/* Session M (page A): Random | Matrix with its count and ⚄ Reroll, the preview, and
+                THE ONE confirm for any send of more than one generation. */}
             {tab === "image" && (
               <div ref={runBoxRef}>
-                <RunModeRow s={s} set={set} parsed={g.run.parsed} plan={g.run.plan}
-                  onLists={() => setListsOpen((v) => !v)} listsOpen={listsOpen} />
-                {listsOpen && (
-                  <ListsSheet lists={g.run.lists} onSave={g.run.saveLists} onClose={() => setListsOpen(false)} />
-                )}
+                <RunModeRow s={s} set={set} parsed={g.run.parsed} plan={g.run.plan} />
                 <RunConfirm confirm={g.run.confirm} busy={g.run.busy}
                   onGo={() => { setReuseFrom(null); g.run.go(); }} onCancel={g.run.cancel} />
                 <RunPreview s={s} parsed={g.run.parsed} plan={g.run.plan} />
@@ -1462,9 +1485,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     quote on the badge must have been priced off the payload this click submits
                     (gen/priceProbeCore.js). generate() refuses the same way, for the keyboard
                     Enter that fires against a stale render. */}
-                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || !g.canSubmit ? " off" : "")}
-                  disabled={!!gate || g.busy || prefillBusy || !g.canSubmit}
-                  title={prefillBusy ? "Restoring the recipe…"
+                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || g.power.restoring || !g.canSubmit ? " off" : "")}
+                  disabled={!!gate || g.busy || prefillBusy || g.power.restoring || !g.canSubmit}
+                  title={prefillBusy || g.power.restoring ? "Restoring the recipe…"
                     : gate ? (s.unlimited || g.run.templateGate ? gate : "Pick a model and write a prompt first")
                       : s.unlimited ? "Submit in Unlimited Mode"
                         : g.run.images > 1 ? "Send " + g.run.images + " — a confirm shows the total first"
@@ -1495,6 +1518,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
         baseType={m ? m.model_type : ""}
         value={m} selected={s.loras}
         onBasePick={onBasePick} onLoraPick={onLoraPick}
+        favs={{ base: g.power.favModels, lora: g.power.favLoras }} onFav={g.power.toggleQuickFav}
         onClose={() => setFlyOpen(false)}
       />
       {/* THE DARKROOM (issue #48, handoff comp A1): the full-screen art-filters room that
