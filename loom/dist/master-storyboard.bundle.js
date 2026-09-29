@@ -4135,6 +4135,8 @@ ${"=".repeat(48)}
       avatar: o.avatar || "",
       code: o.code || "",
       action: o.action && typeof o.action.run === "function" ? { label: String(o.action.label || ""), run: o.action.run } : null,
+      actions: !o.action && Array.isArray(o.actions) ? o.actions.filter((a) => a && typeof a.run === "function").slice(0, 2).map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" })) : [],
+      foot: o.foot ? String(o.foot) : "",
       sticky: !!o.sticky,
       out: false
     }]);
@@ -4689,9 +4691,13 @@ ${"=".repeat(48)}
     });
     _resume();
   }
+  var _unleashSource = () => false;
+  function registerUnleashSource(fn) {
+    if (typeof fn === "function") _unleashSource = fn;
+  }
   function unleashed() {
     try {
-      return localStorage.getItem("unleash") === "1";
+      return !!_unleashSource();
     } catch {
       return false;
     }
@@ -5251,6 +5257,238 @@ ${"=".repeat(48)}
     return _driver(e);
   }
 
+  // ../gallery/src/hooks/accountPrefsStore.js
+  var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
+  var PREF_KEY_MAX = 64;
+  var _isPlainObject = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  var _has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  function prefKeyProblem(key) {
+    if (typeof key !== "string" || !key) return "Preference keys must be non-empty strings.";
+    if (key.length > PREF_KEY_MAX) return "Preference keys are at most " + PREF_KEY_MAX + " characters.";
+    if (!PREF_KEY_RE.test(key)) {
+      return "'" + key + "' is not a valid preference key: use lowercase dotted names like guide.library.";
+    }
+    return "";
+  }
+  function applyOps(base, ops) {
+    const out = { ...base };
+    for (const op of ops) {
+      for (const k of Object.keys(op.set)) out[k] = op.set[k];
+      for (const k of op.unset) delete out[k];
+    }
+    return out;
+  }
+  function readPref(prefs, key, fallback) {
+    return prefs && _has(prefs, key) ? prefs[key] : fallback;
+  }
+  function _jsonValue(value) {
+    let enc;
+    try {
+      enc = JSON.stringify(value);
+    } catch {
+      return void 0;
+    }
+    return enc === void 0 ? void 0 : JSON.parse(enc);
+  }
+  function createPrefsStore({ load: load2, save }) {
+    let base = {};
+    let pending2 = [];
+    let status = "idle";
+    let error = "";
+    let loadRun = null;
+    let queue = Promise.resolve();
+    let snap = { status, error, prefs: base };
+    const subs8 = /* @__PURE__ */ new Set();
+    function publish() {
+      snap = { status, error, prefs: applyOps(base, pending2) };
+      for (const fn of [...subs8]) {
+        try {
+          fn();
+        } catch {
+        }
+      }
+    }
+    function enqueue(job) {
+      const run = queue.then(job);
+      queue = run.then(() => void 0, () => void 0);
+      return run;
+    }
+    function ensureLoaded() {
+      if (status === "ready") return Promise.resolve(true);
+      if (loadRun) return loadRun;
+      status = "loading";
+      error = "";
+      publish();
+      loadRun = enqueue(async () => {
+        let d;
+        try {
+          d = await load2();
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        loadRun = null;
+        if (status === "ready") return true;
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+        } else {
+          status = "error";
+          error = d && d.error || "could not load preferences";
+        }
+        publish();
+        return status === "ready";
+      });
+      return loadRun;
+    }
+    function write(setObj, unsetList) {
+      const op = { set: setObj, unset: unsetList };
+      pending2 = [...pending2, op];
+      publish();
+      ensureLoaded();
+      return enqueue(async () => {
+        let d;
+        try {
+          d = await save({ set: op.set, unset: op.unset });
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        pending2 = pending2.filter((o) => o !== op);
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+          publish();
+          return { ok: true };
+        }
+        publish();
+        return { error: d && d.error || "could not save preferences" };
+      });
+    }
+    function set2(key, value) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      const v = _jsonValue(value);
+      if (v === void 0) {
+        return Promise.resolve({ error: "The value for '" + key + "' is not plain JSON (use unset to remove a key)." });
+      }
+      return write({ [key]: v }, []);
+    }
+    function unset(key) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      return write({}, [key]);
+    }
+    return {
+      ensureLoaded,
+      set: set2,
+      unset,
+      get: (key, fallback) => readPref(snap.prefs, key, fallback),
+      getSnapshot: () => snap,
+      subscribe(fn) {
+        subs8.add(fn);
+        return () => {
+          subs8.delete(fn);
+        };
+      }
+    };
+  }
+
+  // ../gallery/src/hooks/useAccountPrefs.js
+  var PATH = "/api/account/prefs";
+  var _csrf = "";
+  var _store2 = null;
+  function _bootCsrf() {
+    try {
+      return typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.csrf || "";
+    } catch {
+      return "";
+    }
+  }
+  function accountPrefs() {
+    if (!_store2) {
+      _store2 = createPrefsStore({
+        load: async () => {
+          const d = await apiGet(PATH);
+          if (d && d.csrf) _csrf = d.csrf;
+          return d;
+        },
+        save: (patch2) => apiPost(PATH, { ...patch2, csrf: _csrf || _bootCsrf() })
+      });
+    }
+    return _store2;
+  }
+  function useAccountPrefs() {
+    const store = accountPrefs();
+    const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+    useEffect(() => {
+      store.ensureLoaded();
+    }, [store]);
+    const get = useCallback((key, fallback) => readPref(snap.prefs, key, fallback), [snap]);
+    return {
+      prefs: snap.prefs,
+      status: snap.status,
+      ready: snap.status === "ready",
+      error: snap.error,
+      get,
+      set: store.set,
+      unset: store.unset
+    };
+  }
+
+  // ../gallery/src/folio/unleashPref.js
+  var UNLEASH_KEY = "unleash";
+  var LEGACY_KEY = "unleash";
+  function isUnleashed(prefs) {
+    return !!prefs && prefs[UNLEASH_KEY] === true;
+  }
+  function migrationPlan({ status, stored, legacy }) {
+    if (status === "error") return { wait: false, write: false, clear: false };
+    if (status !== "ready") return { wait: true, write: false, clear: false };
+    if (legacy === null || legacy === void 0) return { wait: false, write: false, clear: false };
+    if (stored !== void 0) return { wait: false, write: false, clear: true };
+    if (legacy === "1") return { wait: false, write: true, clear: true };
+    return { wait: false, write: false, clear: true };
+  }
+  async function syncLegacyUnleash(store, storage) {
+    let legacy = null;
+    try {
+      legacy = storage ? storage.getItem(LEGACY_KEY) : null;
+    } catch {
+      legacy = null;
+    }
+    if (legacy === null) return migrationPlan({ status: "ready", stored: void 0, legacy: null });
+    let ok = false;
+    try {
+      ok = await store.ensureLoaded();
+    } catch {
+      ok = false;
+    }
+    const plan = migrationPlan({
+      status: ok ? "ready" : "error",
+      stored: ok ? store.get(UNLEASH_KEY, void 0) : void 0,
+      legacy
+    });
+    const drop = () => {
+      try {
+        storage.removeItem(LEGACY_KEY);
+      } catch {
+      }
+    };
+    if (plan.write) {
+      let res = null;
+      try {
+        res = await store.set(UNLEASH_KEY, true);
+      } catch {
+        res = { error: "failed" };
+      }
+      if (res && !res.error) drop();
+      return plan;
+    }
+    if (plan.clear) drop();
+    return plan;
+  }
+
   // ../gallery/src/notify/spikeStore.js
   var SEEN_KEY = "mg_spike_announced";
   var memSeen = "";
@@ -5337,7 +5575,22 @@ ${"=".repeat(48)}
           "aria-hidden": "true",
           style: { backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }
         }
-      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title, t.code ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " ", /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mt-code" }, t.code)) : null), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null), t.thumb ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-thumb", style: { backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" } }) : null, t.action ? /* @__PURE__ */ react_global_shim_default.createElement(
+      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title, t.code ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " ", /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mt-code" }, t.code)) : null), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null, t.actions && t.actions.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-acts" }, t.actions.map((a, i) => /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: i,
+          type: "button",
+          className: "mt-act" + (a.tone ? " " + a.tone : ""),
+          onClick: () => {
+            dismiss(t.id);
+            try {
+              a.run();
+            } catch {
+            }
+          }
+        },
+        a.label
+      ))) : null, t.foot ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-foot" }, t.foot) : null), t.thumb ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-thumb", style: { backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" } }) : null, t.action ? /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
           type: "button",
@@ -6541,6 +6794,18 @@ ${"=".repeat(48)}
     };
     window.Ach = { check, replay };
     registerMomentHost(playMoment);
+    {
+      const prefs = accountPrefs();
+      registerUnleashSource(() => isUnleashed({ [UNLEASH_KEY]: prefs.get(UNLEASH_KEY, void 0) }));
+      let storage = null;
+      try {
+        storage = window.localStorage;
+      } catch {
+        storage = null;
+      }
+      prefs.ensureLoaded();
+      syncLegacyUnleash(prefs, storage);
+    }
     start();
     check();
     const boot = typeof window !== "undefined" && window.MG_BOOT || {};
@@ -6549,185 +6814,6 @@ ${"=".repeat(48)}
   }
   function NotifyRoot() {
     return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(BannerHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null), /* @__PURE__ */ react_global_shim_default.createElement(MomentHost, null));
-  }
-
-  // ../gallery/src/hooks/accountPrefsStore.js
-  var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
-  var PREF_KEY_MAX = 64;
-  var _isPlainObject = (d) => !!d && typeof d === "object" && !Array.isArray(d);
-  var _has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-  function prefKeyProblem(key) {
-    if (typeof key !== "string" || !key) return "Preference keys must be non-empty strings.";
-    if (key.length > PREF_KEY_MAX) return "Preference keys are at most " + PREF_KEY_MAX + " characters.";
-    if (!PREF_KEY_RE.test(key)) {
-      return "'" + key + "' is not a valid preference key: use lowercase dotted names like guide.library.";
-    }
-    return "";
-  }
-  function applyOps(base, ops) {
-    const out = { ...base };
-    for (const op of ops) {
-      for (const k of Object.keys(op.set)) out[k] = op.set[k];
-      for (const k of op.unset) delete out[k];
-    }
-    return out;
-  }
-  function readPref(prefs, key, fallback) {
-    return prefs && _has(prefs, key) ? prefs[key] : fallback;
-  }
-  function _jsonValue(value) {
-    let enc;
-    try {
-      enc = JSON.stringify(value);
-    } catch {
-      return void 0;
-    }
-    return enc === void 0 ? void 0 : JSON.parse(enc);
-  }
-  function createPrefsStore({ load: load2, save }) {
-    let base = {};
-    let pending2 = [];
-    let status = "idle";
-    let error = "";
-    let loadRun = null;
-    let queue = Promise.resolve();
-    let snap = { status, error, prefs: base };
-    const subs8 = /* @__PURE__ */ new Set();
-    function publish() {
-      snap = { status, error, prefs: applyOps(base, pending2) };
-      for (const fn of [...subs8]) {
-        try {
-          fn();
-        } catch {
-        }
-      }
-    }
-    function enqueue(job) {
-      const run = queue.then(job);
-      queue = run.then(() => void 0, () => void 0);
-      return run;
-    }
-    function ensureLoaded() {
-      if (status === "ready") return Promise.resolve(true);
-      if (loadRun) return loadRun;
-      status = "loading";
-      error = "";
-      publish();
-      loadRun = enqueue(async () => {
-        let d;
-        try {
-          d = await load2();
-        } catch (e) {
-          d = { error: "network error: " + (e && e.message || "unreachable") };
-        }
-        loadRun = null;
-        if (status === "ready") return true;
-        if (d && !d.error && _isPlainObject(d.prefs)) {
-          base = d.prefs;
-          status = "ready";
-          error = "";
-        } else {
-          status = "error";
-          error = d && d.error || "could not load preferences";
-        }
-        publish();
-        return status === "ready";
-      });
-      return loadRun;
-    }
-    function write(setObj, unsetList) {
-      const op = { set: setObj, unset: unsetList };
-      pending2 = [...pending2, op];
-      publish();
-      ensureLoaded();
-      return enqueue(async () => {
-        let d;
-        try {
-          d = await save({ set: op.set, unset: op.unset });
-        } catch (e) {
-          d = { error: "network error: " + (e && e.message || "unreachable") };
-        }
-        pending2 = pending2.filter((o) => o !== op);
-        if (d && !d.error && _isPlainObject(d.prefs)) {
-          base = d.prefs;
-          status = "ready";
-          error = "";
-          publish();
-          return { ok: true };
-        }
-        publish();
-        return { error: d && d.error || "could not save preferences" };
-      });
-    }
-    function set2(key, value) {
-      const problem = prefKeyProblem(key);
-      if (problem) return Promise.resolve({ error: problem });
-      const v = _jsonValue(value);
-      if (v === void 0) {
-        return Promise.resolve({ error: "The value for '" + key + "' is not plain JSON (use unset to remove a key)." });
-      }
-      return write({ [key]: v }, []);
-    }
-    function unset(key) {
-      const problem = prefKeyProblem(key);
-      if (problem) return Promise.resolve({ error: problem });
-      return write({}, [key]);
-    }
-    return {
-      ensureLoaded,
-      set: set2,
-      unset,
-      get: (key, fallback) => readPref(snap.prefs, key, fallback),
-      getSnapshot: () => snap,
-      subscribe(fn) {
-        subs8.add(fn);
-        return () => {
-          subs8.delete(fn);
-        };
-      }
-    };
-  }
-
-  // ../gallery/src/hooks/useAccountPrefs.js
-  var PATH = "/api/account/prefs";
-  var _csrf = "";
-  var _store2 = null;
-  function _bootCsrf() {
-    try {
-      return typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.csrf || "";
-    } catch {
-      return "";
-    }
-  }
-  function accountPrefs() {
-    if (!_store2) {
-      _store2 = createPrefsStore({
-        load: async () => {
-          const d = await apiGet(PATH);
-          if (d && d.csrf) _csrf = d.csrf;
-          return d;
-        },
-        save: (patch2) => apiPost(PATH, { ...patch2, csrf: _csrf || _bootCsrf() })
-      });
-    }
-    return _store2;
-  }
-  function useAccountPrefs() {
-    const store = accountPrefs();
-    const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-    useEffect(() => {
-      store.ensureLoaded();
-    }, [store]);
-    const get = useCallback((key, fallback) => readPref(snap.prefs, key, fallback), [snap]);
-    return {
-      prefs: snap.prefs,
-      status: snap.status,
-      ready: snap.status === "ready",
-      error: snap.error,
-      get,
-      set: store.set,
-      unset: store.unset
-    };
   }
 
   // ../gallery/src/hooks/useLayerHistory.js

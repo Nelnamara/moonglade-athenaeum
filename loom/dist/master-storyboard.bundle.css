@@ -3385,6 +3385,28 @@ body.mg-moment-up > #root {
 .mg-toast .mt-act:hover {
   background: color-mix(in srgb, var(--lavender) 14%, transparent);
 }
+.mg-toast .mt-acts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.mg-toast .mt-acts .mt-act {
+  align-self: auto;
+}
+.mg-toast .mt-act.ruby {
+  border-color: var(--red);
+  color: var(--red);
+}
+.mg-toast .mt-act.ruby:hover {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.mg-toast .mt-foot {
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: var(--overlay0);
+  margin-top: 7px;
+}
 .mg-toast.whatsnew {
   align-items: center;
   background: var(--base);

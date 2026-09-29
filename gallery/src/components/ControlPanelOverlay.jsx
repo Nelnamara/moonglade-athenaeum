@@ -1135,7 +1135,7 @@ function BrandingPointerTile({ state, onOpen }) {
       {state === "in" ? (
         <div className="mgcp-tileghost" aria-hidden="true">
           <div className="mgcp-mkick">Branding</div>
-          <div className="mgcp-tilesmall">◈ ❖ M 🌙 · mark · animation ▾ · launcher icon</div>
+          <div className="mgcp-tilesmall">mark · animation ▾ · launcher icon</div>
         </div>
       ) : null}
     </div>
