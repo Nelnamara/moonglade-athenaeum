@@ -181,7 +181,7 @@ const SHEET_COLS = [
     title: "General",
     items: [
       ["Ctrl/⌘", "", "K", "Open the palette"],
-      ["?", "", "", "This cheat-sheet"],
+      ["?", "", "", "The guide (Help)"],
       ["Esc", "", "", "Close the top layer"],
     ],
   },

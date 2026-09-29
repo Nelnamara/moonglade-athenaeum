@@ -334,7 +334,7 @@ somewhere, ffprobe is demonstrably working, so that one file is the suspect.
 
 ## Where to go next
 
-- The **?** button at the bottom-right of `/loom` is a quick in-page guide.
+- The **?** button at the bottom-right of `/loom` opens the app's guide on this page (the same guide the ? key opens anywhere).
 - [Generating](Generating) covers the credits, free cards, and the simple one-clip Video tab.
 - [Collections](Collections) — bulk-select images in the gallery and **Send to The Loom
   (cast)**.

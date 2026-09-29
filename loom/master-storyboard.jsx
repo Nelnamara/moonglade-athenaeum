@@ -75,6 +75,10 @@ import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import { adjustedText } from "../gallery/src/gen/genCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+// The in-app guide (Session I): Help, About and the what's-new sheet, and the Loom's own
+// first-run guide. The shell's "?" button opens Help through helpStore's window.mgHelp.
+import HelpRoot from "../gallery/src/help/HelpRoot.jsx";
+import GuideHost from "../gallery/src/help/GuideHost.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
 import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
 import useActivity from "../gallery/src/notify/useActivity.js";
@@ -7376,6 +7380,8 @@ export default function App() {
     <div className="sb-root">
       <style>{STYLES}</style>
       <NotifyRoot />
+      <HelpRoot />
+      <GuideHost surface="loom" phone={mobileUI} />
       {mobileUI ? (
         <V2Boundary><LoomMobile
           project={project} entries={entries} thumbs={thumbs} genState={genState}

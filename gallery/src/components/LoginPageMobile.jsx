@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import useLogin, { onMascotError } from "../hooks/useLogin.js";
+import useLogin, { onMascotError, LOGIN_BANNER_PACK, nextBannerSrc } from "../hooks/useLogin.js";
 import "../styles/login-mobile.css";
 
 /* The mobile-viewport presentation of LoginPage.jsx (design spec: Login
@@ -49,8 +49,8 @@ export default function LoginPageMobile({ boot }) {
     onCreateUserChange, onCreatePassChange, onCreateConfirmChange,
     lenOk, guessOk,
   } = useLogin(boot);
-  // The login banner's one failure state -> fall back to the mark (see the render).
-  const [bannerFailed, setBannerFailed] = useState(false);
+  // The login banner: the pack's, then the carried copy, then the mark (useLogin.js).
+  const [bannerSrc, setBannerSrc] = useState(LOGIN_BANNER_PACK);
 
   return (
     <div className="lgnm-stage">
@@ -67,16 +67,16 @@ export default function LoginPageMobile({ boot }) {
         </div>
         <div className="lgnm-card">
           {/* #25's banner half, same call as desktop (owner, 2026-08-31): the login
-              slot's art as a full-width strip across the card top, with the same
-              onError fallback to the mark that used to render here. */}
-          {bannerFailed ? (
+              slot's art as a full-width strip across the card top -- the pack's, then the
+              carried copy (Session I 4b), then the mark, the same ladder as desktop. */}
+          {!bannerSrc ? (
             <div className="lgnm-mark">
               {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
             </div>
           ) : (
             <div className="lgnm-banner">
-              <img src="/branding/login-banner.png" alt=""
-                onError={() => setBannerFailed(true)} />
+              <img src={bannerSrc} alt=""
+                onError={() => setBannerSrc(nextBannerSrc(bannerSrc))} />
             </div>
           )}
           <div className="lgnm-titlewrap">

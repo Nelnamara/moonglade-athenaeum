@@ -69,7 +69,11 @@ export function matchScore(label, q) {
    inside their own group. A group with zero matches drops away entirely, header included.
 
    Each returned row carries its own `index` -- the flat keyboard position across every
-   group -- so the up/down handler never has to re-walk the tree. */
+   group -- so the up/down handler never has to re-walk the tree.
+
+   A command marked `queryOnly` is offered only against a typed query: the Help group's guide
+   hits (one row per wiki page and heading, Session I) answer a search and would bury the
+   palette's own rows if they were listed with nothing typed. */
 export function groupCommands(commands, q) {
   const query = String(q || "").trim();
   const order = [];
@@ -79,6 +83,7 @@ export function groupCommands(commands, q) {
       bucket.set(c.group, []);
       order.push(c.group);
     }
+    if (c.queryOnly && !query) continue;
     const score = matchScore(c.label, query);
     if (score === null) continue;
     bucket.get(c.group).push({ cmd: c, score });

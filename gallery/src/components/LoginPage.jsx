@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { apiPost } from "../api.js";
 import useFlavour from "../hooks/useFlavour.js";
+import { onMascotError, LOGIN_BANNER_PACK, nextBannerSrc } from "../hooks/useLogin.js";
 import "../styles/login.css";
 
 /* The React sign-in AND first-run account-creation page (design spec:
@@ -93,24 +94,9 @@ function passwordProblem(p) {
   return "";
 }
 
-// Mirrors classic LOGIN_HTML's data-fb ladder exactly (moonglade_gallery.py):
-// webp (animated) -> still png -> the mascots/ copies -> the generic narrator.
-const MASCOT_FALLBACKS = [
-  "/branding/login_nel.png",
-  "/branding/mascots/login_nel.webp",
-  "/branding/mascots/login_nel.png",
-  "/branding/mascots/nel_narrator.png",
-];
-function onMascotError(e) {
-  const img = e.currentTarget;
-  const tried = Number(img.dataset.fb || 0);
-  if (tried < MASCOT_FALLBACKS.length) {
-    img.dataset.fb = String(tried + 1);
-    img.src = MASCOT_FALLBACKS[tried];
-  } else {
-    img.style.display = "none";
-  }
-}
+// The mascot's fallback ladder -- classic LOGIN_HTML's data-fb ladder, ending on the app's
+// own carried still (Session I decision 4b) -- is hooks/useLogin.js's, shared with the phone
+// page, so the two can never disagree about what a fresh install shows.
 
 // The busy beat: hold the "Signing in…" / mascot-pop phase at least this long so the peek is
 // actually SEEN, even though a real login fetch returns almost instantly. Matches the DC's
@@ -136,8 +122,8 @@ export default function LoginPage({ boot }) {
 
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
-  // The login banner's one failure state -> fall back to the mark (see the render).
-  const [bannerFailed, setBannerFailed] = useState(false);
+  // The login banner: the pack's, then the carried copy, then the mark (useLogin.js).
+  const [bannerSrc, setBannerSrc] = useState(LOGIN_BANNER_PACK);
   const [createUser, setCreateUser] = useState("");
   const [createPass, setCreatePass] = useState("");
   const [createConfirm, setCreateConfirm] = useState("");
@@ -242,18 +228,20 @@ export default function LoginPage({ boot }) {
 
               /branding/login-banner.png is PUBLIC-tier (this page is unauthenticated) and
               rule-8-backed -- with no per-install crop rendered yet, the route serves the
-              slot's shipped sealed default -- so it resolves on a fresh install too. The
-              onError fallback to the mark is belt-and-braces on top of that: a sign-in
-              page is the one screen that must never show a broken image, and the mark is
-              exactly what rendered here before. */}
-          {bannerFailed ? (
+              slot's shipped sealed default -- so it resolves on any install that HAS its
+              pack. Before the pack arrives it 404s, and the card falls back to the app's
+              own carried copy of the same banner (art/loginArt.js, Session I decision 4b),
+              silently: the first sign-in looks like every other one. The mark is the last
+              resort behind that -- a sign-in page is the one screen that must never show a
+              broken image. */}
+          {!bannerSrc ? (
             <div className="lgn-mark">
               {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
             </div>
           ) : (
             <div className="lgn-banner">
-              <img src="/branding/login-banner.png" alt=""
-                onError={() => setBannerFailed(true)} />
+              <img src={bannerSrc} alt=""
+                onError={() => setBannerSrc(nextBannerSrc(bannerSrc))} />
             </div>
           )}
           <div className="lgn-titlewrap">

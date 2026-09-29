@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import useFlavour from "./useFlavour.js";
 import { apiPost } from "../api.js";
+import { LOGIN_NEL, LOGIN_BANNER } from "../art/loginArt.js";
 
 /* All of LoginPage.jsx's state/handlers/validation/API-call logic, mechanically
    lifted out (2026-08-02) so LoginPageMobile.jsx can reuse it verbatim instead
@@ -54,12 +55,27 @@ export function passwordProblem(p) {
 
 // Mirrors classic LOGIN_HTML's data-fb ladder exactly (moonglade_gallery.py):
 // webp (animated) -> still png -> the mascots/ copies -> the generic narrator.
+// The LAST rung is the app's own carried copy (art/loginArt.js, Session I decision 4b):
+// before the art pack is installed every /branding/ rung 404s, and the sign-in page is the
+// one screen a fresh install shows before its pack arrives. The pack's files win whenever
+// they are there; the carried still is the silent fallback, never a note on the page.
 export const MASCOT_FALLBACKS = [
   "/branding/login_nel.png",
   "/branding/mascots/login_nel.webp",
   "/branding/mascots/login_nel.png",
   "/branding/mascots/nel_narrator.png",
+  LOGIN_NEL,
 ];
+
+/* The login card's banner, pack first: the Branding slot's rendered flat (PUBLIC tier,
+   served from the pack's shipped default on a fresh install that HAS a pack), then the
+   carried copy, then -- only if both fail -- the mark the card showed before (decision 4b).
+   Returns the src to paint, or "" once the carried copy has failed too. */
+export const LOGIN_BANNER_PACK = "/branding/login-banner.png";
+export function nextBannerSrc(failed) {
+  if (failed === LOGIN_BANNER_PACK) return LOGIN_BANNER;
+  return "";
+}
 export function onMascotError(e) {
   const img = e.currentTarget;
   const tried = Number(img.dataset.fb || 0);

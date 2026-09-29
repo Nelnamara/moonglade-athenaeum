@@ -47,6 +47,10 @@ import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
+import GuideHost from "./help/GuideHost.jsx";
+import { openHelp, OPEN_SURFACE_EVENT } from "./help/helpStore.js";
+import { useGuideIndex } from "./help/helpData.js";
+import { githubSlug } from "./help/helpCore.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -336,7 +340,11 @@ export default function App({ boot }) {
       const st = dockStateRef.current;
       if (!st.open || st.closing) return;
       if (isMomentUp()) return;                     // a click on a moment ends the moment only
-      if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
+      // ...nor a click inside a layer that stands OVER the dock without replacing it: the
+      // guide's cards, Help, About and the what's-new sheet (Session I) mark themselves
+      // [data-keeps-dock], so answering the dock's own welcome card, or reading its page
+      // of the guide, does not shut the dock out from under it.
+      if (ev.target.closest && ev.target.closest("[data-dock-toggle], [data-keeps-dock]")) return;
       if (isPickerOpen()) return;
       if (isRecipesOpen()) return;                  // the recipe picker adds TO the dock
       const host = dockHostRef.current;
@@ -1241,6 +1249,25 @@ export default function App({ boot }) {
     setFocusSearchAt((n) => n + 1);
   }, [goLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* "Show me ›" (the what's-new sheet, Session I 3c): open a surface this shell owns, with
+     the same verbs its own buttons use. The Loom is a page of its own -- not claimed here,
+     so helpStore navigates there. */
+  useEffect(() => {
+    const onSurface = (e) => {
+      const s = e.detail && e.detail.surface;
+      if (s === "gallery") { e.preventDefault(); goLibrary(); }
+      else if (s === "dock") { e.preventDefault(); goLibrary(); openDock(); }
+      else if (s === "folio" || s === "panel") { e.preventDefault(); setOverlay(s); }
+    };
+    window.addEventListener(OPEN_SURFACE_EVENT, onSurface);
+    return () => window.removeEventListener(OPEN_SURFACE_EVENT, onSurface);
+  }, [goLibrary, openDock]);
+
+  /* The guide's page list, for the palette's Help group (Session I: "the palette's Help
+     group lists the same hits" as Help's own search -- the same titles and headings, the
+     same subsequence matcher). */
+  const guideIndex = useGuideIndex();
+
   /* "Sync now" -- the Control Panel's own ↻ Sync now button, same route, same body
      (useControlPanel.runAction's sync case). Ruling, NOTES §2.2: while a job is already
      running the row STAYS and the refusal shows as the busy toast, in the server's own
@@ -1381,14 +1408,35 @@ export default function App({ boot }) {
       img("publish", "☁", "Publish", () => openPublish(mid));
     }
 
+    /* Help (Session I decision 2): the guide itself on the ? key, the cheat-sheet a row
+       away, and -- only against a typed query (queryOnly) -- every page and heading of the
+       guide, which is exactly the set Help's own search covers. */
     list.push({
-      id: "help.keys", group: "Help", icon: "?", label: "Show keyboard shortcuts",
-      keys: ["?"], run: () => paletteRef.current && paletteRef.current.openSheet(),
+      id: "help.guide", group: "Help", icon: "?", label: "Open the guide",
+      sub: "Help", keys: ["?"], run: () => openHelp(),
     });
+    list.push({
+      id: "help.keys", group: "Help", icon: "⌨", label: "Show keyboard shortcuts",
+      keys: [], run: () => paletteRef.current && paletteRef.current.openSheet(),
+    });
+    for (const p of (guideIndex && guideIndex.pages) || []) {
+      list.push({
+        id: "help.page:" + p.slug, group: "Help", icon: "?", label: p.title, sub: "Guide",
+        keys: [], queryOnly: true, run: () => openHelp({ slug: p.slug }),
+      });
+      for (const h of p.headings || []) {
+        const anchor = githubSlug(h.text);
+        list.push({
+          id: "help.h:" + p.slug + "#" + anchor, group: "Help", icon: "?", label: h.text,
+          sub: p.title, keys: [], queryOnly: true,
+          run: () => openHelp({ slug: p.slug, anchor }),
+        });
+      }
+    }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collections, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
-      openDock, openOverlay, applyAdvanced, openPublish]);
+      openDock, openOverlay, applyAdvanced, openPublish, guideIndex]);
 
   const palette = useCommandPalette(commands);
   paletteRef.current = palette;
@@ -1689,6 +1737,18 @@ export default function App({ boot }) {
           cheat-sheet's own scrim 470/471, the G… chip 462 — see command-palette.css and
           the ladder comment in overlays.css). Each surface is its own deferred-exit
           mount, exactly like the dock host and the toasts. */}
+      {/* The first-run guide (Session I decision 1): the library's while nothing is over it,
+          the dock's while the dock is the top thing. The Folio and the Control Panel mount
+          their own. A palette, a cheat-sheet or the claim modal holds either one. */}
+      {!overlay && !detailsFor && lbIndex == null && !stackFor && !similarFor && !ctxMenu && !dockActive && (
+        <GuideHost surface="gallery"
+          paused={palette.active || palette.sheetActive || claimModal.open} />
+      )}
+      {dockActive && !overlay && (
+        <GuideHost surface="dock"
+          paused={palette.active || palette.sheetActive || claimModal.open || isPickerOpen()} />
+      )}
+
       <CommandPalette palette={palette} />
       <ShortcutSheet open={palette.sheetOpen} closing={palette.sheetClosing}
         onClose={palette.closeSheet} />

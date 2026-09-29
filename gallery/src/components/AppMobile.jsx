@@ -38,6 +38,9 @@ import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as cle
 import { registerUpdateHost } from "../notify/bannerStore.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
+import { OPEN_SURFACE_EVENT } from "../help/helpStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -379,6 +382,18 @@ export default function AppMobile({ boot }) {
      intent up on mount and pushes its update screen. Same two-part contract App.jsx uses
      for the Panel overlay -- see notify/bannerStore.js. */
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
+  /* "Show me ›" (the what's-new sheet, Session I 3c), on the phone: the surface's own tab,
+     or the Folio. The Loom is a page of its own -- not claimed, so helpStore navigates. */
+  useEffect(() => {
+    const onSurface = (e) => {
+      const s = e.detail && e.detail.surface;
+      const tabFor = { gallery: "gallery", dock: "create", panel: "control" }[s];
+      if (tabFor) { e.preventDefault(); setTab(tabFor); }
+      else if (s === "folio") { e.preventDefault(); setFolioOpen(true); }
+    };
+    window.addEventListener(OPEN_SURFACE_EVENT, onSurface);
+    return () => window.removeEventListener(OPEN_SURFACE_EVENT, onSurface);
+  }, []);
   /* OPEN THE CONTROL PANEL ON A TAB, on the phone (notify/panelRequest.js). The phone's
      panel is its Control tab, and Branding is the drill-in there, so a request for that tab
      -- the key-turn moment's button, or one carried over from the Loom -- lands on Control
@@ -1026,6 +1041,9 @@ export default function AppMobile({ boot }) {
             ◉
             {jobsRunning ? <span className="glm-iconbtn-badge" aria-hidden="true" /> : null}
           </button>
+          {/* The guide's "?" (Session I decision 2): Help on the page for the tab in view. */}
+          <HelpButton plain className="glm-iconbtn glm-iconbtn-lav glm-help"
+            surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
             onClick={() => openSheet("menu")}>☰</button>
         </div>
@@ -1138,6 +1156,14 @@ export default function AppMobile({ boot }) {
       </div>
 
       <TabBarMobile tab={tab} setTab={setTab} />
+      {/* The first-run guide (Session I decision 1) for the tab in view, while nothing this
+          shell pushes covers it. Control's lives in ControlMobile, beside its Branding
+          drill-in; the Folio's in FolioMobile. */}
+      {!screen && !detailsFor && lbIndex == null && !folioOpen && !contactSheetTarget && !contestEntry
+        && (tab === "gallery" || tab === "create") ? (
+          <GuideHost key={tab} surface={tab === "create" ? "dock" : "gallery"} phone
+            paused={!!sheet || claimModal.open} />
+        ) : null}
       <PickerHost />
       <RecipesHost />
       {claimModal.open && (

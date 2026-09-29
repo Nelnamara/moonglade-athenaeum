@@ -15,6 +15,9 @@ import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
 import { panelTabLabel } from "../lib/panelTabs.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
+import { openAbout } from "../help/helpStore.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -491,9 +494,16 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 <b>{credits}</b> credits
                 {cards != null ? <><br />{cards} free card{cards !== 1 ? "s" : ""}</> : null}
               </div>
+              <HelpButton surface={tab === "brand" ? "branding" : "panel"} className="mgv-help" />
               <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
             </div>
           </div>
+          {/* The Panel's first-run guide, and Branding's own while its tab is showing (Session I
+              decision 1: Branding's guide exists only where its tab does). Held while one of
+              the Panel's own layers covers it. */}
+          <GuideHost key={tab === "brand" ? "branding" : "panel"}
+            surface={tab === "brand" ? "branding" : "panel"}
+            paused={!!subOverlay || !!power || updOpen || tabHeld} />
 
           <div className="mgcp-body">
             <div className="mgcp-side">
@@ -566,16 +576,25 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                   2026-09-01, Variant A): no new chrome, the stamp that was always here
                   just becomes the notice. Up to date, it is byte-identical to what it
                   has always rendered -- the whole point of the variant. */}
+              {/* ...and since Session I (decision 3a) the stamp is also About's door: up to
+                  date it opens the About card; with a release out it keeps its "vX available
+                  — view" wording and About LEADS with the update card, whose button opens the
+                  same update modal this stamp used to open directly. Mid-apply it still goes
+                  straight to the modal that is reporting the apply. */}
               <div className="mgcp-ver">
                 {update?.behind ? (
                   <button type="button" className="mgcp-verup"
                     title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
-                    onClick={() => setUpdOpen(true)}>
+                    onClick={() => (updPhase === "applying" || updPhase === "done"
+                      ? setUpdOpen(true) : openAbout("update"))}>
                     <span className="dot" aria-hidden="true">●</span>
                     {updPhase === "applying" || updPhase === "done" ? "updating…"
                       : update.latest + " available — view"}
                   </button>
-                ) : (boot?.build_stamp || "—")}
+                ) : (
+                  <button type="button" className="mgcp-verbtn" title="About Moonglade Athenaeum"
+                    onClick={() => openAbout("")}>{boot?.build_stamp || "—"}</button>
+                )}
                 {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
               </div>
             </div>

@@ -3,6 +3,7 @@ import "../styles/shell.css";
 import useFlavour from "../hooks/useFlavour.js";
 import { apiGet } from "../api.js";
 import MarkAnimated from "./MarkAnimated.jsx";
+import HelpButton from "../help/HelpButton.jsx";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -143,6 +144,9 @@ export default function Banner({
             ) : null}
           </div>
           <div className="mgx-actrow">
+            {/* The guide's "?" (Session I decision 2): just before Generate, as the handoff's
+                section A header draws it. SeparatorBar carries it in the slim state. */}
+            <HelpButton surface="gallery" className="mgx-help" />
             <button type="button" data-dock-toggle="1"
               className={"mgx-metal mgx-gen" + (dockOpen ? " mgx-dockdim" : "")}
               onClick={onToggleDock}
