@@ -396,9 +396,7 @@ export default function ModelPicker({
                   <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
                     aria-pressed={(favs || []).includes(String(m.model_id))}
                     title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
-                    onClick={(e) => { e.stopPropagation(); onFav(m); }}>
-                    {(favs || []).includes(String(m.model_id)) ? "★" : "☆"}
-                  </button>
+                    onClick={(e) => { e.stopPropagation(); onFav(m); }} />
                 ) : null}
                 {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
               </div>

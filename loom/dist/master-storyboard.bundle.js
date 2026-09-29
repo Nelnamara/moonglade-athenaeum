@@ -2504,8 +2504,7 @@ ${"=".repeat(48)}
                 e.stopPropagation();
                 onFav(m);
               }
-            },
-            (favs || []).includes(String(m.model_id)) ? "\u2605" : "\u2606"
+            }
           ) : null, incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
           /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
         );

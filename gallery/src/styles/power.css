@@ -76,6 +76,8 @@
   line-height: 1; width: 24px; height: 24px; border-radius: 50%; border: 0; cursor: pointer; padding: 0;
   display: grid; place-items: center; color: var(--subtext);
   background: color-mix(in srgb, var(--base) 72%, transparent); }
+.model-picker .mg-fav::before { content: "☆"; }  /* the glyph is drawn, not text, so a card's text stays its name */
+.model-picker .mg-fav.on::before { content: "★"; }
 .model-picker .mg-fav.on { color: var(--gold); }
 .model-picker .mg-fav:hover { color: var(--text); }
 .model-picker .mg-fav.on:hover { color: var(--gold); }
