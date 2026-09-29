@@ -2455,6 +2455,10 @@ def _derive_sealed(defs):
     defs.setdefault("skin_unlock", {})
     defs.setdefault("ach_criteria", {})
     defs.setdefault("ladder_tracks", [])
+    # The narrator's poke lines (moonglade_narrator.clean_pools' shape). Carried whole from
+    # the pack like the roster; a pack that has none leaves the narrator on its neutral line.
+    if not isinstance(defs.get("poke_lines"), dict):
+        defs["poke_lines"] = {}
     defs["_ach_ids"] = frozenset(a["id"] for a in roster)
     defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
     defs["_ach_rung"] = _build_ach_rung(roster)
@@ -2483,6 +2487,7 @@ def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
 def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
 def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 def _moment_ach():    return _sealed_defs()["_moment_ach"]     # noqa: E704
+def _poke_lines():    return _sealed_defs()["poke_lines"]      # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
@@ -10360,6 +10365,84 @@ def account_prefs_update(out_dir, account, set_=None, unset=None):
                 lock.unlink()
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Per-account narrator state -- SERVER-ONLY, deliberately not the prefs store
+# ---------------------------------------------------------------------------
+# The narrator's ladder (moonglade_narrator.py) is progress an account earns slowly, so it
+# cannot live where the account itself can write: /api/account/prefs takes any key from the
+# browser, which would make "the count" one console line away. This is a sibling store with
+# the same key rule (_account_key), the same locking (a thread lock plus a per-account
+# lockfile) and the same atomic write, and NO route that takes a state from a client: the
+# poke route below is the only writer, and it writes what moonglade_narrator.poke() returned.
+#
+# ON DISK: out_dir/account_state/<key>.json. A missing, torn or non-object file reads as a
+# fresh state (fail soft: a torn file must not break a click); a write never fails a poke
+# silently -- the route answers what it could not save.
+ACCOUNT_STATE_DIRNAME = "account_state"
+_ACCOUNT_STATE_LOCK = threading.Lock()
+
+
+def account_state_path(out_dir, account):
+    """The file `account`'s server-only state lives in. A username (the session's own);
+    anything else -- None, "", whitespace, a non-string -- raises ValueError rather than
+    landing on some shared file."""
+    if not (isinstance(account, str) and account.strip()):
+        raise ValueError("account state needs a signed-in account")
+    return Path(out_dir) / ACCOUNT_STATE_DIRNAME / (_account_key(account) + ".json")
+
+
+@contextmanager
+def account_state_locked(out_dir, account):
+    """Hold this account's state lock (thread + process) for a read-modify-write.
+    Yields the path. Raises AccountPrefsBusy when another process held the lockfile past the
+    wait -- the caller refuses the request rather than risk a lost update."""
+    p = account_state_path(out_dir, account)
+    with _ACCOUNT_STATE_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lock = _excl_lockfile(p.with_suffix(".lock"))
+        if lock is None:
+            raise AccountPrefsBusy("Busy; try again.")
+        try:
+            yield p
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
+def _narrator_clock():
+    """(epoch seconds, local calendar day) -- the two readings the ladder is given. The day
+    is the SERVER's local date, the same convention the Vigil's day ledger uses
+    (telem_mark_day). One seam so a test can drive a fortnight without sleeping."""
+    import datetime as _dt
+    return time.time(), _dt.date.today().isoformat()
+
+
+def account_state_read(p):
+    """The stored document ({} when missing, unreadable, torn or not an object)."""
+    doc, _state = _account_prefs_read(p)
+    return doc
+
+
+def account_state_write(p, doc):
+    """Atomically replace `p` with `doc`. Raises OSError."""
+    import moonglade_backup as core
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(doc, sort_keys=True, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
+    tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+    try:
+        tmp.write_bytes(data)
+        core._atomic_replace(tmp, p)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _account_prefs_set_aside(p):
@@ -19250,9 +19333,12 @@ def create_app(out_dir: Path):
     @app.route("/api/ach-event", methods=["POST"])
     @tier(LOGIN)
     def api_ach_event():
-        """Feat-event beacon from the front-end: the Starfall konami egg, the
-        in-app manual, and narrator pokes. Whitelisted event names only; each is
-        a cosmetic local counter (no spend).
+        """Feat-event beacon from the front-end: the Starfall konami egg and the
+        in-app manual. Whitelisted event names only; each is a cosmetic local counter
+        (no spend). Narrator pokes used to ride this beacon; they have their own route
+        (/api/narrator/poke) since the ladder, which keeps its count and clocks per
+        account on the server, and an event named "narrator" is refused here so no
+        second road can move that count.
 
         LOGIN again since 2026-09-07, on the owner's ruling ("I feel like
         triggered should be obtainable easily on a phone just like desktop. For
@@ -19281,16 +19367,14 @@ def create_app(out_dir: Path):
         of MG_BOOT and curl it -- but it is the same class of witness CSRF gives
         us everywhere else, and it costs a phone nothing.
 
-        Also here, so five real pokes stay five real pokes: a 150ms debounce per
+        Also here, so a real gesture stays one event: a 150ms debounce per
         (session, event), and 30 beacon calls per session per rolling minute,
         beyond which the answer is 429 and no counter moves. The debounce is a
         wall-clock gap, so its width IS its meaning: 150ms is under a hand and
         over a double-fired DOM event, which is the only thing it should fold
         together. It shipped at 400ms earlier the same day and swallowed every
         second tap of an ordinary phone tap-rate -- see _ach_debounced(). A
-        debounced reply is accepted, hands back a nonce, counts nothing, and
-        carries the current counter so the client holds its line rather than
-        rewinding its toast.
+        debounced reply is accepted, hands back a nonce and counts nothing.
 
         The other half of one double-fired click is one nonce sent twice: the
         twin that loses is refused 403 as consumed. The clients do NOT refresh
@@ -19298,9 +19382,8 @@ def create_app(out_dir: Path):
         same gesture twice from the other side.
 
         The clients still treat a refusal as a no-op by design: api.js never
-        throws (a 403 comes back as an {error} body), App.jsx's konami handler is
-        explicitly fail-soft (the stars and toast still play), useFolio.js's
-        pokeNarrator() early-returns on res.error before any Toast. What is new
+        throws (a 403 comes back as an {error} body) and App.jsx's konami handler
+        is explicitly fail-soft (the stars and toast still play). What is new
         is that every caller now goes through notify/achNonce.js, which adopts
         the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
         once on a stale-page 403 before giving up quietly."""
@@ -19309,7 +19392,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
-        if ev not in ("konami", "docs", "narrator"):
+        if ev not in ("konami", "docs"):
             return jsonify({"error": "unknown event"}), 400
         # One refusal wording for missing, unknown, expired and foreign alike: which
         # check failed is exactly the thing a replay probe would want to learn, and
@@ -19320,28 +19403,77 @@ def create_app(out_dir: Path):
         # second half of a double-fire leaves the page with no nonce at all.
         nxt = _ach_mint(sid)
         if _ach_debounced(sid, ev):
-            # ...and it carries the CURRENT counter, READ not bumped (2026-09-07, refining
-            # the same day's debounce ruling). A debounced reply used to be the three keys
-            # above and nothing else, so useFolio.js's `res.pokes || 1` fell back to 1 and
-            # re-showed POKES[0] -- the escalating toast visibly REWOUND on the swallowed
-            # half of a double-fire. The client holds its line on `debounced` now; sending
-            # the true count as well means a client that does read it cannot be misled.
-            held = {"ok": True, "debounced": True, "next_nonce": nxt}
-            if ev == "narrator":
-                pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-                held["pokes"] = pokes
-                held["snapped"] = pokes >= 5
-            return jsonify(held)
+            return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
         if ev == "konami":
             telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
-        if ev == "docs":
-            telem_bump("docs_opened", out_dir=out_dir)
-            return jsonify({"ok": True, "next_nonce": nxt})
-        telem_bump("narrator_pokes", out_dir=out_dir)
-        pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-        return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5,
-                        "next_nonce": nxt})
+        telem_bump("docs_opened", out_dir=out_dir)
+        return jsonify({"ok": True, "next_nonce": nxt})
+
+    @app.route("/api/narrator/poke", methods=["POST"])
+    @tier(LOGIN)
+    def api_narrator_poke():
+        """One poke at the narrator. Body: {"csrf": "..."} and nothing else. Answer:
+        {"ok": true, "line": "..."} -- and, on the one poke that ends the ladder, a `final`
+        object carrying the two lines that poke is answered with.
+
+        THE SERVER DECIDES, THE CLIENT PAINTS. The count, the clocks and the choice of line
+        are this route's and moonglade_narrator.poke()'s (a pure core that takes the time as
+        a parameter); the page is told a line and nothing else, so it can learn neither how
+        far along it is, nor which stage, nor whether a poke counted. A poke that does not
+        count answers exactly like one that does.
+
+        WHICH ACCOUNT: the session's, never the body's. The state is per account and is
+        kept where the account cannot write it (account_state_*, not the prefs store).
+
+        WHAT IT WRITES: that account's own ladder state, and -- only on a poke that counted
+        -- the install's `narrator_pokes` metric raised to that account's count (a maximum,
+        not a sum, so two accounts never pool their pokes). Triggered is then earned the way
+        every feat is: the metric meets the sealed roster's threshold, and the next
+        achievements read stamps it. Nothing here spends, reaches PixAI or retries.
+
+        LINES come only from the sealed pack (`poke_lines`); a pack with none for what is
+        being said answers a bare ellipsis, never copy invented here. LOGIN tier, CSRF by
+        the explicit token (_check_csrf), like the other per-account writes."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "authentication required"}), 401
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_narrator as _nar
+        pools = _nar.clean_pools(_poke_lines())
+        now, today = _narrator_clock()
+        try:
+            with account_state_locked(out_dir, user) as p:
+                doc = account_state_read(p)
+                st, res = _nar.poke(doc.get("ladder"), now, today, pools)
+                account_state_write(p, dict(doc, ladder=st))
+        except AccountPrefsBusy as e:
+            return jsonify({"error": str(e)}), 503
+        except OSError:
+            return jsonify({"error": "Could not save that."}), 500
+        # The metric follows the count: only ever up, and re-asserted once the ladder is
+        # done so a write that was lost once is repaired by the next poke.
+        if res["counted"] or res["count"] >= _nar.FINAL:
+            telem_max("narrator_pokes", res["count"], out_dir=out_dir)
+        out = {"ok": True, "line": res["line"]}
+        if res["final"]:
+            final = {}
+            out["line"] = _nar.NEUTRAL
+            feat = next((a for a in _roster() if a.get("metric") == "narrator_pokes"), None)
+            if feat and feat["id"] in _earned_achievement_ids(out_dir, db_path, need=feat["id"]):
+                final = {"id": feat["id"],
+                         "clean": feat.get("roast") or feat.get("desc") or "",
+                         "unleashed": feat.get("roast_nsfw") or ""}
+                out["line"] = final["clean"] or _nar.NEUTRAL
+                choice = _nar.clean_choice(_poke_lines().get("choice"))
+                if choice:
+                    final["choice"] = choice
+            out["final"] = final
+        return jsonify(out)
 
     @app.route("/api/mirror/status")
     @tier(LOGIN)

@@ -206,6 +206,7 @@ TIER_SNAPSHOT = [
     "/api/model-version [GET] LOGIN",
     "/api/myart/items [GET] LOGIN",
     "/api/myart/publish [POST] LOGIN",
+    "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
     "/api/next/detail/<media_id> [GET] LOGIN",
     "/api/next/history [GET] LOGIN",
     "/api/next/library [GET] LOGIN",
@@ -968,10 +969,11 @@ def test_the_pilot_codename_has_no_page_route(app):
 
 
 # The wave 2 and wave 3 lanes' own POST families (recipes, Train a LoRA, the account store
-# Help and the recipe drafts share) each check the session's CSRF token before they act.
+# Help and the recipe drafts share, the narrator's poke) each check the session's CSRF token before they act.
 # Older POSTs predate the rule and are not listed here; a NEW route under one of these
 # prefixes that forgets the check fails by name.
-_CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs")
+_CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
+                  "/api/narrator")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -988,3 +990,4 @@ def test_every_lane_post_checks_csrf(app):
     assert any(r.startswith("/api/train") for r in checked), checked
     assert any(r.startswith("/api/recipes") for r in checked), checked
     assert "/api/account/prefs" in checked, checked
+    assert "/api/narrator/poke" in checked, checked

@@ -53,10 +53,24 @@ def roster(riddles=True, nsfw=True, bare_first=False):
     return out
 
 
-def seed(container_path, **kw):
-    """Write the synthetic roster as the install's sealed container and reset the caches."""
-    defs = {"roster": roster(**kw), "skins": [], "skin_unlock": {}, "ach_criteria": {},
+def seed(container_path, poke_lines=None, ladder_feat=False, **kw):
+    """Write the synthetic roster as the install's sealed container and reset the caches.
+
+    poke_lines   the pack's `poke_lines` payload (synthetic lines), or None for a pack that
+                 carries none.
+    ladder_feat  True points the synthetic trigger feat at the metric the narrator's ladder
+                 feeds, at the ladder's own final count -- the way a real pack's feat is
+                 wired -- so the last poke can earn it."""
+    import moonglade_narrator as nar
+    ros = roster(**kw)
+    if ladder_feat:
+        for a in ros:
+            if a["id"] == TRIGGER_ID:
+                a["metric"], a["threshold"] = "narrator_pokes", nar.FINAL
+    defs = {"roster": ros, "skins": [], "skin_unlock": {}, "ach_criteria": {},
             "ladder_tracks": []}
+    if poke_lines is not None:
+        defs["poke_lines"] = poke_lines
     _mc.write_container(container_path, {"_seed.txt": b"x"},
                         {"achievements": json.dumps(defs).encode("utf-8")})
     clear_sealed_caches()
