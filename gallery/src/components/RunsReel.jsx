@@ -13,6 +13,8 @@ import "../styles/runs.css";
    run's axes and cell states come from GET /api/generate/runs/<id>, read once per run and
    kept for the page's life (a finished run does not change). */
 const runCache = new Map();
+const MATRIX_CELL_MIN = 72;
+const MATRIX_CELL_MAX = 150;
 
 function useRunRecord(runId, refreshKey) {
   const [rec, setRec] = useState(() => runCache.get(runId) || null);
@@ -40,11 +42,14 @@ function MatrixBlock({ runId, jobs, th, onPrefill, onInspect }) {
   const grid = matrixGrid(axes, cells);
   if (!grid) return null;
   const rows = grid.rows.length;
-  const cellH = Math.max(22, Math.floor((th - 16 - 5 * rows) / Math.max(1, rows)));
-  const cellW = Math.max(16, Math.round(cellH * (832 / 1216)));
+  // Tiles stay aspect-true (the page's aspect-ratio tiles) and big enough to read: they take
+  // the reel's height when it has the room and never go below MATRIX_CELL_MIN -- a tall grid
+  // scrolls in the dock's body instead of shrinking into 24 px specks.
+  const cellH = Math.min(MATRIX_CELL_MAX, Math.max(MATRIX_CELL_MIN, Math.floor((th - 16 - 5 * rows) / Math.max(1, rows))));
+  const cellW = Math.round(cellH * (832 / 1216));
   return (
     <div className="mgrun-grid" title={"matrix · " + cells.length + " cells"}
-      style={{ gridTemplateColumns: "64px repeat(" + grid.across.length + ", " + cellW + "px)" }}>
+      style={{ gridTemplateColumns: "88px repeat(" + grid.across.length + ", " + cellW + "px)" }}>
       <span />
       {grid.across.map((a, i) => <span key={"a" + i} className="mgrun-axis" title={a}>{a}</span>)}
       {grid.rows.map((row, r) => (

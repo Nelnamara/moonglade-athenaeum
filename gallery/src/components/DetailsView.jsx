@@ -3,6 +3,7 @@ import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import RunInspector from "./RunInspector.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
@@ -212,6 +213,9 @@ export default function DetailsView({
     () => (typeof localStorage !== "undefined" && localStorage.getItem(MORE_KEY) === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
+  // Session M (NOTES 7): the record's ⋯ menu and the Inspector it opens
+  const [moreMenu, setMoreMenu] = useState(false);
+  const [inspectOpen, setInspectOpen] = useState(false);
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
   // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
@@ -247,6 +251,8 @@ export default function DetailsView({
   useEffect(() => {
     setMediaOk(true);
     setPosterSrc(null);   // a rebuilt poster belongs to ONE row; don't carry it to the next
+    setMoreMenu(false);
+    setInspectOpen(false);
   }, [mediaId]);
 
   useEffect(() => {
@@ -568,7 +574,25 @@ export default function DetailsView({
               onClick={() => onFilterByBatch(row.task_id)}>View batch</button> : null}
             <button className="btn" disabled={suggestBusy} title="Reverse a prompt out of this image"
               onClick={runSuggest}>{suggestBusy ? "Reading…" : "Suggest prompt"}</button>
+            {/* Session M (NOTES 7, page M5): ⋯ -> Inspect the request -- the exact request this
+                picture's task was sent with, secrets stripped, with Copy JSON and Copy as CLI.
+                Only for a picture PixAI made from a numeric task; nothing is read until opened. */}
+            {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
+              <span className="mgrun-more">
+                <button className="btn" aria-haspopup="menu" aria-expanded={moreMenu} title="More"
+                  onClick={() => setMoreMenu((v) => !v)}>⋯</button>
+                {moreMenu && (
+                  <div className="mgrun-morepop" role="menu">
+                    <button type="button" role="menuitem"
+                      onClick={() => { setMoreMenu(false); setInspectOpen((v) => !v); }}>{"{ } Inspect the request"}</button>
+                  </div>
+                )}
+              </span>
+            ) : null}
           </div>
+          {inspectOpen && (
+            <RunInspector source={{ kind: "task", taskId: String(row.task_id) }} onClose={() => setInspectOpen(false)} />
+          )}
 
           {/* The prompt editor and the suggestions land right under the buttons that open
               them, INSIDE the scroller -- nothing outside the record may grow the page. */}

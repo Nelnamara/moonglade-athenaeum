@@ -10,10 +10,14 @@ import "../styles/runs.css";
    data, never hidden in CSS): the API key, cookies, session tokens and the csrf field never
    ride a request body this panel can see. Read-only; it writes nothing.
 
+   `phone`: the details sheet's copy -- Copy JSON only (no CLI tab). `inline`: no card chrome, for
+   a sheet or the record page that already has its own.
    `source`: {kind: "plan", plan} -- the confirm's /plan answer, "preview · not sent yet"
            | {kind: "task", taskId} -- one sent task, GET /api/generate/request/<id> */
-export default function RunInspector({ source, onClose, floating }) {
-  const [tab, setTab] = useState("json");
+export default function RunInspector({ source, onClose, floating, phone, inline }) {
+  const [tabPick, setTab] = useState("json");
+  // The phone's Inspect (NOTES, Phone) is Copy JSON only: no CLI tab, no Copy as CLI.
+  const tab = phone ? "json" : tabPick;
   const [cell, setCell] = useState(0);
   const [task, setTask] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -57,10 +61,10 @@ export default function RunInspector({ source, onClose, floating }) {
     setTimeout(() => setCopied(false), 1400);
   };
   return (
-    <div className={"mgrun-insp" + (floating ? " float" : "")} role="dialog" aria-label="Inspect the request">
+    <div className={"mgrun-insp" + (floating ? " float" : "") + (inline ? " inline" : "")} role="dialog" aria-label="Inspect the request">
       <div className="mgrun-insphead">
         <div className="mgrun-insptitle">{"{ } INSPECT · " + what}</div>
-        {[["json", "JSON"], ["cli", "CLI"]].map(([k, l]) => (
+        {!phone && [["json", "JSON"], ["cli", "CLI"]].map(([k, l]) => (
           <button key={k} type="button" className={"mgrun-inspbtn" + (tab === k ? " on" : "")}
             onClick={() => setTab(k)}>{l}</button>
         ))}
