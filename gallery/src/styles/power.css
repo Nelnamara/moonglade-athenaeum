@@ -123,8 +123,9 @@
 .pm-cell.held { border-color: color-mix(in srgb, var(--peach) 55%, transparent);
   background: color-mix(in srgb, var(--peach) 8%, transparent); color: var(--peach); font-size: 14px; }
 .pm-cell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.pm-axis { font-size: 10.5px; color: var(--mauve); text-align: center; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pm-axis { font-size: 10.5px; color: var(--mauve); text-align: center; overflow: hidden; line-height: 1.15;
+  max-height: 2.3em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pm-rowlbl { font-size: 10.5px; color: var(--mauve); align-self: center; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pm-linkbtn { font: inherit; font-size: 12px; font-weight: 700; padding: 0 12px; height: 32px; border-radius: 9px;
