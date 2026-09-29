@@ -1720,6 +1720,13 @@ class TrainGuard:
         retry and charge a second run. The failed id is armed before the POST; a success
         records the new run's id for good; an unclear failure is "ambiguous" for
         AMBIGUOUS_RETRY_WINDOW; only a definite refusal disarms it.
+      * ADVANCED DESCRIBE / START (spend review of waves 2+3, finding F1): the per-task lock
+        covers two requests at once, and the task's status covers a POST PixAI answered --
+        but after an UNCLEAR failure the status may not have moved yet, so a second confirm
+        would send a second paid POST. Each is armed (keyed "<what>:<task id>", with the
+        status it was confirmed from) before the POST; a success or a definite refusal
+        clears it; an unclear failure keeps it "ambiguous" for AMBIGUOUS_WINDOW. While it
+        stands, the next confirm is refused unless the task's status has moved on since.
 
     Every read-modify-write holds one lock, and the file is rewritten whole each time."""
 
@@ -1740,6 +1747,7 @@ class TrainGuard:
             d = {}
         d.setdefault("basic", {})
         d.setdefault("retried", {})
+        d.setdefault("paid", {})
         return d
 
     def _save(self, d):
@@ -1828,6 +1836,56 @@ class TrainGuard:
             else:
                 d["retried"][str(task_id)] = {"at": now, "state": outcome,
                                               "new_id": str(new_id or "")}
+            self._save(d)
+
+    @staticmethod
+    def paid_key(what, task_id):
+        return "%s:%s" % (what, task_id)
+
+    def paid_blocked(self, what, task_id, status, now=None):
+        """True when an earlier `what` ("caption" | "submit") confirm on this task may have
+        gone through and the task's status (`status`, read just now) has not moved on from
+        the one it was confirmed from. A status that moved clears the entry: PixAI took it,
+        and the route's own status check says what happens next. "armed" seen here is a
+        confirm that never resolved (the process stopped mid-POST): as unclear as
+        "ambiguous"."""
+        now = time.time() if now is None else now
+        key = self.paid_key(what, task_id)
+        with self._lock:
+            d = self._load()
+            e = d["paid"].get(key)
+            if not isinstance(e, dict):
+                return False
+            fresh = now - float(e.get("at") or 0) < self.AMBIGUOUS_WINDOW
+            if fresh and str(e.get("status") or "") == str(status or ""):
+                return True
+            d["paid"].pop(key, None)
+            self._save(d)
+            return False
+
+    def paid_arm(self, what, task_id, status, now=None):
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            d["paid"] = {k: v for k, v in d["paid"].items()
+                         if now - float((v or {}).get("at") or 0) < self.AMBIGUOUS_WINDOW}
+            d["paid"][self.paid_key(what, task_id)] = {"at": now, "state": "armed",
+                                                       "status": str(status or "")}
+            self._save(d)
+
+    def paid_resolve(self, what, task_id, outcome, now=None):
+        """outcome: "done" or "refused" (clear: PixAI answered, and its status now says what
+        happened), "ambiguous" (keep for AMBIGUOUS_WINDOW)."""
+        now = time.time() if now is None else now
+        key = self.paid_key(what, task_id)
+        with self._lock:
+            d = self._load()
+            if outcome == "ambiguous":
+                e = d["paid"].get(key) or {}
+                d["paid"][key] = {"at": now, "state": "ambiguous",
+                                  "status": str(e.get("status") or "")}
+            else:
+                d["paid"].pop(key, None)
             self._save(d)
 
     def retried(self):
@@ -17942,7 +18000,7 @@ def create_app(out_dir: Path):
                                              "accepted %s, and this training costs %s credits. "
                                              "Nothing was spent; check the cost and confirm "
                                              "again." % (
-                                                 ("{:,} credits".format(int(accepted))
+                                                 ("{:,} credits".format(accepted)
                                                   if isinstance(accepted, (int, float))
                                                   and not isinstance(accepted, bool)
                                                   else "an unnamed amount"),
@@ -17952,7 +18010,7 @@ def create_app(out_dir: Path):
                 task = core.submit_training(
                     session, base_model_id, [] if reuse else media_ids, title, trigger,
                     category, training_task_id=dataset_task_id if reuse else "",
-                    kaisuuken_id=(card["id"] if free_by_card else ""))
+                    kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
             except Exception as e:
                 if core.definite_refusal(e):
                     train_guard.basic_resolve(key, "refused")
@@ -18001,6 +18059,10 @@ def create_app(out_dir: Path):
 
     _BUSY = ("Another request is already working on this run. Nothing was sent again -- give "
              "it a moment, then look again.")
+    # An advanced describe/start confirm refused by TrainGuard.paid_blocked (finding F1).
+    _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
+                           "answer clearly. Check Runs before trying again (this guard clears "
+                           "by itself after 15 minutes). Nothing was sent.")
     train_guard = TrainGuard(out_dir / "train_guard.json")
     _runs_cache = {"full": None, "light": None}
 
@@ -18041,10 +18103,18 @@ def create_app(out_dir: Path):
     def _exact_amount(accepted, price):
         """The acknowledgement a paid confirm must carry: the NUMBER the user was shown, equal to
         the fresh quote. A bool is never an amount (True == 1 in Python), and a bare `true` is
-        refused whenever there is a price to name (spend review, finding 6)."""
+        refused whenever there is a price to name (spend review, finding 6). A fractional
+        amount is never the quote: int() would truncate 1200.5 onto a quote of 1200, so the
+        number must be integer-valued AND equal (waves 2+3 review, finding F6)."""
         if isinstance(accepted, bool) or not isinstance(accepted, (int, float)):
             return False
-        return int(accepted) == int(price)
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            return False
+        try:
+            a, p = float(accepted), float(price)
+        except (OverflowError, ValueError):
+            return False
+        return a.is_integer() and a == p
 
     def _amount_refusal(accepted, price, what):
         if accepted is None or accepted is False:
@@ -18449,6 +18519,9 @@ def create_app(out_dir: Path):
                 return _train_refusal(e)
             st = str(t.get("status") or "")
             n = len((t.get("parameters") or {}).get("mediaIds") or [])
+            if confirming and train_guard.paid_blocked("caption", tid, st):
+                return jsonify({"error": _PAID_MAYBE_REFUSAL % "describing these images",
+                                "maybe_started": True}), 409
             if t.get("trainingMode") != "advanced" or st not in ("draft", "captionReady"):
                 return jsonify({"error": "PixAI is %s this run, so it can't be described "
                                          "now. Nothing was sent." %
@@ -18472,10 +18545,20 @@ def create_app(out_dir: Path):
             accepted = body.get("accept_credit_cost")
             if not _exact_amount(accepted, q["total_price"]):
                 return _amount_refusal(accepted, q["total_price"], "Describing these images")
+            train_guard.paid_arm("caption", tid, st)
             try:
                 status = core.start_training_captions(session, tid)
             except Exception as e:                      # noqa: BLE001
-                return _train_refusal(e)
+                if core.definite_refusal(e):
+                    train_guard.paid_resolve("caption", tid, "refused")
+                    return _train_refusal(e)
+                train_guard.paid_resolve("caption", tid, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so describing these "
+                                         "images may have started. Check Runs before "
+                                         "describing again.",
+                                "maybe_started": True}), 502
+            train_guard.paid_resolve("caption", tid, "done")
         finally:
             lk.release()
         _runs_dirty()
@@ -18517,6 +18600,10 @@ def create_app(out_dir: Path):
             try:
                 core_, session = _gen_session()
                 t = core.training_task(session, tid)
+                if confirming and train_guard.paid_blocked("submit", tid,
+                                                           str(t.get("status") or "")):
+                    return jsonify({"error": _PAID_MAYBE_REFUSAL % "this run",
+                                    "maybe_started": True}), 409
                 if t.get("trainingMode") != "advanced" or t.get("status") != "captionReady":
                     return jsonify({"error": "This run isn't waiting to start (PixAI says: %s). "
                                              "Nothing was sent." % (t.get("status") or "?")}), 409
@@ -18539,10 +18626,19 @@ def create_app(out_dir: Path):
             if price > 0 and not _exact_amount(accepted, price):
                 return _amount_refusal(accepted, price, "This training")
             before = core.training_free_quota(session)
+            train_guard.paid_arm("submit", tid, t.get("status"))
             try:
                 status = core.submit_advanced_training(session, tid)
             except Exception as e:                      # noqa: BLE001
-                return _train_refusal(e)
+                if core.definite_refusal(e):
+                    train_guard.paid_resolve("submit", tid, "refused")
+                    return _train_refusal(e)
+                train_guard.paid_resolve("submit", tid, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so this run may have "
+                                         "started. Check Runs before starting it again.",
+                                "maybe_started": True}), 502
+            train_guard.paid_resolve("submit", tid, "done")
             after = core.training_free_quota(session)
             try:
                 telem_bump("loras_trained", out_dir=out_dir)

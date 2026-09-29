@@ -294,6 +294,14 @@ describe("Advanced: descriptions", () => {
     assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote, status: "draft", saving: 1 }).describe, false);
     assert.equal(advancedGates({ mediaIds: ids, captions: all, quote, status: "captionReady", saving: 2 }).next, false);
   });
+  test("an unclear describe answer (maybe_started) holds the button off and says check Runs", () => {
+    const held = advancedGates({ mediaIds: ids, captions: {}, quote, status: "draft", held: true });
+    assert.equal(held.describe, false);
+    assert.match(held.whyNoDescribe, /may have started; check Runs/);
+    // PixAI's own status still wins once it has moved on
+    assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote, status: "captioning", held: true }).whyNoDescribe,
+      "PixAI is describing them now.");
+  });
   test("the button's count and total come only from PixAI's quote", () => {
     assert.equal(describeLabel(quote), "Describe automatically (12 images) · 1,800");
     assert.equal(describeLabel({ image_count: 1, total_price: 150 }), "Describe automatically (1 image) · 150");

@@ -386,6 +386,7 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
   const [rejected, setRejected] = useState([]);
   const [started, setStarted] = useState(null);
   const [maybe, setMaybe] = useState(false);
+  const [describeHeld, setDescribeHeld] = useState(false);  // a describe answered maybe_started
 
   const bases = (setup.cfg && setup.cfg.advanced_bases) || [];
   useEffect(() => {
@@ -540,7 +541,7 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
 
   const captions = (detail && detail.captions) || {};
   const quote = (detail && detail.caption_quote) || null;
-  const gates = advancedGates({ mediaIds, captions, quote, saving, status, busy });
+  const gates = advancedGates({ mediaIds, captions, quote, saving, status, busy, held: describeHeld });
 
   /* Describe automatically (PAID; the only way in): ONE press, sending PixAI's own quote --
      the number on the button -- as the acknowledged amount. */
@@ -552,6 +553,10 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
     const d = await apiPost("/api/train/advanced/" + draftId + "/caption",
       { confirm: true, accept_credit_cost: total, csrf });
     if (d.error) setErr(d.error);
+    // PixAI didn't answer clearly (or the server's guard says an earlier one may have gone
+    // through): drop the ask -- the button stays off, and the answer's own words say to
+    // check Runs. Never a second paid press on an unclear answer.
+    if (d.maybe_started) setDescribeHeld(true);
     await load();
     setBusy("");
   };

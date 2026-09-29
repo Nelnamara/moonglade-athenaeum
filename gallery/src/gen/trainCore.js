@@ -389,7 +389,10 @@ export function captionFilter(ids, captions, key) {
    - next ("Next: parameters"): only once every image in the set is described, 10 or more,
      nothing pending and nothing describing.
    Each gate answers why it is off, in words the screen can show. */
-export function advancedGates({ mediaIds, captions, quote, saving, status, busy }) {
+/* `held`: the last describe answered maybe_started (PixAI didn't answer clearly, so it may
+   have gone through): the button stays off until the page is reloaded or PixAI's status says
+   it is describing -- the server's own guard refuses a second confirm either way. */
+export function advancedGates({ mediaIds, captions, quote, saving, status, busy, held }) {
   const ids = mediaIds || [];
   const caps = captions || {};
   const left = ids.filter((m) => !caps[m]).length;
@@ -398,6 +401,7 @@ export function advancedGates({ mediaIds, captions, quote, saving, status, busy 
   if (ids.length < MIN_IMAGES) describe = "Add at least " + (MIN_IMAGES - ids.length) + " more image" + (MIN_IMAGES - ids.length === 1 ? "" : "s") + " first.";
   else if (status === "captioning") describe = "PixAI is describing them now.";
   else if (!left) describe = "Every image is described.";
+  else if (held) describe = "Describing may have started; check Runs before describing again.";
   else if (!quote || typeof quote.total_price !== "number") describe = "PixAI's price for describing couldn't be read; try again in a moment.";
   else if (!(quote.image_count > 0)) describe = "Nothing left to describe.";
   else if (pending) describe = "Saving your edits first.";

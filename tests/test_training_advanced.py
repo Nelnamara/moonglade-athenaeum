@@ -684,3 +684,161 @@ def test_two_basic_confirms_at_once_send_one(tmp_path, monkeypatch, pixai):
     t.join(5)
     assert second.status_code == 409 and out["a"].get_json()["submitted"]
     assert pixai.mutations("createTrainingTask") == 1
+
+
+# ------------------------------- waves 2+3 spend review: F1, F2, F4, F6
+
+def _fake_for(what, pixai):
+    (_start_fake if what == "submit" else _describe_fake)(pixai)
+
+
+_PAID = {"submit": ("/api/train/advanced/700/submit", "/training-task/700/submit", 100000),
+         "caption": ("/api/train/advanced/700/caption", "/training-task/700/caption", 1800)}
+
+
+@pytest.mark.parametrize("what", ["submit", "caption"])
+def test_an_unclear_paid_advanced_failure_arms_a_guard_so_a_second_confirm_sends_nothing(
+        tmp_path, pixai, what):
+    """F1: a read timeout on Start or Describe may have reached PixAI and charged. The answer
+    says it may have started, and the next confirm is refused on disk -- through a restart --
+    until the task's status moves on or the window lapses. Only one paid POST ever goes."""
+    url, path, amount = _PAID[what]
+    _, post = _app(tmp_path)
+    _fake_for(what, pixai)
+    pixai.fail(path, requests.ReadTimeout("no answer"))
+    body = {"confirm": True, "accept_credit_cost": amount}
+    r = post(url, body)
+    assert r.status_code == 502 and r.get_json()["maybe_started"] is True
+    r = post(url, body)
+    assert r.status_code == 409 and r.get_json()["maybe_started"] is True
+    assert "Nothing was sent" in r.get_json()["error"]
+    _, post2 = _app(tmp_path)                                  # a restart keeps it
+    assert post2(url, body).status_code == 409
+    assert len(pixai.calls_for(path)) == 1
+    # PixAI's status moved on: the guard clears, and the route's own status check answers.
+    pixai.on("trainingTask", _task(status="waiting" if what == "submit" else "captioning"))
+    r = post2(url, body)
+    assert r.status_code == 409 and not r.get_json().get("maybe_started")
+    assert "paid" in (tmp_path / "train_guard.json").read_text()
+    assert "%s:700" % what not in (tmp_path / "train_guard.json").read_text()
+    assert len(pixai.calls_for(path)) == 1
+
+
+@pytest.mark.parametrize("what", ["submit", "caption"])
+def test_a_definite_paid_advanced_refusal_does_not_arm_the_guard(tmp_path, pixai, what):
+    """F1: a 4xx is PixAI saying no -- nothing was created or charged, so the next confirm
+    is free to go."""
+    url, path, amount = _PAID[what]
+    _, post = _app(tmp_path)
+    _fake_for(what, pixai)
+    pixai.fail(path, core.PixAIRestError("x", 403, {"code": "INSUFFICIENT_BALANCE"}))
+    body = {"confirm": True, "accept_credit_cost": amount}
+    r = post(url, body)
+    assert r.status_code == 403 and not r.get_json().get("maybe_started")
+    _fake_for(what, pixai)
+    r = post(url, body)
+    assert r.status_code == 200, r.get_json()
+    assert len(pixai.calls_for(path)) == 2
+
+
+def test_the_paid_guard_lapses_after_its_window_and_only_on_the_same_status(tmp_path):
+    g = TrainGuard(tmp_path / "train_guard.json")
+    g.paid_arm("submit", "700", "captionReady", now=1000.0)
+    g.paid_resolve("submit", "700", "ambiguous", now=1000.0)
+    assert g.paid_blocked("submit", "700", "captionReady", now=1000.0 + 60)
+    assert not g.paid_blocked("caption", "700", "captionReady", now=1000.0 + 60)
+    assert not g.paid_blocked("submit", "700", "captionReady",
+                              now=1000.0 + TrainGuard.AMBIGUOUS_WINDOW + 1)
+    g.paid_arm("submit", "700", "captionReady", now=2000.0)      # a crash mid-POST: "armed"
+    assert g.paid_blocked("submit", "700", "captionReady", now=2001.0)
+    g.paid_resolve("submit", "700", "done", now=2001.0)
+    assert not g.paid_blocked("submit", "700", "captionReady", now=2002.0)
+
+
+def _graphql_error(body):
+    """The error the REAL transport raises for `body` (PixAIClient._graphql_post)."""
+    client = core.PixAIClient(_Sess(_Resp(200, body)))
+    with pytest.raises(core.PixAIError) as ei:
+        client.mutate("mutation { createTrainingTask(input: {}) { id } }", {})
+    return ei.value
+
+
+def test_a_graphql_answer_with_data_and_errors_is_not_a_definite_refusal():
+    """F2: GraphQL can answer `errors` beside a resolved `data` -- the run was created (and
+    maybe charged) and something under it failed. That is not PixAI saying no."""
+    partial = _graphql_error({"data": {"createTrainingTask": {"id": "trn9"}},
+                              "errors": [{"message": "a nested field failed"}]})
+    assert partial.graphql_data == {"createTrainingTask": {"id": "trn9"}}
+    assert not core.definite_refusal(partial)
+    for data in ({"createTrainingTask": None}, None):
+        refused = _graphql_error({"data": data, "errors": [{"message": "nope"}]})
+        assert core.definite_refusal(refused)
+
+
+def test_a_partial_basic_success_keeps_the_double_start_guard(tmp_path, monkeypatch, pixai):
+    """F2: the Basic start's guard stays armed on a data+errors answer, so the second
+    confirm is refused (409) and only one createTrainingTask goes."""
+    post = _basic_client(tmp_path, monkeypatch, pixai)
+    _loras(pixai, [])
+    pixai.fail("createTrainingTask", _graphql_error(
+        {"data": {"createTrainingTask": {"id": "trn9"}},
+         "errors": [{"message": "a nested field failed"}]}))
+    body = dict(_BASIC, dataset_task_id="", confirm=True, accept_credit_cost=100000)
+    r = post("/api/train/submit", body)
+    assert r.status_code == 502 and r.get_json()["maybe_started"] is True
+    r = post("/api/train/submit", body)
+    assert r.status_code == 409 and "may have gone through" in r.get_json()["error"]
+    assert pixai.mutations("createTrainingTask") == 1
+
+
+def test_a_basic_refusal_before_the_network_is_definite_and_says_nothing_started(
+        tmp_path, monkeypatch, pixai):
+    """F4: READ_ONLY switched on between the route's own check and submit_training's is
+    refused before anything is sent -- a LocalRefusal: no "may have started", no armed guard,
+    and the next confirm (the switch off again) goes."""
+    post = _basic_client(tmp_path, monkeypatch, pixai)
+    _loras(pixai, [])
+    real = core._check_read_only
+    seen = {"n": 0}
+
+    def second_call_refuses(what):
+        seen["n"] += 1
+        if seen["n"] == 2:
+            raise core.PixAIError("READ_ONLY is set")
+        return real(what)
+    monkeypatch.setattr(core, "_check_read_only", second_call_refuses)
+    body = dict(_BASIC, dataset_task_id="", confirm=True, accept_credit_cost=100000)
+    r = post("/api/train/submit", body)
+    assert r.status_code == 502 and not r.get_json().get("maybe_started")
+    assert "READ_ONLY" in r.get_json()["error"]
+    assert pixai.mutations("createTrainingTask") == 0
+    assert post("/api/train/submit", body).get_json()["submitted"]
+    assert pixai.mutations("createTrainingTask") == 1
+
+
+def test_submit_training_validates_against_the_callers_config(pixai, monkeypatch):
+    """F4: the route's config, not a re-read, so the confirm validates what was priced; a
+    validation refusal is a LocalRefusal and sends nothing."""
+    cfg = core.training_config()
+    monkeypatch.setattr(core, "training_config",
+                        lambda: (_ for _ in ()).throw(AssertionError("re-read the config")))
+    pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn1"}})
+    session = core._make_session()
+    out = core.submit_training(session, T3, _REUSED, "Tania v2", TRIGGER, "character",
+                               config=cfg)
+    assert out == {"id": "trn1"}
+    with pytest.raises(core.LocalRefusal):
+        core.submit_training(session, T3, _REUSED, "Tania v2", "short", "character",
+                             config=cfg)
+    assert pixai.mutations("createTrainingTask") == 1
+
+
+@pytest.mark.parametrize("accepted, goes", [(1800.5, False), (1800.9, False), (1799.9, False),
+                                            (1800.0, True)])
+def test_a_fractional_acknowledgement_is_never_the_quote(tmp_path, pixai, accepted, goes):
+    """F6: int() would truncate 1800.9 onto a quote of 1800; the amount must be the number."""
+    _, post = _app(tmp_path)
+    _describe_fake(pixai, total=1800)
+    r = post("/api/train/advanced/700/caption", {"confirm": True, "accept_credit_cost": accepted})
+    assert (r.status_code == 200) is goes
+    assert len(pixai.calls_for("/training-task/700/caption")) == (1 if goes else 0)

@@ -111,6 +111,13 @@ class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
 
 
+class LocalRefusal(PixAIError):
+    """Refused HERE, before any network call: READ_ONLY, or the request's own validation.
+    Nothing reached PixAI, so a spend guard treats it as a definite refusal
+    (definite_refusal) and never tells the user a run "may have started" (waves 2+3 review,
+    F4). Still a PixAIError, so every existing catch site is unchanged."""
+
+
 class PixAIRestError(PixAIError):
     """A /v2 REST route answered non-2xx. Still a PixAIError with the same message as before
     (every existing catch site is unchanged); it also carries the HTTP `status` and PixAI's
@@ -1630,6 +1637,11 @@ class PixAIClient:
                 # structured refusal (a recipe's RECIPE_* with its ids and reason) can be
                 # longer. Reading it changes nothing about what was sent or retried.
                 err.graphql_errors = data["errors"]
+                # A GraphQL answer may carry `errors` AND `data` at once: a partial success,
+                # where the root field DID resolve (a run created and charged) and something
+                # beneath it failed. The data rides on the error so a spend guard can tell
+                # that apart from a refusal (definite_refusal; waves 2+3 review, F2).
+                err.graphql_data = data.get("data")
                 raise err
             return data.get("data") or {}
         raise RuntimeError("unreachable")
@@ -13417,7 +13429,8 @@ def describe_rejected_training_images(rejected):
 
 
 def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
-                    training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
+                    training_task_id="", primary_lora_model_id="", kaisuuken_id="",
+                    config=None):
     """Submit a real LoRA training task to PixAI (`createTrainingTask`).
 
     SPENDS unless the account has usable free-training quota left (training_free_quota) or
@@ -13431,10 +13444,20 @@ def submit_training(session, base_model_id, media_ids, title, trigger_words, cat
 
     This function does NOT decide whether the user wants to pay: callers preview first
     (quota + validation) and only call this once the user has confirmed. Input shape
-    mirrors the site's own form exactly. Returns the created task dict."""
-    _check_read_only("submit a LoRA training task")
-    tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
-                           training_task_id)
+    mirrors the site's own form exactly. Returns the created task dict.
+
+    `config` is the caller's training_config() -- the one it previewed and priced against --
+    so this validates against the SAME config instead of a fresh re-read that could differ.
+    A refusal before the network call (READ_ONLY, validation) is raised as LocalRefusal:
+    nothing was sent, and the caller's spend guard must not say a run may have started."""
+    try:
+        _check_read_only("submit a LoRA training task")
+        tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
+                               training_task_id, config=config)
+    except LocalRefusal:
+        raise
+    except PixAIError as e:
+        raise LocalRefusal(str(e)) from e
     inp = {
         "baseModelId": str(base_model_id),
         "mediaIds": [str(m) for m in (media_ids or []) if str(m).strip()],
@@ -13532,14 +13555,26 @@ def training_price_tier(version_id, tier="price", config=None):
 
 def definite_refusal(exc):
     """True when PixAI answered and REFUSED (so nothing was created or charged): a 4xx from a
-    REST route, a GraphQL error body, or a 401. False for anything that may have reached PixAI
-    and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable answer -- which a
-    spend guard must treat as "may have started"."""
+    REST route, a GraphQL error body, or a 401 -- or nothing was sent at all (LocalRefusal: a
+    READ_ONLY or validation refusal before the network call). False for anything that may
+    have reached PixAI and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable
+    answer -- which a spend guard must treat as "may have started".
+
+    A GraphQL error body is a refusal only when its `data` resolved nothing: an answer whose
+    mutation root field came back non-null alongside `errors` is a PARTIAL SUCCESS -- the run
+    exists and may be charged -- so it is not definite (waves 2+3 review, F2)."""
+    if isinstance(exc, LocalRefusal):
+        return True
     if isinstance(exc, PixAIRestError):
         return exc.status is not None and 400 <= int(exc.status) < 500
     if isinstance(exc, PixAIError):
         msg = str(exc)
-        return msg.startswith("GraphQL error") or msg.startswith("401 ")
+        if msg.startswith("GraphQL error"):
+            partial = getattr(exc, "graphql_data", None)
+            if isinstance(partial, dict) and any(v is not None for v in partial.values()):
+                return False
+            return True
+        return msg.startswith("401 ")
     return False
 
 
