@@ -97,7 +97,7 @@ export default function useGenerate({ costRef, isMember }) {
   useEffect(() => { refreshPrice(); }, [
     s.model, s.loras, s.ref, s.refStrength, s.boosters,
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
-    s.mode, s.steps, s.unlimited,
+    s.mode, s.steps, s.unlimited, s.palette,
     s.inputs, s.ctx, s.auto, s.landscape, s.tier, s.creativity, s.recipes, s.member,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 

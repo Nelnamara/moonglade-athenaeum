@@ -10,7 +10,9 @@
    wrote the number, and since 2026-09-26 every collected video row does too (with the engine
    NAME in video_model, which is tried first) -- so the row still feeds the engine resolve. */
 
-import { MODELS, MODEL_MAXDUR, snapDuration, modelTakes } from "./videoDrawerCore.js";
+import {
+  MODELS, MODEL_MAXDUR, RATIO_MODELS, VIDEO_RATIOS, snapDuration, modelTakes,
+} from "./videoDrawerCore.js";
 
 // Numeric top-level `modelId` -> engine NAME. Mirror of moonglade_backup.VIDEO_MODELS (the
 // seven engines that publish a numeric id; v3.0.1 / v2.7 have none). A catalog-only remix, or
@@ -146,10 +148,14 @@ export function videoRemixFromRow(row, taskParams) {
     if (tp.start && !tp.start.in_lib) notes.push("start frame isn't in your library");
   }
 
-  // The output aspect ratio (Tsubaki reference videos) is NOT carried: the drawer has no ratio
-  // picker yet, and a ratio riding along unseen would be priced and sent without the drawer
-  // showing it. Say so; PixAI infers the ratio from the references when it is omitted.
-  if (tp.ratio && tp.ratio !== "adaptive") notes.push("aspect ratio " + tp.ratio + " not carried — PixAI will infer it");
+  // The output aspect ratio (Tsubaki reference videos). Since the drawer's ratio picker
+  // (2026-09-28) it is CARRIED when the remix lands where the picker shows it -- a Tsubaki
+  // engine in Multi-Reference -- so the chip names it before any spend. Anywhere else it could
+  // only ride unseen, so it is left out and said so; PixAI infers the frame when it is omitted.
+  if (tp.ratio && tp.ratio !== "adaptive" && VIDEO_RATIOS.indexOf(tp.ratio) >= 0) {
+    if (tp.kind === "r2v" && RATIO_MODELS[prefill.video_model]) prefill.ratio = tp.ratio;
+    else notes.push("aspect ratio " + tp.ratio + " not carried — PixAI will infer it");
+  }
 
   clampNote(prefill, engine, notes);
   fieldsNote(prefill, engine, notes);

@@ -24,7 +24,20 @@ export const EDIT_PRICE_KEY_SKIP = PRICE_KEY_SKIP.concat(["instruction"]);
        it and PixAI picks the frame. It is not a promise to keep the source's frame, and no
        label here may say it is. */
 export const EDIT_ASPECT_AUTO = "auto";
+/* PixAI Edit v4.0 (Session L decision 6, 2026-09-28): its own model record (version
+   1983993578828959744, extra.chatEditing) -- ten inputs, 1K/2K/4K, no quality knob, no
+   published default aspect (so Auto, as on Reference Pro), fourteen aspects down to 1:8 / 8:1.
+   Listed FIRST, with a "new" tag until `new_until` (30 days from the build); the card's
+   default model stays Edit Pro. */
 export const EDIT_CAPS = {
+  "edit-v4": {
+    label: "Edit v4.0", max_refs: 10,
+    resolutions: ["1K", "2K", "4K"],
+    qualities: [],
+    aspects: [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
+    def: { resolution: "1K", quality: "", aspect: EDIT_ASPECT_AUTO },
+    new_until: "2026-10-28",
+  },
   "edit-pro": {
     label: "Edit Pro", max_refs: 4,
     resolutions: ["1K", "2K"],
@@ -47,6 +60,29 @@ export const DEFAULT_EDIT_MODEL = "edit-pro";
    "16:9". Ratios read as themselves. */
 const EDIT_ASPECT_LABELS = { [EDIT_ASPECT_AUTO]: "Auto" };
 export const editAspectLabel = (a) => EDIT_ASPECT_LABELS[a] || a;
+
+/* L6: "the extremes sit under More ▾" -- a ratio whose long side is at least twice its short
+   side (21:9, 1:3 / 3:1, 1:4 / 4:1, 1:8 / 8:1). Auto and the common ratios stay as chips. */
+export function editAspectExtreme(a) {
+  const m = /^(\d+):(\d+)$/.exec(String(a || ""));
+  if (!m) return false;
+  const x = +m[1], y = +m[2];
+  return Math.max(x, y) >= 2 * Math.min(x, y);
+}
+
+/* Split a model's aspects into the chips shown and the "More ▾" extremes, keeping order. */
+export function editAspectGroups(model) {
+  const all = editCaps(model).aspects;
+  return { common: all.filter((a) => !editAspectExtreme(a)), extreme: all.filter(editAspectExtreme) };
+}
+
+/* The emerald "new" tag, shown until the model's `new_until` day (inclusive). */
+export function editModelIsNew(model, now) {
+  const until = (EDIT_CAPS[model] || {}).new_until;
+  if (!until) return false;
+  const today = new Date(now == null ? Date.now() : now).toISOString().slice(0, 10);
+  return today <= until;
+}
 
 // Fix: face/hand box colors and the classic's minimum drag size (DISPLAY px).
 export const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };

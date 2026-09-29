@@ -21,6 +21,7 @@ import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
+import { PaletteRow } from "./ColorPalette.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
@@ -1094,6 +1095,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
                       onBlur={(e) => set({ cfg: clampField(e.target.value, cfgR, 1, 30) })} />
                   </div>
                 )}
+                {/* PALETTE (Session H 4, frame A): the row and its overlay are
+                    ColorPalette.jsx's own; this is only the mount. `ctx` holds it. */}
+                <PaletteRow s={s} set={set} ctx={ctxOn} />
                 <div className="mgdock-sliderrow">
                   <span className="mgdock-lbl">SEED</span>
                   <input className="mgdock-seed" value={s.seed} placeholder="blank = random"

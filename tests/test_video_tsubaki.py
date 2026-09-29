@@ -762,3 +762,77 @@ def _i2v_args(tmp_path, **kw):
                 name_length=60, dump_params=False, video_ratio="")
     base.update(kw)
     return SimpleNamespace(**base)
+
+
+# =============================================================================
+# The Generate drawer's ratio picker on the web road (lane w2-small, 2026-09-28)
+# =============================================================================
+# The drawer sends `ratio` only for a Tsubaki engine in Multi-Reference and never as Auto
+# (videoDrawerCore.ratioForPayload); build_request carries it to the referenceVideo road and
+# writes a receipt where it cannot go -- keyed on the ROAD, not the shot mode (spend review N6).
+
+def _web(**kw):
+    body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",
+            "duration": 5}
+    body.update(kw)
+    return core.build_request(body, mode="video")
+
+
+def test_the_web_road_sends_the_ratio_for_tbkv_multi_reference():
+    for model in ("tbkv1.0.1", "tbkv1.0"):
+        r = _web(video_model=model, ratio="21:9")
+        assert r.parameters["referenceVideo"]["ratio"] == "21:9"
+        assert r.adjusted == []
+
+
+def test_no_ratio_or_auto_is_byte_identical():
+    plain = _web().parameters
+    assert _web(ratio="").parameters == plain
+    assert _web(ratio="adaptive").parameters == plain
+    assert "ratio" not in plain["referenceVideo"]
+
+
+def test_a_ratio_the_road_cannot_carry_is_dropped_with_a_receipt():
+    why = "only Tsubaki Video's Multi-Reference takes an aspect ratio"
+    r = _web(video_model="v4.0.1", ratio="16:9")
+    assert "ratio" not in r.parameters["referenceVideo"]
+    assert r.adjusted == [{"field": "ratio", "asked": "16:9", "used": None, "why": why}]
+    r = _web(mode="I2V", ratio="16:9")
+    assert "i2vPro" in r.parameters and "ratio" not in r.parameters["i2vPro"]
+    assert [a["field"] for a in r.adjusted] == ["ratio"]
+
+
+def test_an_flf_with_one_frame_is_a_reference_video_and_keeps_its_ratio():
+    """N6: the receipt follows the ROAD. An FLF shot with only a start frame goes out as a
+    reference video, where a Tsubaki engine takes the ratio."""
+    r = _web(mode="FLF", ratio="3:4")
+    assert r.parameters["referenceVideo"]["ratio"] == "3:4"
+    assert r.adjusted == []
+
+
+def test_an_unknown_ratio_is_the_badges_note_not_a_spend(tmp_path, monkeypatch):
+    with pytest.raises(core.PixAIError):
+        _web(ratio="5:4")
+    from tests.conftest import login_client
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.post("/api/price", json={"mode": "R2V", "images": ["1"], "prompt": "@image1",
+                                     "video_model": "tbkv1.0.1", "ratio": "5:4"}).get_json()
+    assert d["cost"] is None and "aspect ratio" in d["note"]
+
+
+def test_the_quote_and_the_submit_carry_the_same_ratio(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 21000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit",
+                        lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "v1"})
+    cli = login_client(tmp_path)
+    body = {"mode": "R2V", "images": ["1"], "prompt": "@image1", "video_model": "tbkv1.0.1",
+            "duration": 5, "ratio": "9:16"}
+    assert cli.post("/api/price", json=body).get_json()["cost"] == 21000
+    assert cli.post("/api/loom/generate", json=body).get_json().get("task_id") == "v1"
+    assert seen["priced"]["referenceVideo"] == seen["sent"]["referenceVideo"]
+    assert seen["sent"]["referenceVideo"]["ratio"] == "9:16"

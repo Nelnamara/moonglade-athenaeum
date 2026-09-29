@@ -71,6 +71,28 @@ profile and an Auto size — no LoRAs, recipes, palette or negative. The price s
 before you send, and the run joins the dock's reel and the Activity tray while the Lightbox stays
 open. **E** jumps to the bar; **Esc** leaves it (a second Esc closes the Lightbox).
 
+### Colour palette
+
+Tsubaki.3 and Flash can steer a picture's colours with a **colour palette** — up to three groups
+(overall · background · character), each 1 to 12 colours with a share of the whole. The drawer's
+**Palette** row (the dock's Tuning column; the phone's Advanced screen) shows the palette in use
+and opens the palette window:
+
+- **Library** — PixAI's own palettes, each a cover picture with its colour strip. Pick one and
+  **Use palette**, or **Customise** it into your own.
+- **Custom** — your saved palettes, kept with your Moonglade account (they are not saved to
+  PixAI). **+ New colour palette** opens the editor.
+- **The editor** — turn each group on or off (overall or background must stay on; turning one on
+  starts it with six even colours), drag the dividers between colours to trade their shares,
+  change a colour, its share, its order or the number of colours in the list below, replace the
+  colours with a Library palette, or **Extract from image** (a gallery picture or an upload — read
+  in your browser, nothing is uploaded) to fill the group you are on. The preview card repaints
+  as you go. **Save & apply** saves it to Custom and uses it.
+
+A palette is sent only to a model that takes one, and never with a context image: in either case
+the row says **Held** and the palette stays picked for when it applies again. It does not change
+the price.
+
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
 generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
@@ -331,8 +353,10 @@ Notes:
   camera move** (both controls read disabled — anything you typed stays in the box but is not
   sent); **no video references** in Multi-Reference (images and audio only — video references
   you already picked are held, dimmed and not sent, never deleted); and a reference video can
-  set an **output aspect ratio** (CLI `--video-ratio`; the drawer has no ratio picker yet, so a
-  Remix names the source's ratio and lets PixAI infer it). Multi-Reference jobs on these
+  set an **output aspect ratio** — Auto (PixAI works it out from the references), 1:1, 2:3,
+  3:2, 3:4, 4:3, 9:16, 16:9 or 21:9. In the drawer it is the ratio chip on the prompt bar (the
+  phone shows the choices in Multi-Reference itself); on the CLI it is `--video-ratio`. A Remix
+  of a Tsubaki Multi-Reference clip brings its ratio back with it. Multi-Reference jobs on these
   engines have run on PixAI's own site, but Moonglade sends them a different way, and that has
   not run yet; First Frame and First & Last follow PixAI's own site and price quotes. The first
   real run of each mode from Moonglade is the proof it goes through.
@@ -363,7 +387,9 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
-type the change, set resolution/aspect/quality, then submit.
+type the change, set resolution/aspect/quality, then submit. Three edit models: **Edit v4.0**
+(new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
+setting), **Edit Pro** and **Reference Pro**.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
@@ -384,7 +410,7 @@ Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values 
 corrected (and shown in the preview) rather than rejected.
 
 **Edits made with a model Moonglade doesn't know locally still get a real name.** It
-recognizes PixAI's two edit models by name without asking anyone; anything else — a newer
+recognizes PixAI's three edit models by name without asking anyone; anything else — a newer
 `modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
 PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
 than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
@@ -678,7 +704,7 @@ the button comes back — the app will tell you it doesn't know rather than leav
   live: gradient overlays applied right in your browser, so they cost nothing, make no request,
   and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
   tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
-  The two edit models take different numbers of reference images (Edit Pro up to 4,
+  The edit models take different numbers of reference images (Edit Pro up to 4, Edit v4.0 and
   Reference Pro up to 10, and the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left

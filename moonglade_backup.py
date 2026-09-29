@@ -3779,8 +3779,8 @@ def _empty_version_meta():
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
             "compatibility": {}, "restrictions": {}, "profiles": None,
             "quality_tag": None, "size_rule": None, "context_images": None,
-            "unlimited": None, "profile_rows": None, "size_tiers": None,
-            "context_max": None, "creativity": False}
+            "color_palette": None, "unlimited": None, "profile_rows": None,
+            "size_tiers": None, "context_max": None, "creativity": False}
 
 
 def _version_quality_tag(extra):
@@ -3845,8 +3845,8 @@ def _version_row_to_meta(r):
       has the same keys whether or not that caller ran the second read.
     - quality_tag: the version's own Quality Tag ({prefix, suffix}) or None -- see
       _version_quality_tag (SCOPE_2026-09-26 G4).
-    - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
-      _attach_features on the opt-in path that already pays the profile read.
+    - size_rule / context_images / color_palette: PLACEHOLDERS (None) like `profiles`,
+      filled by _attach_features on the opt-in path that already pays the profile read.
     - unlimited: PLACEHOLDER (None), filled by _attach_unlimited on that same path for a
       version in UNLIMITED_VERSIONS (SCOPE_2026-09-26_unlimited-mode S2).
     - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
@@ -3878,6 +3878,7 @@ def _version_row_to_meta(r):
         "quality_tag": _version_quality_tag(extra),
         "size_rule": None,
         "context_images": None,
+        "color_palette": None,
         "unlimited": None,
         "profile_rows": None,
         "size_tiers": None,
@@ -3965,6 +3966,9 @@ def _attach_features(session, meta):
     - context_images: True only when /features answered with modelType MMDIT26B_MODEL and
       contextImages "on" -- the exact condition under which the gate sends a reference as a
       context image. None when /features could not be read.
+    - color_palette: True only when /features lists colorPalette "on" -- the one condition
+      under which the gate lets a colour palette through (it fails closed, unlike the strip
+      rules). False when /features answered without it, None when it could not be read.
     - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
       when /features could not be read. The drawer's dims() applies the identical snap, so
       its "-> W x H px" line is what is sent.
@@ -3990,6 +3994,7 @@ def _attach_features(session, meta):
                 compat[name] = False
     meta["compatibility"] = compat
     meta["context_images"] = None if feats is None else _context_images_on(feats)
+    meta["color_palette"] = None if feats is None else feats["status"].get("colorPalette") == "on"
     ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
     # The gate runs G1 whenever /features answered (an empty modelType included, on the
     # step-8 rule), so the drawer carries a rule exactly then.
@@ -8001,6 +8006,114 @@ def _is_turbo_refusal(err):
             or ("turbo" in s.lower() and "member" in s.lower()))
 
 
+# ---- Colour palettes (Session H decision 4, 2026-09-28) ------------------------------------
+# PixAI's shape, from its own contract: a palette is {overall?, background?, character?}, each
+# group {colors: [{hex: "#RRGGBB", ratio: 0-100}]} with 1-12 colours, and overall or background
+# must be present. A generation carries colorPalette: {name, palette} (the task-parameter
+# schema), which the Generate drawer builds (gallery/src/gen/colorPaletteCore.js). The official
+# palettes are one read-only GET; a user's own palettes live in the app's per-account store,
+# never on PixAI (saving there is a write this app does not make).
+PALETTE_GROUPS = ("overall", "background", "character")
+PALETTE_MAX_COLORS = 12
+PALETTE_NAME_MAX = 50
+PALETTE_NAME_DEFAULT = "Custom palette"
+_PALETTE_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _palette_ratio(raw):
+    """A colour's share as PixAI takes it: a number 0-100, sent as a whole percent. None when
+    it is not a number in range."""
+    if isinstance(raw, bool):
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v < 0 or v > 100:                    # NaN or out of range
+        return None
+    return int(round(v))
+
+
+def _palette_group_colors(raw):
+    """[{hex, ratio}] from one palette group, or None when it is not a valid group: a list of
+    1-12 colours, each a #RRGGBB hex (upper-cased) and a 0-100 ratio (a whole percent)."""
+    colors = raw.get("colors") if isinstance(raw, dict) else None
+    if not isinstance(colors, list) or not 1 <= len(colors) <= PALETTE_MAX_COLORS:
+        return None
+    out = []
+    for c in colors:
+        hx = c.get("hex") if isinstance(c, dict) else None
+        ratio = _palette_ratio(c.get("ratio")) if isinstance(c, dict) else None
+        if not isinstance(hx, str) or not _PALETTE_HEX_RE.match(hx.strip()) or ratio is None:
+            return None
+        out.append({"hex": hx.strip().upper(), "ratio": ratio})
+    return out
+
+
+def clean_color_palette(raw):
+    """The web payload's `color_palette` -> the task parameter `colorPalette`
+    ({name, palette}), or None when the payload carries none (absent, null, or an empty
+    object -- the drawer leaves the key out when no palette applies).
+
+    Anything PixAI's own schema would refuse is refused HERE, before any network call, as a
+    builder refusal (PixAIError): the badge shows it as its note, the create route returns
+    it, and nothing is created or charged. Groups other than overall/background/character
+    are refused rather than dropped (a dropped group would change the picture asked for)."""
+    if raw is None or (isinstance(raw, dict) and not raw):
+        return None
+    bad = "The colour palette isn't valid: "
+    if not isinstance(raw, dict) or not isinstance(raw.get("palette"), dict):
+        raise PixAIError(bad + "it has no colour groups (nothing was sent or charged)")
+    pal = raw["palette"]
+    extra = [k for k in pal if k not in PALETTE_GROUPS]
+    if extra:
+        raise PixAIError(bad + "unknown group {} (nothing was sent or charged)".format(
+            ", ".join(sorted(str(k) for k in extra))[:40]))
+    out = {}
+    for k in PALETTE_GROUPS:
+        if pal.get(k) is None:
+            continue
+        colors = _palette_group_colors(pal[k])
+        if colors is None:
+            raise PixAIError(bad + "{} needs 1 to 12 #RRGGBB colours with 0-100 shares "
+                                   "(nothing was sent or charged)".format(k))
+        out[k] = {"colors": colors}
+    if "overall" not in out and "background" not in out:
+        raise PixAIError(bad + "it needs overall or background colours "
+                               "(nothing was sent or charged)")
+    name = raw.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    return {"name": (name or PALETTE_NAME_DEFAULT)[:PALETTE_NAME_MAX], "palette": out}
+
+
+def color_palette_presets(session):
+    """PixAI's official colour palettes -- GET /v2/color-palettes/presets, READ-ONLY -- as
+    [{id, name, cover_url, palette}], each palette holding only its valid groups (a group that
+    fails _palette_group_colors is left out; a preset left with neither overall nor background
+    is skipped). `cover_url` is PixAI's CDN thumbnail as given, or "". Raises on a failed read;
+    the caller decides how to fail soft."""
+    data = _rest_get(session, "/color-palettes/presets")
+    rows = (data or {}).get("palettes") if isinstance(data, dict) else None
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        raw = r.get("palette") if isinstance(r.get("palette"), dict) else {}
+        pal = {}
+        for k in PALETTE_GROUPS:
+            colors = _palette_group_colors(raw.get(k))
+            if colors:
+                pal[k] = {"colors": colors}
+        if "overall" not in pal and "background" not in pal:
+            continue
+        cover = r.get("coverUrl")
+        out.append({"id": str(r.get("id") or ""),
+                    "name": str(r.get("name") or "")[:PALETTE_NAME_MAX] or "Palette",
+                    "cover_url": cover if isinstance(cover, str) else "",
+                    "palette": pal})
+    return out
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -8131,6 +8244,12 @@ def _gen_parameters(args):
         params["upscaleSampler"] = str(getattr(args, "upscale_sampler", "") or "")
     if getattr(args, "face_fix", False):
         params["enableADetailer"] = True             # their "Face Fix" booster
+    # Colour palette: {name, palette}, already cleaned by clean_color_palette. Emitted only
+    # when asked for, so every other submit is byte-identical; the gate strips it where the
+    # model cannot take it (and says so).
+    cpal = getattr(args, "color_palette", None)
+    if cpal:
+        params["colorPalette"] = cpal
     qtag = str(getattr(args, "quality_tag", "") or "").strip()
     # Quality Tag is MEMBERS-ONLY on PixAI -- crowned in their Add Booster menu on every
     # model, and their own guide says "member-only" in writing. This app was never built to
@@ -8602,7 +8721,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional", negative="", is_private=False,
-                            use_prompt_helper=False, input_video_durations=None):
+                            use_prompt_helper=False, input_video_durations=None, ratio=""):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -8620,7 +8739,12 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     `model: "tbkv1.0.1"` with another model's id. `input_video_durations` (the caller's
     all-or-nothing list, see input_video_durations()) reaches only referenceVideo, and an
     engine that takes no video references refuses them here (build_reference_video_parameters)
-    rather than sending them."""
+    rather than sending them.
+
+    `ratio` (the Generate drawer's Tsubaki aspect-ratio picker, 2026-09-28) reaches only the
+    referenceVideo road, where build_reference_video_parameters sends it for a Tsubaki engine
+    and never as "adaptive"; an i2vPro shot has no such field and never carries it. The web
+    road writes the receipt when it cannot go out (build_request)."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -8659,7 +8783,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
                                                  model_id=mid_num,
-                                                 input_video_durations=input_video_durations)
+                                                 input_video_durations=input_video_durations,
+                                                 ratio=ratio)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -8969,9 +9094,27 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 #     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
 #     come back 2:3), so no copy anywhere may say it does.
 # editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
-# reads both and fails if their aspects or defaults drift apart.
+# reads both and fails if their aspects, defaults, reference caps, resolutions or qualities
+# drift apart.
+#
+# PixAI Edit v4.0 (Session L decision 6, lane w2-small 2026-09-28), copied from its own model
+# record -- the preset roster's version row 1983993578828959744, extra.chatEditing, read
+# 2026-09-28: maxInputImageCount 10; supportedResolutionOptions 1K/2K/4K, defaultResolution
+# 1K; no quality options; no defaultAspectRatio; fourteen aspects down to 1:8 / 8:1, in the
+# record's own order. No published default aspect means PixAI's own client sends no
+# aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
+# Reference Pro. Listed first; the card's default model stays Edit Pro.
 EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
+    "edit-v4": {
+        "model_id": "1983993578828959744",
+        "label": "Edit v4.0", "max_refs": 10,
+        "resolutions": ["1K", "2K", "4K"],
+        "qualities": [],
+        "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
+        "default": {"resolution": "1K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
+    },
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
         "label": "Edit Pro", "max_refs": 4,
@@ -9007,7 +9150,8 @@ FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
-    """model_id for an Edit-card model key ('edit-pro'/'reference-pro'); '' if unknown."""
+    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'reference-pro'); '' if
+    unknown."""
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 
@@ -10393,7 +10537,8 @@ def _check_context_images(session, p):
 def _gate_image_params(session, params):
     """THE per-model image gate: params -> (params, adjusted). See the section comment.
 
-    Order: the 2026-08-25 profile branch (unchanged) -> the Upscale road exits -> /features
+    Order: the 2026-08-25 profile branch (unchanged) -> the colour palette (fails closed,
+    so before the exits) -> the Upscale road exits -> /features
     (unknown -> exit, today's shape) -> G3 context image -> G2 strips -> G6 prompt helper ->
     G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
     shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
@@ -10466,6 +10611,32 @@ def _gate_image_params(session, params):
     # not text-to-image; none of the rules below describe it.
     if "chat" in p:
         return p, adjusted
+    # Colour palette (Session H 4; lane w2-small 2026-09-28, spend review B1). This rule FAILS
+    # CLOSED, unlike every strip rule below, and so runs BEFORE the two early exits: a palette
+    # goes out only on a version whose /features lists colorPalette "on" -- PixAI's own client
+    # never sends one otherwise (its feature tracker reads an unread list as off) -- and never
+    # beside a context image (the site drops it there), on the Upscale road, or when /features
+    # could not be read. Each strip is a receipt. The price cannot move: /v2/task-price takes
+    # no colorPalette.
+    if "colorPalette" in p:
+        cpal = p.get("colorPalette")
+        cf = _model_features(session, params["modelId"])
+        why = None
+        upscale_road = bool(p.get("mediaId") and (p.get("enlarge") or p.get("upscale")))
+        if p.get("contextImages") or (p.get("mediaId") and not upscale_road
+                                      and _context_images_on(cf)):
+            why = "a context image takes no colour palette"
+        elif upscale_road:
+            why = "an upscale takes no colour palette"
+        elif cf is None:
+            why = "couldn't confirm this model takes a colour palette"
+        elif cf["status"].get("colorPalette") != "on":
+            why = "this model takes no colour palette"
+        if why:
+            adjusted.append({"field": "colorPalette",
+                             "asked": cpal.get("name") if isinstance(cpal, dict) else cpal,
+                             "used": None, "why": why})
+            _own().pop("colorPalette")
     # The UPSCALE road: a top-level mediaId together with enlarge or upscale is an Upscale
     # panel request, and it passes the new rules untouched -- no size snap, no strip, never a
     # context image. What PixAI does with an upscale of a Tsubaki picture is unobserved; the
@@ -11445,6 +11616,10 @@ def _gen_args_from_web_payload(p):
         upscale_denoising_steps=num("upscale_denoise_steps", None, int),
         face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
         quality_tag=str(p.get("quality_tag") or "").strip(),
+        # The Generate drawer's colour palette (Session H 4): cleaned or REFUSED here, before
+        # any network call -- a refusal is the badge's note and costs nothing. The gate
+        # decides whether it may go out (see _gate_image_params' palette rule).
+        color_palette=clean_color_palette(p.get("color_palette")),
         kaisuuken_id="", no_card=bool(p.get("no_card")),
         # _gen_parameters reads named attributes only, so carrying the receipt on
         # the namespace costs the submit shape nothing and keeps it beside the values it
@@ -11633,6 +11808,16 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             if unknown:
                 adjusted.append({"field": "inputVideoDurations", "asked": "measured lengths",
                                  "used": [], "why": INPUT_VIDEO_UNKNOWN_WHY})
+        # The Tsubaki Multi-Reference aspect ratio (lane w2-small, 2026-09-28). It rides only the
+        # referenceVideo road of a Tsubaki engine (VIDEO_RATIO_MODELS) -- keyed on the ROAD, not
+        # the shot mode, since an FLF with one frame goes out as a reference video (spend review
+        # N6). Asked for anywhere else it is dropped with a receipt; the drawer never asks there.
+        # "adaptive" is PixAI's default and is never sent, so it needs no receipt.
+        ratio = str(p.get("ratio") or "").strip()
+        if ratio and ratio != "adaptive" and (i2v_road or vmodel not in VIDEO_RATIO_MODELS):
+            adjusted.append({"field": "ratio", "asked": ratio, "used": None,
+                             "why": "only Tsubaki Video's Multi-Reference takes an aspect ratio"})
+            ratio = ""
         if i2v_road:
             # V6: the builder drops both on an engine whose panel has neither; say so.
             if negative and vmodel in VIDEO_NO_NEGATIVE_MODELS:
@@ -11653,7 +11838,8 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             negative=negative,
             is_private=bool(p.get("is_private")),
             use_prompt_helper=bool(p.get("prompt_helper")),
-            input_video_durations=durations)
+            input_video_durations=durations,
+            ratio=ratio)
         return GenerationRequest(mode="video", parameters=params, no_card=no_card,
                                  adjusted=adjusted)
 

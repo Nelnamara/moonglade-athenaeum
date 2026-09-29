@@ -205,6 +205,7 @@ TIER_SNAPSHOT = [
     "/api/next/detail/<media_id> [GET] LOGIN",
     "/api/next/history [GET] LOGIN",
     "/api/next/library [GET] LOGIN",
+    "/api/palettes/presets [GET] LOGIN",
     "/api/panel/cancel [POST] LOCALHOST",
     "/api/panel/run [POST] LOGIN",
     "/api/panel/schedule [GET] LOGIN",

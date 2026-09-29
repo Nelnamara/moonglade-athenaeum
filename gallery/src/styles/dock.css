@@ -440,7 +440,8 @@ html.mg-noblur .mgdock-scrim {
    dashed on rgba(12,10,28,.7) with the 9.5px subtext caption (DC 1457); filled = solid
    rim over the real thumbnail (the DC's tint is a demo stand-in for the picture),
    pointer on both because a click on a filled slot removes it (DC 2868) */
-.mgdock-srcslots { display: flex; flex-wrap: wrap; gap: 6px; }
+/* ...in rows of five: Edit v4.0 and Reference Pro take ten (Session L 6, "Inputs") */
+.mgdock-srcslots { display: grid; grid-template-columns: repeat(5, 54px); gap: 6px; }
 .mgdock-srcslot { position: relative; width: 54px; height: 54px; border-radius: 9px;
   display: grid; place-items: center; overflow: hidden; cursor: pointer; padding: 0;
   font-family: inherit; border: 1px dashed var(--surface1); background: rgba(12, 10, 28, .7); }
@@ -492,6 +493,23 @@ html.mg-noblur .mgdock-scrim {
   background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
 /* the no-quality-knob help line (DC 1532: 10px / 1.45 subtext) */
 .mgdock-editcopy { font-size: 10px; line-height: 1.45; color: var(--subtext); }
+
+/* ---- Session L decision 6 (Small Calls Handoff, L6): Edit v4.0 and the chip rows ---- */
+/* the model select with its emerald "new" tag beside it (L6: 8.5px bold, radius 4) */
+.mgdock-editmodelrow { display: flex; align-items: center; gap: 8px; }
+.mgdock-editmodelrow .mgdock-editmodel { flex: 1 1 auto; min-width: 0; }
+.mgdock-newtag { flex: none; font-size: 8.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+  background: rgba(79, 201, 154, .16); color: var(--emerald); }
+/* RESOLUTION and ASPECT as chips (L6: 10.5px pills, the pick lavender); More ▾ opens the
+   extremes as a second row */
+.mgdock-editchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.mgdock-editchip { padding: 4px 10px; border-radius: 999px; font-size: 10.5px; cursor: pointer;
+  font-family: inherit; border: 1px solid var(--surface1); background: transparent;
+  color: var(--subtext); transition: border-color .2s, color .2s, background .2s; }
+.mgdock-editchip:hover { color: var(--text); }
+.mgdock-editchip.on { border-color: var(--lavender); color: var(--text);
+  background: rgba(182, 146, 230, .12); }
+.mgdock-editmore { animation: mgSlab .42s cubic-bezier(.22, 1, .36, 1) both; }
 
 /* ---- slab 2 under the FIXER sub-tab: REGION (DC 1499-1508) ---- */
 /* the DC's column (1500): flex col, gap 8 */
@@ -1144,7 +1162,7 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 @media (prefers-reduced-motion: reduce) {
   .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
   .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span,
-  .mgdock-tileimg, .mgdock-reusefrom,
+  .mgdock-tileimg, .mgdock-reusefrom, .mgdock-editmore,
   .mgdock-runhalo, .mgdock-shim > i { animation: none; }
   .mgdock-runhalo { opacity: .55; }
   .mgdock-shim > i { left: 30%; }

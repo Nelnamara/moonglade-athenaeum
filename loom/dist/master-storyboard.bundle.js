@@ -2893,6 +2893,16 @@ ${"=".repeat(48)}
     ["korean", "Korean"],
     ["none", "SE only (no dialogue)"]
   ];
+  var VIDEO_RATIOS = ["adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"];
+  var RATIO_MODELS = { "tbkv1.0": true, "tbkv1.0.1": true };
+  var ratioLabel = (r) => r === "adaptive" || !r ? "Auto" : r;
+  function ratioOffered(s) {
+    return !!(s && s.mode === "r2v" && RATIO_MODELS[s.model]);
+  }
+  function ratioForPayload(s) {
+    const r = s && s.ratio;
+    return ratioOffered(s) && r && r !== "adaptive" && VIDEO_RATIOS.indexOf(r) >= 0 ? r : "";
+  }
   var DURATIONS = [5, 6, 10, 15];
   function snapDuration(d, model) {
     d = Number(d);
@@ -2981,6 +2991,7 @@ ${"=".repeat(48)}
   function applyPrefill(s, o) {
     o = o || {};
     s.modeNote = "";
+    s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : "adaptive";
     if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
     if (o.video_model != null) s.model = o.video_model;
     if (o.duration != null) s.duration = snapDuration(o.duration);
@@ -3008,6 +3019,7 @@ ${"=".repeat(48)}
     const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
     const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos")) : [];
     const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
+    const ratio = ratioForPayload(s);
     return {
       mode: s.mode.toUpperCase(),
       prompt: promptText2 || "",
@@ -3028,7 +3040,10 @@ ${"=".repeat(48)}
       // gen). Rides the payload -> i2vPro.usePromptsHelper on the server (I2V/FLF only; the
       // verified referenceVideo shape has no such field), and so lives in priceKey like every
       // other submitted field.
-      prompt_helper: !!s.videoHelper
+      prompt_helper: !!s.videoHelper,
+      // The Tsubaki Multi-Reference aspect ratio -> referenceVideo.ratio. Only when offered and
+      // not Auto; ABSENT otherwise, so every other video payload is byte-identical to before.
+      ...ratio ? { ratio } : {}
     };
   }
   function hasAnyRef(p) {
@@ -3340,6 +3355,69 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/components/VideoDrawer.jsx
+  function RatioGlyph({ r }) {
+    if (!r || r === "adaptive") return /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-rglyph auto", "aria-hidden": "true" });
+    const [x, y] = r.split(":").map(Number);
+    const L = 12;
+    const w = x >= y ? L : Math.max(4, Math.round(L * x / y));
+    const h = y >= x ? L : Math.max(4, Math.round(L * y / x));
+    return /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-rglyph", style: { width: w, height: h }, "aria-hidden": "true" });
+  }
+  function RatioGrid({ value, onPick, big }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-rgrid" + (big ? " big" : ""), role: "radiogroup", "aria-label": "Aspect ratio" }, VIDEO_RATIOS.map((r) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        key: r,
+        type: "button",
+        role: "radio",
+        "aria-checked": value === r,
+        className: "mgd-rchip" + (value === r ? " on" : ""),
+        title: r === "adaptive" ? "Auto \u2014 PixAI works the frame out from the references" : r,
+        onClick: () => onPick(r)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement(RatioGlyph, { r }),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, ratioLabel(r))
+    )));
+  }
+  function RatioPopover({ value, onPick }) {
+    const [open2, setOpen2] = useState(false);
+    const ref = useRef(null);
+    useEffect(() => {
+      if (!open2) return void 0;
+      const down = (e) => {
+        if (ref.current && !ref.current.contains(e.target)) setOpen2(false);
+      };
+      const key = (e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          setOpen2(false);
+        }
+      };
+      document.addEventListener("pointerdown", down, true);
+      window.addEventListener("keydown", key, true);
+      return () => {
+        document.removeEventListener("pointerdown", down, true);
+        window.removeEventListener("keydown", key, true);
+      };
+    }, [open2]);
+    return /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-ratiowrap", ref }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgd-ratiochip" + (open2 ? " open" : ""),
+        "aria-haspopup": "dialog",
+        "aria-expanded": open2,
+        title: "Aspect ratio",
+        onClick: () => setOpen2(!open2)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement(RatioGlyph, { r: value }),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, ratioLabel(value)),
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-ratiocaret" }, "\u25BE")
+    ), open2 ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-ratiopop", role: "dialog", "aria-label": "Aspect Ratio" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-ratiotitle" }, "Aspect Ratio"), /* @__PURE__ */ react_global_shim_default.createElement(RatioGrid, { value, onPick: (r) => {
+      onPick(r);
+      setOpen2(false);
+    } })) : null);
+  }
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
     const { loomCtx, style, className, dock } = props;
@@ -3363,6 +3441,8 @@ ${"=".repeat(48)}
       audioLanguage: "english",
       videoHelper: false,
       // DC 1919: 'Video prompt helper' off by default (the opposite of image gen)
+      ratio: "adaptive",
+      // the Tsubaki Multi-Reference aspect ratio; Auto (nothing sent) by default
       negative: "",
       modeNote: "",
       rendering: false,
@@ -3550,6 +3630,12 @@ ${"=".repeat(48)}
     const pickVideoModel = (v) => {
       st.current.model = v;
       applyModelGating2(true);
+      reprice();
+    };
+    const pickRatio = (r) => {
+      if (st.current.ratio === r || VIDEO_RATIOS.indexOf(r) < 0) return;
+      st.current.ratio = r;
+      rerender();
       reprice();
     };
     const payload = () => buildPayload(st.current, promptText2());
@@ -3833,7 +3919,7 @@ ${"=".repeat(48)}
       },
       /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.rendering ? "Rendering\u2026" : "\u2726 Generate video")
     ) : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgd-go", disabled: !canGo, onClick: doGenerate }, s.rendering ? "Rendering\u2026" : "Generate video");
-    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s"), reuse && /* @__PURE__ */ react_global_shim_default.createElement(
+    const topRow = inDock ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-modelchip static", title: "Video engine \u2014 set in the video settings" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-chipph" }), /* @__PURE__ */ react_global_shim_default.createElement("span", null, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgdock-frames" }, SHOT_LABEL[s.mode] || s.mode, " \xB7 ", s.duration, "s"), ratioOffered(s) ? /* @__PURE__ */ react_global_shim_default.createElement(RatioPopover, { value: s.ratio, onPick: pickRatio }) : null, reuse && /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
         type: "button",
@@ -3889,7 +3975,7 @@ ${"=".repeat(48)}
           if (f) uploadAudio(f);
         }
       }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, disabled: !modelTakes(s.model, "camera"), title: modelTakes(s.model, "camera") ? void 0 : "Camera \u2014 not used by this engine (kept, not sent)", onChange: (e) => {
+    ), !inDock && !loomCtx && ratioOffered(s) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-ratioblock" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ASPECT RATIO"), /* @__PURE__ */ react_global_shim_default.createElement(RatioGrid, { value: s.ratio, onPick: pickRatio, big: true })) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, disabled: !modelTakes(s.model, "camera"), title: modelTakes(s.model, "camera") ? void 0 : "Camera \u2014 not used by this engine (kept, not sent)", onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
       reprice();

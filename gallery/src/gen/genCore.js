@@ -21,6 +21,7 @@ import {
   effectiveCreativity, effectiveTier, onContextSide, profileLocked, profileRows, ratioIndexOf,
   sizeTiers, tierDims,
 } from "./tsubakiCore.js";
+import { paletteForPayload } from "./colorPaletteCore.js";
 
 // PixAI's own captured Enhance Details values (task 2039053268124647852,
 // 2026-07-28) -- same constants the classic chip carries.
@@ -377,6 +378,7 @@ export function buildPayload(s) {
   // the classic sends its ||25 fallback to both (review: sending null to one and
   // a number to the other made the upscale pass stop mirroring sampling steps).
   const eff = s.steps === "" ? STEPS_FALLBACK : Number(s.steps);
+  const palette = paletteForPayload(s, ctxOn);
   return {
     version_id: s.model ? s.model.version_id : "",
     model_id: s.model ? s.model.model_id : "",
@@ -417,6 +419,11 @@ export function buildPayload(s) {
     ...(ctxIds.length ? { context_images: ctxIds, image_refs: imageRefs(s.prompt) } : {}),
     // Recipes are lane w2-recipes'; the dock sends their ids on the LoRA side, never held ones.
     ...(recipeIds.length ? { recipeIds } : {}),
+    // The colour palette (Session H 4, gen/colorPaletteCore.js): only with a palette applied,
+    // a version whose /features lists colorPalette "on", and no context image -- the pick is
+    // HELD otherwise, never cleared. Absent when it does not apply, so an ordinary payload is
+    // byte-identical to before.
+    ...(palette ? { color_palette: palette } : {}),
   };
 }
 
@@ -443,6 +450,10 @@ export function versionPatch(v) {
     // without them (only the latest row carries them) never inherits the previous one's.
     size_rule: v.size_rule || null,
     context_images: v.context_images === true,
+    // Whether this version takes a colour palette (Session H 4): true only when /features
+    // lists colorPalette "on"; false when it answered without it; null when unread. The
+    // palette is sent only on true (colorPaletteCore.paletteForPayload).
+    color_palette: v.color_palette === true ? true : (v.color_palette === false ? false : null),
     // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
     // null = the server could not determine them -> the drawer dims nothing, exactly as
     // before. An array (including []) is a real answer.
@@ -571,4 +582,5 @@ export const GEN_DEFAULTS = {
   creativity: "medium", // decision 5's stops (off | low | medium)
   recipes: [],          // lane w2-recipes' row: [{id, title, cover}]
   member: null,         // PixAI membership (true / false / null = unknown), from /api/account
+  palette: null,        // the applied colour palette {name, palette, source, id, from} (Session H 4)
 };

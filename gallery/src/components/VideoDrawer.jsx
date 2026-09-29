@@ -15,12 +15,74 @@ import {
   applySetRefs as applySetRefsState,
   applyPrefill as applyPrefillState,
   flfMissingStart as flfMissingStartOf,
+  VIDEO_RATIOS, ratioLabel, ratioOffered,
 } from "../gen/videoDrawerCore.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import { CEILING_MS } from "../notify/pollCadence.js";
 import { chipify as refChipify, promptText as refPromptText } from "../gen/refChips.js";
 import "../styles/gen-drawer.css";
+
+/* ---- the Tsubaki Multi-Reference aspect ratio (reference 36: PixAI's "Aspect Ratio" popover on
+   the prompt bar -- Auto · 1:1 · 2:3 · 3:2 · 3:4 · 4:3 · 9:16 · 16:9 · 21:9, each with its shape).
+   Lane w2-small, 2026-09-28. In the dock it is a chip on the composer's top row that opens the
+   popover upward, PixAI's own pattern; elsewhere (the phone's Video mode) the same grid sits in
+   the SHOT MODE slab, where CAMERA stands for the other modes. The pick rides the payload as
+   `ratio` only for a Tsubaki engine in Multi-Reference and never as Auto
+   (videoDrawerCore.ratioForPayload). ---- */
+function RatioGlyph({ r }) {
+  if (!r || r === "adaptive") return <span className="mgd-rglyph auto" aria-hidden="true" />;
+  const [x, y] = r.split(":").map(Number);
+  const L = 12;
+  const w = x >= y ? L : Math.max(4, Math.round((L * x) / y));
+  const h = y >= x ? L : Math.max(4, Math.round((L * y) / x));
+  return <span className="mgd-rglyph" style={{ width: w, height: h }} aria-hidden="true" />;
+}
+function RatioGrid({ value, onPick, big }) {
+  return (
+    <div className={"mgd-rgrid" + (big ? " big" : "")} role="radiogroup" aria-label="Aspect ratio">
+      {VIDEO_RATIOS.map((r) => (
+        <button key={r} type="button" role="radio" aria-checked={value === r}
+          className={"mgd-rchip" + (value === r ? " on" : "")}
+          title={r === "adaptive" ? "Auto — PixAI works the frame out from the references" : r}
+          onClick={() => onPick(r)}>
+          <RatioGlyph r={r} /><span>{ratioLabel(r)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+function RatioPopover({ value, onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // Escape closes the popover only -- stopped here so the dock under it stays open.
+    const key = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <span className="mgd-ratiowrap" ref={ref}>
+      <button type="button" className={"mgd-ratiochip" + (open ? " open" : "")}
+        aria-haspopup="dialog" aria-expanded={open} title="Aspect ratio"
+        onClick={() => setOpen(!open)}>
+        <RatioGlyph r={value} /><span>{ratioLabel(value)}</span><span className="mgd-ratiocaret">▾</span>
+      </button>
+      {open ? (
+        <div className="mgd-ratiopop" role="dialog" aria-label="Aspect Ratio">
+          <div className="mgd-ratiotitle">Aspect Ratio</div>
+          <RatioGrid value={value} onPick={(r) => { onPick(r); setOpen(false); }} />
+        </div>
+      ) : null}
+    </span>
+  );
+}
 
 /* VideoDrawer -- the React port of static/mg-generate-drawer.js's <mg-generate-drawer> (no-vanilla
    campaign, component 7, the last one). The shared VIDEO generation form: 3 modes (i2v / first-
@@ -111,6 +173,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     audioGen: false,
     audioLanguage: "english",
     videoHelper: false,  // DC 1919: 'Video prompt helper' off by default (the opposite of image gen)
+    ratio: "adaptive",   // the Tsubaki Multi-Reference aspect ratio; Auto (nothing sent) by default
     negative: "",
     modeNote: "",
     rendering: false,
@@ -294,6 +357,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // adjusts the shot mode to a supported one and clamps duration to the engine's cap), then
   // re-price. userDriven=true so a dropped shot mode explains itself (DC pickVideoModel note).
   const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); };
+  // The aspect ratio pick (Tsubaki, Multi-Reference). HELD across a mode or engine switch like
+  // the other held fields; ratioForPayload sends it only where it applies. Re-prices, because
+  // it rides the priced referenceVideo block.
+  const pickRatio = (r) => {
+    if (st.current.ratio === r || VIDEO_RATIOS.indexOf(r) < 0) return;
+    st.current.ratio = r;
+    rerender();
+    reprice();
+  };
 
   // ---- payload + live cost -------------------------------------------------------------------
   // payload/hasAnyRef/flfMissingStart are the PURE spend-gate predicates (videoDrawerCore.js); the
@@ -645,6 +717,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         <span>{chosenModel ? chosenModel.label : s.model}</span>
       </span>
       <span className="mgdock-frames">{SHOT_LABEL[s.mode] || s.mode} · {s.duration}s</span>
+      {ratioOffered(s) ? <RatioPopover value={s.ratio} onPick={pickRatio} /> : null}
       {reuse && (
         <button type="button" className={"mgdock-reusefrom" + (reuse.partial ? " warn" : "")}
           onClick={() => setReuseChip(null)}
@@ -727,6 +800,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               its space but goes invisible (cameraVis: visibility:hidden) -- the payload already
               drops camera_movement for r2v. Camera rides the priced payload (i2vPro.cameraMovement),
               so each change re-prices like every other priced field. */}
+          {/* The aspect ratio outside the dock (the phone's Video mode): the same grid inline,
+              44 px targets. Not in the Loom, whose shots carry no ratio of their own. */}
+          {!inDock && !loomCtx && ratioOffered(s) ? (
+            <div className="mgd-ratioblock">
+              <div className="mgd-sec">ASPECT RATIO</div>
+              <RatioGrid value={s.ratio} onPick={pickRatio} big />
+            </div>
+          ) : null}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
             <div className="mgd-sec">CAMERA</div>
             <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} disabled={!modelTakes(s.model, "camera")} title={modelTakes(s.model, "camera") ? undefined : "Camera — not used by this engine (kept, not sent)"} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
