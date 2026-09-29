@@ -391,6 +391,41 @@ button.mgcp-bannerpill .ic { font-style: normal; font-size: 14px; }
 .mgcp-sliderval { font-family: ui-monospace, Menlo, monospace; color: var(--subtext); }
 .mgcp-sliderrow input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .mgcp-bannerchips { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+/* ---- THE BRANDING BEAT (Session L, decision 5; Small Calls Handoff, section L5) ----------
+   The first Panel open after the Branding unlock: the old tile's contents cross-fade into
+   "Branding & skins" (0.4 s), then the ✦ Branding tab slides in from the right with one gold
+   shimmer across its border (0.8 s, ease-out). 1.2 s in all; lib/brandingBeatCore.js holds the
+   same numbers and loom/test/branding-beat.test.js holds the two together. Reduced motion:
+   both simply present (the JS never applies the classes; the media query below is the
+   backstop). The tab's rest state is the tab as it ships, so a keyframe with no end value
+   lands exactly on it and the class can leave without a jump. */
+.mgcp-tile5 { position: relative; }
+.mgcp-tile-hold { opacity: 0; }
+.mgcp-tile-in { animation: mgcp-beat-in .4s ease both; }
+.mgcp-tileghost { position: absolute; inset: 0; box-sizing: border-box; border-radius: inherit;
+  background: var(--mantle); padding: 13px 15px; pointer-events: none;
+  animation: mgcp-beat-out .4s ease both; }
+.mgcp-tab-arrive { position: relative; animation: mgcp-tab-arrive .8s ease-out both; }
+.mgcp-tab-arrive::after { content: ""; position: absolute; inset: 0; box-sizing: border-box;
+  border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, rgba(212,175,55,.9) 50%, transparent 70%) 150% 0 / 250% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: mgcp-tab-shimmer .8s ease-out both; }
+@keyframes mgcp-beat-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mgcp-beat-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mgcp-tab-arrive {
+  0% { opacity: 0; transform: translateX(28px); border-color: rgba(212,175,55,.5);
+    box-shadow: 0 0 0 rgba(212,175,55,0); }
+  55% { opacity: 1; transform: translateX(0); border-color: rgba(212,175,55,.5); color: var(--gold);
+    box-shadow: 0 0 12px rgba(212,175,55,.45); }
+}
+@keyframes mgcp-tab-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .mgcp-tile-in, .mgcp-tab-arrive, .mgcp-tab-arrive::after { animation: none; }
+  .mgcp-tileghost, .mgcp-tab-arrive::after { display: none; }
+}
+
 /* Maintenance's post-unlock pointer tile (DC:284). */
 .mgcp-openbrandbtn { align-self: flex-start; padding: 8px 14px; border-radius: 8px; font-size: 12px;
   font-weight: 600; cursor: pointer; background: rgba(182,146,230,.14); border: 1px solid var(--accent);
