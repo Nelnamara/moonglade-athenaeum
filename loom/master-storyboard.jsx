@@ -85,6 +85,10 @@ import {
 import {
   emptyFind, findActive, findMatches, findChips, chipOn, toggleChip, currentIndex, stepIndex, findCountText,
 } from "./src/loom-find-core.js";
+// Session P, Stage B2 (NOTES P9): the continuity ribbon's pairs and its Lab colour-jump measure.
+import {
+  RIBBON_GRID, ribbonPairs, frameUrl, meanDeltaE, pairFlagged, pairTitle,
+} from "./src/loom-ribbon-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -193,6 +197,9 @@ const LV_TINTS = [
 // Session P (P3): how much taller the timeline's full view is for the music bed's row (36 px,
 // the page's), its controls line and the one-line note under them.
 const LV_BED_ZONE_H = 92;
+// Session P (P9): and for the continuity ribbon under the bed row (its caption and one row of
+// frame pairs, with room for the peach dot and a scrollbar).
+const LV_RIBBON_ZONE_H = 84;
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -273,6 +280,27 @@ const STYLES = `
 .sb-edlfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 .sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
+/* Session P (P9): THE CONTINUITY RIBBON -- the Loom Handoff page's strip, its own sizes and tokens
+   (70x42 frames, a 7px wrap with a surface0 border, peach-tinted and dotted when flagged). In the
+   global sheet because both the desktop timeline and the phone's review panel draw it. */
+.lv-ribbon{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+.lv-ribcap{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-ribrow{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 4px 0;}
+.lv-ribpair{position:relative;flex:none;display:flex;gap:2px;padding:3px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface0);outline:none;}
+.lv-ribpair.flag{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lv-ribpair:hover,.lv-ribpair:focus-visible{border-color:var(--lavender);}
+.lv-ribframe{position:relative;width:70px;height:42px;border-radius:5px;overflow:hidden;box-sizing:border-box;
+  display:flex;align-items:flex-end;background-size:cover;background-position:center;}
+.lv-ribframe img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.lv-riblab{position:relative;z-index:1;padding:2px 4px;font-size:8.5px;line-height:1.1;white-space:nowrap;
+  color:color-mix(in srgb,var(--text) 85%,transparent);text-shadow:0 1px 2px rgba(0,0,0,.65);}
+.lv-ribdot{position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:var(--peach);
+  box-shadow:0 0 0 2px var(--base);}
+.lv-ribnone{font-size:10px;color:var(--overlay0);}
+.lv-ribbon.compact .lv-ribrow{scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+.lv-ribbon.compact .lv-ribpair{scroll-snap-align:start;}
+.lv-ribbon.compact .lv-ribframe{width:84px;height:50px;}
 .sb-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
   background:#000;cursor:col-resize;max-width:460px}
@@ -1894,7 +1922,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // to the nearest named state on release. Session P (P3): the full view also carries the
   // music bed's row and controls under the reel (LV_BED_ZONE_H), so it is that much taller;
   // slim is unchanged.
-  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H };
+  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H };
   const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
   const tlPointerMove = (e) => {
     if (!tlDrag.current.dragging) return;
@@ -2361,6 +2389,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const el = typeof document !== "undefined" ? document.querySelector('.lv-card[data-card-id="' + id + '"]') : null;
     if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   };
+  // THE CONTINUITY RIBBON's pair click (P9, "clicking a pair opens both shots"): the pair's
+  // second shot is selected and find narrows to exactly those two shots, so both cards ring and
+  // the reel shows them. A selection / find change only -- never a render (a root of
+  // loom-no-auto-render.test.js). Esc (or clearing the field) lets them go.
+  const openRibbonPair = (pair) => {
+    setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+    setSelShot(pair.b.cardId);
+    scrollToCard(pair.b.cardId);
+  };
+  // A shot's own reel tint -- the ribbon's stand-in when a frame can't be produced here.
+  const tintByCard = new Map(entries.map((x) => [x.c.id, LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length]]));
+  const tintOfCard = (id) => tintByCard.get(id) || LV_TINTS[0];
   // ⌘/Ctrl F focuses the field while the Loom's board is on screen (not over Deep Focus); Esc
   // anywhere outside a text field clears an active find, as the page's own handler does.
   useEffect(() => {
@@ -2692,6 +2732,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           {showTlPreview && bedApi && (
             <BedRow entries={entries} scale={scale} bed={bed} segs={bedSegs} plan={bedPlanNow}
               peaks={bedPeaks} api={bedApi} />
+          )}
+          {/* Session P (P9): the continuity ribbon, in the full view only, under the bed row. */}
+          {showTlPreview && (
+            <RibbonStrip pairs={ribbonPairs(entries, cardById)} tintOf={tintOfCard} onOpen={openRibbonPair} />
           )}
           <div className="lv-tlinfo">{sel
             ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
@@ -9790,6 +9834,74 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
           <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
             <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>
         ) : null}
+    </div>
+  );
+}
+
+/* THE CONTINUITY RIBBON (Session P, NOTES P9; Loom Handoff.dc.html section A's strip under the
+   reel, "close frame → next open frame"). One pair per cut between rendered shots, from their ★
+   takes (loom-ribbon-core.js's ribbonPairs). Each frame is GET /api/loom/frame -- a local ffmpeg
+   still, never an upload, never PixAI -- and the colour jump is measured HERE, from the two images
+   drawn into a small same-origin canvas: mean CIE76 ΔE in Lab, over 25 = a peach dot, labelled a
+   heuristic. A frame that cannot be produced shows the shot's own reel tint and no ΔE (only a
+   stale anchor can flag that pair). A click is the owner's "open both" (openRibbonPair: a
+   selection / find change, never a render). `compact` is the phone's review-panel strip. */
+function RibbonFrame({ url, tint, label, onState }) {
+  const [ok, setOk] = useState(null);
+  useEffect(() => { setOk(null); }, [url]);
+  return (
+    <div className="lv-ribframe" style={{ backgroundImage: tint }}>
+      <img src={url} alt="" draggable={false} style={ok === false ? { display: "none" } : undefined}
+        onLoad={(ev) => { setOk(true); onState(ev.currentTarget); }} onError={() => { setOk(false); onState(null); }} />
+      <span className="lv-riblab">{label}</span>
+    </div>
+  );
+}
+function RibbonPair({ pair, tintOf, onOpen }) {
+  const ua = frameUrl(pair.a.mid, pair.a.at), ub = frameUrl(pair.b.mid, pair.b.at);
+  const imgs = useRef({ a: undefined, b: undefined });
+  const [meas, setMeas] = useState({ frames: "loading", mean: null });
+  useEffect(() => { imgs.current = { a: undefined, b: undefined }; setMeas({ frames: "loading", mean: null }); }, [ua, ub]);
+  const got = (side) => (el) => {
+    imgs.current[side] = el;
+    const { a, b } = imgs.current;
+    if (a === undefined || b === undefined) return;
+    if (!a || !b) { setMeas({ frames: "missing", mean: null }); return; }
+    let mean = null;
+    try {
+      const cv = document.createElement("canvas");
+      cv.width = RIBBON_GRID.w; cv.height = RIBBON_GRID.h;
+      const cx = cv.getContext("2d", { willReadFrequently: true });
+      cx.drawImage(a, 0, 0, cv.width, cv.height);
+      const da = cx.getImageData(0, 0, cv.width, cv.height).data;
+      cx.clearRect(0, 0, cv.width, cv.height);
+      cx.drawImage(b, 0, 0, cv.width, cv.height);
+      const db = cx.getImageData(0, 0, cv.width, cv.height).data;
+      mean = meanDeltaE(da, db);
+    } catch (e) { mean = null; }
+    setMeas({ frames: mean == null ? "missing" : "ok", mean });
+  };
+  const flag = pairFlagged(pair, meas.frames === "ok" ? meas.mean : null);
+  const title = pairTitle(pair, meas.frames === "ok" ? meas.mean : null, meas.frames)
+    + (meas.frames === "ok" && meas.mean != null ? " · mean Lab ΔE " + meas.mean.toFixed(1) : "")
+    + " — click to open both shots";
+  return (
+    <div className={"lv-ribpair" + (flag ? " flag" : "")} role="button" tabIndex={0} title={title}
+      data-pair={pair.a.code + ">" + pair.b.code} data-delta={meas.mean == null ? "" : meas.mean.toFixed(2)}
+      onClick={() => onOpen(pair)} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onOpen(pair); } }}>
+      <RibbonFrame url={ua} tint={tintOf(pair.a.cardId)} label={pair.a.code + " out"} onState={got("a")} />
+      <RibbonFrame url={ub} tint={tintOf(pair.b.cardId)} label={pair.b.code + " in"} onState={got("b")} />
+      {flag && <span className="lv-ribdot" />}
+    </div>
+  );
+}
+function RibbonStrip({ pairs, tintOf, onOpen, compact }) {
+  return (
+    <div className={"lv-ribbon" + (compact ? " compact" : "")}>
+      <div className="lv-ribcap">CONTINUITY RIBBON &middot; close frame &rarr; next open frame</div>
+      {pairs.length
+        ? <div className="lv-ribrow">{pairs.map((p) => <RibbonPair key={p.key} pair={p} tintOf={tintOf} onOpen={onOpen} />)}</div>
+        : <div className="lv-ribnone">Nothing to compare yet: the ribbon pairs each rendered shot with the next rendered one.</div>}
     </div>
   );
 }

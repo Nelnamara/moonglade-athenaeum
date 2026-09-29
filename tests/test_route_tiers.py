@@ -208,6 +208,7 @@ TIER_SNAPSHOT = [
     "/api/loom/export-edl [POST] LOGIN",     # Session P (P4): the editor handoff zip
     "/api/loom/export-file [GET] LOGIN",
     "/api/loom/export-status [GET] LOGIN",
+    "/api/loom/frame [GET] LOGIN",           # Session P (P9): a local still for the ribbon, no upload
     "/api/loom/generate [POST] LOGIN",
     "/api/loom/get [GET] LOGIN",
     "/api/loom/handoff [POST] LOGIN",

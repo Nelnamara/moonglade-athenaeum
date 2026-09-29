@@ -405,6 +405,8 @@ const ROOTS = [
   "openCastLibrary", "toggleCastTick", "editLibraryMember", "addLibraryMember",
   // Stage B2 -- P8, find in storyboard: typing / a chip, ↑ ↓ / Enter, Esc.
   "runFind", "stepFind", "clearFind",
+  // Stage B2 -- P9, the continuity ribbon: a pair's "open both shots" (a selection / find change).
+  "openRibbonPair",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -648,7 +650,9 @@ describe("the pure modules can reach nothing", () => {
     // Stage B2 -- the cast library's views and patches (P7): the board walk and tag rule only
     ["src/loom-cast-library.js", ["./loom-core.js"]],
     // Stage B2 -- find in storyboard (P8): the prompt text and the stale-anchor view only
-    ["src/loom-find-core.js", ["./loom-core.js", "./loom-takes-core.js"]]]) {
+    ["src/loom-find-core.js", ["./loom-core.js", "./loom-takes-core.js"]],
+    // Stage B2 -- the continuity ribbon's pairs and colour measure (P9): the ★ take view only
+    ["src/loom-ribbon-core.js", ["./loom-core.js", "./loom-takes-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {

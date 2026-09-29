@@ -1055,6 +1055,19 @@ LOOM_EDL_MAX_CSV_CHARS = 4 * 1024 * 1024
 LOOM_EDL_MAX_CLIPS = 2000
 LOOM_EXPORT_SWEEP_AGE_S = 3600
 
+# THE CONTINUITY RIBBON'S FRAMES (Session P, P9; review F18). GET /api/loom/frame extracts ONE
+# small still from a local clip -- ffmpeg on this machine, never an upload, never PixAI -- and
+# keeps it in out_dir/loom/_frames/ as <mid>_<frame>.png, the time quantised to a 24 fps frame
+# so a trim dragged across a second makes at most 24 files, not one per float. The cache is
+# capped by count and by bytes, least-recently-used first, swept on every write; only files of
+# exactly this name shape are ever swept (the ✂ splice's own <mid>_last.png is not).
+LOOM_FRAME_FPS = 24
+LOOM_FRAME_WIDTH = 160
+LOOM_FRAME_MAX_SECONDS = 6 * 3600
+LOOM_FRAME_CACHE_MAX_FILES = 600
+LOOM_FRAME_CACHE_MAX_BYTES = 64 * 1024 * 1024
+LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7})\.png$")
+
 # The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
 LOOM_BED_FADE_IN = 2.0
 LOOM_BED_FADE_OUT = 3.0
@@ -24573,6 +24586,112 @@ __DESIGN_TOKENS__
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
+
+    # ---- THE CONTINUITY RIBBON'S FRAMES (Session P, NOTES P9; BUILD-w5-p §5.2; review F18) ----
+    # One small still from a LOCAL clip, for the ribbon's close-frame / next-open-frame pairs:
+    # ffmpeg on this machine through the app's one frame primitive (core.frame_at), scaled to
+    # LOOM_FRAME_WIDTH, cached as out_dir/loom/_frames/<mid>_<frame>.png. Unlike
+    # /api/loom/handoff there is NO upload and no PixAI session at all -- it cannot spend and it
+    # never talks to PixAI. The time is quantised to a 24 fps frame (at most 24 files per second
+    # of clip, whatever the trims do), and the cache is LRU-capped by count and bytes on every
+    # write, touching only files of exactly the ribbon's name shape.
+    _loom_frame_lock = threading.Lock()
+
+    def _loom_frame_sweep(fdir):
+        """Keep the newest-used ribbon frames within LOOM_FRAME_CACHE_MAX_FILES files and
+        LOOM_FRAME_CACHE_MAX_BYTES bytes; remove the rest. Other files in _frames are never
+        counted or touched. Returns the names removed."""
+        found = []
+        try:
+            for f in fdir.iterdir():
+                if not LOOM_FRAME_FILE_RE.match(f.name):
+                    continue
+                try:
+                    st = f.stat()
+                except OSError:
+                    continue
+                found.append((st.st_mtime, f.name, st.st_size, f))
+        except OSError:
+            return []
+        found.sort(key=lambda x: (x[0], x[1]), reverse=True)   # most recently used first
+        removed, count, total = [], 0, 0
+        for _mtime, name, size, f in found:
+            count += 1
+            total += size
+            if count <= LOOM_FRAME_CACHE_MAX_FILES and total <= LOOM_FRAME_CACHE_MAX_BYTES:
+                continue
+            try:
+                f.unlink()
+                removed.append(name)
+            except OSError:
+                pass
+        return removed
+
+    @app.route("/api/loom/frame")
+    @tier(LOGIN)
+    def loom_frame():
+        """GET ?mid=<media id>&at=<seconds> -> a PNG of that clip's frame at `at`, ~160 px wide.
+        400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
+        could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
+        placeholder tint. Login required; local only."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        mid = (request.args.get("mid") or "").strip()
+        if not LOOM_MEDIA_ID_RE.match(mid):
+            return jsonify({"error": "mid must be a media id"}), 400
+        try:
+            at = float(request.args.get("at", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "at must be a number of seconds"}), 400
+        if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
+            return jsonify({"error": "at is out of range"}), 400
+        frame = int(round(at * LOOM_FRAME_FPS))
+        fdir = out_dir / "loom" / "_frames"
+        png = fdir / "{}_{}.png".format(mid, frame)
+        if png.is_file():
+            try:
+                os.utime(png, None)            # used now: the LRU keeps it
+            except OSError:
+                pass
+            return send_file(str(png), mimetype="image/png", max_age=3600)
+        # A COMPLETE library file only (Invariant 3): a .part download or a zero-byte file is
+        # never read -- the same resolver the EDL zip uses.
+        vid = _loom_complete_clip(mid)
+        if vid is None:
+            return jsonify({"error": "that clip is not on this machine"}), 404
+        import moonglade_backup as core
+        fdir.mkdir(parents=True, exist_ok=True)
+        tag = secrets.token_hex(6)
+        raw = fdir / ".raw-{}-{}.png".format(tag, frame)
+        small = fdir / ".small-{}-{}.png".format(tag, frame)
+        try:
+            if not core.frame_at(str(vid), frame / float(LOOM_FRAME_FPS), str(raw)):
+                return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
+            src = raw
+            if Image is not None:
+                try:
+                    with Image.open(str(raw)) as im:
+                        w, h = im.size
+                        rgb = im.convert("RGB")
+                    if w > LOOM_FRAME_WIDTH:
+                        rgb = rgb.resize((LOOM_FRAME_WIDTH, max(1, int(round(h * LOOM_FRAME_WIDTH / float(w))))))
+                    rgb.save(str(small), "PNG")
+                    src = small
+                except Exception:                              # noqa: BLE001
+                    return jsonify({"error": "that frame could not be read"}), 404
+            os.replace(str(src), str(png))
+        finally:
+            for t in (raw, small):
+                try:
+                    t.unlink()
+                except OSError:
+                    pass
+        with _loom_frame_lock:
+            _loom_frame_sweep(fdir)
+        if not png.is_file():
+            return jsonify({"error": "the frame cache is full"}), 404
+        return send_file(str(png), mimetype="image/png", max_age=3600)
 
     # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
     # already chunks at 400 for SQLite's variable limit, so the number here only bounds how

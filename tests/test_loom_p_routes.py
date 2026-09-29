@@ -324,14 +324,17 @@ def test_every_new_route_is_login_tier(tmp_path):
     anon = create_app(tmp_path).test_client()
     for method, path in (("POST", "/api/loom/bed"), ("GET", "/api/loom/bed?file=x"),
                          ("GET", "/api/loom/beds/unused"), ("POST", "/api/loom/beds/sweep"),
-                         ("POST", "/api/loom/export-edl"), ("GET", "/api/loom/prompts?ids=1")):
+                         ("POST", "/api/loom/export-edl"), ("GET", "/api/loom/prompts?ids=1"),
+                         ("GET", "/api/loom/frame?mid=1&at=0")):
         r = anon.open(path, method=method, json={} if method == "POST" else None)
         assert r.status_code == 401, (method, path, r.status_code)
 
 
 _NEW_FUNCS = ("api_loom_bed_upload", "api_loom_bed_get", "api_loom_beds_unused", "api_loom_beds_sweep",
               "api_loom_export_edl", "api_loom_prompts", "_loom_bed_path", "_loom_store_bed",
-              "_loom_account_projects", "_loom_unused_beds", "_loom_complete_clip", "_loom_beds_dir")
+              "_loom_account_projects", "_loom_unused_beds", "_loom_complete_clip", "_loom_beds_dir",
+              # Stage B2 (P9): the continuity ribbon's frame route and its cache sweep
+              "loom_frame", "_loom_frame_sweep")
 _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "_gen_session",
           "_make_session", "upload_media", "submit_fixer"}
 
@@ -668,3 +671,98 @@ def test_sniff_audio_ext():
     assert g.sniff_audio_ext(M4A) == "m4a"
     for bad in (MP4_VIDEO, PNG, b"", b"RIFF\x00\x00\x00\x00AVI ", b"\xff\xd8\xff\xe0jpeg"):
         assert g.sniff_audio_ext(bad) is None, bad[:12]
+
+
+# ---- the continuity ribbon's frames (P9; review F18) ------------------------------------------------
+# GET /api/loom/frame: a small local still, cached as <mid>_<frame>.png, the time quantised to
+# 1/24 s, the cache LRU-capped by count and bytes and swept on write -- no upload, never PixAI.
+# ffmpeg is not installed here, so core.frame_at (the app's one frame primitive) is faked with a
+# recorder that writes a real PNG; the route's own scaling, naming and cache are what is tested.
+
+@pytest.fixture
+def frames(clips, monkeypatch):
+    calls = []
+
+    def fake_frame_at(path, t, out, *, trim_aware=True):
+        from PIL import Image
+        calls.append((Path(path).name, t, Path(out).name))
+        Image.new("RGB", (640, 360), (40 + len(calls), 60, 120)).save(out, "PNG")
+        return out
+    monkeypatch.setattr(core, "frame_at", fake_frame_at)
+    clips["calls"] = calls
+    clips["fdir"] = clips["tmp"] / "loom" / "_frames"
+    return clips
+
+
+def _frame(cli, mid, at):
+    return cli.get("/api/loom/frame", query_string={"mid": mid, "at": at})
+
+
+def test_a_frame_is_a_small_png_named_by_its_quantised_frame(frames):
+    from PIL import Image
+    cli = frames["cli"]
+    r = _frame(cli, "7001", "1.0")
+    assert r.status_code == 200 and r.mimetype == "image/png"
+    assert Image.open(io.BytesIO(r.data)).size == (160, 90), "scaled to LOOM_FRAME_WIDTH, aspect kept"
+    assert frames["calls"] == [("shot_7001.mp4", 1.0, frames["calls"][0][2])]
+    assert (frames["fdir"] / "7001_24.png").is_file()
+    assert _frame(cli, "7001", "1.01").status_code == 200, "1.01 s is still frame 24"
+    assert len(frames["calls"]) == 1, "served from the cache, no second extraction"
+    assert _frame(cli, "7001", "1.03").status_code == 200
+    assert frames["calls"][1][1] == 25 / 24.0, "the extraction asks for the quantised time"
+    assert sorted(f.name for f in frames["fdir"].iterdir()) == ["7001_24.png", "7001_25.png"], "no temp file left"
+    assert frames["traps"] == []
+
+
+@pytest.mark.parametrize("mid", ["../7001", "7001/../x", "abc", "local_xyz", "local_0123456789abc", "", "7001.png", "-1"])
+def test_a_bad_media_id_is_refused_before_anything_runs(frames, mid):
+    assert _frame(frames["cli"], mid, "1").status_code == 400
+    assert frames["calls"] == [] and not frames["fdir"].exists()
+
+
+@pytest.mark.parametrize("at", ["", "x", "-1", "nan", "inf", "-inf", str(6 * 3600 + 1)])
+def test_a_bad_time_is_refused_before_anything_runs(frames, at):
+    assert _frame(frames["cli"], "7001", at).status_code == 400
+    assert frames["calls"] == []
+
+
+def test_a_clip_not_on_this_machine_or_with_no_frame_is_a_404_and_leaves_nothing(frames, monkeypatch):
+    cli = frames["cli"]
+    assert _frame(cli, "9999", "1").status_code == 404
+    assert _frame(cli, "7003", "1").status_code == 404, "a zero-byte (half-written) clip is not read"
+    assert frames["calls"] == []
+    monkeypatch.setattr(core, "frame_at", lambda *a, **k: None)
+    r = _frame(cli, "7001", "2")
+    assert r.status_code == 404 and "ffmpeg" in r.get_json()["error"]
+    assert [f.name for f in frames["fdir"].iterdir()] == [], "no cache file and no temp file"
+
+
+def test_the_cache_is_lru_capped_and_touches_nothing_else(frames, monkeypatch):
+    cli, fdir = frames["cli"], frames["fdir"]
+    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_FILES", 3)
+    fdir.mkdir(parents=True)
+    (fdir / "7001_last.png").write_bytes(b"the splice's own frame")
+    (fdir / "notes.txt").write_bytes(b"x")
+    for i, at in enumerate(("1", "2", "3")):
+        assert _frame(cli, "7001", at).status_code == 200
+        _age(fdir / ("7001_%d.png" % (24 * (i + 1))), 3600 - i * 60)
+    assert _frame(cli, "7001", "1").status_code == 200, "a cache hit is a use"
+    assert _frame(cli, "7002", "1").status_code == 200
+    names = sorted(f.name for f in fdir.iterdir())
+    assert names == ["7001_24.png", "7001_72.png", "7001_last.png", "7002_24.png", "notes.txt"], \
+        "the least recently used frame (2 s) went; other files are never counted or touched"
+    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_BYTES", 1)
+    assert _frame(cli, "7002", "5").status_code in (200, 404)
+    assert sorted(f.name for f in fdir.iterdir() if g.LOOM_FRAME_FILE_RE.match(f.name)) in ([], ["7002_120.png"])
+    assert (fdir / "7001_last.png").read_bytes() == b"the splice's own frame"
+    assert frames["traps"] == []
+
+
+def test_the_frame_route_never_reaches_pixai_or_a_render(frames):
+    """The rig's traps make core.submit, submit_generation, build_request, gql_mutate,
+    gql_adhoc, the PixAI session maker and upload_media raise; the AST test above pins that
+    loom_frame names none of them (nor _gen_session)."""
+    assert _frame(frames["cli"], "7002", "0.5").status_code == 200
+    assert _frame(frames["cli"], "7002", "0.5").status_code == 200
+    assert frames["traps"] == [], "no submit, no build_request, no gql, no session, no upload"
+    assert len(frames["calls"]) == 1
