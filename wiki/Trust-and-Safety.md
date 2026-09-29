@@ -173,7 +173,9 @@ more. Browsing the contest board still changes nothing. But **entering** one is 
 public, account-changing act — your artwork goes into a public contest under your name, and
 PixAI offers no way to withdraw it — so it is covered by this flag like every other write,
 whether you enter from a contest's page, from My Art, or by picking a contest while you
-publish.
+publish. Checking whether an entry won is the opposite kind of act: the daily check and the
+**Check** button on My entries only *read* PixAI's winners list, so `READ_ONLY` has nothing
+to refuse there and they keep working.
 
 `READ_ONLY` does **not** cover purely local operations (`--organize`, `--dedup`) — those never
 touch the network in the first place, so there's no account to protect. They're safe in a
