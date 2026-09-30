@@ -394,8 +394,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
 
   // The arithmetic itself is gen/dockLayout.js (DC measureDock / fitReel / promptRows,
   // one pure function) so the tests run exactly what renders here.
-  // Session M: the composer's run pieces are measured, so the dock makes room for them (the
-  // reel yields first) instead of clipping the confirm -- gen/dockLayout.js's `extraPx`.
+  // Session M: the composer's run pieces are measured, so the reel yields its room to them --
+  // gen/dockLayout.js's `extraPx`. They never size the dock (its height budgets them).
   const [runPx, setRunPx] = useState(0);
   const tokBoxRef = useRef(null);
   const runBoxRef = useRef(null);
@@ -409,33 +409,37 @@ function GenerateDrawer({ open, onClose, account, request }) {
     measure();
     return () => ro.disconnect();
   }, [tab]);
+  /* The dock's HEIGHT (owner walk 2026-09-29, second pass: the tabs moved on every Image / Edit
+     / Video, Random / Matrix and LoRAs / Context switch). Collapsed it is one fixed height per
+     window -- gen/dockLayout.js collapsedHeight -- read only from the window, ▲, History and the
+     IMAGE draft (a long prompt, variables) and the account's quick-pick rows, none of which a tab
+     or mode switch changes. Never the tab, never the mode, never a measured content height. */
   const { capH, reelH, reelVisible, promptMax, promptRows } = dockLayout({
     vh: metrics.vh, sepBottom: metrics.sepBottom, expanded, historyOpen,
     promptLen: (s.prompt || "").length, promptFocus, extraPx: tab === "image" ? runPx : 0,
+    variables: !!(g.run.parsed && g.run.parsed.syntax),
+    quickRows: (g.power.modelChips.length ? 1 : 0) + (g.power.loraChips.length ? 1 : 0),
   });
-  /* The height HOLD (owner walk 2026-09-29, screenshot 12: every tab and mode switch moved the
-     dock's top edge -- and the tabs on it -- under the mouse). gen/dockLayout.js dockBox says the
-     rule: in ▲ the dock is its ceiling; otherwise it keeps the tallest height it has had in this
-     state. `hold` is that height, keyed by the state (▲, History, the window -- never the tab or
-     a mode) -- a new state starts from the content's own height in the same render, never a
-     stale hold for a frame. offsetHeight is the layout box, untouched by the dock's translateX /
-     entrance transforms. */
-  const holdKey = [expanded ? 1 : 0, historyOpen ? 1 : 0, metrics.vh, metrics.sepBottom].join("|");
-  const holdKeyRef = useRef(holdKey);
-  holdKeyRef.current = holdKey;
-  const [hold, setHold] = useState({ key: "", h: 0 });
+  /* The composer's safety valve (dockBox): the body scrolls, the composer never does, so the
+     tabs row + the composer are measured and the dock grows past its fixed height only if they
+     alone would not fit in it (THE confirm open in a short window) -- never for the body. */
+  const headRef = useRef(null);
+  const footRef = useRef(null);
+  const [fitPx, setFitPx] = useState(0);
   useEffect(() => {
-    const el = drawerRef.current;
-    if (!el || !open || expanded || typeof ResizeObserver === "undefined") return undefined;
+    const el = drawerRef.current, head = headRef.current, foot = footRef.current;
+    if (!open || !el || !head || !foot || typeof ResizeObserver === "undefined") return undefined;
     const take = () => {
-      const h = el.offsetHeight, key = holdKeyRef.current;
-      setHold((o) => (o.key !== key || h > o.h ? { key, h } : o));
+      const px = head.offsetHeight + foot.offsetHeight + (el.offsetHeight - el.clientHeight);
+      setFitPx((o) => (o === px ? o : px));
     };
     const ro = new ResizeObserver(take);
-    ro.observe(el);
+    ro.observe(head);
+    ro.observe(foot);
+    take();
     return () => ro.disconnect();
-  }, [open, expanded, holdKey]);
-  const box = dockBox({ capH, expanded, held: hold.key === holdKey ? hold.h : 0 });
+  }, [open]);
+  const box = dockBox({ vh: metrics.vh, capH, fitPx });
 
   /* Prime the cost chip on each Image-tab entry. The image <CostBadge> sits in the
      dock footer's right column under `tab === "image"`, so it mounts and unmounts
@@ -948,15 +952,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
         className={"mgdock" + (expanded ? " expanded" : "")}
         role="dialog" aria-label="Generate"
         aria-hidden={!open} inert={open ? undefined : ""}
-        style={{
-          maxHeight: box.maxHeight + "px",
-          height: box.height != null ? box.height + "px" : undefined,
-          minHeight: box.minHeight != null ? box.minHeight + "px" : undefined,
-        }}>
+        style={{ height: box.height + "px", maxHeight: box.maxHeight + "px" }}>
         <div className="mgdock-glow" aria-hidden="true" />
 
         {/* ---- HEADER: runs label · note · tab strip · History · × ---- */}
-        <div className="mgdock-head">
+        <div ref={headRef} className="mgdock-head">
           <span className="mgdock-runslabel" style={reelVisible ? null : { display: "none" }}>{reelLabel}</span>
           <span className="mgdock-runsnote" style={reelVisible ? null : { display: "none" }}>{reelNote}</span>
           <span className="sp" />
@@ -1373,7 +1373,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
              above); Enhance's is inline too. genLabel per DC 3682-3684:
              '✦ Generate' / '✦ Generate video' / '✦ Edit' / '✦ Fix <kind>' /
              'Save to library'. ---- */}
-        <div className="mgdock-foot">
+        <div ref={footRef} className="mgdock-foot">
           <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
 
           <div ref={composerRef} className={"mgdock-composer" + (promptFocus ? " focus" : "")}

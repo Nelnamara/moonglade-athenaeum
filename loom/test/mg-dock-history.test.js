@@ -201,18 +201,25 @@ describe("cells: one per row, cluster for a running batch, cost once per task", 
 
 describe("History is its own dock mode (DC dockStyle 3505-3506; DECISIONS 2551/2565)", () => {
   const desk = { vh: 1080, sepBottom: 262, promptLen: 0, promptFocus: false };
-  test("historyOpen alone lifts the clamp to 100vh − 28 and the reel's cap with it", () => {
+  test("historyOpen alone lifts the dock past the separator -- as far as the strip needs, never past 100vh − 28", () => {
+    // owner walk 2026-09-29: the collapsed dock is one fixed height per window (dockLayout.js
+    // collapsedHeight); History is its own mode, sized to the strip + the resting composer
     const L = dockLayout({ ...desk, historyOpen: true });
-    assert.equal(L.capH, desk.vh - 28);
-    assert.equal(L.reelRoom, (desk.vh - 28) - 56 - 118 - 46);
+    assert.equal(L.capH, Math.min(desk.vh - 28, 46 + HISTORY_STRIP + 96 + 6 * 25));
+    assert.equal(L.reelRoom, L.capH - 56 - 118 - 46);
     assert.equal(L.reelVisible, true);
     const S = dockLayout({ ...desk });
-    assert.equal(S.capH, desk.vh - desk.sepBottom - 14);
+    assert.ok(L.capH > S.capH, "the strip is taller than the reel's slot");
+    assert.ok(S.capH <= desk.vh - desk.sepBottom - 14, "standard stays under the separator");
+    // a short window: the strip still asks, the ceiling still caps
+    const T = dockLayout({ ...desk, vh: 540, historyOpen: true });
+    assert.equal(T.capH, 540 - 28);
   });
   test("the prompt cap counts the 2-row strip (HISTORY_STRIP) in place of the reel term", () => {
     assert.equal(HISTORY_STRIP, 260);
     const L = dockLayout({ ...desk, vh: 900, historyOpen: true, promptLen: 2000 });
-    // chrome = 46 + 260 + 96 = 402; (872 − 402) / 25 = 18 -> capped at 14
+    // the long prompt sizes the dock for 14 rows: 46 + 260 + 96 + 350 = 752 (under 872);
+    // chrome = 46 + 260 + 96 = 402; (752 − 402) / 25 = 14
     assert.equal(L.promptMax, 14);
     const E = dockLayout({ ...desk, vh: 900, historyOpen: true, expanded: true, promptLen: 2000 });
     // chrome = 46 + 260 + 330 + 96 = 732; (872 − 732) / 25 = 5 -> cap 5, floor 6 wins

@@ -117,11 +117,10 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-x:hover { border-color: var(--accent); color: var(--text); }
 
 /* =============================== BODY ======================================= */
-/* safety valve for short windows only — slabs may scroll, the composer never. It GROWS too
-   (owner walk 2026-09-29): when the dock holds its height across a tab or mode switch
-   (GenerateDrawer's height hold, gen/dockLayout.js dockBox) the room a shorter tab leaves is
-   the body's, so the composer stays at the dock's foot and the tabs at its top. A dock sized
-   by its content has no spare room, and this changes nothing there. */
+/* safety valve — the reel and slabs may scroll, the composer never. It GROWS too (owner walk
+   2026-09-29): the dock is a fixed height in both states (gen/dockLayout.js collapsedHeight /
+   dockBox), so the room a shorter tab or mode leaves is the body's -- the composer stays at the
+   dock's foot and the tabs at its top -- and a taller one scrolls the body, never the dock. */
 .mgdock-body { position: relative; flex: 1 1 auto; min-height: 0;
   overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 
