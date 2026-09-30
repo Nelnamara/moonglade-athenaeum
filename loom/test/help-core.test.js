@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   githubSlug, parseInline, plainInline, parseWiki, classifyHref, glossaryMatchers,
   markGlossary, markPage, searchGuide, pageForSurface, visiblePages, whatsNewPlan,
-  highlightsOf, toastSummary,
+  highlightsOf, toastSummary, spansText,
 } from "../../gallery/src/help/helpCore.js";
 
 /* The guide's pure core (gallery/src/help/helpCore.js): the wiki parser Help renders
@@ -220,5 +220,52 @@ describe("what's new", () => {
     assert.deepEqual(highlightsOf(items.slice(0, 3)).map((i) => i.lead), ["a", "b"]);
     assert.equal(toastSummary({ title: "Moving Pictures", items }), "Moving Pictures");
     assert.equal(toastSummary({ title: "", items }), "a");
+  });
+});
+
+// Owner walk 2026-09-29: Help's "The Gallery" page opened with command-line lines.
+describe("The Gallery page opens in plain words", () => {
+  test("nothing but words before the first section; the commands have their own", () => {
+    const blocks = parseWiki(readFileSync(path.join(WIKI, "Gallery.md"), "utf8"));
+    assert.equal(blocks[0].type, "h");
+    const firstSection = blocks.findIndex((b, i) => i > 0 && b.type === "h");
+    assert.ok(firstSection > 1, "an introduction under the title");
+    assert.ok(blocks.slice(1, firstSection).every((b) => b.type === "p"),
+      "the introduction is paragraphs only, no command block");
+    assert.match(blocks.slice(1, firstSection).map((b) => spansText(b.spans)).join(" "), /Serve Gallery\.pyw/);
+    const term = blocks.findIndex((b) => b.type === "h" && b.anchor === "running-it-from-a-terminal");
+    assert.equal(term, firstSection, "the terminal section follows the introduction");
+    const next = blocks.findIndex((b, i) => i > term && b.type === "h");
+    const code = blocks.slice(term + 1, next).filter((b) => b.type === "code");
+    assert.equal(code.length, 1);
+    assert.match(code[0].text, /python moonglade_gallery\.py --out pixai_backup/);
+    assert.ok(!blocks.slice(0, term).some((b) => b.type === "code"));
+  });
+});
+
+// Owner walk 2026-09-29: "No ? anywhere on screen" (the library's "?" was a faint ring on the
+// banner art) and Help's back/forward arrows were near invisible.
+describe("the library's ? and Help's arrows are visible", () => {
+  const css = readFileSync(path.resolve(__dirname, "../../gallery/src/styles/help.css"), "utf8");
+  const rule = (sel) => {
+    const at = css.indexOf(sel + " {");
+    assert.ok(at >= 0, "no rule " + sel);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  test("the ? wears a solid chip face with a white glyph, at a size that reads", () => {
+    const face = rule(".mghelp-q.mgx-help, .mghelp-q.mgx-sephelp");
+    assert.match(face, /background: linear-gradient\(/);
+    assert.match(face, /color-mix\(in srgb, var\(--base\) 82%, transparent\)/);   // the solid ground
+    assert.match(face, /color: #f2ecff/);
+    assert.match(face, /border: 1px solid rgba\(255, 255, 255, \.26\)/);
+    const w = Number(/width: (\d+)px/.exec(rule(".mghelp-q.mgx-help"))[1]);
+    assert.ok(w >= 32, "the banner's ? is at least 32 px, got " + w);
+  });
+  test("back and forward are bordered buttons with a large glyph", () => {
+    const nav = rule(".mghelp-nav button");
+    assert.match(nav, /border: 1px solid var\(--surface1\)/);
+    assert.match(nav, /background: var\(--surface0\)/);
+    assert.match(nav, /color: var\(--text\)/);
+    assert.ok(Number(/font: 600 (\d+)px/.exec(nav)[1]) >= 16);
   });
 });

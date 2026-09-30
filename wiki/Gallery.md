@@ -1,6 +1,11 @@
 # The Gallery
 
-A local web gallery over your whole catalog.
+A local web gallery over your whole catalog. Double-click **`Serve Gallery.pyw`** to start
+it — a no-console launcher that opens the gallery in your browser once it is ready. The
+gallery is a viewer of `catalog.db` + your files, but can also make authenticated API calls
+for prune / reconcile (see [Deleting & Sync](Deleting)).
+
+## Running it from a terminal
 
 ```bash
 python moonglade_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
@@ -8,10 +13,6 @@ python moonglade_gallery.py --out pixai_backup --port 5757
 python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
 python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
-
-…or double-click **`Serve Gallery.pyw`** for a no-console launcher. The gallery is a
-viewer of `catalog.db` + your files, but can also make authenticated API calls for prune /
-reconcile (see [Deleting & Sync](Deleting)).
 
 ## The header
 

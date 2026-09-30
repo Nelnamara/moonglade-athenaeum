@@ -366,8 +366,8 @@ export default function HelpOverlay({ phone }) {
           <div className="mghelp-head">
             <div className="mghelp-title">Guide</div>
             <div className="mghelp-nav">
-              <button type="button" onClick={goBack} disabled={!back.length} aria-label="Back">‹</button>
-              <button type="button" onClick={goFwd} disabled={!fwd.length} aria-label="Forward">›</button>
+              <button type="button" onClick={goBack} disabled={!back.length} aria-label="Back" title="Back">‹</button>
+              <button type="button" onClick={goFwd} disabled={!fwd.length} aria-label="Forward" title="Forward">›</button>
             </div>
             <div className="mghelp-crumb">
               {crumb.map((c, i) => (

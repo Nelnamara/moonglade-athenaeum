@@ -3,15 +3,16 @@ import { createPortal } from "react-dom";
 import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import useIsMobile from "../hooks/useIsMobile.js";
 import {
-  afterNote, afterTour, afterWelcome, firstPresentNote, guideKey, NOTES_HIDDEN_KEY,
-  noteText, placeBeside, readGuide, rectShowing, tourSteps,
+  afterNote, afterTour, afterWelcome, CHIP_ROW, firstPresentNote, guideKey, LAYER_SELECTORS,
+  layerOpen, NOTES_HIDDEN_KEY, noteText, placeBeside, placeClear, readGuide, rectShowing,
+  tourSteps,
 } from "./guideCore.js";
 import { stepsFor } from "./guideSteps.js";
 import {
   claimEscape, isTopSurface, pushSurface, subscribe as subscribeHelp, subscribeAbout,
   subscribeSurfaces,
 } from "./helpStore.js";
-import { replayCount, subscribeReplay } from "./guideActions.js";
+import { replayCount, setNotesHidden, subscribeReplay } from "./guideActions.js";
 import "../styles/help.css";
 
 /* ONE SURFACE'S FIRST-RUN GUIDE (Session I decision 1; the handoff's section A).
@@ -27,15 +28,23 @@ import "../styles/help.css";
    never while Help, About or the what's-new sheet is up. `paused` lets a host hold it
    while one of its own layers (a sub-overlay, a confirm) covers the surface.
 
+   AND NEVER OVER ANYTHING OPENED ON TOP (owner walk 2026-09-29). The welcome card and the
+   notes also stand aside while ANY layer is open over the surface -- a dialog, a menu, the
+   model browser, the recipe market, the Colour palette -- whether or not its host thought to
+   pass `paused` (guideCore.LAYER_SELECTORS; useLayerOver below watches the page for them).
+   A desktop note never covers the header's chip row either (guideCore.placeClear).
+
    The three layers and the one key per surface are guideCore.js's; the steps are
    guideSteps.js's. Everything here is placement and events.
 
    NOTHING WRITES ON OPEN. The welcome card shows off an ABSENT key and writes only when it
    is answered. A tour writes only when it ends; a note only when its control is used or
-   waved off. */
+   waved off ("got it" or Escape); "hide notes" writes Help's own notes switch. */
 
 const SETTLE_MS = 900;          // a surface's own entrance plays out before the guide appears
 const NOTE_POLL_MS = 600;       // how often a waiting note looks for its control
+const LAYER_CHECK_MS = 120;     // the open-layer check runs at most this often while the page changes
+const NOTE_W = 250;
 const NEL = "/branding/mascots/gen_nel.png";
 
 function vp() {
@@ -55,12 +64,85 @@ export function findAnchor(step) {
   return null;
 }
 
-/* The phone keeps its cards above the tab bar when there is one, and above the home bar
+/* The phone keeps its cards above the tab bar when there is one -- and above the pinned
+   goal and Vigil row that sits on it, which a card must not cover -- and above the home bar
    either way. */
 function phoneFloor() {
-  const nav = document.querySelector(".glm-nav");
-  const r = nav ? nav.getBoundingClientRect() : null;
-  return r && r.height ? Math.max(0, (window.innerHeight || 0) - r.top) : 0;
+  const h = window.innerHeight || 0;
+  let top = h;
+  for (const sel of [".glm-nav", ".mgg-chips.phone"]) {
+    const el = document.querySelector(sel);
+    const r = el ? el.getBoundingClientRect() : null;
+    if (r && r.height && r.top < top) top = r.top;
+  }
+  return Math.max(0, h - top);
+}
+
+/* The header chips' rects, which a desktop note keeps clear of. */
+function chipRects() {
+  try {
+    return Array.from(document.querySelectorAll(CHIP_ROW), (el) => el.getBoundingClientRect());
+  } catch { return []; }
+}
+
+/* Is anything open over this surface right now? Every element matching LAYER_SELECTORS is
+   asked three things: is it one of the guide's own cards; does it hold one of the surface's
+   controls (then it IS the surface -- the dock, the Folio's slab); is it drawn and on screen
+   (a closed dock or model browser stays mounted, hidden). */
+function layerShowing(el, view) {
+  if (el.closest('[aria-hidden="true"], [inert]')) return false;
+  if (!rectShowing(el.getBoundingClientRect(), view)) return false;
+  if (typeof el.checkVisibility === "function") return el.checkVisibility({ visibilityProperty: true });
+  return window.getComputedStyle(el).visibility !== "hidden";
+}
+function layerOverSurface(steps) {
+  let els;
+  try { els = document.querySelectorAll(LAYER_SELECTORS); } catch { return false; }
+  if (!els.length) return false;
+  const anchors = [];
+  steps.forEach((s) => (Array.isArray(s.at) ? s.at : [s.at]).forEach((sel) => {
+    try { document.querySelectorAll(sel).forEach((a) => anchors.push(a)); } catch { /* finds nothing */ }
+  }));
+  const view = vp();
+  return layerOpen(Array.from(els, (el) => ({
+    own: !!el.closest(".mgguide-root"),
+    holdsAnchor: anchors.some((a) => el.contains(a)),
+    showing: layerShowing(el, view),
+  })));
+}
+
+/* Watches the page while `watch` holds: once at once (before paint, so a card never flashes
+   over a layer already open), then on every change to the page -- a layer mounting, a class
+   or aria-hidden flip -- at most every LAYER_CHECK_MS, with a slow poll behind that for a
+   layer shown by a style change alone. */
+function useLayerOver(guide, watch) {
+  const [up, setUp] = useState(false);
+  useLayoutEffect(() => {
+    if (!guide || !watch) { setUp(false); return undefined; }
+    let raf = 0, timer = 0, last = 0;
+    const run = () => { raf = 0; last = Date.now(); setUp(layerOverSurface(guide.steps)); };
+    const kick = () => {
+      if (raf || timer) return;
+      const wait = LAYER_CHECK_MS - (Date.now() - last);
+      if (wait > 0) timer = setTimeout(() => { timer = 0; raf = requestAnimationFrame(run); }, wait);
+      else raf = requestAnimationFrame(run);
+    };
+    run();
+    let mo = null;
+    try {
+      mo = new MutationObserver(kick);
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true,
+        attributeFilter: ["class", "role", "aria-modal", "aria-hidden", "inert", "open"] });
+    } catch { mo = null; }
+    const poll = setInterval(kick, NOTE_POLL_MS);
+    return () => {
+      if (mo) mo.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      clearInterval(poll);
+    };
+  }, [guide, watch]);
+  return up;
 }
 
 /* The desktop dock, when it is open, owns the bottom of the screen: cards sit above it. */
@@ -138,12 +220,15 @@ function Tour({ guide, phone, onEnd, restartKey }) {
   }, [guide, restartKey]);
 
   const tourCount = tourSteps(guide.steps).length;
+  // Done on the last mark hands the notes what the tour did not reach; Skip (or Escape)
+  // ends the guide for this surface.
   const end = useCallback((finished) => {
     const cur = marks && marks[k];
     const lastIdx = finished ? tourCount - 1 : (cur ? cur.idx : -1);
-    onEnd(afterTour(lastIdx, tourCount));
+    onEnd(afterTour(lastIdx, tourCount, !finished));
   }, [marks, k, tourCount, onEnd]);
 
+  // Nothing to ring: the person asked to be shown around, so the notes do it instead.
   useEffect(() => {
     if (marks && !marks.length) onEnd(afterTour(-1, tourCount));
   }, [marks, tourCount, onEnd]);
@@ -224,23 +309,33 @@ function Tour({ guide, phone, onEnd, restartKey }) {
 /* ---------------------------------------------------------------- ③ Nel's notes */
 function Notes({ guide, phone, n, onAdvance }) {
   const total = guide.steps.length;
-  // "note 1 of 3" counts the notes still to come from where this run of them began -- after
-  // a tour that is the controls it did not reach; after "Got it", every control.
+  // "note 1 of 3" counts the notes still to come from where this run of them began -- the
+  // controls the tour did not reach.
   const [n0] = useState(n);
   const [j, setJ] = useState(-1);
   const [rect, setRect] = useState(null);
   const cardRef = useRef(null);
   const [cardH, setCardH] = useState(70);
+  const hRef = useRef(cardH);
+  hRef.current = cardH;
 
-  // Find the note to show, and keep its pin on its control.
+  // Find the note to show, and keep its pin on its control. On the desktop a note whose card
+  // cannot sit beside its control without covering the header's chips is passed over, the
+  // same way as one whose control is not on screen.
   useEffect(() => {
     let live = true;
+    const spot = (s) => {
+      const el = findAnchor(s);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      if (!phone && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), chipRects(), 12)) return null;
+      return r;
+    };
     const look = () => {
       if (!live) return;
-      const at = firstPresentNote(guide.steps, n, (s) => !!findAnchor(s));
+      const at = firstPresentNote(guide.steps, n, (s) => !!spot(s));
       setJ(at);
-      const el = at >= 0 ? findAnchor(guide.steps[at]) : null;
-      const r = el ? el.getBoundingClientRect() : null;
+      const r = at >= 0 ? spot(guide.steps[at]) : null;
       setRect(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } : null);
     };
     look();
@@ -253,11 +348,30 @@ function Notes({ guide, phone, n, onAdvance }) {
       window.removeEventListener("resize", look);
       window.removeEventListener("scroll", look, true);
     };
-  }, [guide, n]);
+  }, [guide, n, phone]);
 
-  // "The next shows after you've used that control": any press, key or input inside it.
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const h = el.getBoundingClientRect().height;
+    if (h && Math.abs(h - cardH) > 1) setCardH(h);
+  });
+
+  let cardStyle = null;
+  if (j >= 0 && rect) {
+    if (phone) {
+      cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
+    } else {
+      const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), chipRects(), 12);
+      if (p) cardStyle = { left: p.left, top: p.top, width: NOTE_W };
+    }
+  }
+  const showing = !!cardStyle;
+
+  // "The next shows after you've used that control": any press, key or input inside it --
+  // while its note is on screen, so the cursor only ever moves past a note that was shown.
   useEffect(() => {
-    if (j < 0) return undefined;
+    if (!showing) return undefined;
     let fired = false;
     const onUse = (e) => {
       if (fired) return;
@@ -274,25 +388,20 @@ function Notes({ guide, phone, n, onAdvance }) {
       document.removeEventListener("input", onUse, true);
       document.removeEventListener("keydown", onUse, true);
     };
-  }, [guide, j, total, onAdvance]);
+  }, [guide, showing, j, total, onAdvance]);
 
-  useLayoutEffect(() => {
-    const el = cardRef.current;
-    if (!el) return;
-    const h = el.getBoundingClientRect().height;
-    if (h && Math.abs(h - cardH) > 1) setCardH(h);
-  });
+  // "got it" and Escape both wave off the note on screen; Escape only while one is.
+  const wave = useCallback(() => onAdvance(afterNote(j, total)), [onAdvance, j, total]);
+  useEffect(() => (showing ? claimEscape(wave) : undefined), [showing, wave]);
 
-  if (j < 0 || !rect) return null;
-  const view = vp();
+  if (!showing) return null;
   const dot = { left: Math.round(rect.right - 5), top: Math.round(rect.top - 4) };
-  let cardStyle;
-  if (phone) {
-    cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
-  } else {
-    const p = placeBeside(rect, { w: 250, h: cardH }, view, 12);
-    cardStyle = { left: p.left, top: p.top, width: 250 };
-  }
+  // The way out of every note: the same account switch as Help's "Hide Nel's notes".
+  const hide = (
+    <button type="button" className={"mgguide-hide" + (phone ? " phone" : "")}
+      onClick={() => setNotesHidden(true)}
+      title="Turn Nel's notes off everywhere. Help can turn them back on.">hide notes</button>
+  );
   return (
     <>
       <span className="mgguide-dot" style={dot} aria-hidden="true" />
@@ -300,16 +409,19 @@ function Notes({ guide, phone, n, onAdvance }) {
         <Nel size={phone ? 32 : 28} />
         <div className="mgguide-nmain">
           <div className="mgguide-ntext">{noteText(guide.steps[j])}</div>
-          {phone ? null : (
+          {phone ? (
+            <div className="mgguide-nfoot phone">{hide}</div>
+          ) : (
             <div className="mgguide-nfoot">
               <span>note {j - n0 + 1} of {total - n0}</span>
               <span className="sp" />
-              <button type="button" className="mgguide-gotit" onClick={() => onAdvance(afterNote(j, total))}>got it</button>
+              {hide}
+              <button type="button" className="mgguide-gotit" onClick={wave}>got it</button>
             </div>
           )}
         </div>
         {phone ? (
-          <button type="button" className="mgguide-gotit phone" onClick={() => onAdvance(afterNote(j, total))}>got it</button>
+          <button type="button" className="mgguide-gotit phone" onClick={wave}>got it</button>
         ) : null}
       </div>
     </>
@@ -338,6 +450,7 @@ export default function GuideHost({ surface, phone, paused }) {
 
   const raw = ready ? get(guideKey(surface)) : null;
   const st = readGuide(raw);
+  const notesOff = ready && !!get(NOTES_HIDDEN_KEY, false);
   // Each new layer waits for the surface to settle before it appears.
   const phaseKey = st.phase + ":" + st.n + ":" + restart;
   useEffect(() => {
@@ -346,16 +459,22 @@ export default function GuideHost({ surface, phone, paused }) {
     return () => clearTimeout(t);
   }, [phaseKey]);
 
+  // The welcome card and the notes stand aside for any layer opened over the surface. (A
+  // running tour blocks the page, so nothing opens over it.)
+  const watch = !!guide && ready && top && !paused && !helpUp
+    && (st.phase === "welcome" || (st.phase === "notes" && !notesOff));
+  const layerUp = useLayerOver(guide, watch);
+
   const write = useCallback((v) => { set(guideKey(surface), v); }, [set, surface]);
 
-  if (!guide || !ready || !top || paused || helpUp || !settled) return null;
+  if (!guide || !ready || !top || paused || helpUp || !settled || (watch && layerUp)) return null;
   let layer = null;
   if (st.phase === "welcome") {
     layer = <Welcome guide={guide} phone={ph} onTour={() => write(afterWelcome("tour"))}
       onDone={() => write(afterWelcome("gotit"))} />;
   } else if (st.phase === "tour") {
     layer = <Tour guide={guide} phone={ph} onEnd={write} restartKey={restart} />;
-  } else if (st.phase === "notes" && !get(NOTES_HIDDEN_KEY, false)) {
+  } else if (st.phase === "notes" && !notesOff) {
     layer = <Notes guide={guide} phone={ph} n={st.n} onAdvance={write} />;
   }
   if (!layer) return null;
