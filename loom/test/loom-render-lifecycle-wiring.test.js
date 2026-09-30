@@ -114,9 +114,10 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
     assert.match(fn, /await priceBody\(p\)/, "the price is asked of the payload that is sent");
     assert.match(fn, /const settings = snapshotSettings\(c, proj, p\.prompt, p\.quality\);/);
     assert.doesNotMatch(fn, /shotPayload\(entry\)|priceShot\(entry\)/, "no second payload from the stale entry");
-    const refuseLocal = fn.indexOf("unsendableImages(p).length");
+    const refuseLocal = fn.indexOf("unsendableRefs(p).length");
     assert.ok(refuseLocal > build && refuseLocal < fn.indexOf("await priceBody(p)"),
-      "an imported (local_) picture is refused BEFORE pricing (open call 4)");
+      "an imported (local_) picture, video or audio is refused BEFORE pricing (open call 4, spend review S6)");
+    assert.doesNotMatch(CODE, /unsendableImages\(/, "every render path checks every reference kind, not pictures alone (S6)");
     const fpCheck = fn.indexOf("priceFingerprint(p) !== opts.confirmedFp");
     assert.ok(fpCheck > build && fpCheck < fn.indexOf('fetch("/api/loom/generate"'),
       "a batch shot whose payload changed since the confirm is not sent (F12)");
@@ -285,6 +286,8 @@ describe("the drawer's events are resolved by their ids, never by the selected s
     const ok = b.indexOf("if (saved.ok) return { ok: true };");
     assert.ok(lock > add && flush > lock && ok > flush, "ok only after the lock is saved");
     assert.match(b, /if \(activeIdRef\.current !== boardId\) return \{ refused:/);
+    const refuse = b.indexOf("if (unsendableRefs(payload).length) {");
+    assert.ok(refuse >= 0 && refuse < add, "the drawer's Go refuses an imported picture, video or audio before it locks (S6)");
   });
 });
 

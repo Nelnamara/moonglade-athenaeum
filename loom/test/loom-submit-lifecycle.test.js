@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   classifySubmit, classifySubmitStatus, submitsToCheck, failRender, markUnclear, abandonSubmit,
   adoptTask, beginRender, landTake, inFlight, needsRender, cancelRender,
-  goBlocked, sendUnclear, unsendableImages, cardForSubmit, cardForTask,
+  goBlocked, sendUnclear, unsendableImages, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
 } from "../src/loom-takes-core.js";
-import { cardsToResume } from "../src/loom-core.js";
+import { cardsToResume, shotPayload, flat } from "../src/loom-core.js";
 
 // Session P, BUILD-w5-p §3.3/§3.4 and review F3, F8, F14: the pure half of one render's
 // lifecycle. A lost answer is UNCLEAR, never an error: the lock stays, nothing is re-sent,
@@ -144,6 +144,30 @@ describe("pictures the render route cannot send (open call 4, review F16)", () =
     assert.deepEqual(unsendableImages({ images: ["/thumbs/1.jpg"] }), ["/thumbs/1.jpg"]);
     assert.deepEqual(unsendableImages({}), []);
     assert.deepEqual(unsendableImages(null), []);
+  });
+  test("spend review S6: an imported reference VIDEO or AUDIO is refused the same way (data: is no escape there)", () => {
+    assert.deepEqual(unsendableRefs({ images: ["1"], video_refs: ["2"], audio_refs: ["3"] }), []);
+    assert.deepEqual(unsendableRefs({ images: ["1"], video_refs: ["local_0123456789ab"] }), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableRefs({ audio_refs: ["local_abcdefabcdef"] }), ["local_abcdefabcdef"]);
+    assert.deepEqual(unsendableRefs({ video_refs: ["data:video/mp4;base64,AA"] }), ["data:video/mp4;base64,AA"]);
+    assert.deepEqual(unsendableRefs({ images: ["local_0123456789ab"], video_refs: ["local_abcdefabcdef"] }),
+      ["local_0123456789ab", "local_abcdefabcdef"]);
+    assert.deepEqual(unsendableRefs(null), []);
+    assert.equal(unsendableKind({ images: ["local_0123456789ab"], video_refs: ["local_abcdefabcdef"] }), "picture");
+    assert.equal(unsendableKind({ images: ["1"], video_refs: ["local_abcdefabcdef"] }), "video");
+    assert.equal(unsendableKind({ audio_refs: ["local_abcdefabcdef"] }), "audio");
+    assert.equal(unsendableKind({ images: ["1"] }), "");
+  });
+  test("S6 end to end: a shot citing an imported @video carries it in its payload, and the payload is refused", () => {
+    const card = { id: "c1", title: "t", mode: "R2V", duration: 5, connect: "new", prompt: "go", cast: [],
+      openFrame: { thumbId: "", source: "733917871331404290", desc: "", tag: "" }, closeFrame: {},
+      refs: [{ id: "v1", kind: "video", tag: "@video1", source: "local_0123456789ab" }] };
+    const proj = { name: "P", acts: [{ id: "a1", name: "Act", cards: [card] }], assets: [] };
+    const p = shotPayload(flat(proj)[0], proj, (t, s) => t || s || null);
+    assert.deepEqual(p.video_refs, ["local_0123456789ab"], "the card shows (and the payload carries) the imported video");
+    assert.deepEqual(unsendableImages(p), [], "the picture check alone let it through");
+    assert.deepEqual(unsendableRefs(p), ["local_0123456789ab"]);
+    assert.equal(unsendableKind(p), "video");
   });
 });
 

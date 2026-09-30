@@ -24833,6 +24833,21 @@ __DESIGN_TOKENS__
         unsendable = [str(x) for x in (p.get("images") or [])
                       if str(x or "").strip() and not str(x).strip().isdigit()
                       and not str(x).strip().startswith("data:")]
+        # Spend review S6: the same for the reference VIDEOS and AUDIO. Only catalog ids are
+        # sent for those (see video_ids / audio_ids below); anything else -- an imported local_
+        # video above all -- was silently dropped, and the render went out, priced and charged,
+        # without the reference the card showed.
+        unsendable_av = [str(x) for k in ("video_refs", "audio_refs") for x in (p.get(k) or [])
+                         if str(x or "").strip() and not str(x).strip().isdigit()]
+        if unsendable:
+            unsendable_msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
+                              "picture). Nothing was sent.")
+        elif unsendable_av:
+            unsendable = unsendable_av
+            unsendable_msg = ("One of this shot's reference videos or audio can't be sent to PixAI "
+                              "(an imported file). Nothing was sent.")
+        else:
+            unsendable_msg = ""
         if journalled:
             with _loom_journal_lock:
                 idx = _loom_journal_load(user)
@@ -24861,16 +24876,14 @@ __DESIGN_TOKENS__
                                      + (" (task …%s)." % tid[-6:] if tid else "."),
                             "busy_task_id": tid or None}), 409
                 if unsendable:
-                    msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
-                           "picture). Nothing was sent.")
+                    msg = unsendable_msg
                     _loom_journal_note(user, submit_id, board=board_id, card=card_id,
                                        state="not_sent", error=msg)
                     return jsonify({"error": msg})
                 _loom_journal_note(user, submit_id, board=board_id, card=card_id, state="sending")
                 _loom_sending_now.add(sending_key)
         elif unsendable:
-            return jsonify({"error": "One of these pictures can't be sent to PixAI (an imported "
-                                     "picture). Nothing was sent."})
+            return jsonify({"error": unsendable_msg})
 
         attempt = {"sent": False}
 

@@ -59,7 +59,7 @@ import {
   landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
   classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
-  splicePatch, unsendableImages, cardForSubmit, cardForTask,
+  splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
   // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
   // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
   // The pure Keep is renamed here because the click handler that applies it is `keepAnchor`.
@@ -2381,7 +2381,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // "⚠ only" also keeps the ⚠ chips the card itself shows: a cast member with no picture, one
   // past the reference limit, and an imported picture that can't be sent yet.
   const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
-    || unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+    || unsendableRefs(buildShotPayload(e, project, imgSrc)).length > 0;
   const findOn = findActive(find);
   const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: cardById, statusOf: shownStatus, warn: cardWarns }) : [];
   const findSet = new Set(findIds);
@@ -2538,11 +2538,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         // Session P (open call 4, review F16): a picture the render route
                         // cannot send yet (an imported local_ picture) is marked BEFORE anyone
                         // presses Render -- the render itself refuses it before pricing.
-                        const unsendable = unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+                        // Spend review S6: an imported reference VIDEO (or audio) is marked the same way.
+                        const unsendable = unsendableKind(buildShotPayload(e, project, imgSrc));
                         return <>
                           {unsendable ? (
-                            <span className="lv-st warn" title="This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.">
-                              imported picture — can't be sent to PixAI yet
+                            <span className="lv-st warn" title={`This shot uses a ${unsendable} imported into your library (not a PixAI ${unsendable}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.`}>
+                              {unsendable === "picture" ? "imported picture — can't be sent to PixAI yet" : "imported " + unsendable + " — can't be sent to PixAI yet"}
                             </span>
                           ) : null}
                           {miss.length ? (
@@ -5180,7 +5181,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   const [find, setFind] = useState(emptyFind);
   useEffect(() => { setFind(emptyFind()); }, [activeId]);
   const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
-    || unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+    || unsendableRefs(buildShotPayload(e, project, imgSrc)).length > 0;
   const findOn = findActive(find);
   const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: phoneById, statusOf, warn: phoneWarns }) : [];
   const findSet = new Set(findIds);
@@ -5656,7 +5657,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 // Session P: P2's ⚠ for a stale anchor, and the imported-picture mark the desktop
                 // card carries (open call 4: rendering it is refused before anything is priced).
                 const stalePhone = anchorInfo(e.c, phoneById).state === "stale";
-                const unsendablePhone = unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+                const unsendablePhone = unsendableKind(buildShotPayload(e, project, imgSrc));
                 return (
                   <div key={e.c.id} className="lm-cardrow" data-find={findOn ? (findSet.has(e.c.id) ? "match" : "dim") : undefined}>
                     <button type="button" data-card-id={e.c.id}
@@ -5686,8 +5687,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                             </span>
                           )}
                           {unsendablePhone && (
-                            <span className="lm-warn" title="This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.">
-                              imported picture — can't be sent to PixAI yet
+                            <span className="lm-warn" title={`This shot uses a ${unsendablePhone} imported into your library (not a PixAI ${unsendablePhone}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.`}>
+                              {unsendablePhone === "picture" ? "imported picture — can't be sent to PixAI yet" : "imported " + unsendablePhone + " — can't be sent to PixAI yet"}
                             </span>
                           )}
                         </div>
@@ -6682,8 +6683,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   <button type="button" className="lm-unclearbtn" onClick={() => releaseSubmit(c.id)}>I checked Activity — release this shot</button>
                 </div>
               ) : (gsSelf && gsSelf.held && gsSelf.msg ? <div className="lm-held" role="status">{gsSelf.msg}</div>
-                : (unsendableImages(buildShotPayload(dfLive, project, imgSrc)).length
-                  ? <div className="lm-held" role="status">Imported picture — it can't be sent to PixAI yet.</div> : null))}
+                : (unsendableKind(buildShotPayload(dfLive, project, imgSrc))
+                  ? <div className="lm-held" role="status">Imported {unsendableKind(buildShotPayload(dfLive, project, imgSrc))} — it can't be sent to PixAI yet.</div> : null))}
               {/* useExistingVideo -- the SAME real, already-shipped attach-without-generating
                   path LoomV2's own board already offers (no spend, no PixAI task). */}
               <button type="button" className="lm-genexisting" disabled={genBusy}
@@ -8374,8 +8375,8 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       }
       // An imported (local_) picture cannot be sent yet (open call 4, review F16): refuse
       // BEFORE a price is asked or a confirm shown. The server refuses it too.
-      if (unsendableImages(p).length) {
-        holdCard(c.id, "Imported picture — it can't be sent to PixAI yet. Nothing was sent.");
+      if (unsendableRefs(p).length) {
+        holdCard(c.id, "Imported " + unsendableKind(p) + " — it can't be sent to PixAI yet. Nothing was sent.");
         return { ok: false, reason: "imported-picture" };
       }
       // A batch confirmed THIS payload's price; content edited since then is not sent (F12).
@@ -8808,9 +8809,10 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
     const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
     if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { refused: "This shot is already rendering. Nothing was sent." };
-    if (unsendableImages(payload).length) {
-      holdCard(cardId, "Imported picture — it can't be sent to PixAI yet. Nothing was sent.");
-      return { refused: "Imported picture — it can't be sent to PixAI yet. Nothing was sent." };
+    if (unsendableRefs(payload).length) {
+      const msg = "Imported " + unsendableKind(payload) + " — it can't be sent to PixAI yet. Nothing was sent.";
+      holdCard(cardId, msg);
+      return { refused: msg };
     }
     inflightRef.current.add(cardId);
     // ---- step 3: the lock, saved before anything is sent ----

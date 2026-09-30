@@ -116,6 +116,25 @@ def test_an_imported_picture_is_refused_before_anything_is_sent(rig):
     assert st["state"] == "not_sent"
 
 
+@pytest.mark.parametrize("field", ["video_refs", "audio_refs"])
+def test_an_imported_video_or_audio_ref_is_refused_before_anything_is_sent(rig, field):
+    """Spend review S6. video_ids / audio_ids keep digits only, so a local_ @video ref was
+    silently dropped: the render was priced and charged without the reference the card showed.
+    It is refused exactly like an imported picture (F16), journalled not_sent."""
+    r = rig["cli"].post("/api/loom/generate", json=_body(mode="R2V", **{field: ["local_0123456789ab"]}))
+    body = r.get_json()
+    assert "can't be sent to PixAI" in body["error"] and body.get("task_id") is None
+    assert rig["submits"] == [] and rig["sessions"] == 0 and rig["uploads"] == []
+    assert rig["cli"].get("/api/loom/submit-status?submit_id=s1").get_json()["state"] == "not_sent"
+    # The gallery's own Video tab (no Loom keys) is refused the same way.
+    plain = rig["cli"].post("/api/loom/generate", json=_body(submit_id=None, card=None, mode="R2V",
+                                                              **{field: ["local_0123456789ab"]})).get_json()
+    assert "can't be sent to PixAI" in plain["error"] and rig["submits"] == []
+    # A catalog id is sent as before.
+    ok = rig["cli"].post("/api/loom/generate", json=_body(submit_id="s2", mode="R2V", **{field: [MID]})).get_json()
+    assert ok["task_id"] and len(rig["submits"]) == 1
+
+
 # ---- one render, however it is asked for ----------------------------------------------------
 
 def test_the_same_submit_id_twice_submits_once(rig):

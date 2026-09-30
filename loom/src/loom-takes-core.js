@@ -132,9 +132,27 @@ export const sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pe
  *  F16): anything that is neither a catalog id (digits) nor a data: thumbnail -- an imported
  *  `local_` picture above all. Mirrors the server's own test, so the client refuses exactly
  *  what the server would, BEFORE a price is asked or a confirm shown. */
-export const unsendableImages = (payload) => ((payload && payload.images) || [])
+const unsendableIn = (list, dataOk) => (Array.isArray(list) ? list : [])
   .map((x) => str(x).trim())
-  .filter((s) => s && !/^\d+$/.test(s) && !s.startsWith("data:"));
+  .filter((s) => s && !/^\d+$/.test(s) && !(dataOk && s.startsWith("data:")));
+export const unsendableImages = (payload) => unsendableIn(payload && payload.images, true);
+
+/** Spend review S6: the same rule for the shot's reference VIDEOS and AUDIO. The server sends
+ *  only catalog ids (digits) for those -- a `local_` video was silently dropped, so the render
+ *  was priced and charged without the reference the card showed. A data: value is no escape
+ *  there (only pictures are uploaded on the way). Every render path refuses on this list. */
+export const unsendableRefs = (payload) => {
+  const p = payload || {};
+  return unsendableIn(p.images, true).concat(unsendableIn(p.video_refs, false), unsendableIn(p.audio_refs, false));
+};
+/** What the card calls the first unsendable reference: "picture", "video", "audio" or "". */
+export const unsendableKind = (payload) => {
+  const p = payload || {};
+  if (unsendableIn(p.images, true).length) return "picture";
+  if (unsendableIn(p.video_refs, false).length) return "video";
+  if (unsendableIn(p.audio_refs, false).length) return "audio";
+  return "";
+};
 
 /** The card on a board waiting for this submit id (the drawer's mg-submit / mg-error), or null. */
 export const cardForSubmit = (project, submitId) => {
