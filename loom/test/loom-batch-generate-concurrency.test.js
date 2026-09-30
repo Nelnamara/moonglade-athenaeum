@@ -46,7 +46,7 @@ const loopBody = () => {
 
 describe("Generate all (batchGenerate) never resubmits a shot that is already rendering", () => {
   test("the todo list is the CURRENT board's shots that need a render (needsRender), not a status filter", () => {
-    assert.match(src, /const board = projectRef\.current \? flat\(projectRef\.current\) : \(entries \|\| \[\]\);\n\s*const todo = board\.filter\(\(e\) => needsRender\(e\.c\)\);/,
+    assert.match(src, /const board = projectRef\.current \? flat\(projectRef\.current\) : \(entries \|\| \[\]\);\r?\n\s*const todo = board\.filter\(\(e\) => needsRender\(e\.c\)\);/,
       "batchGenerate must pick its shots from the store's current board with needsRender -- a " +
       "status filter re-renders a rendered shot whose retake failed (F14) and a stale entries " +
       "list sends content the owner has since changed (F12)");
