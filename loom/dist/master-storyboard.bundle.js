@@ -100,7 +100,18 @@ var LoomBundle = (() => {
     return !paused;
   };
   var sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pendingTaskId && card.lastAttempt && card.lastAttempt.state === "unclear");
-  var unsendableImages = (payload) => (payload && payload.images || []).map((x) => str(x).trim()).filter((s) => s && !/^\d+$/.test(s) && !s.startsWith("data:"));
+  var unsendableIn = (list, dataOk) => (Array.isArray(list) ? list : []).map((x) => str(x).trim()).filter((s) => s && !/^\d+$/.test(s) && !(dataOk && s.startsWith("data:")));
+  var unsendableRefs = (payload) => {
+    const p = payload || {};
+    return unsendableIn(p.images, true).concat(unsendableIn(p.video_refs, false), unsendableIn(p.audio_refs, false));
+  };
+  var unsendableKind = (payload) => {
+    const p = payload || {};
+    if (unsendableIn(p.images, true).length) return "picture";
+    if (unsendableIn(p.video_refs, false).length) return "video";
+    if (unsendableIn(p.audio_refs, false).length) return "audio";
+    return "";
+  };
   var cardForSubmit = (project, submitId) => {
     const sid = str(submitId);
     if (!sid) return null;
@@ -201,6 +212,15 @@ var LoomBundle = (() => {
     return next;
   };
   var settledStatus = (card) => selectedTakeOf(card) != null ? "done" : "error";
+  var untomb = (card, mid) => {
+    const t = card.deletedTakes;
+    if (!Array.isArray(t) || !t.some((x) => str(x) === str(mid))) return card;
+    const rest = t.filter((x) => str(x) !== str(mid));
+    const next = { ...card };
+    if (rest.length) next.deletedTakes = rest;
+    else delete next.deletedTakes;
+    return next;
+  };
   var landTake = (card, rep) => {
     const r = rep || {};
     const mid = str(r.mid), taskId = str(r.taskId);
@@ -241,7 +261,7 @@ var LoomBundle = (() => {
       source: "render"
     };
     if (isPending && card.pendingQuote) take2.quoted = card.pendingQuote;
-    const withTake = { ...c0, takes: c0.takes.concat([take2]), takeSeq: n };
+    const withTake = untomb({ ...c0, takes: c0.takes.concat([take2]), takeSeq: n }, mid);
     if (!isPending) return { card: withoutSuperseded(withTake, taskId), outcome: "unselected" };
     const c1 = clearPending(mirrorOnto(withTake, take2));
     return { card: { ...c1, status: "done", lastAttempt: null }, outcome: "landed" };
@@ -259,7 +279,7 @@ var LoomBundle = (() => {
     c = clearPending(c);
     const existing = takesOf(c).find((t) => str(t.mid) === mid);
     if (existing) {
-      c = selectTake(c, existing.n);
+      c = untomb(selectTake(c, existing.n), mid);
       return { card: { ...c, status: "done", lastAttempt: null }, outcome: "selected" };
     }
     const n = takeSeqOf(c) + 1;
@@ -278,7 +298,7 @@ var LoomBundle = (() => {
       imported,
       source: imported ? "attach" : "render"
     };
-    const withTake = { ...c, takes: c.takes.concat([take2]), takeSeq: n };
+    const withTake = untomb({ ...c, takes: c.takes.concat([take2]), takeSeq: n }, mid);
     const sel = selectedTakeOf(c);
     let base = withTake;
     if (sel != null) base = writeBack(withTake, sel);
@@ -616,12 +636,12 @@ var LoomBundle = (() => {
       if (!hit) return rc;
       const lc = hit.c;
       const rTakes = takesOf(rc);
-      const dead = /* @__PURE__ */ new Set([
-        ...(rc.attempts || []).map((x) => str(x && x.media_id)),
-        ...(rc.deletedTakes || []).map(str),
-        ...(lc.deletedTakes || []).map(str)
-      ]);
       const rMids = new Set(rTakes.map((t) => str(t.mid)));
+      const lMids = new Set(takesOf(lc).map((t) => str(t.mid)));
+      const dead = /* @__PURE__ */ new Set([
+        ...[...(rc.attempts || []).map((x) => str(x && x.media_id)), ...(rc.deletedTakes || []).map(str)].filter((m) => !rMids.has(m)),
+        ...(lc.deletedTakes || []).map(str).filter((m) => !lMids.has(m))
+      ]);
       const extra = takesOf(lc).filter((t) => !rMids.has(str(t.mid)) && !dead.has(str(t.mid)));
       let out = rc;
       const renum = {};
@@ -650,9 +670,14 @@ var LoomBundle = (() => {
         const kept = out.takes.filter((t) => t.n === sel || !dead.has(str(t.mid)));
         if (kept.length !== out.takes.length) out = { ...out, takes: kept };
       }
-      if ((lc.deletedTakes || []).length) {
-        const tomb = Array.from(/* @__PURE__ */ new Set([...(out.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str)]));
-        out = { ...out, deletedTakes: tomb };
+      if ((lc.deletedTakes || []).length || (out.deletedTakes || []).length) {
+        const held = new Set(takesOf(out).map((t) => str(t.mid)));
+        const tomb = Array.from(/* @__PURE__ */ new Set([...(out.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str)])).filter((m) => !held.has(m));
+        if (tomb.length) out = { ...out, deletedTakes: tomb };
+        else if (own(out, "deletedTakes")) {
+          out = { ...out };
+          delete out.deletedTakes;
+        }
       }
       const lpTask = str(lc.pendingTaskId), lpSub = str(lc.pendingSubmitId);
       const remoteBusy = !!(rc.pendingTaskId || rc.pendingSubmitId);
@@ -884,6 +909,17 @@ var LoomBundle = (() => {
       // Absent/false = Normal, matching the drawer's own default.
       is_private: !!c.isPrivate,
       hasInput: imgs.length + vids.length > 0
+    };
+  };
+  var shotSendBody = (payload, ids) => {
+    const { hasInput, ...sent } = payload || {};
+    const x = ids || {};
+    return {
+      ...sent,
+      origin: "loom-shot",
+      loom_target: { board_id: x.boardId, card_id: x.cardId },
+      submit_id: x.submitId,
+      ...x.expectFree ? { expect_free: true } : {}
     };
   };
   var PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
@@ -13336,7 +13372,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       const gs = genState[c.id];
       return gs && gs.phase === "paused" ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status;
     };
-    const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+    const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableRefs(shotPayload(e, project, imgSrc)).length > 0;
     const findOn = findActive(find);
     const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: cardById, statusOf: shownStatus, warn: cardWarns }) : [];
     const findSet = new Set(findIds);
@@ -13466,8 +13502,8 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), (() => {
             const miss = castMissingImages(e, project, imgSrc);
             const over = castPastBudget(e, project, imgSrc);
-            const unsendable = unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, unsendable ? /* @__PURE__ */ React.createElement("span", { className: "lv-st warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent to PixAI yet") : null, miss.length ? /* @__PURE__ */ React.createElement(
+            const unsendable = unsendableKind(shotPayload(e, project, imgSrc));
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, unsendable ? /* @__PURE__ */ React.createElement("span", { className: "lv-st warn", title: `This shot uses a ${unsendable} imported into your library (not a PixAI ${unsendable}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.` }, unsendable === "picture" ? "imported picture \u2014 can't be sent to PixAI yet" : "imported " + unsendable + " \u2014 can't be sent to PixAI yet") : null, miss.length ? /* @__PURE__ */ React.createElement(
               "span",
               {
                 className: "lv-st warn",
@@ -15674,7 +15710,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     useEffect2(() => {
       setFind(emptyFind());
     }, [activeId]);
-    const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+    const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableRefs(shotPayload(e, project, imgSrc)).length > 0;
     const findOn = findActive(find);
     const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: phoneById, statusOf, warn: phoneWarns }) : [];
     const findSet = new Set(findIds);
@@ -16069,7 +16105,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         const thumb = cardThumb(e.c);
         const canReview = st === "done" && !!e.c.resultMid;
         const stalePhone = anchorInfo(e.c, phoneById).state === "stale";
-        const unsendablePhone = unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+        const unsendablePhone = unsendableKind(shotPayload(e, project, imgSrc));
         return /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-cardrow", "data-find": findOn ? findSet.has(e.c.id) ? "match" : "dim" : void 0 }, /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -16083,7 +16119,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             title: "Open this shot \u2014 it binds to Generate"
           },
           /* @__PURE__ */ React.createElement("div", { className: "lm-thumb", style: thumb ? { backgroundImage: `url(${thumb})` } : void 0 }, !thumb && e.c.mode),
-          /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`), stalePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: "Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep." }, "\u26A0 anchor changed"), unsendablePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent to PixAI yet")))
+          /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`), stalePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: "Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep." }, "\u26A0 anchor changed"), unsendablePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `This shot uses a ${unsendablePhone} imported into your library (not a PixAI ${unsendablePhone}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.` }, unsendablePhone === "picture" ? "imported picture \u2014 can't be sent to PixAI yet" : "imported " + unsendablePhone + " \u2014 can't be sent to PixAI yet")))
         ), canReview && /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -16993,7 +17029,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         /* @__PURE__ */ React.createElement("option", { value: "chinese" }, "Chinese"),
         /* @__PURE__ */ React.createElement("option", { value: "korean" }, "Korean"),
         /* @__PURE__ */ React.createElement("option", { value: "none" }, "SE only (no dialogue)")
-      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? /* @__PURE__ */ React.createElement("div", { className: "lm-unclear", role: "status" }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => recheckSubmit(c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => releaseSubmit(c.id) }, "I checked Activity \u2014 release this shot")) : gsSelf && gsSelf.held && gsSelf.msg ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, gsSelf.msg) : unsendableImages(shotPayload(dfLive, project, imgSrc)).length ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, "Imported picture \u2014 it can't be sent to PixAI yet.") : null, /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? /* @__PURE__ */ React.createElement("div", { className: "lm-unclear", role: "status" }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => recheckSubmit(c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => releaseSubmit(c.id) }, "I checked Activity \u2014 release this shot")) : gsSelf && gsSelf.held && gsSelf.msg ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, gsSelf.msg) : unsendableKind(shotPayload(dfLive, project, imgSrc)) ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, "Imported ", unsendableKind(shotPayload(dfLive, project, imgSrc)), " \u2014 it can't be sent to PixAI yet.") : null, /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -18481,6 +18517,7 @@ Generate anyway?`);
     const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
     const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
     const CHECKING_MSG = "Checking whether the render was sent\u2026";
+    const STILL_SENDING_MSG = "Still being sent to PixAI \u2014 it can't be released until PixAI answers. Check again in a moment.";
     const generateShot = async (entry, opts = {}) => {
       const cardId = entry.c.id;
       const boardId = activeIdRef.current;
@@ -18500,8 +18537,8 @@ Generate anyway?`);
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
           return { ok: false, reason: "no-input" };
         }
-        if (unsendableImages(p).length) {
-          holdCard(c.id, "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent.");
+        if (unsendableRefs(p).length) {
+          holdCard(c.id, "Imported " + unsendableKind(p) + " \u2014 it can't be sent to PixAI yet. Nothing was sent.");
           return { ok: false, reason: "imported-picture" };
         }
         if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
@@ -18557,20 +18594,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           const r = await fetch("/api/loom/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: p.mode,
-              prompt: p.prompt,
-              images: p.images,
-              video_refs: p.video_refs,
-              duration: p.duration,
-              quality: p.quality,
-              generate_audio: p.generate_audio,
-              audio_language: p.audio_language,
-              origin: "loom-shot",
-              loom_target: { board_id: boardId, card_id: cardId },
-              submit_id: submitId,
-              ...expectFree ? { expect_free: true } : {}
-            })
+            body: JSON.stringify(shotSendBody(p, { boardId, cardId, submitId, expectFree }))
           });
           status = r.status;
           try {
@@ -18614,6 +18638,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     const checkSubmit = async (cardId, submitId, boardId) => {
       const here = () => activeIdRef.current === boardId;
+      if (inflightRef.current.has(cardId)) return { pending: true };
       if (checkingRef.current.has(submitId)) return { unclear: true };
       checkingRef.current.add(submitId);
       try {
@@ -18662,6 +18687,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const e = cardOn(cardId);
       const boardId = activeIdRef.current;
       if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+      if (inflightRef.current.has(cardId)) {
+        holdCard(cardId, STILL_SENDING_MSG, "checking");
+        return;
+      }
       const submitId = e.c.pendingSubmitId;
       let d = null, status = 0;
       try {
@@ -18685,6 +18714,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       if (status === 409 && d && d.task_id) {
         adoptFromJournal(cardId, submitId, String(d.task_id), boardId);
+        return;
+      }
+      if (status === 409 && d && d.sending) {
+        holdCard(cardId, STILL_SENDING_MSG, "unclear");
         return;
       }
       holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " \u2014 " + d.error : " \u2014 the server didn't answer.") + " Nothing was sent.", "unclear");
@@ -18785,7 +18818,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (!proj) return;
       const boardId = activeIdRef.current;
       cardsToResume(proj, resumedRef.current).forEach((c) => pollShot(c.id, c.taskId, c.startedAt, boardId));
-      submitsToCheck(proj, /* @__PURE__ */ Object.create(null)).forEach((c) => checkSubmit(c.id, c.submitId, boardId));
+      submitsToCheck(proj, /* @__PURE__ */ Object.create(null)).filter((c) => !inflightRef.current.has(c.id)).forEach((c) => checkSubmit(c.id, c.submitId, boardId));
     };
     useEffect2(() => {
       resumeInterrupted();
@@ -18845,9 +18878,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
       const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
       if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { refused: "This shot is already rendering. Nothing was sent." };
-      if (unsendableImages(payload).length) {
-        holdCard(cardId, "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent.");
-        return { refused: "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent." };
+      if (unsendableRefs(payload).length) {
+        const msg2 = "Imported " + unsendableKind(payload) + " \u2014 it can't be sent to PixAI yet. Nothing was sent.";
+        holdCard(cardId, msg2);
+        return { refused: msg2 };
       }
       inflightRef.current.add(cardId);
       const c = pre.c;
