@@ -3459,6 +3459,216 @@ def test_the_manual_switch_still_overrules_the_phone_auto_open(logged_in_page):
 
 
 # ---------------------------------------------------------------------------
+# The desktop Loom built to its Design Handoff (2026-09-29)
+# ---------------------------------------------------------------------------
+# The owner's window, 1444x815, where he found the Loom "fucking broken": both glass panels
+# opened over the board, the full timeline (618 px) left the board 0 px, the drawer could only
+# be dragged, the top bar wrapped "← Gallery" onto a row of its own, and the rails and panels
+# stayed Moonglade violet under every skin. Each test below measures the fix in a real browser
+# and then puts the pre-fix state back as an in-page override to show its metric flips.
+OWNER_LOOM = {"width": 1444, "height": 815}
+
+_LOOM_BOARD_JS = """() => {
+  const shell = document.querySelector('.lv-shell').getBoundingClientRect();
+  const vh = window.innerHeight;
+  const card = document.querySelector('.lv-card');
+  let cardVisible = false, cardOnTop = false;
+  if (card) {
+    const r = card.getBoundingClientRect();
+    cardVisible = r.height > 20 && r.top >= shell.top - 1 && r.top < vh && r.bottom > shell.top;
+    const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 30, vh - 2));
+    cardOnTop = !!(hit && card.contains(hit));
+  }
+  return {
+    boardVisible: Math.min(shell.bottom, vh) - Math.max(shell.top, 0),
+    panels: document.querySelectorAll('.lv-panel').length,
+    backdrops: document.querySelectorAll('.lv-backdrop').length,
+    cards: document.querySelectorAll('.lv-card').length,
+    cardVisible, cardOnTop,
+    tl: document.querySelector('.lv-tldrawer').getAttribute('data-tl'),
+    tlHeight: document.querySelector('.lv-tlcontent').getBoundingClientRect().height,
+    overlayOverflows: (() => { const ov = document.querySelector('.lv-overlay');
+      return ov.scrollHeight > ov.clientHeight + 1; })(),
+  };
+}"""
+
+
+def _open_owner_loom(logged_in_page):
+    page = logged_in_page(**OWNER_LOOM)
+    _visit(page, "/loom")
+    page.wait_for_selector(".lv-top")
+    page.wait_for_selector(".lv-card")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    return page
+
+
+def test_the_loom_opens_on_its_rails_with_the_board_in_view(logged_in_page):
+    """Call 1: both side panels start collapsed to their rails (the page's `startCollapsed`,
+    default true) and the board's shot cards are on screen and uncovered."""
+    page = _open_owner_loom(logged_in_page)
+    m = page.evaluate(_LOOM_BOARD_JS)
+    assert m["panels"] == 0 and m["backdrops"] == 0, (
+        "the Loom opened with a side panel over the board: {!r}".format(m))
+    assert m["cards"] >= 1 and m["cardVisible"] and m["cardOnTop"], (
+        "the board's first shot card is not visible and uncovered on open: {!r}".format(m))
+    assert m["tl"] == "slim"
+
+    # Phase 2: the pre-fix open state -- a panel and its blurred backdrop over the board --
+    # must read as "covered" to the same measurement.
+    page.click(".lv-rail .lv-railbtn")
+    page.wait_for_selector(".lv-panel.left")
+    _settle(page)
+    covered = page.evaluate(_LOOM_BOARD_JS)
+    assert covered["panels"] == 1 and not covered["cardOnTop"], (
+        "opening a panel did not register as covering the board -- the check above is "
+        "vacuous: {!r}".format(covered))
+
+
+def test_the_timeline_grip_cycles_on_a_click_and_never_drags(logged_in_page):
+    """Call 2: a click on the grip cycles hidden -> slim -> full -> hidden (The Loom.dc.html
+    :168, 1002); the heights are 0 / 86 / the fit rule's full. There is no drag: a press and
+    pull on the grip changes nothing."""
+    page = _open_owner_loom(logged_in_page)
+    seen = [page.evaluate(_LOOM_BOARD_JS)]
+    for _ in range(3):
+        page.click(".lv-tlhandle")
+        _settle(page)
+        seen.append(page.evaluate(_LOOM_BOARD_JS))
+    states = [m["tl"] for m in seen]
+    heights = [round(m["tlHeight"]) for m in seen]
+    assert states == ["slim", "full", "hidden", "slim"], states
+    assert heights[0] == 86 and heights[2] == 0 and heights[3] == 86, heights
+    assert heights[1] > 86, "the full drawer is no taller than slim: {!r}".format(heights)
+
+    # A drag on the grip is not a gesture any more: press, pull 200 px down, let go.
+    box = page.locator(".lv-tlhandle").bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x, y + 200, steps=8)
+    after_drag_mid = page.evaluate(_LOOM_BOARD_JS)
+    page.mouse.up()
+    _settle(page)
+    after_drag = page.evaluate(_LOOM_BOARD_JS)
+    assert round(after_drag_mid["tlHeight"]) == 86 and after_drag["tl"] == "slim", (
+        "the drawer followed a drag on its grip: {!r} / {!r}".format(after_drag_mid, after_drag))
+
+
+def test_the_full_timeline_leaves_the_board_in_view(logged_in_page):
+    """Call 3 (the fit rule): the full drawer never takes the board below 240 px, the page
+    itself never scrolls, and the drawer's own body is what scrolls when its rows do not fit
+    -- at the owner's 1444x815 with the banner up, the case that used to leave the board 0 px
+    and "nothing scrollable"."""
+    page = _open_owner_loom(logged_in_page)
+    page.click(".lv-tlhandle")
+    page.wait_for_function("() => document.querySelector('.lv-tldrawer').getAttribute('data-tl') === 'full'")
+    _settle(page)
+    m = page.evaluate(_LOOM_BOARD_JS)
+    assert m["boardVisible"] >= 240, "the full timeline left the board {} px: {!r}".format(
+        m["boardVisible"], m)
+    assert not m["overlayOverflows"], "the Loom overflows the window under the full timeline: {!r}".format(m)
+    body = page.evaluate("""() => { const b = document.querySelector('.lv-tlbody');
+      return { oy: getComputedStyle(b).overflowY, sh: b.scrollHeight, ch: b.clientHeight,
+               preview: document.querySelector('.lv-tlpreviewzone').getBoundingClientRect().height }; }""")
+    assert body["oy"] == "auto", "the full drawer's body cannot scroll: {!r}".format(body)
+    assert 150 <= round(body["preview"]) <= 300, "the preview box broke its 150-300 px range: {!r}".format(body)
+
+    # Phase 2: the pre-fix full height (618 px) must leave the board under 240 px here.
+    page.add_style_tag(content=".lv-tlcontent{height:618px !important}")
+    _settle(page)
+    old = page.evaluate(_LOOM_BOARD_JS)
+    assert old["boardVisible"] < 240, (
+        "the old 618 px drawer still left the board >= 240 px -- the check above proves "
+        "nothing at this window: {!r}".format(old))
+
+
+_TOPBAR_ROWS_JS = """() => {
+  const bar = document.querySelector('.lv-top');
+  const kids = [...bar.children].filter((el) => {
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+  const mids = kids.map((el) => { const r = el.getBoundingClientRect(); return (r.top + r.bottom) / 2; });
+  const g = document.querySelector('a.lv-close').getBoundingClientRect();
+  return { spread: Math.max(...mids) - Math.min(...mids), barHeight: bar.getBoundingClientRect().height,
+           galleryRight: g.right, barRight: bar.getBoundingClientRect().right,
+           galleryUpper: getComputedStyle(document.querySelector('a.lv-close')).textTransform,
+           mobileInBar: [...bar.querySelectorAll(':scope > label')].some((l) => /Mobile view/.test(l.textContent)),
+           hasName: !!bar.querySelector('.lv-sbname') };
+}"""
+
+
+def test_the_loom_top_bar_is_one_row_at_the_owners_width(logged_in_page):
+    """Call 5: at 1444 px the whole bar -- name ▾, find and its chips, Draft, the Generate
+    cluster, Activity and ← GALLERY -- sits on ONE row (the page's bar, The Loom.dc.html
+    :46-143). 📱 Mobile view lives in the storyboards popover now; ← Gallery wears the page's
+    uppercase form and ends the row."""
+    page = _open_owner_loom(logged_in_page)
+    m = page.evaluate(_TOPBAR_ROWS_JS)
+    assert m["spread"] <= 6 and m["barHeight"] <= 62, (
+        "the Loom's top bar wrapped at 1444 px: {!r}".format(m))
+    assert abs(m["galleryRight"] - (m["barRight"] - 16)) <= 2, "← Gallery does not end the row: {!r}".format(m)
+    assert m["galleryUpper"] == "uppercase" and m["hasName"] and not m["mobileInBar"], m
+
+    # The Mobile view switch is one click away, in the ▾ popover.
+    page.click(".lv-top .lv-caret")
+    page.wait_for_selector(".sb-projpop .sb-projrow input[type=checkbox]")
+    page.keyboard.press("Escape")
+    _settle(page)
+
+    # Phase 2: a find pill that will not give (the old min-width) plus the old Mobile view chip
+    # is the pre-fix bar -- it must read as more than one row to the same measurement.
+    page.add_style_tag(content=".lv-top .lv-find{flex:0 0 236px !important;max-width:none !important}"
+                               ".lv-top .lv-findchips{flex:none !important}"
+                               ".lv-top .harness-oldchip{flex:none;width:300px}")
+    page.evaluate("() => { const b = document.createElement('label'); b.className = 'lv-draft harness-oldchip';"
+                  " b.textContent = 'Mobile view (the old chip)';"
+                  " document.querySelector('.lv-top .lv-draft').after(b); }")
+    _settle(page)
+    wrapped = page.evaluate(_TOPBAR_ROWS_JS)
+    assert wrapped["spread"] > 6, (
+        "the pre-fix bar did not wrap at 1444 px -- the one-row check proves nothing: "
+        "{!r}".format(wrapped))
+
+
+_PANEL_SKIN_JS = """(skin) => {
+  if (skin === 'moonglade') document.documentElement.removeAttribute('data-skin');
+  else document.documentElement.setAttribute('data-skin', skin);
+  const panel = getComputedStyle(document.querySelector('.lv-panel'));
+  const rail = getComputedStyle(document.querySelector('.lv-rail'));
+  return { panelBg: panel.backgroundImage, panelBorder: panel.borderTopColor,
+           railBg: rail.backgroundImage, tint: document.querySelector('.lv-seg')
+             ? getComputedStyle(document.querySelector('.lv-seg')).backgroundImage : '' };
+}"""
+
+
+def test_a_skin_reaches_the_loom_rails_panels_and_reel(logged_in_page):
+    """DECISIONS "Every skin reaches every surface": under Embercourt the glass side panel,
+    the rails and the reel's tints are not Moonglade's any more (they were hard-coded violet
+    literals, screenshot 04 of the 2026-09-29 audit)."""
+    page = _open_owner_loom(logged_in_page)
+    page.click(".lv-rail .lv-railbtn")
+    page.wait_for_selector(".lv-panel.left")
+    _settle(page)
+    moon = page.evaluate(_PANEL_SKIN_JS, "moonglade")
+    ember = page.evaluate(_PANEL_SKIN_JS, "ember")
+    assert moon["panelBg"] != ember["panelBg"], "the side panel ignores the skin: {!r}".format(moon)
+    assert moon["panelBorder"] != ember["panelBorder"], (moon, ember)
+    assert moon["railBg"] != ember["railBg"], "the rails ignore the skin: {!r}".format(moon)
+    assert moon["tint"] and moon["tint"] != ember["tint"], "the reel's tints ignore the skin"
+
+    # Phase 2: the pre-fix literal glass is the same under both skins.
+    page.add_style_tag(content=".lv-panel{background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,"
+                               "rgba(14,11,32,.95) 100%) !important}")
+    _settle(page)
+    moon2 = page.evaluate(_PANEL_SKIN_JS, "moonglade")
+    ember2 = page.evaluate(_PANEL_SKIN_JS, "ember")
+    assert moon2["panelBg"] == ember2["panelBg"], (
+        "the literal glass read differently under two skins -- the comparison above cannot "
+        "tell a skinned panel from an unskinned one")
+    page.evaluate(_PANEL_SKIN_JS, "moonglade")
+
+
+# ---------------------------------------------------------------------------
 # THE PHONE'S FOUNDATIONS (2026-09-06) -- the mobile audit's four confirmed defects
 # ---------------------------------------------------------------------------
 # Each of the four below was independently re-reproduced on a driven 390x844 chromium

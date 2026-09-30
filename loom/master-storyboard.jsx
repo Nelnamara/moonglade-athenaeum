@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 // Pure, framework-agnostic logic (tag numbering, continuity checks, shot-text
 // assembly, reel duration/pricing math) lives in ./src/loom-core.js so it can
 // be unit-tested under `node --test` outside React. `shotPayload` is imported
@@ -11,6 +11,8 @@ import {
   usesCloseFrame,
   pickTarget, pickVideoTarget, positionTag, durOf,
   reelStats, effectivePrompt,
+  // The timeline drawer's click-to-cycle states and its fit rule (The Loom.dc.html:1001-1002).
+  timelineFit, timelineHeight, nextTimelineState,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
@@ -189,13 +191,20 @@ const priceBody = async (body) => {
 // from other statuses. `(ai*3+ci) % TINTS.length` is the design's real assignment rule --
 // ai/ci already exist on every flat() entry (loom-core.js:118), so this needs no change to
 // that pure-logic file, just reading fields it already provides.
+// TOKEN MIXES, NOT THE PAGE'S HEXES (2026-09-29, DECISIONS "Every skin reaches every surface"):
+// the page hard-codes Moonglade's violets here, and a skin has to reach the reel too. Each stop
+// is fitted to the page's hex under the default skin (within about 2 OKLab dE, below what an eye
+// separates) and follows the skin's own base / surfaces / accent / emerald elsewhere. HSL mixing
+// is what keeps the dark stops saturated: sRGB and OKLab mixes of these tokens cannot reach
+// #33236d or #643aac at all. Page hexes, in order: #33236d>#1b1733, #3a3460>#17142b,
+// #643aac>#241f5b, #2a4a58>#171f38, #4a3a6e>#1f1a36, #3a2b63>#191338.
 const LV_TINTS = [
-  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
-  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
-  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
-  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
-  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
-  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--base) 69%, var(--accent)) 0%, color-mix(in oklab, var(--base) 65%, var(--surface1)) 100%)",
+  "linear-gradient(150deg, var(--surface1) 0%, color-mix(in oklab, var(--surface1) 59%, black) 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 48%, var(--accent)) 0%, color-mix(in hsl, var(--base) 78%, var(--mauve)) 100%)",
+  "linear-gradient(150deg, color-mix(in oklab, var(--surface0) 73%, var(--emerald)) 0%, color-mix(in oklch, var(--mantle) 84%, var(--emerald)) 100%)",
+  "linear-gradient(150deg, color-mix(in srgb, var(--surface1) 90%, var(--accent)) 0%, color-mix(in srgb, var(--mantle) 58%, var(--surface1)) 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 80%, var(--accent)) 0%, color-mix(in hsl, var(--base) 89%, var(--accent)) 100%)",
 ];
 
 // Session P (P3): how much taller the timeline's full view is for the music bed's row (36 px,
@@ -225,8 +234,24 @@ const STYLES = `
   --line:var(--overlay0);    --line2:color-mix(in srgb, var(--overlay0) 55%, var(--text) 45%);
   --ink:var(--text);         --ink2:var(--subtext);      --ink3:var(--overlay0);
   --amber:var(--accent);     --amber-d:color-mix(in srgb, var(--accent) 70%, black);
-  --cyan:var(--emerald);     --green:var(--green);       --coral:var(--red);
+  --coral:var(--red);
+  /* --cyan is the Loom's own cyan (--loomc, the same in every skin), not --emerald: the page
+     draws the "linked" chip and the live @tags in it (The Loom.dc.html:294, 1055, 1136).
+     There is no --green alias any more. It read var(--green) on the same :root it was
+     declared on -- a self-reference is a cycle, which makes the property invalid, so every
+     var(--green) with no fallback (the card's DONE, Deep Focus's tick) lost its colour.
+     --green now falls through to the gallery token. */
+  --cyan:var(--loomc);
   --shadow:0 10px 30px rgba(0,0,0,.45);
+  /* The page's hard-coded violet chrome as token mixes (DECISIONS "Every skin reaches every
+     surface"). Each is fitted to the page's literal under the default skin (within about
+     1 OKLab dE) and follows the skin everywhere else:
+       --lv-ink       the near-black of every veil and backdrop (rgba(5,4,13) and kin)
+       --lv-glass-hi  the glass gradient's first stop, rgba(24,18,54)
+       --lv-glass-lo  its second stop, rgba(14,11,32) */
+  --lv-ink:color-mix(in oklab, var(--mantle) 80%, black);
+  --lv-glass-hi:color-mix(in hsl, var(--base) 90%, var(--accent));
+  --lv-glass-lo:color-mix(in hsl, var(--mantle) 90%, var(--surface1));
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
@@ -253,6 +278,15 @@ const STYLES = `
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:317}
+/* The desktop bar's 📱 Mobile view, moved into this popover as a row (2026-09-29, the one-row
+   bar): the Draft chip's own 12 px check square. */
+.sb-projpop .sb-projrow{display:flex;align-items:center;gap:8px;border:0;border-top:1px solid var(--line);border-radius:0;
+  background:transparent;padding:8px 8px 2px;margin:0;font:600 12px/1.2 system-ui,sans-serif;color:var(--ink2);cursor:pointer;user-select:none}
+.sb-projpop .sb-projrow:hover{color:var(--ink)}
+.sb-projpop .sb-projrow.on{color:var(--amber)}
+.sb-projrow input{appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;width:12px;height:12px;
+  border-radius:3px;border:1px solid var(--surface1);background:var(--base);flex:none}
+.sb-projrow input:checked{background:var(--accent)}
 /* Export ▾ menu reuses .sb-projwrap/.sb-projveil/.sb-projpop's POPOVER chrome as-is --
    same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
    the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
@@ -266,7 +300,7 @@ const STYLES = `
 .sb-exportitem.sb-exportedl:hover{background:color-mix(in srgb,var(--lavender) 22%,transparent)}
 /* Session P (P4): THE EDIT DECISION LIST PANEL, the page's own sizes and tokens (its #0a0818 is
    --mantle; its darker preview well is --mantle pulled toward black). Shown over the board. */
-.sb-edlveil{background:rgba(4,3,10,.72)}
+.sb-edlveil{background:color-mix(in srgb,var(--lv-ink) 72%,transparent)}
 .sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
   border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
 .sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -332,14 +366,14 @@ const STYLES = `
   color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
-.sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
+.sb-trim-sel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--gold) 26%,transparent);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
 .sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
 .sb-trim-h:hover{background:var(--gold)}
 .sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:ui-monospace,monospace}
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
-.sb-seq{position:fixed;inset:0;z-index:490;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
+.sb-seq{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 92%,transparent);display:flex;align-items:center;justify-content:center;padding:22px}
 .sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
@@ -355,7 +389,7 @@ const STYLES = `
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
-.sb-pick-ov{position:fixed;inset:0;z-index:490;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+.sb-pick-ov{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
 .sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
@@ -451,6 +485,18 @@ const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing",
 // vanilla-campaign work; until then the local copy stays, same as modeSendsRefs/liveTagText
 // etc. keep their own copies for values outside this file's two DO-NOT-MODIFY pure modules.)
 const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+// The desktop Fixer paints with the SKIN's colours (2026-09-29, "Every skin reaches every
+// surface"): editCore's #b692e6 and #4fc99a are Moonglade's --lavender and --emerald, so the
+// desktop canvas reads those tokens live and keeps FIX_COLORS only as the fallback. A canvas
+// cannot take var(), hence the computed-style read.
+const FIX_TOKENS = { face: "--lavender", hand: "--emerald" };
+const fixStroke = (tag) => {
+  const k = tag === "hand" ? "hand" : "face";
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(FIX_TOKENS[k]).trim();
+    return v || FIX_COLORS[k];
+  } catch (e) { return FIX_COLORS[k]; }
+};
 const FIX_MIN_PX = 6;
 const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
 // boxes arrive as {x,y,w,h,tag} in DISPLAY pixels (the canvas's own coordinate space); the
@@ -696,7 +742,7 @@ const V2_STYLES = `
 .lv-banner{position:relative;width:100%;height:160px;overflow:hidden;background:var(--base);
   flex:none;border-bottom:1px solid var(--surface1);}
 .lv-banner-art{position:absolute;inset:0;
-  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, var(--base)) 0%, var(--base) 62%, color-mix(in oklab, var(--mantle) 87%, black) 100%);}
 .lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
 .lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
@@ -704,12 +750,35 @@ const V2_STYLES = `
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-/* Top bar geometry per The Loom.dc.html:45 (2026-08-13 styleset pass): wrapping
-   row, 8x10 gap, and NO eyebrow/hint -- the DC's bar opens straight with the
-   storyboard caret. Two .lv-fill spacers center the Generate cluster exactly
-   like the DC's twin flex-1 divs. */
+/* Top bar geometry per The Loom.dc.html:46 + Loom Handoff.dc.html:44 (2026-09-29): ONE row
+   at desktop widths -- [Banner] name ▾ · find + chips · Draft · | · Generate all · cost · Play ·
+   Render · Export ▾ · | · spend · goals · Activity · ← GALLERY. Two .lv-fill spacers center the
+   Generate cluster like the DC's twin flex-1 divs. It still wraps on a narrow window, but the
+   things that can give (the name, the find pill, its chips, the Activity chip's words) carry a
+   small flex-basis and GROW back to their natural width, so the row breaks only when even their
+   small sizes do not fit -- and .lv-topend keeps ← Gallery on the same line as whatever sits
+   before it, so it never lands alone on a row. Their grow factor (1000) is far above the
+   spacers' (1), so free space goes to them first, up to their natural width, and only what is
+   left over opens the spacers. */
 .lv-top{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-fill{flex:1 1 auto;}
+.lv-top .lv-sbwrap{flex:1000 1 80px;max-width:max-content;min-width:0;align-items:center;gap:6px;}
+.lv-top button.lv-sbname{background:none;border:0;padding:0 2px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font:italic 400 16px/1.25 Georgia,"Times New Roman",serif;color:var(--text);cursor:pointer;}
+.lv-top button.lv-sbname:hover{color:var(--accent);}
+.lv-findchips{display:flex;align-items:center;gap:8px;flex:1000 1 60px;max-width:max-content;min-width:0;
+  overflow-x:auto;scrollbar-width:none;}
+.lv-findchips::-webkit-scrollbar{display:none;}
+.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 220px;max-width:max-content;min-width:0;justify-content:flex-end;}
+.lv-topend.withexport{flex:1 1 auto;max-width:none;}
+.lv-topend > *{flex:none;}
+.lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:0;display:flex;}
+.lv-topend > .lv-fill{flex:1 1 auto;}
+.lv-topend .at-chip{min-width:0;max-width:100%;}
+.lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+/* ← Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
+   surface): uppercase, 11 px / 700, letter-spacing .1em. */
+.lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
    anchor, not a button, so a button-only selector left it as an unstyled browser link --
    rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
@@ -731,12 +800,12 @@ const V2_STYLES = `
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
-.lv-cost-pill{opacity:.85;font-weight:600;}
+.lv-cost-pill{opacity:.85;font-weight:600;white-space:nowrap;}
 .lv-cost-pill:disabled{opacity:.5;}
 /* The storyboard caret, The Loom.dc.html caretBtnStyle: a compact 26px square,
    not a text pill. (The Export trigger next to Render is the opposite case --
    it dropped .sb-projbtn to inherit the bar's normal button idiom.) */
-.lv-top .lv-caret{width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
+.lv-top .lv-caret{flex:none;width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
   color:var(--subtext);border-radius:6px;cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
 .lv-top .lv-caret:hover{border-color:var(--accent);}
 /* ▶ Generate all -- the DC's "metal" treatment verbatim (The Loom.dc.html:748):
@@ -767,23 +836,26 @@ const V2_STYLES = `
    resolve their position:absolute against the WHOLE shell (board + rails),
    exactly like the design's own equivalent wrapper. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;position:relative;}
+/* The page's violet "glass" (The Loom.dc.html:921) as token mixes -- lavender at the page's own
+   32% / 14%, and the --lv-glass-* stops (see :root) at its .92 / .95 -- so a skin reaches the
+   rails and panels too (DECISIONS "Every skin reaches every surface"). */
 .lv-rail{flex:none;width:58px;box-sizing:border-box;display:flex;flex-direction:column;
   align-items:center;gap:7px;padding:10px 0;margin:10px 4px;border-radius:14px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);}
 .lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 
-.lv-backdrop{position:absolute;inset:0;z-index:310;background:rgba(5,4,13,.62);
+.lv-backdrop{position:absolute;inset:0;z-index:310;background:color-mix(in srgb,var(--lv-ink) 62%,transparent);
   backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
 .lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
 .lv-panel{position:absolute;top:20px;bottom:20px;z-index:311;box-sizing:border-box;
   display:flex;flex-direction:column;min-height:0;border-radius:16px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);overflow:hidden;}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);overflow:hidden;}
 .lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
   animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
 .lv-panel.left.wide{width:min(572px,37vw);}
@@ -807,19 +879,28 @@ const V2_STYLES = `
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-/* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
-   other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
-   the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
+/* THE TIMELINE DRAWER (The Loom.dc.html:146-170, 1001-1003): fixed under the top bar, full
+   width, three states -- hidden 0 / slim 86 / full -- and the only way between them is a CLICK
+   on the grip, which cycles hidden -> slim -> full. Nothing drags. The height animates on the
+   page's own curve. Full is the fit rule's height (loom-core.js timelineFit): the board keeps
+   240 px below it, the preview gives way first, and past that the drawer's own body scrolls --
+   never the page. */
 .lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
-.lv-tlcontent{overflow:hidden;position:relative;}
-.lv-tlpreviewzone{padding:10px 14px 4px;height:362px;box-sizing:border-box;}
-.lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
+.lv-tlcontent{overflow:hidden;position:relative;transition:height .36s cubic-bezier(.2,.9,.24,1);}
+.lv-tlbody{height:100%;overflow:hidden;box-sizing:border-box;}
+.lv-tlbody.full{overflow-y:auto;overscroll-behavior:contain;}
+.lv-tlpreviewzone{padding:10px 14px 4px;box-sizing:border-box;}
+.lv-tlpreviewbox{height:100%;box-sizing:border-box;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
   display:flex;align-items:center;justify-content:center;text-align:center;}
-.lv-tlreelzone{padding:8px 14px 10px;}
+.lv-tlreelzone{padding:7px 14px 8px;}
+.lv-tlreelzone .lv-reel{height:44px;border-radius:8px;}
+.lv-tlreelzone .lv-tlinfo{padding-top:8px;}
 .lv-tlhandle{position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);z-index:2;
-  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;touch-action:none;}
+  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;
+  background:none;border:0;margin:0;}
+.lv-tlhandle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px;}
 .lv-tlgrip{width:40px;height:4px;border-radius:3px;background:var(--surface1);transition:background .15s;}
-.lv-tlhandle:hover .lv-tlgrip{background:var(--accent);}
+.lv-tlhandle:hover .lv-tlgrip,.lv-tlhandle:focus-visible .lv-tlgrip{background:var(--accent);}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
@@ -832,6 +913,11 @@ const V2_STYLES = `
 .lv-ico:hover{color:var(--accent);border-color:var(--accent);}
 .lv-ico.danger:hover{color:var(--coral,#e06c75);border-color:var(--coral,#e06c75);}
 .lv-ico.xs{width:16px;height:15px;font-size:9px;}
+/* "+ Add shot to <act>" as the page's dashed, card-sized tile at the end of the act's grid
+   (The Loom.dc.html:319). */
+.lv-addshot{border:1px dashed var(--surface1);border-radius:8px;min-height:128px;display:grid;place-items:center;
+  font:600 11px/1.3 system-ui;color:var(--subtext);background:transparent;cursor:pointer;padding:8px;text-align:center;}
+.lv-addshot:hover{border-color:var(--accent);color:var(--accent);}
 .lv-crow{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;}
 .lv-actsel{font-size:8px;background:var(--base);border:1px solid var(--surface1);color:var(--subtext);
   border-radius:4px;padding:1px 3px;cursor:pointer;max-width:100%;}
@@ -921,8 +1007,15 @@ const V2_STYLES = `
 /* A shot's take list (P1), beside the ★ clip's preview in the timeline's full view. Not drawn by
    the page; the timeline's own row idiom. */
 .lv-tlprevrow{display:flex;gap:14px;height:100%;min-height:0;}
-.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:auto;}
-.lv-takelist{flex:0 0 300px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
+.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:hidden;}
+/* In the drawer the clip sits at the preview box's full height with its controls BESIDE it
+   (buttons, trim track, readout), so a short box still shows a usable frame. */
+.sb-shotprev-wrap.side{margin:0;max-width:none;height:100%;display:grid;grid-template-columns:auto minmax(220px,1fr);
+  grid-template-rows:auto auto 1fr;column-gap:14px;align-items:start;}
+.sb-shotprev-wrap.side .sb-shotprev{grid-column:1;grid-row:1 / span 3;margin:0;max-width:none;}
+.sb-shotprev-wrap.side .sb-shotprev-ctrls{grid-column:2;margin-top:0;}
+.sb-shotprev-wrap.side .sb-trim{grid-column:2;}
+.lv-takelist{flex:0 1 260px;max-width:260px;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
 .lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
 .lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
 .lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
@@ -950,9 +1043,11 @@ const V2_STYLES = `
 .lv-seg.fdim{opacity:.35;}
 /* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
    the bar's own button chrome does not apply). */
-.lv-find{flex:1 1 180px;max-width:360px;min-width:236px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+.lv-find{flex:1000 1 110px;max-width:150px;min-width:0;transition:max-width .2s ease;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
   border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
 .lv-find.on{border-color:var(--lavender);}
+/* Compact until it is in use, then it grows (the 2026-09-29 one-row bar). */
+.lv-find:focus-within,.lv-find.on{max-width:260px;}
 .lv-findico{font-size:11px;color:var(--overlay0);}
 .lv-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:11.5px/1.2 system-ui,sans-serif;padding:0;}
 .lv-findin::placeholder{color:var(--overlay0);}
@@ -963,14 +1058,13 @@ const V2_STYLES = `
   white-space:nowrap;user-select:none;}
 .lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
 .lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
-.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+.lv-segcode{font-size:9px;font-weight:700;color:color-mix(in srgb,var(--lv-ink) 55%,transparent);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
 .lv-segbar.todo{background:rgba(255,255,255,.25);}
 .lv-segbar.wip{background:#f2c14a;}
 .lv-segbar.done{background:var(--green,#4fc99a);}
 .lv-segbar.error{background:var(--coral,#f38ba8);}
-.lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 /* Session P (P3): THE MUSIC BED under the reel -- the page's section A bed row (36 px, 6 px
    radius, thin bars, a dashed "No bed" row), its button (surface1 outline, Loom-cyan when a bed is
@@ -1000,11 +1094,55 @@ const V2_STYLES = `
 .lv-bedlink{border:0;background:transparent;color:var(--loomc);font:inherit;padding:0;cursor:pointer;text-decoration:underline;}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
-.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
-.lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
-  color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
-.lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
-.lv-fhlabel{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);margin-bottom:6px;}
+/* THE GENERATE PANEL'S HEADER (The Loom.dc.html:334-346): "⚙ A·02 · title  ✕ unbind" when a
+   shot is bound, "Generate · draft generation — route results into a shot" when not, and the
+   collapse › at the RIGHT end. The Image/Edit/Reference/Video tabs are a segmented bar at the
+   top of the scroll body (.lv-gentabs), not in the header. */
+.lv-genhdtitle{flex:0 1 auto;font:700 13px/1.2 system-ui;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdsub{flex:0 1 auto;font:italic 10.5px/1.3 system-ui;color:var(--subtext);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdfill{flex:1 1 auto;}
+.lv-unbind{flex:none;font:700 10.5px/1 system-ui;background:none;border:0;padding:2px 0;
+  color:var(--subtext);cursor:pointer;white-space:nowrap;}
+.lv-unbind:hover{color:var(--accent);}
+.lv-gentabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:color-mix(in srgb,var(--base) 70%,transparent);
+  border:1px solid var(--surface1);margin-bottom:10px;}
+.lv-gentab{flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:9px;font:800 12px/1 system-ui;letter-spacing:.03em;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;
+  color:color-mix(in srgb,var(--text) 60%,transparent);}
+.lv-gentab:hover{color:var(--text);}
+.lv-gentab.on{color:var(--text);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--lavender) 32%,transparent) 0%,color-mix(in srgb,color-mix(in hsl,var(--lavender) 48%,var(--overlay0)) 24%,transparent) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 18px rgba(0,0,0,.4);}
+/* The page's segmented sub-strips (Edit / Fixer / Enhance, Face / Hand, the Continuity 2x2 --
+   The Loom.dc.html:409, 433, 501) and its FIELD SLABS (1126-1130): each group of fields sits in
+   a rounded well, and the prompt's well is outlined in lavender. Layout only. */
+.lv-segtrack{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
+  border:1px solid var(--surface1);}
+.lv-segtrack.grid2{display:grid;grid-template-columns:1fr 1fr;}
+.lv-segbtn{flex:1;min-width:0;text-align:center;padding:7px 4px;border-radius:7px;font:700 10px/1 system-ui;cursor:pointer;
+  background:transparent;border:0;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-segbtn:hover{color:var(--text);}
+.lv-segbtn.on{background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text);}
+.lv-slab{display:flex;flex-direction:column;gap:8px;padding:11px 13px;border-radius:12px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 55%,transparent);margin-bottom:9px;min-width:0;}
+.lv-slab.prompt{gap:7px;border-color:color-mix(in srgb,var(--lavender) 30%,transparent);
+  background:color-mix(in srgb,var(--base) 62%,transparent);}
+.lv-slablab{font:700 9.5px/1.2 system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.lv-slabhint{font:400 9.5px/1.2 system-ui;letter-spacing:0;text-transform:none;color:var(--overlay0);}
+.lv-slab .lv-lab{margin:0 0 5px;}
+.lv-slab .lv-row2{margin-top:0;}
+.lv-slab .lv-ck{margin-top:0;}
+.lv-slab .lv-termspal{margin:5px 0 0;}
+.lv-slab .lv-mini2{align-self:flex-start;margin:0;}
+.lv-slab .lv-loratoggle{align-self:flex-start;margin:0;}
+.lv-slab .lv-fixwarn{margin-top:0;}
+.lv-slab .lv-fixhint{margin:0;}
+.lv-slab .lv-framehandoff{margin-bottom:0;padding-bottom:0;border-bottom:0;}
+.lv-slabrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.lv-prompt-ta{width:100%;box-sizing:border-box;background:transparent;border:none;outline:none;resize:vertical;color:var(--text);
+  font:300 15px/1.5 system-ui;padding:0;min-height:84px;
+  resize:none;field-sizing:content;max-height:320px;overflow-y:auto;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -1174,7 +1312,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
-.lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
+.lv-df-veil{position:fixed;inset:0;z-index:450;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);display:flex;align-items:center;justify-content:center;padding:24px;}
 .lv-df{width:min(640px,92vw);max-height:88vh;overflow:auto;background:var(--surface0);border:1px solid var(--surface1);
   border-radius:14px;padding:18px 20px 22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.7);}
 .lv-df-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
@@ -1239,7 +1377,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
    pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
    .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
    and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
-.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:none;align-items:center;justify-content:center;padding:20px;}
 .lv-mpick-veil.open{display:flex;}
 .lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
 .lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
@@ -1261,15 +1399,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-fixwrap img{width:100%;max-height:280px;object-fit:contain;display:block;background:#000;}
 .lv-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
 .lv-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:10px 0 6px;}
-.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
-  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:8px;}
+.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:color-mix(in srgb,var(--peach) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 30%,transparent);border-radius:8px;padding:7px 9px;margin-top:8px;}
 .lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
   border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
 .lv-openfilters:hover{border-color:var(--accent);}
 /* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
    veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
-.lv-fc-veil{position:fixed;inset:0;z-index:312;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
+.lv-fc-veil{position:fixed;inset:0;z-index:312;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);backdrop-filter:blur(7px);}
 .lv-fc-host{position:fixed;inset:0;z-index:313;display:grid;place-items:center;pointer-events:none;padding:20px;}
 .lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
   max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
@@ -1323,7 +1461,10 @@ class V2Boundary extends React.Component {
 
 // Shared storyboard switcher — used in BOTH the classic header and the V2 header.
 // All project state/actions arrive bundled as `api` (built once in App).
-function ProjectSwitcher({ api }) {
+// `name` (the desktop bar): the open storyboard's name, shown before the caret as the Loom
+// Handoff page draws it ("Moonwell · ep 1", Loom Handoff.dc.html:44); a click on it opens the
+// same popover. `extra`: rows the host adds under + New / Duplicate (the desktop's Mobile view).
+function ProjectSwitcher({ api, name, extra }) {
   const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
   // Escape closes it, same as Deep Focus's handler in LoomV2. Without this the only way out
   // is a click, and .sb-projveil is a full-viewport pointer-events layer -- so until you
@@ -1335,7 +1476,11 @@ function ProjectSwitcher({ api }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [projMenu, setProjMenu]);
   return (
-    <div className="sb-projwrap">
+    <div className={"sb-projwrap" + (name != null ? " lv-sbwrap" : "")}>
+      {name != null && (
+        <button type="button" className="lv-sbname" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
+          title={(name || "Untitled storyboard") + " — switch, create, or manage storyboards"}>{name || "Untitled storyboard"}</button>
+      )}
       <button className="lv-caret" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
         title="Switch, create, or manage storyboards" aria-label="Storyboards">&#9662;</button>
       {projMenu && <div className="sb-projveil" onClick={() => setProjMenu(false)} />}
@@ -1355,6 +1500,7 @@ function ProjectSwitcher({ api }) {
             <button className="sb-btn sm" onClick={newProject}>+ New</button>
             <button className="sb-btn sm ghost" onClick={duplicateProject}>&#10697; Duplicate</button>
           </div>
+          {extra}
         </div>
       )}
     </div>
@@ -1467,6 +1613,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       ) : null}
     </div>
   );
+  // Export ▾, built once too: it follows Render, or joins the bar's end group when Activity is
+  // docked left (see the .lv-topend comment in the bar).
+  const exportMenu = (
+    <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
+      bundling={bundling} importBackup={importBackup} openEdl={openEdl} />
+  );
   const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
@@ -1483,15 +1635,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState("base");
   const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage' | 'library' (Session P, P7)
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  // THE LOOM OPENS ON ITS RAILS (2026-09-29, the page's `startCollapsed` prop, default true):
+  // both side panels start collapsed, so the board is what you see first. A rail button opens
+  // one; nothing is remembered, so every visit opens the same way.
+  const [leftCollapsed, setLeftCollapsed] = useState(true);
   // Session P (P7): showing the Library tab READS the cast library and the other storyboards'
   // ticks for "in N storyboards" -- again for another board. A read only; nothing is written.
   useEffect(() => {
     if (!leftCollapsed && leftTab === "library" && castApi) castApi.openCastLibrary();
   }, [leftCollapsed, leftTab, projectApi.activeId]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [leftClosing, setLeftClosing] = useState(false);  // true for 340ms while the panel plays its slide-out, matching The Loom.dc.html's own leftClosing/lvSlideOutL
-  const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [density, setDensity] = useState("simple");      // 'simple' | 'detailed' -- Cast tab only (the page opens Simple)
+  const [rightCollapsed, setRightCollapsed] = useState(true);
   const [rightClosing, setRightClosing] = useState(false);
   const leftCloseTimer = useRef(null);
   const rightCloseTimer = useRef(null);
@@ -1511,8 +1666,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const openLeftPanel = () => { clearTimeout(leftCloseTimer.current); setLeftClosing(false); setLeftCollapsed(false); };
   const openRightPanel = () => { clearTimeout(rightCloseTimer.current); setRightClosing(false); setRightCollapsed(false); };
   useEffect(() => () => { clearTimeout(leftCloseTimer.current); clearTimeout(rightCloseTimer.current); }, []);
-  const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full'
-  const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
+  const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full' -- the grip's click cycles it
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
   const [dzHover, setDzHover] = useState(false);          // footage drop-zone hover feedback
   const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);   // brief notice when the native Prompt field destroys an active override
@@ -1521,7 +1675,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
   // draftCard/draftTarget/draftAttachedInfo are now App()-level props (see this function's
   // own signature comment) -- lifted, not removed; every use below is unchanged.
-  const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   // The overlay is position:fixed, so it never visibly moves -- but classic Loom's own
   // page underneath is a normal tall document, and without this, its body/html scrollbar
   // stays live. A wheel scroll that isn't captured by one of the internal panels (already
@@ -1923,27 +2076,27 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     }
   }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
 
-  // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
-  // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
-  // to the nearest named state on release. Session P (P3): the full view also carries the
-  // music bed's row and controls under the reel (LV_BED_ZONE_H), so it is that much taller;
-  // slim is unchanged.
-  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H };
-  const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
-  const tlPointerMove = (e) => {
-    if (!tlDrag.current.dragging) return;
-    const h = Math.max(0, Math.min(TL_HEIGHTS.full, tlDrag.current.startH + (e.clientY - tlDrag.current.startY)));
-    tlDrag.current.lastH = h;   // read by tlPointerUp -- setTlDragH's state update is batched/async,
-    setTlDragH(h);               // so the ref (not the state) is the reliable live value on release.
-  };
-  const tlPointerUp = () => {
-    if (!tlDrag.current.dragging) return;
-    tlDrag.current.dragging = false;
-    const h = tlDrag.current.lastH;
-    let best = "hidden", bestD = Infinity;
-    Object.entries(TL_HEIGHTS).forEach(([k, v]) => { const d = Math.abs(v - h); if (d < bestD) { bestD = d; best = k; } });
-    setTlState(best); setTlDragH(null);
-  };
+  // THE TIMELINE DRAWER'S HEIGHT (The Loom.dc.html:1001-1002; loom-core.js timelineFit). A click
+  // on the grip cycles hidden -> slim -> full; nothing drags. The full height is measured, not
+  // fixed: `tlRoom` is the window height below the drawer's top edge, and the fit keeps 240 px
+  // of board below the drawer, shrinking the preview first. The page's full view is 372 px;
+  // Session P's music bed (P3) and continuity ribbon (P9) sit under the reel in full, so the
+  // design height carries their zones too.
+  const TL_DESIGN_FULL = 372 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H;
+  const tlDrawerRef = useRef(null);
+  const [tlRoom, setTlRoom] = useState(null);
+  const measureTlRoom = useCallback(() => {
+    const d = tlDrawerRef.current;
+    if (!d) return;
+    const ov = d.closest(".lv-overlay");
+    const bottom = ov ? ov.getBoundingClientRect().bottom : window.innerHeight;
+    // The drawer's own chrome (its bottom border) is not content height, so it comes off too.
+    const content = d.firstElementChild;
+    const chrome = content ? Math.max(0, d.offsetHeight - content.offsetHeight) : 0;
+    const room = Math.round(bottom - d.getBoundingClientRect().top - chrome);
+    setTlRoom((cur) => (cur === room ? cur : room));
+  }, []);
+  const cycleTl = () => setTlState((s) => nextTimelineState(s));
   const togglePal = (which) => setPalFor((p) => (p === which ? null : which));
 
   const sel = entries.find((e) => e.c.id === selShot) || null;
@@ -1993,7 +2146,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const ctx = cvs.getContext("2d");
     ctx.clearRect(0, 0, w, h);
     const draw = (b) => {
-      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.strokeStyle = fixStroke(b.tag);
       ctx.lineWidth = 2;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
       ctx.fillStyle = ctx.strokeStyle;
@@ -2469,9 +2622,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <input className="lv-actname-in" value={act.name} onChange={(ev) => setAct(act.id, { name: ev.target.value })} aria-label="Act name" />
               <button className="lv-ico" onClick={() => moveAct(ai, -1)} title="Move act up">&#8593;</button>
               <button className="lv-ico" onClick={() => moveAct(ai, 1)} title="Move act down">&#8595;</button>
+              {/* The page's collapse (The Loom.dc.html:276): ⌃ folds the act's cards away, ⌄
+                  brings them back. It is the act's own `collapsed` field, so it stays folded. */}
+              <button className="lv-ico" onClick={() => setAct(act.id, { collapsed: !act.collapsed })}
+                title={act.collapsed ? "Expand this act" : "Collapse this act"} aria-expanded={!act.collapsed}>
+                {act.collapsed ? "⌄" : "⌃"}</button>
               <button className="lv-ico danger" onClick={() => delAct(act.id)} title="Delete act">&#10005;</button>
             </div>
-            <div className="lv-cards">
+            {!act.collapsed && <div className="lv-cards">
               {items.map((e) => {
                 const gs = genState[e.c.id];
                 // "paused" is its own visual state (auto-checking genuinely stopped);
@@ -2660,8 +2818,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   </div>
                 );
               })}
-            </div>
-            <button className="lv-mini2" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
+              {/* The page's dashed, card-sized "+ Add shot" tile (The Loom.dc.html:319). */}
+              <button type="button" className="lv-addshot" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
+            </div>}
           </div>
         );
       })}
@@ -2669,11 +2828,31 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       {!project.acts.length && <div className="lv-ph">No acts yet — add one below.</div>}
     </div>
   );
-  // Fixed drawer, banner-attached, never draggable (unlike every other region). Preview
-  // only renders once the drawer is more than halfway to full, so it doesn't paint fighting
-  // the collapse/expand animation.
-  const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
-  const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+  // The drawer's height for its state, and the full view's preview height, from the fit rule.
+  // The preview renders whenever the drawer is full.
+  const tlFit = timelineFit(tlRoom, TL_DESIGN_FULL);
+  const tlHeight = timelineHeight(tlState, tlFit);
+  const showTlPreview = tlState === "full";
+  // The clip's frame takes the preview box's whole height (less its 14 px of padding); its
+  // controls sit beside it.
+  const tlVideoH = Math.max(60, tlFit.preview - 14);
+  // Re-measure the room whenever something above the drawer can have moved it: the banner,
+  // the batch bar, the window (which also rewraps the top bar) and the overlay itself (the
+  // update strip moves its top).
+  useLayoutEffect(() => { measureTlRoom(); }, [measureTlRoom, bannerOpen, !!batchTally, tlState]);
+  useEffect(() => {
+    const on = () => measureTlRoom();
+    window.addEventListener("resize", on);
+    let ro = null;
+    const ov = tlDrawerRef.current && tlDrawerRef.current.closest(".lv-overlay");
+    if (ov && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(on);
+      ro.observe(ov);
+      const top = ov.querySelector(".lv-top");
+      if (top) ro.observe(top);
+    }
+    return () => { window.removeEventListener("resize", on); if (ro) ro.disconnect(); };
+  }, [measureTlRoom]);
   // Session P (P3): the board's music bed, the cut it plays under, and its waveform -- views
   // and a GET of the local file; nothing here writes the board or renders anything.
   const bed = bedOf(project);
@@ -2684,10 +2863,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     if (showTlPreview && bedApi) bedApi.refreshUnusedBeds();
   }, [showTlPreview]);   // eslint-disable-line react-hooks/exhaustive-deps
   const timelineDrawer = (
-    <div className="lv-tldrawer">
-      <div className="lv-tlcontent" style={{ height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" }}>
+    <div className="lv-tldrawer" ref={tlDrawerRef} data-tl={tlState}>
+      <div className="lv-tlcontent" style={{ height: tlHeight }}>
+        <div className={"lv-tlbody" + (showTlPreview ? " full" : "")}>
         {showTlPreview && (
-          <div className="lv-tlpreviewzone">
+          <div className="lv-tlpreviewzone" style={{ height: tlFit.preview }}>
             {sel && sel.c.resultMid
               // key={sel.c.id}: without it, switching between two finished shots on the
               // reel reuses the same instance -- swapping `mid` on a live <video> silently
@@ -2700,7 +2880,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   <div className="lv-tlprevmain">
                     <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
                       onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
-                      onSplit={(t) => splitShot(sel, t)}
+                      onSplit={(t) => splitShot(sel, t)} videoH={tlVideoH}
                       crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
                   </div>
                   <TakeList card={sel.c} code={sel.code}
@@ -2713,13 +2893,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         )}
         <div className="lv-tlreelzone">
           <div className="lv-reel">
-            {/* The Loom.dc.html:906-914 -- per-shot tint (LV_TINTS, distinct from status
-                color), the diagonal-stripe texture overlay, the shot's code+duration as
-                VISIBLE text (not just the title tooltip, which stays too), and a separate
-                thin status bar under the tint instead of the status color filling the
-                whole segment. Duration-proportional width, selected outline, and the
-                drag-resize grip (elsewhere in this file) are unchanged -- those already
-                matched or exceeded the design. */}
+            {/* The Loom.dc.html:1006-1015 -- per-shot tint (LV_TINTS, distinct from status
+                color), the stripe texture overlay, the shot's code+duration as VISIBLE text
+                (the title tooltip stays too), and a thin status bar under the tint. Each
+                segment's width is its share of the CUT (scale is the cut's own length,
+                loom-core.js reelStats), so the shots always span the whole reel, as the
+                page's `flex: dur` does; there is no target marker. */}
             {entries.map((x, i) => {
               const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
               // Session P, Stage A2 (P2): a shot whose anchor went stale gets the page's peach
@@ -2739,8 +2918,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 </div>
               );
             })}
-            <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
+          <div className="lv-tlinfo">{sel
+            ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
+            : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
           {/* Session P (P3, the page's section A): the music bed row under the reel, its button,
               level, the fades/ducking line and the cut's status -- in the full view. */}
           {showTlPreview && bedApi && (
@@ -2751,20 +2932,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           {showTlPreview && (
             <RibbonStrip pairs={ribbonPairs(entries, cardById)} tintOf={tintOfCard} onOpen={openRibbonPair} />
           )}
-          <div className="lv-tlinfo">{sel
-            ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
-            : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
+        </div>
         </div>
       </div>
-      <div className="lv-tlhandle" onPointerDown={tlPointerDown} onPointerMove={tlPointerMove} onPointerUp={tlPointerUp} onPointerCancel={tlPointerUp}>
-        <div className="lv-tlgrip" />
-      </div>
+      {/* The grip (The Loom.dc.html:168): a CLICK cycles hidden -> slim -> full -> hidden. */}
+      <button type="button" className="lv-tlhandle" onClick={cycleTl}
+        title="Timeline — hidden / slim / full" aria-label={"Timeline: " + tlState + " — click for " + nextTimelineState(tlState)}>
+        <span className="lv-tlgrip" />
+      </button>
     </div>
   );
   // Collapsed Generate: the right-edge icon rail ("gallery-drawer muscle memory") —
   // clicking an icon expands the drawer back out AND switches to that tab.
   const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
-  let gen;
+  let gen, genHead;
   {
     const gs = genState[active.c.id];
     // "paused" no longer counts as busy -- the auto-poll has genuinely stopped, so a manual
@@ -2816,11 +2997,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     let videoTrailer = null;
     if (tab === "Video") { tabBody = (
       <div>
-        <label className="lv-lab">Continuity</label>
-        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint}
-          onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
-        <label className="lv-lab">Prompt</label>
-        <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => {
+        {/* The page's slabs (The Loom.dc.html:499-519): CONTINUITY, the outlined PROMPT well with
+            its big light motion prompt, then CAMERA / LIGHTING / TRANSITION IN / OUT. */}
+        <div className="lv-slab">
+          <div className="lv-slablab">Continuity — how it joins the shot before</div>
+          <div className="lv-segtrack grid2">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-segbtn" + (k === (active.c.connect || "new") ? " on" : "")} title={CONNECT[k].hint}
+            role="button" tabIndex={0} onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
+        </div>
+        <div className="lv-slab prompt">
+          <div className="lv-slablab">Prompt <span className="lv-slabhint">motion only — camera, lighting and cast weave in</span></div>
+        <textarea className="lv-prompt-ta" placeholder="Describe the motion…" value={active.c.prompt || ""} onChange={(ev) => {
           // Typing here always means "auto-compose, using this text" -- clears an active
           // override immediately (matches the drawer's own "your edit wins" rule, just
           // from the other surface). Destructive with no undo, same as every other text
@@ -2829,6 +3015,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           if (active.c.promptOverride) { setOverrideClearedFlash(true); setTimeout(() => setOverrideClearedFlash(false), 1600); }
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
         }} />
+        </div>
+        <div className="lv-slab">
+        <div>
         <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
         <input className="lv-in" value={active.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
         {palFor === "camera" && (
@@ -2839,21 +3028,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </div>
           ))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Lighting <button className="lv-termsbtn" onClick={() => togglePal("lighting")}>+ terms</button></label>
         <input className="lv-in" value={active.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
         {palFor === "lighting" && (
           <div className="lv-termspal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>{t}</span>))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Transition in <button className="lv-termsbtn" onClick={() => togglePal("transIn")}>+ terms</button></label>
         <input className="lv-in" value={active.c.transIn || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transIn: ev.target.value }))} />
         {palFor === "transIn" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transIn: t }))}>{t}</span>))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Transition out <button className="lv-termsbtn" onClick={() => togglePal("transOut")}>+ terms</button></label>
         <input className="lv-in" value={active.c.transOut || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transOut: ev.target.value }))} />
         {palFor === "transOut" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transOut: t }))}>{t}</span>))}</div>
         )}
+        </div>
+        </div>
         <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab; add extra image/video/audio refs directly below)</span></div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" }}>
           {active.c.promptOverride
@@ -2904,7 +3101,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const busyI = gi.phase === "submitting" || gi.phase === "running";
       tabBody = (
         <div>
-          <label className="lv-lab">Model</label>
+          {/* The page's slabs (The Loom.dc.html:356-403): MODEL (with the LoRAs), the outlined
+              IMAGE PROMPT well, then ASPECT with size, mode, count, seed and the two switches. */}
+          <div className="lv-slab">
+          <div className="lv-slablab">Model</div>
           {/* picker-parity-round2 (problem 2): a trigger row, not an inline-mounted picker --
               mirrors moonglade_gallery.py's own #gen-selrow. The actual <mg-model-picker
               kind="base"> lives in the always-mounted .lv-mpick-veil overlay below (outside
@@ -2995,6 +3195,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               })}
             </div>
           )}
+          <div className="lv-slabrow">
           <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
             + add LoRA
           </button>
@@ -3003,10 +3204,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               {imgLoras.length} / {acct.lora_cap} LoRAs
             </span>
           )}
-          <label className="lv-lab">Image prompt</label>
+          </div>
+          </div>
+          <div className="lv-slab prompt">
+          <div className="lv-slablab">Image prompt</div>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          </div>
           {/* L536: full PixAI field parity with the gallery's own Generate tab (owner-decided
               scope, 2026-07-23) -- Advanced (negative/steps/cfg), 8 aspect-ratio buttons,
               Size + custom W×H, Mode, Count, Seed, High-priority, Prompt helper. Same field
@@ -3029,7 +3234,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             const cfgB = restr.cfgScale || {};
             const offTitle = "This model doesn’t use this setting";
             return (
-          <details>
+          <details className="lv-slab">
             <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
             <textarea className={"lv-ta" + (negOff ? " cap-off" : "")} style={{ marginTop: 5 }} value={imgAdv.negative}
               placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
@@ -3060,7 +3265,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </details>
             );
           })()}
-          <label className="lv-lab">Aspect</label>
+          <div className="lv-slab">
+          <div className="lv-slablab">Aspect</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
               [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
@@ -3114,6 +3320,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-ck">
             <input type="checkbox" checked={imgAdv.promptHelper}
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
+          </div>
           <CostBadge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." cardLabel="a card" />
           {/* Gate on what genImage() itself refuses without -- a model and a prompt. It rejects
               both outright ("pick a model first" / "enter an image prompt"), so a live button
@@ -3157,20 +3364,24 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               sub-screens, same underlying real pipelines). Closes the design-fidelity punch
               list's "Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap)"
               item -- 2026-08-04. */}
-          <div className="lv-tabs" style={{ marginBottom: 9 }}>
-            <span className={"lv-tab" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
-            <span className={"lv-tab" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
-            <span className={"lv-tab" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
+          <div className="lv-segtrack" style={{ marginBottom: 9 }}>
+            <span className={"lv-segbtn" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
+            <span className={"lv-segbtn" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
+            <span className={"lv-segbtn" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
           </div>
 
           {editSub === "edit" && (
             <>
-              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              <div className="lv-slab">
+              <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
                    : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
-              <label className="lv-lab">Edit instruction</label>
+              </div>
+              <div className="lv-slab prompt">
+              <div className="lv-slablab">Edit instruction</div>
               <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
                 onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+              </div>
               <CostBadge ref={editCostRef} hint="Add a source image and instruction to see the cost." cardLabel="an Edit card" />
               <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
               {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
@@ -3189,7 +3400,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
           {editSub === "fixer" && (
             <>
-              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              <div className="lv-slab">
+              <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? (
                 <div className="lv-fixwrap">
                   <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
@@ -3197,17 +3409,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
                 </div>
               ) : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              </div>
+              <div className="lv-slab">
               {src && (
                 <>
-                  <div className="lv-tabs" style={{ marginTop: 8 }}>
-                    <span className={"lv-tab" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
-                    <span className={"lv-tab" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
+                  <div className="lv-slabrow">
+                    <div className="lv-segtrack" style={{ flex: "1 1 auto" }}>
+                      <span className={"lv-segbtn" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
+                      <span className={"lv-segbtn" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                    </div>
                     <button className="lv-mini2" disabled={!fixBoxes.length} onClick={() => setFixBoxes([])}>Clear{fixBoxes.length ? " " + fixBoxes.length : ""}</button>
                   </div>
-                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
                 </>
               )}
               <div className="lv-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+              </div>
               <div className="lv-dim" style={{ padding: "4px 2px" }}>
                 {fixPriceEntry && fixPriceEntry.loading ? "checking…"
                   : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits — never card-covered"
@@ -3234,11 +3451,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           )}
 
           {editSub === "enhance" && (
-            <>
-              <label className="lv-lab">Art filters · free, no generation</label>
+            <div className="lv-slab">
+              <div className="lv-slablab">Art filters · free, no generation</div>
               <button className="lv-openfilters" onClick={openFilterCompare}>&#9680; Open filters</button>
-              <div className="lv-dim" style={{ padding: "6px 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
-            </>
+              <div className="lv-dim" style={{ padding: "0 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
+            </div>
           )}
         </div>
       );
@@ -3249,12 +3466,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
       tabBody = (
         <div>
-          <label className="lv-lab">References — cast @image members ({refs.length})</label>
+          <div className="lv-slab">
+          <div className="lv-slablab">References — cast @image members ({refs.length})</div>
           {refs.length ? <div className="lv-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
                        : <div className="lv-ph">No cast @image references with a gallery image yet — add some in <b>Cast &amp; assets</b>.</div>}
-          <label className="lv-lab">Prompt</label>
+          </div>
+          <div className="lv-slab prompt">
+          <div className="lv-slablab">Prompt</div>
           <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
+          </div>
           <CostBadge ref={refCostRef} hint="Add references and a prompt to see the cost." cardLabel="an Edit card" />
           <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
@@ -3272,13 +3493,49 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       );
     }
     else tabBody = <div className="lv-ph">The <b>{tab}</b> tab renders the shot on PixAI.</div>;
+    // THE PANEL HEADER (The Loom.dc.html:334-346): the bound shot and ✕ unbind, or "Generate ·
+    // draft generation"; the collapse › follows it at the right end (rendered by the panel).
+    genHead = sel
+      ? <>
+          <span className="lv-genhdtitle" title={sel.code + " · " + (sel.c.title || "untitled")}>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</span>
+          <span className="lv-genhdfill" />
+          <button type="button" className="lv-unbind" onClick={() => setSelShot(null)}
+            title="Unbind this shot and go back to draft generation">&#10005; unbind</button>
+        </>
+      : <>
+          <span className="lv-genhdtitle">Generate</span>
+          <span className="lv-genhdsub" title="Generate freely, then route or attach the result to a shot">draft generation — route results into a shot</span>
+          <span className="lv-genhdfill" />
+        </>;
+    // The frame handoff slab (The Loom.dc.html:452-477): on Reference and Video it leads the
+    // tab; on Edit it follows the edit controls, where the page draws it.
+    const frameHandoff = (tab === "Reference" || tab === "Video" || tab === "Edit") ? (
+      <div className="lv-slab">
+        <div className="lv-slablab">FRAME HANDOFF — {
+          tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
+        <div className="lv-framehandoff">
+          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("openFrame", p)}
+            extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
+                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+              : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
+          <div className="sb-conn-mid">&#8594;</div>
+          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("closeFrame", p)} />
+        </div>
+      </div>
+    ) : null;
     gen = (
       <div className="lv-gen">
-        <div className="lv-genhead">{sel
-          ? <>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</>
-          : <>&#10024; Draft generation <span className="lv-dim">— generate freely, then route or attach it to a shot</span></>}
-          {sel && <button className="lv-unbind" onClick={() => setSelShot(null)}
-            title="Unbind this shot and go back to draft generation">&#10005; unbind</button>}</div>
+        {/* The Image / Edit / Reference / Video tabs: the page's segmented bar at the top of the
+            panel's body (The Loom.dc.html:348-352), not in the header. */}
+        <div className="lv-gentabs" role="tablist" aria-label="Generate">
+          {["Image", "Edit", "Reference", "Video"].map((t) => (
+            <button type="button" role="tab" key={t} aria-selected={t === tab} className={"lv-gentab" + (t === tab ? " on" : "")}
+              onClick={() => setTab(t)}>{t}</button>))}
+        </div>
         {!sel && (
           <div className="lv-drafttarget">
             <label className="lv-lab">Route results into a shot <span className="lv-dim">(cast doesn't need one)</span></label>
@@ -3288,41 +3545,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </select>
           </div>
         )}
-        {/* Gallery-era correction (handoff-2026-08-06 / The Loom.dc.html:399-427): the
-            shared Frame Handoff block shows on the THREE tabs that consume it —
-            Reference (still composition), Video (its Continuity/weave modes read these
-            frames), Edit (reads openFrame as its source) — with a contextual label
-            naming which role it plays. Hidden on Image, the one tab that doesn't use
-            it. This is the re-scope the owner sent back 2026-08-04: shared
-            infrastructure, never Reference-only. */}
-        {(tab === "Reference" || tab === "Video" || tab === "Edit") && (
-          <>
-            <div className="lv-fhlabel">FRAME HANDOFF — {
-              tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
-            <div className="lv-framehandoff">
-              <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-                onPatch={(p) => patchFrame("openFrame", p)}
-                extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                    title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
-                    {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                      : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
-                  : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
-              <div className="sb-conn-mid">&#8594;</div>
-              <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-                onPatch={(p) => patchFrame("closeFrame", p)} />
-            </div>
-          </>
-        )}
-        {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
-            (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
-            an identical strip here stacked a duplicate directly below the header one
-            whenever the right rail was expanded. Removed to match the left-rail pattern:
-            tabs in the header, content below without repeating them. */}
+        {/* Gallery-era correction (handoff-2026-08-06): the shared Frame Handoff shows on the
+            THREE tabs that consume it -- Reference (still composition), Video (its Continuity /
+            weave modes read these frames), Edit (reads openFrame as its source) -- with a
+            contextual label; hidden on Image. Shared infrastructure, never Reference-only. */}
+        {tab !== "Edit" ? frameHandoff : null}
         {acct && (
           <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
             {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
         )}
         {tabBody}
+        {tab === "Edit" ? frameHandoff : null}
         {/* Always mounted (never conditionally rendered on `tab`) so switching tabs mid-
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
@@ -3438,6 +3671,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   ) : null;
   const castList = (
     <>
+      {/* The page's order (The Loom.dc.html:193-203): Simple / Detailed, then the project look,
+          then the "CAST & ASSETS — bound to" header and its reference-slot line. */}
+      <div className="lv-tabs lv-density">
+        <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
+        <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
+      </div>
+      <details className="lv-look" open={!!(project.look || "").trim()}>
+        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
+        <textarea className="lv-lookin" value={project.look || ""} rows={2}
+          onChange={(e) => setLook(e.target.value)}
+          placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
+      </details>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — bound to {sel.code}</span> : null}</div>
       {/* Live reference-slot budget for the bound shot (owner decision, 2026-07-27): PixAI
           takes 6 images, attached frames claim theirs only when attached, so cast/refs get
@@ -3473,16 +3718,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </div>
         );
       })()}
-      <details className="lv-look" open={!!(project.look || "").trim()}>
-        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
-        <textarea className="lv-lookin" value={project.look || ""} rows={2}
-          onChange={(e) => setLook(e.target.value)}
-          placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
-      </details>
-      <div className="lv-tabs lv-density">
-        <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
-        <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
-      </div>
       {density === "detailed" ? (project.assets || []).map((as) => {
         const inShot = sel && (sel.c.cast || []).includes(as.id);
         const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }));
@@ -3676,35 +3911,33 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         </div>
       ) : null}
       <div className="lv-top">
+        {act.edge === "left" ? activityControl : null}
         {!bannerOpen && (
           <button type="button" className="lv-banner-show" title="Show banner"
             onClick={() => setBannerOpen(true)}>🖼 Banner</button>
         )}
-        {act.edge === "left" ? activityControl : null}
-        {/* The eyebrow title + hint line are GONE (The Loom.dc.html:45-55, the
-            2026-08-13 styleset pass): the DC's bar opens straight with the
-            storyboard caret; the document title still names the tool. */}
-        <ProjectSwitcher api={projectApi} />
+        {/* ONE ROW (The Loom.dc.html:46-143 + Loom Handoff.dc.html:44, 2026-09-29): the
+            storyboard's name and its ▾, the find pill and its chips, Draft, then the Generate
+            cluster, then the spend / goals / Activity / ← GALLERY end. No eyebrow or hint line;
+            the document title still names the tool.
+            📱 Mobile view -- the manual switch to the phone-sized board/reel view (LoomMobile) --
+            is a row in the storyboards popover now, so the bar fits one row. It is the same
+            persisted, two-way switch (useLoomView, LOOM_VIEW_KEY; it overrides the phone
+            auto-open), and draftCard/draftTarget/draftAttachedInfo are lifted to App() so
+            flipping it mid-draft never loses the draft. */}
+        <ProjectSwitcher api={projectApi} name={project.name || ""}
+          extra={(
+            <label className={"sb-projrow" + (mobileUI ? " on" : "")}
+              title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
+              <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
+          )} />
         {/* Session P (P8): the page's find pill and filter chips, right after the storyboard's
             name, as the page places them. */}
         {findPill}
-        {findChipsRow}
+        {findChipsRow.length ? <div className="lv-findchips">{findChipsRow}</div> : null}
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
-        {/* Manual, owner-preference switch to the phone-sized board/reel view (LoomMobile,
-            below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
-            for the Loom: the main gallery only ever auto-detects viewport width for its own
-            mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
-            in this file to reuse. Persisted (useLoomView, LOOM_VIEW_KEY) so the choice
-            survives a reload -- and, since 2026-09-06, so it also OVERRIDES the phone
-            auto-open; reuses .lv-draft's own checkbox-chip visual pattern rather than
-            inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
-            see this component's own prop-list comment -- specifically so flipping this switch
-            mid-draft never loses it. */}
-        <label className={"lv-draft" + (mobileUI ? " on" : "")}
-          title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
-          <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
         <span className="lv-fill" />
         <button className="lv-genall" onClick={() => {
           // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
@@ -3745,14 +3978,30 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               : formatCostEstimate(costEstimate)}
           </button>
         )}
+        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
+          title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
+        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
+          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8679; Render</button>
+        {act.edge === "left" ? null : exportMenu}
+        {act.edge === "left" ? null : <span className="lv-fill" />}
+        {/* THE BAR'S END, kept on one line (.lv-topend) so ← Gallery never wraps onto a row of its
+            own (2026-09-29): the spend pill, the pinned goal and the Vigil (Session O -- the
+            Loom's header has no credits chip, so they sit at its right end; a click on the pin
+            crosses to the gallery's Folio; they render nothing unless a pin or the Vigil switch
+            is on), Activity FIRST in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
+            CSS comment), then ← Gallery. Docked left (act.edge === "left"), Activity mounts at
+            the row's START instead, and Export ▾ joins this end so ← Gallery still has company. */}
+        <div className={"lv-topend" + (act.edge === "left" ? " withexport" : "")}>
+        {act.edge === "left" ? exportMenu : null}
+        {act.edge === "left" ? <span className="lv-fill" /> : null}
         {/* Its historical sibling, and deliberately the SAME pill -- same .lv-cost-pill
             chrome, same click-to-refresh, same call-site suffix trick -- so the two read as
             one before/after pair rather than as two inventions sharing a bar. The marks are
-            the house's own and they are not interchangeable: `≈` above is an ESTIMATE
+            the house's own and they are not interchangeable: `≈` (the cost pill) is an ESTIMATE
             (/api/price's quote for what is left), `~` here is a SETTLED ACTUAL (the
             catalog's paid_credit, the same mark historyCore.costText renders every finished
             run's cost with). Only the ~-credits shape takes the "spent" suffix, exactly as
-            only the ≈-credits shape above takes "to finish"; "3 unpriced spent" is not a
+            only the ≈-credits shape of the cost pill takes "to finish"; "3 unpriced spent" is not a
             sentence, and the hover says the rest either way. */}
         {spendPillShown(spend) && (
           <button className="lv-cost-pill" onClick={refreshSpend}
@@ -3764,24 +4013,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)}
           </button>
         )}
-        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
-          title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
-        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
-          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8679; Render</button>
-        <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
-          bundling={bundling} importBackup={importBackup} openEdl={openEdl} />
-        <span className="lv-fill" />
-        {/* Activity FIRST again in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
-            own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
-            its normal gap. When docked left (act.edge === "left") the whole control instead
-            mounts near the row's START, right after the banner-show button -- see above. */}
-        {/* The pinned goal and the Vigil (Session O), beside the flush-right pair: the Loom's
-            header has no credits chip of its own, so they sit at its right end. A click on the
-            pin crosses to the gallery's Folio (the Loom has no Folio). Renders nothing unless a
-            pin or the Vigil switch is on. */}
         <GoalChips />
         {act.edge === "left" ? null : activityControl}
         <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Gallery</a>
+        </div>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
@@ -3843,9 +4078,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className={"lv-backdrop" + (rightClosing ? " closing" : "")} onClick={closeRightPanel} />
             <div className={"lv-panel right" + (rightClosing ? " closing" : "")}>
               <div className="lv-sidehead">
-                <button className="lv-col" onClick={closeRightPanel} title="collapse">&#8250;</button>
-                <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
-                  <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+                {genHead}
+                <button className="lv-col" onClick={closeRightPanel} title="Collapse to a rail">&#8250;</button>
               </div>
               {gen}
             </div>
@@ -4063,7 +4297,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <div className="sb-toolbar">
                 <button className="sb-btn amber sm" onClick={() => copyShot(live)}>Copy shot</button>
               </div>
-              <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
+              {/* The page's dfToDrawer (The Loom.dc.html:1315): select the shot, close, and put
+                  Generate on its Video tab -- and open the panel, which the Loom now starts
+                  with collapsed, so the button always shows what it selected. */}
+              <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); setTab("Video"); openRightPanel(); }}>Select in Generate &rarr;</button>
             </div>
           </div>
         );
@@ -4266,7 +4503,7 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
-.lm-scrim{position:absolute;inset:0;z-index:306;background:rgba(3,2,8,.6);
+.lm-scrim{position:absolute;inset:0;z-index:306;background:color-mix(in srgb,color-mix(in oklab,var(--mantle) 64%,black) 60%,transparent);
   animation:lmFadeIn .24s ease both;}
 .lm-scrim.closing{animation:lmFadeOut .28s ease both;}
 .lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:307;background:var(--mantle);
@@ -4275,7 +4512,7 @@ const LOOM_MOBILE_STYLES = `
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
-.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
   border:1px solid var(--surface1);margin-bottom:10px;}
 .lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
   cursor:pointer;background:none;border:none;color:var(--subtext);}
@@ -4386,10 +4623,10 @@ const LOOM_MOBILE_STYLES = `
 .lm-genmodelrow{display:flex;align-items:center;padding:8px 10px;border-radius:8px;
   background:var(--base);border:1px solid var(--surface1);font:600 12px/1.2 system-ui;color:var(--text);}
 .lm-genmodelthumb{width:26px;height:26px;border-radius:6px;flex:none;
-  background:linear-gradient(150deg,#643aac 0%,#241f5b 100%);margin-right:8px;}
+  background:linear-gradient(150deg,color-mix(in hsl,var(--surface0) 48%,var(--accent)) 0%,color-mix(in hsl,var(--base) 78%,var(--mauve)) 100%);margin-right:8px;}
 .lm-gencaps{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;}
 .lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
-  border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--subtext);}
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext);}
 .lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
@@ -4563,7 +4800,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-fc-range{width:100%;height:3px;cursor:pointer;}
 .lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
 .lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
-  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+  cursor:pointer;border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
 
@@ -9932,7 +10169,9 @@ function TakeList({ card, code, onUse, onReuse, onDelete }) {
   );
 }
 
-function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
+// videoH (the timeline drawer only): the 16:9 frame's height, the drawer's preview box less its
+// padding -- the fit rule shrinks that box first -- with the controls laid out beside the frame.
+function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop, videoH }) {
   const vidRef = useRef(null), trackRef = useRef(null);
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
@@ -10045,8 +10284,9 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const shownCrop = cropDraft || crop;   // draft while drawing, else the committed rect
   const trimmed = range.in > 0 || range.out != null;
   return (
-    <div className="sb-shotprev-wrap">
+    <div className={"sb-shotprev-wrap" + (videoH ? " side" : "")}>
       <div className="sb-shotprev" onMouseMove={cropping ? undefined : scrub}
+        style={videoH ? { width: Math.round(videoH * 16 / 9), height: videoH } : undefined}
         onMouseLeave={() => { if (playing || cropping) return; const v = vidRef.current; if (v) v.currentTime = range.in; }}>
         <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
           onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}

@@ -7,9 +7,15 @@
 /* Glass spec: this IS the Generate-dock surface. backdrop-filter sits on a ::before layer (a
    backdrop-filter on the element would make it the containing block for the fixed .mgd-preview,
    re-anchoring its viewport coords). isolation:isolate keeps the z-index:-1 pseudo behind the
-   content but never behind a host card's background. */
-.gen-drawer{display:block;position:relative;isolation:isolate;box-sizing:border-box;padding:16px;border-radius:16px;border:1px solid rgba(182,146,230,.32);box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);animation:mgdDockIn .44s cubic-bezier(.2,.9,.24,1);font:13px/1.4 var(--font-system,system-ui,sans-serif);color:var(--text,#d6d2e2);}
-.gen-drawer::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:linear-gradient(120deg,rgba(24,18,54,.92),rgba(14,11,32,.95));-webkit-backdrop-filter:blur(18px) saturate(1.12);backdrop-filter:blur(18px) saturate(1.12);}
+   content but never behind a host card's background.
+   SKINS (2026-09-29, DECISIONS "Every skin reaches every surface"): every violet literal the
+   design hands this drawer is a token mix now -- the glass border/glow are --lavender at the
+   design's own 32% / 14%, the slabs and tracks --base / --surface0 / --surface1 at the design's
+   alphas, and the two glass stops HSL mixes fitted to rgba(24,18,54) and rgba(14,11,32). Under
+   the default skin they render as the literals did; under any other skin they follow it. The
+   Generate dock and the Loom's Video tab both mount this, so one fix covers both. */
+.gen-drawer{display:block;position:relative;isolation:isolate;box-sizing:border-box;padding:16px;border-radius:16px;border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);animation:mgdDockIn .44s cubic-bezier(.2,.9,.24,1);font:13px/1.4 var(--font-system,system-ui,sans-serif);color:var(--text,#d6d2e2);}
+.gen-drawer::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:linear-gradient(120deg,color-mix(in srgb,color-mix(in hsl,var(--base) 90%,var(--accent)) 92%,transparent),color-mix(in srgb,color-mix(in hsl,var(--mantle) 90%,var(--surface1)) 95%,transparent));-webkit-backdrop-filter:blur(18px) saturate(1.12);backdrop-filter:blur(18px) saturate(1.12);}
 /* Open/close both ways (glass law). dock-in replays on every mount + display:none->visible
    re-show. The exit is the .mgd-closing hook: a host hiding/unmounting adds it first and defers
    the real removal 360ms. */
@@ -31,16 +37,16 @@
 .gen-drawer .mgd-slabwrap{container-type:inline-size;}
 .gen-drawer .mgd-slabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start;}
 @container (max-width:640px){.gen-drawer .mgd-slabs{grid-template-columns:1fr;}}
-.gen-drawer .mgd-slab{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:14px;background:rgba(12,10,28,.6);border:1px solid rgba(58,52,96,.75);min-width:0;animation:mgdSlab .42s cubic-bezier(.22,1,.36,1) both;}
+.gen-drawer .mgd-slab{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--base) 60%,transparent);border:1px solid color-mix(in srgb,var(--surface1) 75%,transparent);min-width:0;animation:mgdSlab .42s cubic-bezier(.22,1,.36,1) both;}
 @keyframes mgdSlab{from{opacity:0;transform:translate3d(0,12px,0);}to{opacity:1;transform:none;}}
 @keyframes mgdFade{from{opacity:0;}to{opacity:1;}}
 /* Section heading (DC 1347/1379: SHOT MODE / ENGINE / MODE & CHANNEL). */
 .gen-drawer .mgd-sec{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--overlay0,#6a6088);}
 /* SHOT MODE segment track + segments (DC 1348; shotModes style 2893-2895). All three always
    render; .off = the engine lacks it (dimmed, not-allowed, still titled). */
-.gen-drawer .mgd-seg{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);border:1px solid var(--surface1,#3a3460);}
+.gen-drawer .mgd-seg{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);border:1px solid var(--surface1,#3a3460);}
 .gen-drawer .mgd-seg button{flex:1 1 0;min-width:0;padding:6px 4px;text-align:center;border-radius:7px;font-size:10px;font-weight:700;font-family:inherit;transition:background .2s,color .2s;cursor:pointer;border:0;background:transparent;color:var(--subtext,#9a93ab);}
-.gen-drawer .mgd-seg button.on{background:rgba(182,146,230,.2);color:var(--text,#d6d2e2);}
+.gen-drawer .mgd-seg button.on{background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text,#d6d2e2);}
 .gen-drawer .mgd-seg button.off{cursor:not-allowed;opacity:.35;}
 /* The mode-switch hold notice (DC 1354 heldNote). Amber, not red: nothing has failed or is lost. */
 .gen-drawer .mgd-modenote{font-size:10px;line-height:1.45;color:#f9d38c;background:rgba(249,211,140,.08);border:1px solid rgba(249,211,140,.32);border-radius:8px;padding:7px 9px;}
@@ -54,7 +60,7 @@
 .gen-drawer .mgd-slots{display:flex;flex-wrap:wrap;gap:6px;}
 .gen-drawer .mgd-ce{width:100%;box-sizing:border-box;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--text,#d6d2e2);padding:7px 9px;font-size:13px;font-family:inherit;min-height:66px;white-space:pre-wrap;overflow-y:auto;max-height:180px;margin-top:8px;}
 .gen-drawer .mgd-ce:empty::before{content:attr(data-placeholder);color:var(--overlay0,#6a6088);pointer-events:none;}
-.gen-drawer .mgd-ce:focus{outline:none;border-color:var(--accent-soft,#4fc99a);box-shadow:0 0 0 2px rgba(79,201,154,.25);}
+.gen-drawer .mgd-ce:focus{outline:none;border-color:var(--accent-soft,#4fc99a);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent-soft) 25%,transparent);}
 .gen-drawer .mgd-ce+.mgd-lbl{margin-top:10px;}
 .gen-drawer .mgd-neg{width:100%;box-sizing:border-box;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--subtext,#9a93ab);padding:6px 9px;font-size:12.5px;font-family:inherit;min-height:32px;resize:vertical;margin-top:6px;}
 .gen-drawer .mgd-neg:focus{outline:none;border-color:var(--accent-soft,#4fc99a);color:var(--text,#d6d2e2);}
@@ -64,7 +70,7 @@
 .gen-drawer .mgd-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1,#3a3460);border:1px solid var(--overlay0,#6a6088);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender,#b692e6);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
 .gen-drawer .mgd-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
 /* The CAMERA / audio-language <select> (DC 1404 / 1434, one identical style string). */
-.gen-drawer .mgd-sel{width:100%;box-sizing:border-box;background:rgba(12,10,28,.8);color:var(--text,#d6d2e2);border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:5px 7px;font-size:11px;font-family:inherit;cursor:pointer;}
+.gen-drawer .mgd-sel{width:100%;box-sizing:border-box;background:color-mix(in srgb,var(--base) 80%,transparent);color:var(--text,#d6d2e2);border:1px solid var(--surface1,#3a3460);border-radius:8px;padding:5px 7px;font-size:11px;font-family:inherit;cursor:pointer;}
 .gen-drawer .mgd-sel:focus{outline:none;border-color:var(--accent,#b692e6);}
 .gen-drawer .mgd-sel:disabled{color:var(--overlay0,#6a6088);}
 /* DURATION (DC 1393-1401 + durationStops 2906-2911): label + live 'Ns' readout on one
@@ -74,7 +80,7 @@
 .gen-drawer .mgd-durval{font-size:11px;font-weight:600;color:var(--text,#d6d2e2);}
 .gen-drawer .mgd-stops{display:flex;gap:5px;}
 .gen-drawer .mgd-stop{flex:1 1 0;min-width:0;padding:5px 0;text-align:center;border-radius:8px;font-size:10.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:border-color .2s,background .2s,color .2s;border:1px solid var(--surface1,#3a3460);background:transparent;color:var(--subtext,#9a93ab);}
-.gen-drawer .mgd-stop.on{border-color:var(--accent,#b692e6);background:rgba(182,146,230,.16);color:var(--text,#d6d2e2);}
+.gen-drawer .mgd-stop.on{border-color:var(--accent,#b692e6);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text,#d6d2e2);}
 .gen-drawer .mgd-stop.off{cursor:not-allowed;opacity:.3;}
 /* CAMERA block (DC 1402): a 5px column; in Multi-Reference it keeps its space but goes
    invisible (cameraVis 2912). */
@@ -90,7 +96,7 @@
    dock's own stacking context (.mgdock 7): 5. Outside the dock (the phone's Video mode) the same
    grid sits inline in the SHOT MODE slab with 44 px targets. */
 .mgd-ratiowrap{position:relative;display:inline-flex;flex:none;}
-.mgd-ratiochip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;border:1px solid var(--surface1);background:rgba(33,31,58,.5);color:var(--subtext);font-size:10px;font-family:inherit;cursor:pointer;transition:border-color .2s,color .2s;}
+.mgd-ratiochip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 50%,transparent);color:var(--subtext);font-size:10px;font-family:inherit;cursor:pointer;transition:border-color .2s,color .2s;}
 .mgd-ratiochip:hover,.mgd-ratiochip.open{border-color:var(--lavender);color:var(--text);}
 .mgd-ratiocaret{font-size:8px;color:var(--overlay0);}
 .mgd-ratiopop{position:absolute;z-index:5;left:0;bottom:calc(100% + 8px);width:216px;padding:10px;border-radius:12px;border:1px solid var(--surface1);background:var(--mantle);box-shadow:0 16px 40px rgba(0,0,0,.55);animation:mgdRatioPop .3s cubic-bezier(.2,.9,.24,1) both;}
@@ -99,7 +105,7 @@
 .mgd-rgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
 .mgd-rchip{display:flex;align-items:center;justify-content:center;gap:5px;padding:5px 4px;border-radius:8px;border:1px solid var(--surface1);background:transparent;color:var(--subtext);font-size:10.5px;font-family:inherit;cursor:pointer;transition:border-color .2s,color .2s,background .2s;}
 .mgd-rchip:hover{color:var(--text);}
-.mgd-rchip.on{border-color:var(--lavender);background:rgba(182,146,230,.14);color:var(--text);}
+.mgd-rchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 14%,transparent);color:var(--text);}
 .mgd-rglyph{display:inline-block;flex:none;border:1.3px solid currentColor;border-radius:2px;box-sizing:border-box;}
 .mgd-rglyph.auto{width:12px;height:12px;border-style:dashed;border-radius:3px;}
 .mgd-rgrid.big .mgd-rchip{min-height:44px;font-size:12px;border-radius:10px;}
@@ -116,8 +122,8 @@
 .gen-drawer .mgd-swtrack{flex:none;position:relative;width:28px;height:16px;border-radius:999px;background:var(--surface1,#3a3460);transition:background .25s;}
 .gen-drawer .mgd-sw input:checked+.mgd-swtrack{background:var(--accent,#b692e6);}
 .gen-drawer .mgd-swtrack i{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--overlay0,#6a6088);transition:transform .25s cubic-bezier(.2,.9,.24,1),background .25s;}
-.gen-drawer .mgd-sw input:checked+.mgd-swtrack i{transform:translateX(12px);background:#180f2c;}
-.gen-drawer .mgd-sw input:focus-visible+.mgd-swtrack{box-shadow:0 0 0 2px rgba(182,146,230,.35);}
+.gen-drawer .mgd-sw input:checked+.mgd-swtrack i{transform:translateX(12px);background:color-mix(in hsl,var(--mantle) 85%,var(--overlay0));}
+.gen-drawer .mgd-sw input:focus-visible+.mgd-swtrack{box-shadow:0 0 0 2px color-mix(in srgb,var(--lavender) 35%,transparent);}
 .gen-drawer .mgd-swlab{font-size:11px;color:var(--subtext,#9a93ab);}
 .gen-drawer .mgd-sw input:checked~.mgd-swlab{color:var(--text,#d6d2e2);}
 /* ENGINE chip grid (§45 drift; DC 1433-1451, videoChips 2992-3001): a header (ENGINE label +
@@ -128,17 +134,17 @@
 .gen-drawer .mgd-enghd{display:flex;align-items:baseline;gap:7px;}
 .gen-drawer .mgd-engcur{flex:1 1 auto;min-width:0;font-size:11px;font-weight:600;color:var(--text,#d6d2e2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .gen-drawer .mgd-enggrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-.gen-drawer .mgd-engchip{display:flex;align-items:center;gap:7px;min-width:0;padding:7px 9px;border-radius:9px;cursor:pointer;transition:border-color .2s,background .2s;border:1px solid var(--surface1,#3a3460);background:rgba(33,31,58,.5);}
+.gen-drawer .mgd-engchip{display:flex;align-items:center;gap:7px;min-width:0;padding:7px 9px;border-radius:9px;cursor:pointer;transition:border-color .2s,background .2s;border:1px solid var(--surface1,#3a3460);background:color-mix(in srgb,var(--surface0) 50%,transparent);}
 .gen-drawer .mgd-engchip:hover{border-color:var(--lavender,#b692e6);}
-.gen-drawer .mgd-engchip.sel{border-color:var(--accent,#b692e6);background:rgba(182,146,230,.13);}
+.gen-drawer .mgd-engchip.sel{border-color:var(--accent,#b692e6);background:color-mix(in srgb,var(--accent) 13%,transparent);}
 .gen-drawer .mgd-engdot{flex:none;width:12px;height:12px;border-radius:50%;box-sizing:border-box;border:2px solid var(--surface1,#3a3460);background:transparent;transition:border-color .2s,background .2s;}
 .gen-drawer .mgd-engchip.sel .mgd-engdot{border-color:var(--accent,#b692e6);background:var(--accent,#b692e6);}
 .gen-drawer .mgd-englabel{flex:1 1 auto;min-width:0;font-size:11px;font-weight:700;color:var(--text,#d6d2e2);line-height:1.15;}
 .gen-drawer .mgd-engmeta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:9.5px;color:var(--overlay0,#6a6088);}
 /* Capability chips (DC 1388 row; capStyle 1877-1880 kind tiers: hot=emerald, crown=pink, plain). */
 .gen-drawer .mgd-caps{display:flex;flex-wrap:wrap;gap:4px;}
-.gen-drawer .mgd-cap{font-size:8.5px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid var(--surface1,#3a3460);background:rgba(33,31,58,.6);color:var(--subtext,#9a93ab);}
-.gen-drawer .mgd-cap.hot{border-color:rgba(79,201,154,.45);background:rgba(79,201,154,.14);color:var(--emerald,#4fc99a);}
+.gen-drawer .mgd-cap{font-size:8.5px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid var(--surface1,#3a3460);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext,#9a93ab);}
+.gen-drawer .mgd-cap.hot{border-color:color-mix(in srgb,var(--emerald) 45%,transparent);background:color-mix(in srgb,var(--emerald) 14%,transparent);color:var(--emerald,#4fc99a);}
 .gen-drawer .mgd-cap.crown{border-color:rgba(224,143,214,.45);background:rgba(224,143,214,.14);color:#e08fd6;}
 /* The cost line is the React <CostBadge> (.cost-badge). This drawer has always painted the
    V4.0-full caution RED (not the badge's default amber): the loudest cost warning in the app
@@ -157,7 +163,7 @@
 .gen-drawer .cost-badge.mgd-cost{margin-top:10px;}
 /* Metallic spec: skin-aware accentMetal on the primary Generate action. Disabled (busy) is the
    MUTED state -- the metal stays and desaturates/darkens, never a flat opacity fade. */
-.gen-drawer .mgd-go{width:100%;padding:11px 26px;border:1px solid rgba(255,255,255,.34);border-radius:12px;background:linear-gradient(100deg,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 0%,var(--accent,#b692e6) 18%,color-mix(in oklab,var(--accent,#b692e6) 22%,#ffffff) 34%,var(--accent,#b692e6) 50%,color-mix(in oklab,var(--accent,#b692e6) 74%,#06030d) 68%,var(--mauve,#c4a6f0) 84%,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 100%);background-size:220% 100%;animation:mgMetal 7s ease-in-out infinite;color:color-mix(in oklab,var(--accent,#b692e6) 26%,#08040f);text-shadow:0 1px 0 rgba(255,255,255,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.72),inset 0 -3px 5px rgba(40,20,70,.5),0 10px 26px rgba(0,0,0,.5);font-size:14px;font-weight:800;letter-spacing:.03em;white-space:nowrap;cursor:pointer;}
+.gen-drawer .mgd-go{width:100%;padding:11px 26px;border:1px solid rgba(255,255,255,.34);border-radius:12px;background:linear-gradient(100deg,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 0%,var(--accent,#b692e6) 18%,color-mix(in oklab,var(--accent,#b692e6) 22%,#ffffff) 34%,var(--accent,#b692e6) 50%,color-mix(in oklab,var(--accent,#b692e6) 74%,#06030d) 68%,var(--mauve,#c4a6f0) 84%,color-mix(in oklab,var(--accent,#b692e6) 50%,#06030d) 100%);background-size:220% 100%;animation:mgMetal 7s ease-in-out infinite;color:color-mix(in oklab,var(--accent,#b692e6) 26%,#08040f);text-shadow:0 1px 0 rgba(255,255,255,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.72),inset 0 -3px 5px color-mix(in srgb,color-mix(in hsl,var(--mantle) 81%,var(--accent)) 50%,transparent),0 10px 26px rgba(0,0,0,.5);font-size:14px;font-weight:800;letter-spacing:.03em;white-space:nowrap;cursor:pointer;}
 .gen-drawer .mgd-go:disabled{filter:saturate(.6) brightness(.82);cursor:not-allowed;}
 @keyframes mgMetal{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
 @media (max-width:640px){.gen-drawer .mgd-go{border-radius:10px;padding:12px;}}
@@ -169,7 +175,7 @@
 /* Concurrent generations: each submission gets its own line, hairline-separated. */
 .gen-drawer .mgd-result-line{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1,#3a3460);}
 .gen-drawer .mgd-result-line:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
-.gen-drawer .mgd-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender,#b692e6);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px rgba(182,146,230,.75);}
+.gen-drawer .mgd-moon{display:inline-block;width:15px;height:15px;border-radius:50%;background:var(--lavender,#b692e6);position:relative;overflow:hidden;vertical-align:-3px;margin-right:7px;box-shadow:0 0 9px color-mix(in srgb,var(--lavender) 75%,transparent);}
 .gen-drawer .mgd-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--mantle,#131024);animation:mgd-eclipse 2.6s ease-in-out infinite;}
 @keyframes mgd-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
 /* the floating ref preview -- fixed so a host transform:scale() can't distort it. */
@@ -187,14 +193,14 @@
 /* The reference / frame slot (DC slotBox 2842-2843): 54px, radius 9, dashed + dark while empty,
    solid once filled (the thumb is the fill); empty caption 9.5px subtext; the '@imageN'/'@videoN'
    badge (DC 1369) sits bottom-left in mauve. Clicking a filled slot removes it (DC), so no ×. */
-.gen-drawer .mgd-slot{position:relative;width:54px;height:54px;border-radius:9px;display:grid;place-items:center;overflow:hidden;cursor:pointer;border:1px dashed var(--surface1,#3a3460);background:rgba(12,10,28,.7);}
+.gen-drawer .mgd-slot{position:relative;width:54px;height:54px;border-radius:9px;display:grid;place-items:center;overflow:hidden;cursor:pointer;border:1px dashed var(--surface1,#3a3460);background:color-mix(in srgb,var(--base) 70%,transparent);}
 .gen-drawer .mgd-slot.filled{border-style:solid;}
 /* .off = the engine takes no reference of this kind (a Tsubaki engine's video bank): dimmed and
    not-allowed like a dimmed shot mode, still titled; a held pick in it is not sent. */
 .gen-drawer .mgd-slot.off{cursor:not-allowed;opacity:.35;}
 .gen-drawer .mgd-slot.off.filled{cursor:pointer;}   /* a held pick can still be clicked away */
-.gen-drawer .mgd-slot.filled.audio{background:linear-gradient(150deg,#3a2b63 0%,#191338 100%);}
+.gen-drawer .mgd-slot.filled.audio{background:linear-gradient(150deg,color-mix(in hsl,var(--surface0) 80%,var(--accent)) 0%,color-mix(in hsl,var(--base) 89%,var(--accent)) 100%);}
 .gen-drawer .mgd-slot.filled.audio .mgd-slotcap{font-size:16px;color:var(--lavender,#b692e6);}
 .gen-drawer .mgd-slotcap{font-size:9.5px;color:var(--subtext,#9a93ab);text-align:center;}
 .gen-drawer .mgd-slot img{width:100%;height:100%;object-fit:cover;display:block;}
-.gen-drawer .mgd-slot-tag{position:absolute;bottom:3px;left:3px;font-size:8.5px;padding:1px 4px;border-radius:3px;background:rgba(5,4,13,.74);color:var(--mauve,#c4a6f0);}
+.gen-drawer .mgd-slot-tag{position:absolute;bottom:3px;left:3px;font-size:8.5px;padding:1px 4px;border-radius:3px;background:color-mix(in srgb,color-mix(in oklab,var(--mantle) 80%,black) 74%,transparent);color:var(--mauve,#c4a6f0);}

@@ -36,7 +36,7 @@ for. The header button is there at every screen width, phones included.
 
 **On a phone the Loom opens its phone layout by itself** — a board-and-reel view built for
 the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
-still work and always win: untick **📱 Mobile view** in the top bar to get the wide board on
+still work and always win: untick **📱 Mobile view** (in the storyboards **▾** menu) to get the wide board on
 a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
 browser from then on. A phone that is already **held sideways** when the Loom opens gets the
 wide four-panel board straight away; held upright it gets the board-and-reel view.
@@ -77,9 +77,12 @@ Four fixed regions:
 - **Center** — the **Acts & Shots** board. Click a shot to select it; the whole workspace
   binds to it.
 - **Right** — the **Generate drawer** (Image / Edit / Reference / Video tabs).
-- **Top** — the **Timeline drawer** (hidden / slim / full — drag the grip to resize).
+- **Top** — the **Timeline drawer** (hidden / slim / full — click the grip to step through
+  them). Full always leaves part of the board in view; when its rows do not fit, the drawer
+  scrolls on its own.
 
-Both side rails collapse to an icon strip; clicking an icon re-opens the rail on that tab.
+Both side rails collapse to an icon strip, and the Loom opens with both collapsed so the board
+is what you see first; clicking an icon opens the rail on that tab.
 
 ## Acts & shots
 

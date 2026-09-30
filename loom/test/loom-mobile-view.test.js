@@ -78,13 +78,21 @@ describe("the Mobile-view toggle: a new, persisted, manual owner-preference swit
     assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\{ landscapePhones: false \}\)\);/);
   });
 
-  test("a toggle chip lives in LoomV2's own .lv-top bar, reusing .lv-draft's exact visual pattern", () => {
-    const topBarMatch = src.match(/<div className="lv-top">[\s\S]*?<\/div>/);
-    assert.ok(topBarMatch, "expected to find the .lv-top toolbar's own JSX block");
-    assert.match(topBarMatch[0], /<label className=\{"lv-draft" \+ \(mobileUI \? " on" : ""\)\}/,
-      "expected the Mobile-view chip to reuse the .lv-draft checkbox-chip class, not invent a new visual language");
-    assert.match(topBarMatch[0], /checked=\{!!mobileUI\}/);
-    assert.match(topBarMatch[0], /onChange=\{\(e\) => setMobileUI\(e\.target\.checked\)\}/);
+  // Flipped 2026-09-29 (the Loom build to the Design Handoff, call 5: the top bar fits one row
+  // at desktop widths). The switch left the bar and became a row in the storyboards ▾ popover
+  // -- the same persisted, two-way checkbox, handed to ProjectSwitcher as its `extra` row.
+  test("the Mobile-view switch is a row in the storyboards popover, handed to LoomV2's ProjectSwitcher", () => {
+    const topStart = src.indexOf('<div className="lv-top">');
+    assert.ok(topStart > 0, "expected to find the .lv-top toolbar's own JSX block");
+    const sw = src.slice(topStart).match(/<ProjectSwitcher api=\{projectApi\}[\s\S]*?\)\} \/>/);
+    assert.ok(sw, "expected LoomV2's bar to mount ProjectSwitcher with an extra row");
+    assert.match(sw[0], /<label className=\{"sb-projrow" \+ \(mobileUI \? " on" : ""\)\}/);
+    assert.match(sw[0], /checked=\{!!mobileUI\}/);
+    assert.match(sw[0], /onChange=\{\(e\) => setMobileUI\(e\.target\.checked\)\}/);
+    assert.match(src, /function ProjectSwitcher\(\{ api, name, extra \}\)/);
+    assert.match(src, /<\/div>\n\s*\{extra\}\n\s*<\/div>/, "the popover renders the host's extra rows under + New / Duplicate");
+    assert.doesNotMatch(src, /<label className=\{"lv-draft" \+ \(mobileUI \? " on" : ""\)\}/,
+      "the Mobile-view chip is back in the bar itself");
   });
 
   test("LoomMobile carries its own reciprocal switch back to desktop (never a one-way trap)", () => {

@@ -950,12 +950,51 @@ export const spendTooltip = (s = {}) => {
 // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
 export const durOf = (c) => Number(c.actualDur || c.duration) || 0;
 
+// The reel spans the cut (The Loom.dc.html:1009, each segment `flex: dur`): `scale` is the cut's
+// own length, so the shots always fill the strip however short the cut is. It used to be
+// max(total, project.target) -- a 480 s default target drew a single 6 s shot as a 1% sliver on
+// an empty strip, with no control anywhere to change the target. `over` still reads the target
+// for anything that wants it.
 export const reelStats = (entries, target) => {
   const total = entries.reduce((s, x) => s + durOf(x.c), 0);
-  const scale = Math.max(total, target) || 1;
+  const scale = total || 1;
   const over = total - target;
   return { total, scale, over };
 };
+
+// ---------- the timeline drawer's heights (The Loom.dc.html:1001, Loom Handoff P3/P9) ----------
+//
+// Three states, cycled by a click on the grip: hidden 0, slim 86 (the reel and its label line),
+// full. The design's full view is 372 px (a 300 px preview over the slim strip); Session P adds
+// the music bed zone and the continuity ribbon under the reel, and no page draws all of that
+// together. The fit rule: the full drawer is min(designFull, room - boardMin), where `room` is
+// the window height below the drawer's top edge, so the board always keeps boardMin px in view.
+// The preview shrinks first (300 down to 150); past that the drawer's own body scrolls, never the
+// page. A tiny window floors the drawer at the slim strip plus one more reel's height.
+export const TL_SLIM = 86;
+export const TL_PREVIEW_MAX = 300;
+export const TL_PREVIEW_MIN = 150;
+export const TL_BOARD_MIN = 240;
+export const TL_REEL = 44;
+
+export const timelineFit = (room, designFull) => {
+  const floor = TL_SLIM + TL_REEL;
+  const under = designFull - TL_PREVIEW_MAX;          // everything drawn under the preview
+  const r = Number(room);
+  const full = Number.isFinite(r) && r > 0
+    ? Math.max(floor, Math.min(designFull, Math.floor(r - TL_BOARD_MIN)))
+    : designFull;
+  const preview = Math.max(TL_PREVIEW_MIN, Math.min(TL_PREVIEW_MAX, full - under));
+  return { full, preview, scrolls: preview + under > full };
+};
+
+// The drawer's height for a state.
+export const timelineHeight = (state, fit) =>
+  state === "hidden" ? 0 : state === "full" ? fit.full : TL_SLIM;
+
+// The grip's click: hidden -> slim -> full -> hidden (The Loom.dc.html:1002).
+export const nextTimelineState = (state) =>
+  state === "hidden" ? "slim" : state === "slim" ? "full" : "hidden";
 
 // ---------- full-bundle export: naming what did NOT travel (M24) ----------
 //
