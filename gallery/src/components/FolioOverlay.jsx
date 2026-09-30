@@ -16,7 +16,6 @@ import { GAUGE_SIZES, fractionOf } from "../lib/moonGaugeCore.js";
 import {
   SORTS, sortNote, progressOf, jumpOf, toGoText, meterLine,
 } from "../folio/completionistCore.js";
-import { requestPanelTab } from "../notify/panelRequest.js";
 import { canPin } from "../folio/goalCore.js";
 import HonorsCardPanel from "../folio/HonorsCardPanel.jsx";
 import "../styles/folio-completionist.css";
@@ -208,9 +207,9 @@ function CardGrid({ items, ladderName, ladderNames, earnedAt, skinsById, emptyLa
 
 /* RELICS BY KIND (Small Calls L2): one row per kind -- Skins, Banners, Marks -- each hidden when
    the account has earned nothing of that kind (folio/completionistCore.relicRows), so nothing
-   unearned is ever shown and there are no empty slots. Newest first. A tap applies a skin; a
-   banner or a mark opens the Control Panel's Branding tab. */
-function RelicRows({ rows, onPickSkin, onOpenBranding }) {
+   unearned is ever shown and there are no empty slots. Newest first. DISPLAY ONLY (owner, 2026-09-29):
+   nothing in the Folio wears a skin or opens the Branding tab; that stays in the Control Panel. */
+function RelicRows({ rows }) {
   return (
     <div className="mgfo-relics mgfo-kinds">
       {rows.map((row) => (
@@ -220,15 +219,14 @@ function RelicRows({ rows, onPickSkin, onOpenBranding }) {
             {row.items.map((it) => {
               const sw = row.kind === "skins" ? (SKIN_SW[it.id] || SKIN_SW.moonglade) : null;
               return (
-                <button type="button" key={it.id} title={it.desc ? it.name + " — " + it.desc : it.name}
+                <div key={it.id} role="img" title={it.desc ? it.name + " — " + it.desc : it.name}
                   className={"mgfo-tile " + row.kind + (it.active ? " active" : "")}
                   style={sw ? { background: sw[0], borderColor: sw[1] } : undefined}
-                  aria-label={it.name + (it.active ? " (active)" : "")}
-                  onClick={() => (row.kind === "skins" ? onPickSkin(it.id) : onOpenBranding())}>
+                  aria-label={it.name + (it.active ? " (active)" : "")}>
                   {row.kind === "marks" && it.png && <img src={it.png} alt="" draggable={false}
                     onError={(e) => e.currentTarget.remove()} />}
                   <span className="mgfo-tile-nm">{it.name}</span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -251,7 +249,7 @@ export default function FolioOverlay({ onClose, onJump }) {
     reveal,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
-    meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
+    meter, relics, sortKey, chooseSort, sortedHonors,
     vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
     // filteredActiveTiers is deliberately NOT destructured here any more: the ALL tab
     // stopped rendering the active ladder's own grid (handoff C4). It stays on the hook
@@ -484,11 +482,7 @@ export default function FolioOverlay({ onClose, onJump }) {
                       {relics.length === 0
                         ? <div className="mgfo-empty-mini">No relics yet — honors award them.</div>
                         : (
-                          <>
-                            <div className="mgfo-relicnote">tap a skin to wear it · banners and marks open ✦ Branding</div>
-                            <RelicRows rows={relics} onPickSkin={pickSkin}
-                              onOpenBranding={() => requestPanelTab("brand")} />
-                          </>
+                          <RelicRows rows={relics} />
                         )}
                     </div>
                   </div>
@@ -849,7 +843,7 @@ export default function FolioOverlay({ onClose, onJump }) {
                   </div>
                 </div>
                 <div className="mgfo-rail-foot">
-                  <b>Relics</b> are earned rewards — a skin wears on a tap, and banners and marks open <b>✦ Branding</b>. Recorded on the Summary page.
+                  <b>Relics</b> are earned rewards. Recorded on the Summary page.
                 </div>
               </div>
             </div>

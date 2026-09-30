@@ -14,7 +14,6 @@ import {
 import {
   progressOf, completionOf, loadSort, saveSort, sortHonors, relicRows,
 } from "../folio/completionistCore.js";
-import { applySkin } from "./useControlPanel.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -573,12 +572,7 @@ export default function useFolio() {
     skins: data.skins, achievements: data.achievements,
     marks: data.relics && data.relics.marks, earnedAt: data.earned_at, activeSkin: data.skin,
   }) : []), [data]);
-  // A relic skin's tap applies it (POST /api/skin, the same road the Control Panel uses); a
-  // refusal is a quiet no-op. Only a click ever writes.
-  function pickSkin(id) {
-    if (!data || data.skin === id) return;
-    applySkin(id, data, setData).catch(() => {});
-  }
+  // The relics are display only (owner, 2026-09-29): nothing in the Folio wears a skin.
   function chooseSort(key) {
     setSortKey(key);
     saveSort(safeStorage(), key);
@@ -785,7 +779,7 @@ export default function useFolio() {
     reveal, activeToast,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
-    meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
+    meter, relics, sortKey, chooseSort, sortedHonors,
     vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
     filteredLadderGroups, showGroups, groupedTierCount,

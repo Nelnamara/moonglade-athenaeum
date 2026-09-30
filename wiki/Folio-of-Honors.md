@@ -103,7 +103,7 @@ in place — click one to show only that category, click again to clear it — a
 moon that fills as you close in) and **Relics**: the rewards your honors have handed you,
 in up to three rows — **Skins**, **Banners** and **Marks**, newest first. A row with
 nothing in it simply isn't there, and nothing you haven't earned is shown as a locked
-tile. Tap a skin to wear it; a banner or a mark opens **✦ Branding** in the Control Panel.
+tile. They are a record only: the Folio never switches a skin or a mark; you do that from the Control Panel.
 
 Unlocks announce themselves with a mid-screen moment — badge, chime, and flair that
 scales with rarity. If a whole stack lands at once (a first run over an existing

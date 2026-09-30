@@ -7,7 +7,6 @@ import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { VeilBanner, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
 import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
-import { requestPanelTab } from "../notify/panelRequest.js";
 import MoonGauge from "./MoonGauge.jsx";
 import { GAUGE_SIZES, fractionOf } from "../lib/moonGaugeCore.js";
 import { SORTS, progressOf, jumpOf, toGoText, meterLine } from "../folio/completionistCore.js";
@@ -265,7 +264,7 @@ export default function FolioMobile({ onClose, onJump }) {
     triggered, unleashed, toggleUnleash,
     reveal,
     pokeNarrator, replayToast,
-    relics, pickSkin,
+    relics,
     meter, sortKey, chooseSort, sortedHonors,
     vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
   } = folio;
@@ -469,16 +468,15 @@ export default function FolioMobile({ onClose, onJump }) {
                           <div className="fm-kind-lab">{row.label} <b>{row.items.length}</b></div>
                           <div className="fm-kind-tiles">
                             {row.items.map((it) => (
-                              <button type="button" key={it.id} aria-label={it.name + (it.active ? " (active)" : "")}
+                              <div key={it.id} role="img" aria-label={it.name + (it.active ? " (active)" : "")}
                                 className={"fm-tile " + row.kind + (it.active ? " active" : "")}
                                 style={row.kind === "skins"
                                   ? { background: (SKIN_SW[it.id] || SKIN_SW.moonglade)[0],
-                                    borderColor: (SKIN_SW[it.id] || SKIN_SW.moonglade)[1] } : undefined}
-                                onClick={() => (row.kind === "skins" ? pickSkin(it.id) : requestPanelTab("brand"))}>
+                                    borderColor: (SKIN_SW[it.id] || SKIN_SW.moonglade)[1] } : undefined}>
                                 {row.kind === "marks" && it.png && <img src={it.png} alt="" draggable={false}
                                   onError={(e) => e.currentTarget.remove()} />}
                                 <span className="fm-tile-nm">{it.name}</span>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         </div>

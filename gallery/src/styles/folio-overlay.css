@@ -269,7 +269,6 @@
 .mgfo-reachcard .mgfo-bar { margin-top: 8px; }
 
 /* ---- Relics: the note over the kind rows (the rows themselves are folio-completionist.css) ---- */
-.mgfo-relicnote { font-size: 10.5px; font-style: italic; color: rgba(214, 210, 226, .5); margin-bottom: 10px; }
 .mgfo-relics {
   border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 6px 16px 12px;
 }

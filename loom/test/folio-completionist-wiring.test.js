@@ -132,13 +132,17 @@ describe("L2: relics by kind", () => {
     }
   });
 
-  test("a skin's tap applies it and a banner or a mark opens the Branding tab", () => {
+  test("the relics are display only: nothing in the Folio wears a skin or opens the Branding tab", () => {
+    // Owner, 2026-09-29: "You should not be able to switch marks and enable skins here AT ALL."
     for (const file of [desk, phone]) {
       const c = code(file);
-      assert.match(c, /"skins" \? [a-zA-Z]*[pP]ickSkin\(it\.id\)|"skins" \? onPickSkin\(it\.id\)|onPickSkin\(it\.id\)|pickSkin\(it\.id\)/);
-      assert.match(c, /requestPanelTab\("brand"\)/);
+      assert.ok(!/pickSkin|onPickSkin|onOpenBranding|requestPanelTab/.test(c));
+      assert.ok(!/onClick=\{\(\) => \(row\.kind === "skins"/.test(c));
+      assert.match(c, /<div (key=\{it\.id\} role="img"|role="img")/);
     }
-    assert.match(code(hook), /applySkin\(id, data, setData\)/);
+    assert.ok(!/applySkin|pickSkin/.test(code(hook)));
+    const css = src("styles/folio-completionist.css");
+    assert.ok(!/\.mgfo-tile:hover/.test(css) && !/(mgfo|fm)-tile \{[^}]*cursor: pointer/.test(css));
   });
 
   test("the phone's rows scroll sideways with 64 px tiles", () => {
