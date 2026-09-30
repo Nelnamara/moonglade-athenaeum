@@ -170,12 +170,13 @@ export function parse(template, lists) {
   let buf = "";
   const { groups, consume, badOpen } = templateMarks(s);
   const flush = () => { if (buf) { parts.push({ lit: buf }); buf = ""; } };
-  const bad = (token, msg) => { flush(); parts.push({ bad: token, error: msg }); if (error === null) error = msg; };
+  // `at` is the token's [start, end) in the raw template -- what promptTint cuts the box by.
+  const bad = (token, msg, at) => { flush(); parts.push({ bad: token, error: msg, at }); if (error === null) error = msg; };
   const addVar = (part) => {
     flush();
     nvars += 1;
     if (nvars > MAX_VARS) {
-      parts.push({ bad: part.var, error: ERR_TOO_MANY_VARS });
+      parts.push({ bad: part.var, error: ERR_TOO_MANY_VARS, at: part.at });
       if (error === null) error = ERR_TOO_MANY_VARS;
       return;
     }
@@ -198,15 +199,16 @@ export function parse(template, lists) {
         syntax = true;
         const j = g[1];
         const token = s.slice(i, j + 1);
+        const at = [i, j + 1];
         const opts = s.slice(i + 1, j).split("|").map(trim).filter(Boolean);
-        if (!opts.length) bad(token, ERR_EMPTY);
-        else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS);
-        else addVar({ var: token, options: opts, kind: "inline" });
+        if (!opts.length) bad(token, ERR_EMPTY, at);
+        else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS, at);
+        else addVar({ var: token, options: opts, kind: "inline", at });
         i = j + 1;
         continue;
       }
-      if (g && g[0] === "nested") { syntax = true; bad(s.slice(i, g[1] + 1), ERR_UNCLOSED); i = g[1] + 1; continue; }
-      if (badOpen.has(i)) { syntax = true; bad("{", ERR_UNCLOSED); i += 1; continue; }
+      if (g && g[0] === "nested") { syntax = true; bad(s.slice(i, g[1] + 1), ERR_UNCLOSED, [i, g[1] + 1]); i = g[1] + 1; continue; }
+      if (badOpen.has(i)) { syntax = true; bad("{", ERR_UNCLOSED, [i, i + 1]); i += 1; continue; }
       buf += c; i += 1; continue;   // a literal brace (an escaped group's too)
     }
     if (c === "_") {
@@ -215,12 +217,13 @@ export function parse(template, lists) {
       if (m) {
         syntax = true;
         const token = m[0], name = m[1];
-        if (!Object.prototype.hasOwnProperty.call(L, name)) bad(token, errUnknownList(token));
+        const at = [i, i + token.length];
+        if (!Object.prototype.hasOwnProperty.call(L, name)) bad(token, errUnknownList(token), at);
         else {
           const items = cleanList(L[name]);
-          if (items === null) bad(token, errLongList(token));
-          else if (!items.length) bad(token, errEmptyList(token));
-          else addVar({ var: token, options: items, kind: "list", name });
+          if (items === null) bad(token, errLongList(token), at);
+          else if (!items.length) bad(token, errEmptyList(token), at);
+          else addVar({ var: token, options: items, kind: "list", name, at });
         }
         i = LIST_TOKEN_RE.lastIndex;
         continue;
@@ -321,6 +324,15 @@ export function forcesNoCard(plan) {
   return !!plan && !plan.error && plan.mode === "matrix" && Array.isArray(plan.jobs) && plan.jobs.length >= 2;
 }
 
+/* How many sends the dock's ONE price quote stands for (owner walk 2026-09-29: a Matrix of 3
+   quoted the price of 1). The badge prices one request; a Matrix of 2 or more cells sends that
+   request once per cell -- every cell costs the same, or the server refuses the run -- so the
+   cost line multiplies by the cells and says the total the confirm will say. Anything else is
+   1: a Random run and a plain batch are priced whole, their count rides in the request. */
+export function quoteSends(plan) {
+  return forcesNoCard(plan) ? plan.jobs.length : 1;
+}
+
 /* A plain prompt made safe to put back in the composer (moonglade_runs.escape_literal): only
    what the rule would act on gets a backslash -- the { of every | group (and its } when a
    backslash already sits before it), an unclosed { with a | after it, the first _ of every
@@ -399,6 +411,26 @@ export function tokenLine(parsed) {
   return parsed.parts.map((p) => p.lit != null ? { t: p.lit, kind: "lit" }
     : p.var != null ? { t: p.var + " ·" + p.options.length, kind: "var" }
       : { t: p.bad, kind: "bad", why: p.error });
+}
+
+/* The prompt box's own tint (owner walk 2026-09-29; Power Tools Handoff M1: "{a|b|c} and
+   __name__ are tinted lavender in the prompt"): the RAW text cut into runs that join back to
+   it character for character -- a variable "var", a refusal "bad" (peach), everything else ""
+   -- for the highlight layer the dock draws under its textarea. A brace group with no | is
+   literal text, so {masterpiece} never tints; an escaped group stays plain too. */
+export function promptTint(template, lists) {
+  const s = String(template == null ? "" : template);
+  const out = [];
+  let at = 0;
+  for (const p of parse(s, lists).parts) {
+    if (!p.at) continue;
+    const [a, b] = p.at;
+    if (a > at) out.push({ t: s.slice(at, a), kind: "" });
+    out.push({ t: s.slice(a, b), kind: p.var != null ? "var" : "bad" });
+    at = b;
+  }
+  if (at < s.length) out.push({ t: s.slice(at), kind: "" });
+  return out;
 }
 
 /* The preview rows ("PREVIEW · what each image will get"): up to six, then "… N more". */

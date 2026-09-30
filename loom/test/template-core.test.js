@@ -8,7 +8,7 @@ import {
   CELL_CAP, ERR_UNCLOSED, LIST_ITEM_MAX, LOST_SEEN_WORDS, LOST_WORDS, READBACK_LOST_MS, RUN_SEED_MAX,
   ackOf, chargeMismatch, cleanList, confirmCopy, escapeLiteral, forcesNoCard, hasSyntax, listItemsFromText,
   listProblem, listsFromPrefs, matrixGrid, matrixProduct, newRoll, newRunId, parse, planJobs, previewRows,
-  readBack, readBackEvent, rng, runLine, runSeedOf, sendRoute, sendSummary, tokenLine, trim,
+  fmt, promptTint, quoteSends, readBack, readBackEvent, rng, runLine, runSeedOf, sendRoute, sendSummary, tokenLine, trim,
 } from "../../gallery/src/gen/templateCore.js";
 import {
   LOST_POST_WORDS, PLAN_PATH, imgRunBody, imgSendRoute, runConfirmText, sendImgRun,
@@ -529,5 +529,85 @@ describe("the dock's badge prices what the send will force (review B1)", () => {
     const ui = codeOnly(read(path.join(SRC, "components", "RunInspector.jsx")));
     assert.match(ui, /entry\.cli\.shell_name/);
     assert.match(ui, /tab === "cli" && shell &&/);
+  });
+});
+
+describe("owner walk 2026-09-29: a Matrix of 3 is quoted as 3, not as 1 (screenshots 21a/21b)", () => {
+  // Tsubaki.3, prompt "{red|blue|green} dress, {masterpiece}", Matrix: the button read
+  // "Generate 3" and the cost line "≈ 3,400 credits" -- one image's price. The badge prices ONE
+  // cell (the payload's count is 1 in a Matrix); the cost line now multiplies by the cells.
+  const PROMPT = "{red|blue|green} dress, {masterpiece}";
+  test("quoteSends: a Matrix of N cells is N sends of the one priced request; anything else is 1", () => {
+    const m = planJobs(PROMPT, {}, "matrix", 1, 7);
+    assert.equal(m.images, 3);
+    assert.equal(quoteSends(m), 3);
+    assert.equal(quoteSends(planJobs("{a} dress", {}, "matrix", 1, 7)), 1, "a one-cell Matrix is one send");
+    assert.equal(quoteSends(planJobs(PROMPT, {}, "random", 3, 7)), 1, "a Random run's count is in its request");
+    assert.equal(quoteSends(planJobs("plain", {}, "random", 4, 7)), 1, "a batch is one task");
+    assert.equal(quoteSends(planJobs("{" + "a|".repeat(30) + "b} {c|d}", {}, "matrix", 1, 7)), 1, "over the cap sends nothing");
+    assert.equal(quoteSends(null), 1);
+  });
+  test("the badge's total is the confirm's total: 3,400 each × 3 = 10,200 on both", () => {
+    const sends = quoteSends(planJobs(PROMPT, {}, "matrix", 1, 7));
+    const each = 3400;                                   // /api/price of one cell (no_card, forced)
+    const badgeTotal = each * sends;
+    // the server's quote for the same run: each × (jobs − covered); a Matrix is never covered
+    const c = confirmCopy({ mode: "matrix", count: 3, jobs: 3, each, covered: 0, total: each * 3, card: null });
+    assert.equal(badgeTotal, 10200);
+    assert.equal(c.credits, "≈ 10,200 credits in total · 3,400 each × 3");
+    assert.ok(c.credits.startsWith("≈ " + fmt(badgeTotal) + " credits"), "same total, same words");
+  });
+  test("the badge multiplies the settled price by `sends` and says 'each' beneath", () => {
+    const badge = codeOnly(read(path.join(SRC, "components", "CostBadge.jsx")));
+    assert.match(badge, /const sendsN = Math\.max\(1, cardCount\(props\.sends\) \|\| 1\);/);
+    assert.match(badge, /const total = n \* sendsN;/);
+    assert.match(badge, /\+ "≈ " \+ fmt\(total\) \+ " credits";/, "the main line is the total");
+    assert.match(badge, /: \(warn \|\| short \? "⚠ " : ""\) \+ "≈ " \+ fmt\(total\);/, "and the chip's value");
+    assert.match(badge, /parts\.push\(fmt\(sendsN\) \+ " images", "≈ " \+ fmt\(Number\(d\.cost\)\) \+ " each"\);/,
+      "the per-image figure is only ever shown saying 'each'");
+    const dock = codeOnly(read(path.join(SRC, "components", "GenerateDrawer.jsx")));
+    assert.match(dock, /<CostBadge ref=\{costRef\} stack count=\{s\.varMode === "matrix" \? 1 : s\.count\}\s+sends=\{quoteSends\(g\.run\.plan\)\}/);
+  });
+});
+
+describe("owner walk 2026-09-29: the desktop prompt tints its variables in the box (screenshot 22)", () => {
+  const join = (runs) => runs.map((r) => r.t).join("");
+  test("{red|blue|green} tints; {masterpiece} with no | does not", () => {
+    const p = "{red|blue|green} dress, {masterpiece}";
+    const runs = promptTint(p, {});
+    assert.equal(join(runs), p, "the runs join back to the text character for character");
+    assert.deepEqual(runs, [{ t: "{red|blue|green}", kind: "var" }, { t: " dress, {masterpiece}", kind: "" }]);
+  });
+  test("lists tint, refusals tint peach, escapes and plain text stay plain -- and every run joins back", () => {
+    const lists = { poses: ["kneeling", "turning"] };
+    const cases = [
+      ["a __poses__ b", [["a ", ""], ["__poses__", "var"], [" b", ""]]],
+      ["a __nope__ b", [["a ", ""], ["__nope__", "bad"], [" b", ""]]],
+      ["\\{a|b} x", [["\\{a|b} x", ""]]],
+      ["{a|{b|c}} x", [["{a|{b|c}}", "bad"], [" x", ""]]],
+      ["{ | } x", [["{ | }", "bad"], [" x", ""]]],
+      ["plain, {x}, (y:1.2)", [["plain, {x}, (y:1.2)", ""]]],
+      ["", []],
+    ];
+    for (const [p, want] of cases) {
+      const runs = promptTint(p, lists);
+      assert.equal(join(runs), p, p);
+      assert.deepEqual(runs.map((r) => [r.t, r.kind]), want, p);
+    }
+  });
+  test("the textarea draws the tint under itself with spell-check off", () => {
+    const dock = codeOnly(read(path.join(SRC, "components", "GenerateDrawer.jsx")));
+    assert.match(dock, /const runs = useMemo\(\(\) => promptTint\(value, lists\), \[value, lists\]\);/);
+    assert.match(dock, /<textarea ref=\{taRef\} className="mgdock-prompt" rows=\{rows\} value=\{value\} spellCheck=\{false\}/);
+    assert.match(dock, /<TintedPrompt value=\{s\.prompt\} lists=\{g\.run\.lists\} rows=\{promptRows\}/);
+    const css = read(path.join(SRC, "styles", "dock.css"));
+    const layer = css.match(/\.mgdock-prompt-tint \{[^}]*\}/)[0];
+    for (const rule of ["position: absolute", "pointer-events: none", "font-size: 16px", "line-height: 1.5",
+      "font-weight: 300", "white-space: pre-wrap", "color: transparent"]) {
+      assert.ok(layer.includes(rule), "the layer's metrics are the textarea's: " + rule);
+    }
+    assert.match(css, /\.mgdock-promptwrap > \.mgdock-prompt \{ position: relative; \}/, "the textarea is positioned...");
+    assert.ok(dock.indexOf('className="mgdock-prompt-tint"') < dock.indexOf('className="mgdock-prompt" rows={rows}'),
+      "...and comes after the layer, so it paints on top");
   });
 });

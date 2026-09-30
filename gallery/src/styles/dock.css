@@ -117,8 +117,12 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-x:hover { border-color: var(--accent); color: var(--text); }
 
 /* =============================== BODY ======================================= */
-/* safety valve for short windows only — slabs may scroll, the composer never */
-.mgdock-body { position: relative; flex: 0 1 auto; min-height: 0;
+/* safety valve for short windows only — slabs may scroll, the composer never. It GROWS too
+   (owner walk 2026-09-29): when the dock holds its height across a tab or mode switch
+   (GenerateDrawer's height hold, gen/dockLayout.js dockBox) the room a shorter tab leaves is
+   the body's, so the composer stays at the dock's foot and the tabs at its top. A dock sized
+   by its content has no spare room, and this changes nothing there. */
+.mgdock-body { position: relative; flex: 1 1 auto; min-height: 0;
   overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 
 /* ============================== RUNS REEL =================================== */
@@ -846,6 +850,27 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
   transition: height .28s cubic-bezier(.2, .9, .24, 1); }
 .mgdock-prompt::placeholder { color: var(--overlay0); }
+/* The prompt's variables, tinted IN the box (owner walk 2026-09-29; Power Tools Handoff M1).
+   GenerateDrawer's TintedPrompt: a layer UNDER the (transparent) textarea holds the same text in
+   transparent ink and paints only the grounds -- lavender for a variable, peach for a refusal,
+   the token line's own two tints (runs.css .mgrun-tok). Its text metrics are the textarea's
+   exactly (font, size, line-height, weight, wrapping, no padding), so each ground lands under
+   its own characters; its width and scroll are copied from the textarea at every change. The
+   box-shadow widens a ground past its letters without moving them. No z-index: the layer comes
+   first in the DOM and the positioned textarea after it, so the textarea paints on top. */
+.mgdock-promptwrap { position: relative; }
+.mgdock-promptwrap > .mgdock-prompt { position: relative; }
+.mgdock-prompt-tint { position: absolute; top: 0; left: 0; overflow: hidden;
+  pointer-events: none; box-sizing: border-box; margin: 0; padding: 0; border: 0;
+  font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300;
+  letter-spacing: normal; word-spacing: normal; text-indent: 0; text-transform: none;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 8;
+  color: transparent; }
+.mgdock-prompt-tint mark { color: transparent; border-radius: 4px; }
+.mgdock-prompt-tint mark.var { background: color-mix(in srgb, var(--lavender) 24%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lavender) 24%, transparent); }
+.mgdock-prompt-tint mark.bad { background: color-mix(in srgb, var(--peach) 24%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--peach) 24%, transparent); }
 /* The composer's border IS the focus ring (.mgdock-composer.focus, DC). The global
    :focus-visible ring in styles.css is emitted AFTER this sheet (main.jsx imports
    App.jsx before styles.css) and ties .mgdock-prompt on specificity, so on focus it

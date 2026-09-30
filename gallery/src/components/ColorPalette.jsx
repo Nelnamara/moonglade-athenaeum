@@ -669,14 +669,20 @@ export function PaletteRow({ s, set, ctx, phone }) {
   const bgColors = ov && ov.background ? ov.background.colors : [];
   const topColors = ov ? (ov.overall ? ov.overall.colors : bgColors) : [];
   const second = ov && ov.overall && ov.background ? bgColors : [];
+  // On the Context side the whole row reads held, the way the negative and the recipes do there
+  // (owner walk 2026-09-29): dimmed, with the held note, pick or no pick. A pick stays possible --
+  // the overlay says it is held and used when you switch back -- and nothing held is sent
+  // (colorPaletteCore.paletteForPayload; loom/test/color-palette-core.test.js pins the payload).
+  const ctxHeld = !!ctx;
 
   return (
     <div ref={rowRef} className={"cpal-row" + (phone ? " phone" : "")}>
       <div className="cpal-rowhead">
         {!phone ? <span className="mgdock-lbl">PALETTE</span> : null}
         <span className="cpal-sp" />
-        <button type="button" className="cpal-link" onClick={show}
-          title="Choose a colour palette, or make your own">Library · Custom ›</button>
+        <button type="button" className={"cpal-link" + (ctxHeld ? " held" : "")} onClick={show}
+          title={ctxHeld ? "Held · not sent with context images — a palette picked here is used when you switch back"
+            : "Choose a colour palette, or make your own"}>Library · Custom ›</button>
       </div>
       {pal ? (
         <div className={"cpal-rowbody" + (row.state === "held" ? " held" : "")}>
@@ -689,7 +695,7 @@ export function PaletteRow({ s, set, ctx, phone }) {
           </div>
         </div>
       ) : (
-        <button type="button" className={"cpal-rownone" + (phone ? " phone" : "")} onClick={show}>
+        <button type="button" className={"cpal-rownone" + (phone ? " phone" : "") + (ctxHeld ? " held" : "")} onClick={show}>
           None · pick one from the Library or make your own
         </button>
       )}

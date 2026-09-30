@@ -46,6 +46,9 @@
   text-align: center; }
 .cpal-rownone:hover { border-color: var(--lavender); color: var(--text); }
 .cpal-rownone.phone { min-height: 44px; font-size: 12px; border-radius: 12px; }
+/* Held on the Context side (owner walk 2026-09-29): the link and the empty row dim to the same
+   .38 the negative (.mgts-held) and the recipes (.rcp-row-chips.held) use there. */
+.cpal-row .cpal-link.held, .cpal-rownone.held { opacity: .38; transition: opacity .3s; }
 .cpal-rownote { font-size: 9.5px; color: var(--overlay0); }
 .cpal-row.phone .cpal-rownote { font-size: 11px; }
 

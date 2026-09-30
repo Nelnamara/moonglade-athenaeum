@@ -178,12 +178,35 @@ describe("decision 1 -- the switch, what it holds, the confirm", () => {
 describe("decision 2 -- the @image grammar", () => {
   test("dead refs and renumbering after a slot is removed", () => {
     assert.deepEqual(deadRefs("@image1 @image3 @image0", 2), ["@image3", "@image0"]);
-    assert.equal(renumberAfterRemove("Use @image1 as face, @image2 pose, @image3 bg", 0),
-      "Use @image0 as face, @image1 pose, @image2 bg");
-    assert.equal(renumberAfterRemove("a @image1 b @image2", 1), "a @image1 b @image0");
-    assert.equal(renumberAfterRemove("@image12 stays", 0), "@image11 stays");
+    // Flipped on the owner walk 2026-09-29: removing a slot used to write @image0 into the
+    // prompt. A ref to the removed picture now keeps naming no picture on a real number: the
+    // old last one, which nothing moved into -- and pictures past it follow their slot down.
+    assert.equal(renumberAfterRemove("Use @image1 as face, @image2 pose, @image3 bg", 0, 3),
+      "Use @image3 as face, @image1 pose, @image2 bg");
+    assert.equal(renumberAfterRemove("a @image1 b @image2", 1, 2), "a @image1 b @image2",
+      "removing the last slot leaves its ref exactly as typed");
+    assert.equal(renumberAfterRemove("@image12 moves", 0, 12), "@image11 moves");
     assert.deepEqual(imageRefs("@image2 x @image1 @image2"), [1, 2]);
     assert.equal(SEED_PROMPT, "Use @image1 ");
+  });
+
+  test("the owner's walk: one image, removed, never leaves @image0 or any index under 1", () => {
+    // Screenshot 13: one context image, prompt "@image1 holding flowers beside @image2"; its ✕
+    // then back to LoRAs showed "@image0 holding flowers beside @image1".
+    const before = "@image1 holding flowers beside @image2";
+    const after = renumberAfterRemove(before, 0, 1);
+    assert.equal(after, before, "the removed picture's ref stays as written; @image2 already named no picture");
+    assert.deepEqual(deadRefs(after, 0), ["@image1", "@image2"], "both read as the peach 'no image' chip");
+    for (const [p, k, n] of [[before, 0, 1], ["@image1 @image2 @image3", 0, 3], ["@image1 @image2 @image3", 1, 3],
+      ["@image1 @image2 @image3", 2, 3], ["x @image1", 0, undefined]]) {
+      const out = renumberAfterRemove(p, k, n);
+      assert.ok(!/@image0\b/.test(out), p + " -> " + out);
+      assert.ok(imageRefs(out).every((i) => i >= 1), p + " -> " + out);
+    }
+    // a ref to the removed picture can never turn into the picture that slid into its place
+    const two = renumberAfterRemove("@image1 hugs @image2", 0, 2);
+    assert.equal(two, "@image2 hugs @image1");
+    assert.deepEqual(deadRefs(two, 1), ["@image2"], "the removed one is dead; the kept one follows its picture");
   });
 });
 

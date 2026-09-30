@@ -446,7 +446,8 @@ export default function useGenerate({ costRef, isMember }) {
   /* ---- the context slots (Session H decision 1) ----
      addContext appends (a picture already in a slot is not added twice, and the live max is
      the ceiling); removeContext drops slot k and renumbers the prompt's @image refs -- a ref to
-     the removed slot turns into the peach "no image" chip (tsubakiCore.renumberAfterRemove). */
+     the removed slot keeps naming no picture, the peach "no image" chip, and never becomes
+     @image0 (tsubakiCore.renumberAfterRemove). */
   const addContext = useCallback((img) => {
     if (!img || !img.media_id) return;
     setS((old) => {
@@ -461,7 +462,7 @@ export default function useGenerate({ costRef, isMember }) {
     setS((old) => {
       const ctx = old.ctx || [];
       if (k < 0 || k >= ctx.length) return old;
-      return { ...old, ctx: ctx.filter((_, j) => j !== k), prompt: renumberAfterRemove(old.prompt, k) };
+      return { ...old, ctx: ctx.filter((_, j) => j !== k), prompt: renumberAfterRemove(old.prompt, k, ctx.length) };
     });
   }, []);
   /* The measured size of a slot's picture, when the picker could not say (an upload). */

@@ -8,9 +8,10 @@ import { AT_REF_RE } from "../gen/tsubakiCore.js";
        ↑ ↓ move, ↵ / Tab or a click inserts a chip, Esc closes;
      - a chip is ONE token -- contenteditable=false, so backspace removes it whole -- and is
        sent as the literal @imageN text PixAI reads (the chip's data-ref; promptText below);
-     - a chip whose number points at no slot (the slot was removed -- @image0 after
-       tsubakiCore.renumberAfterRemove -- or a number past the last slot) turns peach and reads
-       "no image"; the host's gate refuses Generate while one is there;
+     - a chip whose number points at no slot (its slot was removed -- tsubakiCore.
+       renumberAfterRemove leaves it on a number past the last slot, never @image0 -- or it was
+       typed that way) turns peach and reads "no image"; the host's gate refuses Generate while
+       one is there;
      - phone: the suggestions are a chip row under the prompt while it has focus (the phone's
        "above the keyboard").
 

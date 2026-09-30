@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  dockLayout, PROMPT_FLOOR, PROMPT_CAP, SLAB_CHROME, REEL_MIN_ROOM, HISTORY_STRIP,
+  dockBox, dockLayout, PROMPT_FLOOR, PROMPT_CAP, SLAB_CHROME, REEL_MIN_ROOM, HISTORY_STRIP,
 } from "../../gallery/src/gen/dockLayout.js";
 
 // The Generate dock's HEIGHT PASS -- owner calls 08-16d/e/f, drift-report §43,
@@ -138,7 +138,7 @@ describe("the dock wires the pure layout, and the pieces that are not pure carry
   const css = src("gallery/src/styles/dock.css");
 
   test("GenerateDrawer renders from dockLayout(), not a private copy of the math", () => {
-    assert.match(dock, /import \{ dockLayout \} from "\.\.\/gen\/dockLayout\.js"/);
+    assert.match(dock, /import \{ (dockBox, )?dockLayout \} from "\.\.\/gen\/dockLayout\.js"/);
     assert.match(dock, /const \{ capH, reelH, reelVisible, promptMax, promptRows \} = dockLayout\(\{/);
     assert.doesNotMatch(dock, /const reelVisible = !expanded/, "the old '!expanded' reel gate is gone");
     assert.doesNotMatch(dock, /const promptRows = Math\.max\(2/, "the old 2-row floor is gone");
@@ -170,5 +170,44 @@ describe("the dock wires the pure layout, and the pieces that are not pure carry
   });
   test("no second focus ring on the composer textareas (the composer border is the ring)", () => {
     assert.match(css, /\.mgdock-prompt:focus-visible, \.mgdock-neg:focus-visible \{ outline: none; \}/);
+  });
+});
+
+// Owner walk 2026-09-29 (screenshot 12): the dock is bottom-anchored and was sized by whatever
+// the tab held, so Image / Edit / Video, Random / Matrix and LoRAs / Context images each moved
+// its top edge -- and the tabs on it -- under the mouse. The owner's finding wins over the
+// height pass's "content-sized": in ▲ the dock is its ceiling; otherwise it never shrinks while
+// it stays in the same state.
+describe("the tabs stay put across tab and mode switches (dockBox)", () => {
+  test("in ▲ the dock IS its ceiling, whatever the tab holds -- top 14px from the window's top", () => {
+    const L = dockLayout({ ...desk, expanded: true, promptLen: 0, promptFocus: false });
+    for (const held of [0, 300, 5000]) {
+      const b = dockBox({ capH: L.capH, expanded: true, held });
+      assert.equal(b.height, desk.vh - 28, "held " + held);
+      assert.equal(b.maxHeight, desk.vh - 28);
+      assert.equal(desk.vh - 14 - b.height, 14, "the top edge, and the tabs, sit at 14px");
+    }
+  });
+  test("standard: it grows for content but a shorter tab or mode keeps the tallest height", () => {
+    const L = dockLayout({ ...desk, promptLen: 0, promptFocus: false });
+    assert.deepEqual(dockBox({ capH: L.capH, expanded: false, held: 0 }),
+      { height: null, minHeight: null, maxHeight: L.capH }, "a fresh state is content-sized, as before");
+    assert.deepEqual(dockBox({ capH: L.capH, expanded: false, held: 520 }),
+      { height: null, minHeight: 520, maxHeight: L.capH }, "the tallest it has been is its floor");
+    assert.equal(dockBox({ capH: 400, expanded: false, held: 520 }).minHeight, 400,
+      "never above today's ceiling (a floor over a max would win in CSS)");
+  });
+  test("the dock holds by state (▲ / History / window, never the tab or a mode), and the body takes the room", () => {
+    const dock = src("gallery/src/components/GenerateDrawer.jsx");
+    const css = src("gallery/src/styles/dock.css");
+    assert.match(dock, /import \{ dockBox, dockLayout \} from "\.\.\/gen\/dockLayout\.js"/);
+    assert.match(dock, /const holdKey = \[expanded \? 1 : 0, historyOpen \? 1 : 0, metrics\.vh, metrics\.sepBottom\]\.join\("\|"\);/);
+    assert.doesNotMatch(dock.match(/const holdKey = [^\n]*/)[0], /\btab\b|varMode|inputs/,
+      "a tab or mode switch is exactly what must NOT reset the hold");
+    assert.match(dock, /setHold\(\(o\) => \(o\.key !== key \|\| h > o\.h \? \{ key, h \} : o\)\);/, "it only grows within a state");
+    assert.match(dock, /const box = dockBox\(\{ capH, expanded, held: hold\.key === holdKey \? hold\.h : 0 \}\);/);
+    assert.match(dock, /maxHeight: box\.maxHeight \+ "px",\s*height: box\.height != null \? box\.height \+ "px" : undefined,\s*minHeight: box\.minHeight != null \? box\.minHeight \+ "px" : undefined,/);
+    assert.match(css, /\.mgdock-body \{ position: relative; flex: 1 1 auto; min-height: 0;/,
+      "the room a shorter tab leaves is the body's -- the composer stays at the foot");
   });
 });

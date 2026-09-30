@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
@@ -29,7 +29,7 @@ import EnhanceTab from "./EnhanceTab.jsx";
 import SceneTab from "./SceneTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
-import { dockLayout } from "../gen/dockLayout.js";
+import { dockBox, dockLayout } from "../gen/dockLayout.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import Darkroom from "./Darkroom.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
@@ -40,7 +40,7 @@ import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./Run
 import { ListsPop, NegDefaultButton, PowerHeader, PowerNote, QuickRows } from "./PowerControls.jsx";
 import { presetNegativeTail } from "../gen/powerCore.js";
 import RunInspector from "./RunInspector.jsx";
-import { escapeLiteral, newRoll } from "../gen/templateCore.js";
+import { escapeLiteral, newRoll, promptTint, quoteSends } from "../gen/templateCore.js";
 import "../styles/dock.css";
 
 /* The Generate DOCK — the designed bottom-center glass reshell of the pilot's
@@ -96,6 +96,49 @@ function ExpandToggle({ expanded, onToggle }) {
       title={expanded ? "Collapse the settings" : "Open model, frame and tuning"}>
       <span className={"mgdock-caret" + (expanded ? " flip" : "")}>▲</span>
     </button>
+  );
+}
+
+/* The Image tab's prompt with its variables tinted IN the box (owner walk 2026-09-29, screenshot
+   22: "{red|blue|green}" showed only the browser's spell-check squiggle; Power Tools Handoff M1:
+   "{a|b|c} and __name__ are tinted lavender in the prompt"). A highlight layer sits UNDER the
+   textarea and draws the same text in transparent ink, cut by templateCore.promptTint -- so a
+   real group gets a lavender ground, a refusal a peach one, and a {masterpiece} with no | none.
+   The textarea above it keeps its own text, caret, selection and typing untouched; the layer
+   copies its width (the scrollbar comes out of clientWidth) and its scroll. Spell-check is off:
+   its squiggles are what the owner saw instead of the tint. The token line under the composer
+   stays as it was. */
+function TintedPrompt({ value, lists, rows, placeholder, onChange }) {
+  const taRef = useRef(null);
+  const layerRef = useRef(null);
+  const runs = useMemo(() => promptTint(value, lists), [value, lists]);
+  const tinted = runs.some((r) => r.kind);
+  const sync = useCallback(() => {
+    const ta = taRef.current, layer = layerRef.current;
+    if (!ta || !layer) return;
+    layer.style.width = ta.clientWidth + "px";
+    layer.style.height = ta.clientHeight + "px";
+    layer.scrollTop = ta.scrollTop;
+  }, []);
+  useLayoutEffect(sync);                       // every render: new text, new rows, a scrollbar
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(sync);       // the rows' height transition, a window resize
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, [sync]);
+  return (
+    <div className="mgdock-promptwrap">
+      {tinted && (
+        <div ref={layerRef} className="mgdock-prompt-tint" aria-hidden="true">
+          {runs.map((r, i) => (r.kind ? <mark key={i} className={r.kind}>{r.t}</mark> : <span key={i}>{r.t}</span>))}
+          {"\u200b"}
+        </div>
+      )}
+      <textarea ref={taRef} className="mgdock-prompt" rows={rows} value={value} spellCheck={false}
+        placeholder={placeholder} onScroll={sync} onChange={onChange} />
+    </div>
   );
 }
 
@@ -370,6 +413,29 @@ function GenerateDrawer({ open, onClose, account, request }) {
     vh: metrics.vh, sepBottom: metrics.sepBottom, expanded, historyOpen,
     promptLen: (s.prompt || "").length, promptFocus, extraPx: tab === "image" ? runPx : 0,
   });
+  /* The height HOLD (owner walk 2026-09-29, screenshot 12: every tab and mode switch moved the
+     dock's top edge -- and the tabs on it -- under the mouse). gen/dockLayout.js dockBox says the
+     rule: in ▲ the dock is its ceiling; otherwise it keeps the tallest height it has had in this
+     state. `hold` is that height, keyed by the state (▲, History, the window -- never the tab or
+     a mode) -- a new state starts from the content's own height in the same render, never a
+     stale hold for a frame. offsetHeight is the layout box, untouched by the dock's translateX /
+     entrance transforms. */
+  const holdKey = [expanded ? 1 : 0, historyOpen ? 1 : 0, metrics.vh, metrics.sepBottom].join("|");
+  const holdKeyRef = useRef(holdKey);
+  holdKeyRef.current = holdKey;
+  const [hold, setHold] = useState({ key: "", h: 0 });
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el || !open || expanded || typeof ResizeObserver === "undefined") return undefined;
+    const take = () => {
+      const h = el.offsetHeight, key = holdKeyRef.current;
+      setHold((o) => (o.key !== key || h > o.h ? { key, h } : o));
+    };
+    const ro = new ResizeObserver(take);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open, expanded, holdKey]);
+  const box = dockBox({ capH, expanded, held: hold.key === holdKey ? hold.h : 0 });
 
   /* Prime the cost chip on each Image-tab entry. The image <CostBadge> sits in the
      dock footer's right column under `tab === "image"`, so it mounts and unmounts
@@ -882,7 +948,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
         className={"mgdock" + (expanded ? " expanded" : "")}
         role="dialog" aria-label="Generate"
         aria-hidden={!open} inert={open ? undefined : ""}
-        style={{ maxHeight: Math.max(180, capH) + "px" }}>
+        style={{
+          maxHeight: box.maxHeight + "px",
+          height: box.height != null ? box.height + "px" : undefined,
+          minHeight: box.minHeight != null ? box.minHeight + "px" : undefined,
+        }}>
         <div className="mgdock-glow" aria-hidden="true" />
 
         {/* ---- HEADER: runs label · note · tab strip · History · × ---- */}
@@ -1380,7 +1450,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 the edit instruction portal into their slots; Fixer/Enhance carry a line
                 of copy instead of an empty box */}
             {tab === "image" && !ctxOn && (
-              <textarea className="mgdock-prompt" rows={promptRows} value={s.prompt}
+              <TintedPrompt value={s.prompt} lists={g.run.lists} rows={promptRows}
                 placeholder="Describe your image…"
                 onChange={(e) => set({ prompt: e.target.value, note: "" })} />
             )}
@@ -1477,8 +1547,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
               <>
                 {/* idle here == no model (useGenerate clears the badge only when there is
                     no version_id to price), so the DC's nomodel sentence (3674) is the
-                    idle hint -- via the badge's own hint API, never hand-written text */}
-                <CostBadge ref={costRef} stack count={s.varMode === "matrix" ? 1 : s.count} balance={balance}
+                    idle hint -- via the badge's own hint API, never hand-written text.
+                    `sends` (owner walk 2026-09-29): the badge prices ONE cell of a Matrix, and
+                    a Matrix sends one per cell -- the line shows their total, the same total
+                    the confirm quotes, with "each" beneath. */}
+                <CostBadge ref={costRef} stack count={s.varMode === "matrix" ? 1 : s.count}
+                  sends={quoteSends(g.run.plan)} balance={balance}
                   laneHeld={ctxOn && unlimitedOffered(m)}
                   hint="Pick a model to see the cost." />
                 {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the

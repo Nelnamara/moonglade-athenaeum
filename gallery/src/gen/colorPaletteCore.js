@@ -336,11 +336,13 @@ export function paletteForPayload(s, ctx) {
   return { name: String(pal.name || UNTITLED).slice(0, NAME_MAX), palette: p };
 }
 
-/* What the PALETTE row says about the applied palette. `ctx`: context images are on. */
+/* What the PALETTE row says about the applied palette. `ctx`: context images are on -- then the
+   row reads held with or without a pick (owner walk 2026-09-29: an empty row still offered
+   "Library · Custom ›" as usable beside a negative and recipes that both said held). */
 export function paletteRowState(s, ctx) {
   const pal = s && s.palette;
-  if (!pal) return { state: "none", note: "" };
   if (ctx) return { state: "held", note: "Held · not sent with context images" };
+  if (!pal) return { state: "none", note: "" };
   if (s.model && s.model.color_palette === false) {
     return { state: "held", note: "Held · this model takes no colour palette" };
   }

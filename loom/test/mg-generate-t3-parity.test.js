@@ -113,10 +113,23 @@ describe("G2/G3/G4 -- buildPayload withholds what the drawer shows as not applyi
 
 describe("receipts -- used:null reads 'off'", () => {
   test("adjustedText", () => {
+    // Flipped on the owner walk 2026-09-29: the receipt names a field by the drawer's own word,
+    // never PixAI's parameter name ("negativePrompts" read as code on screen).
     assert.equal(adjustedText([{ field: "width", asked: 768, used: 912 },
                                { field: "negativePrompts", asked: "x".repeat(40), used: null }]),
-      "width 768→912, negativePrompts " + "x".repeat(23) + "…→off");
+      "width 768 → 912, negative prompt " + "x".repeat(23) + "… → off");
     assert.equal(adjustedText(undefined), "");
+  });
+
+  test("the cost note says the dock's word: creativity, not promptHelper (owner walk 2026-09-29)", () => {
+    // The screenshot's note: "Adjusted before sending: promptHelper medium→low" (recipes run the
+    // prompt helper one step lower). The dock calls that control "creativity".
+    assert.equal(adjustedText([{ field: "promptHelper", asked: "medium", used: "low" }]),
+      "creativity medium → low");
+    for (const f of ["promptHelper", "negativePrompts", "colorPalette", "enableADetailer", "qualityTag"]) {
+      assert.doesNotMatch(adjustedText([{ field: f, asked: "a", used: "b" }]), new RegExp("^" + f + " "),
+        f + " must be said in the drawer's words");
+    }
   });
 
   test("submitTask and CostBadge both render it (the badge in its note line, before a spend)", () => {

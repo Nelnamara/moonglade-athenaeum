@@ -1,5 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 /* The Generate drawer's colour palette (Session H decision 4, Tsubaki3 Generate Handoff frame D;
    the Library tab to PixAI's own pattern). gallery/src/gen/colorPaletteCore.js holds every
@@ -184,6 +189,19 @@ describe("the request", () => {
     assert.equal(paletteSummary(applied), "W · overall + background");
   });
 
+  test("on the Context side the row reads held even with no palette picked (owner walk 2026-09-29)", () => {
+    // Screenshot 14: the negative said "· held", the recipes "Held · not sent with context
+    // images", and the empty palette row still offered "Library · Custom ›" as usable.
+    assert.deepEqual(paletteRowState({ palette: null, model: t3 }, true),
+      { state: "held", note: "Held · not sent with context images" });
+    const row = readFileSync(path.join(here, "../../gallery/src/components/ColorPalette.jsx"), "utf8");
+    assert.match(row, /className=\{"cpal-link" \+ \(ctxHeld \? " held" : ""\)\}/, "the link dims when held");
+    assert.match(row, /"cpal-rownone" \+ \(phone \? " phone" : ""\) \+ \(ctxHeld \? " held" : ""\)/, "so does the empty row");
+    assert.match(row, /\{row\.note \? <div className="cpal-rownote">\{row\.note\}<\/div> : null\}/, "and the note shows");
+    const css = readFileSync(path.join(here, "../../gallery/src/styles/color-palette.css"), "utf8");
+    assert.match(css, /\.cpal-row \.cpal-link\.held, \.cpal-rownone\.held \{ opacity: \.38;/);
+  });
+
   test("the preview card: background is the field, character or overall the figure", () => {
     const p = previewOf(toPalette(editorFromPalette(WISTERIA, {})));
     assert.equal(p.field, "#FEF9F7");
@@ -246,6 +264,9 @@ describe("the drawer's payload (genCore.buildPayload)", () => {
     const held = buildPayload({ ...GEN_DEFAULTS, model, prompt: "p", palette: pal,
       inputs: "context", ctx: [{ media_id: "9", thumb: "", w: 0, h: 0 }] });
     assert.ok(!("color_palette" in held), "a context image holds the palette");
+    // ...from the moment the switch is on the Context side, before any image is added
+    const heldEmpty = buildPayload({ ...GEN_DEFAULTS, model, prompt: "p", palette: pal, inputs: "context", ctx: [] });
+    assert.ok(!("color_palette" in heldEmpty), "the Context side holds the palette with no image yet");
     const off = buildPayload({ ...GEN_DEFAULTS, model: { ...model, color_palette: null }, prompt: "p", palette: pal });
     assert.ok(!("color_palette" in off), "unknown support is not sent");
     // the palette is the only difference

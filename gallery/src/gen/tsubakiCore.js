@@ -220,7 +220,8 @@ export function needsSwitchConfirm(s) {
 
 /* ---- the @image grammar (decision 2) ----------------------------------------------------- */
 export const AT_REF_RE = /@image(\d+)/g;
-export const DEAD_REF = "@image0";          // a chip whose image was removed ("no image")
+// A typed @image0 still names no slot (deadRefs); removing a slot no longer writes one.
+export const DEAD_REF = "@image0";
 export const SEED_PROMPT = "Use @image1 ";
 
 /* The @imageN refs in `prompt` that point at no slot (N < 1, or N > count). */
@@ -235,13 +236,21 @@ export function deadRefs(prompt, count) {
   return out;
 }
 
-/* Renumber after slot `k` (0-based) is removed: refs to it die (DEAD_REF, "no image"), refs
-   past it move down one. Everything else is left exactly as typed. */
-export function renumberAfterRemove(prompt, k) {
+/* Renumber after slot `k` (0-based) of `count` slots is removed (owner walk 2026-09-29: the old
+   rule wrote "@image0" into the prompt, and it showed as raw text on the LoRAs side).
+     - a ref to a picture past the removed one follows its picture down one (@image3 -> @image2);
+     - a ref to the removed picture keeps pointing at NO picture, so it reads as the peach "no
+       image" chip: it stays exactly as typed when that was the last slot, and otherwise takes
+       the old last number (`count`) -- the one number nothing moved into, so it can never
+       silently turn into the picture that slid into its place;
+     - everything else -- refs before it, refs that already named no slot -- is left as typed.
+   Never an index below 1. `count` absent reads as "the removed slot was the last one". */
+export function renumberAfterRemove(prompt, k, count) {
+  const last = Number(count) > k ? Math.floor(Number(count)) : k + 1;
   return String(prompt || "").replace(new RegExp(AT_REF_RE.source, "g"), (all, d) => {
     const n = Number(d);
-    if (n === k + 1) return DEAD_REF;
-    if (n > k + 1) return "@image" + (n - 1);
+    if (n === k + 1) return "@image" + last;
+    if (n > k + 1 && n <= last) return "@image" + (n - 1);
     return all;
   });
 }

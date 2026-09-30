@@ -194,6 +194,15 @@ export function qualityTagTitle(m) {
   return "Adds PixAI's quality tag to the prompt";
 }
 
+/* The server names a receipt's field by PixAI's parameter; the owner reads the drawer's own
+   word for it (owner walk 2026-09-29: the note read "promptHelper medium→low" where the dock
+   says "creativity"). A field not listed here is already a plain word (width, steps, …). */
+const ADJUSTED_WORDS = {
+  promptHelper: "creativity", negativePrompts: "negative prompt", colorPalette: "palette",
+  enableADetailer: "Face Fix", qualityTag: "Quality Tag", cameraMovement: "camera movement",
+  inputVideoDurations: "clip lengths",
+};
+
 /* One line of text for a server receipt (`adjusted`: [{field, asked, used, why}]). `used`
    null means the field is not sent -- read "off". A long value (a negative prompt the
    model does not take) is shortened. Shared by the submit result line (submitTask.js) and
@@ -203,8 +212,9 @@ export function adjustedText(list) {
     const t = v == null ? "off" : String(v);
     return t.length > 24 ? t.slice(0, 23) + "…" : t;
   };
+  const word = (f) => (Object.prototype.hasOwnProperty.call(ADJUSTED_WORDS, f) ? ADJUSTED_WORDS[f] : f);
   return (Array.isArray(list) ? list : [])
-    .map((a) => (a && a.field) + " " + short(a && a.asked) + "→" + short(a && a.used))
+    .map((a) => word(a && a.field) + " " + short(a && a.asked) + " → " + short(a && a.used))
     .join(", ");
 }
 

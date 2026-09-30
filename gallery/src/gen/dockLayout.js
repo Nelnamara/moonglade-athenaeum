@@ -62,3 +62,23 @@ export function dockLayout({ vh, sepBottom, expanded, historyOpen, promptLen, pr
     Math.min(promptMax, promptLines + (promptFocus ? 1 : 0)));
   return { promptLines, longPrompt, capH, reelRoom, reelTier, reelH, reelVisible, promptMax, promptRows };
 }
+
+/* The dock's box while it is open -- what keeps its top edge, and the Image · Edit · Video tabs
+   on it, where they are (owner walk 2026-09-29, screenshot 12: the dock is bottom-anchored and
+   was sized by whatever the tab held, so every tab and mode switch -- Image / Edit / Video,
+   Random / Matrix, LoRAs / Context images -- moved the tabs under the mouse). The owner's
+   finding wins over the height pass's "content-sized" here:
+     · in ▲ the dock IS its ceiling (100vh − 28, top 14px from the window's top) whatever the tab
+       holds; a tab with less shows room in its body, a tab with more scrolls its body;
+     · otherwise it may grow when the content needs room but never SHRINKS while it stays in the
+       same state: `held` is the tallest it has been in this state -- ▲, History and the window's
+       size make the state, the tab and the modes do not (the host keys it so) -- so going back
+       to a shorter tab or mode leaves the tabs where they were.
+   Never above the ceiling: a `held` taller than today's cap (the long prompt it grew for was
+   deleted) yields to the cap. -> {height, minHeight, maxHeight} in px (null = not set). */
+export function dockBox({ capH, expanded, held }) {
+  const max = Math.max(180, Number(capH) || 0);
+  if (expanded) return { height: max, minHeight: null, maxHeight: max };
+  const h = Math.max(0, Math.round(Number(held) || 0));
+  return { height: null, minHeight: h ? Math.min(h, max) : null, maxHeight: max };
+}
