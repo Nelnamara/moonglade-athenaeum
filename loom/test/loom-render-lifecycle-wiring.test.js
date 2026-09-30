@@ -135,8 +135,10 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
   });
   test("step 4: ONE POST carrying loom_target, submit_id and expect_free (only when the confirmed quote was free)", () => {
     assert.equal((fn.match(/fetch\("\/api\/loom\/generate"/g) || []).length, 1);
-    assert.match(fn, /loom_target: \{ board_id: boardId, card_id: cardId \}, submit_id: submitId,/);
-    assert.match(fn, /\.\.\.\(expectFree \? \{ expect_free: true \} : \{\}\)/);
+    // Spend review S3: the body IS the priced payload `p` (every key but hasInput, pinned in
+    // loom-core.test.js), never a re-listed subset that can drop a field such as is_private.
+    assert.match(fn, /fetch\("\/api\/loom\/generate", \{ method: "POST", headers: \{ "Content-Type": "application\/json" \},\s*body: JSON\.stringify\(shotSendBody\(p, \{ boardId, cardId, submitId, expectFree \}\)\) \}\);/);
+    assert.doesNotMatch(fn, /body: JSON\.stringify\(\{ mode: p\.mode/, "no hand-listed body");
     assert.match(fn, /expectFree = !!\(pr && pr\.free\);/, "a single render is sent expect_free exactly when its quote was free (F13)");
     assert.doesNotMatch(fn, /retry|setTimeout\([^)]*fetch/, "never re-posted");
   });

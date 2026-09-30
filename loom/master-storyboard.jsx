@@ -16,6 +16,8 @@ import {
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
+  // Spend review S3: the card's Render POSTs the priced payload itself (plus the Loom's keys).
+  shotSendBody,
   // Session P, Stage B1: a new shot's default fields (newCard below wraps it with uid()).
   newCardShape,
 } from "./src/loom-core.js";
@@ -8435,11 +8437,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       let threw = false, status = 0, body = null;
       try {
         const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-            video_refs: p.video_refs, duration: p.duration, quality: p.quality,
-            generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot",
-            loom_target: { board_id: boardId, card_id: cardId }, submit_id: submitId,
-            ...(expectFree ? { expect_free: true } : {}) }) });
+          body: JSON.stringify(shotSendBody(p, { boardId, cardId, submitId, expectFree })) });
         status = r.status;
         try { body = await r.json(); } catch (_e) { body = null; }
       } catch (_e) { threw = true; }

@@ -563,6 +563,20 @@ export const shotPayload = (entry, project, imgSrc) => {
            hasInput: (imgs.length + vids.length) > 0 };
 };
 
+// ---------- the card's render body: THE priced payload, as sent (spend review S3) ----------
+// The card's Render used to re-list the payload's fields one by one and dropped is_private:
+// a Private shot was priced and snapshotted as Private and sent on the Normal channel. The
+// body is now the priced payload object itself -- every key but the client-only `hasInput` --
+// plus the Loom's own keys, which the server pops before anything is priced or sent. A field
+// added to shotPayload later reaches the POST without anyone remembering to list it.
+export const shotSendBody = (payload, ids) => {
+  const { hasInput, ...sent } = payload || {};   // eslint-disable-line no-unused-vars
+  const x = ids || {};
+  return { ...sent, origin: "loom-shot",
+    loom_target: { board_id: x.boardId, card_id: x.cardId }, submit_id: x.submitId,
+    ...(x.expectFree ? { expect_free: true } : {}) };
+};
+
 // ---------- cost-to-finish pricing (shared by the toolbar's standing estimate and
 // batchGenerate's own price-confirm dialog) ----------
 

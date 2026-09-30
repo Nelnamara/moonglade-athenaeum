@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, castMissingImages, shotPayload, durOf, reelStats, effectivePrompt,
+  flat, shotText, castMissingImages, shotPayload, shotSendBody, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip,
 } from "../src/loom-core.js";
@@ -548,6 +548,28 @@ describe("shotPayload", () => {
     const enhanced = makeCard({ ...base, isPrivate: true });
     const proj2 = makeProject([{ id: "a1", name: "Act", cards: [enhanced] }]);
     assert.equal(shotPayload(flat(proj2)[0], proj2, fakeImgSrc).is_private, true);
+  });
+
+  test("spend review S3: every key of the priced payload but hasInput reaches the card's POST body, unchanged", () => {
+    // A Private R2V shot with a video ref, audio on and Draft on: every field non-default.
+    const card = makeCard({ cast: [], isPrivate: true, audioGen: true, audioLanguage: "none",
+      openFrame: { thumbId: "t", source: "", desc: "", tag: "@image1" },
+      refs: [{ id: "v1", kind: "video", tag: "@video1", source: "733917871331404290" }] });
+    const proj = makeProject([{ id: "a1", name: "Act", cards: [card] }]);
+    proj.draft = true;
+    const p = shotPayload(flat(proj)[0], proj, fakeImgSrc);
+    assert.equal(p.is_private, true);
+    const body = shotSendBody(p, { boardId: "b1", cardId: card.id, submitId: "s1", expectFree: false });
+    for (const k of Object.keys(p)) {
+      if (k === "hasInput") { assert.equal(k in body, false, "hasInput is client-only"); continue; }
+      assert.deepEqual(body[k], p[k], k + " must reach the POST exactly as it was priced");
+    }
+    assert.equal(body.origin, "loom-shot");
+    assert.deepEqual(body.loom_target, { board_id: "b1", card_id: card.id });
+    assert.equal(body.submit_id, "s1");
+    assert.equal("expect_free" in body, false);
+    assert.equal(shotSendBody(p, { boardId: "b1", cardId: card.id, submitId: "s1", expectFree: true }).expect_free, true);
+    assert.equal(p.hasInput, true, "the payload itself is not mutated");
   });
 
   test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
