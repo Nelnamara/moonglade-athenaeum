@@ -111,11 +111,12 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
     const build = fn.indexOf("const p = buildShotPayload(fresh, proj, imgSrc);");
     assert.ok(build > fn.indexOf("inflightRef.current.add(cardId);"), "the payload is built after the latch, from the fresh entry");
     assert.match(fn, /const fresh = cardOn\(cardId\);/);
-    assert.match(fn, /await priceBody\(p\)/, "the price is asked of the payload that is sent");
+    assert.match(fn, /const ask = await askShotSpend\(p\);/, "the price is asked of the payload that is sent");
+    assert.match(hookFn(CODE, "askShotSpend"), /const pr = await priceBody\(p\);/, "the ask prices the payload it is handed");
     assert.match(fn, /const settings = snapshotSettings\(c, proj, p\.prompt, p\.quality\);/);
     assert.doesNotMatch(fn, /shotPayload\(entry\)|priceShot\(entry\)/, "no second payload from the stale entry");
     const refuseLocal = fn.indexOf("unsendableRefs(p).length");
-    assert.ok(refuseLocal > build && refuseLocal < fn.indexOf("await priceBody(p)"),
+    assert.ok(refuseLocal > build && refuseLocal < fn.indexOf("await askShotSpend(p)"),
       "an imported (local_) picture, video or audio is refused BEFORE pricing (open call 4, spend review S6)");
     assert.doesNotMatch(CODE, /unsendableImages\(/, "every render path checks every reference kind, not pictures alone (S6)");
     const fpCheck = fn.indexOf("priceFingerprint(p) !== opts.confirmedFp");
@@ -140,7 +141,9 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
     // loom-core.test.js), never a re-listed subset that can drop a field such as is_private.
     assert.match(fn, /fetch\("\/api\/loom\/generate", \{ method: "POST", headers: \{ "Content-Type": "application\/json" \},\s*body: JSON\.stringify\(shotSendBody\(p, \{ boardId, cardId, submitId, expectFree \}\)\) \}\);/);
     assert.doesNotMatch(fn, /body: JSON\.stringify\(\{ mode: p\.mode/, "no hand-listed body");
-    assert.match(fn, /expectFree = !!\(pr && pr\.free\);/, "a single render is sent expect_free exactly when its quote was free (F13)");
+    assert.match(hookFn(CODE, "askShotSpend"), /const expectFree = !!\(pr && pr\.free\);/,
+      "a single render is sent expect_free exactly when its quote was free (F13)");
+    assert.match(fn, /if \(!ask\.go\) return \{ ok: false, reason: "cancelled" \};\s*quote = ask\.quote;\s*expectFree = ask\.expectFree;/);
     assert.doesNotMatch(fn, /retry|setTimeout\([^)]*fetch/, "never re-posted");
   });
   test("step 5: after the answer is classified, an unclear send reads submit-status -- /api/loom/generate is never asked again", () => {
@@ -283,11 +286,38 @@ describe("the drawer's events are resolved by their ids, never by the selected s
     assert.ok(latch >= 0 && add > latch && firstAwait > add, "the latch is set before anything is awaited");
     const lock = b.indexOf("beginRender(cc,");
     const flush = b.indexOf("const saved = await saveBoardNow(boardId);");
-    const ok = b.indexOf("if (saved.ok) return { ok: true };");
+    const ok = b.indexOf("if (saved.ok) return { ok: true, expectFree: ask.expectFree };");
     assert.ok(lock > add && flush > lock && ok > flush, "ok only after the lock is saved");
     assert.match(b, /if \(activeIdRef\.current !== boardId\) return \{ refused:/);
     const refuse = b.indexOf("if (unsendableRefs(payload).length) {");
     assert.ok(refuse >= 0 && refuse < add, "the drawer's Go refuses an imported picture, video or audio before it locks (S6)");
+  });
+  test("beforeSend ASKS before any credit spend, the same fail-closed ask as generateShot (owner walk 2026-09-30)", () => {
+    // The Video tab's Go spent 70,000 credits on the click: beforeSend locked and answered ok
+    // with no ask. Now it asks through askShotSpend -- the one ask generateShot uses too -- of
+    // the payload the drawer POSTs, after the latch and before the lock; a "no" takes the latch
+    // off and sends nothing; the lock records the quote the owner said yes to.
+    const b = hookFn(CODE, "beginDrawerRender");
+    const add = b.indexOf("inflightRef.current.add(cardId);");
+    const ask = b.indexOf("const ask = await askShotSpend(payload);");
+    const lock = b.indexOf("beginRender(cc,");
+    assert.ok(ask > add && lock > ask, "latch -> ask -> lock");
+    assert.equal(b.search(/\bawait\b/), ask + "const ask = ".length, "the ask is the first thing awaited, after the latch");
+    assert.match(b, /if \(!ask\.go\) \{ inflightRef\.current\.delete\(cardId\); return \{ cancelled: true \}; \}/,
+      "a no releases the latch and answers cancelled");
+    assert.match(b.slice(ask, lock), /if \(activeIdRef\.current !== boardId \|\| !cardOn\(cardId\)\) \{\s*inflightRef\.current\.delete\(cardId\);\s*return \{ refused:/,
+      "the board or the shot changed during the ask: nothing is locked or sent");
+    assert.match(b, /const quote = ask\.quote;/, "the lock records the quote that was confirmed, not the drawer's badge");
+    // The draft (no shot) is asked the same way, and says what it confirmed.
+    assert.match(b, /if \(cardId === "__draft__"\) return beginDraftRender\(submitId, payload\);/);
+    const d = hookFn(CODE, "beginDraftRender");
+    assert.match(d, /const ask = await askShotSpend\(payload\);\s*if \(!ask\.go\) return \{ cancelled: true \};/);
+    assert.match(d, /return \{ ok: true, expectFree: ask\.expectFree \};/);
+    // ONE ask, one wording: generateShot's and the drawer's Go both ride askShotSpend.
+    assert.equal((CODE.match(/await askShotSpend\(/g) || []).length, 3, "generateShot, beginDrawerRender, beginDraftRender");
+    assert.equal((CODE.match(/Couldn't verify this shot's cost or free-card coverage/g) || []).length, 1);
+    assert.equal((CODE.match(/No free card covers this shot/g) || []).length, 1);
+    assert.equal(reach(BLOCKS, "askShotSpend"), null, "the ask itself can never reach a render");
   });
 });
 
@@ -392,8 +422,17 @@ describe("<VideoDrawer> in the Loom: target at the click, beforeSend before the 
   });
   test("the POST adds loom_target (not for a draft), submit_id and expect_free (settled verdict free); the gallery's request is unchanged", () => {
     assert.match(gen, /const sent = loomIds \? \{ \.\.\.p, submit_id: submitId,\s*\.\.\.\(target\.draft \? \{\} : \{ loom_target: \{ board_id: target\.board_id, card_id: target\.card_id \} \}\),\s*\.\.\.\(expectFree \? \{ expect_free: true \} : \{\}\) \} : p;/);
-    assert.match(gen, /const expectFree = !!\(quoted && quoted\.free\);/);
+    assert.match(gen, /let expectFree = !!\(quoted && quoted\.free\);/);
     assert.match(gen, /await submitTask\("\/api\/loom\/generate", sent, /);
+  });
+  test("in the Loom, what is sent is what the host's ask confirmed; a no sends nothing and leaves no line", () => {
+    const before = gen.indexOf("await host.beforeSend(");
+    const road = gen.indexOf('await submitTask("/api/loom/generate"');
+    const between = gen.slice(before, road);
+    assert.match(between, /if \(verdict && verdict\.cancelled\) setResults\(\(rs\) => rs\.filter\(\(l\) => l\.id !== id\)\);/);
+    assert.match(between, /if \(typeof verdict\.expectFree === "boolean"\) expectFree = verdict\.expectFree;/,
+      "expect_free follows the quote the owner said yes to, not the badge's older verdict");
+    assert.ok(gen.indexOf("const sent = ") > gen.indexOf("expectFree = verdict.expectFree"), "decided before the body is built");
   });
   test("every Loom event names its render; a submit with no answer says unclear", () => {
     assert.match(gen, /emit\("mg-submit", tag\(\{ task_id: tid, payload: p \}\)\);/);

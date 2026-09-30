@@ -102,9 +102,10 @@ test("confirmSpend and generateShot branch short-vs-unmatched, and still fail cl
   // confirmSpend: `${label}\n\n${line}` where line is short OR the original not-matched sentence
   assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\);/,
     "confirmSpend must word the short case honestly and keep the not-matched sentence otherwise");
-  // generateShot (video): names the shot's duration in the short sentence
+  // askShotSpend (video; generateShot's ask and the Loom Video tab's Go's): names the shot's
+  // duration in the short sentence
   assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, `this \$\{p\.duration \? `\$\{p\.duration\}s ` : ""\}shot`\)\s*\n\s*: `No free card covers this shot — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;/,
-    "generateShot must word the short case honestly and keep the not-matched sentence otherwise");
+    "the shot ask must word the short case honestly and keep the not-matched sentence otherwise");
   // fail-closed shape untouched: both gates still ask on a null/unverified price
   assert.match(src, /return window\.confirm\(`\$\{label\}\\n\\nCouldn't verify the cost or free-card coverage — it may spend credits\./);
   assert.match(src, /\} else if \(!pr \|\| !pr\.free\) \{\s*\n\s*if \(!window\.confirm\("Couldn't verify this shot's cost or free-card coverage/);

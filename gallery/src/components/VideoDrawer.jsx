@@ -476,16 +476,19 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     const submitId = loomCtx ? newSubmitId() : null;
     const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
     // The settled verdict Go was allowed on (canSubmit above): was THIS payload quoted free?
+    // In the Loom the host's own ask (below) re-prices this payload and says so instead.
     const quoted = probe.response || null;
-    const expectFree = !!(quoted && quoted.free);
+    let expectFree = !!(quoted && quoted.free);
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
     setReuseChip(null);   // a new submission goes out -- the recipe is no longer "from" the old run
     st.current.rendering = true;
     rerender();
     const unlock = () => { st.current.rendering = false; rerender(); };
     if (loomCtx) {
-      // The host's beforeSend runs the Loom's latch and saves the shot's lock BEFORE anything
-      // is sent; a refusal (or no host at all) ends the click here with its message, unsent.
+      // The host's beforeSend runs the Loom's latch, ASKS before any credit spend (the same
+      // fail-closed confirm as the Loom's own Render -- priced off this exact payload), and
+      // saves the shot's lock BEFORE anything is sent; a refusal (or no host at all) ends the
+      // click here with its message, unsent. A "no" to the ask sends nothing and leaves no line.
       const host = hostRef.current;
       let verdict = null;
       try {
@@ -493,11 +496,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           quote: quoted ? { cost: quoted.cost == null ? null : quoted.cost, free: !!quoted.free } : null }) : null;
       } catch (e) { verdict = null; }
       if (!verdict || verdict.refused || !verdict.ok) {
-        updateLine(id, { kind: "error", moon: false,
+        if (verdict && verdict.cancelled) setResults((rs) => rs.filter((l) => l.id !== id));
+        else updateLine(id, { kind: "error", moon: false,
           text: (verdict && verdict.refused) || "The storyboard didn't take this render, so nothing was sent." });
         unlock();
         return;
       }
+      // What the owner said yes to is what is sent: expect_free exactly when the host's quote
+      // was free (the server then refuses rather than charge if the card is gone by then).
+      if (typeof verdict.expectFree === "boolean") expectFree = verdict.expectFree;
     }
     // Every Loom event of this render names it: its submit id, its shot, its board (and its task
     // once known). The gallery's own Video tab emits exactly what it always did.

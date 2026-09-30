@@ -8539,6 +8539,36 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     }
     return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
   };
+  // GUARDRAIL: never spend credits silently. ONE video shot's ask, asked of the payload that
+  // will be sent: generateShot's (the card's Render, the phone's Generate) and the Video tab's
+  // "Generate video" in the Loom (<VideoDrawer>'s Go, through beginDrawerRender) -- the same
+  // words and the same three branches on both, so neither can drift from the other (owner walk
+  // 2026-09-30: the Video tab's Go spent 70,000 credits with no ask at all).
+  // Must fail CLOSED: priceBody answers null for a check that could not be verified, and the
+  // server's own /api/price returns HTTP 200 with cost:null on any exception -- either one
+  // used to slip straight through the confirm below (every condition short-circuited on
+  // cost==null), submitting a paid generation with zero confirmation. A verify failure now
+  // still asks. -> {go:false} when the owner said no; else {go:true, quote, expectFree}, where
+  // expectFree is true exactly when this quote was free (review F13: a render shown FREE, so no
+  // confirm, is sent as expect_free, and the server refuses it rather than charge credits if the
+  // card is gone by then).
+  const askShotSpend = async (p) => {
+    const pr = await priceBody(p);
+    if (pr && !pr.free && pr.cost != null) {
+      // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
+      // is worded as exactly what happens: no card attaches, the FULL price is charged.
+      // Not-matched keeps the original sentence. See confirmSpend's note above.
+      const line = priceIsShort(pr)
+        ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
+        : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
+      if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { go: false };
+    } else if (!pr || !pr.free) {
+      if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { go: false };
+    }
+    const quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
+    const expectFree = !!(pr && pr.free);
+    return { go: true, quote, expectFree };
+  };
   // ---- The render lifecycle's small helpers (Session P, BUILD-w5-p §3.3) ----
   // The card as the board holds it NOW (the store's synchronous ref), never a render closure.
   const cardOn = (id) => {
@@ -8621,29 +8651,14 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const settings = snapshotSettings(c, proj, p.prompt, p.quality);
       let quote = opts.quote || null;
       let expectFree = !!opts.expectFree;
-      // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
-      // Must fail CLOSED: priceBody answers null for a check that could not be verified, and the
-      // server's own /api/price returns HTTP 200 with cost:null on any exception -- either one
-      // used to slip straight through the confirm below (every condition short-circuited on
-      // cost==null), submitting a paid generation with zero confirmation. A verify failure now
-      // still asks. The price is asked of THE payload that will be sent (review F12).
+      // GUARDRAIL: never spend credits silently -- askShotSpend (above) checks cost + free card
+      // and confirms any credit spend, failing CLOSED. The price is asked of THE payload that
+      // will be sent (review F12). A batch confirmed its own tally already (skipConfirm).
       if (!opts.skipConfirm) {
-        const pr = await priceBody(p);
-        if (pr && !pr.free && pr.cost != null) {
-          // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
-          // is worded as exactly what happens: no card attaches, the FULL price is charged.
-          // Not-matched keeps the original sentence. See confirmSpend's note above.
-          const line = priceIsShort(pr)
-            ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
-            : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
-          if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
-        } else if (!pr || !pr.free) {
-          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
-        }
-        quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
-        // Review F13: a render shown FREE (so no confirm) is sent as expect_free, and the
-        // server refuses it rather than charge credits if the card is gone by then.
-        expectFree = !!(pr && pr.free);
+        const ask = await askShotSpend(p);
+        if (!ask.go) return { ok: false, reason: "cancelled" };
+        quote = ask.quote;
+        expectFree = ask.expectFree;
       }
       // ---- 3. the lock, saved before anything is sent ----
       if (activeIdRef.current !== boardId || !cardOn(cardId)) return { ok: false, reason: "board-changed" };
@@ -9021,25 +9036,32 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
 
   /* ---- The Video drawer's host (BUILD-w5-p §3.3, review F7) ----
      The drawer asks beforeSend({submit_id, card_id, board_id, payload}) before it POSTs, with
-     the target it captured AT THE CLICK. For a card this runs generateShot's steps 1 and 3:
-     the synchronous latch, then the lock (beginRender) saved through the queue. Any refusal
-     ends the click with the Loom's message and NO POST. Every drawer event is then resolved
-     by the ids it carries -- mg-submit by the card's pendingSubmitId, mg-result / mg-error /
-     mg-slow / mg-paused by the card's task id -- and never by whichever shot is selected. A
-     draft render (no card: "__draft__") locks nothing and is sent without a loom_target. */
+     the target it captured AT THE CLICK. For a card this runs generateShot's steps 1 to 3:
+     the synchronous latch, the spend ask (askShotSpend, asked of the payload the drawer will
+     POST -- the same words generateShot asks with), then the lock (beginRender) saved through
+     the queue. Any refusal ends the click with the Loom's message and NO POST; a "no" to the
+     ask ends it as cancelled, with nothing locked and nothing sent. Every drawer event is then
+     resolved by the ids it carries -- mg-submit by the card's pendingSubmitId, mg-result /
+     mg-error / mg-slow / mg-paused by the card's task id -- and never by whichever shot is
+     selected. A draft render (no card: "__draft__") is asked the same, locks nothing and is
+     sent without a loom_target. The answer carries the quote the owner said yes to and
+     whether it was free (expectFree), which is what the drawer then sends. */
+  const beginDraftRender = async (submitId, payload) => {
+    const ask = await askShotSpend(payload);
+    if (!ask.go) return { cancelled: true };
+    const dc = (draftCardRef && draftCardRef.current) || {};
+    draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
+      { ...dc, mode: payload.mode || dc.mode, duration: payload.duration != null ? payload.duration : dc.duration,
+        audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage },
+      projectRef.current, payload.prompt, payload.quality) };
+    return { ok: true, expectFree: ask.expectFree };
+  };
   const beginDrawerRender = async (req) => {
     const q = req || {};
     const cardId = String(q.card_id || ""), boardId = String(q.board_id || ""), submitId = String(q.submit_id || "");
     const payload = q.payload || {};
     if (!cardId || !boardId || !submitId) return { refused: "This render isn't tied to a shot, so nothing was sent." };
-    if (cardId === "__draft__") {
-      const dc = (draftCardRef && draftCardRef.current) || {};
-      draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
-        { ...dc, mode: payload.mode || dc.mode, duration: payload.duration != null ? payload.duration : dc.duration,
-          audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage },
-        projectRef.current, payload.prompt, payload.quality) };
-      return { ok: true };
-    }
+    if (cardId === "__draft__") return beginDraftRender(submitId, payload);
     if (activeIdRef.current !== boardId) return { refused: "The storyboard changed before this render went out. Nothing was sent." };
     // ---- step 1: the latch, synchronous ----
     const pre = cardOn(cardId);
@@ -9052,13 +9074,20 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       return { refused: msg };
     }
     inflightRef.current.add(cardId);
+    // ---- step 2: the spend ask, of the payload the drawer will send ----
+    const ask = await askShotSpend(payload);
+    if (!ask.go) { inflightRef.current.delete(cardId); return { cancelled: true }; }
+    if (activeIdRef.current !== boardId || !cardOn(cardId)) {
+      inflightRef.current.delete(cardId);
+      return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+    }
     // ---- step 3: the lock, saved before anything is sent ----
-    const c = pre.c;
+    const c = cardOn(cardId).c;
     const settings = snapshotSettings({ ...c, mode: payload.mode || c.mode,
       duration: payload.duration != null ? payload.duration : c.duration,
       audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
       audioLanguage: payload.audio_language || c.audioLanguage }, projectRef.current, payload.prompt, payload.quality);
-    const quote = q.quote || null;
+    const quote = ask.quote;
     preLockRef.current[submitId] = c;
     patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
       board: boardId, quote, startedAt: Date.now() }, { pausedOk: pausedNow }) || cc);
@@ -9069,7 +9098,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     }
     setGenState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     const saved = await saveBoardNow(boardId);
-    if (saved.ok) return { ok: true };
+    if (saved.ok) return { ok: true, expectFree: ask.expectFree };
     inflightRef.current.delete(cardId); delete preLockRef.current[submitId];
     const here = activeIdRef.current === boardId;
     if (saved.conflict) {
