@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoards, landTake, deleteTake, selectTake, takesOf, selectedTakeOf } from "../src/loom-takes-core.js";
+import { mergeBoards, landTake, attachTake, deleteTake, selectTake, takesOf, selectedTakeOf } from "../src/loom-takes-core.js";
 import { makeSaveQueue } from "../src/loom-store-core.js";
 
 // Session P, BUILD-w5-p §3.5 and review F5/F6: a stale save answers 409 and the tab merges.
@@ -57,6 +57,59 @@ describe("mergeBoards", () => {
     const { project, changed } = mergeBoards(local, two);
     assert.equal(selectedTakeOf(card(project, "c")), 2);
     assert.ok(changed.some((x) => x.id === "c" && x.star));
+  });
+
+  test("F6b both ways: a delete made in the tab that saved first, or in this tab, sticks", () => {
+    const both = land(base(), "M2", "T2");
+    const stale = JSON.parse(JSON.stringify(both));
+    const deleter = { ...both, acts: both.acts.map((a) => ({ ...a, cards: a.cards.map((c) => c.id !== "c" ? c : deleteTake(c, 1, "now").card) })) };
+    assert.deepEqual(takesOf(card(mergeBoards(deleter, stale).project, "c")).map((t) => t.mid), ["M2"],
+      "this tab deleted it; the other tab's stale copy does not bring it back");
+  });
+
+  test("S2a: F10's older-build re-roll followed by any conflict keeps every take", () => {
+    // This build materialised takes 1 and 2 with ★ on 2; an older build re-rolled the shot:
+    // resultMid is the new clip, and the old ★ clip went into attempts (withResult).
+    const p = base();
+    p.acts[0].cards[0] = { id: "c", title: "one", status: "done", resultMid: "M3", actualDur: 5, trimIn: 0, trimOut: null,
+      takes: [{ id: "t1", n: 1, mid: "M1" }, { id: "t2", n: 2, mid: "M2" }], selectedTake: 2, takeSeq: 2,
+      attempts: [{ media_id: "M2", at: "then" }] };
+    assert.deepEqual(takesOf(card(p, "c")).map((t) => t.mid), ["M1", "M2", "M3"], "the strip before the conflict");
+    const out = card(mergeBoards(JSON.parse(JSON.stringify(p)), JSON.parse(JSON.stringify(p))).project, "c");
+    assert.deepEqual(takesOf(out).map((t) => t.mid), ["M1", "M2", "M3"], "take 2 is still on the board");
+    assert.equal(out.resultMid, "M3");
+  });
+
+  test("S2b: a take deleted, then re-attached, survives the next merge -- and the re-attach clears its tombstone", () => {
+    let c = { id: "c", title: "one", status: "done", resultMid: "A", actualDur: 5, trimIn: 0, trimOut: null };
+    c = attachTake(c, { mid: "B", imported: true, at: "1" }).card;
+    c = attachTake(c, { mid: "C", imported: true, at: "2" }).card;
+    const nB = takesOf(c).find((t) => t.mid === "B").n;
+    c = deleteTake(c, nB, "3").card;
+    assert.deepEqual(c.deletedTakes, ["B"]);
+    c = attachTake(c, { mid: "B", imported: true, at: "4" }).card;
+    assert.equal((c.deletedTakes || []).includes("B"), false, "a clip that is a take again is not deleted");
+    c = attachTake(c, { mid: "D", imported: true, at: "5" }).card;
+    const p = base();
+    p.acts[0].cards[0] = c;
+    const out = card(mergeBoards(JSON.parse(JSON.stringify(p)), JSON.parse(JSON.stringify(p))).project, "c");
+    assert.deepEqual(takesOf(out).map((t) => t.mid).sort(), ["A", "B", "C", "D"]);
+  });
+
+  test("S2b on a board saved before the fix: a tombstone beside a live take never deletes it", () => {
+    const p = base();
+    p.acts[0].cards[0] = { id: "c", title: "one", status: "done", resultMid: "D", actualDur: 5, trimIn: 0, trimOut: null,
+      takes: [{ id: "t1", n: 1, mid: "A" }, { id: "t4", n: 4, mid: "B" }, { id: "t5", n: 5, mid: "D" }],
+      selectedTake: 5, takeSeq: 5, deletedTakes: ["B"] };
+    const out = card(mergeBoards(JSON.parse(JSON.stringify(p)), JSON.parse(JSON.stringify(p))).project, "c");
+    assert.deepEqual(takesOf(out).map((t) => t.mid), ["A", "B", "D"]);
+    assert.equal((out.deletedTakes || []).includes("B"), false, "the merged board drops the contradicting tombstone");
+  });
+
+  test("a landed render clears its clip's tombstone too", () => {
+    const c0 = { id: "c", status: "wip", resultMid: "M1", pendingSubmitId: "S9", pendingTaskId: "T9", deletedTakes: ["M9", "Mx"] };
+    const c1 = landTake(c0, { mid: "M9", taskId: "T9" }).card;
+    assert.deepEqual(c1.deletedTakes, ["Mx"]);
   });
 
   test("a card only this tab has, holding takes, is kept", () => {

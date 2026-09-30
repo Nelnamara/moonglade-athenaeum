@@ -228,6 +228,16 @@ const withoutSuperseded = (card, taskId) => {
   return next;
 };
 const settledStatus = (card) => (selectedTakeOf(card) != null ? "done" : "error");
+// A clip that becomes a take again is no longer deleted (spend review S2): its tombstone goes,
+// or the next two-tab merge would read it as a delete and drop the take.
+const untomb = (card, mid) => {
+  const t = card.deletedTakes;
+  if (!Array.isArray(t) || !t.some((x) => str(x) === str(mid))) return card;
+  const rest = t.filter((x) => str(x) !== str(mid));
+  const next = { ...card };
+  if (rest.length) next.deletedTakes = rest; else delete next.deletedTakes;
+  return next;
+};
 
 /* ---------- a render lands (F1, F4) ---------- */
 
@@ -280,7 +290,7 @@ export const landTake = (card, rep) => {
     imported: false, source: "render",
   };
   if (isPending && card.pendingQuote) take.quoted = card.pendingQuote;
-  const withTake = { ...c0, takes: c0.takes.concat([take]), takeSeq: n };
+  const withTake = untomb({ ...c0, takes: c0.takes.concat([take]), takeSeq: n }, mid);
   if (!isPending) return { card: withoutSuperseded(withTake, taskId), outcome: "unselected" };
   const c1 = clearPending(mirrorOnto(withTake, take));
   return { card: { ...c1, status: "done", lastAttempt: null }, outcome: "landed" };
@@ -307,7 +317,7 @@ export const attachTake = (card, rep) => {
   c = clearPending(c);
   const existing = takesOf(c).find((t) => str(t.mid) === mid);
   if (existing) {
-    c = selectTake(c, existing.n);
+    c = untomb(selectTake(c, existing.n), mid);
     return { card: { ...c, status: "done", lastAttempt: null }, outcome: "selected" };
   }
   const n = takeSeqOf(c) + 1;
@@ -317,7 +327,7 @@ export const attachTake = (card, rep) => {
     trimIn: 0, trimOut: null, settings: imported ? null : (r.settings || null), anchor: null,
     imported, source: imported ? "attach" : "render",
   };
-  const withTake = { ...c, takes: c.takes.concat([take]), takeSeq: n };
+  const withTake = untomb({ ...c, takes: c.takes.concat([take]), takeSeq: n }, mid);
   // Selecting writes the outgoing take's trims back first, exactly like a ★ click.
   const sel = selectedTakeOf(c);
   let base = withTake;
@@ -701,6 +711,8 @@ const cardsById = (project) => {
  * except takes and in-flight markers:
  *  - a local take whose clip remote does not have, and that neither side deleted
  *    (remote.attempts, either side's deletedTakes), is appended with the next number;
+ *    a side's tombstones and attempts never count against a clip that same side still
+ *    holds as a take (spend review S2: a re-attached clip, an older build's re-roll);
  *  - ★ stays remote's unless remote has none;
  *  - a local pending marker is kept only when remote has no take for that task, has no
  *    render of its own in flight, and the submit is not known to be resolved (F6);
@@ -720,11 +732,19 @@ export const mergeBoards = (local, remote, opts) => {
     if (!hit) return rc;
     const lc = hit.c;
     const rTakes = takesOf(rc);
-    const dead = new Set([
-      ...(rc.attempts || []).map((x) => str(x && x.media_id)),
-      ...(rc.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str),
-    ]);
     const rMids = new Set(rTakes.map((t) => str(t.mid)));
+    const lMids = new Set(takesOf(lc).map((t) => str(t.mid)));
+    // What each side says is gone (spend review S2). A side's tombstones and ledger entries
+    // never count against a clip that SAME side still holds as a take: it came back there
+    // (re-attached after a delete), or it is a take an older build pushed into attempts on a
+    // re-roll (F10) -- neither is a delete. So a take dies only by a delete the other side
+    // made while not holding it itself, and remote.attempts is never a tombstone for a take
+    // remote still has.
+    const dead = new Set([
+      ...[...(rc.attempts || []).map((x) => str(x && x.media_id)), ...(rc.deletedTakes || []).map(str)]
+        .filter((m) => !rMids.has(m)),
+      ...(lc.deletedTakes || []).map(str).filter((m) => !lMids.has(m)),
+    ]);
     const extra = takesOf(lc).filter((t) => !rMids.has(str(t.mid)) && !dead.has(str(t.mid)));
     let out = rc;
     const renum = {};
@@ -750,9 +770,14 @@ export const mergeBoards = (local, remote, opts) => {
       const kept = out.takes.filter((t) => t.n === sel || !dead.has(str(t.mid)));
       if (kept.length !== out.takes.length) out = { ...out, takes: kept };
     }
-    if ((lc.deletedTakes || []).length) {
-      const tomb = Array.from(new Set([...(out.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str)]));
-      out = { ...out, deletedTakes: tomb };
+    if ((lc.deletedTakes || []).length || (out.deletedTakes || []).length) {
+      // The merged tombstones: both sides', minus any clip the merged card holds as a take
+      // (a tombstone beside a live take would delete it at the next merge).
+      const held = new Set(takesOf(out).map((t) => str(t.mid)));
+      const tomb = Array.from(new Set([...(out.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str)]))
+        .filter((m) => !held.has(m));
+      if (tomb.length) out = { ...out, deletedTakes: tomb };
+      else if (own(out, "deletedTakes")) { out = { ...out }; delete out.deletedTakes; }
     }
     // In-flight markers.
     const lpTask = str(lc.pendingTaskId), lpSub = str(lc.pendingSubmitId);
