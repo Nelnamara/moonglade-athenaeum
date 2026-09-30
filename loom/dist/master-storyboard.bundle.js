@@ -1139,10 +1139,25 @@ var LoomBundle = (() => {
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
-    const scale = Math.max(total, target) || 1;
+    const scale = total || 1;
     const over = total - target;
     return { total, scale, over };
   };
+  var TL_SLIM = 86;
+  var TL_PREVIEW_MAX = 300;
+  var TL_PREVIEW_MIN = 150;
+  var TL_BOARD_MIN = 240;
+  var TL_REEL = 44;
+  var timelineFit = (room, designFull) => {
+    const floor = TL_SLIM + TL_REEL;
+    const under = designFull - TL_PREVIEW_MAX;
+    const r = Number(room);
+    const full = Number.isFinite(r) && r > 0 ? Math.max(floor, Math.min(designFull, Math.floor(r - TL_BOARD_MIN))) : designFull;
+    const preview = Math.max(TL_PREVIEW_MIN, Math.min(TL_PREVIEW_MAX, full - under));
+    return { full, preview, scrolls: preview + under > full };
+  };
+  var timelineHeight = (state2, fit) => state2 === "hidden" ? 0 : state2 === "full" ? fit.full : TL_SLIM;
+  var nextTimelineState = (state2) => state2 === "hidden" ? "slim" : state2 === "slim" ? "full" : "hidden";
   var mediaRefIndex = (project) => {
     const ids = {};
     const note3 = (mid, where) => {
@@ -11586,7 +11601,7 @@ ${"=".repeat(48)}
   }
 
   // master-storyboard.jsx
-  var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
+  var { useState: useState2, useEffect: useEffect2, useLayoutEffect: useLayoutEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   var LOOM_RUN_DEPS = {
     post: apiPost,
     run: submitRun,
@@ -11606,12 +11621,12 @@ ${"=".repeat(48)}
     return failed ? null : response;
   };
   var LV_TINTS = [
-    "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
-    "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
-    "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
-    "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
-    "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
-    "linear-gradient(150deg, #3a2b63 0%, #191338 100%)"
+    "linear-gradient(150deg, color-mix(in hsl, var(--base) 69%, var(--accent)) 0%, color-mix(in oklab, var(--base) 65%, var(--surface1)) 100%)",
+    "linear-gradient(150deg, var(--surface1) 0%, color-mix(in oklab, var(--surface1) 59%, black) 100%)",
+    "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 48%, var(--accent)) 0%, color-mix(in hsl, var(--base) 78%, var(--mauve)) 100%)",
+    "linear-gradient(150deg, color-mix(in oklab, var(--surface0) 73%, var(--emerald)) 0%, color-mix(in oklch, var(--mantle) 84%, var(--emerald)) 100%)",
+    "linear-gradient(150deg, color-mix(in srgb, var(--surface1) 90%, var(--accent)) 0%, color-mix(in srgb, var(--mantle) 58%, var(--surface1)) 100%)",
+    "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 80%, var(--accent)) 0%, color-mix(in hsl, var(--base) 89%, var(--accent)) 100%)"
   ];
   var LV_BED_ZONE_H = 92;
   var LV_RIBBON_ZONE_H = 84;
@@ -11628,8 +11643,24 @@ ${"=".repeat(48)}
   --line:var(--overlay0);    --line2:color-mix(in srgb, var(--overlay0) 55%, var(--text) 45%);
   --ink:var(--text);         --ink2:var(--subtext);      --ink3:var(--overlay0);
   --amber:var(--accent);     --amber-d:color-mix(in srgb, var(--accent) 70%, black);
-  --cyan:var(--emerald);     --green:var(--green);       --coral:var(--red);
+  --coral:var(--red);
+  /* --cyan is the Loom's own cyan (--loomc, the same in every skin), not --emerald: the page
+     draws the "linked" chip and the live @tags in it (The Loom.dc.html:294, 1055, 1136).
+     There is no --green alias any more. It read var(--green) on the same :root it was
+     declared on -- a self-reference is a cycle, which makes the property invalid, so every
+     var(--green) with no fallback (the card's DONE, Deep Focus's tick) lost its colour.
+     --green now falls through to the gallery token. */
+  --cyan:var(--loomc);
   --shadow:0 10px 30px rgba(0,0,0,.45);
+  /* The page's hard-coded violet chrome as token mixes (DECISIONS "Every skin reaches every
+     surface"). Each is fitted to the page's literal under the default skin (within about
+     1 OKLab dE) and follows the skin everywhere else:
+       --lv-ink       the near-black of every veil and backdrop (rgba(5,4,13) and kin)
+       --lv-glass-hi  the glass gradient's first stop, rgba(24,18,54)
+       --lv-glass-lo  its second stop, rgba(14,11,32) */
+  --lv-ink:color-mix(in oklab, var(--mantle) 80%, black);
+  --lv-glass-hi:color-mix(in hsl, var(--base) 90%, var(--accent));
+  --lv-glass-lo:color-mix(in hsl, var(--mantle) 90%, var(--surface1));
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
@@ -11656,6 +11687,15 @@ ${"=".repeat(48)}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
 .sb-projveil{position:fixed;inset:0;z-index:317}
+/* The desktop bar's \u{1F4F1} Mobile view, moved into this popover as a row (2026-09-29, the one-row
+   bar): the Draft chip's own 12 px check square. */
+.sb-projpop .sb-projrow{display:flex;align-items:center;gap:8px;border:0;border-top:1px solid var(--line);border-radius:0;
+  background:transparent;padding:8px 8px 2px;margin:0;font:600 12px/1.2 system-ui,sans-serif;color:var(--ink2);cursor:pointer;user-select:none}
+.sb-projpop .sb-projrow:hover{color:var(--ink)}
+.sb-projpop .sb-projrow.on{color:var(--amber)}
+.sb-projrow input{appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;width:12px;height:12px;
+  border-radius:3px;border:1px solid var(--surface1);background:var(--base);flex:none}
+.sb-projrow input:checked{background:var(--accent)}
 /* Export \u25BE menu reuses .sb-projwrap/.sb-projveil/.sb-projpop's POPOVER chrome as-is --
    same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
    the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
@@ -11669,7 +11709,7 @@ ${"=".repeat(48)}
 .sb-exportitem.sb-exportedl:hover{background:color-mix(in srgb,var(--lavender) 22%,transparent)}
 /* Session P (P4): THE EDIT DECISION LIST PANEL, the page's own sizes and tokens (its #0a0818 is
    --mantle; its darker preview well is --mantle pulled toward black). Shown over the board. */
-.sb-edlveil{background:rgba(4,3,10,.72)}
+.sb-edlveil{background:color-mix(in srgb,var(--lv-ink) 72%,transparent)}
 .sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
   border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
 .sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -11735,14 +11775,14 @@ ${"=".repeat(48)}
   color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
-.sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
+.sb-trim-sel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--gold) 26%,transparent);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
 .sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
 .sb-trim-h:hover{background:var(--gold)}
 .sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:ui-monospace,monospace}
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
-.sb-seq{position:fixed;inset:0;z-index:490;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
+.sb-seq{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 92%,transparent);display:flex;align-items:center;justify-content:center;padding:22px}
 .sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
@@ -11758,7 +11798,7 @@ ${"=".repeat(48)}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
-.sb-pick-ov{position:fixed;inset:0;z-index:490;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+.sb-pick-ov{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
 .sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
@@ -11891,6 +11931,16 @@ ${"=".repeat(48)}
     "rustling fabric"
   ];
   var FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+  var FIX_TOKENS = { face: "--lavender", hand: "--emerald" };
+  var fixStroke = (tag) => {
+    const k = tag === "hand" ? "hand" : "face";
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(FIX_TOKENS[k]).trim();
+      return v || FIX_COLORS[k];
+    } catch (e) {
+      return FIX_COLORS[k];
+    }
+  };
   var FIX_MIN_PX = 6;
   var FIX_MAX_BOXES = 20;
   var scaleFixBoxes = (boxes, imgEl) => {
@@ -12076,7 +12126,7 @@ ${"=".repeat(48)}
 .lv-banner{position:relative;width:100%;height:160px;overflow:hidden;background:var(--base);
   flex:none;border-bottom:1px solid var(--surface1);}
 .lv-banner-art{position:absolute;inset:0;
-  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, var(--base)) 0%, var(--base) 62%, color-mix(in oklab, var(--mantle) 87%, black) 100%);}
 .lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
 .lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
@@ -12084,12 +12134,35 @@ ${"=".repeat(48)}
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-/* Top bar geometry per The Loom.dc.html:45 (2026-08-13 styleset pass): wrapping
-   row, 8x10 gap, and NO eyebrow/hint -- the DC's bar opens straight with the
-   storyboard caret. Two .lv-fill spacers center the Generate cluster exactly
-   like the DC's twin flex-1 divs. */
+/* Top bar geometry per The Loom.dc.html:46 + Loom Handoff.dc.html:44 (2026-09-29): ONE row
+   at desktop widths -- [Banner] name \u25BE \xB7 find + chips \xB7 Draft \xB7 | \xB7 Generate all \xB7 cost \xB7 Play \xB7
+   Render \xB7 Export \u25BE \xB7 | \xB7 spend \xB7 goals \xB7 Activity \xB7 \u2190 GALLERY. Two .lv-fill spacers center the
+   Generate cluster like the DC's twin flex-1 divs. It still wraps on a narrow window, but the
+   things that can give (the name, the find pill, its chips, the Activity chip's words) carry a
+   small flex-basis and GROW back to their natural width, so the row breaks only when even their
+   small sizes do not fit -- and .lv-topend keeps \u2190 Gallery on the same line as whatever sits
+   before it, so it never lands alone on a row. Their grow factor (1000) is far above the
+   spacers' (1), so free space goes to them first, up to their natural width, and only what is
+   left over opens the spacers. */
 .lv-top{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-fill{flex:1 1 auto;}
+.lv-top .lv-sbwrap{flex:1000 1 80px;max-width:max-content;min-width:0;align-items:center;gap:6px;}
+.lv-top button.lv-sbname{background:none;border:0;padding:0 2px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font:italic 400 16px/1.25 Georgia,"Times New Roman",serif;color:var(--text);cursor:pointer;}
+.lv-top button.lv-sbname:hover{color:var(--accent);}
+.lv-findchips{display:flex;align-items:center;gap:8px;flex:1000 1 60px;max-width:max-content;min-width:0;
+  overflow-x:auto;scrollbar-width:none;}
+.lv-findchips::-webkit-scrollbar{display:none;}
+.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 220px;max-width:max-content;min-width:0;justify-content:flex-end;}
+.lv-topend.withexport{flex:1 1 auto;max-width:none;}
+.lv-topend > *{flex:none;}
+.lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:0;display:flex;}
+.lv-topend > .lv-fill{flex:1 1 auto;}
+.lv-topend .at-chip{min-width:0;max-width:100%;}
+.lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+/* \u2190 Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
+   surface): uppercase, 11 px / 700, letter-spacing .1em. */
+.lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
    anchor, not a button, so a button-only selector left it as an unstyled browser link --
    rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
@@ -12111,12 +12184,12 @@ ${"=".repeat(48)}
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
-.lv-cost-pill{opacity:.85;font-weight:600;}
+.lv-cost-pill{opacity:.85;font-weight:600;white-space:nowrap;}
 .lv-cost-pill:disabled{opacity:.5;}
 /* The storyboard caret, The Loom.dc.html caretBtnStyle: a compact 26px square,
    not a text pill. (The Export trigger next to Render is the opposite case --
    it dropped .sb-projbtn to inherit the bar's normal button idiom.) */
-.lv-top .lv-caret{width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
+.lv-top .lv-caret{flex:none;width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
   color:var(--subtext);border-radius:6px;cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
 .lv-top .lv-caret:hover{border-color:var(--accent);}
 /* \u25B6 Generate all -- the DC's "metal" treatment verbatim (The Loom.dc.html:748):
@@ -12147,23 +12220,26 @@ ${"=".repeat(48)}
    resolve their position:absolute against the WHOLE shell (board + rails),
    exactly like the design's own equivalent wrapper. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;position:relative;}
+/* The page's violet "glass" (The Loom.dc.html:921) as token mixes -- lavender at the page's own
+   32% / 14%, and the --lv-glass-* stops (see :root) at its .92 / .95 -- so a skin reaches the
+   rails and panels too (DECISIONS "Every skin reaches every surface"). */
 .lv-rail{flex:none;width:58px;box-sizing:border-box;display:flex;flex-direction:column;
   align-items:center;gap:7px;padding:10px 0;margin:10px 4px;border-radius:14px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);}
 .lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 
-.lv-backdrop{position:absolute;inset:0;z-index:310;background:rgba(5,4,13,.62);
+.lv-backdrop{position:absolute;inset:0;z-index:310;background:color-mix(in srgb,var(--lv-ink) 62%,transparent);
   backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
 .lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
 .lv-panel{position:absolute;top:20px;bottom:20px;z-index:311;box-sizing:border-box;
   display:flex;flex-direction:column;min-height:0;border-radius:16px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);overflow:hidden;}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);overflow:hidden;}
 .lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
   animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
 .lv-panel.left.wide{width:min(572px,37vw);}
@@ -12187,19 +12263,28 @@ ${"=".repeat(48)}
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-/* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
-   other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
-   the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
+/* THE TIMELINE DRAWER (The Loom.dc.html:146-170, 1001-1003): fixed under the top bar, full
+   width, three states -- hidden 0 / slim 86 / full -- and the only way between them is a CLICK
+   on the grip, which cycles hidden -> slim -> full. Nothing drags. The height animates on the
+   page's own curve. Full is the fit rule's height (loom-core.js timelineFit): the board keeps
+   240 px below it, the preview gives way first, and past that the drawer's own body scrolls --
+   never the page. */
 .lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
-.lv-tlcontent{overflow:hidden;position:relative;}
-.lv-tlpreviewzone{padding:10px 14px 4px;height:362px;box-sizing:border-box;}
-.lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
+.lv-tlcontent{overflow:hidden;position:relative;transition:height .36s cubic-bezier(.2,.9,.24,1);}
+.lv-tlbody{height:100%;overflow:hidden;box-sizing:border-box;}
+.lv-tlbody.full{overflow-y:auto;overscroll-behavior:contain;}
+.lv-tlpreviewzone{padding:10px 14px 4px;box-sizing:border-box;}
+.lv-tlpreviewbox{height:100%;box-sizing:border-box;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
   display:flex;align-items:center;justify-content:center;text-align:center;}
-.lv-tlreelzone{padding:8px 14px 10px;}
+.lv-tlreelzone{padding:7px 14px 8px;}
+.lv-tlreelzone .lv-reel{height:44px;border-radius:8px;}
+.lv-tlreelzone .lv-tlinfo{padding-top:8px;}
 .lv-tlhandle{position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);z-index:2;
-  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;touch-action:none;}
+  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;
+  background:none;border:0;margin:0;}
+.lv-tlhandle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px;}
 .lv-tlgrip{width:40px;height:4px;border-radius:3px;background:var(--surface1);transition:background .15s;}
-.lv-tlhandle:hover .lv-tlgrip{background:var(--accent);}
+.lv-tlhandle:hover .lv-tlgrip,.lv-tlhandle:focus-visible .lv-tlgrip{background:var(--accent);}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
@@ -12212,6 +12297,11 @@ ${"=".repeat(48)}
 .lv-ico:hover{color:var(--accent);border-color:var(--accent);}
 .lv-ico.danger:hover{color:var(--coral,#e06c75);border-color:var(--coral,#e06c75);}
 .lv-ico.xs{width:16px;height:15px;font-size:9px;}
+/* "+ Add shot to <act>" as the page's dashed, card-sized tile at the end of the act's grid
+   (The Loom.dc.html:319). */
+.lv-addshot{border:1px dashed var(--surface1);border-radius:8px;min-height:128px;display:grid;place-items:center;
+  font:600 11px/1.3 system-ui;color:var(--subtext);background:transparent;cursor:pointer;padding:8px;text-align:center;}
+.lv-addshot:hover{border-color:var(--accent);color:var(--accent);}
 .lv-crow{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;}
 .lv-actsel{font-size:8px;background:var(--base);border:1px solid var(--surface1);color:var(--subtext);
   border-radius:4px;padding:1px 3px;cursor:pointer;max-width:100%;}
@@ -12301,8 +12391,15 @@ ${"=".repeat(48)}
 /* A shot's take list (P1), beside the \u2605 clip's preview in the timeline's full view. Not drawn by
    the page; the timeline's own row idiom. */
 .lv-tlprevrow{display:flex;gap:14px;height:100%;min-height:0;}
-.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:auto;}
-.lv-takelist{flex:0 0 300px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
+.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:hidden;}
+/* In the drawer the clip sits at the preview box's full height with its controls BESIDE it
+   (buttons, trim track, readout), so a short box still shows a usable frame. */
+.sb-shotprev-wrap.side{margin:0;max-width:none;height:100%;display:grid;grid-template-columns:auto minmax(220px,1fr);
+  grid-template-rows:auto auto 1fr;column-gap:14px;align-items:start;}
+.sb-shotprev-wrap.side .sb-shotprev{grid-column:1;grid-row:1 / span 3;margin:0;max-width:none;}
+.sb-shotprev-wrap.side .sb-shotprev-ctrls{grid-column:2;margin-top:0;}
+.sb-shotprev-wrap.side .sb-trim{grid-column:2;}
+.lv-takelist{flex:0 1 260px;max-width:260px;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
 .lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
 .lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
 .lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
@@ -12330,9 +12427,11 @@ ${"=".repeat(48)}
 .lv-seg.fdim{opacity:.35;}
 /* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
    the bar's own button chrome does not apply). */
-.lv-find{flex:1 1 180px;max-width:360px;min-width:236px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+.lv-find{flex:1000 1 110px;max-width:150px;min-width:0;transition:max-width .2s ease;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
   border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
 .lv-find.on{border-color:var(--lavender);}
+/* Compact until it is in use, then it grows (the 2026-09-29 one-row bar). */
+.lv-find:focus-within,.lv-find.on{max-width:260px;}
 .lv-findico{font-size:11px;color:var(--overlay0);}
 .lv-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:11.5px/1.2 system-ui,sans-serif;padding:0;}
 .lv-findin::placeholder{color:var(--overlay0);}
@@ -12343,14 +12442,13 @@ ${"=".repeat(48)}
   white-space:nowrap;user-select:none;}
 .lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
 .lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
-.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+.lv-segcode{font-size:9px;font-weight:700;color:color-mix(in srgb,var(--lv-ink) 55%,transparent);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
 .lv-segbar.todo{background:rgba(255,255,255,.25);}
 .lv-segbar.wip{background:#f2c14a;}
 .lv-segbar.done{background:var(--green,#4fc99a);}
 .lv-segbar.error{background:var(--coral,#f38ba8);}
-.lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
 /* Session P (P3): THE MUSIC BED under the reel -- the page's section A bed row (36 px, 6 px
    radius, thin bars, a dashed "No bed" row), its button (surface1 outline, Loom-cyan when a bed is
@@ -12380,11 +12478,55 @@ ${"=".repeat(48)}
 .lv-bedlink{border:0;background:transparent;color:var(--loomc);font:inherit;padding:0;cursor:pointer;text-decoration:underline;}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
-.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
-.lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
-  color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
-.lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
-.lv-fhlabel{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);margin-bottom:6px;}
+/* THE GENERATE PANEL'S HEADER (The Loom.dc.html:334-346): "\u2699 A\xB702 \xB7 title  \u2715 unbind" when a
+   shot is bound, "Generate \xB7 draft generation \u2014 route results into a shot" when not, and the
+   collapse \u203A at the RIGHT end. The Image/Edit/Reference/Video tabs are a segmented bar at the
+   top of the scroll body (.lv-gentabs), not in the header. */
+.lv-genhdtitle{flex:0 1 auto;font:700 13px/1.2 system-ui;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdsub{flex:0 1 auto;font:italic 10.5px/1.3 system-ui;color:var(--subtext);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdfill{flex:1 1 auto;}
+.lv-unbind{flex:none;font:700 10.5px/1 system-ui;background:none;border:0;padding:2px 0;
+  color:var(--subtext);cursor:pointer;white-space:nowrap;}
+.lv-unbind:hover{color:var(--accent);}
+.lv-gentabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:color-mix(in srgb,var(--base) 70%,transparent);
+  border:1px solid var(--surface1);margin-bottom:10px;}
+.lv-gentab{flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:9px;font:800 12px/1 system-ui;letter-spacing:.03em;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;
+  color:color-mix(in srgb,var(--text) 60%,transparent);}
+.lv-gentab:hover{color:var(--text);}
+.lv-gentab.on{color:var(--text);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--lavender) 32%,transparent) 0%,color-mix(in srgb,color-mix(in hsl,var(--lavender) 48%,var(--overlay0)) 24%,transparent) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 18px rgba(0,0,0,.4);}
+/* The page's segmented sub-strips (Edit / Fixer / Enhance, Face / Hand, the Continuity 2x2 --
+   The Loom.dc.html:409, 433, 501) and its FIELD SLABS (1126-1130): each group of fields sits in
+   a rounded well, and the prompt's well is outlined in lavender. Layout only. */
+.lv-segtrack{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
+  border:1px solid var(--surface1);}
+.lv-segtrack.grid2{display:grid;grid-template-columns:1fr 1fr;}
+.lv-segbtn{flex:1;min-width:0;text-align:center;padding:7px 4px;border-radius:7px;font:700 10px/1 system-ui;cursor:pointer;
+  background:transparent;border:0;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-segbtn:hover{color:var(--text);}
+.lv-segbtn.on{background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text);}
+.lv-slab{display:flex;flex-direction:column;gap:8px;padding:11px 13px;border-radius:12px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 55%,transparent);margin-bottom:9px;min-width:0;}
+.lv-slab.prompt{gap:7px;border-color:color-mix(in srgb,var(--lavender) 30%,transparent);
+  background:color-mix(in srgb,var(--base) 62%,transparent);}
+.lv-slablab{font:700 9.5px/1.2 system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.lv-slabhint{font:400 9.5px/1.2 system-ui;letter-spacing:0;text-transform:none;color:var(--overlay0);}
+.lv-slab .lv-lab{margin:0 0 5px;}
+.lv-slab .lv-row2{margin-top:0;}
+.lv-slab .lv-ck{margin-top:0;}
+.lv-slab .lv-termspal{margin:5px 0 0;}
+.lv-slab .lv-mini2{align-self:flex-start;margin:0;}
+.lv-slab .lv-loratoggle{align-self:flex-start;margin:0;}
+.lv-slab .lv-fixwarn{margin-top:0;}
+.lv-slab .lv-fixhint{margin:0;}
+.lv-slab .lv-framehandoff{margin-bottom:0;padding-bottom:0;border-bottom:0;}
+.lv-slabrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.lv-prompt-ta{width:100%;box-sizing:border-box;background:transparent;border:none;outline:none;resize:vertical;color:var(--text);
+  font:300 15px/1.5 system-ui;padding:0;min-height:84px;
+  resize:none;field-sizing:content;max-height:320px;overflow-y:auto;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -12554,7 +12696,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
-.lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
+.lv-df-veil{position:fixed;inset:0;z-index:450;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);display:flex;align-items:center;justify-content:center;padding:24px;}
 .lv-df{width:min(640px,92vw);max-height:88vh;overflow:auto;background:var(--surface0);border:1px solid var(--surface1);
   border-radius:14px;padding:18px 20px 22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.7);}
 .lv-df-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
@@ -12619,7 +12761,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
    pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
    .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
    and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
-.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:none;align-items:center;justify-content:center;padding:20px;}
 .lv-mpick-veil.open{display:flex;}
 .lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
 .lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
@@ -12641,15 +12783,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-fixwrap img{width:100%;max-height:280px;object-fit:contain;display:block;background:#000;}
 .lv-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
 .lv-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:10px 0 6px;}
-.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
-  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:8px;}
+.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:color-mix(in srgb,var(--peach) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 30%,transparent);border-radius:8px;padding:7px 9px;margin-top:8px;}
 .lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
   border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
 .lv-openfilters:hover{border-color:var(--accent);}
 /* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
    veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
-.lv-fc-veil{position:fixed;inset:0;z-index:312;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
+.lv-fc-veil{position:fixed;inset:0;z-index:312;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);backdrop-filter:blur(7px);}
 .lv-fc-host{position:fixed;inset:0;z-index:313;display:grid;place-items:center;pointer-events:none;padding:20px;}
 .lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
   max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
@@ -12697,7 +12839,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       return this.props.children;
     }
   };
-  function ProjectSwitcher({ api }) {
+  function ProjectSwitcher({ api, name, extra }) {
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
     useEffect2(() => {
       if (!projMenu) return;
@@ -12707,7 +12849,19 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       window.addEventListener("keydown", onKey3);
       return () => window.removeEventListener("keydown", onKey3);
     }, [projMenu, setProjMenu]);
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" + (name != null ? " lv-sbwrap" : "") }, name != null && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-sbname",
+        onClick: () => {
+          setProjMenu((v) => !v);
+          readProjList();
+        },
+        title: (name || "Untitled storyboard") + " \u2014 switch, create, or manage storyboards"
+      },
+      name || "Untitled storyboard"
+    ), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "lv-caret",
@@ -12719,7 +12873,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         "aria-label": "Storyboards"
       },
       "\u25BE"
-    ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
+    ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate")), extra));
   }
   function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling, openEdl }) {
     const [open2, setOpen2] = useState2(false);
@@ -12939,6 +13093,17 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         className: "lv-top-act-panel"
       }
     ) : null);
+    const exportMenu = /* @__PURE__ */ React.createElement(
+      ExportMenu,
+      {
+        exportAll,
+        exportJSON,
+        exportBundle,
+        bundling,
+        importBackup,
+        openEdl
+      }
+    );
     const [acct, setAcct] = useState2(null);
     const [handoff, setHandoff] = useState2("");
     const [deepFocus, setDeepFocus] = useState2(null);
@@ -12946,13 +13111,13 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const [pickerOpen, setPickerOpen] = useState2(false);
     const [pickerKind, setPickerKind] = useState2("base");
     const [leftTab, setLeftTab] = useState2("cast");
-    const [leftCollapsed, setLeftCollapsed] = useState2(false);
+    const [leftCollapsed, setLeftCollapsed] = useState2(true);
     useEffect2(() => {
       if (!leftCollapsed && leftTab === "library" && castApi) castApi.openCastLibrary();
     }, [leftCollapsed, leftTab, projectApi.activeId]);
     const [leftClosing, setLeftClosing] = useState2(false);
-    const [density, setDensity] = useState2("detailed");
-    const [rightCollapsed, setRightCollapsed] = useState2(false);
+    const [density, setDensity] = useState2("simple");
+    const [rightCollapsed, setRightCollapsed] = useState2(true);
     const [rightClosing, setRightClosing] = useState2(false);
     const leftCloseTimer = useRef2(null);
     const rightCloseTimer = useRef2(null);
@@ -12987,11 +13152,9 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       clearTimeout(rightCloseTimer.current);
     }, []);
     const [tlState, setTlState] = useState2("slim");
-    const [tlDragH, setTlDragH] = useState2(null);
     const [palFor, setPalFor] = useState2(null);
     const [dzHover, setDzHover] = useState2(false);
     const [overrideClearedFlash, setOverrideClearedFlash] = useState2(false);
-    const tlDrag = useRef2({ dragging: false, startY: 0, startH: 0 });
     useEffect2(() => {
       const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
@@ -13232,32 +13395,20 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         });
       }
     }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
-    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H };
-    const tlPointerDown = (e) => {
-      tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
-      e.currentTarget.setPointerCapture(e.pointerId);
-    };
-    const tlPointerMove = (e) => {
-      if (!tlDrag.current.dragging) return;
-      const h = Math.max(0, Math.min(TL_HEIGHTS.full, tlDrag.current.startH + (e.clientY - tlDrag.current.startY)));
-      tlDrag.current.lastH = h;
-      setTlDragH(h);
-    };
-    const tlPointerUp = () => {
-      if (!tlDrag.current.dragging) return;
-      tlDrag.current.dragging = false;
-      const h = tlDrag.current.lastH;
-      let best = "hidden", bestD = Infinity;
-      Object.entries(TL_HEIGHTS).forEach(([k, v]) => {
-        const d = Math.abs(v - h);
-        if (d < bestD) {
-          bestD = d;
-          best = k;
-        }
-      });
-      setTlState(best);
-      setTlDragH(null);
-    };
+    const TL_DESIGN_FULL = 372 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H;
+    const tlDrawerRef = useRef2(null);
+    const [tlRoom, setTlRoom] = useState2(null);
+    const measureTlRoom = useCallback2(() => {
+      const d = tlDrawerRef.current;
+      if (!d) return;
+      const ov = d.closest(".lv-overlay");
+      const bottom = ov ? ov.getBoundingClientRect().bottom : window.innerHeight;
+      const content = d.firstElementChild;
+      const chrome = content ? Math.max(0, d.offsetHeight - content.offsetHeight) : 0;
+      const room = Math.round(bottom - d.getBoundingClientRect().top - chrome);
+      setTlRoom((cur2) => cur2 === room ? cur2 : room);
+    }, []);
+    const cycleTl = () => setTlState((s) => nextTimelineState(s));
     const togglePal = (which) => setPalFor((p) => p === which ? null : which);
     const sel = entries.find((e) => e.c.id === selShot) || null;
     const draftEntry = { a: { id: "__draft__" }, c: draftCard, code: "Draft" };
@@ -13293,7 +13444,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       const ctx = cvs.getContext("2d");
       ctx.clearRect(0, 0, w, h);
       const draw = (b) => {
-        ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+        ctx.strokeStyle = fixStroke(b.tag);
         ctx.lineWidth = 2;
         ctx.strokeRect(b.x, b.y, b.w, b.h);
         ctx.fillStyle = ctx.strokeStyle;
@@ -13675,7 +13826,16 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     ));
     const boardGrid = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
       const items = entries.filter((e) => e.ai === ai);
-      return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
+      return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "lv-ico",
+          onClick: () => setAct(act2.id, { collapsed: !act2.collapsed }),
+          title: act2.collapsed ? "Expand this act" : "Collapse this act",
+          "aria-expanded": !act2.collapsed
+        },
+        act2.collapsed ? "\u2304" : "\u2303"
+      ), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), !act2.collapsed && /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
         const gs = genState[e.c.id];
         const paused = gs && gs.phase === "paused";
         const st = paused ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : e.c.status;
@@ -13817,10 +13977,31 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             project.acts.filter((a) => a.id !== act2.id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name))
           ))
         );
-      })), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => addCard(act2.id) }, "+ Add shot to ", act2.name));
+      }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-addshot", onClick: () => addCard(act2.id) }, "+ Add shot to ", act2.name)));
     }), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No acts yet \u2014 add one below."));
-    const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
-    const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+    const tlFit = timelineFit(tlRoom, TL_DESIGN_FULL);
+    const tlHeight = timelineHeight(tlState, tlFit);
+    const showTlPreview = tlState === "full";
+    const tlVideoH = Math.max(60, tlFit.preview - 14);
+    useLayoutEffect2(() => {
+      measureTlRoom();
+    }, [measureTlRoom, bannerOpen, !!batchTally, tlState]);
+    useEffect2(() => {
+      const on = () => measureTlRoom();
+      window.addEventListener("resize", on);
+      let ro = null;
+      const ov = tlDrawerRef.current && tlDrawerRef.current.closest(".lv-overlay");
+      if (ov && typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(on);
+        ro.observe(ov);
+        const top = ov.querySelector(".lv-top");
+        if (top) ro.observe(top);
+      }
+      return () => {
+        window.removeEventListener("resize", on);
+        if (ro) ro.disconnect();
+      };
+    }, [measureTlRoom]);
     const bed = bedOf(project);
     const bedSegs = cutSegments(entries, project);
     const bedPlanNow = bedPlan(bedSegs, bed);
@@ -13828,7 +14009,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     useEffect2(() => {
       if (showTlPreview && bedApi) bedApi.refreshUnusedBeds();
     }, [showTlPreview]);
-    const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevmain" }, /* @__PURE__ */ React.createElement(
+    const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer", ref: tlDrawerRef, "data-tl": tlState }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight } }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlbody" + (showTlPreview ? " full" : "") }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone", style: { height: tlFit.preview } }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevmain" }, /* @__PURE__ */ React.createElement(
       ShotPreview,
       {
         key: sel.c.id,
@@ -13837,6 +14018,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         trimOut: sel.c.trimOut,
         onTrim: (i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o })),
         onSplit: (t) => splitShot(sel, t),
+        videoH: tlVideoH,
         crop: sel.c.crop,
         onCrop: (rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))
       }
@@ -13869,7 +14051,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         /* @__PURE__ */ React.createElement("span", { className: "lv-segcode" }, x.code, " \xB7 ", durOf2(x.c), "s"),
         /* @__PURE__ */ React.createElement("span", { className: "lv-segbar " + x.c.status })
       );
-    }), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), showTlPreview && bedApi && /* @__PURE__ */ React.createElement(
+    })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")), showTlPreview && bedApi && /* @__PURE__ */ React.createElement(
       BedRow,
       {
         entries,
@@ -13880,9 +14062,19 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         peaks: bedPeaks,
         api: bedApi
       }
-    ), showTlPreview && /* @__PURE__ */ React.createElement(RibbonStrip, { pairs: ribbonPairs(entries, cardById), tintOf: tintOfCard, onOpen: openRibbonPair }), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
+    ), showTlPreview && /* @__PURE__ */ React.createElement(RibbonStrip, { pairs: ribbonPairs(entries, cardById), tintOf: tintOfCard, onOpen: openRibbonPair })))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-tlhandle",
+        onClick: cycleTl,
+        title: "Timeline \u2014 hidden / slim / full",
+        "aria-label": "Timeline: " + tlState + " \u2014 click for " + nextTimelineState(tlState)
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "lv-tlgrip" })
+    ));
     const GEN_ICONS = [["Image", "\u2726"], ["Edit", "\u270E"], ["Reference", "\u{1F5BC}"], ["Video", "\u{1F3AC}"]];
-    let gen;
+    let gen, genHead;
     {
       const gs = genState[active.c.id];
       const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
@@ -13915,22 +14107,24 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       let tabBody;
       let videoTrailer = null;
       if (tab === "Video") {
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Continuity"), /* @__PURE__ */ React.createElement("div", { className: "lv-chips" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Continuity \u2014 how it joins the shot before"), /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack grid2" }, Object.keys(CONNECT).map((k) => /* @__PURE__ */ React.createElement(
           "span",
           {
             key: k,
-            className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""),
+            className: "lv-segbtn" + (k === (active.c.connect || "new") ? " on" : ""),
             title: CONNECT[k].hint,
+            role: "button",
+            tabIndex: 0,
             onClick: () => patch((c) => setShotConnect(c, k))
           },
           CONNECT[k].label
-        ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => {
+        )))), /* @__PURE__ */ React.createElement("div", { className: "lv-slab prompt" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Prompt ", /* @__PURE__ */ React.createElement("span", { className: "lv-slabhint" }, "motion only \u2014 camera, lighting and cast weave in")), /* @__PURE__ */ React.createElement("textarea", { className: "lv-prompt-ta", placeholder: "Describe the motion\u2026", value: active.c.prompt || "", onChange: (ev) => {
           if (active.c.promptOverride) {
             setOverrideClearedFlash(true);
             setTimeout(() => setOverrideClearedFlash(false), 1600);
           }
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
-        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
+        } })), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t)))))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
           promptDirtyRef.current = false;
           const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
           active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
@@ -13944,7 +14138,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Model"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-selrow", onClick: () => {
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Model"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-selrow", onClick: () => {
           setPickerKind("base");
           setPickerOpen(true);
         } }, imgModel && imgModel.preview_url ? /* @__PURE__ */ React.createElement("img", { className: "lv-selthumb", src: imgModel.preview_url, alt: "" }) : null, /* @__PURE__ */ React.createElement("span", { className: "lv-selname" }, imgModel ? imgModel.title : "none \u2014 browse models"), /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-selhint" }, "\u2630 browse")), imgModel && (imgModel.sampling_method || (imgModel.capabilities || []).length > 0) && /* @__PURE__ */ React.createElement("div", { className: "lv-caps" }, imgModel.sampling_method ? /* @__PURE__ */ React.createElement("span", { className: "lv-cap method" }, imgModel.sampling_method) : null, (imgModel.capabilities || []).map((c) => /* @__PURE__ */ React.createElement("span", { key: c, className: "lv-cap" }, c))), imgModel && imgModel.versions && imgModel.versions.length > 1 && /* @__PURE__ */ React.createElement(
@@ -14016,10 +14210,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             },
             l.versions.map((v) => /* @__PURE__ */ React.createElement("option", { key: v.version_id, value: v.version_id }, v.label || v.version_id))
           ));
-        })), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
+        })), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-chip lv-loratoggle", onClick: () => {
           setPickerKind("lora");
           setPickerOpen(true);
-        } }, "+ add LoRA"), acct && acct.lora_cap != null && /* @__PURE__ */ React.createElement("span", { className: "lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "") }, imgLoras.length, " / ", acct.lora_cap, " LoRAs"), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
+        } }, "+ add LoRA"), acct && acct.lora_cap != null && /* @__PURE__ */ React.createElement("span", { className: "lv-loracap" + (overLoraCap(imgLoras, acct.lora_cap) ? " over" : "") }, imgLoras.length, " / ", acct.lora_cap, " LoRAs"))), /* @__PURE__ */ React.createElement("div", { className: "lv-slab prompt" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Image prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -14027,7 +14221,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
             onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), (() => {
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description")), (() => {
           const compat = imgModel && imgModel.compatibility || {};
           const restr = imgModel && imgModel.restrictions || {};
           const negOff = compat.negativePrompt === false;
@@ -14036,7 +14230,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           const stepsB = restr.samplingSteps || {};
           const cfgB = restr.cfgScale || {};
           const offTitle = "This model doesn\u2019t use this setting";
-          return /* @__PURE__ */ React.createElement("details", null, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
+          return /* @__PURE__ */ React.createElement("details", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("summary", { style: { cursor: "pointer", color: "var(--subtext)", fontSize: 11 } }, "Advanced"), /* @__PURE__ */ React.createElement(
             "textarea",
             {
               className: "lv-ta" + (negOff ? " cap-off" : ""),
@@ -14081,7 +14275,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
               cfg: modelDefaults.cfg_scale || a.cfg
             }));
           } }, "\u21B6 reset")));
-        })(), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
+        })(), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Aspect"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, [
           [1, 1, "1:1"],
           [3, 4, "3:4"],
           [4, 3, "4:3"],
@@ -14186,7 +14380,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             checked: imgAdv.promptHelper,
             onChange: (ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))
           }
-        ), " Prompt helper"), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", cardLabel: "a card" }), /* @__PURE__ */ React.createElement(
+        ), " Prompt helper")), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: imgCostRef, hint: "Pick a model and write a prompt to see the cost.", cardLabel: "a card" }), /* @__PURE__ */ React.createElement(
           "button",
           {
             className: "lv-go",
@@ -14202,7 +14396,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         const gf = genFixState[active.c.id] || {};
         const busyF = gf.phase === "submitting" || gf.phase === "running";
         const fixPriceEntry = genFixPrice[active.c.id];
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs", style: { marginBottom: 9 } }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab" + (editSub === "edit" ? " on" : ""), onClick: () => setEditSub("edit") }, "Edit"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab" + (editSub === "fixer" ? " on" : ""), onClick: () => setEditSub("fixer") }, "Fixer"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab" + (editSub === "enhance" ? " on" : ""), onClick: () => setEditSub("enhance") }, "Enhance")), editSub === "edit" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("img", { className: "lv-editsrc", src: "/thumbs/" + src + ".jpg", alt: "source" }) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above."), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Edit instruction"), /* @__PURE__ */ React.createElement(
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { marginBottom: 9 } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "edit" ? " on" : ""), onClick: () => setEditSub("edit") }, "Edit"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "fixer" ? " on" : ""), onClick: () => setEditSub("fixer") }, "Fixer"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "enhance" ? " on" : ""), onClick: () => setEditSub("enhance") }, "Enhance")), editSub === "edit" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("img", { className: "lv-editsrc", src: "/thumbs/" + src + ".jpg", alt: "source" }) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab prompt" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Edit instruction"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -14210,7 +14404,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
+        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
           "canvas",
           {
             ref: fixCanvasRef,
@@ -14219,7 +14413,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             onPointerUp: fixUp,
             onPointerLeave: fixUp
           }
-        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above."), src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs", style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab" + (fixTag !== "hand" ? " on" : ""), onClick: () => setFixTag("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab" + (fixTag === "hand" ? " on" : ""), onClick: () => setFixTag("hand") }, "Hand"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : "")), /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source.")), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first."), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixPriceEntry && fixPriceEntry.loading ? "checking\u2026" : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "\u2248 " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits \u2014 never card-covered" : !src ? "Pick a source image first." : !fixBoxes.length ? "Drag at least one box to see the cost." : "Couldn't verify the cost \u2014 a Fix always spends credits."), /* @__PURE__ */ React.createElement(
+        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { flex: "1 1 auto" } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag !== "hand" ? " on" : ""), onClick: () => setFixTag("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag === "hand" ? " on" : ""), onClick: () => setFixTag("hand") }, "Hand")), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : ""))), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first.")), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixPriceEntry && fixPriceEntry.loading ? "checking\u2026" : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "\u2248 " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits \u2014 never card-covered" : !src ? "Pick a source image first." : !fixBoxes.length ? "Drag at least one box to see the cost." : "Couldn't verify the cost \u2014 a Fix always spends credits."), /* @__PURE__ */ React.createElement(
           "button",
           {
             className: "lv-go",
@@ -14227,12 +14421,12 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             onClick: () => genFix(active, scaleFixBoxes(fixBoxes, fixImgRef.current))
           },
           busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
-        ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { className: "lv-openfilters", onClick: openFilterCompare }, "\u25D0 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "6px 2px" } }, "Gradient overlays, not AI \u2014 applied right in the browser: ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--text)" } }, "no credits, no request, works offline"), ".")));
+        ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { className: "lv-openfilters", onClick: openFilterCompare }, "\u25D0 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "0 2px" } }, "Gradient overlays, not AI \u2014 applied right in the browser: ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--text)" } }, "no credits, no request, works offline"), ".")));
       } else if (tab === "Reference") {
         const gr = genRefState[active.c.id] || {};
         const busyR = gr.phase === "submitting" || gr.phase === "running";
         const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
-        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "References \u2014 cast @image members (", refs.length, ")"), refs.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-refstrip" }, refs.map((a) => /* @__PURE__ */ React.createElement("img", { key: a.id, src: "/thumbs/" + a.mediaId + ".jpg", title: a.tag, alt: "" }))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast @image references with a gallery image yet \u2014 add some in ", /* @__PURE__ */ React.createElement("b", null, "Cast & assets"), "."), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement(
+        tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "References \u2014 cast @image members (", refs.length, ")"), refs.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-refstrip" }, refs.map((a) => /* @__PURE__ */ React.createElement("img", { key: a.id, src: "/thumbs/" + a.mediaId + ".jpg", title: a.tag, alt: "" }))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No cast @image references with a gallery image yet \u2014 add some in ", /* @__PURE__ */ React.createElement("b", null, "Cast & assets"), ".")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab prompt" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Prompt"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
             className: "lv-ta",
@@ -14240,17 +14434,19 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "compose a new still from the references\u2026",
             onChange: (ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))
           }
-        ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostRef, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
+        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostRef, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
-      gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-genhead" }, sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled") : /* @__PURE__ */ React.createElement(React.Fragment, null, "\u2728 Draft generation ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2014 generate freely, then route or attach it to a shot")), sel && /* @__PURE__ */ React.createElement(
+      genHead = sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lv-genhdtitle", title: sel.code + " \xB7 " + (sel.c.title || "untitled") }, "\u2699 ", sel.code, " \xB7 ", sel.c.title || "untitled"), /* @__PURE__ */ React.createElement("span", { className: "lv-genhdfill" }), /* @__PURE__ */ React.createElement(
         "button",
         {
+          type: "button",
           className: "lv-unbind",
           onClick: () => setSelShot(null),
           title: "Unbind this shot and go back to draft generation"
         },
         "\u2715 unbind"
-      )), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), (tab === "Reference" || tab === "Video" || tab === "Edit") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fhlabel" }, "FRAME HANDOFF \u2014 ", tab === "Video" ? "drives this shot\u2019s motion" : tab === "Edit" ? "edit source" : "still composition"), /* @__PURE__ */ React.createElement("div", { className: "lv-framehandoff" }, /* @__PURE__ */ React.createElement(
+      )) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lv-genhdtitle" }, "Generate"), /* @__PURE__ */ React.createElement("span", { className: "lv-genhdsub", title: "Generate freely, then route or attach the result to a shot" }, "draft generation \u2014 route results into a shot"), /* @__PURE__ */ React.createElement("span", { className: "lv-genhdfill" }));
+      const frameHandoff = tab === "Reference" || tab === "Video" || tab === "Edit" ? /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "FRAME HANDOFF \u2014 ", tab === "Video" ? "drives this shot\u2019s motion" : tab === "Edit" ? "edit source" : "still composition"), /* @__PURE__ */ React.createElement("div", { className: "lv-framehandoff" }, /* @__PURE__ */ React.createElement(
         FrameSlot,
         {
           which: "open",
@@ -14284,7 +14480,19 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           openPick,
           onPatch: (p) => patchFrame("closeFrame", p)
         }
-      ))), acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, /* @__PURE__ */ React.createElement(VideoDrawer_default, { ref: bindGenDrawer, loomCtx: true, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
+      ))) : null;
+      gen = /* @__PURE__ */ React.createElement("div", { className: "lv-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lv-gentabs", role: "tablist", "aria-label": "Generate" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          role: "tab",
+          key: t,
+          "aria-selected": t === tab,
+          className: "lv-gentab" + (t === tab ? " on" : ""),
+          onClick: () => setTab(t)
+        },
+        t
+      ))), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), tab !== "Edit" ? frameHandoff : null, acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, tab === "Edit" ? frameHandoff : null, /* @__PURE__ */ React.createElement(VideoDrawer_default, { ref: bindGenDrawer, loomCtx: true, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
         "div",
         {
           className: "lv-mpick-veil" + (pickerOpen ? " open" : ""),
@@ -14419,7 +14627,16 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         }
       }
     )))) : null;
-    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), sel && (() => {
+    const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
+      "textarea",
+      {
+        className: "lv-lookin",
+        value: project.look || "",
+        rows: 2,
+        onChange: (e) => setLook(e.target.value),
+        placeholder: "e.g. muted teal grade, 35mm grain, anamorphic flares \u2014 applied to every shot's prompt"
+      }
+    )), /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), sel && (() => {
       if (!modeSendsRefs(sel.c.mode)) {
         return /* @__PURE__ */ React.createElement(
           "div",
@@ -14440,16 +14657,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         /* @__PURE__ */ React.createElement("span", { className: b.used > b.budget ? "lv-refbudget-over" : void 0 }, b.used, " of ", b.budget, " reference slot", b.budget === 1 ? "" : "s", " used"),
         b.frames ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \xB7 ", b.frames, " of 6 held by attached frame", b.frames === 1 ? "" : "s") : null
       );
-    })(), /* @__PURE__ */ React.createElement("details", { className: "lv-look", open: !!(project.look || "").trim() }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F3A8} Project look", (project.look || "").trim() ? "" : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 a style line added to every shot")), /* @__PURE__ */ React.createElement(
-      "textarea",
-      {
-        className: "lv-lookin",
-        value: project.look || "",
-        rows: 2,
-        onChange: (e) => setLook(e.target.value),
-        placeholder: "e.g. muted teal grade, 35mm grain, anamorphic flares \u2014 applied to every shot's prompt"
-      }
-    )), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-density" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "simple" ? "on" : ""), onClick: () => setDensity("simple") }, "Simple"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (density === "detailed" ? "on" : ""), onClick: () => setDensity("detailed") }, "Detailed")), density === "detailed" ? (project.assets || []).map((as) => {
+    })(), density === "detailed" ? (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...c.cast || [], as.id] }));
       const src = frameSrc(as);
@@ -14616,7 +14824,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         onClick: () => setBannerOpen(false)
       },
       "\u2304 Hide banner"
-    )) : null, /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, !bannerOpen && /* @__PURE__ */ React.createElement(
+    )) : null, /* @__PURE__ */ React.createElement("div", { className: "lv-top" }, act.edge === "left" ? activityControl : null, !bannerOpen && /* @__PURE__ */ React.createElement(
       "button",
       {
         type: "button",
@@ -14625,7 +14833,22 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         onClick: () => setBannerOpen(true)
       },
       "\u{1F5BC} Banner"
-    ), act.edge === "left" ? activityControl : null, /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), findPill, findChipsRow, /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement(
+      ProjectSwitcher,
+      {
+        api: projectApi,
+        name: project.name || "",
+        extra: /* @__PURE__ */ React.createElement(
+          "label",
+          {
+            className: "sb-projrow" + (mobileUI ? " on" : ""),
+            title: "Switch to a phone-sized board/reel view \u2014 desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected"
+          },
+          /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!mobileUI, onChange: (e) => setMobileUI(e.target.checked) }),
+          "\u{1F4F1} Mobile view"
+        )
+      }
+    ), findPill, findChipsRow.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-findchips" }, findChipsRow) : null, /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),
@@ -14633,14 +14856,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       },
       /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!project.draft, onChange: (e) => setDraft(e.target.checked) }),
       "\u26A1 Draft"
-    ), /* @__PURE__ */ React.createElement(
-      "label",
-      {
-        className: "lv-draft" + (mobileUI ? " on" : ""),
-        title: "Switch to a phone-sized board/reel view \u2014 desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected"
-      },
-      /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!mobileUI, onChange: (e) => setMobileUI(e.target.checked) }),
-      "\u{1F4F1} Mobile view"
     ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -14673,14 +14888,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
       },
       /^≈.*cr/.test(formatCostEstimate(costEstimate)) ? formatCostEstimate(costEstimate) + " to finish" : formatCostEstimate(costEstimate)
-    ), spendPillShown(spend) && /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "lv-cost-pill",
-        onClick: refreshSpend,
-        title: spend.status === "error" ? "Couldn't read the spend ledger \u2014 the catalog didn't answer. Click to retry; no number is shown rather than a wrong one." : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."
-      },
-      spend.status === "error" ? "\u2014" : spend.status === "loading" ? "\u2026" : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -14697,17 +14904,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         title: "Trim + stitch every finished shot into one mp4 (ffmpeg)"
       },
       "\u21E7 Render"
-    ), /* @__PURE__ */ React.createElement(
-      ExportMenu,
+    ), act.edge === "left" ? null : exportMenu, act.edge === "left" ? null : /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement("div", { className: "lv-topend" + (act.edge === "left" ? " withexport" : "") }, act.edge === "left" ? exportMenu : null, act.edge === "left" ? /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }) : null, spendPillShown(spend) && /* @__PURE__ */ React.createElement(
+      "button",
       {
-        exportAll,
-        exportJSON,
-        exportBundle,
-        bundling,
-        importBackup,
-        openEdl
-      }
-    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement(GoalChips, null), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+        className: "lv-cost-pill",
+        onClick: refreshSpend,
+        title: spend.status === "error" ? "Couldn't read the spend ledger \u2014 the catalog didn't answer. Click to retry; no number is shown rather than a wrong one." : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."
+      },
+      spend.status === "error" ? "\u2014" : spend.status === "loading" ? "\u2026" : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)
+    ), /* @__PURE__ */ React.createElement(GoalChips, null), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Gallery"))), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;
@@ -14743,7 +14948,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         title: "The cast library: every member you keep, ticked where this storyboard uses it"
       },
       "Library"
-    )), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : leftTab === "library" && libraryList ? libraryList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, boardGrid), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "collapse" }, "\u203A"), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
+    )), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : leftTab === "library" && libraryList ? libraryList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, boardGrid), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, genHead, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "Collapse to a rail" }, "\u203A")), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
       "button",
       {
         key: t,
@@ -14920,6 +15125,8 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 7, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "image") }, "+ Image"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "video") }, "+ Video"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: () => addRef(live.a.id, c, "audio") }, "+ Audio"))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Music / audio cue ", /* @__PURE__ */ React.createElement("button", { className: "sb-ico", style: { fontSize: 11 }, onClick: () => setDfPalFor(dfPalFor === "audio" ? null : "audio") }, "\uFF0Bterms")), /* @__PURE__ */ React.createElement("input", { className: "sb-in", value: c.audioCue, onChange: (ev) => dfPatch((cc) => ({ ...cc, audioCue: ev.target.value })), placeholder: "track, beat sync, room tone\u2026" }), dfPalFor === "audio" && /* @__PURE__ */ React.createElement("div", { className: "sb-pal" }, AUDIO_PALETTE.map((t) => /* @__PURE__ */ React.createElement("button", { key: t, className: "sb-pchip sb-mono", onClick: () => dfAppend("audioCue", t) }, t)))), /* @__PURE__ */ React.createElement("div", { className: "sb-field" }, /* @__PURE__ */ React.createElement("label", { className: "sb-lab" }, "Notes"), /* @__PURE__ */ React.createElement("textarea", { className: "sb-ta", value: c.notes, onChange: (ev) => dfPatch((cc) => ({ ...cc, notes: ev.target.value })), placeholder: "blocking, continuity reminders\u2026" })), /* @__PURE__ */ React.createElement("div", { className: "sb-toolbar" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn amber sm", onClick: () => copyShot(live) }, "Copy shot")), /* @__PURE__ */ React.createElement("button", { className: "lv-go", onClick: () => {
         setSelShot(c.id);
         setDeepFocus(null);
+        setTab("Video");
+        openRightPanel();
       } }, "Select in Generate \u2192")));
     })());
   }
@@ -15078,7 +15285,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's \u{1F465} button) ---- */
-.lm-scrim{position:absolute;inset:0;z-index:306;background:rgba(3,2,8,.6);
+.lm-scrim{position:absolute;inset:0;z-index:306;background:color-mix(in srgb,color-mix(in oklab,var(--mantle) 64%,black) 60%,transparent);
   animation:lmFadeIn .24s ease both;}
 .lm-scrim.closing{animation:lmFadeOut .28s ease both;}
 .lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:307;background:var(--mantle);
@@ -15087,7 +15294,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
-.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
   border:1px solid var(--surface1);margin-bottom:10px;}
 .lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
   cursor:pointer;background:none;border:none;color:var(--subtext);}
@@ -15198,10 +15405,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lm-genmodelrow{display:flex;align-items:center;padding:8px 10px;border-radius:8px;
   background:var(--base);border:1px solid var(--surface1);font:600 12px/1.2 system-ui;color:var(--text);}
 .lm-genmodelthumb{width:26px;height:26px;border-radius:6px;flex:none;
-  background:linear-gradient(150deg,#643aac 0%,#241f5b 100%);margin-right:8px;}
+  background:linear-gradient(150deg,color-mix(in hsl,var(--surface0) 48%,var(--accent)) 0%,color-mix(in hsl,var(--base) 78%,var(--mauve)) 100%);margin-right:8px;}
 .lm-gencaps{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;}
 .lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
-  border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--subtext);}
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext);}
 .lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
@@ -15375,7 +15582,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
 .lm-fc-range{width:100%;height:3px;cursor:pointer;}
 .lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
 .lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
-  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+  cursor:pointer;border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
 
@@ -20314,7 +20521,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       ))));
     }));
   }
-  function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
+  function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop, videoH }) {
     const vidRef = useRef2(null), trackRef = useRef2(null);
     const [dur, setDur] = useState2(0);
     const [range2, setRange] = useState2({ in: trimIn || 0, out: trimOut });
@@ -20442,11 +20649,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     const shownCrop = cropDraft || crop;
     const trimmed = range2.in > 0 || range2.out != null;
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-wrap" }, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-shotprev-wrap" + (videoH ? " side" : "") }, /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "sb-shotprev",
         onMouseMove: cropping ? void 0 : scrub2,
+        style: videoH ? { width: Math.round(videoH * 16 / 9), height: videoH } : void 0,
         onMouseLeave: () => {
           if (playing || cropping) return;
           const v = vidRef.current;
