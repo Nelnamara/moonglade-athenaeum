@@ -27,7 +27,7 @@ test("the phone title renders the headline bare, exactly as the desktop record d
 });
 
 test("the More chip says its name beside the design's ⋯, and still opens the More sheet", () => {
-  assert.match(phone, /<button type="button" className="idm-chip" aria-haspopup="dialog"\n\s*onClick=\{\(\) => moreSheet\.open\("more"\)\}>⋯ More<\/button>/);
+  assert.match(phone, /<button type="button" className="idm-chip" aria-haspopup="dialog" aria-label="More"\n\s*onClick=\{\(\) => moreSheet\.open\("more"\)\}>⋯ More<\/button>/);
   assert.doesNotMatch(phone, />⋯<\/button>/);
   assert.match(phone, /<MobileSheet open closing=\{moreSheet\.closing\} onClose=\{moreSheet\.close\} title="MORE">/);
 });
