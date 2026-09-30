@@ -50,16 +50,15 @@ export const QUICK_ROW = 30;       // px: one MODELS / LORAS chip row and its ga
    account, not the tab), so those switches never move the tabs; a mode with less shows room in
    the body, and the body scrolls if a mode ever holds more. The owner's finding wins over the
    height pass's "content-sized" here.
-     · standard stays under the separator bar when that leaves the composer its room; past it
-       the reel's slot is given up first, the composer's never (Session M's "the reel yields");
-     · History and a long prompt lift the ceiling as the DC's dockStyle does, sized to need. */
-function collapsedHeight({ vh, sepBottom, historyOpen, longPrompt, variables, quickRows, reelTier }) {
+     · the reel's slot is always budgeted in full (owner walk 2026-09-29, third pass): capping
+       the dock under the separator bar squeezed the reel to a sliver behind the composer on a
+       ~700px window. The open dock may rise over the nav band instead, as ▲ already does;
+     · only a window too short for tabs + reel + composer (100vh − 28) cuts into the reel. */
+function collapsedHeight({ vh, historyOpen, longPrompt, variables, quickRows, reelTier }) {
   const reelSlot = historyOpen ? HISTORY_STRIP : reelTier + 46;
   const composer = 96 + (longPrompt ? PROMPT_CAP : PROMPT_FLOOR) * 25
     + (variables ? RUN_ROOM : 0) + Math.max(0, Number(quickRows) || 0) * QUICK_ROW;
-  const need = 46 + reelSlot + composer;
-  if (historyOpen || longPrompt) return Math.min(vh - 28, need);
-  return Math.min(vh - 28, Math.max(46 + composer, Math.min(need, vh - sepBottom - 14)));
+  return Math.min(vh - 28, 46 + reelSlot + composer);
 }
 
 export function dockLayout({ vh, sepBottom, expanded, historyOpen, promptLen, promptFocus, extraPx,
@@ -77,7 +76,7 @@ export function dockLayout({ vh, sepBottom, expanded, historyOpen, promptLen, pr
   // the dock's height: ▲ is 100vh − 28 (DC dockStyle 3505-3506); collapsed, the one fixed
   // height above
   const capH = expanded ? vh - 28
-    : collapsedHeight({ vh, sepBottom, historyOpen, longPrompt, variables, quickRows, reelTier });
+    : collapsedHeight({ vh, historyOpen, longPrompt, variables, quickRows, reelTier });
   // fitReel: the reel's room under the dock's own height, less header · footer · caption +
   // padding, less the slabs in ▲
   const reelRoom = capH - 56 - 118 - 46 - (expanded ? SLAB_CHROME : 0) - extra;

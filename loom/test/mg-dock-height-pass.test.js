@@ -78,6 +78,13 @@ describe("standard: under the separator ceiling", () => {
     assert.equal(L.capH, 46 + (L.reelTier + 46) + 96 + PROMPT_FLOOR * 25, "the reel and the resting composer");
     assert.ok(!L.longPrompt);
   });
+  test("a ~700px window keeps the whole reel: the dock rises over the nav band rather than squeezing it (owner walk 2026-09-29)", () => {
+    // 1568×708 page, the separator bar's bottom at ~395: capping under it left the reel 7px.
+    const L = dockLayout({ vh: 708, sepBottom: 395, promptLen: 0, promptFocus: false });
+    assert.equal(L.capH, 46 + (L.reelTier + 46) + 96 + PROMPT_FLOOR * 25, "tabs, the full reel and the resting composer");
+    assert.equal(L.reelH, L.reelTier, "the reel at its full tier, not a sliver");
+    assert.ok(L.reelVisible);
+  });
   test("▲ lifts the clamp to 100vh − 28", () => {
     const L = dockLayout({ ...desk, expanded: true, promptLen: 0, promptFocus: false });
     assert.equal(L.capH, desk.vh - 28);
@@ -210,15 +217,16 @@ describe("the tabs stay put across tab and mode switches (one fixed collapsed he
     }
   });
 
-  test("the owner's walk window: under the separator bar at rest; with variables the reel's slot yields, the composer's never", () => {
+  test("the owner's walk window: the whole reel is kept at rest and with variables (third pass)", () => {
     const w = { vh: 744, sepBottom: 287 };
-    const sepCeil = w.vh - w.sepBottom - 14;
     const plain = dockLayout({ ...w, promptLen: 40, promptFocus: false });
-    assert.ok(plain.capH <= sepCeil, "a plain prompt keeps the dock under the separator: " + plain.capH);
+    assert.equal(plain.capH, 46 + (plain.reelTier + 46) + 96 + PROMPT_FLOOR * 25,
+      "tabs row + the full reel + the resting composer");
+    assert.equal(plain.reelH, plain.reelTier);
     const vars = dockLayout({ ...w, promptLen: 40, promptFocus: false, variables: true });
-    assert.equal(vars.capH, 46 + 96 + PROMPT_FLOOR * 25 + RUN_ROOM,
-      "the tabs row + the composer with its Random | Matrix row and a full preview");
-    assert.ok(vars.capH > sepCeil && vars.capH < w.vh - 28);
+    assert.equal(vars.capH, 46 + (vars.reelTier + 46) + 96 + PROMPT_FLOOR * 25 + RUN_ROOM,
+      "the tabs row + the full reel + the composer with its Random | Matrix row and a full preview");
+    assert.ok(vars.capH < w.vh - 28);
     assert.equal(RUN_ROOM, 212);
     const quick = dockLayout({ ...w, promptLen: 40, promptFocus: false, variables: true, quickRows: 2 });
     assert.equal(quick.capH - vars.capH, 2 * QUICK_ROW, "the account's MODELS / LORAS rows are budgeted");
