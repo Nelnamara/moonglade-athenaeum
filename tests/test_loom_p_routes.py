@@ -538,9 +538,44 @@ def test_a_crafted_bundle_cannot_place_or_forge_a_bed(rig):
     want = hashlib.sha1(OGG).hexdigest() + ".ogg"
     assert d["project"]["bed"]["file"] == want, "re-pointed at the name its own bytes give it"
     stored = sorted(f.name for f in _beds_dir(rig["tmp"]).iterdir())
-    assert stored == sorted([want, hashlib.sha1(MP3_ID3).hexdigest() + ".mp3"])
+    # Spend review S5: the traversing entry is real audio, but the board does not name it, so
+    # it is never read or stored (it used to be stored under its own hash).
+    assert stored == [want]
     assert not (rig["tmp"].parent / "evil.py").exists() and not (rig["tmp"] / "evil.py").exists()
     assert not (_beds_dir(rig["tmp"]) / forged).exists()
+
+
+def test_a_bundle_stores_only_the_bed_its_board_names(rig):
+    """Spend review S5. Every beds/ entry used to be re-hashed and stored, each up to 50 MB with
+    no count or total cap, so a small bundle of compressible 'audio' (an ID3 header then zeros)
+    could fill the disk with beds nothing referenced. Only the board's own bed is stored now."""
+    mem = io.BytesIO()
+    named = hashlib.sha1(FLAC).hexdigest() + ".flac"
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("project.json", json.dumps({"project": {"name": "P", "acts": [], "assets": [],
+                                                           "bed": {"file": named, "name": "x"}}, "thumbs": {}}))
+        z.writestr("beds/" + named, FLAC)
+        for n in range(12):
+            filler = MP3_ID3 + bytes([n]) + b"\0" * (2 * 1024 * 1024)
+            z.writestr("beds/%s.mp3" % hashlib.sha1(filler).hexdigest(), filler)
+    assert len(mem.getvalue()) < 256 * 1024, "the hostile bundle is small"
+    d = rig["cli"].post("/api/loom/import-bundle", data={"file": (io.BytesIO(mem.getvalue()), "b.zip")},
+                        content_type="multipart/form-data").get_json()
+    assert d["project"]["bed"]["file"] == named
+    stored = sorted(f.name for f in _beds_dir(rig["tmp"]).iterdir())
+    assert stored == [named], "one bed, the one the board names; nothing else is written"
+    assert g.LOOM_BUNDLE_MAX_BEDS == 1
+
+
+def test_a_bundle_whose_board_names_no_bed_stores_none(rig):
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w") as z:
+        z.writestr("project.json", json.dumps({"project": {"name": "P", "acts": [], "assets": []}, "thumbs": {}}))
+        z.writestr("beds/" + hashlib.sha1(FLAC).hexdigest() + ".flac", FLAC)
+    d = rig["cli"].post("/api/loom/import-bundle", data={"file": (io.BytesIO(mem.getvalue()), "b.zip")},
+                        content_type="multipart/form-data").get_json()
+    assert "bed" not in d["project"]
+    assert not _beds_dir(rig["tmp"]).exists() or not list(_beds_dir(rig["tmp"]).iterdir())
 
 
 def test_an_imported_bed_naming_no_storable_file_is_dropped(rig):

@@ -1040,6 +1040,9 @@ LOOM_BED_MAX_BYTES = 50 * 1024 * 1024
 # request whose declared length is over the cap plus this is refused before a byte is read.
 LOOM_BED_FORM_SLACK = 64 * 1024
 LOOM_BED_FILE_RE = re.compile(r"^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$")
+# A bundle import stores at most this many beds (the one its board names), each under the cap
+# above -- so one import writes at most LOOM_BED_MAX_BYTES of beds (spend review S5).
+LOOM_BUNDLE_MAX_BEDS = 1
 LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
                   "ogg": "audio/ogg", "flac": "audio/flac"}
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
@@ -25968,11 +25971,19 @@ __DESIGN_TOKENS__
         # under the name its own bytes give it, in the caller's bed folder -- never under the
         # name inside the zip, which could point anywhere or claim another bed's hash. The
         # board is then pointed at the computed name. Not audio, or over the cap: skipped.
+        # Spend review S5: ONLY the bed the imported board names is read and stored -- a board
+        # has one bed, so a bundle stores at most one file of at most LOOM_BED_MAX_BYTES. Every
+        # other beds/ entry is skipped unread: before, each one was stored, so a small bundle
+        # of highly compressible "audio" could fill the disk with files nothing referenced.
         import tempfile
         user = str(session.get("user") or "")
         bed_names = {}
-        for name in z.namelist():
-            if not name.startswith("beds/") or name.endswith("/"):
+        pbed0 = project.get("bed") if isinstance(project, dict) else None
+        wanted = str((pbed0 or {}).get("file") or "") if isinstance(pbed0, dict) else ""
+        wanted_entries = (["beds/" + wanted] if LOOM_BED_FILE_RE.match(wanted) else [])[:LOOM_BUNDLE_MAX_BEDS]
+        present = set(z.namelist())
+        for name in wanted_entries:
+            if name not in present:
                 continue
             try:
                 info = z.getinfo(name)
