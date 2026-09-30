@@ -243,6 +243,50 @@ def test_the_invalid_media_id_fallback_is_journalled(rig):
     assert r2["state"] == "refused" and len(rig["submits"]) == 1
 
 
+def test_a_partial_success_naming_invalid_media_id_is_never_submitted_again(rig):
+    """Spend review S1. PixAI answers `errors` AND a resolved `data` (the task was created and
+    charged) and the error names invalid_media_id. The fallback was gated on the text alone,
+    so it uploaded the frames and submitted a second paid task, and the first task id was
+    never journalled. A partial success is not a refusal: one submit, recorded as unclear."""
+    def _partial(params):
+        err = core.PixAIError('GraphQL error: [{"message": "invalid_media_id"}]')
+        err.graphql_data = {"createGenerationTask": {"id": "task-partial"}}
+        raise err
+    rig["behaviour"] = _partial
+    r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sP")).get_json()
+    assert len(rig["submits"]) == 1, "a created-and-charged task is never submitted twice"
+    assert r.get("unclear") is True and r["state"] == "may_have_started"
+    assert rig["cli"].get("/api/loom/submit-status?submit_id=sP").get_json()["state"] == "may_have_started"
+    rig["behaviour"] = None
+    assert rig["cli"].post("/api/loom/generate", json=_body(submit_id="sP2")).status_code == 409, \
+        "the shot stays held while the first render may exist"
+    assert len(rig["submits"]) == 1
+
+
+def test_a_fallback_that_fails_before_its_send_is_not_sent(rig, monkeypatch):
+    """Spend review N1. The passthrough is definitely refused (nothing created), then the
+    fallback fails before its own mutation. The first attempt's on_send used to leave "sent"
+    set, so the shot was journalled may_have_started and held for 6 h over a render that was
+    never created."""
+    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.PixAIError("GraphQL error: invalid_media_id"))
+    real_build = core.build_request
+    calls = []
+
+    def _build_then_fail(payload, *a, **k):
+        calls.append(1)
+        if len(calls) >= 2:
+            raise ConnectionError("frame upload dropped")
+        return real_build(payload, *a, **k)
+    monkeypatch.setattr(core, "build_request", _build_then_fail)
+    r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sN1")).get_json()
+    assert len(rig["submits"]) == 1, "only the refused passthrough reached the mutation"
+    assert r["state"] == "not_sent" and not r.get("unclear")
+    rig["behaviour"] = None
+    monkeypatch.setattr(core, "build_request", real_build)
+    assert rig["cli"].post("/api/loom/generate", json=_body(submit_id="sN1b")).get_json()["task_id"], \
+        "nothing exists, so the shot is free for the owner's next Render"
+
+
 def test_a_failure_before_the_mutation_is_not_sent(rig, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("no key")

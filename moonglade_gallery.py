@@ -24992,9 +24992,9 @@ __DESIGN_TOKENS__
                 # content scanner then refuses it (403 NSFW_DETECTED, no task) while the very
                 # same frames pass on the website. The upload was manufacturing the rejection.
                 #
-                # Safe by submit_generation's own argument for its inferenceProfile retry: a
-                # PixAIError means PixAI answered with a GraphQL error and REJECTED the task, so
-                # there is nothing created and nothing charged to duplicate.
+                # Safe ONLY when PixAI answered with a GraphQL error and REJECTED the task (a
+                # definite refusal, checked below), so there is nothing created and nothing
+                # charged to duplicate. A partial success is not that (spend review S1).
                 # Both error names: `invalid_media_id` (i2vPro) and
                 # `invalid_reference_image_media_id` (R2V's own field). The passthrough now
                 # applies to every mode (probe 2026-08-22), so the fallback does too.
@@ -25009,6 +25009,18 @@ __DESIGN_TOKENS__
                 err = str(e)
                 if "invalid_media_id" not in err and "invalid_reference_image_media_id" not in err:
                     raise
+                # Spend review S1: the error TEXT is not enough. A GraphQL answer can carry
+                # `errors` AND a resolved `data` at once -- a partial success, where the task
+                # was created and charged -- and it can name invalid_media_id all the same.
+                # Only a definite refusal created nothing; anything else goes to the classifier
+                # below and is journalled may_have_started, never submitted a second time.
+                if not _core.definite_refusal(e):
+                    raise
+                # Spend review N1: the refused first attempt sent nothing that exists, so from
+                # here "sent" describes the fallback alone. A re-upload that fails below is
+                # then journalled not_sent, not may_have_started (which held the shot for 6 h
+                # over a render that was never created).
+                attempt["sent"] = False
                 _logging_ = __import__("logging")
                 _logging_.getLogger(__name__).info(
                     "passthrough refused (%s); uploading frames and retrying", err[:80])
