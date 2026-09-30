@@ -3592,6 +3592,16 @@ ${"=".repeat(48)}
     );
   }
 
+  // scripts/react-dom-global-shim.js
+  var ReactDOM = window.ReactDOM;
+  var createPortal = ReactDOM.createPortal;
+  var flushSync = ReactDOM.flushSync;
+  var createRoot = ReactDOM.createRoot;
+  var hydrateRoot = ReactDOM.hydrateRoot;
+  var render = ReactDOM.render;
+  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
+  var findDOMNode = ReactDOM.findDOMNode;
+
   // ../gallery/src/icons/Icons.jsx
   var GLYPHS = {
     /* Search — every search surface (owner: "All search surfaces") -- binoculars-1_bold.svg */
@@ -4071,15 +4081,18 @@ ${"=".repeat(48)}
           /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
         );
       })
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: sentinelRef, className: "mg-sentinel", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), /* @__PURE__ */ react_global_shim_default.createElement(
-      "div",
-      {
-        className: "mg-preview" + (p ? " open" : ""),
-        "aria-hidden": p ? "false" : "true",
-        style: p ? { left: preview.x, top: preview.y } : void 0
-      },
-      p && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, (p.cover_url || p.preview_url) && /* @__PURE__ */ react_global_shim_default.createElement("img", { src: p.cover_url || p.preview_url, className: p.should_blur ? "blur" : void 0, alt: "" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-nm" }, p.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, tyShort(p.type)), p.ref_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "uses" }), " ", fmtCompact(p.ref_count), " uses") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u2665 ", fmt(p.liked_count)), p.comment_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u{1F4AC} ", fmt(p.comment_count)) : null), (baseLabel(p.base_model) || p.official) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-badges" }, baseLabel(p.base_model) && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg base" }, baseLabel(p.base_model)), p.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg official", title: "In-house / official model" }, "\u2713 Official")), p.description && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-desc" }, p.description)))
-    ));
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: sentinelRef, className: "mg-sentinel", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), typeof document !== "undefined" ? createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style: { display: "contents" } }, /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          className: "mg-preview" + (p ? " open" : ""),
+          "aria-hidden": p ? "false" : "true",
+          style: p ? { left: preview.x, top: preview.y } : void 0
+        },
+        p && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, (p.cover_url || p.preview_url) && /* @__PURE__ */ react_global_shim_default.createElement("img", { src: p.cover_url || p.preview_url, className: p.should_blur ? "blur" : void 0, alt: "" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-nm" }, p.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, tyShort(p.type)), p.ref_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "uses" }), " ", fmtCompact(p.ref_count), " uses") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u2665 ", fmt(p.liked_count)), p.comment_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u{1F4AC} ", fmt(p.comment_count)) : null), (baseLabel(p.base_model) || p.official) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-badges" }, baseLabel(p.base_model) && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg base" }, baseLabel(p.base_model)), p.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg official", title: "In-house / official model" }, "\u2713 Official")), p.description && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-desc" }, p.description)))
+      )),
+      document.body
+    ) : null);
   }
 
   // ../gallery/src/recipes/recipesCore.js
@@ -4105,12 +4118,22 @@ ${"=".repeat(48)}
     ["16:9", 16 / 9],
     ["3:1", 3]
   ];
+  var ADJUSTED_WORDS = {
+    promptHelper: "creativity",
+    negativePrompts: "negative prompt",
+    colorPalette: "palette",
+    enableADetailer: "Face Fix",
+    qualityTag: "Quality Tag",
+    cameraMovement: "camera movement",
+    inputVideoDurations: "clip lengths"
+  };
   function adjustedText(list) {
     const short = (v) => {
       const t = v == null ? "off" : String(v);
       return t.length > 24 ? t.slice(0, 23) + "\u2026" : t;
     };
-    return (Array.isArray(list) ? list : []).map((a) => (a && a.field) + " " + short(a && a.asked) + "\u2192" + short(a && a.used)).join(", ");
+    const word = (f) => Object.prototype.hasOwnProperty.call(ADJUSTED_WORDS, f) ? ADJUSTED_WORDS[f] : f;
+    return (Array.isArray(list) ? list : []).map((a) => word(a && a.field) + " " + short(a && a.asked) + " \u2192 " + short(a && a.used)).join(", ");
   }
   function friendlyGenErr2(raw) {
     const e = String(raw || "");
@@ -4174,6 +4197,7 @@ ${"=".repeat(48)}
     const lane = state2 === "free" && d.unlimited === true;
     const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
     const needN = cardCount(d.cards_needed);
+    const sendsN = Math.max(1, cardCount(props.sends) || 1);
     if (lane) {
       main = "Free";
       title = "Unlimited Mode \u2014 this generation spends nothing and uses no card.";
@@ -4197,12 +4221,13 @@ ${"=".repeat(48)}
       }
     } else if (state2 === "paid") {
       const n = Number(d.cost);
+      const total = n * sendsN;
       short = n !== 0 && isShort(d);
       const shortNote = short ? "You hold " + (heldN != null ? fmt2(heldN) : "?") + " of the " + (needN != null ? fmt2(needN) : "?") + " cards this needs \u2014 not enough, so no card is used. Costs the full ~" + fmt2(n) + " credits." : "";
-      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : short ? "\u26A0 " : "") + "\u2248 " + fmt2(n) + " credits";
-      title = n === 0 ? "Priced at zero credits. No free card was involved." : short ? shortNote : "No free card covers this \u2014 generating spends credits.";
+      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : short ? "\u26A0 " : "") + "\u2248 " + fmt2(total) + " credits";
+      title = n === 0 ? "Priced at zero credits. No free card was involved." : short ? shortNote : "No free card covers this \u2014 generating spends credits." + (sendsN > 1 ? " \u2248 " + fmt2(n) + " each \xD7 " + fmt2(sendsN) + "." : "");
       if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
-      val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt2(n);
+      val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt2(total);
       lab = n === 0 ? "credits \u2014 spends nothing" : short ? "credits \xB7 card short" : "credits";
       tip = n !== 0 && warn ? "\u26A0 " + warn + ". " + title : title;
     } else if (state2 === "error") {
@@ -4239,6 +4264,8 @@ ${"=".repeat(48)}
         parts.push(/\bcard\b/i.test(card) ? card : card + " card");
         if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
         if (sub) parts.push(sub.text);
+      } else if (state2 === "paid" && sendsN > 1) {
+        parts.push(fmt2(sendsN) + " images", "\u2248 " + fmt2(Number(d.cost)) + " each");
       } else if (state2 === "paid" && countN != null && countN > 1) {
         parts.push(fmt2(countN) + " images");
       }
@@ -4267,7 +4294,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, stack: stack2, count, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack: stack2, count, sends, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -4317,7 +4344,7 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, stack: stack2, count, balance, cardLabel, laneHeld });
+    const m = build(view, { hint, warn, compact, stack: stack2, count, sends, balance, cardLabel, laneHeld });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;
@@ -4347,16 +4374,6 @@ ${"=".repeat(48)}
     );
   });
   var CostBadge_default = CostBadge;
-
-  // scripts/react-dom-global-shim.js
-  var ReactDOM = window.ReactDOM;
-  var createPortal = ReactDOM.createPortal;
-  var flushSync = ReactDOM.flushSync;
-  var createRoot = ReactDOM.createRoot;
-  var hydrateRoot = ReactDOM.hydrateRoot;
-  var render = ReactDOM.render;
-  var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
-  var findDOMNode = ReactDOM.findDOMNode;
 
   // ../gallery/src/gen/priceProbeCore.js
   var PRICE_KEY_SKIP = ["prompt", "negative", "seed"];
@@ -8931,9 +8948,10 @@ ${"=".repeat(48)}
     return { phase: "done", n: 0 };
   }
   function afterWelcome(choice) {
-    return choice === "tour" ? "tour" : "notes:0";
+    return choice === "tour" ? "tour" : "done";
   }
-  function afterTour(k, stepCount) {
+  function afterTour(k, stepCount, skipped) {
+    if (skipped) return "done";
     const next = Math.max(0, Math.min((k | 0) + 1, stepCount | 0));
     return "notes:" + next;
   }
@@ -8974,6 +8992,50 @@ ${"=".repeat(48)}
   function rectShowing(rect, viewport2) {
     if (!rect || rect.width <= 0 || rect.height <= 0) return false;
     return rect.bottom > 0 && rect.right > 0 && rect.top < viewport2.h && rect.left < viewport2.w;
+  }
+  function overlaps(a, b) {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  }
+  var CHIP_ROW = ".mgg-chips, .mgx-cred, .mgx-claim, .mgx-act-wrap";
+  function placeClear(rect, size, viewport2, avoid, gap, margin) {
+    const g = gap == null ? 10 : gap;
+    const mg = margin == null ? 12 : margin;
+    const first = placeBeside(rect, size, viewport2, g, mg);
+    const list = (avoid || []).filter((a) => a && a.right > a.left && a.bottom > a.top);
+    const clampL = (l) => Math.round(Math.max(mg, Math.min(l, viewport2.w - mg - size.w)));
+    const tops = { below: rect.bottom + g, above: rect.top - g - size.h };
+    const order = first.placement === "below" ? ["below", "above"] : ["above", "below"];
+    const cands = [first];
+    for (const placement of order) {
+      const top = Math.round(tops[placement]);
+      if (top < mg || top + size.h > viewport2.h - mg) continue;
+      for (const left of [first.left, clampL(rect.left), clampL(rect.right - size.w)]) {
+        cands.push({ left, top, placement });
+      }
+    }
+    for (const c of cands) {
+      const box = { left: c.left, top: c.top, right: c.left + size.w, bottom: c.top + size.h };
+      if (!list.some((a) => overlaps(box, a))) return c;
+    }
+    return null;
+  }
+  var LAYER_SELECTORS = [
+    '[role="dialog"]',
+    '[role="alertdialog"]',
+    '[aria-modal="true"]',
+    '[role="menu"]',
+    '[role="listbox"]',
+    ".mfly.open",
+    // the model / LoRA browser
+    ".mg-gallery-picker",
+    // the gallery picker (it is its own scrim)
+    ".mgl-menu",
+    // the library's drop-down menus
+    ".at-panel"
+    // the Activity drop-down
+  ].join(", ");
+  function layerOpen(layers) {
+    return (layers || []).some((l) => !!(l && l.showing && !l.own && !l.holdsAnchor));
   }
 
   // ../gallery/src/help/guideSteps.js
@@ -10085,7 +10147,7 @@ ${"=".repeat(48)}
       );
     }
     return createPortal(
-      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-scrim" + cls, onMouseDown: closeHelp, "data-keeps-dock": "1" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-host" + cls, "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp" + cls, role: "dialog", "aria-modal": "true", "aria-label": "Guide" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-head" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-title" }, "Guide"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-nav" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goBack, disabled: !back.length, "aria-label": "Back" }, "\u2039"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goFwd, disabled: !fwd.length, "aria-label": "Forward" }, "\u203A")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-crumb" }, crumb.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: i }, i ? " / " : "", i === 0 && crumb.length > 1 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => go("Home", "") }, c) : /* @__PURE__ */ react_global_shim_default.createElement("span", null, c)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "sp" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-ver" }, version), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mghelp-x", onClick: closeHelp, "aria-label": "Close the guide" }, "\xD7")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-body" }, list, reader)))),
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-scrim" + cls, onMouseDown: closeHelp, "data-keeps-dock": "1" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-host" + cls, "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp" + cls, role: "dialog", "aria-modal": "true", "aria-label": "Guide" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-head" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-title" }, "Guide"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-nav" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goBack, disabled: !back.length, "aria-label": "Back", title: "Back" }, "\u2039"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goFwd, disabled: !fwd.length, "aria-label": "Forward", title: "Forward" }, "\u203A")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-crumb" }, crumb.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: i }, i ? " / " : "", i === 0 && crumb.length > 1 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => go("Home", "") }, c) : /* @__PURE__ */ react_global_shim_default.createElement("span", null, c)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "sp" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-ver" }, version), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mghelp-x", onClick: closeHelp, "aria-label": "Close the guide" }, "\xD7")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-body" }, list, reader)))),
       document.body
     );
   }
@@ -10167,6 +10229,8 @@ ${"=".repeat(48)}
   // ../gallery/src/help/GuideHost.jsx
   var SETTLE_MS = 900;
   var NOTE_POLL_MS = 600;
+  var LAYER_CHECK_MS = 120;
+  var NOTE_W = 250;
   var NEL3 = "/branding/mascots/gen_nel.png";
   function vp() {
     return {
@@ -10189,9 +10253,94 @@ ${"=".repeat(48)}
     return null;
   }
   function phoneFloor() {
-    const nav = document.querySelector(".glm-nav");
-    const r = nav ? nav.getBoundingClientRect() : null;
-    return r && r.height ? Math.max(0, (window.innerHeight || 0) - r.top) : 0;
+    const h = window.innerHeight || 0;
+    let top = h;
+    for (const sel of [".glm-nav", ".mgg-chips.phone"]) {
+      const el = document.querySelector(sel);
+      const r = el ? el.getBoundingClientRect() : null;
+      if (r && r.height && r.top < top) top = r.top;
+    }
+    return Math.max(0, h - top);
+  }
+  function chipRects() {
+    try {
+      return Array.from(document.querySelectorAll(CHIP_ROW), (el) => el.getBoundingClientRect());
+    } catch {
+      return [];
+    }
+  }
+  function layerShowing(el, view) {
+    if (el.closest('[aria-hidden="true"], [inert]')) return false;
+    if (!rectShowing(el.getBoundingClientRect(), view)) return false;
+    if (typeof el.checkVisibility === "function") return el.checkVisibility({ visibilityProperty: true });
+    return window.getComputedStyle(el).visibility !== "hidden";
+  }
+  function layerOverSurface(steps) {
+    let els;
+    try {
+      els = document.querySelectorAll(LAYER_SELECTORS);
+    } catch {
+      return false;
+    }
+    if (!els.length) return false;
+    const anchors = [];
+    steps.forEach((s) => (Array.isArray(s.at) ? s.at : [s.at]).forEach((sel) => {
+      try {
+        document.querySelectorAll(sel).forEach((a) => anchors.push(a));
+      } catch {
+      }
+    }));
+    const view = vp();
+    return layerOpen(Array.from(els, (el) => ({
+      own: !!el.closest(".mgguide-root"),
+      holdsAnchor: anchors.some((a) => el.contains(a)),
+      showing: layerShowing(el, view)
+    })));
+  }
+  function useLayerOver(guide, watch) {
+    const [up, setUp] = useState(false);
+    useLayoutEffect(() => {
+      if (!guide || !watch) {
+        setUp(false);
+        return void 0;
+      }
+      let raf = 0, timer2 = 0, last2 = 0;
+      const run = () => {
+        raf = 0;
+        last2 = Date.now();
+        setUp(layerOverSurface(guide.steps));
+      };
+      const kick = () => {
+        if (raf || timer2) return;
+        const wait = LAYER_CHECK_MS - (Date.now() - last2);
+        if (wait > 0) timer2 = setTimeout(() => {
+          timer2 = 0;
+          raf = requestAnimationFrame(run);
+        }, wait);
+        else raf = requestAnimationFrame(run);
+      };
+      run();
+      let mo = null;
+      try {
+        mo = new MutationObserver(kick);
+        mo.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["class", "role", "aria-modal", "aria-hidden", "inert", "open"]
+        });
+      } catch {
+        mo = null;
+      }
+      const poll2 = setInterval(kick, NOTE_POLL_MS);
+      return () => {
+        if (mo) mo.disconnect();
+        cancelAnimationFrame(raf);
+        clearTimeout(timer2);
+        clearInterval(poll2);
+      };
+    }, [guide, watch]);
+    return up;
   }
   function dockTop() {
     const dock = document.querySelector(".mgx-dock-host.open .mgdock");
@@ -10266,7 +10415,7 @@ ${"=".repeat(48)}
     const end = useCallback((finished) => {
       const cur2 = marks && marks[k];
       const lastIdx = finished ? tourCount - 1 : cur2 ? cur2.idx : -1;
-      onEnd(afterTour(lastIdx, tourCount));
+      onEnd(afterTour(lastIdx, tourCount, !finished));
     }, [marks, k, tourCount, onEnd]);
     useEffect(() => {
       if (marks && !marks.length) onEnd(afterTour(-1, tourCount));
@@ -10336,14 +10485,22 @@ ${"=".repeat(48)}
     const [rect, setRect] = useState(null);
     const cardRef = useRef(null);
     const [cardH, setCardH] = useState(70);
+    const hRef = useRef(cardH);
+    hRef.current = cardH;
     useEffect(() => {
       let live = true;
+      const spot = (s) => {
+        const el = findAnchor(s);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        if (!phone && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), chipRects(), 12)) return null;
+        return r;
+      };
       const look = () => {
         if (!live) return;
-        const at = firstPresentNote(guide.steps, n, (s) => !!findAnchor(s));
+        const at = firstPresentNote(guide.steps, n, (s) => !!spot(s));
         setJ(at);
-        const el = at >= 0 ? findAnchor(guide.steps[at]) : null;
-        const r = el ? el.getBoundingClientRect() : null;
+        const r = at >= 0 ? spot(guide.steps[at]) : null;
         setRect(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } : null);
       };
       look();
@@ -10356,9 +10513,25 @@ ${"=".repeat(48)}
         window.removeEventListener("resize", look);
         window.removeEventListener("scroll", look, true);
       };
-    }, [guide, n]);
+    }, [guide, n, phone]);
+    useLayoutEffect(() => {
+      const el = cardRef.current;
+      if (!el) return;
+      const h = el.getBoundingClientRect().height;
+      if (h && Math.abs(h - cardH) > 1) setCardH(h);
+    });
+    let cardStyle = null;
+    if (j >= 0 && rect) {
+      if (phone) {
+        cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
+      } else {
+        const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), chipRects(), 12);
+        if (p) cardStyle = { left: p.left, top: p.top, width: NOTE_W };
+      }
+    }
+    const showing = !!cardStyle;
     useEffect(() => {
-      if (j < 0) return void 0;
+      if (!showing) return void 0;
       let fired2 = false;
       const onUse = (e) => {
         if (fired2) return;
@@ -10375,24 +10548,22 @@ ${"=".repeat(48)}
         document.removeEventListener("input", onUse, true);
         document.removeEventListener("keydown", onUse, true);
       };
-    }, [guide, j, total, onAdvance]);
-    useLayoutEffect(() => {
-      const el = cardRef.current;
-      if (!el) return;
-      const h = el.getBoundingClientRect().height;
-      if (h && Math.abs(h - cardH) > 1) setCardH(h);
-    });
-    if (j < 0 || !rect) return null;
-    const view = vp();
+    }, [guide, showing, j, total, onAdvance]);
+    const wave = useCallback(() => onAdvance(afterNote(j, total)), [onAdvance, j, total]);
+    useEffect(() => showing ? claimEscape(wave) : void 0, [showing, wave]);
+    if (!showing) return null;
     const dot = { left: Math.round(rect.right - 5), top: Math.round(rect.top - 4) };
-    let cardStyle;
-    if (phone) {
-      cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
-    } else {
-      const p = placeBeside(rect, { w: 250, h: cardH }, view, 12);
-      cardStyle = { left: p.left, top: p.top, width: 250 };
-    }
-    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgguide-dot", style: dot, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: cardRef, className: "mgguide-note" + (phone ? " phone" : ""), style: cardStyle, role: "note" }, /* @__PURE__ */ react_global_shim_default.createElement(Nel, { size: phone ? 32 : 28 }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nmain" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-ntext" }, noteText(guide.steps[j])), phone ? null : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nfoot" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "note ", j - n0 + 1, " of ", total - n0), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "sp" }), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit", onClick: () => onAdvance(afterNote(j, total)) }, "got it"))), phone ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit phone", onClick: () => onAdvance(afterNote(j, total)) }, "got it") : null));
+    const hide = /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgguide-hide" + (phone ? " phone" : ""),
+        onClick: () => setNotesHidden(true),
+        title: "Turn Nel's notes off everywhere. Help can turn them back on."
+      },
+      "hide notes"
+    );
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgguide-dot", style: dot, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: cardRef, className: "mgguide-note" + (phone ? " phone" : ""), style: cardStyle, role: "note" }, /* @__PURE__ */ react_global_shim_default.createElement(Nel, { size: phone ? 32 : 28 }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nmain" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-ntext" }, noteText(guide.steps[j])), phone ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nfoot phone" }, hide) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nfoot" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "note ", j - n0 + 1, " of ", total - n0), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "sp" }), hide, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit", onClick: wave }, "got it"))), phone ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit phone", onClick: wave }, "got it") : null));
   }
   function GuideHost({ surface, phone, paused }) {
     const isMobile = useIsMobile();
@@ -10416,16 +10587,19 @@ ${"=".repeat(48)}
     useEffect(() => subscribeReplay((n) => setRestart(n)), []);
     const raw = ready ? get(guideKey(surface)) : null;
     const st = readGuide(raw);
+    const notesOff = ready && !!get(NOTES_HIDDEN_KEY, false);
     const phaseKey = st.phase + ":" + st.n + ":" + restart;
     useEffect(() => {
       setSettled(false);
       const t = setTimeout(() => setSettled(true), SETTLE_MS);
       return () => clearTimeout(t);
     }, [phaseKey]);
+    const watch = !!guide && ready && top && !paused && !helpUp && (st.phase === "welcome" || st.phase === "notes" && !notesOff);
+    const layerUp = useLayerOver(guide, watch);
     const write = useCallback((v) => {
       set2(guideKey(surface), v);
     }, [set2, surface]);
-    if (!guide || !ready || !top || paused || helpUp || !settled) return null;
+    if (!guide || !ready || !top || paused || helpUp || !settled || watch && layerUp) return null;
     let layer = null;
     if (st.phase === "welcome") {
       layer = /* @__PURE__ */ react_global_shim_default.createElement(
@@ -10439,7 +10613,7 @@ ${"=".repeat(48)}
       );
     } else if (st.phase === "tour") {
       layer = /* @__PURE__ */ react_global_shim_default.createElement(Tour, { guide, phone: ph, onEnd: write, restartKey: restart });
-    } else if (st.phase === "notes" && !get(NOTES_HIDDEN_KEY, false)) {
+    } else if (st.phase === "notes" && !notesOff) {
       layer = /* @__PURE__ */ react_global_shim_default.createElement(Notes, { guide, phone: ph, n: st.n, onAdvance: write });
     }
     if (!layer) return null;
@@ -11151,16 +11325,16 @@ ${"=".repeat(48)}
         buf = "";
       }
     };
-    const bad = (token, msg) => {
+    const bad = (token, msg, at) => {
       flush();
-      parts.push({ bad: token, error: msg });
+      parts.push({ bad: token, error: msg, at });
       if (error === null) error = msg;
     };
     const addVar = (part) => {
       flush();
       nvars += 1;
       if (nvars > MAX_VARS) {
-        parts.push({ bad: part.var, error: ERR_TOO_MANY_VARS });
+        parts.push({ bad: part.var, error: ERR_TOO_MANY_VARS, at: part.at });
         if (error === null) error = ERR_TOO_MANY_VARS;
         return;
       }
@@ -11194,22 +11368,23 @@ ${"=".repeat(48)}
           syntax = true;
           const j = g[1];
           const token = s.slice(i, j + 1);
+          const at = [i, j + 1];
           const opts = s.slice(i + 1, j).split("|").map(trim).filter(Boolean);
-          if (!opts.length) bad(token, ERR_EMPTY);
-          else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS);
-          else addVar({ var: token, options: opts, kind: "inline" });
+          if (!opts.length) bad(token, ERR_EMPTY, at);
+          else if (opts.length > MAX_OPTIONS) bad(token, ERR_TOO_MANY_OPTS, at);
+          else addVar({ var: token, options: opts, kind: "inline", at });
           i = j + 1;
           continue;
         }
         if (g && g[0] === "nested") {
           syntax = true;
-          bad(s.slice(i, g[1] + 1), ERR_UNCLOSED);
+          bad(s.slice(i, g[1] + 1), ERR_UNCLOSED, [i, g[1] + 1]);
           i = g[1] + 1;
           continue;
         }
         if (badOpen.has(i)) {
           syntax = true;
-          bad("{", ERR_UNCLOSED);
+          bad("{", ERR_UNCLOSED, [i, i + 1]);
           i += 1;
           continue;
         }
@@ -11223,12 +11398,13 @@ ${"=".repeat(48)}
         if (m) {
           syntax = true;
           const token = m[0], name = m[1];
-          if (!Object.prototype.hasOwnProperty.call(L, name)) bad(token, errUnknownList(token));
+          const at = [i, i + token.length];
+          if (!Object.prototype.hasOwnProperty.call(L, name)) bad(token, errUnknownList(token), at);
           else {
             const items = cleanList(L[name]);
-            if (items === null) bad(token, errLongList(token));
-            else if (!items.length) bad(token, errEmptyList(token));
-            else addVar({ var: token, options: items, kind: "list", name });
+            if (items === null) bad(token, errLongList(token), at);
+            else if (!items.length) bad(token, errEmptyList(token), at);
+            else addVar({ var: token, options: items, kind: "list", name, at });
           }
           i = LIST_TOKEN_RE.lastIndex;
           continue;

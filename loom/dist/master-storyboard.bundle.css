@@ -3646,6 +3646,41 @@ html.mg-updbanner-on .detail-wrap {
 .mghelp-q.fm-help {
   margin-right: 10px;
 }
+.mghelp-q.mgx-help,
+.mghelp-q.mgx-sephelp {
+  border: 1px solid rgba(255, 255, 255, .26);
+  color: #f2ecff;
+  font-weight: 800;
+  background:
+    linear-gradient(
+      150deg,
+      rgba(222, 214, 246, .34) 0%,
+      rgba(122, 96, 178, .36) 46%,
+      rgba(24, 18, 44, .66) 100%),
+    color-mix(in srgb, var(--base) 82%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .4),
+    inset 0 -2px 4px rgba(20, 12, 40, .45),
+    0 5px 14px rgba(0, 0, 0, .4);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .45);
+  transition: filter .2s, border-color .2s;
+}
+.mghelp-q.mgx-help {
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+}
+.mghelp-q.mgx-sephelp {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+}
+.mghelp-q.mgx-help:hover,
+.mghelp-q.mgx-sephelp:hover {
+  color: #fff;
+  border-color: var(--lavender);
+  filter: brightness(1.12);
+}
 .mghelp-q.mgx-sephelp:not(.slim) {
   display: none;
 }
@@ -3750,14 +3785,19 @@ html.mg-noblur .mghelp-scrim {
 }
 .mghelp-nav {
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 .mghelp-nav button {
-  background: none;
-  border: 0;
-  padding: 0 3px;
-  font-size: 12px;
-  color: var(--overlay0);
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  font: 600 17px/1 var(--font-system, system-ui, sans-serif);
   cursor: pointer;
 }
 .mghelp-nav button:disabled {
@@ -3765,7 +3805,8 @@ html.mg-noblur .mghelp-scrim {
   cursor: default;
 }
 .mghelp-nav button:not(:disabled):hover {
-  color: var(--text);
+  border-color: var(--lavender);
+  background: color-mix(in srgb, var(--lavender) 16%, var(--surface0));
 }
 .mghelp-crumb {
   font-size: 10.5px;
@@ -4882,6 +4923,22 @@ html.mg-noblur .mgwn-scrim {
 .mgguide-gotit:hover {
   color: var(--mauve);
 }
+.mgguide-hide {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: 9.5px/1.2 var(--font-system, system-ui, sans-serif);
+  color: var(--subtext);
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--surface1);
+  text-underline-offset: 2px;
+}
+.mgguide-hide:hover {
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
 .mgguide-note.phone {
   align-items: center;
   padding: 10px 12px;
@@ -4891,6 +4948,14 @@ html.mg-noblur .mgwn-scrim {
 .mgguide-note.phone .mgguide-ntext {
   font-size: 12px;
   line-height: 1.4;
+}
+.mgguide-nfoot.phone {
+  font-size: 11px;
+}
+.mgguide-hide.phone {
+  min-height: 32px;
+  padding: 0 2px;
+  font-size: 11.5px;
 }
 .mgguide-gotit.phone {
   flex: none;
