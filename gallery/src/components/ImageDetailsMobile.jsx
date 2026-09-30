@@ -320,7 +320,7 @@ export default function ImageDetailsMobile({
               PixAI made (a numeric task id); nothing is read until it is opened. It says its
               name: the bare ⋯ drew as a lone dash on the phone (owner walk 2026-09-29). */}
           {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
-            <button type="button" className="idm-chip" aria-haspopup="dialog"
+            <button type="button" className="idm-chip" aria-haspopup="dialog" aria-label="More"
               onClick={() => moreSheet.open("more")}>⋯ More</button>
           ) : null}
         </div>
