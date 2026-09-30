@@ -90,7 +90,7 @@ describe("the Mobile-view toggle: a new, persisted, manual owner-preference swit
     assert.match(sw[0], /checked=\{!!mobileUI\}/);
     assert.match(sw[0], /onChange=\{\(e\) => setMobileUI\(e\.target\.checked\)\}/);
     assert.match(src, /function ProjectSwitcher\(\{ api, name, extra \}\)/);
-    assert.match(src, /<\/div>\n\s*\{extra\}\n\s*<\/div>/, "the popover renders the host's extra rows under + New / Duplicate");
+    assert.match(src, /<\/div>\r?\n\s*\{extra\}\r?\n\s*<\/div>/, "the popover renders the host's extra rows under + New / Duplicate");
     assert.doesNotMatch(src, /<label className=\{"lv-draft" \+ \(mobileUI \? " on" : ""\)\}/,
       "the Mobile-view chip is back in the bar itself");
   });
