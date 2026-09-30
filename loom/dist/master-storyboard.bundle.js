@@ -8997,7 +8997,26 @@ ${"=".repeat(48)}
     return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   }
   var CHIP_ROW = ".mgg-chips, .mgx-cred, .mgx-claim, .mgx-act-wrap";
-  function placeClear(rect, size, viewport2, avoid, gap, margin) {
+  var HEADER_BAND = ".mgx-hdr";
+  var HEADER_CONTROLS = [
+    "button",
+    "a[href]",
+    "input",
+    "select",
+    "textarea",
+    "summary",
+    ".mgl-search",
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="switch"]',
+    '[role="slider"]',
+    '[role="checkbox"]',
+    '[role="combobox"]',
+    '[tabindex]:not([tabindex="-1"])'
+  ].map((s) => HEADER_BAND + " " + s).join(", ");
+  var NOTE_AVOID = CHIP_ROW + ", " + HEADER_CONTROLS;
+  function placeClear(rect, size, viewport2, avoid, gap, margin, band) {
     const g = gap == null ? 10 : gap;
     const mg = margin == null ? 12 : margin;
     const first = placeBeside(rect, size, viewport2, g, mg);
@@ -9006,6 +9025,14 @@ ${"=".repeat(48)}
     const tops = { below: rect.bottom + g, above: rect.top - g - size.h };
     const order = first.placement === "below" ? ["below", "above"] : ["above", "below"];
     const cands = [first];
+    if (band && band.bottom > band.top && rect.top < band.bottom) {
+      const top = Math.round(Math.max(band.bottom, rect.bottom) + g);
+      if (top + size.h <= viewport2.h - mg) {
+        for (const left of [first.left, clampL(rect.left), clampL(rect.right - size.w)]) {
+          cands.push({ left, top, placement: "below" });
+        }
+      }
+    }
     for (const placement of order) {
       const top = Math.round(tops[placement]);
       if (top < mg || top + size.h > viewport2.h - mg) continue;
@@ -10262,12 +10289,16 @@ ${"=".repeat(48)}
     }
     return Math.max(0, h - top);
   }
-  function chipRects() {
+  function noteObstacles() {
+    let avoid = [];
     try {
-      return Array.from(document.querySelectorAll(CHIP_ROW), (el) => el.getBoundingClientRect());
+      avoid = Array.from(document.querySelectorAll(NOTE_AVOID), (el) => el.getBoundingClientRect());
     } catch {
-      return [];
+      avoid = [];
     }
+    const hdr = document.querySelector(HEADER_BAND);
+    const r = hdr ? hdr.getBoundingClientRect() : null;
+    return { avoid, band: r && r.height ? { top: r.top, bottom: r.bottom } : null };
   }
   function layerShowing(el, view) {
     if (el.closest('[aria-hidden="true"], [inert]')) return false;
@@ -10493,7 +10524,8 @@ ${"=".repeat(48)}
         const el = findAnchor(s);
         if (!el) return null;
         const r = el.getBoundingClientRect();
-        if (!phone && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), chipRects(), 12)) return null;
+        const ob = phone ? null : noteObstacles();
+        if (ob && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), ob.avoid, 12, void 0, ob.band)) return null;
         return r;
       };
       const look = () => {
@@ -10525,7 +10557,8 @@ ${"=".repeat(48)}
       if (phone) {
         cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
       } else {
-        const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), chipRects(), 12);
+        const ob = noteObstacles();
+        const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), ob.avoid, 12, void 0, ob.band);
         if (p) cardStyle = { left: p.left, top: p.top, width: NOTE_W };
       }
     }
