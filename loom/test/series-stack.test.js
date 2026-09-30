@@ -277,7 +277,10 @@ describe("(c2) B1: the layout switcher is the LibraryBar's glyph strip", () => {
     assert.ok(!app.includes('["hero", "Hero", "\u25a7"]'));
   });
   test("NO mobile switcher -- the control does not render below the desktop breakpoint", () => {
-    assert.match(shell, /@media \(max-width: 860px\) \{ \.mgx-lay \{ display: none; \} \}/);
+    // the breakpoint is the phone build's own 520px line (owner walk 2026-09-29: at 860 the
+    // strip vanished on an iPad, which runs the desktop build, at 744 and 820)
+    assert.match(shell, /@media \(max-width: 520px\) \{ \.mgx-lay \{ display: none; \} \}/);
+    assert.doesNotMatch(shell, /@media \(max-width: 860px\) \{ \.mgx-lay/);
   });
   test("selection still persists in localStorage beside the size value (App owns both)", () => {
     assert.ok(app.includes('localStorage.setItem("mg_gallery_layout", v);'));

@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -74,6 +74,36 @@ describe("the library bar wraps rather than running on under anything", () => {
 
   test("with the Similar token in it the slab keeps room for the token before the pills wrap", () => {
     assert.match(bar, /\.mgl-search\.simon \{[^}]*flex-basis: 300px; max-width: 430px;/);
+  });
+
+  test("every bar control shows from the 521px line up -- the four view buttons included", () => {
+    // Owner walk 2026-09-29, second pass: at 744 and 820 the four view buttons after Actions
+    // were gone -- shell.css hid the strip below 861px, though an iPad runs the desktop build.
+    // No stylesheet may hide a library-bar control in a max-width block above the phone line.
+    const barBits = /\.mgx-lay\b|\.mgx-laycell\b|\.mgl-bar\b|\.mgl-search\b|\.mgl-pill\b|\.mgl-filters\b|\.mgl-clear\b|\.mgl-wrap\b|\.mgx-libslot\b|\.mgx-bottom\b/;
+    const dir = path.join(here, "..", "..", "gallery", "src");
+    const files = ["styles.css", ...readdirSync(path.join(dir, "styles")).filter((f) => f.endsWith(".css")).map((f) => "styles/" + f)];
+    for (const f of files) {
+      const css = readFileSync(path.join(dir, f), "utf8").replace(/\r\n/g, "\n");
+      const re = /@media \(max-width: (\d+)px\) \{/g;
+      let m;
+      while ((m = re.exec(css))) {
+        if (Number(m[1]) <= 520) continue;
+        let depth = 0, k = css.indexOf("{", m.index), end = k;
+        for (; k < css.length; k++) {
+          if (css[k] === "{") depth++;
+          else if (css[k] === "}" && --depth === 0) { end = k; break; }
+        }
+        for (const rule of css.slice(m.index, end).split("}")) {
+          const [sel, body = ""] = rule.split("{").slice(-2);
+          if (sel && barBits.test(sel) && /display:\s*none/.test(body)) {
+            assert.fail(f + " hides a library-bar control at max-width " + m[1] + "px: " + sel.trim());
+          }
+        }
+      }
+    }
+    assert.match(shell, /@media \(max-width: 520px\) \{ \.mgx-lay \{ display: none; \} \}/,
+      "the strip still hides where the phone build takes over");
   });
 
   test("the bar's own header comment no longer promises a row that never wraps", () => {
