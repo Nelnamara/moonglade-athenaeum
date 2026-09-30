@@ -5470,7 +5470,8 @@ def test_train_advanced_describes_once_at_pixais_quote_and_starts_at_its_price(
     added on the Descriptions step; PixAI describes first -- "Describe automatically (12
     images)" names PixAI's own quote (150 an image, not the config's 100) and is the only way
     in (no "Write them myself"), and "Next: parameters" stays off until every image is
-    described; one press sends that quote once. An edit saves after a pause; Esc leaves the
+    described; the press asks once (the ask's "Describe · 1,800" sends that quote once; Back
+    sends nothing -- owner walk 2026-09-30). An edit saves after a pause; Esc leaves the
     focus view for the grid without closing the overlay. The parameters are drawn locked, and
     Start names PixAI's quote and sends it once, with PixAI's own default options."""
     _fake_training(pixai, monkeypatch)
@@ -5502,15 +5503,28 @@ def test_train_advanced_describes_once_at_pixais_quote_and_starts_at_its_price(
         for i in range(12):
             tiles.nth(i).click()
         page.click(".mgtr-pool-tray .mgtr-go")
-        page.wait_for_selector(".mgtr-capask")
+        describe_btn = page.locator(".mgtr-adv-desc button:has-text('Describe automatically')")
+        describe_btn.wait_for()
         assert len(tasks["7700"]["ids"]) == 12
         assert page.locator("text=Write them myself").count() == 0
-        go_desc = page.locator(".mgtr-capask .mgtr-go")
-        assert go_desc.inner_text() == "Describe automatically (12 images) · 1,800"
-        assert page.locator(".mgtr-capask-head .p").inner_text() == "1,800"
+        assert describe_btn.inner_text() == "Describe automatically (12 images) · 1,800"
         assert page.locator(".mgtr-adv-desc .mgtr-row-end .mgtr-go").is_disabled(), \
             "Next: parameters is off until every image is described"
         assert not [c for c in pixai.calls if c.op.endswith("/caption")], "nothing described yet"
+
+        # the press ASKS (owner walk 2026-09-30: it used to spend at once); Back sends nothing
+        assert page.locator(".mgtr-capask").count() == 0
+        describe_btn.click()
+        page.wait_for_selector(".mgtr-capask")
+        assert page.locator(".mgtr-capask-head .p").inner_text() == "1,800"
+        go_desc = page.locator(".mgtr-capask .mgtr-go")
+        assert go_desc.inner_text() == "Describe · 1,800"
+        page.click(".mgtr-capask .mgtr-ghost:has-text('Back')")
+        page.wait_for_selector(".mgtr-capask", state="detached")
+        assert not _posts_to(posts, "/7700/caption"), "the press and Back sent nothing"
+        assert not [c for c in pixai.calls if c.op.endswith("/caption")]
+        describe_btn.click()
+        page.wait_for_selector(".mgtr-capask")
 
         go_desc.click()
         page.wait_for_function(
@@ -5568,9 +5582,9 @@ def test_train_continue_opens_a_draft_at_its_descriptions_and_writes_nothing(
     try:
         page.click(".mgtr-runsrow")
         page.locator(".mgtr-run", has_text="Priestess set").locator(".mgtr-run-act").click()
-        page.wait_for_selector(".mgtr-capask")
-        assert page.locator(".mgtr-capask .mgtr-go").inner_text() == \
-            "Describe automatically (24 images) · 3,600"
+        describe_btn = page.locator(".mgtr-adv-desc button:has-text('Describe automatically')")
+        describe_btn.wait_for()
+        assert describe_btn.inner_text() == "Describe automatically (24 images) · 3,600"
         assert "24 IMAGES" in page.locator(".mgtr-adv-desc .mgtr-kick").first.inner_text()
         assert posts == [], "continuing a draft sent a training POST: %r" % posts
         assert pixai.mutations() == 0

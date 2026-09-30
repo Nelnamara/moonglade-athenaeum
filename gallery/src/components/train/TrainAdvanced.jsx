@@ -19,7 +19,7 @@ import {
    2 DESCRIPTIONS -- the images are added HERE (Upload / From history, N of 100, at least 10).
       PixAI describes them first: "Describe automatically (N images)" with PixAI's own quote for
       this set is the ONLY way in (there is no writing them yourself before it), asked once --
-      the button names the amount it sends. Then the grid (auto-fill 120 px, the filters All ·
+      the press opens the ask, whose "Describe · price" names the amount it sends. Then the grid (auto-fill 120 px, the filters All ·
       Auto · Edited · Not described yet, find / replace / + tag / − tag, restore automatic on
       the selected) and the focus view (the image and its whole description, out of 1,000,
       restore automatic, the strip, ← → J K, Esc back to the grid). Edits save one at a time
@@ -127,6 +127,16 @@ function Descriptions({ a, title, baseName, onBasic }) {
   const q = a.quote;
   const per = perImage(q);
   const g = a.gates;
+  /* "Describe automatically (N images) · price" ASKS ONCE before it spends (BUILD-w3-train
+     section 5; owner walk 2026-09-30: the press used to send the paid describe at once). The
+     press opens the handoff's ask (3c's gold-priced confirm card: the question, PixAI's quote,
+     the line, a way back and "Describe · price" -- "Write them myself" gone, as PixAI has no
+     such path), and only that second press sends; the phone asks the same in its sheet. A new
+     quote (the set changed under it) closes the ask, so the number confirmed is the number
+     the pressed button sends. */
+  const [asking, setAsking] = useState(false);
+  const askTotal = q && typeof q.total_price === "number" ? q.total_price : null;
+  useEffect(() => { setAsking(false); }, [askTotal]);
   const editable = a.status === "captionReady";
   const canChangeSet = (a.status === "draft" || a.status === "captionReady") && !a.busy;
   const have = new Set(ids);
@@ -175,8 +185,14 @@ function Descriptions({ a, title, baseName, onBasic }) {
 
       {a.status === "captioning" ? (
         <div className="mgtr-capwait" role="status">PixAI is describing the images now. This checks again every few seconds; you can close it and come back from Runs.</div>
+      ) : undescribed > 0 && a.enough && !asking ? (
+        <div className="mgtr-row-go">
+          {!g.describe && <span className="mgtr-dim">{g.whyNoDescribe}</span>}
+          <button type="button" className="mgtr-go" disabled={!g.describe} onClick={() => setAsking(true)}>
+            {describeLabel(q)}</button>
+        </div>
       ) : undescribed > 0 && a.enough ? (
-        <div className="mgtr-capask">
+        <div className="mgtr-capask" role="group" aria-label="Describe automatically">
           <div className="mgtr-capask-head">
             <div className="t">Describe {q && q.image_count > 0 ? q.image_count : undescribed} image{(q && q.image_count === 1) ? "" : "s"} automatically?</div>
             <div className="p">{q && typeof q.total_price === "number" ? credits(q.total_price) : "—"}</div>
@@ -186,8 +202,10 @@ function Descriptions({ a, title, baseName, onBasic }) {
           </div>
           <div className="a">
             {!g.describe && <span className="mgtr-dim">{g.whyNoDescribe}</span>}
-            <button type="button" className="mgtr-go" disabled={!g.describe} onClick={a.describe}>
-              {a.busy === "describe" ? "sending…" : describeLabel(q)}</button>
+            <button type="button" className="mgtr-ghost" disabled={!!a.busy} onClick={() => setAsking(false)}>Back</button>
+            <button type="button" className="mgtr-go" disabled={!g.describe}
+              onClick={async () => { await a.describe(); setAsking(false); }}>
+              {a.busy === "describe" ? "sending…" : q && typeof q.total_price === "number" ? "Describe · " + credits(q.total_price) : "Describe"}</button>
           </div>
         </div>
       ) : null}

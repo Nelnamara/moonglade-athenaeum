@@ -543,8 +543,10 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
   const quote = (detail && detail.caption_quote) || null;
   const gates = advancedGates({ mediaIds, captions, quote, saving, status, busy, held: describeHeld });
 
-  /* Describe automatically (PAID; the only way in): ONE press, sending PixAI's own quote --
-     the number on the button -- as the acknowledged amount. */
+  /* Describe automatically (PAID; the only way in): ONE send, from the ask's own button
+     ("Describe · price" -- the desktop's ask card, the phone's sheet; never the entry button
+     that opens them), sending PixAI's own quote -- the number on that button -- as the
+     acknowledged amount. */
   const describe = async () => {
     if (busy || !gates.describe || !quote) return;
     const total = quote.total_price;
