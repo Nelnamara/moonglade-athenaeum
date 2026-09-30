@@ -262,8 +262,12 @@ export default function Lightbox({
             {/* ⁂ Make a recipe (Recipes Handoff K decision 4): between Similar and Upscale,
                 only for a picture whose model takes recipes; opens the creator's step 2. */}
             <MakeRecipeChip className="lbx-chip" mediaId={it.media_id} isVideo={!!it.is_video} />
-            <button className="lbx-chip" title="Upscale or Hires this picture"
-              onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
+            {/* Stills only (owner walk 2026-09-29): a video's Upscale could only say it applies
+                to images. */}
+            {!it.is_video ? (
+              <button className="lbx-chip" title="Upscale or Hires this picture"
+                onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
+            ) : null}
             {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since
                 2026-08-06: it hands this image to the Publish panel, which runs the actual
                 createArtworkFromTaskV2 pipeline (preview, then confirm). The DC builds it

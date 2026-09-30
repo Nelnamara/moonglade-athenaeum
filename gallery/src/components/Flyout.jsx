@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchPresets } from "../api.js";
 import { ASPECT_CHOICES, aspectIn, withAspect, parseAspect } from "../curation/aspectCore.js";
 
@@ -6,7 +6,15 @@ import { ASPECT_CHOICES, aspectIn, withAspect, parseAspect } from "../curation/a
    never placed: the locked behavior from the design pass. Drafts locally,
    commits on Apply. Saved views are the server-side, account-scoped store the
    classic gallery writes; each preset holds the classic query string, parsed
-   here back into pilot state -- one store, both surfaces. */
+   here back into pilot state -- one store, both surfaces.
+
+   IT NEVER RUNS OFF THE SCREEN (owner walk 2026-09-29). It hangs below a search slab that sits
+   ~300px down the banner, and it is ~620px tall; on a 708px-tall page its last row -- Clear ·
+   Contact sheet · Export view · Apply · ✕ -- was below the screen, and the wheel scrolled the
+   grid behind it. So it measures where its own top landed (--fly-top) and shell.css caps its
+   height at the rest of the screen: it scrolls inside, and that action row is sticky to its
+   bottom edge. The wheel over it scrolls it and never the page behind -- at either end of its
+   own scroll, or when it has nothing to scroll, the wheel is simply spent. */
 
 const SORTS = [
   ["newest", "Newest first"], ["oldest", "Oldest first"],
@@ -82,6 +90,30 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
   const [saveMsg, setSaveMsg] = useState("");
   useEffect(() => { setD(current); }, [current]);
   useEffect(() => { fetchPresets().then(setPresets); }, []);
+
+  // Where the top landed, before the first paint and again on every resize (the banner's band
+  // restacks at the tablet line). The header is sticky, so a page scroll never moves it.
+  const flyRef = useRef(null);
+  const [top, setTop] = useState(null);
+  useLayoutEffect(() => {
+    const fit = () => { if (flyRef.current) setTop(Math.round(flyRef.current.getBoundingClientRect().top)); };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
+  // A wheel the flyout cannot use is stopped here rather than handed to the page. Native and
+  // non-passive, since React's own wheel listener cannot preventDefault.
+  useEffect(() => {
+    const el = flyRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (!e.deltaY || e.ctrlKey) return;              // sideways, or the browser's own zoom
+      const room = e.deltaY > 0 ? el.scrollHeight - el.clientHeight - el.scrollTop : el.scrollTop;
+      if (room < 1) e.preventDefault();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   const set = (k) => (e) =>
     setD({ ...d, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
 
@@ -107,7 +139,8 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
   };
 
   return (
-    <div className="fly" role="dialog" aria-label="Advanced search">
+    <div className="fly" role="dialog" aria-label="Advanced search" ref={flyRef}
+      style={top != null ? { "--fly-top": top + "px" } : undefined}>
       <div className="flyhd">ADVANCED SEARCH</div>
       <div className="flylegend">
         <p>these already work — nothing in the app tells you so</p>

@@ -106,7 +106,9 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
     <>
       <div className="mgv-scrim" onClick={onClose} />
       <div className="mgv-host">
-        <div className="mgv-slab mgct-slab" role="dialog" aria-label="Contests">
+        {/* mgv-steady (overlays.css): one size through loading, both tabs and the detail, so
+            nothing moves under the pointer (owner walk 2026-09-29). */}
+        <div className="mgv-slab mgct-slab mgv-steady" role="dialog" aria-label="Contests">
           {detail ? (
             <ContestDetail contest={detail} mineRow={entriesFor(detail)}
               onBack={() => setDetail(null)} onClose={onClose}

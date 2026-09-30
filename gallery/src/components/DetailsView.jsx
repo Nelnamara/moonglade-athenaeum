@@ -461,9 +461,13 @@ export default function DetailsView({
             {/* ⇱ Upscale opens the float (Image Details.dc.html:393-394 / :143-189): the
                 same fixed UpscalePanel the Lightbox uses, over the page -- never in flow,
                 where it would have to squeeze the frame or scroll the document. The hook's
-                close-on-navigate still governs it (useImageDetails.js, correction 2). */}
-            <button className="btn" title="Upscale or Hires"
-              onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
+                close-on-navigate still governs it (useImageDetails.js, correction 2).
+                Stills only (owner walk 2026-09-29): on a video the panel could only answer
+                "Upscaling applies to images, not videos", so a video is not offered it. */}
+            {row.is_video !== "1" ? (
+              <button className="btn" title="Upscale or Hires"
+                onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
+            ) : null}
             <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
               onClick={deleteLocal}>Delete locally</button>
           </div>

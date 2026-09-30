@@ -80,7 +80,11 @@ html.mg-noblur .rcp-scrim { -webkit-backdrop-filter: none !important; backdrop-f
   box-shadow: 0 24px 60px rgba(0, 0, 0, .55); color: var(--text);
   animation: rcpIn .42s cubic-bezier(.2, .9, .24, 1) both; }
 .rcp-host.closing .rcp-slab, .rcp-host.closing .rcp-creator { animation: rcpOut .35s cubic-bezier(.4, 0, .2, 1) both; }
-.rcp-compact { width: min(780px, calc(100vw - 32px)); max-height: min(86vh, 760px); max-height: min(86dvh, 760px); }
+/* A HEIGHT, not a max-height (owner walk 2026-09-29). Sized by its content, the slab shrank and
+   re-centred under the pointer when a tab changed -- Market's 24 tiles fill it, a single Set is
+   one row -- so the next click landed on the scrim and closed it. Every tab, loading or not,
+   now sits in the one box Market fills; the tab's own list scrolls inside it. */
+.rcp-compact { width: min(780px, calc(100vw - 32px)); height: min(86vh, 760px); height: min(86dvh, 760px); }
 /* absolute inside the fixed host, so the update strip's offset on the host carries it too */
 .rcp-mkt { position: absolute; inset: 24px; width: auto; max-height: none; }
 

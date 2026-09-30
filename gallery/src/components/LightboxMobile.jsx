@@ -414,6 +414,12 @@ export default function LightboxMobile({
             lower panel (drift 122; lightbox-mobile.css .lbm-bottom/.lbm-foot), so an open
             prompt slab can never push these off the screen again. */}
         <div className="lbm-foot">
+        {/* THE ORDER (owner walk 2026-09-29): the design's five first -- ✎ Edit · ▶ To Video ·
+            ◈ Similar · ⇱ Upscale · Details › -- then the app's own extras, ⁂ Make a recipe,
+            ★ Enter contest and ▶ Slideshow. At 390px only four chips show before the row
+            scrolls, and with the recipe chip between Similar and Upscale, Upscale fell out of
+            view and Details needed a sideways swipe. The owner's order wins over the Recipes
+            handoff's "between Similar and Upscale" here, on the phone only. */}
         <div className="lbm-actsrow">
           <button type="button" className="lbm-chip"
             onClick={() => toast("Edit", "Its own mobile wiring — coming later.")}>✎ Edit</button>
@@ -426,8 +432,12 @@ export default function LightboxMobile({
           <button type="button" className="lbm-chip lbm-similar"
             title="Find what looks like this one"
             onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
+          {/* Stills only: a video's Upscale could only say it applies to images. */}
+          {!it.is_video ? (
+            <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
+          ) : null}
+          <button type="button" className="lbm-chip" onClick={() => onOpenDetails(it.media_id)}>Details ›</button>
           <MakeRecipeChip className="lbm-chip" mediaId={it.media_id} isVideo={!!it.is_video} phone />
-          <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
           {/* One of the three entry points Contest Mobile Handoff.dc.html keeps -- "the
               lightbox share row". It opens the choose-a-contest sheet, and the entry
               screen behind it pre-selects THIS picture if it is eligible. Rendered
@@ -439,7 +449,6 @@ export default function LightboxMobile({
             <button type="button" className="lbm-chip"
               onClick={() => onEnterContest(it.media_id)}>★ Enter contest</button>
           )}
-          <button type="button" className="lbm-chip" onClick={() => onOpenDetails(it.media_id)}>Details ›</button>
           <button type="button" className="lbm-chip lbm-chip-metal" onClick={() => setSlideOn((v) => !v)}>
             {slideOn ? "⏸ Pause" : "▶ Slideshow"}
           </button>

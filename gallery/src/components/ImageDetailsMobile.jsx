@@ -308,15 +308,20 @@ export default function ImageDetailsMobile({
           <button type="button" className="idm-chip" onClick={() => copy(promptText, "prompt")}>
             {copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}
           </button>
-          <button type="button" className={"idm-chip" + (upscaleOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
+          {/* Stills only (owner walk 2026-09-29): a video's Upscale could only say it applies to
+              images. */}
+          {row.is_video !== "1" ? (
+            <button type="button" className={"idm-chip" + (upscaleOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
+          ) : null}
           <button type="button" className="idm-chip idm-chip-danger" disabled={busy} onClick={deleteLocal}>
             Delete locally
           </button>
           {/* Session M (NOTES 7): ⋯ -> Inspect the request. Only for a picture that has a task
-              PixAI made (a numeric task id); nothing is read until it is opened. */}
+              PixAI made (a numeric task id); nothing is read until it is opened. It says its
+              name: the bare ⋯ drew as a lone dash on the phone (owner walk 2026-09-29). */}
           {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
-            <button type="button" className="idm-chip" aria-haspopup="dialog" aria-label="More"
-              onClick={() => moreSheet.open("more")}>⋯</button>
+            <button type="button" className="idm-chip" aria-haspopup="dialog"
+              onClick={() => moreSheet.open("more")}>⋯ More</button>
           ) : null}
         </div>
 
@@ -329,7 +334,10 @@ export default function ImageDetailsMobile({
 
         <div className="idm-head">
           <p className="idm-kicker">{(row.model_name || row.model_id || "—")}</p>
-          <h2 className="idm-title" key={"t" + row.media_id}>&#8220;{headline}&#8221;</h2>
+          {/* The headline brings its own quotes (gen/headline.js quotes a prompt excerpt; a typed
+              title is shown as typed) -- the desktop record renders it bare, and so does this.
+              Wrapping it again drew doubled quotes (owner walk 2026-09-29). */}
+          <h2 className="idm-title" key={"t" + row.media_id}>{headline}</h2>
           <div className="idm-rule"><span key={"r" + row.media_id} /></div>
         </div>
 

@@ -52,13 +52,22 @@
    v3.7.2 classic-leftovers sweep applied). The trio's own rules are .mgx-lay /
    .mgx-laycell in shell.css. */
 
-/* ---- the bar row: NEVER wraps (drift §10) ---- */
-.mgl-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
+/* ---- the bar row: one row wherever it fits, and it WRAPS where it does not ----
+   Drift §10 drew it as a row that never wraps. That held while the bar always had ~800px beside
+   the banner's buttons; on an iPad it had half that, and a row that cannot wrap can only run on
+   underneath whatever sits to its right -- Select, Actions and the layout cells went under
+   Generate (owner walk 2026-09-29). So it wraps, and the search slab is what keeps the one-row
+   look wherever there IS room: it starts from 170px and GROWS to its old 320px, instead of
+   starting at 320 and shrinking. Where the row fits, those settle on the same width the old
+   shrink did; where it does not, the pills after the slab take a second row instead of
+   overflowing. (shell.css also stacks the banner's band below 1181px -- the bar gets the band's
+   full width there.) */
+.mgl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 
 /* search field (DC searchFieldStyle; a real input where the DC mocks a span).
    position:relative anchors the existing Advanced flyout (.fly, styles.css). */
 .mgl-search { position: relative; display: flex; align-items: center; gap: 8px;
-  padding: 7px 13px 7px 15px; border-radius: 999px; flex: 0 1 320px; min-width: 170px;
+  padding: 7px 13px 7px 15px; border-radius: 999px; flex: 1 1 170px; max-width: 320px; min-width: 170px;
   backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
   transition: border-color .2s, box-shadow .2s;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
@@ -86,9 +95,10 @@
    there is never a question of WHAT it is similar to. ✕ dismisses; so does Esc.
    All three colours are tokens (--lavender at 14%/45%, --overlay0, --emerald). */
 .mgl-search.simon { padding-left: 6px;
-  /* the token needs its own room: at the resting 320px basis it would eat the field it
-     sits in front of, and the bar never wraps (drift §10) */
-  flex-basis: 430px;
+  /* the token needs its own room: at the resting 320px cap it would eat the field it sits
+     in front of. It starts from 300 (so a short row wraps the pills, not the token's field)
+     and grows to 430. */
+  flex-basis: 300px; max-width: 430px;
   border-color: color-mix(in srgb, var(--lavender) 40%, transparent); }
 .mgl-simtok { flex: none; display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 8px 4px 4px; border-radius: 7px; max-width: 190px;

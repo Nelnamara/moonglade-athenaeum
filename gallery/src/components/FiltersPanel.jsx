@@ -13,7 +13,8 @@ import "../styles/curation.css";
 /* ============================================================================
    The LibraryBar (the Library Bar workstream's deliverable, DC drift §10):
    search field · ⚲ Filters collapse pill (active-count badge, tray on its OWN
-   ROW ABOVE the bar) · Clear · Select · Actions — the bar itself never wraps.
+   ROW ABOVE the bar) · Clear · Select · Actions — one row wherever it fits; where it does
+   not (an iPad), it wraps rather than run on under the banner's buttons (librarybar.css).
    Prop-compatible with Strip.jsx's contract ON PURPOSE (App.jsx mounts it in
    the Banner libraryBar slot).
 

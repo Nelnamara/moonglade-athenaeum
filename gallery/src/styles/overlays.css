@@ -121,6 +121,12 @@ html.mg-noblur .mgv-scrim {
   background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;
   animation: mgvSlab .3s cubic-bezier(.2,.9,.24,1) both; }
+/* A STEADY slab holds the full height whatever is inside it (owner walk 2026-09-29). Sized by
+   its content, the Contests slab opened small on "loading live contests…" and grew when the
+   board landed, and changed size again between its tabs -- so a click aimed at "My entries"
+   landed on a contest that had just moved under it. A slab whose innards swap in place (tabs,
+   a loading line, a detail) opts in, and stays the size its fullest state already was. */
+.mgv-slab.mgv-steady { height: 90vh; height: 90dvh; }
 .mgv-titlerow { display: flex; align-items: center; gap: 10px; }
 .mgv-title { font-size: 19px; font-weight: 800; }
 .mgv-x { margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center;
