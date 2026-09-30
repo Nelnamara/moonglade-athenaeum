@@ -567,6 +567,24 @@ def test_a_bundle_stores_only_the_bed_its_board_names(rig):
     assert g.LOOM_BUNDLE_MAX_BEDS == 1
 
 
+def test_a_crash_left_bed_temp_file_is_swept_at_start_once_an_hour_old(tmp_path):
+    """Spend review N5. A bed upload or a bundle import killed mid-write leaves
+    .upload-*.part / .import-*.part in _beds/<account>/, which the unused list and its sweep
+    never see. The next start sweeps an old one -- and touches nothing else."""
+    d = _beds_dir(tmp_path)
+    d.mkdir(parents=True)
+    bed = hashlib.sha1(MP3_ID3).hexdigest() + ".mp3"
+    names = {".upload-abc123.part": True, ".import-def456.part": True, ".upload-fresh.part": False,
+             bed: False, "notes.part": False, ".upload-x.partial": False}
+    for n in names:
+        (d / n).write_bytes(MP3_ID3)
+        if n != ".upload-fresh.part":
+            _age(d / n, seconds=2 * g.LOOM_BED_TEMP_SWEEP_AGE_S)
+    create_app(tmp_path)
+    left = sorted(f.name for f in d.iterdir())
+    assert left == sorted(n for n, swept in names.items() if not swept)
+
+
 def test_a_bundle_whose_board_names_no_bed_stores_none(rig):
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w") as z:

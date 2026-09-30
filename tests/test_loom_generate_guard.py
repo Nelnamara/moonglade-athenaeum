@@ -456,6 +456,56 @@ def test_the_new_routes_and_the_handoff_never_reach_a_submit(rig, monkeypatch):
     assert r.status_code == 200    # "clip not downloaded yet" -- and no submit on the way
 
 
+def test_read_only_refuses_the_handoff_upload_before_the_session(rig, monkeypatch):
+    """Spend review N2 (the verdict on open call 3): Re-anchor's and the splice's frame upload
+    is free, but it WRITES to the PixAI account, so READ_ONLY refuses it -- before the
+    session's USER_ID lookup, so a READ_ONLY install talks to nobody."""
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    r = rig["cli"].post("/api/loom/handoff", json={"video_media_id": MID, "trim_out": 3.0})
+    assert "READ_ONLY" in r.get_json()["error"]
+    assert rig["sessions"] == 0 and rig["uploads"] == []
+
+
+# ---- open call 16: why /api/loom/generate and /set carry no CSRF token (spend review N3) -----
+
+def test_the_session_cookie_is_samesite_lax(tmp_path):
+    """A cross-site POST carries no session cookie. The case for leaving /api/loom/generate and
+    /api/loom/set without a CSRF token rests on this; relaxing it needs a token first."""
+    from tests.conftest import extract_login_csrf
+    app = create_app(tmp_path)
+    assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+    core.add_or_update_web_user(_TEST_USERNAME, _TEST_PASSWORD)
+    cli = app.test_client()
+    csrf = extract_login_csrf(cli.get("/login").get_data(as_text=True))
+    r = cli.post("/api/login", json={"username": _TEST_USERNAME, "password": _TEST_PASSWORD, "csrf": csrf})
+    assert r.get_json().get("ok")
+    cookies = [v for k, v in r.headers.items() if k.lower() == "set-cookie"]
+    assert cookies and all("samesite=lax" in c.lower() for c in cookies), cookies
+
+
+@pytest.mark.parametrize("ctype", ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"])
+def test_a_non_json_body_neither_renders_nor_writes_a_board(rig, ctype):
+    """The other half of open call 16: the routes read get_json(silent=True), which refuses
+    every body a form or a no-preflight fetch can send, so a JSON-looking text/plain body
+    parses as nothing. A later switch to force=True would make it a render or an overwrite."""
+    cli = rig["cli"]
+    r = cli.post("/api/loom/generate", data=json.dumps(_body(submit_id="sCsrf")), content_type=ctype)
+    assert r.get_json().get("task_id") is None
+    assert rig["submits"] == [] and rig["uploads"] == []
+    assert cli.get("/api/loom/submit-status?submit_id=sCsrf").get_json() == {"state": "unknown"}, "nothing journalled"
+    key = "storyboard:v2:proj:csrfprobe"
+    w = cli.post("/api/loom/set", data=json.dumps({"key": key, "value": "{\"hijacked\":1}"}), content_type=ctype)
+    assert w.status_code == 400 and not (w.get_json() or {}).get("ok")
+    assert cli.get("/api/loom/get?key=" + key).get_json()["missing"] is True, "no board was written"
+    import inspect
+    import moonglade_gallery
+    src = inspect.getsource(moonglade_gallery)
+    for fn in ("def loom_generate", "def loom_set"):
+        i = src.index(fn)
+        body = src[i:src.index("\n    @app.route", i)]
+        assert "request.get_json(silent=True)" in body and "force=True" not in body, fn
+
+
 def test_the_handoff_source_names_no_spend_call():
     import ast
     import inspect

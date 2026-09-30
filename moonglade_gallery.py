@@ -1048,6 +1048,10 @@ LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
 # the unused list never offers it (the sweep re-checks the same rule).
 LOOM_BED_UNUSED_GRACE_S = 10 * 60
+# A bed upload's or a bundle import's temp file (.upload-*.part / .import-*.part) that a crash
+# left in _beds/<account>/ is swept at the next start once it is this old (spend review N5):
+# the unused-bed list and its sweep only ever see finished, content-hashed names.
+LOOM_BED_TEMP_SWEEP_AGE_S = 3600
 # THE EDL ZIP'S NAMES -- the same patterns as loom/src/loom-edl-core.js's EDL_CLIP_FILE_RE and
 # EDL_BED_NAME_RE (tests/test_loom_p_routes.py compares the two sources).
 LOOM_EDL_CLIP_RE = re.compile(r"^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$")
@@ -23556,6 +23560,26 @@ def create_app(out_dir: Path):
     def _loom_beds_dir(user):
         return out_dir / "loom" / "_beds" / _account_key(user)
 
+    # Spend review N5: an upload or a bundle import killed mid-write leaves its temp file in the
+    # account's bed folder, invisible to the unused list and the sweep (they match finished
+    # names only). Swept here, at start, once an hour old -- as the EDL exports are. Only files
+    # of exactly the two temp shapes, directly inside _beds/<account>/, are ever touched.
+    _LOOM_BED_TEMP_RE = re.compile(r"^\.(upload|import)-[^/\\]*\.part$")
+    try:
+        _beds_root = out_dir / "loom" / "_beds"
+        for _acct in (_beds_root.iterdir() if _beds_root.is_dir() else []):
+            if not _acct.is_dir():
+                continue
+            for _tmp in _acct.iterdir():
+                try:
+                    if (_LOOM_BED_TEMP_RE.match(_tmp.name) and _tmp.is_file()
+                            and time.time() - _tmp.stat().st_mtime > LOOM_BED_TEMP_SWEEP_AGE_S):
+                        _tmp.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
     def _loom_bed_path(user, name):
         """The caller's bed file for `name`, or None (bad name, outside the folder, absent)."""
         name = str(name or "")
@@ -24503,6 +24527,14 @@ __DESIGN_TOKENS__
             trim_out = float(trim_out) if trim_out is not None else None
         except (TypeError, ValueError):
             trim_out = None
+        # Spend review N2 (the verdict on open call 3): the upload below is free but it is a
+        # WRITE to the PixAI account, so READ_ONLY refuses it -- first, before the session's
+        # USER_ID lookup, so a READ_ONLY install talks to nobody (as /api/loom/generate does).
+        import moonglade_backup as _core
+        try:
+            _core._check_read_only("upload a hand-off frame to your PixAI account")
+        except _core.PixAIError as e:
+            return jsonify({"error": str(e)[:300]}), 200
         try:
             core, session = _gen_session()
             vid = _find_local_video_file(mid)
