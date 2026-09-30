@@ -23458,6 +23458,14 @@ def create_app(out_dir: Path):
     _LOOM_JOURNAL_KEEP_S = 14 * 24 * 3600
     _LOOM_BLOCK_S = 6 * 3600    # the poll ceiling: one render per shot for this long
     _LOOM_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+    # (account key, submit_id) of every render whose loom_generate request is still running
+    # in THIS process (spend review B1). Added when "sending" is journalled, removed in the
+    # handler's finally; guarded by _loom_journal_lock. It is what tells a live send from a
+    # crashed one: the journal alone says "sending" for both. submit-abandon refuses a live
+    # one, so a slow PixAI answer can never be released and rendered a second time while the
+    # first request is still inside core.submit. After a restart the set is empty, so a send
+    # that truly died with the old process can still be released (review F8).
+    _loom_sending_now = set()
 
     def _loom_journal_path(user):
         d = out_dir / "loom" / "_submits"
@@ -24810,6 +24818,7 @@ __DESIGN_TOKENS__
                 board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
                 if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
                     return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
+        sending_key = (_account_key(user), submit_id) if journalled else None
         try:
             _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
         except _core.PixAIError as e:
@@ -24855,6 +24864,7 @@ __DESIGN_TOKENS__
                                        state="not_sent", error=msg)
                     return jsonify({"error": msg})
                 _loom_journal_note(user, submit_id, board=board_id, card=card_id, state="sending")
+                _loom_sending_now.add(sending_key)
         elif unsendable:
             return jsonify({"error": "One of these pictures can't be sent to PixAI (an imported "
                                      "picture). Nothing was sent."})
@@ -25044,6 +25054,13 @@ __DESIGN_TOKENS__
             if state == "may_have_started":
                 return jsonify({"error": msg, "unclear": True, "state": state}), 200
             return jsonify({"error": msg, "state": state}), 200
+        finally:
+            # Spend review B1: this request is no longer sending, whatever became of it. The
+            # outcome was journalled above first, so there is no moment when the id is out of
+            # the set while the journal still says "sending" for a live request.
+            if sending_key is not None:
+                with _loom_journal_lock:
+                    _loom_sending_now.discard(sending_key)
 
     @app.route("/api/loom/submit-status")
     @tier(LOGIN)
@@ -25082,6 +25099,13 @@ __DESIGN_TOKENS__
             return jsonify({"error": "submit_id required"}), 400
         with _loom_journal_lock:
             e = _loom_journal_load(user)["subs"].get(sid) or {}
+            # Spend review B1: a render whose request is still running in this process is not
+            # unclear, it is slow. Releasing it would free the shot for a second paid render
+            # while this one is still inside core.submit. (A send that died with an earlier
+            # process is not in the set, so it can still be released.)
+            if (_account_key(user), sid) in _loom_sending_now:
+                return jsonify({"error": "This render is still being sent. Wait for PixAI's answer, "
+                                         "then check again.", "sending": True}), 409
             if e.get("state") == "submitted" and e.get("task_id"):
                 return jsonify({"error": "That render was sent (task …%s), so it can't be released."
                                          % str(e["task_id"])[-6:], "task_id": e["task_id"]}), 409

@@ -8313,6 +8313,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
   const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
   const CHECKING_MSG = "Checking whether the render was sent…";
+  const STILL_SENDING_MSG = "Still being sent to PixAI — it can't be released until PixAI answers. Check again in a moment.";
 
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
@@ -8498,6 +8499,10 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // It reads GET /api/loom/submit-status and nothing else: it can never send a render.
   const checkSubmit = async (cardId, submitId, boardId) => {
     const here = () => activeIdRef.current === boardId;
+    // Spend review B1: this tab's own POST for this card has not answered yet (a slow PixAI,
+    // then a board switch or the Mobile toggle re-ran the resume). The send is SLOW, not
+    // unclear: nothing is marked and no release is offered -- the POST's answer settles it.
+    if (inflightRef.current.has(cardId)) return { pending: true };
     if (checkingRef.current.has(submitId)) return { unclear: true };
     checkingRef.current.add(submitId);
     try {
@@ -8553,6 +8558,9 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const e = cardOn(cardId);
     const boardId = activeIdRef.current;
     if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+    // Spend review B1: a render whose POST this tab is still waiting on is never released --
+    // it may be charged any second, and a release would free the shot for a second render.
+    if (inflightRef.current.has(cardId)) { holdCard(cardId, STILL_SENDING_MSG, "checking"); return; }
     const submitId = e.c.pendingSubmitId;
     let d = null, status = 0;
     try {
@@ -8570,6 +8578,9 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       return;
     }
     if (status === 409 && d && d.task_id) { adoptFromJournal(cardId, submitId, String(d.task_id), boardId); return; }
+    // The server still has this render's request running (another tab's, or this page's before
+    // a reload): it refused the release. The shot stays locked; ↻ Check reads the answer later.
+    if (status === 409 && d && d.sending) { holdCard(cardId, STILL_SENDING_MSG, "unclear"); return; }
     holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " — " + d.error : " — the server didn't answer.") + " Nothing was sent.", "unclear");
   };
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
@@ -8729,7 +8740,9 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const boardId = activeIdRef.current;
     cardsToResume(proj, resumedRef.current)
       .forEach((c) => pollShot(c.id, c.taskId, c.startedAt, boardId));
+    // A card whose POST this tab is still waiting on is slow, not unclear (spend review B1).
     submitsToCheck(proj, Object.create(null))
+      .filter((c) => !inflightRef.current.has(c.id))
       .forEach((c) => checkSubmit(c.id, c.submitId, boardId));
   };
   useEffect(() => { resumeInterrupted(); }, [activeId, mobileUI]);   // eslint-disable-line

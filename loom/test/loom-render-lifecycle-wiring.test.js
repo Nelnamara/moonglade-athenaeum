@@ -184,8 +184,24 @@ describe("the unclear-send way-out, the resume and every landing cannot reach a 
   test("resumeInterrupted is named, polls the task case and CHECKS the unclear case; the effect only calls it", () => {
     const res = hookFn(CODE, "resumeInterrupted");
     assert.match(res, /cardsToResume\(proj, resumedRef\.current\)\s*\.forEach\(\(c\) => pollShot\(c\.id, c\.taskId, c\.startedAt, boardId\)\);/);
-    assert.match(res, /submitsToCheck\(proj, Object\.create\(null\)\)\s*\.forEach\(\(c\) => checkSubmit\(c\.id, c\.submitId, boardId\)\);/);
+    assert.match(res, /submitsToCheck\(proj, Object\.create\(null\)\)\s*\.filter\(\(c\) => !inflightRef\.current\.has\(c\.id\)\)\s*\.forEach\(\(c\) => checkSubmit\(c\.id, c\.submitId, boardId\)\);/,
+      "a card whose POST this tab is still waiting on is not checked (spend review B1)");
     assert.match(CODE, /useEffect\(\(\) => \{ resumeInterrupted\(\); \}, \[activeId, mobileUI\]\);/);
+  });
+  test("a send this tab is still waiting on is SLOW, never unclear: no mark, no journal read, no release (spend review B1)", () => {
+    // A slow PixAI, then a board switch or the Mobile toggle: the resume used to mark the card
+    // unclear from submit-status "sending" and offer the release, which freed the shot for a
+    // second paid render while the first POST was still inside core.submit.
+    const check = hookFn(CODE, "checkSubmit");
+    const guard = check.indexOf("if (inflightRef.current.has(cardId)) return { pending: true };");
+    assert.ok(guard >= 0, "checkSubmit must refuse a card whose POST is pending in inflightRef");
+    assert.ok(guard < check.indexOf("fetch(") && guard < check.indexOf("markUnclear("), "before the read and before any mark");
+    const rel = hookFn(CODE, "releaseSubmit");
+    const relGuard = rel.indexOf("if (inflightRef.current.has(cardId)) { holdCard(cardId, STILL_SENDING_MSG, \"checking\"); return; }");
+    assert.ok(relGuard >= 0 && relGuard < rel.indexOf('fetch("/api/loom/submit-abandon"'), "the release refuses before it asks the server");
+    assert.match(rel, /if \(status === 409 && d && d\.sending\) \{ holdCard\(cardId, STILL_SENDING_MSG, "unclear"\); return; \}/,
+      "the server's own still-sending refusal keeps the lock and says so");
+    assert.ok(rel.indexOf("d.sending") < rel.indexOf("Couldn't release this shot"));
   });
   test("pollShot registers its own task, so a later resume never starts a second poll of it (F4)", () => {
     const poll = hookFn(CODE, "pollShot");

@@ -302,6 +302,58 @@ def test_release_an_unclear_send_then_render_again_never_resends_the_old_one(rig
     assert len(rig["submits"]) == 2, "one lost send, one new render; s1 is never sent again"
 
 
+def test_a_send_still_in_flight_cannot_be_released_or_rendered_twice(rig):
+    """Spend review B1. PixAI is slow; the owner reloads, the card reads submit-status
+    ("sending") and offers the release; the owner releases. The request is still inside
+    core.submit, so releasing it would free the shot for a second paid render while the first
+    completes. The release must be refused while the request runs, and exactly one submit may
+    happen."""
+    gate = threading.Event()
+    rig["behaviour"] = lambda params: (gate.wait(5), "task-slow")[1]
+    app = rig["app"]
+    first = []
+    t = threading.Thread(target=lambda: first.append(
+        _another_tab(app).post("/api/loom/generate", json=_body(submit_id="sSlow"))))
+    t.start()
+    try:
+        deadline = time.time() + 5
+        while not rig["submits"] and time.time() < deadline:
+            time.sleep(0.01)
+        assert rig["submits"], "the first render reached the mutation"
+        assert rig["cli"].get("/api/loom/submit-status?submit_id=sSlow").get_json()["state"] == "sending"
+        rel = rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "sSlow"})
+        assert rel.status_code == 409 and rel.get_json().get("sending") is True
+        again = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sNew"))
+        assert again.status_code == 409 and "already rendering" in again.get_json()["error"]
+    finally:
+        gate.set()
+        t.join(10)
+    assert first and first[0].get_json()["task_id"] == "task-slow"
+    assert len(rig["submits"]) == 1, "one shot, one paid render"
+    st = rig["cli"].get("/api/loom/submit-status?submit_id=sSlow").get_json()
+    assert st == {"state": "submitted", "task_id": "task-slow"}, "the release never landed"
+    # The request is over: the ordinary rule applies again (a sent render is adopted, not released).
+    done = rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "sSlow"})
+    assert done.status_code == 409 and done.get_json()["task_id"] == "task-slow"
+
+
+def test_a_send_that_died_with_an_earlier_process_can_still_be_released(tmp_path):
+    """B1's other half (F8 kept): the in-flight set is per process, so a journal line that
+    says "sending" for a request no running process owns (a crash mid-send) can be released."""
+    d = tmp_path / "loom" / "_submits"
+    d.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    (d / (_account_key(_TEST_USERNAME) + ".jsonl")).write_text(json.dumps(
+        {"submit_id": "sDead", "board": "b1", "card": "c1", "state": "sending", "at": now,
+         "first_at": now}) + "\n", encoding="utf-8")
+    cli = login_test_client(create_app(tmp_path))
+    assert cli.post("/api/loom/generate", json=_body(submit_id="sAfter")).status_code == 409, \
+        "the dead send still holds the shot until it is released"
+    r = cli.post("/api/loom/submit-abandon", json={"csrf": _csrf(cli), "submit_id": "sDead"})
+    assert r.status_code == 200 and r.get_json()["ok"]
+    assert cli.get("/api/loom/submit-status?submit_id=sDead").get_json()["state"] == "abandoned"
+
+
 def test_a_sent_render_cannot_be_released(rig):
     rig["cli"].post("/api/loom/generate", json=_body(submit_id="s1"))
     r = rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "s1"})
