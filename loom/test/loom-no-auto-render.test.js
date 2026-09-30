@@ -257,12 +257,19 @@ const SINK_NAMES = ["generateShot", "batchGenerate", "genSubmit", "genImage", "g
   // same money as genImage, so the same rules. Stricter than §4's list, never looser.
   "genImageRun", "sendImgRun", "submitRun"];
 const SINK_ROUTES = ["/api/loom/generate", "/api/generate", "/api/edit", "/api/fix", "/api/generate/run", "/api/generate/plan"];
-const GO_SELECTORS = ["mgd-go", "mgdock-gen", "lm-genbtn", "lv-genall"];
+// Spend review S4: lv-render (the board card's Render / Re-render) and lv-go (the desktop tabs'
+// Go: Image, Edit, Fix, Reference) are Go buttons too -- the allowlist below names both.
+const GO_SELECTORS = ["mgd-go", "mgdock-gen", "lm-genbtn", "lv-genall", "lv-render", "lv-go"];
 const ALLOWED_ROUTES = ["/api/loom/handoff", "/api/price", "/api/loom/submit-status", "/api/loom/submit-abandon"];
 
 const idRe = (name, flags) => new RegExp("(?<![\\w$])" + name.replace(/\$/g, "\\$") + "(?![\\w$])", flags);
 const routeHit = (v) => SINK_ROUTES.find((r) => v === r || v.startsWith(r + "?") || v.startsWith(r + "/")) || null;
-const selectorHit = (v) => GO_SELECTORS.find((g) => new RegExp("(^|\\s)" + g + "(\\s|$)").test(v)) || null;
+// The most specific route a literal names ("/api/generate/run", not "/api/generate"), for the pins.
+const routeOf = (v) => SINK_ROUTES.slice().sort((a, b) => b.length - a.length)
+  .find((r) => v === r || v.startsWith(r + "?") || v.startsWith(r + "/")) || null;
+// A class token wherever it sits: a className ("lv-render off"), or a selector
+// (".lv-render", "button.lv-go:not(:disabled)") that a querySelector(...).click() would use.
+const selectorHit = (v) => GO_SELECTORS.find((g) => new RegExp("(^|[^\\w-])" + g + "(?![\\w-])").test(v)) || null;
 
 /** The first sink inside one function's extent, or null. */
 function sinkIn(m, d, sinks) {
@@ -360,6 +367,26 @@ const siteKeys = (m, name) => sitesOf(m, name).map((s) => s.key).sort();
  *  a sink in a JSX prop only as an onClick, or as a bare pass-down to a pinned component. */
 function f20Violations(m, sinks, pinned) {
   const bad = [];
+  // Spend review S4: an effect is checked for EVERY kind of sink, not identifiers only -- a
+  // spend route's literal (fetch("/api/edit", ...)) or a Go button's selector
+  // (querySelector(".lv-render").click()) inside an effect runs on its own just the same; and
+  // every named function an effect mentions is walked, so a helper cannot hide one either.
+  for (const [a, b] of effectRanges(m)) {
+    for (const t of m.strings) {
+      if (t.regex || t.start < a || t.end > b) continue;
+      const r = routeHit(t.value), g = selectorHit(t.value);
+      if (r) bad.push('the spend route "' + r + '" is named inside a useEffect/useLayoutEffect callback (line ' + m.lineOf(t.start) + ") -- an effect runs on its own, never on a click");
+      if (g) bad.push("the Go button ." + g + " is named inside a useEffect/useLayoutEffect callback (line " + m.lineOf(t.start) + ") -- an effect runs on its own, never on a click");
+    }
+    const seen = new Set();
+    for (const x of m.code.slice(a, b).matchAll(/(?<![\w$])[A-Za-z_$][\w$]*/g)) {
+      const id = x[0];
+      if (seen.has(id) || !m.byName.has(id) || sinks.includes(id)) continue;
+      seen.add(id);
+      const p = reach(m, id, sinks);
+      if (p) bad.push("a useEffect/useLayoutEffect callback (line " + m.lineOf(a) + ") reaches a render: " + p);
+    }
+  }
   for (const s of sinks) {
     for (const site of sitesOf(m, s)) {
       if (site.inEffect) bad.push(s + " is referenced inside a useEffect/useLayoutEffect callback (line " + site.line + ": " + site.key + ") -- an effect runs on its own, never on a click");
@@ -474,6 +501,47 @@ describe("negative controls: the walker and the F20 rules really fail", () => {
     const bad = f20Violations(fake, ["genSubmit", "generateShot"], []);
     assert.ok(bad.some((b) => /genSubmit is referenced inside a useEffect/.test(b)), bad.join("\n"));
     assert.ok(bad.some((b) => /generateShot is handed to the JSX prop `onMount`/.test(b)), bad.join("\n"));
+  });
+  test("S4: an effect with no sink identifier -- a spend route's literal, a Go button's selector, or a helper -- is flagged", () => {
+    const literal = model([
+      "function LoomV2({ project }) {",
+      '  useEffect(() => { fetch("/api/edit", { method: "POST", body: "{}" }); }, [project]);',
+      "  return null;",
+      "}",
+    ].join("\n"));
+    const b1 = f20Violations(literal, SINK_NAMES, []);
+    assert.ok(b1.some((b) => /the spend route "\/api\/edit" is named inside a useEffect/.test(b)), b1.join("\n"));
+    const click = model([
+      "function LoomV2({ project }) {",
+      '  useLayoutEffect(() => { document.querySelector(".lv-render").click(); });',
+      "  return null;",
+      "}",
+    ].join("\n"));
+    const b2 = f20Violations(click, SINK_NAMES, []);
+    assert.ok(b2.some((b) => /the Go button \.lv-render is named inside a useEffect/.test(b)), b2.join("\n"));
+    const helper = model([
+      "function LoomV2({ project }) {",
+      '  const poke = () => fetch("/api/fix", {});',
+      "  useEffect(() => { poke(); }, [project]);",
+      "  return null;",
+      "}",
+    ].join("\n"));
+    const b3 = f20Violations(helper, SINK_NAMES, []);
+    assert.ok(b3.some((b) => /reaches a render: poke → "\/api\/fix"/.test(b)), b3.join("\n"));
+    const clean = model([
+      "function LoomV2({ project }) {",
+      '  const peek = () => fetch("/api/price", {});',
+      "  useEffect(() => { peek(); }, [project]);",
+      '  return <button className="lv-go" onClick={() => genImage(project)}>Go</button>;',
+      "}",
+    ].join("\n"));
+    assert.deepEqual(f20Violations(clean, SINK_NAMES, []), [], "a free call in an effect and a Go button's onClick are fine");
+  });
+  test("S4: a Go selector is recognised in a className and in a CSS selector, never inside another class name", () => {
+    for (const v of ["lv-render", "lv-render off", ".lv-render", "button.lv-go:not(:disabled)", "x lv-go", "#b > .lv-genall"]) {
+      assert.ok(selectorHit(v), v);
+    }
+    for (const v of ["lv-gold", "lv-go-wrap", "my-lv-render", "lv-renderer"]) assert.equal(selectorHit(v), null, v);
   });
 });
 
@@ -590,6 +658,36 @@ describe("placement pins", () => {
     const hits = routeSites(M);
     assert.deepEqual(hits.map((s) => fnAt(M, s.start)), ["generateShot"],
       "/api/loom/generate must be named only by generateShot's one POST; found in: " + hits.map((s) => fnAt(M, s.start) + " (line " + M.lineOf(s.start) + ")").join(", "));
+  });
+  test("S4: every spend route's literal in master-storyboard.jsx sits in its one allowed function", () => {
+    // /api/loom/generate is pinned just above; the Image, Edit, Reference and Fix tabs' routes
+    // sit in their own tab handlers; the run road's /plan and /run are never named here (the
+    // road lives in loom-run.js and the gallery's submitRun, pinned below).
+    const PLACES = {
+      "/api/loom/generate": ["generateShot"],
+      "/api/generate": ["genImage"],
+      "/api/edit": ["genEdit", "genRef"],
+      "/api/fix": ["genFix"],
+      "/api/generate/run": [],
+      "/api/generate/plan": [],
+    };
+    assert.deepEqual(Object.keys(PLACES).sort(), SINK_ROUTES.slice().sort(), "every spend route has a pin");
+    const got = Object.fromEntries(SINK_ROUTES.map((r) => [r, []]));
+    for (const s of M.strings) {
+      if (s.regex) continue;
+      const r = routeOf(s.value);
+      if (r) got[r].push(fnAt(M, s.start));
+    }
+    for (const r of SINK_ROUTES) got[r].sort();
+    assert.deepEqual(got, PLACES, "a spend route is named somewhere new in master-storyboard.jsx -- a new place that can spend needs the owner's eye");
+  });
+  test("S4: in loom/src the only spend route named is loom-run.js's PLAN_PATH, at module scope", () => {
+    const found = [];
+    for (const f of readdirSync(path.join(here, "../src")).filter((x) => x.endsWith(".js"))) {
+      const m = model(read("src/" + f));
+      for (const s of m.strings) if (!s.regex && routeOf(s.value)) found.push([f, routeOf(s.value), fnAt(m, s.start)]);
+    }
+    assert.deepEqual(found, [["loom-run.js", "/api/generate/plan", "(module)"]]);
   });
   test("in gallery/src it appears only in VideoDrawer's doGenerate, as submitTask's route", () => {
     const root = path.join(here, "../../gallery/src");
