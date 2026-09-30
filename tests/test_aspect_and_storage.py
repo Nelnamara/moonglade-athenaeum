@@ -346,6 +346,78 @@ def test_a_backslash_filename_still_finds_its_file():
     assert storage_breakdown(rows, {"2026-07/a.png": 7}, frozenset())["total_bytes"] == 7
 
 
+@pytest.fixture
+def real_layout(tmp_path):
+    """The library as it really sits on disk (owner walk 2026-09-29: the bars counted 263 of
+    37,535 pictures). Older rows hold the BARE file name while the file sits in images/;
+    newer ones hold a path relative to the library (videos/..., images/..., imported/...). One
+    picture also has a second copy in a month folder, and one file on disk has no row."""
+    for rel, n in {
+        "images/night_elf_druid_1674_111.webp": 1000,      # row holds the bare name
+        "images/moonlit_library_1675_222.webp": 2000,      # row holds the bare name
+        "images/newer_row_1676_333.webp": 3000,            # row holds images/<name>
+        "2026-07/night_elf_druid_1674_111.webp": 400,      # a smaller second copy of 111
+        "videos/a_walk_in_the_glade_1677_900.mp4": 50000,  # row holds videos/<name>
+        "imported/749_mg_moonglade_local_ab12.png": 700,   # a local import, row holds imported/<name>
+        "images/stray_1678_999.webp": 99,                  # on disk, never catalogued
+    }.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x" * n)
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="111", filename="night_elf_druid_1674_111.webp", model_name="Tsubaki.3",
+             collections="Druid", created_at="2026-07-01T00:00:00"),
+        _row(media_id="222", filename="moonlit_library_1675_222.webp", model_name="Lucent Mix",
+             created_at="2026-07-02T00:00:00"),
+        _row(media_id="333", filename="images/newer_row_1676_333.webp", model_name="Tsubaki.3",
+             source="api", created_at="2026-07-03T00:00:00"),
+        _row(media_id="900", filename="videos/a_walk_in_the_glade_1677_900.mp4", is_video="1",
+             model_name="Seedance", created_at="2026-07-04T00:00:00"),
+        _row(media_id="local_ab12", filename="imported/749_mg_moonglade_local_ab12.png",
+             source="local", created_at="2026-07-05T00:00:00"),
+        _row(media_id="gone", filename="gone_1679_gone.webp", created_at="2026-07-06T00:00:00"),
+    ])
+    return tmp_path, db
+
+
+def test_a_bare_filename_row_is_measured_through_its_media_id(real_layout):
+    """The 263-picture bug: only rows whose `filename` was a relative path were measured."""
+    out, db = real_layout
+    h = collection_health(out, db)
+    st = h["storage"]
+    t = {s["key"]: s for s in st["by_type"]}
+    # every catalogued image with a file: 111 (at its larger copy), 222, 333 and the import
+    assert (t["image"]["count"], t["image"]["bytes"]) == (4, 1000 + 2000 + 3000 + 700)
+    assert (t["video"]["count"], t["video"]["bytes"]) == (1, 50000)
+    assert st["files"] == 5 and st["total_bytes"] == 56700
+    # and it agrees with "Images on disk": every image file, less the second copy of 111
+    # (Duplicates) and the one file no row names
+    assert t["image"]["count"] == h["total_files"] - h["dup_redundant"] - 1
+    models = {s["name"]: s["bytes"] for s in st["by_model"]}
+    assert models["Tsubaki.3"] == 1000 + 3000 and models["Lucent Mix"] == 2000
+    assert {s["name"]: s["bytes"] for s in st["by_collection"]["segments"]} == {"Druid": 1000}
+
+
+def test_a_media_id_match_stays_in_its_own_kind():
+    """A video row never takes an image's bytes (or the reverse) just because the ids agree."""
+    rows = [{"media_id": "5", "filename": "clip_5.mp4", "is_video": "1", "model_name": "",
+             "collections": ""},
+            {"media_id": "6", "filename": "pic_6.webp", "is_video": "", "model_name": "",
+             "collections": ""}]
+    st = storage_breakdown(rows, {}, frozenset(), {("image", "5"): 10, ("video", "6"): 20})
+    assert st["files"] == 0 and st["total_bytes"] == 0
+    st = storage_breakdown(rows, {}, frozenset(), {("video", "5"): 10, ("image", "6"): 20})
+    assert st["files"] == 2 and st["total_bytes"] == 30
+
+
+def test_the_relative_path_wins_over_the_media_id():
+    rows = [{"media_id": "7", "filename": "images/p_7.webp", "is_video": "", "model_name": "M",
+             "collections": ""}]
+    st = storage_breakdown(rows, {"images/p_7.webp": 5}, frozenset(), {("image", "7"): 900})
+    assert st["total_bytes"] == 5
+
+
 def test_reading_health_writes_nothing(lib):
     out, db = lib
     before = hashlib.sha256(db.read_bytes()).hexdigest()

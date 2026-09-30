@@ -288,6 +288,13 @@ export default function FolioOverlay({ onClose, onJump }) {
   const grandTotal = vm ? vm.totalNonFeat : 0;
   const ladderNames = {};
   if (vm) vm.ladders.forEach((l) => { ladderNames[l.id] = l.name; });
+  // What each track counts, in plain words, for its "measured in" header (owner walk
+  // 2026-09-29: one read "measured in local_gens"). The server sends them on each track as
+  // metric_words; the key with its underscores spaced out is only the fallback for an older
+  // server, so no header ever shows a code name.
+  const trackWords = {};
+  ((data && data.ladders) || []).forEach((t) => { if (t && t.id) trackWords[t.id] = t.metric_words; });
+  const metricWords = (l) => trackWords[l.id] || String(l.metric || "").replace(/_/g, " ");
   const sorted = sortKey !== "default";
 
   // Statistics tab, owner-requested addition (not in the DC mock): more of
@@ -646,7 +653,7 @@ export default function FolioOverlay({ onClose, onJump }) {
                                       src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""}
                                       alt="" loading="lazy"
                                       onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
-                                    <span className="mgfo-group-name">{l.name} — measured in {l.metric}</span>
+                                    <span className="mgfo-group-name">{l.name} — measured in {metricWords(l)}</span>
                                     <span className="mgfo-group-count">
                                       {l.filteredTiers.filter((t) => t.earned).length}/{l.filteredTiers.length}
                                     </span>

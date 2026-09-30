@@ -14462,14 +14462,30 @@ _WS_DONE_STATUS = "completed"
 # reason to match it here).
 _WS_STALE_TIMEOUT = 240
 
+# OUR OWN KEEPALIVE (2026-09-29). The clock above assumed PixAI pings an idle
+# subscription. It does not: every idle stretch in the logs since 2026-09-04 reads
+# "connected and subscribed" followed, exactly 240s later, by "socket went silent",
+# with the catch-up sweep then finding nothing missed -- a healthy, quiet account
+# declared dead every four minutes, and the Control Panel read "Reconnecting ...
+# treating the connection as dead" for the minute of backoff after each one. The
+# protocol lets EITHER side ping, and the receiver must answer with a pong, so after
+# this many seconds of quiet the client sends its own graphql-transport-ws `ping`;
+# the server's `pong` is a frame like any other and resets the stale clock. A
+# connection that answers nothing -- not even our ping -- still goes stale at
+# _WS_STALE_TIMEOUT exactly as before. (The websockets library's own RFC 6455 pings
+# are control frames recv() never returns, so they cannot reset this clock.)
+_WS_HEARTBEAT = 60
+
 
 async def _watch_events_async(auth_header, on_event, seconds):
     """Connect, handshake, subscribe to personalEvents, and dispatch each `next` frame's
-    payload to on_event(dict). Replies to server pings. Runs until `seconds` elapses (None =
-    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete.
+    payload to on_event(dict). Replies to server pings, and after `_WS_HEARTBEAT` seconds
+    of quiet sends a ping of its own (see that constant). Runs until `seconds` elapses
+    (None = until cancelled). Read-only: sends only connection_init / subscribe / ping /
+    pong / complete.
 
-    Every frame off the wire -- a `next`, a `ping`, anything -- resets a
-    `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
+    Every frame off the wire -- a `next`, a `ping`, the `pong` to our ping, anything --
+    resets a `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
     instead of waiting forever on a socket that reports no error but has gone
     silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
     number was picked). WatchStaleError is just another exception out of this
@@ -14492,18 +14508,30 @@ async def _watch_events_async(auth_header, on_event, seconds):
             await ws.send(json.dumps({"id": "watch", "type": "subscribe",
                                       "payload": {"query": _WS_SUBSCRIPTION}}))
             on_event({"__meta__": "subscribed"})
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _WS_STALE_TIMEOUT
             while True:
+                # Wait for the next frame, but never past the staleness deadline, and never
+                # longer than one heartbeat: a quiet heartbeat sends our ping and waits on.
+                left = deadline - loop.time()
+                wait = min(_WS_HEARTBEAT, max(left, 0))
                 try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_STALE_TIMEOUT)
+                    # recv() is cancellation-safe in websockets' asyncio client: a timed-out
+                    # wait loses no frame, the next recv() returns it.
+                    raw = await asyncio.wait_for(ws.recv(), timeout=wait)
                 except asyncio.TimeoutError:
-                    # Converted to a WatchStaleError HERE, not left as a bare
-                    # asyncio.TimeoutError, so it can never be mistaken for (or
-                    # accidentally swallowed by) the outer bounded-run timeout
-                    # below, which catches that same exception type for a
-                    # completely different reason (the `seconds` run budget).
-                    raise WatchStaleError(
-                        "no frame from PixAI in {}s (not even a keepalive ping) -- "
-                        "treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                    if wait >= left:
+                        # Converted to a WatchStaleError HERE, not left as a bare
+                        # asyncio.TimeoutError, so it can never be mistaken for (or
+                        # accidentally swallowed by) the outer bounded-run timeout
+                        # below, which catches that same exception type for a
+                        # completely different reason (the `seconds` run budget).
+                        raise WatchStaleError(
+                            "no frame from PixAI in {}s (not even a reply to our keepalive "
+                            "ping) -- treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                    await ws.send(json.dumps({"type": "ping"}))
+                    continue
+                deadline = loop.time() + _WS_STALE_TIMEOUT
                 msg = json.loads(raw)
                 mtype = msg.get("type")
                 if mtype == "ping":

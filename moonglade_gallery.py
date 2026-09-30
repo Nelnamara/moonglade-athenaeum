@@ -6216,6 +6216,37 @@ def achievement_metrics(db_path, use_cache=True):
 
 _TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
 
+# PLAIN WORDS FOR WHAT A LADDER COUNTS (owner walk 2026-09-29). The Folio's ladder headers read
+# "<track> — measured in <metric>", and the metric is the roster's own key: "images" reads fine,
+# "local_gens" is a code name on screen. Every metric a ladder track uses has its words here,
+# sent on each track as `metric_words`; a metric this list does not know yet (a roster that grows
+# a track before this does) falls back to its key with the underscores spaced out, so no header
+# can ever show one. tests/test_achievements.py holds every live track to an entry here.
+LADDER_METRIC_WORDS = {
+    "images": "images",
+    "videos": "videos",
+    "local_gens": "pictures made in the app",
+    "collections": "collections",
+    "models": "models used",
+    "tagged": "tagged pictures",
+    "published": "published pictures",
+    "edits": "edits",
+    "culled": "pictures deleted",
+    "days_used": "days you opened the app",
+    "rated": "rated pictures",
+    "loras_trained": "LoRAs trained",
+    "contest_entries": "contest entries",
+    "jobs_concurrent": "jobs running at once",
+    "loras_distinct": "different LoRAs used",
+    "distinct_active_days": "days you made or sorted pictures",
+}
+
+
+def metric_words(metric):
+    """What a ladder's metric counts, in words a person reads (never a code name)."""
+    m = str(metric or "")
+    return LADDER_METRIC_WORDS.get(m) or " ".join(m.replace("_", " ").split())
+
 
 def _build_ach_rung(roster):
     """Rung = the ordinal step within a ladder family. A ladder family = the
@@ -6375,7 +6406,11 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "ladders": _ladder_tracks(), "newly": newly,
+    # Each track also carries its metric in plain words, for the Folio's "measured in" header
+    # (copies: the sealed defs are cached and shared, never written into).
+    ladders = [dict(t, metric_words=metric_words(t.get("metric"))) if isinstance(t, dict) else t
+               for t in _ladder_tracks()]
+    return {"achievements": achs, "skins": skins, "ladders": ladders, "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
 
 
@@ -8470,11 +8505,15 @@ def collection_health(out_dir, db_path):
     # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
     # anything if it watches exactly the roots this walk descends into.
     size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
+    size_by_mid = {}          # (kind, media_id) -> bytes of its largest copy (the Storage bars)
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
         _rel = str(e.rel).replace("\\", "/")
         on_disk_rels.add(_rel)
         if e.size is not None:
             size_by_rel[_rel] = e.size
+            _k = (e.kind, e.media_id)
+            if e.size > size_by_mid.get(_k, -1):
+                size_by_mid[_k] = e.size
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
         if e.size is None:
@@ -8602,7 +8641,8 @@ def collection_health(out_dir, db_path):
         "top_tags": top_tags,
         "top_loras": top_loras,
         "top_words": top_words,
-        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir)),
+        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir),
+                                     size_by_mid),
     }
 
 
@@ -8610,10 +8650,20 @@ def collection_health(out_dir, db_path):
 # STORAGE BREAKDOWN (Session N6). Collection Health's one "Storage used" number became three
 # stacked bars: by TYPE (images, videos, Loom renders), by MODEL, and by COLLECTION. Sizes are
 # the bytes each catalogued picture's file takes on disk (the health walk already stats every
-# file; it just kept only the images' before). A picture whose file is not where the catalog
-# says is left out -- it takes no space we can measure -- so the bars total what is really
-# there, catalogued pictures only, which can be less than the folder (an uncataloged file
-# counts in the folder and in no bar).
+# file; it just kept only the images' before). A picture whose file is not on disk is left out
+# -- it takes no space we can measure -- so the bars total what is really there, catalogued
+# pictures only, which can be less than the folder (an uncataloged file counts in the folder
+# and in no bar).
+#
+# FINDING A ROW'S FILE. The catalog's `filename` is a path relative to the library only on
+# newer rows (videos/..., images/..., imported/...); every older row holds the bare file name
+# while the file sits in images/. Matching on `filename` alone therefore measured 263 of a
+# 37,535-picture library (owner walk, 2026-09-29). So a row is found the way the rest of the
+# app finds a file: its relative path first, else its media id through the walk's own
+# media_id_of (INVARIANT 1), in the same kind (a video row never borrows an image's bytes).
+# Both lookups come off the health walk that already ran -- no second walk, no stat per row.
+# A media id on disk twice counts once, at its larger copy (the Duplicates tile's own keeper
+# rule; the other copy is what Reclaimable counts).
 #
 #   type        an exclusive split: a Loom render (a board's shot result or a kept re-roll) is
 #               "loom" whether it is a clip or a still, else "video", else "image". It is the
@@ -8628,21 +8678,27 @@ STORAGE_TOP = 4
 _STORAGE_TYPES = (("image", "Images"), ("video", "Videos"), ("loom", "Loom renders"))
 
 
-def storage_breakdown(rows, size_by_rel, loom_ids):
+def storage_breakdown(rows, size_by_rel, loom_ids, size_by_mid=None):
     """Pure: catalog rows (media_id, filename, is_video, model_name, collections), the walk's
-    {relative path: bytes} and the Loom's render ids -> the payload's `storage` block."""
+    {relative path: bytes}, the Loom's render ids and the walk's {(kind, media_id): bytes}
+    -> the payload's `storage` block. A row is measured by its relative path, else by its
+    media id in its own kind (see the section comment: most rows hold a bare file name)."""
+    size_by_mid = size_by_mid or {}
     by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
     by_model, by_coll = {}, {}                                 # name -> [bytes, count]
     total, files = 0, 0
     for r in rows:
         fn = str(r["filename"] or "").replace("\\", "/")
+        mid = str(r["media_id"] or "")
+        is_video = str(r["is_video"] or "") == "1"
         size = size_by_rel.get(fn)
+        if size is None and mid:
+            size = size_by_mid.get(("video" if is_video else "image", mid))
         if size is None:
             continue
         total += size
         files += 1
-        mid = str(r["media_id"] or "")
-        kind = "loom" if mid in loom_ids else ("video" if str(r["is_video"] or "") == "1" else "image")
+        kind = "loom" if mid in loom_ids else ("video" if is_video else "image")
         by_type[kind][0] += size
         by_type[kind][1] += 1
         name = str(r["model_name"] or "").strip()
@@ -14147,6 +14203,11 @@ def create_app(out_dir: Path):
                 _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
                              "reconnecting. Anything that completed during the silence was "
                              "NOT mirrored.", getattr(core, "_WS_STALE_TIMEOUT", "?"))
+                # A stale connection had subscribed and lived a full stale window, so it is
+                # not a failing connect for the backoff to slow down: reconnect at the
+                # shortest step (it had climbed to 60s, so the Panel read "Reconnecting"
+                # for a whole minute after every one).
+                backoff = 5
             except Exception as e:
                 with _watch_lock:
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
