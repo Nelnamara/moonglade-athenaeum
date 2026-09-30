@@ -851,6 +851,39 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
     assert seen["at"] == 3.2             # the trimOut reached ffmpeg
 
 
+def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pixai):
+    """Owner walk 2026-09-30: a spliced frame drew as a broken picture on the Video drawer's
+    frame box and the board card. The frame is uploaded as a NEW media id that is in no
+    catalog, and /thumbs/<id>.jpg serves from disk with no fetch-on-miss -- so the handoff
+    writes that thumbnail itself, from the very PNG it uploaded (as /api/loom/import-frames
+    does), and /thumbs/<frame>.jpg then serves it."""
+    from PIL import Image
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
+    uploaded = {}
+
+    def fake_extract(vp, out, at_seconds=None):
+        Image.new("RGB", (64, 36), (30, 60, 200)).save(out, "PNG")
+        return out
+
+    def fake_upload(s, p):
+        uploaded["path"] = p
+        return "771867920444519035"
+    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(core, "upload_media", fake_upload)
+    monkeypatch.setattr(core, "duration", lambda p: 5.0)
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
+    assert d["frame_media_id"] == "771867920444519035"
+    thumb = tmp_path / "gallery" / "thumbs" / "771867920444519035.jpg"
+    assert thumb.is_file(), "the uploaded frame has no thumbnail, so /thumbs/<id>.jpg 404s"
+    with Image.open(thumb) as im:
+        assert im.format == "JPEG" and im.getpixel((10, 10))[2] > 150   # the frame, not a stand-in
+    r = cli.get("/thumbs/771867920444519035.jpg")
+    assert r.status_code == 200 and r.mimetype == "image/jpeg"
+
+
 def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch, pixai):
     cli = _authed_client(tmp_path, [_row(media_id="X", filename="a_x.png",
                                   created_at="2025-01-01T00:00:00")])

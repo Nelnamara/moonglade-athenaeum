@@ -24575,7 +24575,14 @@ __DESIGN_TOKENS__
         upload it, and return the new frame media_id -- which the storyboard sets as the
         next shot's opening frame, chaining clips into one continuous scene. The clip must
         already be downloaded locally (it is, right after Generate-shot cataloged it).
-        Login required; the upload is free."""
+        Login required; the upload is free.
+
+        The frame is THUMBNAILED as well as uploaded, as /api/loom/import-frames does: the
+        new media id is in no catalog, and /thumbs/<id>.jpg serves from disk with no
+        fetch-on-miss, so every surface that draws the open frame by its id -- the Video
+        drawer's frame box, the board card, Deep Focus -- drew a broken picture (owner walk
+        2026-09-30). The thumbnail is written from the very PNG that was uploaded; a failed
+        thumbnail never fails the handoff (the frame is still PixAI's)."""
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -24607,6 +24614,7 @@ __DESIGN_TOKENS__
             if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
+            make_thumbnail(png, thumb_dir / (str(frame_mid) + ".jpg"))
             # media_tools.duration answers at full precision; 2dp is this route's own
             # display choice for the Edit Bay's reel, made where it is visible.
             _dur = core.duration(str(vid))
