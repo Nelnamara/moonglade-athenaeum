@@ -193,6 +193,11 @@ describe("the base picker and the footer", () => {
   test("the four goals are PixAI's values", () => {
     assert.deepEqual(GOALS.map((g) => g.value), ["character", "style", "clothing", "other"]);
   });
+  test("every goal tile carries its own glyph (owner walk 2026-09-29: the tiles were blank)", () => {
+    const marks = GOALS.map((g) => g.mark);
+    for (const m of marks) assert.ok(typeof m === "string" && m.replace("︎", "").trim(), m);
+    assert.equal(new Set(marks).size, GOALS.length, "one glyph per goal, none shared");
+  });
 });
 
 /* Stage A of the desktop build: rejected tiles, the chooser's Runs row, Use, the one confirm. */

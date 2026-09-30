@@ -4957,6 +4957,57 @@ def test_the_train_dataset_pool_pages_past_its_first_60(
         ctx.close()
 
 
+_TILE_SIZES = ("() => [...document.querySelectorAll('%s')].map(t => {"
+               " const r = t.getBoundingClientRect(); return [r.width, r.height]; })")
+
+
+def _crushed(sizes):
+    """The tiles that are not squares of a usable size (width and height in CSS px)."""
+    return [(round(w, 1), round(h, 1)) for w, h in sizes if w < 60 or abs(w - h) > 1.5]
+
+
+def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Owner walk, 2026-09-29. (1) "From history" drew every picture as a sliver a few pixels
+    tall, stacked in seven columns, in Grouped and All: the pool's grid scrolls inside a 300 px
+    cap and a tile clips its picture, so its minimum height is 0 and the auto rows shared the
+    cap between them (train.css .mgtr-pool-grid). Every tile must be a square at least 60 px
+    across, in both views, with more than the cap's worth of rows loaded -- the counts waited
+    for are past the point where the old rows crushed (five rows no longer fit 300 px). (2)
+    Basic's goal tiles were flat colour squares where PixAI shows a picture: each carries its
+    own glyph."""
+    import sqlite3
+    _fake_training(pixai, monkeypatch)
+    with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
+        con.execute("UPDATE catalog SET task_id = 'T' || media_id")
+    ctx, page, _ = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".mgtr-mode:has-text('Basic training')")
+        marks = page.evaluate(
+            "() => [...document.querySelectorAll('.mgtr-goal .mgtr-goal-tint')]"
+            ".map(t => t.textContent.trim())")
+        assert len(marks) == 4 and all(marks) and len(set(marks)) == 4, (
+            "each goal tile shows its own glyph, not a blank square: %r" % marks)
+        page.click(".mgtr-goal:has-text('Character')")
+        page.click(".mgtr-src:has-text('From history')")
+        # Grouped pages 18 tasks at a time and its sentinel keeps asking while it is within
+        # 600 px of the grid's foot, so two pages (six rows) always arrive; All's first page is 60.
+        for view, least in (("Grouped", 36), ("All", 60)):
+            page.click(".mgtr-segbtn:has-text('%s')" % view)
+            page.wait_for_function(
+                "n => document.querySelectorAll('.mgtr-pool-tile').length >= n", arg=least)
+            sizes = page.evaluate(_TILE_SIZES % ".mgtr-pool-tile")
+            assert len(sizes) >= least
+            bad = _crushed(sizes)
+            assert not bad, "{}: {} of {} tiles are not squares, e.g. {}".format(
+                view, len(bad), len(sizes), bad[:4])
+            over = page.evaluate("() => { const g = document.querySelector('.mgtr-pool-grid');"
+                                 " return g.scrollHeight > g.clientHeight + 50; }")
+            assert over, view + ": the tiles overflow the grid's cap and it scrolls"
+    finally:
+        ctx.close()
+
+
 def test_the_train_overlay_opens_on_a_chooser_reads_only_and_draws_the_moon_where_pixai_counts(
         paged_library_server, render_browser, monkeypatch, pixai):
     """Session J decisions 1a and 5c, L4: the overlay opens on the chooser -- two cards, the Runs
@@ -5115,6 +5166,9 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
         assert len(srcs) == 120 and len(set(srcs)) == 120, (
             "the grid must page through every task, each once: {} tiles, {} distinct".format(
                 len(srcs), len(set(srcs))))
+        # ...and every one of them a picture, not a sliver (owner walk 2026-09-29, desktop).
+        bad = _crushed(page.evaluate(_TILE_SIZES % ".trm-tile"))
+        assert not bad, "phone tiles that are not squares: {}".format(bad[:4])
     finally:
         ctx.close()
 

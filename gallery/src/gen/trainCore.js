@@ -35,12 +35,15 @@ export const MIN_IMAGES = 10;
 export const MAX_IMAGES = 100;
 export const CAPTION_MAX = 1000;
 // Basic's four goals and Advanced's categories: PixAI's own values (its "Something else"
-// sub-kind is never sent).
+// sub-kind is never sent). `mark` is the glyph on Basic's goal tile: PixAI's page shows a
+// sample picture there and the app has no such art yet, so a glyph stands in rather than the
+// flat colour square the owner found blank (walk, 2026-09-29). U+FE0E keeps the three that
+// have an emoji form drawn as text, in the tile's colour.
 export const GOALS = Object.freeze([
-  { value: "character", label: "Character", desc: "One specific person or character" },
-  { value: "style", label: "Art style", desc: "One set of linework and colours" },
-  { value: "clothing", label: "Outfit", desc: "One outfit, on any character" },
-  { value: "other", label: "Something else", desc: "Animals, poses, backgrounds and more" },
+  { value: "character", label: "Character", desc: "One specific person or character", mark: "☺︎" },
+  { value: "style", label: "Art style", desc: "One set of linework and colours", mark: "✒︎" },
+  { value: "clothing", label: "Outfit", desc: "One outfit, on any character", mark: "✂︎" },
+  { value: "other", label: "Something else", desc: "Animals, poses, backgrounds and more", mark: "✿" },
 ]);
 // A tile's source mark (handoff 2a): upload, from history, an imported set.
 export const SOURCE_MARK = Object.freeze({ upload: "⬆", history: "▦", dataset: "⎘" });

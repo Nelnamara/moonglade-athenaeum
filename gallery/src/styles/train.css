@@ -130,7 +130,10 @@
 .mgtr-goal > span:last-child { min-width: 0; display: flex; flex-direction: column; }
 .mgtr-goal .n { font-size: 11.5px; font-weight: 700; }
 .mgtr-goal .d { font-size: 9.5px; line-height: 1.35; color: var(--subtext); }
-.mgtr-goal-tint { width: 34px; height: 34px; flex: none; border-radius: 8px; }
+/* The goal's square carries its glyph (trainCore GOALS' `mark`): PixAI shows a sample picture
+   here, the app has no such art yet, and the bare tint read as a blank tile (walk 2026-09-29). */
+.mgtr-goal-tint { width: 34px; height: 34px; flex: none; border-radius: 8px; display: grid;
+  place-items: center; font-size: 17px; line-height: 1; color: var(--text); }
 .mgtr-goal-tint.lavender { background: color-mix(in srgb, var(--lavender) 35%, var(--surface0)); }
 .mgtr-goal-tint.mauve { background: color-mix(in srgb, var(--mauve) 30%, var(--surface0)); }
 .mgtr-goal-tint.emerald { background: color-mix(in srgb, var(--emerald) 30%, var(--surface0)); }
@@ -172,7 +175,11 @@
 .mgtr-import-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 2px 4px; }
 
 /* From history: the shipped pool (pages on scroll inside its own grid), Grouped / All, search,
-   a tray. */
+   a tray. THE ROWS ARE max-content, NOT auto (owner walk 2026-09-29, every picture a sliver a
+   few pixels tall): a tile clips its picture (overflow: hidden), which makes its automatic
+   minimum height 0, and a grid capped by max-height grows auto rows only until they fill that
+   cap -- so 300 px was shared among every row, thinner with each page the still-visible
+   sentinel pulled in. A max-content row is the tile's own square height, whatever the cap. */
 .mgtr-pool { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 11px;
   border: 1px solid var(--lavender); background: rgba(9,7,22,.9); }
 .mgtr-pool-head { display: flex; align-items: center; gap: 8px; }
@@ -184,8 +191,8 @@
   color: var(--subtext); cursor: pointer; }
 .mgtr-segbtn.on { color: var(--text); background: color-mix(in srgb, var(--lavender) 18%, transparent); }
 .mgtr-pool-search { margin: 0; }
-.mgtr-pool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 5px;
-  max-height: 300px; overflow-y: auto; align-content: start; }
+.mgtr-pool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  grid-auto-rows: max-content; gap: 5px; max-height: 300px; overflow-y: auto; align-content: start; }
 .mgtr-pool-tile { position: relative; aspect-ratio: 1; padding: 0; border-radius: 6px; overflow: hidden;
   border: 2px solid transparent; background: var(--surface0); cursor: pointer; }
 .mgtr-pool-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }

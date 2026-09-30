@@ -220,7 +220,7 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
         {GOALS.map((g, i) => (
           <button type="button" key={g.value} className={"trm-row goal" + (b.goal === g.value ? " sel" : "")}
             aria-pressed={b.goal === g.value} onClick={() => b.setGoal(g.value)}>
-            <span className={"mgtr-goal-tint " + GOAL_TINT[i]} />
+            <span className={"mgtr-goal-tint " + GOAL_TINT[i]} aria-hidden="true">{g.mark}</span>
             <span className="trm-row-text"><span className="trm-row-main"><b>{g.label}</b></span>
               <span className="trm-row-sub">{g.desc}</span></span>
           </button>
