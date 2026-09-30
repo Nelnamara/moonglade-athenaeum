@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import useIsMobile from "../hooks/useIsMobile.js";
 import {
-  afterNote, afterTour, afterWelcome, CHIP_ROW, firstPresentNote, guideKey, LAYER_SELECTORS,
-  layerOpen, NOTES_HIDDEN_KEY, noteText, placeBeside, placeClear, readGuide, rectShowing,
-  tourSteps,
+  afterNote, afterTour, afterWelcome, firstPresentNote, guideKey, HEADER_BAND, LAYER_SELECTORS,
+  layerOpen, NOTE_AVOID, NOTES_HIDDEN_KEY, noteText, placeBeside, placeClear, readGuide,
+  rectShowing, tourSteps,
 } from "./guideCore.js";
 import { stepsFor } from "./guideSteps.js";
 import {
@@ -32,7 +32,8 @@ import "../styles/help.css";
    notes also stand aside while ANY layer is open over the surface -- a dialog, a menu, the
    model browser, the recipe market, the Colour palette -- whether or not its host thought to
    pass `paused` (guideCore.LAYER_SELECTORS; useLayerOver below watches the page for them).
-   A desktop note never covers the header's chip row either (guideCore.placeClear).
+   A desktop note never covers the header's chip row, nor any other control in the header and
+   nav band (guideCore.placeClear / NOTE_AVOID); a header control's note drops below the band.
 
    The three layers and the one key per surface are guideCore.js's; the steps are
    guideSteps.js's. Everything here is placement and events.
@@ -78,11 +79,17 @@ function phoneFloor() {
   return Math.max(0, h - top);
 }
 
-/* The header chips' rects, which a desktop note keeps clear of. */
-function chipRects() {
+/* What a desktop note keeps clear of (guideCore.placeClear): the header's chips and every
+   control in the header and nav band (NOTE_AVOID), and the band itself -- the spot just below
+   it, over the grid, is where a header control's note goes when the one beside it is taken. */
+function noteObstacles() {
+  let avoid = [];
   try {
-    return Array.from(document.querySelectorAll(CHIP_ROW), (el) => el.getBoundingClientRect());
-  } catch { return []; }
+    avoid = Array.from(document.querySelectorAll(NOTE_AVOID), (el) => el.getBoundingClientRect());
+  } catch { avoid = []; }
+  const hdr = document.querySelector(HEADER_BAND);
+  const r = hdr ? hdr.getBoundingClientRect() : null;
+  return { avoid, band: r && r.height ? { top: r.top, bottom: r.bottom } : null };
 }
 
 /* Is anything open over this surface right now? Every element matching LAYER_SELECTORS is
@@ -320,15 +327,16 @@ function Notes({ guide, phone, n, onAdvance }) {
   hRef.current = cardH;
 
   // Find the note to show, and keep its pin on its control. On the desktop a note whose card
-  // cannot sit beside its control without covering the header's chips is passed over, the
-  // same way as one whose control is not on screen.
+  // has no spot that covers none of the header's controls or chips is passed over, the same
+  // way as one whose control is not on screen.
   useEffect(() => {
     let live = true;
     const spot = (s) => {
       const el = findAnchor(s);
       if (!el) return null;
       const r = el.getBoundingClientRect();
-      if (!phone && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), chipRects(), 12)) return null;
+      const ob = phone ? null : noteObstacles();
+      if (ob && !placeClear(r, { w: NOTE_W, h: hRef.current }, vp(), ob.avoid, 12, undefined, ob.band)) return null;
       return r;
     };
     const look = () => {
@@ -362,7 +370,8 @@ function Notes({ guide, phone, n, onAdvance }) {
     if (phone) {
       cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
     } else {
-      const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), chipRects(), 12);
+      const ob = noteObstacles();
+      const p = placeClear(rect, { w: NOTE_W, h: cardH }, vp(), ob.avoid, 12, undefined, ob.band);
       if (p) cardStyle = { left: p.left, top: p.top, width: NOTE_W };
     }
   }

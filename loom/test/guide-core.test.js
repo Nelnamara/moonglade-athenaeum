@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   readGuide, afterWelcome, afterTour, afterNote, tourSteps, noteText, firstPresentNote,
   placeBeside, placeClear, rectShowing, guideKey, GUIDE_SURFACES, CHIP_ROW, LAYER_SELECTORS,
-  layerOpen,
+  layerOpen, HEADER_BAND, HEADER_CONTROLS, NOTE_AVOID,
 } from "../../gallery/src/help/guideCore.js";
 import { GUIDE, stepsFor } from "../../gallery/src/help/guideSteps.js";
 
@@ -104,6 +104,69 @@ describe("a note keeps clear of the header's chip row", () => {
     for (const sel of [".mgg-chips", ".mgx-cred", ".mgx-claim", ".mgx-act-wrap"]) {
       assert.ok(CHIP_ROW.split(",").map((s) => s.trim()).includes(sel), sel);
     }
+  });
+});
+
+// Owner walk 2026-09-29, second pass: after the tour's Done, the note "Filters live here." sat
+// right under Filters -- over the nav row (IMPORT · CONTESTS · HEALTH · PANEL) -- and a click on
+// HEALTH landed on the note. A note keeps clear of EVERY control in the header and nav band, and
+// a header control's note drops below the band, over the grid.
+describe("a note never covers another control in the header", () => {
+  // the owner's walk: a 1568×744 page, the hero banner over the nav band, Filters in the bar
+  const vp = { w: 1568, h: 744 };
+  const filters = { left: 285, top: 210, right: 346, bottom: 236 };
+  const band = { top: 0, bottom: 286 };                       // the sticky header's foot
+  const nav = [[263, 300], [316, 372], [386, 430], [446, 498], [515, 562]]   // IMPORT … LOG OUT
+    .map(([l, r]) => ({ left: l, top: 252, right: r, bottom: 270 }));
+  const bar = [{ left: 18, top: 210, right: 278, bottom: 236 }, filters,
+    { left: 354, top: 210, right: 400, bottom: 236 }, { left: 408, top: 210, right: 482, bottom: 236 }];
+  const size = { w: 250, h: 46 };
+  const hits = (p, rects) => rects.some((a) => p.left < a.right && a.left < p.left + size.w
+    && p.top < a.bottom && a.top < p.top + size.h);
+
+  test("the spot under Filters covers the nav links, so the note drops below the band, lined up with Filters", () => {
+    const natural = placeBeside(filters, size, vp, 12);
+    assert.ok(hits(natural, nav), "the old spot sat on IMPORT · CONTESTS · HEALTH · PANEL");
+    const p = placeClear(filters, size, vp, [...nav, ...bar], 12, undefined, band);
+    assert.ok(p, "there is a clear spot");
+    assert.ok(!hits(p, [...nav, ...bar]), "covers no control");
+    assert.equal(p.top, band.bottom + 12, "just below the header, over the grid");
+    assert.equal(p.left, filters.left);
+  });
+  test("a clear natural spot still wins -- the band is the second choice, not the first", () => {
+    const p = placeClear(filters, size, vp, [], 12, undefined, band);
+    assert.deepEqual(p, placeBeside(filters, size, vp, 12));
+  });
+  test("a control outside the band (the dock's) gets no below-the-band spot", () => {
+    const dockCtl = { left: 600, top: 500, right: 700, bottom: 530 };
+    const all = [{ left: 0, top: 0, right: 1568, bottom: 490 }, { left: 0, top: 540, right: 1568, bottom: 744 }];
+    assert.equal(placeClear(dockCtl, size, vp, all, 12, undefined, band), null);
+  });
+  test("no clear spot anywhere -- the band's foot too near the screen's -- null: the note is skipped", () => {
+    const tall = { top: 0, bottom: 700 };
+    const all = [{ left: 0, top: 0, right: 1568, bottom: 209 }, { left: 0, top: 237, right: 1568, bottom: 744 }];
+    assert.equal(placeClear(filters, size, vp, all, 12, undefined, tall), null);
+  });
+  test("what counts: every clickable, typable or draggable thing in the header band, and the chips", () => {
+    assert.equal(HEADER_BAND, ".mgx-hdr");
+    const sels = HEADER_CONTROLS.split(",").map((s) => s.trim());
+    for (const s of ["button", "a[href]", "input", "select", '[role="button"]', '[role="link"]',
+      '[role="slider"]', ".mgl-search", '[tabindex]:not([tabindex="-1"])']) {
+      assert.ok(sels.includes(HEADER_BAND + " " + s), s);
+    }
+    assert.ok(sels.every((s) => s.startsWith(HEADER_BAND + " ")), "scoped to the header band");
+    assert.ok(NOTE_AVOID.startsWith(CHIP_ROW + ", "), "the chip row stays in");
+    // App.jsx's header IS the band: the banner (library bar inside it) and the nav band
+    const app = readFileSync(path.resolve(__dirname, "../../gallery/src/App.jsx"), "utf8");
+    const hdr = app.slice(app.indexOf('<header className="mgx-hdr"'), app.indexOf("</header>"));
+    assert.ok(hdr.includes("<Banner") && hdr.includes("<SeparatorBar") && hdr.includes("<LibraryBar"));
+  });
+  test("GuideHost measures the header's controls and its band for every desktop note", () => {
+    assert.match(HOST_SRC, /document\.querySelectorAll\(NOTE_AVOID\)/);
+    assert.match(HOST_SRC, /document\.querySelector\(HEADER_BAND\)/);
+    assert.equal((HOST_SRC.match(/placeClear\([^\n]*?, ob\.avoid, 12, undefined, ob\.band\)/g) || []).length, 2,
+      "both the look-up and the card's placement use the same obstacles");
+    assert.doesNotMatch(HOST_SRC, /chipRects\(\)/, "no longer only the chips");
   });
 });
 

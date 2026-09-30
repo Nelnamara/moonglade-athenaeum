@@ -121,11 +121,26 @@ function overlaps(a, b) {
    2026-09-29: the Generate note sat over the pin chip's ✕ and the Vigil). */
 export const CHIP_ROW = ".mgg-chips, .mgx-cred, .mgx-claim, .mgx-act-wrap";
 
-/* placeBeside, kept clear of `avoid` (the rects of CHIP_ROW). The natural spot first; then
-   below or above the control, each lined up with the control's own left and right edges.
-   The first that covers nothing in `avoid` wins; null when every one does, and then that
-   note is not shown at all. */
-export function placeClear(rect, size, viewport, avoid, gap, margin) {
+/* ...AND EVERY OTHER CONTROL IN THE HEADER (owner walk 2026-09-29, second pass: after the tour
+   the Filters note sat right under Filters, over the nav row -- IMPORT · CONTESTS · HEALTH ·
+   PANEL -- and a click meant for HEALTH landed on the note). The header band is the banner and
+   the nav band under it (App.jsx's <header className="mgx-hdr">); anything in it that can be
+   clicked, typed in or dragged is kept clear, and the search slab whole (its glyph is a bare
+   clickable <i>). NOTE_AVOID is what GuideHost measures. */
+export const HEADER_BAND = ".mgx-hdr";
+export const HEADER_CONTROLS = [
+  "button", "a[href]", "input", "select", "textarea", "summary", ".mgl-search",
+  '[role="button"]', '[role="link"]', '[role="tab"]', '[role="switch"]', '[role="slider"]',
+  '[role="checkbox"]', '[role="combobox"]', '[tabindex]:not([tabindex="-1"])',
+].map((s) => HEADER_BAND + " " + s).join(", ");
+export const NOTE_AVOID = CHIP_ROW + ", " + HEADER_CONTROLS;
+
+/* placeBeside, kept clear of `avoid` (the rects of NOTE_AVOID). The natural spot first; then,
+   for a control IN the header band (`band`, its {top, bottom}), just below the band -- over the
+   grid, lined up with the control's edges; then below or above the control, each lined up
+   with the control's own left and right edges. The first that covers nothing in `avoid` wins;
+   null when every one does, and then that note is not shown at all. */
+export function placeClear(rect, size, viewport, avoid, gap, margin, band) {
   const g = gap == null ? 10 : gap;
   const mg = margin == null ? 12 : margin;
   const first = placeBeside(rect, size, viewport, g, mg);
@@ -134,6 +149,14 @@ export function placeClear(rect, size, viewport, avoid, gap, margin) {
   const tops = { below: rect.bottom + g, above: rect.top - g - size.h };
   const order = first.placement === "below" ? ["below", "above"] : ["above", "below"];
   const cands = [first];
+  if (band && band.bottom > band.top && rect.top < band.bottom) {
+    const top = Math.round(Math.max(band.bottom, rect.bottom) + g);
+    if (top + size.h <= viewport.h - mg) {
+      for (const left of [first.left, clampL(rect.left), clampL(rect.right - size.w)]) {
+        cands.push({ left, top, placement: "below" });
+      }
+    }
+  }
   for (const placement of order) {
     const top = Math.round(tops[placement]);
     if (top < mg || top + size.h > viewport.h - mg) continue;   // off screen that way
