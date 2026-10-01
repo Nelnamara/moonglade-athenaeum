@@ -247,7 +247,16 @@ def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
             job = jobs[0]
             break
         time.sleep(0.02)
-    assert cli.get("/api/panel/status").get_json()["status"] == "done"
+    # Sync's success chains the phash backfill (red team #6), so the panel's CURRENT job can be
+    # that follow-on, still "running", at the instant the sync row lands -- the 2026-10-01 CI
+    # failure. Wait for the chain to settle rather than sampling it once.
+    status = None
+    for _ in range(200):
+        status = cli.get("/api/panel/status").get_json()["status"]
+        if status != "running":
+            break
+        time.sleep(0.02)
+    assert status == "done"
     assert job is not None, "the panel terminal event (with rc) never reached jobs.jsonl"
     assert job.get("action") == "sync", "start event lost the machine action key"
     assert job.get("rc") == 0, "terminal event lost the exit code"
