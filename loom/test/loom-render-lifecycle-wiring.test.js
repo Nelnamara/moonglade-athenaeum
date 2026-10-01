@@ -299,10 +299,12 @@ describe("the drawer's events are resolved by their ids, never by the selected s
     // off and sends nothing; the lock records the quote the owner said yes to.
     const b = hookFn(CODE, "beginDrawerRender");
     const add = b.indexOf("inflightRef.current.add(cardId);");
-    const ask = b.indexOf("const ask = await askShotSpend(payload);");
+    const ask = b.indexOf("try { ask = await askShotSpend(payload); }");
     const lock = b.indexOf("beginRender(cc,");
     assert.ok(ask > add && lock > ask, "latch -> ask -> lock");
-    assert.equal(b.search(/\bawait\b/), ask + "const ask = ".length, "the ask is the first thing awaited, after the latch");
+    assert.equal(b.search(/\bawait\b/), ask + "try { ask = ".length, "the ask is the first thing awaited, after the latch");
+    assert.match(b, /catch \(e\) \{ inflightRef\.current\.delete\(cardId\); throw e; \}/,
+      "an ask that throws still takes the latch off (review 2026-10-01, nit 2)");
     assert.match(b, /if \(!ask\.go\) \{ inflightRef\.current\.delete\(cardId\); return \{ cancelled: true \}; \}/,
       "a no releases the latch and answers cancelled");
     assert.match(b.slice(ask, lock), /if \(activeIdRef\.current !== boardId \|\| !cardOn\(cardId\)\) \{\s*inflightRef\.current\.delete\(cardId\);\s*return \{ refused:/,
@@ -312,6 +314,9 @@ describe("the drawer's events are resolved by their ids, never by the selected s
     assert.match(b, /if \(cardId === "__draft__"\) return beginDraftRender\(submitId, payload\);/);
     const d = hookFn(CODE, "beginDraftRender");
     assert.match(d, /const ask = await askShotSpend\(payload\);\s*if \(!ask\.go\) return \{ cancelled: true \};/);
+    const dRefuse = d.indexOf("if (unsendableRefs(payload).length) {");
+    assert.ok(dRefuse >= 0 && dRefuse < d.indexOf("await askShotSpend("),
+      "a draft with an imported reference is refused before it is priced or asked (S6; review 2026-10-01, nit 3)");
     assert.match(d, /return \{ ok: true, expectFree: ask\.expectFree \};/);
     // ONE ask, one wording: generateShot's and the drawer's Go both ride askShotSpend.
     assert.equal((CODE.match(/await askShotSpend\(/g) || []).length, 3, "generateShot, beginDrawerRender, beginDraftRender");

@@ -5334,7 +5334,7 @@ ${"=".repeat(48)}
       const submitId = loomCtx ? newSubmitId() : null;
       const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
       const quoted = probe.response || null;
-      const expectFree = !!(quoted && quoted.free);
+      let expectFree = !!(quoted && quoted.free);
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
       setReuseChip(null);
       st.current.rendering = true;
@@ -5356,7 +5356,8 @@ ${"=".repeat(48)}
           verdict = null;
         }
         if (!verdict || verdict.refused || !verdict.ok) {
-          updateLine(id, {
+          if (verdict && verdict.cancelled) setResults((rs) => rs.filter((l) => l.id !== id));
+          else updateLine(id, {
             kind: "error",
             moon: false,
             text: verdict && verdict.refused || "The storyboard didn't take this render, so nothing was sent."
@@ -5364,6 +5365,7 @@ ${"=".repeat(48)}
           unlock();
           return;
         }
+        if (typeof verdict.expectFree === "boolean") expectFree = verdict.expectFree;
       }
       const tag = (detail, withTask) => loomIds ? { ...detail, ...loomIds, ...withTask ? { task_id: taskId } : {} } : detail;
       const sent = loomIds ? {
@@ -18924,6 +18926,20 @@ Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
 
 Generate anyway?`);
     };
+    const askShotSpend = async (p) => {
+      const pr = await priceBody(p);
+      if (pr && !pr.free && pr.cost != null) {
+        const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
+        if (!window.confirm(`${line}
+
+Generate anyway?`)) return { go: false };
+      } else if (!pr || !pr.free) {
+        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { go: false };
+      }
+      const quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
+      const expectFree = !!(pr && pr.free);
+      return { go: true, quote, expectFree };
+    };
     const cardOn = (id) => {
       const p = projectRef.current;
       return p ? flat(p).find((e) => e.c.id === id) || null : null;
@@ -18962,17 +18978,10 @@ Generate anyway?`);
         let quote = opts.quote || null;
         let expectFree = !!opts.expectFree;
         if (!opts.skipConfirm) {
-          const pr = await priceBody(p);
-          if (pr && !pr.free && pr.cost != null) {
-            const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
-            if (!window.confirm(`${line}
-
-Generate anyway?`)) return { ok: false, reason: "cancelled" };
-          } else if (!pr || !pr.free) {
-            if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
-          }
-          quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
-          expectFree = !!(pr && pr.free);
+          const ask = await askShotSpend(p);
+          if (!ask.go) return { ok: false, reason: "cancelled" };
+          quote = ask.quote;
+          expectFree = ask.expectFree;
         }
         if (activeIdRef.current !== boardId || !cardOn(cardId)) return { ok: false, reason: "board-changed" };
         const before = cardOn(cardId).c;
@@ -19268,27 +19277,33 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
       return out.outcome;
     };
+    const beginDraftRender = async (submitId, payload) => {
+      if (unsendableRefs(payload).length) {
+        return { refused: "Imported " + unsendableKind(payload) + " \u2014 it can't be sent to PixAI yet. Nothing was sent." };
+      }
+      const ask = await askShotSpend(payload);
+      if (!ask.go) return { cancelled: true };
+      const dc = draftCardRef && draftCardRef.current || {};
+      draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
+        {
+          ...dc,
+          mode: payload.mode || dc.mode,
+          duration: payload.duration != null ? payload.duration : dc.duration,
+          audioGen: payload.audio != null ? !!payload.audio : dc.audioGen,
+          audioLanguage: payload.audio_language || dc.audioLanguage
+        },
+        projectRef.current,
+        payload.prompt,
+        payload.quality
+      ) };
+      return { ok: true, expectFree: ask.expectFree };
+    };
     const beginDrawerRender = async (req) => {
       const q = req || {};
       const cardId = String(q.card_id || ""), boardId = String(q.board_id || ""), submitId = String(q.submit_id || "");
       const payload = q.payload || {};
       if (!cardId || !boardId || !submitId) return { refused: "This render isn't tied to a shot, so nothing was sent." };
-      if (cardId === "__draft__") {
-        const dc = draftCardRef && draftCardRef.current || {};
-        draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
-          {
-            ...dc,
-            mode: payload.mode || dc.mode,
-            duration: payload.duration != null ? payload.duration : dc.duration,
-            audioGen: payload.audio != null ? !!payload.audio : dc.audioGen,
-            audioLanguage: payload.audio_language || dc.audioLanguage
-          },
-          projectRef.current,
-          payload.prompt,
-          payload.quality
-        ) };
-        return { ok: true };
-      }
+      if (cardId === "__draft__") return beginDraftRender(submitId, payload);
       if (activeIdRef.current !== boardId) return { refused: "The storyboard changed before this render went out. Nothing was sent." };
       const pre = cardOn(cardId);
       if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
@@ -19300,7 +19315,22 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         return { refused: msg2 };
       }
       inflightRef.current.add(cardId);
-      const c = pre.c;
+      let ask;
+      try {
+        ask = await askShotSpend(payload);
+      } catch (e) {
+        inflightRef.current.delete(cardId);
+        throw e;
+      }
+      if (!ask.go) {
+        inflightRef.current.delete(cardId);
+        return { cancelled: true };
+      }
+      if (activeIdRef.current !== boardId || !cardOn(cardId)) {
+        inflightRef.current.delete(cardId);
+        return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+      }
+      const c = cardOn(cardId).c;
       const settings = snapshotSettings({
         ...c,
         mode: payload.mode || c.mode,
@@ -19308,7 +19338,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
         audioLanguage: payload.audio_language || c.audioLanguage
       }, projectRef.current, payload.prompt, payload.quality);
-      const quote = q.quote || null;
+      const quote = ask.quote;
       preLockRef.current[submitId] = c;
       patchCardNow(cardId, (cc) => beginRender(cc, {
         submitId,
@@ -19326,7 +19356,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       setGenState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const saved = await saveBoardNow(boardId);
-      if (saved.ok) return { ok: true };
+      if (saved.ok) return { ok: true, expectFree: ask.expectFree };
       inflightRef.current.delete(cardId);
       delete preLockRef.current[submitId];
       const here = activeIdRef.current === boardId;

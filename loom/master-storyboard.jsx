@@ -9047,6 +9047,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
      sent without a loom_target. The answer carries the quote the owner said yes to and
      whether it was free (expectFree), which is what the drawer then sends. */
   const beginDraftRender = async (submitId, payload) => {
+    // An imported picture, video or audio can't be sent: refuse before pricing, as the card
+    // paths do (S6), so the owner is never asked to confirm a render that could not go out.
+    if (unsendableRefs(payload).length) {
+      return { refused: "Imported " + unsendableKind(payload) + " — it can't be sent to PixAI yet. Nothing was sent." };
+    }
     const ask = await askShotSpend(payload);
     if (!ask.go) return { cancelled: true };
     const dc = (draftCardRef && draftCardRef.current) || {};
@@ -9075,7 +9080,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     }
     inflightRef.current.add(cardId);
     // ---- step 2: the spend ask, of the payload the drawer will send ----
-    const ask = await askShotSpend(payload);
+    // The latch is released on every way out of the ask, a throw included: a stuck latch
+    // reads "already rendering" until a reload (fails closed, but strands the shot).
+    let ask;
+    try { ask = await askShotSpend(payload); }
+    catch (e) { inflightRef.current.delete(cardId); throw e; }
     if (!ask.go) { inflightRef.current.delete(cardId); return { cancelled: true }; }
     if (activeIdRef.current !== boardId || !cardOn(cardId)) {
       inflightRef.current.delete(cardId);
