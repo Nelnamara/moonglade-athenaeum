@@ -7364,9 +7364,14 @@ def _run_tool(name, path, args, timeout, input=None):
         # path. Decoding is pinned to utf-8/replace because the alternative -- the
         # platform locale with strict errors -- can raise out of a call whose whole
         # contract is that it does not.
+        # stdin is DEVNULL whenever no input is given: a server launched detached on
+        # Windows has no valid stdin handle to inherit, and the child then fails with
+        # WinError 6 -- which this function swallows by contract, so frame_at returned
+        # None and an export silently lost its audio (real-ffmpeg smoke test, 2026-09-29).
+        stdin_kw = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
         r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout, input=input, creationflags=NO_WINDOW)
+                           timeout=timeout, creationflags=NO_WINDOW, **stdin_kw)
     except FileNotFoundError as e:
         # which() said yes and the exec still failed: the binary moved, or a shim
         # points at nothing. Same road for the caller as never having had it.
@@ -7443,7 +7448,11 @@ def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True)
     `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
     the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
     not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
-    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None.
+    clip's real end -- decode the clip's last half second and keep the final frame decoded
+    (`-update 1` with no frame cap overwrites out_png per frame). A clip shorter than that
+    is decoded whole, so it still yields its LAST frame; the old fixed "-sseof -0.15
+    -frames:v 1" clamped to the start on such a clip and handed back the FIRST.
+    Returns out_png or None.
 
     It is also GENERAL: `at_seconds=0.0` takes the explicit-seek branch and yields the
     FIRST frame. Nothing in this app should write a second frame extractor; `frame_at`
@@ -7459,15 +7468,16 @@ def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True)
             at_seconds = None
     try:
         if at_seconds is None:
-            seek = ["-sseof", "-0.15", "-i", str(video_path)]
+            seek = ["-sseof", "-0.5", "-i", str(video_path)]
+            take = ["-update", "1"]
         else:
             # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
             # so we land ON the last kept frame, not the first discarded one.
             seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
+            take = ["-update", "1", "-frames:v", "1"]
     except (TypeError, ValueError):
         return None
-    r = run_ffmpeg(["-y"] + seek +
-                   ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+    r = run_ffmpeg(["-y"] + seek + take + ["-q:v", "2", str(out_png)],
                    timeout=FRAME_TIMEOUT)
     if not r.ok:
         return None

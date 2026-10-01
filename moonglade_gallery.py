@@ -25252,17 +25252,23 @@ __DESIGN_TOKENS__
         progress on a job that takes minutes. It still takes its BINARY and its no-window
         FLAG from media_tools (cmd[0] is core.ffmpeg_path(), set by the caller), so the
         two things that drifted between call sites are still decided in one place."""
-        import subprocess, re as _re
+        import subprocess, collections, re as _re
         import moonglade_backup as core
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE,
                                     text=True, bufsize=1, encoding="utf-8", errors="replace",
                                     creationflags=core.NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
+            # ffmpeg's last few non-progress lines are its whole explanation on a refusal;
+            # keep them so a failed export says why instead of only "ffmpeg exited N".
+            tail = collections.deque(maxlen=4)
             for line in iter(proc.stderr.readline, ""):
                 m = tpat.search(line)
+                if not m and line.strip():
+                    tail.append(line.strip())
                 if m:
                     el = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
                     with _export_lock:
@@ -25276,7 +25282,10 @@ __DESIGN_TOKENS__
                 elif rc == 0 and out_path.exists():
                     _export_job.update(status="done", progress=100, out=out_path.name)
                 else:
-                    _export_job.update(status="failed", error="ffmpeg exited %d" % rc)
+                    why = _redact_host_paths(" | ".join(tail))[-300:]
+                    _export_job.update(status="failed",
+                                       error=("ffmpeg exited %d: %s" % (rc, why)) if why
+                                       else "ffmpeg exited %d" % rc)
         except Exception as e:
             with _export_lock:
                 _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
