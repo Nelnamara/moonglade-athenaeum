@@ -105,6 +105,10 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   small thumbnails and wait for a tap before loading a full-size picture. See
   [Control Panel](Control-Panel).
 
+- **Help** — the **?** in every header: this wiki, inside the app. **About** is its last page.
+  **What's new** is the one-time note after an update. See [The Gallery](Gallery#help-about-and-the-first-run-guide).
+- **the guide** — the first-run welcome card, tour and notes, once per surface per account.
+
 ## Reporting something with these words
 
 Say the **screen**, then the **control**, then **what happened** — "in the Library, the ◈ on a card

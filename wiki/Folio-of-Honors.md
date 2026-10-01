@@ -161,8 +161,8 @@ five earns **Skin-Changer**.
 
 Skins are applied from the **Control Panel**, in its **Identity** strip — all the
 cosmetics live together, and the strip pairs the skins with the mark that sits beside the
-title so you can judge the two together — or with a tap on the skin in the Folio's
-**Relics**. Your choice is saved server-side,
+title so you can judge the two together. The Folio's **Relics** only show what you have; they
+never wear a skin or open Branding. Your choice is saved server-side,
 so it follows you to every device and every page of the suite. Picking a locked skin is
 refused by the server, so there's nothing to cheat.
 

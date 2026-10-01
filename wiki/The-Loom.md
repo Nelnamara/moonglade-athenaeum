@@ -153,6 +153,10 @@ inside one), a button appears under the open slot:
 - **✂ splice `A·01`'s last frame** — once that previous shot has actually rendered, the
   same button extracts the real last frame from its clip (honoring the trim) and uploads it.
 
+Splice and Re-anchor upload the frame to your PixAI account (free, never a render) and save its
+thumbnail beside it, so the frame draws in the drawer and on the next shot's card. With
+`READ_ONLY` set they are refused like every other write to your account.
+
 That's how a run of independent 5–15s clips reads as one continuous scene. The very first
 shot of the project has no previous frame, and neither does draft mode — you get a hint
 instead of a button.
@@ -258,7 +262,9 @@ the Generate drawer's **Video** tab, and press **Generate video**. What happens:
 4. The finished mp4 downloads and is cataloged into your gallery like any other generation,
    and lands on the shot as a new [take](#takes).
 
-The price is shown before anything is sent, and a paid render asks first. A render a free card
+The price is shown before anything is sent, and a paid render asks first, whether you press a
+card's **Render** or the drawer's **Generate video**: the same question, priced off exactly what
+will be sent, and a **No** sends nothing. A render a free card
 covers doesn't ask (as everywhere in the suite) — and if that card has been used somewhere else
 by the time the render goes out, it is refused rather than charged: **Nothing was sent. Press
 Render again to see the new price.** A shot that is already rendering can't be started a
@@ -482,6 +488,9 @@ button).
   log you have no reason to open. Dropping the track isn't a compromise: the whole track was
   going to be synthesized silence anyway, so a file with no track sounds identical — and
   can't drift.
+
+When ffmpeg itself fails partway, the export says why: the message carries ffmpeg's own last
+lines (with your paths redacted) instead of a bare exit code.
 
 Setting aside the obvious refusals — no ffmpeg, no finished shots to export, or an export
 already running — there is exactly one case where the audio handling refuses instead of

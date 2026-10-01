@@ -378,10 +378,12 @@ still asks in the **Queue training run** sheet, whose button names the price.
    picture rule as Basic; adding or taking out a picture changes the draft on PixAI, free).
    PixAI then describes every image: **Describe automatically (N images)** shows PixAI's own
    price for describing this set (it is charged per image, when it runs) and is the only way
-   in — PixAI has no way to write the descriptions yourself before it has described them. One
-   press sends exactly the amount on the button (on the phone the button opens a sheet that
-   asks once); if PixAI's price moved in the meantime, nothing is charged and the new price
-   is shown. Once they are described:
+   in — PixAI has no way to write the descriptions yourself before it has described them. Pressing it
+   opens a confirm card with PixAI's quote and nothing is sent until you press the card's own
+   **Describe · price** button (on the phone the button opens a sheet that asks once); if
+   PixAI's price moved in the meantime, nothing is charged and the new price is shown. If the
+   answer to a paid step is ever unclear (a dropped connection, say), the app never lets a
+   second one go: it tells you to check **Runs** instead. Once they are described:
    - the grid shows every image with the start of its description, with filters for **All**,
      **Auto**, **Edited** and **Not described yet**, and an edited one has a small lavender dot;
    - **⌕ find** with **replace with…** and **Replace**, or a tag with **+ tag** and **− tag**,

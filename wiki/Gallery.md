@@ -102,6 +102,27 @@ bar first. Open the gallery from the serving machine's own `localhost` address a
 restriction lifts. (Earlier builds showed a **🌐 LAN session** chip naming what was hidden;
 the current shell does not.)
 
+## Help, About and the first-run guide
+
+A **?** sits in the header of every surface (the library, the Generate dock, the Folio, the
+Control Panel, the Loom; on the phone, the hero and the Folio), and the **?** key opens it too.
+**Help** is these wiki pages, carried inside the app: it works offline, always describes the
+version you are running, searches titles and headings, and keeps links between pages in place.
+Terms from the [Glossary](Glossary) are underlined once per page, and a page says so when a
+newer copy of it is online. The Loom's **?** opens Help on [The Loom](The-Loom).
+
+**About** is the last page in Help and is also what the Control Panel's version stamp opens
+(on the phone, an **About Moonglade** row on the Control tab): the app and art-pack versions and
+what changed in this release. The first time you open the gallery after an update, a note says so;
+for a minor or major release it opens a short **What's new** sheet with a **Show me** for each
+highlight, and a small patch opens About instead. A brand-new account is simply noted, never shown
+a what's-new.
+
+The **first-run guide** meets you once per surface, per account: a welcome card, a tour if you
+ask for one, then short notes one at a time. **Got it** or **Skip tour** ends it, any note can hide
+the notes, and a note never sits over a header or navigation control. Help can replay the tour,
+hide the notes, or reset the guides. None of it spends or changes anything on PixAI.
+
 ## Browsing & filtering
 
 The filter bar:
