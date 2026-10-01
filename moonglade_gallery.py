@@ -525,15 +525,31 @@ def migrate(db_path, force=False):
         if key in _MIGRATED and not force:   # another thread got here first
             return
         con = sqlite3.connect(str(db_path))
+        busy = False
         try:
             for sql in _MIGRATIONS:
                 try:
                     con.execute(sql)
                     con.commit()
-                except sqlite3.OperationalError:
-                    pass  # column/index already exists
+                except sqlite3.OperationalError as e:
+                    # "duplicate column" / "already exists" is the re-run's success case. A
+                    # LOCKED or BUSY catalog (a --sync holding its write lock past the busy
+                    # timeout) is not: stop at once -- every later statement would wait out the
+                    # same timeout -- and leave the catalog UN-memoized, so the next access
+                    # runs the migration again instead of the new tables staying missing for
+                    # the life of the process (red team 2026-10-01).
+                    msg = str(e).lower()
+                    if "locked" in msg or "busy" in msg:
+                        busy = True
+                        break
         finally:
             con.close()
+        if busy:
+            import logging
+            logging.getLogger(__name__).warning(
+                "catalog migration deferred: %s is locked; it will run again on the "
+                "next catalog access", db_path)
+            return
         _MIGRATED.add(key)
 
 
