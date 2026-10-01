@@ -23685,7 +23685,10 @@ def create_app(out_dir: Path):
 
     def _loom_account_projects(user):
         """Every board this account can open (its own keys and the legacy keys it has not
-        buried -- loom_list's set), parsed. Read-only; an unreadable board is skipped."""
+        buried -- loom_list's set), parsed. Read-only. Raises _LoomUnreadable when any board's
+        file exists but does not read: an unreadable board is not a missing one, so a caller
+        deciding what is UNUSED must refuse rather than treat that board's bed as free (red
+        team 2026-10-01: the sweep deleted the bed of a truncated board)."""
         from urllib.parse import unquote
         with _loom_lock:
             own = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
@@ -23696,12 +23699,15 @@ def create_app(out_dir: Path):
             for k in keys:
                 if not (k.startswith("storyboard:v2:proj:") or k == "storyboard:v2:project"):
                     continue
-                v = _loom_kv_read(user, k)
+                text, _layer = _loom_kv_text(user, k)
+                if text is None:
+                    continue
+                v = json.loads(text)
                 if isinstance(v, str):
                     try:
                         v = json.loads(v)
                     except ValueError:
-                        continue
+                        raise _LoomUnreadable(k)
                 if isinstance(v, dict):
                     out.append(v)
         return out
@@ -25389,6 +25395,9 @@ __DESIGN_TOKENS__
         return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
                          conditional=True, max_age=3600)
 
+    _LOOM_BEDS_UNREADABLE = ("One of your storyboards didn't read, so no music bed can be called "
+                             "unused. Nothing was swept.")
+
     @app.route("/api/loom/beds/unused")
     @tier(LOGIN)
     def api_loom_beds_unused():
@@ -25398,7 +25407,10 @@ __DESIGN_TOKENS__
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
-        rows = _loom_unused_beds(user)
+        try:
+            rows = _loom_unused_beds(user)
+        except _LoomUnreadable:
+            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
         total = sum(b for (_n, b) in rows)
         return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
                         "count": len(rows), "bytes": total, "h": _fmt_size(total)})
@@ -25420,7 +25432,10 @@ __DESIGN_TOKENS__
         want = [str(x) for x in want]
         if any(not LOOM_BED_FILE_RE.match(x) for x in want):
             return jsonify({"error": "bad bed file name"}), 400
-        unused = {n for (n, _b) in _loom_unused_beds(user)}
+        try:
+            unused = {n for (n, _b) in _loom_unused_beds(user)}
+        except _LoomUnreadable:
+            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
         removed, kept = [], []
         for n in want:
             p = _loom_bed_path(user, n)

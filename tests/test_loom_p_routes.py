@@ -819,3 +819,21 @@ def test_the_frame_route_never_reaches_pixai_or_a_render(frames):
     assert _frame(frames["cli"], "7002", "0.5").status_code == 200
     assert frames["traps"] == [], "no submit, no build_request, no gql, no session, no upload"
     assert len(frames["calls"]) == 1
+
+
+def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
+    """Red team 2026-10-01: an unreadable board was skipped, so its bed counted as unused and
+    the sweep deleted it -- though /api/loom/get says the board exists (500, not 404). Now both
+    routes refuse while any board does not read, and the bed stays."""
+    cli = rig["cli"]
+    n = _upload(cli, FLAC).get_json()["file"]
+    _age(_beds_dir(rig["tmp"]) / n)
+    _save_board(cli, "b9", {"name": "b", "acts": [], "bed": {"file": n}})
+    boards = [p for p in (rig["tmp"] / "loom").rglob("*.json") if "b9" in p.name]
+    assert len(boards) == 1, boards
+    boards[0].write_text('{"name": "b", "acts": [', encoding="utf-8")     # torn mid-write
+    r = cli.get("/api/loom/beds/unused")
+    assert r.status_code == 409 and "Nothing was swept" in r.get_json()["error"]
+    r = cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})
+    assert r.status_code == 409
+    assert (_beds_dir(rig["tmp"]) / n).exists()
