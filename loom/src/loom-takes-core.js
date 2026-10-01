@@ -724,7 +724,7 @@ const cardsById = (project) => {
 };
 
 /**
- * mergeBoards(local, remote, {resolvedSubmits}) -> {project, changed}
+ * mergeBoards(local, remote, {resolvedSubmits, base}) -> {project, changed}
  * On a save conflict (another tab saved first). The REMOTE board wins for every field
  * except takes and in-flight markers:
  *  - a local take whose clip remote does not have, and that neither side deleted
@@ -734,7 +734,14 @@ const cardsById = (project) => {
  *  - ★ stays remote's unless remote has none;
  *  - a local pending marker is kept only when remote has no take for that task, has no
  *    render of its own in flight, and the submit is not known to be resolved (F6);
- *  - a card only local has that holds takes is kept, in its act (or the first).
+ *  - a card only local has is kept, in its act (or the first), only when it holds a clip that
+ *    landed HERE: a take whose clip is on no card of the remote board and was not on that card
+ *    in `base` (the board this tab last read or wrote). Without that check a shot the other tab
+ *    DELETED came back (its old takes still read as "only here"), and a split made against a
+ *    stale board kept its right half beside the other tab's untrimmed shot, so the footage
+ *    played twice (red team 2026-10-01). A fresh render or imported clip on a card the other
+ *    tab removed is still kept -- it is new footage, possibly paid for. With no `base` (never
+ *    read) every local-only card with takes is kept, as before.
  * `changed` names every card whose ★ or take numbers now differ from this tab's view, so
  * the toast can say so.
  */
@@ -817,9 +824,20 @@ export const mergeBoards = (local, remote, opts) => {
     if (lview !== oview || Object.keys(renum).length) changed.push({ id: rc.id, star: lview !== oview, renumbered: Object.keys(renum).length > 0 });
     return out;
   }) })) };
-  // Cards only this tab has, that hold takes: kept (a render landed here must not vanish).
+  // Cards only this tab has: kept when they hold a clip that landed here (a render must not
+  // vanish); a deleted shot or a stale split half holds none and stays gone.
+  const baseBoard = (opts || {}).base || null;
+  const baseCards = baseBoard ? cardsById(baseBoard) : null;
+  const remoteMids = new Set();
+  remIds.forEach(({ c }) => takesOf(c).forEach((t) => remoteMids.add(str(t.mid))));
+  const landedHere = (c) => {
+    if (!baseCards) return true;
+    const was = baseCards.get(c.id);
+    const before = new Set(was ? takesOf(was.c).map((t) => str(t.mid)) : []);
+    return takesOf(c).some((t) => { const m = str(t.mid); return m && !remoteMids.has(m) && !before.has(m); });
+  };
   loc.forEach(({ c, a }) => {
-    if (remIds.has(c.id) || !takesOf(c).length) return;
+    if (remIds.has(c.id) || !takesOf(c).length || !landedHere(c)) return;
     const act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
     if (!act) { merged.acts = [{ ...a, cards: [c] }]; changed.push({ id: c.id, kept: true }); return; }
     act.cards = act.cards.concat([c]);

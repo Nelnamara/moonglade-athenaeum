@@ -365,7 +365,9 @@ describe("board storage: nothing writes on open; every board write is the compar
   });
   test("a save conflict merges (takes kept), shows it, and names the shots whose ★ or take numbers moved (F6)", () => {
     const m = hookFn(CODE, "mergeAfterConflict");
-    assert.match(m, /mergeBoards\(local, remote, \{ resolvedSubmits: Array\.from\(resolvedRef\.current\) \}\)/);
+    assert.match(m, /mergeBoards\(local, remote,\s*\{ resolvedSubmits: Array\.from\(resolvedRef\.current\), base: isBoard\(base\) \? base : null \}\)/);
+    assert.match(m, /base = lastSavedRef\.current\[key\] \? JSON\.parse\(lastSavedRef\.current\[key\]\) : null/,
+      "the merge is told what this tab last synced (red team 2026-10-01)");
     assert.match(m, /queueRef\.current\.save\(key, JSON\.stringify\(merged\), \{ baseRev: res\.rev \}\)/);
     assert.match(m, /This storyboard changed in another tab/);
     assert.match(m, /Your takes were kept; other edits from this tab were replaced\./);

@@ -112,6 +112,33 @@ describe("mergeBoards", () => {
     assert.deepEqual(c1.deletedTakes, ["Mx"]);
   });
 
+  test("red team: a rendered shot the other tab DELETED stays deleted", () => {
+    const synced = base();
+    const deleter = { ...base(), acts: [{ ...base().acts[0], cards: [base().acts[0].cards[1]] }] };
+    const stale = { ...base(), name: "retitled here" };
+    const out = mergeBoards(stale, deleter, { base: synced }).project;
+    assert.equal(card(out, "c"), undefined, "the deleted shot came back");
+  });
+
+  test("red team: a split made against a stale board does not double the footage", () => {
+    const synced = base();
+    // This tab split c at 2.0s: left half keeps c (trimOut 2), right half is a new card on M1.
+    const split = base();
+    split.acts[0].cards[0] = { ...split.acts[0].cards[0], trimOut: 2 };
+    split.acts[0].cards.splice(1, 0, { id: "c2", title: "one (2)", status: "done", resultMid: "M1", actualDur: 5, trimIn: 2, trimOut: null });
+    const other = { ...base(), name: "renamed elsewhere" };
+    const out = mergeBoards(split, other, { base: synced }).project;
+    assert.equal(card(out, "c2"), undefined, "the stale split half was kept beside the untrimmed shot");
+  });
+
+  test("red team: a fresh render on a shot the other tab deleted is still kept", () => {
+    const synced = base();
+    const deleter = { ...base(), acts: [{ ...base().acts[0], cards: [base().acts[0].cards[1]] }] };
+    const rendered = land(base(), "MNEW", "TNEW");
+    const out = mergeBoards(rendered, deleter, { base: synced }).project;
+    assert.ok(card(out, "c"), "a new (possibly paid) clip must not vanish");
+  });
+
   test("a card only this tab has, holding takes, is kept", () => {
     const local = base();
     local.acts[0].cards.push({ id: "new", status: "done", resultMid: "MN" });

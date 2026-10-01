@@ -699,8 +699,21 @@ var LoomBundle = (() => {
       if (lview !== oview || Object.keys(renum).length) changed.push({ id: rc.id, star: lview !== oview, renumbered: Object.keys(renum).length > 0 });
       return out;
     }) })) };
+    const baseBoard = (opts || {}).base || null;
+    const baseCards = baseBoard ? cardsById(baseBoard) : null;
+    const remoteMids = /* @__PURE__ */ new Set();
+    remIds.forEach(({ c }) => takesOf(c).forEach((t) => remoteMids.add(str(t.mid))));
+    const landedHere = (c) => {
+      if (!baseCards) return true;
+      const was = baseCards.get(c.id);
+      const before = new Set(was ? takesOf(was.c).map((t) => str(t.mid)) : []);
+      return takesOf(c).some((t) => {
+        const m = str(t.mid);
+        return m && !remoteMids.has(m) && !before.has(m);
+      });
+    };
     loc.forEach(({ c, a }) => {
-      if (remIds.has(c.id) || !takesOf(c).length) return;
+      if (remIds.has(c.id) || !takesOf(c).length || !landedHere(c)) return;
       const act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
       if (!act) {
         merged.acts = [{ ...a, cards: [c] }];
@@ -17873,7 +17886,17 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }
       const open2 = activeIdRef.current === id;
       const local = open2 ? projectRef.current : pendingLocalRef.current[key];
-      const { project: merged, changed } = mergeBoards(local, remote, { resolvedSubmits: Array.from(resolvedRef.current) });
+      let base = null;
+      try {
+        base = lastSavedRef.current[key] ? JSON.parse(lastSavedRef.current[key]) : null;
+      } catch (e) {
+        base = null;
+      }
+      const { project: merged, changed } = mergeBoards(
+        local,
+        remote,
+        { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null }
+      );
       if (open2) setProject(merged);
       if (typeof window !== "undefined" && window.Toast) {
         const codes = namesOf(merged, changed.map((x) => x.id));

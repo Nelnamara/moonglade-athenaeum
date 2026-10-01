@@ -7434,7 +7434,12 @@ function useProjectStore(setSelShot) {
     }
     const open = activeIdRef.current === id;
     const local = open ? projectRef.current : pendingLocalRef.current[key];
-    const { project: merged, changed } = mergeBoards(local, remote, { resolvedSubmits: Array.from(resolvedRef.current) });
+    // `base`: the board this tab last read or wrote -- what tells a shot deleted elsewhere (or a
+    // stale split half) from footage that landed here (red team 2026-10-01).
+    let base = null;
+    try { base = lastSavedRef.current[key] ? JSON.parse(lastSavedRef.current[key]) : null; } catch (e) { base = null; }
+    const { project: merged, changed } = mergeBoards(local, remote,
+      { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null });
     if (open) setProject(merged);
     if (typeof window !== "undefined" && window.Toast) {
       const codes = namesOf(merged, changed.map((x) => x.id));
