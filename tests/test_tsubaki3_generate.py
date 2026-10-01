@@ -317,6 +317,37 @@ def test_a_members_only_profile_stands_the_turbo_fallback_down(rest, monkeypatch
     assert len(calls) == 2 and calls[1]["priority"] == core.PRIORITY_LOW
 
 
+@pytest.mark.parametrize("message,profile", [
+    ("inferenceProfile lite is not supported by this model", "lite"),
+    ("REQUIRE_MEMBERSHIP", "pro"),
+])
+def test_a_partial_success_is_never_resubmitted(rest, monkeypatch, message, profile):
+    """PixAI answered with errors AND a created task (`data.createGenerationTask` non-null):
+    the task exists and may be charged. Neither the profile drop nor the Turbo-to-standard
+    resubmit may send it again -- that would be a second paid generation (red team
+    2026-10-01). The error goes back to the caller exactly as it came."""
+    sent = []
+
+    def fake(s, q, v=None):
+        sent.append(dict(v["parameters"]))
+        e = core.PixAIError('GraphQL error: [{"message": "%s"}]' % message)
+        e.graphql_data = {"createGenerationTask": {"id": "T-made"}}
+        raise e
+    monkeypatch.setattr(core, "gql_mutate", fake)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(core, "_turbo_refused", {"seen": False})
+    # Reach the two resubmit branches: the profile is not one the version lists (so the
+    # inferenceProfile drop is the road taken) and not members-only (so Turbo may step down).
+    monkeypatch.setattr(core, "_profile_listing", lambda s, p: (False, False))
+    monkeypatch.setattr(core, "_gate_image_params", lambda s, p: (p, []))
+    params = {"prompts": "p", "modelId": T3, "width": 1024, "height": 1024, "batchSize": 1,
+              "inferenceProfile": profile, "priority": core.PRIORITY_TURBO}
+    with pytest.raises(core.PixAIError) as ei:
+        core.submit_generation(object(), params)
+    assert len(sent) == 1, "a partial success was sent a second time"
+    assert core.definite_refusal(ei.value) is False
+
+
 # =============================================================================
 # the price breakdown
 # =============================================================================

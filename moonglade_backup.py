@@ -11337,6 +11337,13 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # would be a request nobody quoted, sent after the run's budget check. PixAI's
             # answer comes back as it came; definite_refusal() reads it.
             raise
+        if not definite_refusal(e):
+            # Both resubmits below are safe ONLY because a refusal means nothing was made. A
+            # GraphQL error whose mutation data came back non-null is a partial success: the
+            # task exists and may be charged, so sending again would pay twice. The same rule
+            # the lane, run jobs, training and the Loom fallback already follow (red team
+            # 2026-10-01). A timeout or dropped connection is passed on unchanged as well.
+            raise
         if "inferenceProfile" in str(e) and "inferenceProfile" in params and listed:
             refused = PixAIError("PixAI refused the {} profile for this account, so nothing "
                                  "was made: {}".format(params.get("inferenceProfile"),
