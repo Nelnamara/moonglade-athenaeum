@@ -1057,6 +1057,14 @@ LOOM_BED_TEMP_SWEEP_AGE_S = 3600
 LOOM_EDL_CLIP_RE = re.compile(r"^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$")
 LOOM_EDL_BED_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$")
 LOOM_MEDIA_ID_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})$")
+# A bundle's media entry: exactly media/<id><picture or video extension>, nothing else; the id
+# is letters, digits, '_' and '-' only (no separator, drive letter, colon or dot).
+# The name inside a zip is the sender's to choose, so it is never trusted as a path: anything
+# else (another extension such as .html/.svg, a separator, a drive letter, "..") is skipped
+# unread (red team 2026-10-01). Each entry is copied under this cap.
+LOOM_BUNDLE_MEDIA_RE = re.compile(
+    r"^media/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.(png|jpg|jpeg|webp|gif|avif|mp4|webm|mov|mkv|m4v)$")
+LOOM_BUNDLE_MEDIA_MAX_BYTES = 1024 * 1024 * 1024
 LOOM_EDL_MAX_EDL_CHARS = 1024 * 1024
 LOOM_EDL_MAX_CSV_CHARS = 4 * 1024 * 1024
 LOOM_EDL_MAX_CLIPS = 2000
@@ -26086,9 +26094,8 @@ __DESIGN_TOKENS__
         # of those columns through save_catalog's full-row upsert -- exactly the 2026-09-03
         # data loss. The file is still written (the bytes really are missing here); the row
         # keeps what the user owns.
-        known = core.known_catalog_rows(db_path, [
-            Path(n).stem for n in z.namelist()
-            if n.startswith("media/") and not n.endswith("/")])
+        media_entries = [m for m in (LOOM_BUNDLE_MEDIA_RE.match(n) for n in z.namelist()) if m]
+        known = core.known_catalog_rows(db_path, [m.group(1) for m in media_entries])
         rows = []
         # Session P (P3, review F19): a bundle's music bed is RE-HASHED on arrival and stored
         # under the name its own bytes give it, in the caller's bed folder -- never under the
@@ -26138,16 +26145,32 @@ __DESIGN_TOKENS__
                 project["bed"] = dict(pbed, file=got)
             elif not LOOM_BED_FILE_RE.match(str(pbed.get("file") or "")):
                 project.pop("bed", None)          # a bed naming no storable file is no bed
-        for name in z.namelist():
-            if not name.startswith("media/") or name.endswith("/"):
-                continue
-            mid = Path(name).stem
+        for m in media_entries:
+            name, mid, ext = m.group(0), m.group(1), "." + m.group(2)
             if _loom_resolve_media(mid):
                 continue  # already have it -- both sides share this media, nothing to do
-            ext = Path(name).suffix.lower()
             imported_dir.mkdir(parents=True, exist_ok=True)
             dest = imported_dir / "{}{}".format(mid, ext)
-            dest.write_bytes(z.read(name))
+            if not _is_under(dest.resolve(), imported_dir.resolve()):
+                continue
+            # Streamed under a cap into a temp file, then moved into place: a huge or
+            # truncated entry never leaves a partial picture behind (Invariant 3).
+            part = dest.with_name(dest.name + ".part")
+            try:
+                total = 0
+                with open(part, "wb") as out, z.open(name) as src:
+                    for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                        total += len(chunk)
+                        if total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
+                            break
+                        out.write(chunk)
+                if total == 0 or total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
+                    _unlink_quiet(part)
+                    continue
+                os.replace(part, dest)
+            except (OSError, KeyError, zipfile.BadZipFile, RuntimeError):
+                _unlink_quiet(part)
+                continue
             is_vid = ext in _BUNDLE_VIDEO_EXTS
             thumb_path = thumb_dir / "{}.jpg".format(mid)
             if is_vid:

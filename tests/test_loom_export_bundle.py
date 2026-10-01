@@ -260,3 +260,38 @@ def test_import_bundle_localhost_only(tmp_path):
     r = cli.post("/api/loom/import-bundle", data={"file": (io.BytesIO(zip_bytes), "b.zip")},
                  content_type="multipart/form-data", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 401
+
+
+def test_import_bundle_skips_every_entry_that_is_not_a_plain_picture_or_video(tmp_path):
+    """Red team 2026-10-01: the media loop trusted the zip's entry names. A bundle someone
+    hands you could carry media/x.html or .svg (served back from /full on the gallery's own
+    origin with live script: stored XSS as the owner), or on Windows a drive-relative stem
+    like "C:evil" that resolves outside the library. Only media/<id>.<picture|video ext>
+    with a plain id is stored; everything else is skipped unread and catalogs nothing."""
+    import io
+    import zipfile
+    from moonglade_gallery import create_app, save_catalog
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [])
+    cli = login_test_client(create_app(tmp_path))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("project.json", json.dumps({"project": {"name": "x", "acts": []}}))
+        z.writestr("media/990001.html", b"<script>alert(1)</script>")
+        z.writestr("media/990002.svg", b"<svg onload=alert(1)></svg>")
+        z.writestr("media/C:evil.png", b"x")
+        z.writestr("media/../../escape.png", b"x")
+        z.writestr("media/sub/990003.png", b"x")
+        z.writestr("media/990004.png", b"\x89PNG not really")
+    r = cli.post("/api/loom/import-bundle",
+                 data={"file": (io.BytesIO(buf.getvalue()), "b.zip")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200
+    stored = sorted(p.name for p in (tmp_path / "imported").iterdir())
+    assert stored == ["990004.png"], stored
+    assert not (tmp_path / "escape.png").exists() and not (tmp_path.parent / "escape.png").exists()
+    import sqlite3
+    con = sqlite3.connect(str(tmp_path / "catalog.db"))
+    mids = sorted(r[0] for r in con.execute("select media_id from catalog"))
+    con.close()
+    assert mids == ["990004"], mids
