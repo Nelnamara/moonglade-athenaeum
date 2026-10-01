@@ -8481,7 +8481,7 @@ ${"=".repeat(48)}
             onError: onVideoError
           }
         ) : null,
-        flare ? /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": kind === "starfall" ? "castflare" : "doorflare", className: "mgm-fill" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.wash }), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.bloom })) : null,
+        flare ? /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": kind === "starfall" ? "castflare" : "doorflare", className: "mgm-flare" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.wash }), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.bloom })) : null,
         /* @__PURE__ */ react_global_shim_default.createElement("div", { style: f.gradient }),
         (f.stars || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: s.i, "data-part": "star", style: s.style }, "\u2726"))
       ), /* @__PURE__ */ react_global_shim_default.createElement(

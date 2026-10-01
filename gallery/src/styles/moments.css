@@ -42,7 +42,7 @@
   font-size: 16px; font-weight: 400; font-style: normal; line-height: normal;
   letter-spacing: normal; text-transform: none; color: var(--moment-text);
 }
-.mgm-fade, .mgm-fill { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.mgm-fade, .mgm-flare { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .mgm-stage, .mgm-safe {
   position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0;
 }

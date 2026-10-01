@@ -1805,7 +1805,7 @@ button.mgcp-chip .mgico {
   color: var(--moment-text);
 }
 .mgm-fade,
-.mgm-fill {
+.mgm-flare {
   position: absolute;
   left: 0;
   top: 0;
