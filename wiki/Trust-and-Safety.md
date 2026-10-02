@@ -12,7 +12,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   **Matrix** run shows **one confirm** with the count and the total credits, and sends nothing
   until you press its button; **Start training** first gets PixAI's price for exactly
   that run and asks once, with a tick for a paid one, and Advanced training's **Describe
-  automatically** names its price on the button and sends exactly that amount; and **The Loom
+  automatically** shows PixAI's own price on a confirm card and sends only from that card's button; and **The Loom
   never renders on its own** — every render is your own click on **Render**, **Re-render**, the
   drawer's **Generate video** or **Generate all**, and a paid one is priced and asked about
   before it goes. (The **art filters** in the Darkroom

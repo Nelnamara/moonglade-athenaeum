@@ -15,8 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (3.11.0 to 3.14.0 on 2026-09-26), per the
-  rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.15.0 — The Reading Room,
+  2026-10-01), per the rule at the top of this file.
 
 ---
 
@@ -57,7 +57,7 @@ why this section exists.
   driven browser at phone size. The design-queue wave has merged, so nothing gates this.
 
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
-  Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
+  Today one hook (`MOBILE_QUERY` 520px + a coarse-pointer fallback for a phone-width screen held in portrait)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
   breakpoint so tablets get the mobile build (one number, least work, most side effects on a
   desktop-shaped surface); add a real third tier; or keep the split and port touch affordances
@@ -92,7 +92,7 @@ why this section exists.
   and the `/next/assets/` static prefix baked into the build, the page templates and the installed-app
   manifest. Rename the API routes to plain names (`/api/library`, `/api/detail/<id>`, `/api/history`) on
   one shared handler with the old paths kept as aliases for a release, send every client call through one
-  constants module (54 scattered call sites today), and leave payloads untouched. The assets prefix is
+  constants module (the call sites are scattered today), and leave payloads untouched. The assets prefix is
   decided separately and never simply dropped: installed phone apps read their icons from it. Built after
   the open work is merged and walked, not alongside it (the details route keeps gaining fields). Scope,
   measured blast radius, phases, tests and risks:
@@ -179,11 +179,11 @@ why this section exists.
   The smaller god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,
   `videoDrawerCore.js`) can ride a structural pass instead; these two are banked as their own effort.
 
----
-
 - **Remake the AI Tools thumbnails.** *(owner plan, 2026-09-08)* The Enhance preset thumbnails
   shipped; the owner intends to redo the AI Tools thumbnails himself. Nothing to build until the
   art lands.
+
+---
 
 ## Backlog — needs scoping
 
@@ -197,7 +197,6 @@ why this section exists.
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
 
-- **Loom:** draft-quality blocking pass · project "Look" block.
 - **Curator:** archive-integrity job.
 - **Power user:** metadata recovery for hand-made folders.
 - **Mobile:** the mobile details sheet's View-batch chip still gates on the legacy `batch` column
@@ -213,8 +212,8 @@ above, tagged "Scope":
 - **Mobile:** optional infinite scroll · an opt-in "remember this device" longer LAN session (still
   authenticated) · QR-connect onboarding (URL only, login gate unchanged).
 
-Small integrity fixes the sweep surfaced (issue-candidates, not features): the mobile Details
-"k of N" index counts one loaded page, not the true result total; Contact Sheet Mobile renders
-placeholder thumbs where real art exists; and `deleted_remote` (archive-only) pieces aren't badged
-and can be swept by a bulk quarantine. Detail in the sweep doc §3. (The sweep's fourth item, Loom
-draft-vs-professional marking on rendered shots, was dropped by the owner on 2026-09-07.)
+Small integrity fixes the sweep surfaced are filed as Issues: the phone record's "k of N" ([#64](https://github.com/Nelnamara/moonglade-athenaeum/issues/64)),
+the phone's View batch chip ([#65](https://github.com/Nelnamara/moonglade-athenaeum/issues/65)) and archive-only pieces
+([#66](https://github.com/Nelnamara/moonglade-athenaeum/issues/66)). The phone contact sheet's placeholder thumbnails are a
+deliberate design choice awaiting the owner's call. (The sweep's fourth item, Loom draft-vs-professional
+marking on rendered shots, was dropped by the owner on 2026-09-07.)
