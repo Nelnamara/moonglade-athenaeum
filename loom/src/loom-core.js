@@ -732,6 +732,37 @@ export const costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pend
   `Cost to finish: ${free} free-card, ${paid} paid (≈${credits.toLocaleString()} credits), ` +
   `${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
 
+/* ---------- the Generate panel's balance line (desktop and phone) ----------
+   Owner walk 2026-09-30: after two paid renders the panel still read "2151263 credits · 9
+   cards" -- the balance from when the Loom opened, unformatted -- while the gallery header read
+   2,079,763. Two causes, two helpers. */
+
+/** The line's three pieces, grouped the way the gallery header groups its credits
+ *  (SeparatorBar: Number(credits).toLocaleString()). `claim` is "" when nothing is claimable. */
+export const balanceLine = (acct) => {
+  const a = acct || {};
+  const n = Number(a.cards) || 0;
+  return {
+    credits: a.credits == null ? "—" : Number(a.credits).toLocaleString(),
+    cards: n.toLocaleString() + " card" + (n === 1 ? "" : "s"),
+    claim: a.claim_credits ? "+" + Number(a.claim_credits).toLocaleString() + " claimable" : "",
+  };
+};
+
+/** WHEN THE LINE RE-READS THE ACCOUNT: a key over the board's generation states (genState,
+ *  genImgState, ...) that changes exactly when a spend lands -- a render or generation is out
+ *  (accepted: PixAI has charged it) or has finished (done, with its picture). A task moving
+ *  between its waiting tiers (running / slow / stale / paused) and every message change leave
+ *  it alone, so an hour-long render is one read when it goes out and one when it lands. */
+const SPEND_OUT = { running: 1, slow: 1, stale: 1, paused: 1 };
+export const spendLandedKey = (...maps) => maps.map((m, i) => Object.keys(m || {}).sort()
+  .map((id) => {
+    const s = m[id] || {};
+    if (s.phase === "done") return i + ":" + id + ":done:" + (s.mid == null ? "" : String(s.mid));
+    return SPEND_OUT[s.phase] ? i + ":" + id + ":out" : "";
+  })
+  .filter(Boolean).join(",")).join("|");
+
 /* ---------- per-project spend ledger: what this project ALREADY spent ----------
    The historical sibling of the cost-to-finish pill above. That one is a QUOTE -- it asks
    /api/price what the unrendered shots would cost. This one is a RECORD: every finished

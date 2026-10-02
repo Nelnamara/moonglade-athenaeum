@@ -15,6 +15,8 @@ import {
   timelineFit, timelineHeight, nextTimelineState,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
+  // The Generate panel's balance line: grouped, and re-read when a spend lands (walk 2026-09-30).
+  balanceLine, spendLandedKey,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
@@ -1558,6 +1560,22 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
+/* THE GENERATE PANEL'S BALANCE (desktop and phone; owner walk 2026-09-30). Both views used to read
+   /api/account ONCE, on mount, so after two paid renders the panel still showed the balance from
+   when the Loom opened. It is read on open, again on a bind (`bind`: the shot the panel is bound
+   to) and again whenever a spend lands on this board (`landedKey`: spendLandedKey over the board's
+   generation states, loom-core.js); a read that a newer one overtook is dropped. Display only:
+   it never gates a submit (`lora_cap` rides the same read, as before). */
+function useAccountLine(landedKey, bind) {
+  const [acct, setAcct] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/account").then((r) => r.json()).then((d) => { if (live) setAcct(d); }).catch(() => {});
+    return () => { live = false; };
+  }, [landedKey, bind]);
+  return acct;
+}
+
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
   // "attach to A·0n" (all useGenerationPipeline's).
@@ -1619,7 +1637,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
       bundling={bundling} importBackup={importBackup} openEdl={openEdl} />
   );
-  const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
+  // credits/cards for the inline balance line: re-read on a bind and whenever a spend lands
+  const acct = useAccountLine(spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState), String(selShot || ""));
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
   // Deep Focus's own body is an IIFE inside a conditional render (below), not a component or
@@ -1685,7 +1704,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prevOverflow; };
   }, []);
-  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     if (!deepFocus) return;
     const onKey = (ev) => { if (ev.key === "Escape") setDeepFocus(null); };
@@ -3550,10 +3568,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             weave modes read these frames), Edit (reads openFrame as its source) -- with a
             contextual label; hidden on Image. Shared infrastructure, never Reference-only. */}
         {tab !== "Edit" ? frameHandoff : null}
-        {acct && (
-          <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
-            {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
-        )}
+        {acct && (() => {
+          const bal = balanceLine(acct);
+          return (
+            <div className="lv-bal">&#9889; {bal.credits} credits &middot; {bal.cards}
+              {bal.claim ? <span className="lv-balclaim"> &middot; {bal.claim}</span> : null}</div>
+          );
+        })()}
         {tabBody}
         {tab === "Edit" ? frameHandoff : null}
         {/* Always mounted (never conditionally rendered on `tab`) so switching tabs mid-
@@ -5076,14 +5097,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // Generate screen. "Video" is this screen's pre-existing content (third increment,
   // unchanged below) -- genTab defaults to "Video" to match LoomV2's own default tab.
   const [genTab, setGenTab] = useState("Video");
-  // Credit balance line -- purely a read-only display (matches LoomV2's identical
-  // component-local `acct` state and its own component-local fetch effect below), never
-  // gates a submit. Duplicating this one fetch per view (rather than lifting it) is the
-  // established pattern in this file for non-spend UI chrome (pickerOpen/pickerMounted are
-  // the same kind of per-view local state) -- losing it on a toggle just means one more
-  // free /api/account read next time this screen opens, not a credit-safety concern.
-  const [acct, setAcct] = useState(null);
-  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
+  // Credit balance line -- purely a read-only display (the same useAccountLine LoomV2 reads),
+  // never gates a submit. One read per view (rather than lifting it) is the established pattern
+  // in this file for non-spend UI chrome (pickerOpen/pickerMounted are the same kind of per-view
+  // local state) -- losing it on a toggle just means one more free /api/account read next time
+  // this screen opens, not a credit-safety concern. Re-read when the Generate screen opens on a
+  // shot (the bind) and whenever a spend lands (owner walk 2026-09-30: it went stale).
+  const acct = useAccountLine(spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState),
+    (genOpen ? "gen:" : "") + String(selShot || ""));
 
   // ---- Model/LoRA picker overlay for the Image tab -- a mobile sheet wrapping the SAME
   // real <ModelPicker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
@@ -6380,12 +6401,15 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   onClick={() => setGenTab(t)}>{t}</button>
               ))}
             </div>
-            {acct && (
-              <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
-                &#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
-                {acct.claim_credits ? <span style={{ color: "var(--gold)" }}> &middot; +{acct.claim_credits} claimable</span> : null}
-              </div>
-            )}
+            {acct && (() => {
+              const bal = balanceLine(acct);
+              return (
+                <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
+                  &#9889; {bal.credits} credits &middot; {bal.cards}
+                  {bal.claim ? <span style={{ color: "var(--gold)" }}> &middot; {bal.claim}</span> : null}
+                </div>
+              );
+            })()}
             <div className="lm-gen-body">
             {genTab === "Image" && (() => {
               const gi = genImgState[c.id] || {};
