@@ -426,6 +426,21 @@ export function flfMissingStart(s) {
   return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
 }
 
+/* WHICH RESULT LINES THE DRAWER DRAWS. In the gallery's Generate dock only its refusals and
+   submit-time errors (the RUNS reel and History carry the rest); in mobile's Video mode every
+   line. In the Loom (`loom`) the drawer is one panel shared by every shot, so a line belongs to
+   the shot it was pushed for (`line.shot`, stamped at the click) and only the BOUND shot's lines
+   are drawn (`shot`: the drawer's current target, "" for none). Owner walk 2026-09-30: with E·02
+   bound, the panel still showed "✓ Rendered — 70,000 credits" and E·01's picture, and E·02's
+   own "Rendering…" line went in underneath it. Lines are never dropped -- binding E·01 again
+   shows its lines again. */
+export function linesShown(results, { dock, loom, shot } = {}) {
+  const rs = Array.isArray(results) ? results : [];
+  if (dock) return rs.filter((l) => l && l.kind === "error");
+  if (loom) return rs.filter((l) => l && (l.shot || "") === (shot || ""));
+  return rs;
+}
+
 /* LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns, same
    replacement text, verbatim -- so a generation rejected by PixAI's content filter (or stopped
    short on insufficient balance) reads IDENTICALLY whether it surfaced via the Loom's own poll

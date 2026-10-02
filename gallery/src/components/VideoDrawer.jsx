@@ -16,6 +16,7 @@ import {
   applyPrefill as applyPrefillState,
   flfMissingStart as flfMissingStartOf,
   VIDEO_RATIOS, ratioLabel, ratioOffered,
+  linesShown,
 } from "../gen/videoDrawerCore.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
@@ -422,9 +423,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const reprice = probe.refresh;
 
   // ---- submit -> poll -> result (concurrent; each submission its own line + poll loop) --------
+  // In the Loom a line belongs to a shot (linesShown, videoDrawerCore.js): the one it names
+  // (`line.shot`, a render's captured target), else the shot the drawer is bound to right now.
+  const boundShot = () => ((loomCtx && st.current.loomTarget && st.current.loomTarget.card_id) || "");
   const pushLine = (line) => {
     const id = ++lineSeq;
-    setResults((rs) => rs.concat([{ id, ...line }]));
+    const shot = loomCtx ? (line.shot != null ? String(line.shot) : boundShot()) : undefined;
+    setResults((rs) => rs.concat([{ id, ...line, ...(loomCtx ? { shot } : {}) }]));
     return id;
   };
   const updateLine = (id, patch) => setResults((rs) => rs.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -479,7 +484,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // In the Loom the host's own ask (below) re-prices this payload and says so instead.
     const quoted = probe.response || null;
     let expectFree = !!(quoted && quoted.free);
-    const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
+    // The render's line is its shot's (the target captured above), whatever is bound later.
+    const id = pushLine({ kind: "status", moon: true, text: "Submitting…", ...(loomCtx ? { shot: target.card_id } : {}) });
     setReuseChip(null);   // a new submission goes out -- the recipe is no longer "from" the old run
     st.current.rendering = true;
     rerender();
@@ -639,11 +645,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   };
   // The video ↺-from chip's setter, exposed to the dock's prefillVideoFromRun. Null clears it.
   const setReuse = (info) => setReuseChip(info || null);
-  // The Loom's target (board + shot) for the next Go click; null = none. Stored only -- the
-  // click captures it (doGenerate). Never submits.
+  // The Loom's target (board + shot) for the next Go click; null = none. Stored -- the click
+  // captures it (doGenerate) -- and, when the SHOT changes, repainted: the result lines drawn
+  // are the bound shot's own (linesShown). Never submits.
   const setLoomTarget = (t) => {
+    const was = boundShot();
     st.current.loomTarget = (t && t.board_id && t.card_id)
       ? { board_id: String(t.board_id), card_id: String(t.card_id), draft: !!t.draft } : null;
+    if (boundShot() !== was) rerender();
   };
   // The Loom's host hooks: {beforeSend}. Stored only. Never submits.
   const setHost = (h) => { hostRef.current = h || null; };
@@ -1018,10 +1027,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           the History strip and the banner -- so the drawer's own inline PROGRESS and result-media are
           redundant there and are suppressed; only its refusals / submit-time errors ('Pick a source
           image first.', a rejected submit), which never reach the reel, still show (owner 2026-08-18).
-          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines.
+          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines --
+          in the Loom, the BOUND shot's lines only (linesShown; owner walk 2026-09-30).
           Every mg-* event is emitted regardless above -- this only gates the inline RENDER. */}
       {(() => {
-        const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+        const shown = linesShown(results, { dock: inDock, loom: !!loomCtx, shot: boundShot() });
         return (
           <div className={"mgd-result" + (shown.length ? " has" : "")}>
             {shown.map((l) => (
