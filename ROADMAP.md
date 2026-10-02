@@ -146,7 +146,9 @@ why this section exists.
   named public/private collections. The model picker's Bookmarked tab still works on the older
   call, so nothing is broken; a check in the build warns when that call leaves PixAI's site.
   Adopting collections needs one read-only capture of their shapes and a design step for the
-  picker's source tabs.
+  picker's source tabs. **Owner, 2026-10-02: show and save.** The picker shows his PixAI collections
+  so site-saved models appear in the app, and a Save in the picker puts a model into one of his PixAI
+  collections (design Session S).
 
 ## Open questions — need a call before they can be scoped
 
@@ -186,7 +188,7 @@ why this section exists.
   the app icon) — the same per-user registry spot the Desktop-shortcut code already writes. Touches the
   manifest/downloader file name, `_container_path()`, the builder's default `--out`, and the Release
   asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority. Owner,
-  2026-10-02: yes to the extension, in pack v7; the per-user registry entry is his call.
+  2026-10-02: yes to the extension and to the per-user registry entry, in pack v7.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added. Sources scouted in July (recovered 2026-10-02 from the deleted STATE
   notes): Kenney, the Sonniss GDC bundles, freesound and OpenGameArt (free/CC0 libraries), or Stable
