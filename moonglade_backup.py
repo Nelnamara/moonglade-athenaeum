@@ -35,10 +35,11 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.14.0"
+__version__ = "3.15.0"
 
 import argparse
 import base64
+import copy
 import csv
 import datetime
 import getpass
@@ -109,6 +110,56 @@ except Exception:
 
 class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
+
+
+class LocalRefusal(PixAIError):
+    """Refused HERE, before any network call: READ_ONLY, or the request's own validation.
+    Nothing reached PixAI, so a spend guard treats it as a definite refusal
+    (definite_refusal) and never tells the user a run "may have started" (waves 2+3 review,
+    F4). Still a PixAIError, so every existing catch site is unchanged."""
+
+
+class PixAIRestError(PixAIError):
+    """A /v2 REST route answered non-2xx. Still a PixAIError with the same message as before
+    (every existing catch site is unchanged); it also carries the HTTP `status` and PixAI's
+    parsed error body (`code`, `data`, the oRPC error shape) so a caller can say which images
+    PixAI refused, or that a task was not in the state a route needs, in PixAI's own terms
+    instead of a truncated string.
+
+    `body` is PixAI's parsed answer exactly as sent -- None when it was not JSON -- and
+    `http_status` is the same number as `status` (the recipe code reads that name, the
+    training code this one); `fields` is the body as a dict, empty when it was not one."""
+
+    def __init__(self, message, status=None, body=None):
+        super().__init__(message)
+        self.status = status
+        self.body = body
+
+    @property
+    def http_status(self):
+        return self.status
+
+    @property
+    def fields(self):
+        return self.body if isinstance(self.body, dict) else {}
+
+    @property
+    def code(self):
+        return str(self.fields.get("code") or "")
+
+    @property
+    def data(self):
+        d = self.fields.get("data")
+        return d if isinstance(d, dict) else {}
+
+
+def _rest_error(verb, path, r):
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    return PixAIRestError("REST {} {} -> {}: {}".format(verb, path, r.status_code, r.text[:300]),
+                          status=r.status_code, body=body)
 
 
 class EmptyOutputsError(PixAIError):
@@ -1475,7 +1526,8 @@ def _is_mutation_document(query):
 class PixAIClient:
     """The transport seam: everything this app asks PixAI, asked here.
 
-    Five verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`), one credential
+    Seven verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`, `rest_put`,
+    `rest_patch`), one credential
     choice (`for_create`), and the underlying requests.Session on `.session` for the call
     sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
     resolved account id.
@@ -1581,7 +1633,17 @@ class PixAIClient:
                 raise PixAIError("HTTP {} non-JSON response:\n{}".format(
                     r.status_code, r.text[:400]))
             if data.get("errors"):
-                raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+                err = PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+                # The WHOLE list rides on the error: the message keeps 500 characters, and a
+                # structured refusal (a recipe's RECIPE_* with its ids and reason) can be
+                # longer. Reading it changes nothing about what was sent or retried.
+                err.graphql_errors = data["errors"]
+                # A GraphQL answer may carry `errors` AND `data` at once: a partial success,
+                # where the root field DID resolve (a run created and charged) and something
+                # beneath it failed. The data rides on the error so a spend guard can tell
+                # that apart from a refusal (definite_refusal; waves 2+3 review, F2).
+                err.graphql_data = data.get("data")
+                raise err
             return data.get("data") or {}
         raise RuntimeError("unreachable")
 
@@ -1673,7 +1735,7 @@ class PixAIClient:
         Single-attempt by construction, like `rest_post` -- see its note."""
         r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("GET", path, r)
         return r.json()
 
     def rest_post(self, path, body=None, timeout=60):
@@ -1685,7 +1747,27 @@ class PixAIClient:
         tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
         r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("POST", path, r)
+        return r.json()
+
+    def rest_patch(self, path, body=None, timeout=60):
+        """PATCH JSON to a /v2 oRPC REST route. Single attempt, like rest_post / rest_put:
+        its one caller (joining a LoRA to the rebate programme) cannot be undone."""
+        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise _rest_error("PATCH", path, r)
+        return r.json()
+
+    def rest_put(self, path, body=None, timeout=60):
+        """PUT JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+        Single-attempt like `rest_post`, and by the same reasoning: the training routes that
+        ride it (a dataset replace, a description save) change the account, and a re-send
+        after a lost response can land on a task that has already moved on. Pinned alongside
+        rest_post by tests/test_spend_no_retry.py."""
+        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise _rest_error("PUT", path, r)
         return r.json()
 
     # -- which credential a create rides -------------------------------------
@@ -3779,7 +3861,8 @@ def _empty_version_meta():
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
             "compatibility": {}, "restrictions": {}, "profiles": None,
             "quality_tag": None, "size_rule": None, "context_images": None,
-            "unlimited": None}
+            "color_palette": None, "unlimited": None, "profile_rows": None,
+            "size_tiers": None, "context_max": None, "creativity": False}
 
 
 def _version_quality_tag(extra):
@@ -3844,8 +3927,8 @@ def _version_row_to_meta(r):
       has the same keys whether or not that caller ran the second read.
     - quality_tag: the version's own Quality Tag ({prefix, suffix}) or None -- see
       _version_quality_tag (SCOPE_2026-09-26 G4).
-    - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
-      _attach_features on the opt-in path that already pays the profile read.
+    - size_rule / context_images / color_palette: PLACEHOLDERS (None) like `profiles`,
+      filled by _attach_features on the opt-in path that already pays the profile read.
     - unlimited: PLACEHOLDER (None), filled by _attach_unlimited on that same path for a
       version in UNLIMITED_VERSIONS (SCOPE_2026-09-26_unlimited-mode S2).
     - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
@@ -3877,7 +3960,12 @@ def _version_row_to_meta(r):
         "quality_tag": _version_quality_tag(extra),
         "size_rule": None,
         "context_images": None,
+        "color_palette": None,
         "unlimited": None,
+        "profile_rows": None,
+        "size_tiers": None,
+        "context_max": None,
+        "creativity": False,
     }
 
 
@@ -3919,7 +4007,28 @@ def _attach_profiles(session, meta):
     meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
                         if isinstance(p, dict) and p.get("profileName")
                         and p.get("profileFlag") != "hidden"]
+    # Session H T1a: the same rows as the Pro / Ultra rows under the model -- name, PixAI's
+    # title and description, the live base price (the rows' "+N" is its difference from the
+    # default row's) and the membership flags. Hidden rows are left out exactly as above.
+    meta["profile_rows"] = [_profile_row(p) for p in rows
+                            if isinstance(p, dict) and p.get("profileName")
+                            and p.get("profileFlag") != "hidden"]
     return meta
+
+
+def _profile_row(p):
+    """One /inference-profiles row -> the drawer's profile row (Session H T1a)."""
+    def _num(v):
+        try:
+            return int(v) if v is not None and not isinstance(v, bool) else None
+        except (TypeError, ValueError):
+            return None
+    return {"name": str(p.get("profileName")).strip(),
+            "title": str(p.get("title") or p.get("profileName") or "").strip()[:40],
+            "desc": str(p.get("desc") or "").strip()[:200],
+            "base_price": _num(p.get("basePrice")),
+            "flag": str(p.get("profileFlag") or ""),
+            "required_tier": _num(p.get("requiredMembershipTier")) or 0}
 
 
 def _attach_features(session, meta):
@@ -3939,6 +4048,9 @@ def _attach_features(session, meta):
     - context_images: True only when /features answered with modelType MMDIT26B_MODEL and
       contextImages "on" -- the exact condition under which the gate sends a reference as a
       context image. None when /features could not be read.
+    - color_palette: True only when /features lists colorPalette "on" -- the one condition
+      under which the gate lets a colour palette through (it fails closed, unlike the strip
+      rules). False when /features answered without it, None when it could not be read.
     - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
       when /features could not be read. The drawer's dims() applies the identical snap, so
       its "-> W x H px" line is what is sent.
@@ -3964,11 +4076,19 @@ def _attach_features(session, meta):
                 compat[name] = False
     meta["compatibility"] = compat
     meta["context_images"] = None if feats is None else _context_images_on(feats)
+    meta["color_palette"] = None if feats is None else feats["status"].get("colorPalette") == "on"
     ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
     # The gate runs G1 whenever /features answered (an empty modelType included, on the
     # step-8 rule), so the drawer carries a rule exactly then.
     meta["size_rule"] = (_size_rule(mtype, ranges, meta.get("restrictions"))
                          if feats is not None else None)
+    # Session H: the named tiers off the SAME cached /size-config read (decision 6), the live
+    # context-image max (decision 1), and whether the prompt helper is a creativity level
+    # (decision 5 -- MMDIT26B, the same /features answer the build and the gate read).
+    meta["size_tiers"] = [dict(t) for t in getattr(ranges, "tiers", ())] or None
+    meta["context_max"] = (_model_context_max(session, vid) or CONTEXT_IMAGES_FALLBACK_MAX) \
+        if meta["context_images"] else None
+    meta["creativity"] = mtype == "MMDIT26B_MODEL"
     return meta
 
 
@@ -7244,9 +7364,14 @@ def _run_tool(name, path, args, timeout, input=None):
         # path. Decoding is pinned to utf-8/replace because the alternative -- the
         # platform locale with strict errors -- can raise out of a call whose whole
         # contract is that it does not.
+        # stdin is DEVNULL whenever no input is given: a server launched detached on
+        # Windows has no valid stdin handle to inherit, and the child then fails with
+        # WinError 6 -- which this function swallows by contract, so frame_at returned
+        # None and an export silently lost its audio (real-ffmpeg smoke test, 2026-09-29).
+        stdin_kw = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
         r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout, input=input, creationflags=NO_WINDOW)
+                           timeout=timeout, creationflags=NO_WINDOW, **stdin_kw)
     except FileNotFoundError as e:
         # which() said yes and the exec still failed: the binary moved, or a shim
         # points at nothing. Same road for the caller as never having had it.
@@ -7315,6 +7440,19 @@ def has_audio(path, *, timeout=None):
     return bool(r.stdout.strip())
 
 
+def frame_seek_point(at_seconds, dur):
+    """Where a trim-aware frame grab lands on a clip `dur` seconds long: `at_seconds` itself
+    when it is inside the clip, else None -- the clip's LAST frame (no time asked, a time
+    at/after the real end, or a length that could not be measured). The one rule, read by
+    extract_last_frame and by /api/loom/handoff, which reports back where the frame it
+    uploaded came from (the Loom's anchor records that time; owner walk 2026-09-30)."""
+    if at_seconds is None:
+        return None
+    if not (dur and at_seconds < dur - 0.05):
+        return None
+    return at_seconds
+
+
 def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True):
     """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
     one shot's last frame becomes the next shot's opening frame, so a sequence reads as
@@ -7323,7 +7461,11 @@ def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True)
     `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
     the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
     not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
-    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None.
+    clip's real end -- decode the clip's last half second and keep the final frame decoded
+    (`-update 1` with no frame cap overwrites out_png per frame). A clip shorter than that
+    is decoded whole, so it still yields its LAST frame; the old fixed "-sseof -0.15
+    -frames:v 1" clamped to the start on such a clip and handed back the FIRST.
+    Returns out_png or None.
 
     It is also GENERAL: `at_seconds=0.0` takes the explicit-seek branch and yields the
     FIRST frame. Nothing in this app should write a second frame extractor; `frame_at`
@@ -7333,21 +7475,20 @@ def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True)
     -- for a caller that already knows its timestamp is inside the clip."""
     import os
     if at_seconds is not None and trim_aware:
-        dur = duration(video_path)
         # a trimOut at/after the real end is just "the last frame" -> use the EOF path
-        if not (dur and at_seconds < dur - 0.05):
-            at_seconds = None
+        at_seconds = frame_seek_point(at_seconds, duration(video_path))
     try:
         if at_seconds is None:
-            seek = ["-sseof", "-0.15", "-i", str(video_path)]
+            seek = ["-sseof", "-0.5", "-i", str(video_path)]
+            take = ["-update", "1"]
         else:
             # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
             # so we land ON the last kept frame, not the first discarded one.
             seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
+            take = ["-update", "1", "-frames:v", "1"]
     except (TypeError, ValueError):
         return None
-    r = run_ffmpeg(["-y"] + seek +
-                   ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+    r = run_ffmpeg(["-y"] + seek + take + ["-q:v", "2", str(out_png)],
                    timeout=FRAME_TIMEOUT)
     if not r.ok:
         return None
@@ -7968,6 +8109,114 @@ def _is_turbo_refusal(err):
             or ("turbo" in s.lower() and "member" in s.lower()))
 
 
+# ---- Colour palettes (Session H decision 4, 2026-09-28) ------------------------------------
+# PixAI's shape, from its own contract: a palette is {overall?, background?, character?}, each
+# group {colors: [{hex: "#RRGGBB", ratio: 0-100}]} with 1-12 colours, and overall or background
+# must be present. A generation carries colorPalette: {name, palette} (the task-parameter
+# schema), which the Generate drawer builds (gallery/src/gen/colorPaletteCore.js). The official
+# palettes are one read-only GET; a user's own palettes live in the app's per-account store,
+# never on PixAI (saving there is a write this app does not make).
+PALETTE_GROUPS = ("overall", "background", "character")
+PALETTE_MAX_COLORS = 12
+PALETTE_NAME_MAX = 50
+PALETTE_NAME_DEFAULT = "Custom palette"
+_PALETTE_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _palette_ratio(raw):
+    """A colour's share as PixAI takes it: a number 0-100, sent as a whole percent. None when
+    it is not a number in range."""
+    if isinstance(raw, bool):
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v < 0 or v > 100:                    # NaN or out of range
+        return None
+    return int(round(v))
+
+
+def _palette_group_colors(raw):
+    """[{hex, ratio}] from one palette group, or None when it is not a valid group: a list of
+    1-12 colours, each a #RRGGBB hex (upper-cased) and a 0-100 ratio (a whole percent)."""
+    colors = raw.get("colors") if isinstance(raw, dict) else None
+    if not isinstance(colors, list) or not 1 <= len(colors) <= PALETTE_MAX_COLORS:
+        return None
+    out = []
+    for c in colors:
+        hx = c.get("hex") if isinstance(c, dict) else None
+        ratio = _palette_ratio(c.get("ratio")) if isinstance(c, dict) else None
+        if not isinstance(hx, str) or not _PALETTE_HEX_RE.match(hx.strip()) or ratio is None:
+            return None
+        out.append({"hex": hx.strip().upper(), "ratio": ratio})
+    return out
+
+
+def clean_color_palette(raw):
+    """The web payload's `color_palette` -> the task parameter `colorPalette`
+    ({name, palette}), or None when the payload carries none (absent, null, or an empty
+    object -- the drawer leaves the key out when no palette applies).
+
+    Anything PixAI's own schema would refuse is refused HERE, before any network call, as a
+    builder refusal (PixAIError): the badge shows it as its note, the create route returns
+    it, and nothing is created or charged. Groups other than overall/background/character
+    are refused rather than dropped (a dropped group would change the picture asked for)."""
+    if raw is None or (isinstance(raw, dict) and not raw):
+        return None
+    bad = "The colour palette isn't valid: "
+    if not isinstance(raw, dict) or not isinstance(raw.get("palette"), dict):
+        raise PixAIError(bad + "it has no colour groups (nothing was sent or charged)")
+    pal = raw["palette"]
+    extra = [k for k in pal if k not in PALETTE_GROUPS]
+    if extra:
+        raise PixAIError(bad + "unknown group {} (nothing was sent or charged)".format(
+            ", ".join(sorted(str(k) for k in extra))[:40]))
+    out = {}
+    for k in PALETTE_GROUPS:
+        if pal.get(k) is None:
+            continue
+        colors = _palette_group_colors(pal[k])
+        if colors is None:
+            raise PixAIError(bad + "{} needs 1 to 12 #RRGGBB colours with 0-100 shares "
+                                   "(nothing was sent or charged)".format(k))
+        out[k] = {"colors": colors}
+    if "overall" not in out and "background" not in out:
+        raise PixAIError(bad + "it needs overall or background colours "
+                               "(nothing was sent or charged)")
+    name = raw.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    return {"name": (name or PALETTE_NAME_DEFAULT)[:PALETTE_NAME_MAX], "palette": out}
+
+
+def color_palette_presets(session):
+    """PixAI's official colour palettes -- GET /v2/color-palettes/presets, READ-ONLY -- as
+    [{id, name, cover_url, palette}], each palette holding only its valid groups (a group that
+    fails _palette_group_colors is left out; a preset left with neither overall nor background
+    is skipped). `cover_url` is PixAI's CDN thumbnail as given, or "". Raises on a failed read;
+    the caller decides how to fail soft."""
+    data = _rest_get(session, "/color-palettes/presets")
+    rows = (data or {}).get("palettes") if isinstance(data, dict) else None
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        raw = r.get("palette") if isinstance(r.get("palette"), dict) else {}
+        pal = {}
+        for k in PALETTE_GROUPS:
+            colors = _palette_group_colors(raw.get(k))
+            if colors:
+                pal[k] = {"colors": colors}
+        if "overall" not in pal and "background" not in pal:
+            continue
+        cover = r.get("coverUrl")
+        out.append({"id": str(r.get("id") or ""),
+                    "name": str(r.get("name") or "")[:PALETTE_NAME_MAX] or "Palette",
+                    "cover_url": cover if isinstance(cover, str) else "",
+                    "palette": pal})
+    return out
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -8020,6 +8269,12 @@ def _gen_parameters(args):
     else:
         params["promptHelper"] = {"withStage": False, "userWantToEnable": False,
                                   "forcePromptHelperDetectionSide": "server"}
+    # Session H: the drawer's context images go out as they are (catalog / upload ids, never
+    # through an input resolver -- the quote and the spend build the identical list). Only the
+    # web namespace carries the attribute, so the CLI's shape is unchanged.
+    ctx_ids = list(getattr(args, "context_images", None) or [])
+    if ctx_ids:
+        params["contextImages"] = ctx_ids
     # Reference image (the site's "use as reference" = plain img2img): a top-level
     # mediaId + strength on an otherwise standard submit. Banked from a real capture
     # 2026-07-04 (task 2030052367400863154): {..., mediaId, strength: 0.55}.
@@ -8092,6 +8347,12 @@ def _gen_parameters(args):
         params["upscaleSampler"] = str(getattr(args, "upscale_sampler", "") or "")
     if getattr(args, "face_fix", False):
         params["enableADetailer"] = True             # their "Face Fix" booster
+    # Colour palette: {name, palette}, already cleaned by clean_color_palette. Emitted only
+    # when asked for, so every other submit is byte-identical; the gate strips it where the
+    # model cannot take it (and says so).
+    cpal = getattr(args, "color_palette", None)
+    if cpal:
+        params["colorPalette"] = cpal
     qtag = str(getattr(args, "quality_tag", "") or "").strip()
     # Quality Tag is MEMBERS-ONLY on PixAI -- crowned in their Add Booster menu on every
     # model, and their own guide says "member-only" in writing. This app was never built to
@@ -8563,7 +8824,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional", negative="", is_private=False,
-                            use_prompt_helper=False, input_video_durations=None):
+                            use_prompt_helper=False, input_video_durations=None, ratio=""):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -8581,7 +8842,12 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     `model: "tbkv1.0.1"` with another model's id. `input_video_durations` (the caller's
     all-or-nothing list, see input_video_durations()) reaches only referenceVideo, and an
     engine that takes no video references refuses them here (build_reference_video_parameters)
-    rather than sending them."""
+    rather than sending them.
+
+    `ratio` (the Generate drawer's Tsubaki aspect-ratio picker, 2026-09-28) reaches only the
+    referenceVideo road, where build_reference_video_parameters sends it for a Tsubaki engine
+    and never as "adaptive"; an i2vPro shot has no such field and never carries it. The web
+    road writes the receipt when it cannot go out (build_request)."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -8620,7 +8886,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
                                                  model_id=mid_num,
-                                                 input_video_durations=input_video_durations)
+                                                 input_video_durations=input_video_durations,
+                                                 ratio=ratio)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -8930,9 +9197,27 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 #     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
 #     come back 2:3), so no copy anywhere may say it does.
 # editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
-# reads both and fails if their aspects or defaults drift apart.
+# reads both and fails if their aspects, defaults, reference caps, resolutions or qualities
+# drift apart.
+#
+# PixAI Edit v4.0 (Session L decision 6, lane w2-small 2026-09-28), copied from its own model
+# record -- the preset roster's version row 1983993578828959744, extra.chatEditing, read
+# 2026-09-28: maxInputImageCount 10; supportedResolutionOptions 1K/2K/4K, defaultResolution
+# 1K; no quality options; no defaultAspectRatio; fourteen aspects down to 1:8 / 8:1, in the
+# record's own order. No published default aspect means PixAI's own client sends no
+# aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
+# Reference Pro. Listed first; the card's default model stays Edit Pro.
 EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
+    "edit-v4": {
+        "model_id": "1983993578828959744",
+        "label": "Edit v4.0", "max_refs": 10,
+        "resolutions": ["1K", "2K", "4K"],
+        "qualities": [],
+        "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
+        "default": {"resolution": "1K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
+    },
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
         "label": "Edit Pro", "max_refs": 4,
@@ -8968,7 +9253,8 @@ FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
-    """model_id for an Edit-card model key ('edit-pro'/'reference-pro'); '' if unknown."""
+    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'reference-pro'); '' if
+    unknown."""
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 
@@ -10048,6 +10334,8 @@ _features_cache = {}                        # version_id -> (fetched_at_monotoni
 _size_config_cache = {}                     # version_id -> (fetched_at_monotonic, ranges|None)
 _CONTEXT_REF_LORA_REFUSAL = ("Tsubaki.3 can't combine a reference image with LoRAs "
                              "— remove one")
+_CONTEXT_LORA_REFUSAL = ("Tsubaki.3 can't combine context images with LoRAs — switch to "
+                         "LoRAs or remove them")
 
 
 def _cached_version_read(cache, session, version_id, suffix, parse):
@@ -10086,21 +10374,75 @@ def _parse_features(data):
     return {"model_type": str(data.get("modelType") or "").strip().upper(), "status": status}
 
 
+class _SizeRanges(list):
+    """The gate's /size-config answer: a plain list of (minWidth, maxWidth, minHeight,
+    maxHeight) tuples -- everything that reads ranges sees exactly that -- carrying the same
+    body's named tiers on `.tiers` for the drawer (Session H decision 6, _size_tiers_meta), so
+    the one cached GET feeds both and the drawer's tier row costs no second read."""
+    tiers = ()
+
+
 def _parse_size_config(data):
     """/size-config body -> [(minWidth, maxWidth, minHeight, maxHeight), ...], or None for a
-    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges)."""
+    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges). The list
+    is a _SizeRanges whose `.tiers` keeps each named range with its presets (Session H)."""
     if not isinstance(data, dict) or not isinstance(data.get("ranges"), list):
         return None
-    out = []
+    out = _SizeRanges()
+    tiers = []
     for r in data["ranges"]:
         if not isinstance(r, dict):
             continue
         try:
-            out.append((int(r["minWidth"]), int(r["maxWidth"]),
-                        int(r["minHeight"]), int(r["maxHeight"])))
+            rng = (int(r["minWidth"]), int(r["maxWidth"]),
+                   int(r["minHeight"]), int(r["maxHeight"]))
         except (KeyError, TypeError, ValueError):
             continue
+        out.append(rng)
+        tier = _size_tier_row(r, rng)
+        if tier is not None:
+            tiers.append(tier)
+    out.tiers = tuple(tiers)
     return out
+
+
+def _size_tier_row(r, rng):
+    """One /size-config range -> the drawer's tier row, or None when it is not a named range
+    with a usable default preset. Presets keep PixAI's portrait labels ("3:5", "9:16", ...)."""
+    name = str(r.get("name") or "").strip()
+    if not name or len(name) > 8:
+        return None
+    try:
+        step = int(r.get("step") or 16)
+    except (TypeError, ValueError):
+        step = 16
+    presets = []
+    default = None
+    for pr in r.get("presets") or []:
+        if not isinstance(pr, dict):
+            continue
+        try:
+            w, h = int(pr["width"]), int(pr["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        row = {"ratio": str(pr.get("ratioLabel") or "").strip(), "width": w, "height": h}
+        presets.append(row)
+        if pr.get("id") and pr.get("id") == r.get("defaultPresetId"):
+            default = [w, h]
+    if default is None and presets:
+        default = [presets[0]["width"], presets[0]["height"]]
+    if default is None:
+        return None
+    try:
+        required = int(r.get("requiredMembershipTier") or 0)
+    except (TypeError, ValueError):
+        required = 0
+    return {"name": name, "min": min(rng[0], rng[2]), "max": max(rng[1], rng[3]),
+            "step": step if step > 0 else 16, "required_tier": required,
+            "access": str(r.get("accessStatus") or ""), "default": default,
+            "presets": presets}
 
 
 def _model_features(session, version_id):
@@ -10115,6 +10457,53 @@ def _model_size_config(session, version_id):
     its own per-range rules, and its projected XL range equals /size-config's."""
     return _cached_version_read(_size_config_cache, session, version_id, "/size-config",
                                 _parse_size_config)
+
+
+_model_config_cache = {}                    # version_id -> (fetched_at_monotonic, parsed|None)
+
+
+def _parse_model_config_context_max(data):
+    """/v2/model-config/<version>?source=pixai-app -> contextImages.media.maxCount (int >= 1),
+    or None when the body does not carry it."""
+    try:
+        cfg = data["configs"]["pixai-app"]["params"]["contextImages"]["media"]["maxCount"]
+        n = int(cfg)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return n if n >= 1 else None
+
+
+def _model_context_max(session, version_id):
+    """The live context-image max for a version (Session H decision 1: "up to 3 slots, live
+    max"), read from GET /v2/model-config/<version>?source=pixai-app with the gate's cache
+    discipline (an hour on success, a minute on failure, short timeout, fail soft to None --
+    the caller then uses CONTEXT_IMAGES_FALLBACK_MAX). Read-only."""
+    vid = str(version_id or "").strip()
+    if not vid:
+        return None
+    now = time.monotonic()
+    hit = _model_config_cache.get(vid)
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    try:
+        value = _parse_model_config_context_max(
+            _rest_get(session, "/model-config/" + vid, params={"source": "pixai-app"},
+                      timeout=_GATE_READ_TIMEOUT))
+    except Exception:
+        value = None
+    _model_config_cache[vid] = (now, value)
+    return value
+
+
+def features_resolver(session):
+    """RequestResolver.features: version_id -> the gate's own cached /features read (see
+    _parse_features), or None. Session H: build_request decides the creativity shape from the
+    SAME architecture the gate reads (review B3), never from the version row's own type."""
+    def _feats(version_id):
+        return _model_features(session, version_id)
+    return _feats
 
 
 def _context_images_on(feats):
@@ -10203,10 +10592,59 @@ def _lora_out_of_range(weight, lo, hi):
     return max(lo, min(hi, w))
 
 
+_CREATIVITY_LEVELS = ("off", "low", "medium")
+# Tsubaki.3's live context-image max is model-config's contextImages.media.maxCount; this is the
+# value every capture shows, used only when that read fails (BUILD-w2-gen §5).
+CONTEXT_IMAGES_FALLBACK_MAX = 3
+_CONTEXT_UNREAD = ("Couldn't read this model's settings from PixAI, so context images can't be "
+                   "checked — try again in a minute")
+_CONTEXT_NOT_TAKEN = "This model doesn't take context images"
+
+
+def _check_context_images(session, p):
+    """Session H (BUILD-w2-gen §5, review S2/S4): refuse a dict carrying `contextImages` that
+    PixAI's own site would never send. Raises PixAIError; returns nothing. Order: the shape of
+    the list, then the model (/features must answer MMDIT26B with contextImages on), then the
+    combinations the feature excludes, then the live max."""
+    ids = p.get("contextImages")
+    if not isinstance(ids, list) or not ids \
+            or not all(isinstance(x, str) and x.strip() for x in ids):
+        raise PixAIError("context images must be a list of picture ids")
+    if len(set(ids)) != len(ids):
+        raise PixAIError("The same picture is in two context slots — remove one")
+    if "chat" in p or p.get("enlarge") or p.get("upscale"):
+        raise PixAIError("An edit or an upscale can't carry context images")
+    if p.get("mediaId") or "strength" in p:
+        raise PixAIError("Send context images or a reference picture, not both")
+    lmap, lpar = p.get("lora"), p.get("loraParameters")
+    if (isinstance(lmap, dict) and lmap) or (isinstance(lpar, list) and lpar):
+        raise PixAIError(_CONTEXT_LORA_REFUSAL)
+    if p.get("recipeIds"):
+        # ONE wording for this refusal wherever it fires (the build, this gate, the send's
+        # backstop): the recipe lane's, which tells the user how to send them.
+        import moonglade_recipes as _recipes
+        raise PixAIError(_recipes.HELD_WITH_CONTEXT)
+    if p.get("modelStyle"):
+        raise PixAIError("A style can't ride with context images — PixAI would drop the images")
+    if p.get("lane"):
+        raise PixAIError("Unlimited Mode can't use a reference picture — remove it")
+    feats = _model_features(session, p.get("modelId"))
+    if feats is None:
+        raise PixAIError(_CONTEXT_UNREAD)
+    if not _context_images_on(feats):
+        raise PixAIError(_CONTEXT_NOT_TAKEN)
+    mx = _model_context_max(session, p.get("modelId")) or CONTEXT_IMAGES_FALLBACK_MAX
+    if len(ids) > mx:
+        raise PixAIError("{} takes up to {} context images — remove {}".format(
+            "Tsubaki.3" if str(p.get("modelId")) in UNLIMITED_VERSIONS else "This model",
+            mx, len(ids) - mx))
+
+
 def _gate_image_params(session, params):
     """THE per-model image gate: params -> (params, adjusted). See the section comment.
 
-    Order: the 2026-08-25 profile branch (unchanged) -> the Upscale road exits -> /features
+    Order: the 2026-08-25 profile branch (unchanged) -> the colour palette (fails closed,
+    so before the exits) -> the Upscale road exits -> /features
     (unknown -> exit, today's shape) -> G3 context image -> G2 strips -> G6 prompt helper ->
     G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
     shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
@@ -10248,6 +10686,18 @@ def _gate_image_params(session, params):
                     break
             if default:
                 _own()["inferenceProfile"] = default
+        else:
+            # Session H (BUILD-w2-gen, review S1b): a profile the version does not LIST is
+            # refused here, at build, rather than quoted and then rejected and re-run on the
+            # default by submit_generation's fallback -- a quote for one job and a charge for
+            # another. The FULL list is the authority (hidden profiles included), so nothing
+            # the site itself would send is refused. An unreadable list (None) never refuses.
+            asked = str(p.get("inferenceProfile") or "").strip().lower()
+            names = {str(r.get("profileName") or "").strip().lower()
+                     for r in profiles if isinstance(r, dict)}
+            if asked and names and asked not in names:
+                raise PixAIError("This model doesn't offer the {} profile — pick one it "
+                                 "lists".format(p.get("inferenceProfile")))
         for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
             if k in p:
                 _own().pop(k)
@@ -10255,11 +10705,44 @@ def _gate_image_params(session, params):
         if "inferenceProfile" in p:
             _own().pop("inferenceProfile")
 
+    # --- Session H: a request that already carries context images (BUILD-w2-gen, review S2) --
+    # Checked BEFORE the chat / Upscale / unknown-/features exits below, so no road -- the
+    # drawer, the Lightbox edit bar, a CLI --params-json -- sends a context-image dict that
+    # was not checked here. Every rule is a refusal that costs nothing.
+    if "contextImages" in p:
+        _check_context_images(session, p)
+
     # --- SCOPE_2026-09-26 rules --------------------------------------------------------
     # A chat-kind shape (the Fix's synthesized price shape carries a top-level modelId) is
     # not text-to-image; none of the rules below describe it.
     if "chat" in p:
         return p, adjusted
+    # Colour palette (Session H 4; lane w2-small 2026-09-28, spend review B1). This rule FAILS
+    # CLOSED, unlike every strip rule below, and so runs BEFORE the two early exits: a palette
+    # goes out only on a version whose /features lists colorPalette "on" -- PixAI's own client
+    # never sends one otherwise (its feature tracker reads an unread list as off) -- and never
+    # beside a context image (the site drops it there), on the Upscale road, or when /features
+    # could not be read. Each strip is a receipt. The price cannot move: /v2/task-price takes
+    # no colorPalette.
+    if "colorPalette" in p:
+        cpal = p.get("colorPalette")
+        cf = _model_features(session, params["modelId"])
+        why = None
+        upscale_road = bool(p.get("mediaId") and (p.get("enlarge") or p.get("upscale")))
+        if p.get("contextImages") or (p.get("mediaId") and not upscale_road
+                                      and _context_images_on(cf)):
+            why = "a context image takes no colour palette"
+        elif upscale_road:
+            why = "an upscale takes no colour palette"
+        elif cf is None:
+            why = "couldn't confirm this model takes a colour palette"
+        elif cf["status"].get("colorPalette") != "on":
+            why = "this model takes no colour palette"
+        if why:
+            adjusted.append({"field": "colorPalette",
+                             "asked": cpal.get("name") if isinstance(cpal, dict) else cpal,
+                             "used": None, "why": why})
+            _own().pop("colorPalette")
     # The UPSCALE road: a top-level mediaId together with enlarge or upscale is an Upscale
     # panel request, and it passes the new rules untouched -- no size snap, no strip, never a
     # context image. What PixAI does with an upscale of a Tsubaki picture is unobserved; the
@@ -10302,11 +10785,15 @@ def _gate_image_params(session, params):
         if "strength" in q:
             adjusted.append({"field": "strength", "asked": q.pop("strength"), "used": None,
                              "why": "a context image carries no strength"})
+    # Whichever road the context images came by (a converted reference above, or Session H's
+    # drawer building them itself), what the feature excludes is not sent -- each a receipt.
+    if p.get("contextImages"):
         for fld, why in (("negativePrompts", "a context image takes no negative prompt "
                                              "(PixAI drops it there too)"),
                          ("colorPalette", "a context image takes no colour palette")):
-            if fld in q:
-                adjusted.append({"field": fld, "asked": q.pop(fld), "used": None, "why": why})
+            if fld in p:
+                adjusted.append({"field": fld, "asked": p[fld], "used": None, "why": why})
+                _own().pop(fld)
 
     # G2 -- strip what the model does not take (T3-05/06/08/10/15).
     stripped = set()
@@ -10342,30 +10829,58 @@ def _gate_image_params(session, params):
         # off -> medium case (review F3). Without context images it is left absent.
         if "promptHelper" not in p and ctx and extra_ok:
             ph, asked = {}, None
-        if isinstance(ph, dict) and "creativity" not in ph and extra_ok:
-            on = bool(ph.get("userWantToEnable",
-                             ph.get("withStage", ph.get("enable", False))))
-            level = "medium" if (on or ctx) else "off"
-            new_ph = {k: v for k, v in ph.items()
-                      if k not in ("withStage", "enable", "userWantToEnable")}
-            new_ph["creativity"] = level
-            new_ph["forcePromptHelperDetectionSide"] = "server"
-            q = _own()
-            q["promptHelper"] = new_ph
-            if ctx and not on:
+        if isinstance(ph, dict) and extra_ok:
+            if "creativity" in ph:
+                # Session H: the drawer builds the creativity shape itself (decision 5's stops,
+                # build_request); a creativity already here is honoured as asked.
+                level = ph.get("creativity")
+                asked = level
+                if level not in _CREATIVITY_LEVELS:
+                    level = "medium"
+                    if not ctx:
+                        adjusted.append({"field": "promptHelper", "asked": asked,
+                                         "used": "medium",
+                                         "why": "the prompt helper runs off, low or medium"})
+            else:
+                on = bool(ph.get("userWantToEnable",
+                                 ph.get("withStage", ph.get("enable", False))))
+                level = "medium" if on else "off"
+                if asked is not None:
+                    asked = level
+            if ctx and level != "medium":
                 adjusted.append({"field": "promptHelper", "asked": asked, "used": "medium",
                                  "why": "a context image runs the prompt helper at medium, "
                                         "as PixAI's own site does"})
-            natural = q.pop("naturalPrompts", None)
-            extra = dict(q["extra"]) if isinstance(q.get("extra"), dict) else {}
+                level = "medium"
+            if "creativity" in ph:
+                # A creativity shape is kept as it came (a stored or --params-json one may
+                # carry the server's own `enable`); only the level can change, and only when
+                # context images force it or the value is not a level at all.
+                new_ph = dict(ph)
+                new_ph["creativity"] = level
+            else:
+                new_ph = {k: v for k, v in ph.items()
+                          if k not in ("withStage", "enable", "userWantToEnable")}
+                new_ph["creativity"] = level
+                new_ph["forcePromptHelperDetectionSide"] = "server"
+            natural = p.get("naturalPrompts")
+            extra = dict(p["extra"]) if isinstance(p.get("extra"), dict) else {}
             if level == "off":
                 extra.pop("naturalPrompts", None)
             elif natural:
                 extra["naturalPrompts"] = natural
-            if extra:
-                q["extra"] = extra
-            else:
-                q.pop("extra", None)
+            # Copy ONLY on a real difference (review S5): an already-gated dict re-gates to the
+            # SAME object, which the backstops in price_task and submit_generation rely on.
+            if new_ph != ph or "naturalPrompts" in p \
+                    or (extra or None) != (p.get("extra") if isinstance(p.get("extra"), dict)
+                                            and p.get("extra") else None):
+                q = _own()
+                q["promptHelper"] = new_ph
+                q.pop("naturalPrompts", None)
+                if extra:
+                    q["extra"] = extra
+                else:
+                    q.pop("extra", None)
 
     # G10 -- LoRA weights held to the architecture's range (T3-19 correction). Only when
     # /features supplied the modelType; lora_weight_range() gives the union -2..2 (today's
@@ -10507,6 +11022,12 @@ UNLIMITED_LANE = "infinite"
 # The versions the lane is offered on: PixAI's own site asks the status for Tsubaki.3's id and
 # no other (§8.4). Not "any MMDIT26B" -- Flash is MMDIT26B too and has no lane.
 UNLIMITED_VERSIONS = frozenset(("2024383379556065549",))
+# Session H (decision 2 / T3a): a Tsubaki edit runs on Tsubaki.3. It is offered on every still
+# picture -- the "Edit with Tsubaki" menu item and the Lightbox edit bar alike (owner ruling,
+# 2026-09-28), whatever model made it. gallery/src/gen/tsubakiCore.js carries the same ids
+# (tests/test_tsubaki3_generate.py pins the copies together).
+TSUBAKI3_MODEL_ID = "2024383378759147749"
+TSUBAKI3_VERSION_ID = "2024383379556065549"
 # The status is cached RAW, keyed by (version, the identity that creates), and the expiry is
 # compared with the clock at every check (§8.8): an hour's success TTL is too long for a grant
 # that ends on a fixed date, so success keeps 5 minutes and a failure the gate's own minute.
@@ -10729,9 +11250,17 @@ def _graphql_reason(err):
     return s
 
 
-def submit_generation(session, params):
+def submit_generation(session, params, *, on_send=None, exact=False):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id.
+
+    Session M (BUILD-w5-m s3.4): `on_send(variables)` is called immediately before each
+    mutation with a deep COPY of what is about to go out -- observation only: its return is
+    ignored and an exception inside it is swallowed, so a recorder can never block or alter a
+    spend. It is how the Inspector learns the exact request PixAI got and how a run knows the
+    mutation was reached. `exact=True` (a run's jobs, review F6) turns off BOTH refusal-only
+    resubmits below: a job goes out once, exactly as it was quoted and confirmed, and PixAI's
+    refusal comes back as it came. Both default to today's behaviour, byte for byte.
 
     inferenceProfile (the Mode quality setting) is MODEL-TYPE-SPECIFIC on PixAI's side --
     some model types only accept lite/standard, others pro/ultra, and an unsupported value
@@ -10770,23 +11299,75 @@ def submit_generation(session, params):
     # priced shape. Fail-soft: an undetermined profile set returns params unchanged (today's
     # behavior).
     params = _gate_params_for_model(session, params)
-    params = priority_for_submit(params)   # already known to be turbo-refused? use Low
+    # Lane w2-recipes: the dict about to go out may not carry recipes beside context images
+    # (a reference the backstop gate just converted), a lane or an upscale. No network.
+    import moonglade_recipes as _recipes
+    _recipes.check_params(params)
+    if not exact:
+        # Already known to be turbo-refused? use Low. A run job (exact) never: the run applied
+        # this at build, so it was quoted and digested, and what is sent must equal what was
+        # quoted (review N1) -- a flag flipped since then would send an unquoted priority.
+        params = priority_for_submit(params)
+    # Session H (BUILD-w2-gen §8, review S1): decided BEFORE the mutation, off the gate's own
+    # cached profile read -- is the profile asked for one this version LISTS? A listed profile
+    # PixAI refuses is an entitlement refusal (a non-member's Ultra), not "unsupported", so the
+    # drop-and-resubmit below must not turn it into a Pro job the quote never described; and
+    # a REQUIRE_MEMBERSHIP answer on a listed members-only profile is ambiguous between Ultra
+    # and Turbo, so the Turbo fallback stands down too. An unreadable list keeps today's
+    # self-heal (pinned since 2026-07-24).
+    listed, members_only = _profile_listing(session, params)
+
+    def _send(p):
+        if on_send is not None:
+            try:
+                on_send(copy.deepcopy(p))
+            except Exception:                                # noqa: BLE001
+                pass                                         # a recorder never blocks a spend
+        return gql_mutate(session, _GEN_MUTATION, {"parameters": p})
     try:
-        created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+        created = _send(params)
     except PixAIError as e:
-        if lane:
-            # Never retried as anything else (§8.2). A GraphQL error is PixAI refusing the
-            # task, so nothing exists and nothing was spent; anything else is passed on as it
-            # came, because it does not prove that.
-            if str(e).startswith("GraphQL error"):
-                raise PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+        if _recipes.refusal_from(e):
+            # PixAI refused a recipe: nothing was created. Re-raised BEFORE the two resubmits
+            # below can read its words -- a recipe refusal is never retried as anything else.
             raise
+        if lane:
+            # Never retried as anything else (§8.2). A GraphQL error whose data resolved
+            # nothing is PixAI refusing the task, so nothing exists and nothing was spent;
+            # anything else -- a partial success (the mutation's data came back beside the
+            # errors, review N2), a timeout -- is passed on as it came, because it does not
+            # prove that and must read may_have_started, never refused.
+            if definite_refusal(e) and str(e).startswith("GraphQL error"):
+                refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+                refused.graphql_data = getattr(e, "graphql_data", None)
+                refused.refused = True       # a definite refusal, for a run's job state
+                raise refused
+            raise
+        if exact:
+            # A run job (review F6): never resubmitted on another profile or priority -- that
+            # would be a request nobody quoted, sent after the run's budget check. PixAI's
+            # answer comes back as it came; definite_refusal() reads it.
+            raise
+        if not definite_refusal(e):
+            # Both resubmits below are safe ONLY because a refusal means nothing was made. A
+            # GraphQL error whose mutation data came back non-null is a partial success: the
+            # task exists and may be charged, so sending again would pay twice. The same rule
+            # the lane, run jobs, training and the Loom fallback already follow (red team
+            # 2026-10-01). A timeout or dropped connection is passed on unchanged as well.
+            raise
+        if "inferenceProfile" in str(e) and "inferenceProfile" in params and listed:
+            refused = PixAIError("PixAI refused the {} profile for this account, so nothing "
+                                 "was made: {}".format(params.get("inferenceProfile"),
+                                                       _graphql_reason(e)))
+            refused.refused = True
+            raise refused
         if "inferenceProfile" in str(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
                   "model's default...".format(dropped))
-            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
-        elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO:
+            created = _send(params)
+        elif _is_turbo_refusal(e) and params.get("priority") == PRIORITY_TURBO \
+                and not members_only:
             # Turbo (500) is members-only and this app asked for it on EVERY submit, so
             # the day a membership lapses every generate/edit/video/fix/upscale starts
             # failing at once. Safe to re-submit for the same reason the inferenceProfile
@@ -10797,7 +11378,7 @@ def submit_generation(session, params):
             _turbo_refused["seen"] = True
             print("  turbo is members-only on this account; resubmitting at standard "
                   "speed (no extra cost).")
-            created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
+            created = _send(params)
         else:
             raise
     task_id = (created.get("createGenerationTask") or {}).get("id")
@@ -10805,6 +11386,28 @@ def submit_generation(session, params):
         raise PixAIError("no task id returned: " + json.dumps(created)[:200])
     _bump_card_use(params)
     return str(task_id)
+
+
+def _profile_listing(session, params):
+    """(listed, members_only) for the params' inferenceProfile, off _model_profiles (the
+    gate's cached read). (False, False) when there is no profile or the list is unreadable."""
+    prof = str((params or {}).get("inferenceProfile") or "").strip().lower()
+    if not prof or not (params or {}).get("modelId"):
+        return False, False
+    try:
+        rows = _model_profiles(session, params["modelId"])
+    except Exception:
+        rows = None
+    if not rows:
+        return False, False
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("profileName") or "").strip().lower() == prof:
+            try:
+                tier = int(r.get("requiredMembershipTier") or 0)
+            except (TypeError, ValueError):
+                tier = 0
+            return True, (r.get("profileFlag") == "membershipOnly" or tier > 0)
+    return False, False
 
 
 def clean_fix_boxes(boxes):
@@ -10973,6 +11576,10 @@ class RequestResolver:
     unlimited(params, version_id) -> lane params               -- the Unlimited Mode
                           check (see unlimited_resolver); absent = a lane request
                           is refused on this road
+    features(version_id) -> parsed /features or None           -- Session H: the
+                          architecture the creativity shape is decided on, the gate's
+                          own cached read (features_resolver); absent = the web
+                          payload's `creativity` is not honoured (legacy helper only)
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
@@ -10986,6 +11593,7 @@ class RequestResolver:
     gate: object = None
     video_duration: object = None
     unlimited: object = None
+    features: object = None
 
 
 def model_version_resolver(session):
@@ -11103,7 +11711,28 @@ def _gen_args_from_web_payload(p):
             loras.append((vid, (lo or {}).get("weight", 0.7)))
     seed_raw = str(p.get("seed") or "").strip()
     hp = p.get("high_priority") in (True, "1", "true", "on")
+    # Session H (BUILD-w2-gen §1): the drawer's context images, in slot order (slot N is the
+    # prompt's @imageN), and its creativity stop. Refused, never repaired: a malformed list or
+    # a repeated picture would change the count and the price.
+    ctx_raw = p.get("context_images")
+    context_images = []
+    if ctx_raw not in (None, "", []):
+        if not isinstance(ctx_raw, list):
+            raise PixAIError("context images must be a list of picture ids")
+        for x in ctx_raw:
+            v = str(x if x is not None else "").strip()
+            if not v.isdigit():
+                raise PixAIError("context images must be a list of picture ids")
+            context_images.append(v)
+        if len(set(context_images)) != len(context_images):
+            raise PixAIError("The same picture is in two context slots — remove one")
+    creativity = p.get("creativity")
+    if creativity in (None, ""):
+        creativity = None
+    elif creativity not in _CREATIVITY_LEVELS:
+        raise PixAIError("creativity must be off, low or medium")
     return SimpleNamespace(
+        context_images=context_images, creativity=creativity,
         params_json="", prompt=(p.get("prompt") or "").strip(),
         negative=(p.get("negative") or "").strip(),
         model=(p.get("version_id") or "").strip(),
@@ -11139,6 +11768,10 @@ def _gen_args_from_web_payload(p):
         upscale_denoising_steps=num("upscale_denoise_steps", None, int),
         face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
         quality_tag=str(p.get("quality_tag") or "").strip(),
+        # The Generate drawer's colour palette (Session H 4): cleaned or REFUSED here, before
+        # any network call -- a refusal is the badge's note and costs nothing. The gate
+        # decides whether it may go out (see _gate_image_params' palette rule).
+        color_palette=clean_color_palette(p.get("color_palette")),
         kaisuuken_id="", no_card=bool(p.get("no_card")),
         # _gen_parameters reads named attributes only, so carrying the receipt on
         # the namespace costs the submit shape nothing and keeps it beside the values it
@@ -11327,6 +11960,16 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             if unknown:
                 adjusted.append({"field": "inputVideoDurations", "asked": "measured lengths",
                                  "used": [], "why": INPUT_VIDEO_UNKNOWN_WHY})
+        # The Tsubaki Multi-Reference aspect ratio (lane w2-small, 2026-09-28). It rides only the
+        # referenceVideo road of a Tsubaki engine (VIDEO_RATIO_MODELS) -- keyed on the ROAD, not
+        # the shot mode, since an FLF with one frame goes out as a reference video (spend review
+        # N6). Asked for anywhere else it is dropped with a receipt; the drawer never asks there.
+        # "adaptive" is PixAI's default and is never sent, so it needs no receipt.
+        ratio = str(p.get("ratio") or "").strip()
+        if ratio and ratio != "adaptive" and (i2v_road or vmodel not in VIDEO_RATIO_MODELS):
+            adjusted.append({"field": "ratio", "asked": ratio, "used": None,
+                             "why": "only Tsubaki Video's Multi-Reference takes an aspect ratio"})
+            ratio = ""
         if i2v_road:
             # V6: the builder drops both on an engine whose panel has neither; say so.
             if negative and vmodel in VIDEO_NO_NEGATIVE_MODELS:
@@ -11347,7 +11990,8 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             negative=negative,
             is_private=bool(p.get("is_private")),
             use_prompt_helper=bool(p.get("prompt_helper")),
-            input_video_durations=durations)
+            input_video_durations=durations,
+            ratio=ratio)
         return GenerationRequest(mode="video", parameters=params, no_card=no_card,
                                  adjusted=adjusted)
 
@@ -11383,6 +12027,19 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
+    # Session H (BUILD-w2-gen §2): what a context-image request may not carry, refused at build.
+    if args.context_images:
+        if args.ref_media_id:
+            raise PixAIError("Send context images or a reference picture, not both")
+        if _upscale_ratio(args.enlarge) or _upscale_ratio(args.upscale):
+            raise PixAIError("An upscale can't carry context images")
+        bad = [n for n in _image_refs(args.prompt)
+               if n < 1 or n > len(args.context_images)]
+        if bad:
+            raise PixAIError("The prompt names @image{}, but only {} context image{} {} set"
+                             .format(bad[0], len(args.context_images),
+                                     "" if len(args.context_images) == 1 else "s",
+                                     "is" if len(args.context_images) == 1 else "are"))
     row = None
     if rs.model_version is not None:
         got = rs.model_version(p.get("model_id") or "", args.model)
@@ -11415,14 +12072,41 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             args.quality_tag = ""
     params = _gen_parameters(args)
     adjusted = args.clamped
+    # Recipes, step 1 (lanes w2-recipes x w2-gen): the payload's `recipeIds`, validated by
+    # moonglade_recipes.recipe_ids_from, onto the BUILT params HERE -- before the creativity
+    # step-down below reads them (w2-gen review S3) and before the gate. Refuses a malformed
+    # list, a gateless road, and recipes beside context images or on the Upscale road.
+    # Returns `params` itself when the payload names none. Design:
+    # design/notes/recipes/BUILD-w2-recipes.md.
+    import moonglade_recipes as _recipes
+    params = _recipes.attach_to_built(params, p, gated=rs.gate is not None)
+    # Session H decision 5 -- the creativity stop, shaped at BUILD on the architecture the
+    # gate itself reads (rs.features, the same cached /features; review B3). The gate's G6 then
+    # relocates naturalPrompts and forces medium beside context images, idempotently.
+    if args.creativity is not None:
+        _shape_creativity(params, args.creativity, rs, args.model, adjusted)
     # G7 -- ONE gate, applied ONCE, here. The gated dict IS req.parameters: price() prices and
     # card-matches it, submit() attaches the card to it and sends it, and the backstop gates
     # inside price_task/submit_generation return this same object. A gate refusal raises
     # PixAIError like any builder refusal (the badge's note; nothing is spent).
     if rs.gate is not None:
-        params, gate_adjusted = rs.gate(params)
+        try:
+            params, gate_adjusted = rs.gate(params)
+        except PixAIError:
+            # A lane request on another version is told so in the lane's own words, not in a
+            # gate refusal about its profile (Session H added the gate's unlisted-profile
+            # refusal, which a lane request on Flash -- "pro" is not Flash's -- reaches first).
+            if lane and rs.unlimited is not None \
+                    and str(args.model or "").strip() not in UNLIMITED_VERSIONS:
+                raise PixAIError(_UNLIMITED_T3_ONLY)
+            raise
         adjusted = list(adjusted) + list(gate_adjusted or [])
         _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
+    # Recipes, step 2: every forbidden combination checked AGAIN on the dict the gate returned
+    # (it can turn a reference into a context image), before the lane check so Unlimited Mode
+    # still refuses a recipe. Returns `params` itself when the payload names none, or when
+    # step 1's ids rode through the gate as sent.
+    params = _recipes.apply_to_params(params, p, gated=rs.gate is not None)
     # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode S3): checked AFTER the one gate and its
     # profile fill, on the dict that will be quoted and sent. A road without the entitlement
     # lookup, or without the gate, cannot vouch for the lane and refuses it (§8.4, §8.10).
@@ -11433,6 +12117,59 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card or lane, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)
+
+
+_IMAGE_REF_RE = re.compile(r"@image(\d+)")
+
+
+def _image_refs(prompt):
+    """The @imageN numbers a prompt names, in order (Session H decision 2). The same rule as
+    the drawer's tsubakiCore.AT_REF_RE -- tests/test_tsubaki3_generate.py pins the two."""
+    return [int(m.group(1)) for m in _IMAGE_REF_RE.finditer(str(prompt or ""))]
+
+
+def _recipes_in(params):
+    """True when the built params carry recipes, read by the recipe lane's one parser."""
+    import moonglade_recipes as _recipes
+    return bool(_recipes.recipe_ids_from(params))
+
+
+def _shape_creativity(params, level, rs, version_id, adjusted):
+    """Session H decision 5: the web payload's creativity stop onto the params, in place.
+
+    Only on MMDIT26B, decided by the gate's own /features read (review B3). /features
+    unreadable -> refuse (a creativity shape PixAI's site would never send beside an unchecked
+    architecture). Another architecture -> the legacy on/off shape the builder already made
+    stays, with a receipt entry. On MMDIT26B the level is the one asked, EXCEPT: context images
+    run it at medium, and recipes run it one step lower (medium -> low, low -> off), as PixAI's
+    own builder does (task-*.js). Both are receipt entries. The recipe step lives HERE, at
+    build, because the gate must stay idempotent; it reads the BUILT params' recipeIds, so it
+    fires only when recipes are really sent (review S3). build_request attaches them before
+    this runs (moonglade_recipes.attach_to_built), and they are read here through the same
+    parser, moonglade_recipes.recipe_ids_from (recipes review finding 6)."""
+    if rs.features is None:
+        return
+    feats = rs.features(version_id)
+    if feats is None:
+        raise PixAIError("Couldn't read this model's settings from PixAI, so its creativity "
+                         "can't be set — try again in a minute")
+    if feats.get("model_type") != "MMDIT26B_MODEL":
+        adjusted.append({"field": "creativity", "asked": level, "used": None,
+                         "why": "this model's prompt helper is on or off"})
+        return
+    used = level
+    if params.get("contextImages"):
+        used = "medium"
+        if level != "medium":
+            adjusted.append({"field": "promptHelper", "asked": level, "used": "medium",
+                             "why": "a context image runs the prompt helper at medium, as "
+                                    "PixAI's own site does"})
+    elif level in ("medium", "low") and _recipes_in(params):
+        used = "low" if level == "medium" else "off"
+        adjusted.append({"field": "promptHelper", "asked": level, "used": used,
+                         "why": "recipes run the prompt helper one step lower, as PixAI's "
+                                "own site does"})
+    params["promptHelper"] = {"creativity": used, "forcePromptHelperDetectionSide": "server"}
 
 
 def price(session, req):
@@ -11459,6 +12196,42 @@ def price(session, req):
     out = _price_answer(session, req)
     if req.adjusted:
         out["adjusted"] = list(req.adjusted)
+    # The breakdown notes ride a PAID quote only: on a card-covered one "+X" would read as a
+    # charge (review N1), and the extra reads would buy nothing.
+    if req.mode == "image" and req.parameters is not None and not req.unlimited \
+            and out.get("cost") is not None and not out.get("free"):
+        out.update(_price_breakdown(session, req.parameters, out["cost"]))
+    return out
+
+
+def _price_breakdown(session, params, cost):
+    """Session H: what the badge's one note line says (BUILD-w2-gen "Price"): the context
+    images' charge ("N context images +X") and a non-default profile's ("profile Ultra +X"),
+    each the difference between this request's price and the same request without it. The
+    variant dicts are PRICED only -- never card-checked, never submitted, never cached where a
+    submit reads. A read that fails leaves its figure out; nothing here can fail the quote."""
+    out = {}
+    ctx = params.get("contextImages")
+    if isinstance(ctx, list) and ctx:
+        out["context_images"] = len(ctx)
+        base = price_task(session, {k: v for k, v in params.items() if k != "contextImages"})
+        if base is not None and cost - base >= 0:
+            out["context_charge"] = cost - base
+    prof = str(params.get("inferenceProfile") or "").strip()
+    if prof:
+        try:
+            rows = _model_profiles(session, params.get("modelId")) or []
+        except Exception:
+            rows = []
+        default = next((str(r.get("profileName") or "").strip() for r in rows
+                        if isinstance(r, dict) and r.get("profileFlag") == "default"), "")
+        mine = next((r for r in rows if isinstance(r, dict)
+                     and str(r.get("profileName") or "").strip() == prof), None)
+        if default and mine is not None and prof != default:
+            out["profile"] = str(mine.get("title") or prof)[:40]
+            alt = price_task(session, dict(params, inferenceProfile=default))
+            if alt is not None and cost - alt >= 0:
+                out["profile_extra"] = cost - alt
     return out
 
 
@@ -11478,23 +12251,40 @@ def _price_answer(session, req):
             out["list_cost"] = listed
         return out
     cost = price_task(session, req.parameters)
+    recipes = bool(req.parameters.get("recipeIds"))
+    if recipes:
+        # Lane w2-recipes: a failed quote with recipes is PixAI's refusal (RECIPE_*) or
+        # "couldn't verify" -- and the card check is skipped, so FREE needs a read price.
+        import moonglade_recipes as _recipes
+        verdict = _recipes.price_verdict(session, req.parameters, cost)
+        if verdict is not None:
+            return verdict
     best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
     covered = card_covers(best)
-    return {"cost": cost, "free": covered,
-            "cards": (best or {}).get("total"),
-            "cards_held": (best or {}).get("total"),
-            "cards_needed": (best or {}).get("consumeAmount"),
-            "card_short": bool(best) and not covered,
-            "card_name": (best or {}).get("name"),
-            # The Loom's batch tally keys its per-template ticket pool on this (falls
-            # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
-            "card_template": (best or {}).get("templateId"),
-            "card_expires": (best or {}).get("expiresAt")}
+    out = {"cost": cost, "free": covered,
+           "cards": (best or {}).get("total"),
+           "cards_held": (best or {}).get("total"),
+           "cards_needed": (best or {}).get("consumeAmount"),
+           "card_short": bool(best) and not covered,
+           "card_name": (best or {}).get("name"),
+           # The Loom's batch tally keys its per-template ticket pool on this (falls
+           # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
+           "card_template": (best or {}).get("templateId"),
+           "card_expires": (best or {}).get("expiresAt")}
+    if recipes and covered:
+        out["card_note"] = _recipes.CARD_NOTE    # a card over a recipe's LoRAs: unobserved
+    return out
 
 
-def submit(session, req, *, no_card=None):
+def submit(session, req, *, no_card=None, before_send=None, on_send=None, exact=False):
     """Spend: READ_ONLY guard -> free card -> the one mutation this road's mode uses.
     Returns {"task_id": ...}.
+
+    Session M (BUILD-w5-m s3.4): `before_send(params)` runs after the card step and before
+    submit_generation on EVERY branch that reaches it (the lane branch too, review F13b); it
+    may raise to stop, and nothing has been sent when it does -- a run's budget check lives
+    there. `on_send` and `exact` are handed to submit_generation (see it). All three default
+    to today's behaviour, byte for byte.
 
     The READ_ONLY check is FIRST, ahead of the card match, and that ordering is the point
     of putting it here. `_apply_kaisuuken` calls /v2/kaisuuken/check -- a real network
@@ -11522,7 +12312,10 @@ def submit(session, req, *, no_card=None):
         # S5: the card step is skipped outright for a lane request -- keyed on req.unlimited,
         # which the `no_card` argument cannot override (§8.10). submit_generation guards the
         # params' own `lane` too, for every road that reaches it (§8.3).
-        return {"task_id": submit_generation(session, req.parameters)}
+        if before_send is not None:
+            before_send(req.parameters)
+        return {"task_id": submit_generation(session, req.parameters,
+                                             **_send_kwargs(on_send, exact))}
     from types import SimpleNamespace
     skip = req.no_card if no_card is None else bool(no_card)
     # Passing the flag through rather than branching around the call keeps
@@ -11530,7 +12323,126 @@ def submit(session, req, *, no_card=None):
     # spend log ("--no-card: this WILL spend credits") the single source of both.
     _apply_kaisuuken(session, req.parameters,
                      SimpleNamespace(kaisuuken_id="", no_card=skip))
-    return {"task_id": submit_generation(session, req.parameters)}
+    if before_send is not None:
+        before_send(req.parameters)
+    return {"task_id": submit_generation(session, req.parameters,
+                                         **_send_kwargs(on_send, exact))}
+
+
+def _send_kwargs(on_send, exact):
+    """submit_generation's Session M keywords, passed only when asked for: a default submit
+    calls it exactly as it always did."""
+    kw = {}
+    if on_send is not None:
+        kw["on_send"] = on_send
+    if exact:
+        kw["exact"] = True
+    return kw
+
+
+# Session M: the pause between one answered mutation and the next in a run ("be polite to
+# their servers"; the Loom's batch staggers 2.2 s). Nothing waits for a task to FINISH.
+RUN_SEND_GAP_S = 1.5
+
+
+def _run_budget_note(sent):
+    return ("The free card expected for image {} was used elsewhere, so it would cost more "
+            "than you confirmed. {} {} sent; the rest were not.".format(
+                sent + 1, sent, "was" if sent == 1 else "were"))
+
+
+def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
+    """THE run sender (Session M, BUILD-w5-m s4): a run's jobs, strictly one after another,
+    each through submit() -- READ_ONLY first, the card step, the budget check, then
+    submit_generation(exact=True), whose one gql_mutate is the only mutation a job can make.
+    The FIRST failure stops the rest; nothing is retried or resent.
+
+    `jobs`   [{"cell": int, "req": GenerationRequest, "no_card": True | None}] -- the very
+             objects the run quoted; nothing is rebuilt here.
+    `budget` {"each": credits per job, "total": the confirmed total} or None. Before each
+             job without a card: charged-so-far + each > total stops the run before that
+             job (a card spent in another tab, a card that expired). None = a single send,
+             which has no confirmed total (review F11): no check, the card auto-applies.
+    `hooks`  the Runs store's side, each call guarded here:
+               sending(cell)                        committed BEFORE the job's submit; if it
+                                                    raises, the run stops, nothing more sent
+               sent(cell, task_id, request, card)   after the mutation; a raise is swallowed
+                                                    (the task exists; the answer carries it)
+               failed(cell, state, error, request)  a job that did not go out cleanly
+    Returns {"status": "sent"|"stopped", "reason"?, "jobs": [{cell, state, task_id?, card,
+             error?, recipe_error?}]} with state sent | refused | may_have_started | not_sent.
+
+    State after a failure (s4.4): an exception before on_send fired means the mutation was
+    never reached -> not_sent; after it, a definite refusal (a GraphQL error, a 401, a local
+    refusal) -> refused; anything else (a timeout, a dropped connection, a 5xx, no task id)
+    -> may_have_started, never resent and never counted as refused."""
+    import moonglade_recipes as _recipes
+    gap = RUN_SEND_GAP_S if gap_s is None else gap_s
+    pause = sleep if sleep is not None else time.sleep
+    out = []
+    state = {"charged": 0, "sent": 0, "stop": None}
+
+    for idx, job in enumerate(jobs):
+        cell = job["cell"]
+        if state["stop"] is not None:
+            out.append({"cell": cell, "state": "not_sent", "card": False})
+            continue
+        if idx and gap:
+            pause(gap)
+        try:
+            hooks.sending(cell)
+        except Exception:                                    # noqa: BLE001
+            state["stop"] = ("Couldn't record cell {} before sending it, so it and the rest "
+                             "were not sent.".format(cell + 1))
+            out.append({"cell": cell, "state": "not_sent", "card": False})
+            continue
+        seen = {"request": None}
+
+        def _on_send(variables):
+            seen["request"] = variables
+
+        def _before(params):
+            if budget is None or params.get("kaisuukenId"):
+                return
+            if state["charged"] + int(budget["each"]) > int(budget["total"]):
+                raise LocalRefusal(_run_budget_note(state["sent"]))
+
+        try:
+            task_id = submit(session, job["req"], no_card=job.get("no_card"),
+                             before_send=_before, on_send=_on_send, exact=True)["task_id"]
+        except Exception as e:                               # noqa: BLE001
+            reached = seen["request"] is not None
+            if not reached:
+                st = "not_sent"
+            elif getattr(e, "refused", False) or definite_refusal(e):
+                st = "refused"
+            else:
+                st = "may_have_started"
+            refusal = _recipes.refusal_from(e) if reached else None
+            msg = refusal["copy"] if refusal else _graphql_reason(e)
+            rec = {"cell": cell, "state": st, "card": False, "error": str(msg)[:300]}
+            if refusal:
+                rec["recipe_error"] = refusal
+            out.append(rec)
+            try:
+                hooks.failed(cell, st, rec["error"], seen["request"])
+            except Exception:                                # noqa: BLE001
+                pass
+            state["stop"] = rec["error"]
+            continue
+        card = bool((seen["request"] or {}).get("kaisuukenId"))
+        if not card and budget is not None:
+            state["charged"] += int(budget["each"])
+        state["sent"] += 1
+        out.append({"cell": cell, "state": "sent", "task_id": str(task_id), "card": card})
+        try:
+            hooks.sent(cell, str(task_id), seen["request"], card)
+        except Exception:                                    # noqa: BLE001
+            pass
+    res = {"status": "stopped" if state["stop"] is not None else "sent", "jobs": out}
+    if state["stop"] is not None:
+        res["reason"] = state["stop"]
+    return res
 
 
 # =============================================================================
@@ -12485,14 +13397,23 @@ def training_price_for_version(version_id, config=None):
     return row.get("price") if row else None
 
 
+# The architecture PixAI marks "Recommended" on both train pages since 2026-09-27 (DiT.3), and
+# the one the Session J handoff pre-selects (decision 6a, DECISIONS 2026-09-28).
+TRAIN_RECOMMENDED_TYPE = "MMDIT26B_MODEL"
+
+
 def default_training_base(config=None):
-    """The base the panel pre-selects: the first SDXL row of the list, else the first row --
-    PixAI's own default (`e.find(SdxlModel) ?? e[0]`). Never "the first group's first model":
-    with Tsubaki.3 in the list that would pre-select the 100,000-credit base."""
+    """The base the panel pre-selects: the Recommended architecture's first row (Tsubaki.3 --
+    the handoff's 6a and PixAI's own basic page since 2026-09-27, whose DiT.3 tab opens
+    selected), else the first SDXL row (PixAI's older default, `e.find(SdxlModel) ?? e[0]`),
+    else the first row. This replaces the SCOPE_2026-09-26 E7 rule that avoided Tsubaki.3 for
+    its price: the price now sits on the review footer before Start, and a paid start still
+    needs the amount ticked."""
     cfg = config or training_config()
     offered = [m for m in cfg["models"] if m["model_type"] in dict(_TRAIN_ARCHS)]
-    pick = next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None) or \
-        (offered[0] if offered else None)
+    pick = (next((m for m in offered if m["model_type"] == TRAIN_RECOMMENDED_TYPE), None)
+            or next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None)
+            or (offered[0] if offered else None))
     return pick["version_id"] if pick else ""
 
 
@@ -12510,8 +13431,11 @@ def list_trainable_base_models(session=None, per_type=None, config=None):
                    "cover": m["cover"], "usage": m["usage"]}
                   for m in cfg["models"] if m["model_type"] == arch]
         if models:
-            price = (cfg["pricing"].get(arch) or {}).get("price")
-            groups.append({"arch": arch, "label": label, "models": models, "price": price})
+            row = cfg["pricing"].get(arch) or {}
+            groups.append({"arch": arch, "label": label, "models": models,
+                           "price": row.get("price"), "reuse": row.get("reuse"),
+                           "list_price": row.get("originalPrice"),
+                           "recommended": arch == TRAIN_RECOMMENDED_TYPE})
     return groups
 
 
@@ -12694,7 +13618,8 @@ def describe_rejected_training_images(rejected):
 
 
 def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
-                    training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
+                    training_task_id="", primary_lora_model_id="", kaisuuken_id="",
+                    config=None):
     """Submit a real LoRA training task to PixAI (`createTrainingTask`).
 
     SPENDS unless the account has usable free-training quota left (training_free_quota) or
@@ -12708,10 +13633,20 @@ def submit_training(session, base_model_id, media_ids, title, trigger_words, cat
 
     This function does NOT decide whether the user wants to pay: callers preview first
     (quota + validation) and only call this once the user has confirmed. Input shape
-    mirrors the site's own form exactly. Returns the created task dict."""
-    _check_read_only("submit a LoRA training task")
-    tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
-                           training_task_id)
+    mirrors the site's own form exactly. Returns the created task dict.
+
+    `config` is the caller's training_config() -- the one it previewed and priced against --
+    so this validates against the SAME config instead of a fresh re-read that could differ.
+    A refusal before the network call (READ_ONLY, validation) is raised as LocalRefusal:
+    nothing was sent, and the caller's spend guard must not say a run may have started."""
+    try:
+        _check_read_only("submit a LoRA training task")
+        tw = validate_training(base_model_id, media_ids, title, trigger_words, category,
+                               training_task_id, config=config)
+    except LocalRefusal:
+        raise
+    except PixAIError as e:
+        raise LocalRefusal(str(e)) from e
     inp = {
         "baseModelId": str(base_model_id),
         "mediaIds": [str(m) for m in (media_ids or []) if str(m).strip()],
@@ -12728,6 +13663,426 @@ def submit_training(session, base_model_id, media_ids, title, trigger_words, cat
         inp["kaisuukenId"] = str(kaisuuken_id)
     d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
     return d.get("createTrainingTask") or {}
+
+
+# --- LoRA training: the advanced flow, runs, publish (Session J, 2026-09-28) ------------------
+# PixAI's advanced trainer is a draft (GraphQL createTrainingTask, trainingMode "advanced", no
+# images, free) worked on through REST under /v2/training-task/{id}: the dataset (PUT media,
+# free), a PAID describe round (POST caption, priced per task by GET caption-price), the owner's
+# own edits of those descriptions (PUT captions/{mediaId}, free, only once a machine description
+# exists), a PAID start (POST submit, priced by GET price), a PAID retry of a failed run (a NEW
+# run), and an irreversible publish. Every writer below calls _check_read_only first and rides a
+# single-attempt transport (gql_mutate, rest_post, rest_put, rest_patch). Callers preview and
+# acknowledge; nothing here decides that the user wants to pay. The wire facts and the guard
+# order are in ../moonglade-internal/design/notes/training/BUILD-w3-train.md.
+
+# Basic's four goals (and Advanced's categories), PixAI's own values: its "Something else"
+# sub-kind is never sent.
+TRAIN_GOALS = (("character", "Character"), ("style", "Art style"), ("clothing", "Outfit"),
+               ("other", "Something else"))
+# The architectures Advanced offers (Tsubaki.3 Recommended, then Tsubaki.2).
+TRAIN_ADVANCED_TYPES = ("MMDIT26B_MODEL", "MMDIT26A_MODEL")
+# What PixAI's own advanced page submits: its parameter controls are inert ("coming soon") and
+# it sends these defaults. Sent verbatim -- the quote route takes no length, and PixAI's own
+# fallback price scales with it, so an unquoted length is never sent (spend review, finding 3).
+TRAIN_DEFAULT_OPTIONS = {"trainingSteps": 325, "learningRate": 0.0006, "rank": 64,
+                         "gradAccum": 2}
+# A description, as PixAI's editor caps it (its contract would take 20,000; the editor is the
+# rule users meet).
+TRAIN_CAPTION_MAX = 1000
+
+_TRAINING_TASK_FIELDS = ("id userId status trainingMode type refId retryCount createdAt "
+                         "updatedAt startedAt endAt parameters { title mediaIds category "
+                         "baseModelId triggerWords } extra { progress estimatedTotalTime } "
+                         "outputs { message }")
+_TRAINING_TASK_Q = "query($id: ID!) { trainingTask(id: $id) { " + _TRAINING_TASK_FIELDS + " } }"
+_MY_LORAS_Q = ("query($au: ID, $ty: GenerationModelType, $n: Int, $b: String) { "
+               "generationModels(authorId: $au, type: $ty, last: $n, before: $b) { "
+               "pageInfo { hasPreviousPage startCursor } edges { node { id title isPrivate "
+               "visibilityType createdAt mediaId latestAvailableVersion { id } trainingTask { "
+               + _TRAINING_TASK_FIELDS + " } } } } }")
+_GEN_MODEL_Q = ("query($id: ID!) { generationModel(id: $id) { id authorId title type isPrivate "
+                "visibilityType } }")
+_UPSERT_MODEL = ("mutation upsertGenerationModel($id: ID, $input: UpsertGenerationModelInput!) "
+                 "{ upsertGenerationModel(id: $id, input: $input) { id isPrivate "
+                 "visibilityType } }")
+
+
+def training_eta(steps=325):
+    """PixAI's own estimate (its advanced page's Br()): t = max(1, round(steps * 27 / 325))
+    minutes, shown as "about t to round(t * 1.3) minutes" -- 27-35 at the default, the same
+    number its basic page prints."""
+    t = max(1, int(round(float(steps) * 27.0 / 325.0)))
+    return {"min": t, "max": int(round(t * 1.3))}
+
+
+def advanced_training_bases(config=None):
+    """The two bases Advanced offers: one row per advanced architecture (an "animation" row
+    preferred, as the site picks), Recommended first. [{version_id, title, cover, model_type,
+    recommended}]."""
+    cfg = config or training_config()
+    out = []
+    for mtype in TRAIN_ADVANCED_TYPES:
+        rows = [m for m in cfg["models"] if m["model_type"] == mtype]
+        pick = next((m for m in rows if m.get("usage") == "animation"), None) or \
+            (rows[0] if rows else None)
+        if pick:
+            out.append({"version_id": pick["version_id"], "title": pick["title"],
+                        "cover": pick["cover"], "model_type": mtype,
+                        "recommended": mtype == TRAIN_RECOMMENDED_TYPE})
+    return out
+
+
+def training_price_tier(version_id, tier="price", config=None):
+    """A base's price at one tier of PixAI's matrix (`price` fresh, `reuse` a reused dataset),
+    or None when unknown. Never `originalPrice`."""
+    cfg = config or training_config()
+    row = cfg["pricing"].get(training_model_type(version_id, cfg) or "") or {}
+    v = row.get(tier)
+    return v if isinstance(v, int) else None
+
+
+def definite_refusal(exc):
+    """True when PixAI answered and REFUSED (so nothing was created or charged): a 4xx from a
+    REST route, a GraphQL error body, or a 401 -- or nothing was sent at all (LocalRefusal: a
+    READ_ONLY or validation refusal before the network call). False for anything that may
+    have reached PixAI and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable
+    answer -- which a spend guard must treat as "may have started".
+
+    A GraphQL error body is a refusal only when its `data` resolved nothing: an answer whose
+    mutation root field came back non-null alongside `errors` is a PARTIAL SUCCESS -- the run
+    exists and may be charged -- so it is not definite (waves 2+3 review, F2)."""
+    if isinstance(exc, LocalRefusal):
+        return True
+    if isinstance(exc, PixAIRestError):
+        return exc.status is not None and 400 <= int(exc.status) < 500
+    if isinstance(exc, PixAIError):
+        msg = str(exc)
+        if msg.startswith("GraphQL error"):
+            partial = getattr(exc, "graphql_data", None)
+            if isinstance(partial, dict) and any(v is not None for v in partial.values()):
+                return False
+            return True
+        return msg.startswith("401 ")
+    return False
+
+
+_TRAIN_ERROR_WORDS = {
+    "TRAINING_IMAGE_REJECTED": "PixAI won't train on some of these images (smaller than its "
+                               "minimum size, or too long and thin)",
+    "TRAINING_DATASET_TOO_SMALL": "PixAI needs more images in this set before it can go on",
+    "INSUFFICIENT_BALANCE": "there aren't enough credits on the account; nothing was charged",
+    "MODEL_PUBLISH_CONFLICT": "another public LoRA already uses these weights",
+    "LORA_REBATE_REQUIRES_PUBLIC": "only a public LoRA can join rebates",
+}
+
+
+def training_error_words(exc):
+    """A PixAI training refusal in plain words: its defined code where it sent one, its own
+    message otherwise."""
+    if isinstance(exc, PixAIRestError):
+        if exc.code in _TRAIN_ERROR_WORDS:
+            return _TRAIN_ERROR_WORDS[exc.code]
+        msg = str(exc.fields.get("message") or "").strip()
+        if msg:
+            return msg
+    return str(exc)
+
+
+def _task_path(task_id, suffix=""):
+    tid = str(task_id or "").strip()
+    if not tid.isdigit():
+        raise PixAIError("not a training task id: %r" % (task_id,))
+    return "/training-task/" + tid + suffix
+
+
+def training_task(session, task_id):
+    """One training task by id (GraphQL trainingTask) -- basic or advanced -- or raises.
+    Read-only. `extra.progress` is PixAI's percentage (0-100) and `estimatedTotalTime` its
+    whole-run estimate in milliseconds, both only while it runs."""
+    d = gql_adhoc(session, _TRAINING_TASK_Q, {"id": str(task_id)}) or {}
+    t = d.get("trainingTask")
+    if not isinstance(t, dict):
+        raise PixAIError("training task %s not found" % task_id)
+    return t
+
+
+def list_training_in_progress(session, limit=100):
+    """Every advanced task still in the owner's hands (drafts through failed), newest activity
+    first: [{id, status, title, baseModelId, mediaCount, updatedAt}]. Read-only."""
+    d = _rest_get(session, "/training-task/in-progress",
+                  params={"limit": max(1, min(int(limit), 100))}) or {}
+    return [t for t in (d.get("tasks") or []) if isinstance(t, dict)]
+
+
+def list_training_completed(session, limit=100):
+    """Every finished advanced task, newest first, published or not (`modelId` null until
+    published): [{id, title, baseModelId, mediaCount, modelId, completedAt}]. Read-only."""
+    d = _rest_get(session, "/training-task/completed",
+                  params={"limit": max(1, min(int(limit), 100))}) or {}
+    return [t for t in (d.get("tasks") or []) if isinstance(t, dict)]
+
+
+def list_my_trained_loras(session, pages=3, per_page=20):
+    """The account's own trained LoRAs with the run behind each (GraphQL generationModels
+    authorId + ANY_USER_LORA, the list PixAI's "Import from previous datasets" reads), newest
+    first, up to `pages` pages. Each row: {model_id, title, is_private, visibility, created_at,
+    cover_media_id, version_id, task} where task is the TrainingTask dict or None. Read-only."""
+    uid = str(_client_of(session).user_id or "")
+    out, before = [], None
+    for _ in range(max(1, int(pages))):
+        v = {"au": uid, "ty": "ANY_USER_LORA", "n": int(per_page)}
+        if before:
+            v["b"] = before
+        d = (gql_adhoc(session, _MY_LORAS_Q, v) or {}).get("generationModels") or {}
+        rows = []
+        for e in d.get("edges") or []:
+            n = (e or {}).get("node") or {}
+            if not n.get("id"):
+                continue
+            ver = n.get("latestAvailableVersion") or {}
+            rows.append({"model_id": str(n["id"]), "title": str(n.get("title") or ""),
+                         "is_private": bool(n.get("isPrivate")),
+                         "visibility": str(n.get("visibilityType") or ""),
+                         "created_at": str(n.get("createdAt") or ""),
+                         "cover_media_id": str(n.get("mediaId") or ""),
+                         "version_id": str(ver.get("id") or ""),
+                         "task": n.get("trainingTask") if isinstance(n.get("trainingTask"), dict)
+                         else None})
+        out.extend(reversed(rows))                 # `last` pages come oldest-first
+        info = d.get("pageInfo") or {}
+        if not info.get("hasPreviousPage") or not info.get("startCursor"):
+            break
+        before = info["startCursor"]
+    return out
+
+
+def training_caption_quote(session, task_id):
+    """What the next describe round would charge: {image_count, total_price} -- PixAI's own
+    per-task quote (the images with no machine description yet, times the unit price). The
+    config's captionPricing is stale (100 there; 150 on the owner's capture draft), so this,
+    never the config, is the number shown and acknowledged. Read-only."""
+    d = _rest_get(session, _task_path(task_id, "/caption-price")) or {}
+    if not isinstance(d.get("totalPrice"), (int, float)):
+        raise PixAIError("PixAI returned no describe price for training task %s" % task_id)
+    return {"image_count": int(d.get("imageCount") or 0),
+            "total_price": int(d.get("totalPrice") or 0)}
+
+
+def training_quote(session, task_id):
+    """What starting (or retrying) this advanced task would charge today, by its base model --
+    PixAI's own free quote (GET price). Read-only. Returns an int."""
+    d = _rest_get(session, _task_path(task_id, "/price")) or {}
+    if not isinstance(d.get("price"), (int, float)):
+        raise PixAIError("PixAI returned no price for training task %s" % task_id)
+    return int(d["price"])
+
+
+def training_captions(session, task_id):
+    """The task's descriptions: [{media_id, source (machine|user), caption_url, machine_url,
+    user_url}]. The links are short-lived; fetch_caption_text reads each. Read-only."""
+    d = _rest_get(session, _task_path(task_id, "/captions")) or {}
+    out = []
+    for it in d.get("items") or []:
+        if isinstance(it, dict) and it.get("mediaId"):
+            out.append({"media_id": str(it["mediaId"]), "source": str(it.get("source") or ""),
+                        "caption_url": str(it.get("captionUrl") or ""),
+                        "machine_url": str(it.get("machineCaptionUrl") or ""),
+                        "user_url": str(it.get("userCaptionUrl") or "")})
+    return out
+
+
+def fetch_caption_text(url, limit=64 * 1024):
+    """One description's text from its time-limited link (PixAI's own page fetches it the same
+    way, without credentials). HTTPS only; NO PixAI credential rides this request -- a plain
+    requests.get, never the account session; capped at `limit` bytes. Returns None on any
+    failure (the caller shows the description as unreadable, never as empty-and-editable)."""
+    u = str(url or "")
+    if not u.startswith("https://"):
+        return None
+    try:
+        r = requests.get(u, timeout=15, stream=True)
+        if not r.ok:
+            return None
+        raw = r.raw.read(limit + 1, decode_content=True) or b""
+        return raw[:limit].decode("utf-8", "replace").strip()
+    except (requests.RequestException, OSError, ValueError):
+        return None
+
+
+def create_advanced_training_draft(session, base_model_id, title, trigger_words, category,
+                                   config=None):
+    """Create an ADVANCED training draft -- PixAI's own step-1 call (createTrainingTask with
+    {type: LORA, trainingMode: advanced, title, category, baseModelId, triggerWords}, no
+    images). FREE, but it writes to the account, so it runs only on the user's deliberate
+    "Next · creates a draft" (DECISIONS 2026-09-28, nothing writes on open). Name, category,
+    base and trigger words are fixed from here. Single attempt. Returns {id}."""
+    _check_read_only("create a LoRA training draft")
+    cfg = config or training_config()
+    bases = {b["version_id"] for b in advanced_training_bases(cfg)}
+    if str(base_model_id) not in bases:
+        raise PixAIError("Advanced training runs on Tsubaki.3 or Tsubaki.2 only")
+    if str(category or "") not in dict(TRAIN_GOALS):
+        raise PixAIError("pick what you are training (%s)" % ", ".join(
+            lab for _, lab in TRAIN_GOALS))
+    # the dataset floor is checked when describing and starting, not here: a draft has none
+    tw = validate_training(base_model_id, [], title, trigger_words, category,
+                           training_task_id="draft", config=cfg)
+    inp = {"type": "LORA", "trainingMode": "advanced", "title": str(title).strip(),
+           "category": str(category), "baseModelId": str(base_model_id), "triggerWords": tw}
+    d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
+    task = d.get("createTrainingTask") or {}
+    if not task.get("id"):
+        raise PixAIError("PixAI created no draft")
+    return {"id": str(task["id"])}
+
+
+def replace_training_media(session, task_id, media_ids):
+    """Replace an advanced task's whole image list (PUT media, <=100, free). Single attempt."""
+    _check_read_only("change a LoRA training set")
+    ids = []
+    for m in media_ids or []:
+        m = str(m).strip()
+        if m and m not in ids:
+            ids.append(m)
+    if len(ids) > TRAIN_MAX_IMAGES:
+        raise PixAIError("training takes at most %d images -- you have %d"
+                         % (TRAIN_MAX_IMAGES, len(ids)))
+    d = _rest_put(session, _task_path(task_id, "/media"), {"mediaIds": ids}) or {}
+    return [str(m) for m in (d.get("mediaIds") or ids)]
+
+
+def start_training_captions(session, task_id):
+    """PAID: send the set's undescribed images to PixAI's describe round (POST caption). The
+    caller has quoted it (training_caption_quote) and had the amount acknowledged. Single
+    attempt. Returns PixAI's new status."""
+    _check_read_only("describe LoRA training images (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/caption"), {}) or {}
+    return str(d.get("status") or "")
+
+
+def save_training_caption(session, task_id, media_id, text):
+    """Save the owner's own description for one image (PUT captions/{mediaId}; free; PixAI
+    keeps it as a new version, the machine's stays on file). Only for an image PixAI has
+    described already. 1 to TRAIN_CAPTION_MAX characters. Single attempt."""
+    _check_read_only("edit a LoRA training description")
+    t = str(text or "").strip()
+    if not t:
+        raise PixAIError("a description can't be empty")
+    if len(t) > TRAIN_CAPTION_MAX:
+        raise PixAIError("a description is %d characters at most -- this one is %d"
+                         % (TRAIN_CAPTION_MAX, len(t)))
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        raise PixAIError("which image?")
+    _rest_put(session, _task_path(task_id, "/captions/" + mid), {"text": t})
+    return t
+
+
+def submit_advanced_training(session, task_id):
+    """PAID: start an advanced run (POST submit) with PixAI's own default options, exactly as
+    its page sends them (TRAIN_DEFAULT_OPTIONS). No free card rides it -- PixAI's page attaches
+    none. The caller has quoted it (training_quote) and had the amount acknowledged. Single
+    attempt. Returns PixAI's new status."""
+    _check_read_only("start a LoRA training run (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/submit"),
+                   {"trainingOptions": dict(TRAIN_DEFAULT_OPTIONS)}) or {}
+    return str(d.get("status") or "")
+
+
+def retry_training(session, task_id):
+    """PAID: a NEW run from a failed advanced one (POST retry: same set, same descriptions,
+    charged again at today's price). The failed task stays as it is, so a second call would
+    start and charge a second run -- the caller guards against that. Single attempt. Returns
+    {id (the new run), origin_id, status}."""
+    _check_read_only("retry a LoRA training run (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/retry"), {}) or {}
+    return {"id": str(d.get("trainingTaskId") or ""),
+            "origin_id": str(d.get("originTaskId") or task_id),
+            "status": str(d.get("status") or "")}
+
+
+def publish_training(session, task_id, visibility, rebate):
+    """IRREVERSIBLE: turn a finished advanced run into a LoRA (POST publish, once per run).
+    visibility private|public; rebate join|decline, and join only when public (refused here
+    before PixAI would). Single attempt. Returns {model_id, version_id}."""
+    _check_read_only("publish a trained LoRA")
+    if visibility not in ("private", "public"):
+        raise PixAIError("publish it private or public")
+    if rebate not in ("join", "decline"):
+        raise PixAIError("join or decline rebates")
+    if rebate == "join" and visibility != "public":
+        raise PixAIError(_TRAIN_ERROR_WORDS["LORA_REBATE_REQUIRES_PUBLIC"])
+    d = _rest_post(session, _task_path(task_id, "/publish"),
+                   {"visibility": visibility, "loraRebate": rebate}) or {}
+    return {"model_id": str(d.get("modelId") or ""), "version_id": str(d.get("versionId") or "")}
+
+
+def generation_model_brief(session, model_id):
+    """{id, author_id, title, type, is_private, visibility} for one model. Read-only."""
+    d = (gql_adhoc(session, _GEN_MODEL_Q, {"id": str(model_id)}) or {}).get("generationModel")
+    if not isinstance(d, dict):
+        raise PixAIError("model %s not found" % model_id)
+    return {"id": str(d.get("id") or ""), "author_id": str(d.get("authorId") or ""),
+            "title": str(d.get("title") or ""), "type": str(d.get("type") or ""),
+            "is_private": bool(d.get("isPrivate")),
+            "visibility": str(d.get("visibilityType") or "")}
+
+
+def make_model_public(session, model_id):
+    """IRREVERSIBLE: a private LoRA of yours goes public (upsertGenerationModel with just
+    {isPrivate: false}, exactly the site's call). Single attempt."""
+    _check_read_only("make a LoRA public")
+    d = gql_mutate(session, _UPSERT_MODEL, {"id": str(model_id),
+                                            "input": {"isPrivate": False}}) or {}
+    return d.get("upsertGenerationModel") or {}
+
+
+def lora_rebate_eligibility(session, model_id):
+    """PixAI's rebate check for one of your LoRAs: {offered, joined, can_join}. Read-only;
+    a failed read answers not offered."""
+    try:
+        d = _rest_get(session, "/generation-model/%s/lora-rebate-eligibility"
+                      % str(model_id).strip()) or {}
+    except (PixAIError, requests.RequestException):
+        return {"offered": False, "joined": False, "can_join": False}
+    offered = d.get("featureStatus") == "enabled"
+    joined = offered and d.get("eligibility") == "accept"
+    allowed = d.get("allowedTargetEligibilities") or []
+    return {"offered": offered, "joined": joined,
+            "can_join": offered and not joined and "accept" in allowed}
+
+
+_THUMB_VARIANTS = ("STILL_THUMBNAIL", "THUMBNAIL", "PUBLIC", "ORIGINAL")
+
+
+def media_thumbnail_url(session, media_id):
+    """A small picture URL for one PixAI media id -- for training-set images this library has
+    no thumbnail of (an upload, or an image imported from an earlier set). Reads the media
+    object (GET /v1/media/<id>, read-only) and prefers a thumbnail variant. None on failure."""
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        return None
+    try:
+        r = session.get(MEDIA_BASE.format(id=mid), timeout=20)
+        r.raise_for_status()
+        obj = r.json()
+    except (requests.RequestException, ValueError):
+        return None
+    by = {str(u.get("variant", "")).upper(): u.get("url") for u in (obj.get("urls") or [])
+          if isinstance(u, dict) and u.get("url")}
+    for v in _THUMB_VARIANTS:
+        if by.get(v):
+            return by[v]
+    return next(iter(by.values()), None)
+
+
+def join_lora_rebates(session, model_id):
+    """IRREVERSIBLE: join one of your public LoRAs to the rebate programme (PATCH
+    lora-rebate-eligibility {eligibility: accept}, the site's call). Single attempt."""
+    _check_read_only("join a LoRA to rebates")
+    return _rest_patch(session, "/generation-model/%s/lora-rebate-eligibility"
+                       % str(model_id).strip(), {"eligibility": "accept"}) or {}
 
 
 def source_media_of_task(task):
@@ -13135,14 +14490,30 @@ _WS_DONE_STATUS = "completed"
 # reason to match it here).
 _WS_STALE_TIMEOUT = 240
 
+# OUR OWN KEEPALIVE (2026-09-29). The clock above assumed PixAI pings an idle
+# subscription. It does not: every idle stretch in the logs since 2026-09-04 reads
+# "connected and subscribed" followed, exactly 240s later, by "socket went silent",
+# with the catch-up sweep then finding nothing missed -- a healthy, quiet account
+# declared dead every four minutes, and the Control Panel read "Reconnecting ...
+# treating the connection as dead" for the minute of backoff after each one. The
+# protocol lets EITHER side ping, and the receiver must answer with a pong, so after
+# this many seconds of quiet the client sends its own graphql-transport-ws `ping`;
+# the server's `pong` is a frame like any other and resets the stale clock. A
+# connection that answers nothing -- not even our ping -- still goes stale at
+# _WS_STALE_TIMEOUT exactly as before. (The websockets library's own RFC 6455 pings
+# are control frames recv() never returns, so they cannot reset this clock.)
+_WS_HEARTBEAT = 60
+
 
 async def _watch_events_async(auth_header, on_event, seconds):
     """Connect, handshake, subscribe to personalEvents, and dispatch each `next` frame's
-    payload to on_event(dict). Replies to server pings. Runs until `seconds` elapses (None =
-    until cancelled). Read-only: sends only connection_init / subscribe / pong / complete.
+    payload to on_event(dict). Replies to server pings, and after `_WS_HEARTBEAT` seconds
+    of quiet sends a ping of its own (see that constant). Runs until `seconds` elapses
+    (None = until cancelled). Read-only: sends only connection_init / subscribe / ping /
+    pong / complete.
 
-    Every frame off the wire -- a `next`, a `ping`, anything -- resets a
-    `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
+    Every frame off the wire -- a `next`, a `ping`, the `pong` to our ping, anything --
+    resets a `_WS_STALE_TIMEOUT`-second clock. If that clock lapses, raises WatchStaleError
     instead of waiting forever on a socket that reports no error but has gone
     silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
     number was picked). WatchStaleError is just another exception out of this
@@ -13165,18 +14536,30 @@ async def _watch_events_async(auth_header, on_event, seconds):
             await ws.send(json.dumps({"id": "watch", "type": "subscribe",
                                       "payload": {"query": _WS_SUBSCRIPTION}}))
             on_event({"__meta__": "subscribed"})
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _WS_STALE_TIMEOUT
             while True:
+                # Wait for the next frame, but never past the staleness deadline, and never
+                # longer than one heartbeat: a quiet heartbeat sends our ping and waits on.
+                left = deadline - loop.time()
+                wait = min(_WS_HEARTBEAT, max(left, 0))
                 try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_STALE_TIMEOUT)
+                    # recv() is cancellation-safe in websockets' asyncio client: a timed-out
+                    # wait loses no frame, the next recv() returns it.
+                    raw = await asyncio.wait_for(ws.recv(), timeout=wait)
                 except asyncio.TimeoutError:
-                    # Converted to a WatchStaleError HERE, not left as a bare
-                    # asyncio.TimeoutError, so it can never be mistaken for (or
-                    # accidentally swallowed by) the outer bounded-run timeout
-                    # below, which catches that same exception type for a
-                    # completely different reason (the `seconds` run budget).
-                    raise WatchStaleError(
-                        "no frame from PixAI in {}s (not even a keepalive ping) -- "
-                        "treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                    if wait >= left:
+                        # Converted to a WatchStaleError HERE, not left as a bare
+                        # asyncio.TimeoutError, so it can never be mistaken for (or
+                        # accidentally swallowed by) the outer bounded-run timeout
+                        # below, which catches that same exception type for a
+                        # completely different reason (the `seconds` run budget).
+                        raise WatchStaleError(
+                            "no frame from PixAI in {}s (not even a reply to our keepalive "
+                            "ping) -- treating the connection as dead".format(_WS_STALE_TIMEOUT))
+                    await ws.send(json.dumps({"type": "ping"}))
+                    continue
+                deadline = loop.time() + _WS_STALE_TIMEOUT
                 msg = json.loads(raw)
                 mtype = msg.get("type")
                 if mtype == "ping":
@@ -13348,6 +14731,11 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
                 "tack_name": r.get("proposedTackName") or "",
                 "desc_url": r.get("descUrl") or "",
                 "result_url": r.get("resultUrl") or "",
+                # Settlement (L3, PROBE 2026-09-29): `rewardStatus` reads "distributed" once
+                # the prizes have been paid out, which is the signal the win check uses to stop
+                # re-reading a contest early. Absent upstream -> "" (unknown, never a guess).
+                "reward_status": str(r.get("rewardStatus") or "").lower(),
+                "reward_distributed_at": r.get("rewardDistributedAt") or "",
             })
         total_page = int(d.get("totalPage") or 1)
         if page >= total_page:
@@ -13411,7 +14799,8 @@ def _contest_rows(payload):
     Each row is reduced to its SCALAR fields: the four the app actually uses (`id`,
     `authorId`, `mediaId`, `title`) plus whatever else came flat -- a winner's rank field,
     whose upstream name is unverified, therefore rides along untouched rather than being
-    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped."""
+    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped, except
+    its `entry`: the placement (kept as one small dict, see below)."""
     if isinstance(payload, dict):
         rows = payload.get("data") or []
     elif isinstance(payload, list):
@@ -13435,6 +14824,30 @@ def _contest_rows(payload):
             art = r.get("artwork")
             if isinstance(art, dict) and art.get("id"):
                 flat["artworkId"] = str(art["id"])
+        # L3 (PROBE 2026-09-29): the echoed `contest{}` block is NOT noise on these rows -- its
+        # nested `entry` carries the placement. `contest.entry = {rank, prizeAmount, source,
+        # submittedAt}`: `rank` is the PRIZE TIER (1/2/3, shared by every winner in that tier,
+        # null on a non-winner's entry), `prizeAmount` what that tier paid, `source` "manual"
+        # for a hand-picked winner and "tack" for an ordinary entry. Dropping it (the old
+        # scalars-only rule) is what made the app show list positions 1..65 and a prize of 0.
+        # Kept ADDITIVELY, and only when upstream sent it, so a row without the block maps
+        # exactly as it always did. `rank` stays an int or None -- a numeric string is NOT
+        # coerced, because "is this an integer rank" is the win check's whole question.
+        blk = r.get("contest")
+        ent = blk.get("entry") if isinstance(blk, dict) else None
+        if not isinstance(ent, dict):
+            ent = r.get("entry") if isinstance(r.get("entry"), dict) else None
+        if isinstance(ent, dict):
+            rank = ent.get("rank")
+            prize = ent.get("prizeAmount")
+            flat["entry"] = {
+                "rank": rank if (isinstance(rank, int) and not isinstance(rank, bool)) else None,
+                "prizeAmount": prize if (isinstance(prize, (int, float))
+                                         and not isinstance(prize, bool)) else 0,
+                "source": ent.get("source") if isinstance(ent.get("source"), str) else "",
+                "submittedAt": (ent.get("submittedAt")
+                                if isinstance(ent.get("submittedAt"), str) else ""),
+            }
         out.append(flat)
     return out
 
@@ -13458,8 +14871,11 @@ def contest_winners(session, slug):
 
     Verified live: a still-running contest answers with an EMPTY JSON array rather than an
     error, and the list populates at the contest's `resultAt` -- so an empty result means
-    "not decided yet", never "call failed". `authorId` identifies each winner; any rank
-    field upstream sends is preserved as-is (see _contest_rows). Read-only, no spend."""
+    "not decided yet", never "call failed". ONE unpaged list; each row is a winning artwork
+    (`id` is the artwork id, `authorId` its author) and its `entry` is the placement:
+    `entry.rank` is the prize TIER (1/2/3, shared by every winner in that tier) and
+    `entry.prizeAmount` what the tier paid (PROBE 2026-09-29; see _contest_rows). Read-only,
+    a GET and nothing else, no spend."""
     return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
 
 
@@ -13543,6 +14959,18 @@ def _rest_post(session, path, body, timeout=60):
     THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
     keeps `submit_fixer` and `claim_reward` single-attempt."""
     return _client_of(session).rest_post(path, body, timeout=timeout)
+
+
+def _rest_patch(session, path, body, timeout=60):
+    """PATCH JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_patch`
+    (single attempt). Blocked in tests by conftest."""
+    return _client_of(session).rest_patch(path, body, timeout=timeout)
+
+
+def _rest_put(session, path, body, timeout=60):
+    """PUT JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_put`
+    (single attempt). Blocked in tests by conftest, like _rest_get / _rest_post."""
+    return _client_of(session).rest_put(path, body, timeout=timeout)
 
 
 def _normalize_kaisuuken(raw):
@@ -14033,13 +15461,40 @@ _PRICE_NESTED = frozenset((
     # it moves the price (live quote 2026-09-26: 5,100 for one image, 6,000 for two at
     # 1632x912 pro). Landed in the SAME commit as the gate that sends it, so the badge never
     # quotes a context-image job without its surcharge.
-    "contextImages"))
+    "contextImages",
+    # Lane w2-recipes: the contract's /task-price description lists recipeIds among the
+    # nested parameters "passed as URL-encoded JSON". Landed in the SAME commit as the build
+    # step that sends it, so the badge never quotes a recipe request without its recipes.
+    "recipeIds"))
 # The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
 # differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
 # upscaleSampler and qualityTag. They are real submit params, but they are not in this
 # endpoint's input schema and none of them changes the price (the cost is the same whichever
 # upscaler network runs), and an off-schema query param risks a 400 that would make
 # price_task fail soft and blank the badge. Add one only with a measurement showing it priced.
+
+
+def _task_price_query(session, params):
+    """THE /v2/task-price query for `params`: the backstop gate (so the quote prices the
+    shape that will be sent), then the allowlists above. {} when there is nothing to price,
+    None when the gate refuses. Shared by price_task and moonglade_recipes.price_refusal, so
+    the second read that asks WHY a recipe quote failed cannot ask about a different
+    request than the one that failed."""
+    if not params:
+        return None
+    try:
+        params = _gate_params_for_model(session, params)
+    except PixAIError:
+        return None
+    q = {}
+    for k, v in params.items():
+        if v is None:
+            continue
+        if k in _PRICE_NESTED:
+            q[k] = json.dumps(v)          # requests URL-encodes the JSON string
+        elif k in _PRICE_SCALARS:
+            q[k] = v
+    return q
 
 
 def price_task(session, params):
@@ -14053,18 +15508,7 @@ def price_task(session, params):
     # already gated at build, for which the gate returns the SAME object. Its one refusal (a
     # reference plus LoRAs on an MMDIT26B model) is "no price", never a raise -- this
     # function fails soft.
-    try:
-        params = _gate_params_for_model(session, params)
-    except PixAIError:
-        return None
-    q = {}
-    for k, v in params.items():
-        if v is None:
-            continue
-        if k in _PRICE_NESTED:
-            q[k] = json.dumps(v)          # requests URL-encodes the JSON string
-        elif k in _PRICE_SCALARS:
-            q[k] = v
+    q = _task_price_query(session, params)
     if not q:
         return None
     try:

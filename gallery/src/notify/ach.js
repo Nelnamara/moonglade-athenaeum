@@ -20,8 +20,22 @@
 
 import { apiGet } from "../api.js";
 import { badgeSrc, badgeHop } from "./badgeArt.js";
+import { setFolioFocus } from "../folio/folioFocus.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
+
+/* THE ANSWERS THIS ENGINE READS, for the header's goal chips (Session O). Every /api/achievements
+   answer that reaches load() -- the boot check, one after a generation -- is handed to whoever
+   subscribed, with whether it was a MARKING read (only those carry a trustworthy `newly`). The
+   chips need no read of their own while this engine is reading anyway. Read-only: a listener
+   is told, it cannot change what is toasted. */
+const _dataListeners = new Set();
+export function lastAchievements() { return data; }
+export function onAchievements(fn) {
+  if (typeof fn !== "function") return () => {};
+  _dataListeners.add(fn);
+  return () => { _dataListeners.delete(fn); };
+}
 
 /* ---- BESPOKE MOMENTS (owner ruling 2026-09-10) -----------------------------------------
    A couple of feats have a celebration of their own, and a bespoke moment REPLACES the
@@ -38,7 +52,7 @@ let data = null;                 // last /api/achievements payload (skinName for
         the only function that builds one; hold _drain and nothing reaches the screen.
         NO CALLER IS EXEMPT. A Folio replay used to be, on the grounds that a click has to
         hand its driver handle back synchronously and a parked entry could only return a
-        dead one -- so a replay clicked during a cast opened .ach-m2 (z-index 520) straight
+        dead one -- so a replay clicked during a cast opened .ach-m2 (z-index 519) straight
         over it. An exemption is a door left ajar, and one door ajar is the whole invariant;
         the handle waits WITH the entry instead and drives the moment the dequeue eventually
         builds (see replay() and _driver below).
@@ -72,6 +86,25 @@ let _bespoke = 0;                // depth, not a bool: two moments may overlap a
 let _pendingDrain = false;       // the dequeue was asked to run while the gate was closed
 const _whenClear = [];           // callers waiting for the celebration layer to be EMPTY
 
+/* THE FOLIO'S DOOR, for a host that has one (the gallery app; the Loom has no Folio). The earn
+   moment of a FEAT offers "See it in the Folio" only when a host has registered how to open it;
+   the click leaves the feat's id for the Folio to scroll to (folio/folioFocus.js) and opens it.
+   The id is the earned feat's own -- the moment is only ever built for a feat already earned. */
+let _folioOpener = null;
+export function registerFolioOpener(fn) {
+  _folioOpener = typeof fn === "function" ? fn : null;
+  return () => { if (_folioOpener === fn) _folioOpener = null; };
+}
+
+/* Open the Folio from outside its tree (the header's pinned-goal chip). True when this shell has
+   a Folio to open; false on a host that has none (the Loom), and the caller navigates instead. */
+export function openFolio() {
+  if (!_folioOpener) return false;
+  try { _folioOpener(); } catch { return false; }
+  return true;
+}
+
+
 /* THE MOMENT HOST (review amendment 1). The shell's own "play this feat's moment": a
    function taking the achievement and returning a Promise that settles when the moment has
    ENDED -- played out, skipped, or fallen back. notify/index.jsx registers one for every
@@ -85,18 +118,37 @@ export function registerMomentHost(fn) {
 }
 
 /* THE LAYER LEDGER. Everything this module paints is body-level and sits ABOVE a bespoke
-   moment -- a moment .ach-m2 at z-index 520, the parade's two chips at 519/521, against a
+   moment -- a moment .ach-m2 at z-index 519, the parade's two chips at 518/520, against a
    clip moment's 515/516 -- so "the celebration layer is clear" has to mean the DOM is empty
    of all of it. A receded trail card is not a moment, but it is still four dimmed cards
    painted over a starfall. Every append goes through _mount and every removal through
    _unmount, so the ledger cannot drift from the DOM; the module still reads no element,
    class or stylesheet, it only counts what it put there itself. */
 const _live = new Set();
-function _mount(el) { _live.add(el); document.body.appendChild(el); }
+function _mount(el) { _live.add(el); document.body.appendChild(el); _celebChanged(); }
 function _unmount(el) {
   _live.delete(el);
   if (el.parentNode) el.remove();
   _flushClear();
+  _celebChanged();
+}
+
+/* IS A CELEBRATION ON SCREEN -- as a subscribable fact, for the header's goal chips (Session O:
+   the pinned goal and the Vigil are hidden while anything in the z 510-520 band is up, so a
+   toast or a moment is never crowded by a chip beside it). It is the layer ledger above plus the
+   bespoke hold: true from the moment something is mounted (or a bespoke moment arms its hold)
+   until the last thing has left and the hold has lifted. Read-only; it builds and moves nothing. */
+const _celebListeners = new Set();
+export function celebrationUp() { return _live.size > 0 || _bespoke > 0; }
+export function onCelebration(fn) {
+  if (typeof fn !== "function") return () => {};
+  _celebListeners.add(fn);
+  return () => { _celebListeners.delete(fn); };
+}
+function _celebChanged() {
+  if (!_celebListeners.size) return;
+  const up = celebrationUp();
+  _celebListeners.forEach((fn) => { try { fn(up); } catch { /* a listener's own problem */ } });
 }
 
 /* THE GATE, as one predicate. The dequeue is held while a bespoke moment owns the screen,
@@ -115,10 +167,20 @@ function _resume() {
   _drain();
 }
 
-export function beginBespokeMoment() { _bespoke++; }
+/* Is the celebration layer quiet right now: no marking read in the air, nothing queued,
+   nothing presenting, no hold? Read-only. The post-update "what's new" toast (help/
+   whatsNew.js, Session I decision 3) queues AFTER the achievement toasts of the same sign-in,
+   and polls this rather than joining the queue -- it is a notice, not a celebration, and must
+   never hold one up. */
+export function celebrationsIdle() {
+  return !_marking && !_q.length && !_cur && !_live.size && !_heldOff();
+}
+
+export function beginBespokeMoment() { _bespoke++; _celebChanged(); }
 export function endBespokeMoment() {
   if (_bespoke > 0) _bespoke--;
   _resume();
+  _celebChanged();
 }
 
 /* whenClear(fn): the reverse direction of the hold. The hold keeps a moment off a cast that
@@ -128,7 +190,7 @@ export function endBespokeMoment() {
    catches the next queued moment rather than racing it.
 
    "Empty" is the DOM, not the queue. Treating a parade's receded trail as clear was the
-   reverse direction left half-open: those cards keep .ach-m2's z-index 520 over a moment's
+   reverse direction left half-open: those cards keep .ach-m2's z-index 519 over a moment's
    515/516, and while a hold was armed they could not even time out. Waiting for the whole parade
    instead would delay a cast by every earn still in it, so a waiting cast does not wait for
    presented history -- _flushClear takes it down (_hush). What a cast waits for is the
@@ -176,8 +238,17 @@ function _flushClear() {
   _resume();
 }
 
+/* Does the ACCOUNT want the spicier line? The answer lives in the per-account preferences
+   (folio/unleashPref.js), not here: this module has no store of its own and stays free of
+   React, so the installer (notify/index.jsx) hands it a source to ask. Until one is
+   registered -- and whenever it cannot answer -- the answer is no, and the celebration
+   prints the clean line. The server still decides whether the spicier one is released at all. */
+let _unleashSource = () => false;
+export function registerUnleashSource(fn) {
+  if (typeof fn === "function") _unleashSource = fn;
+}
 function unleashed() {
-  try { return localStorage.getItem("unleash") === "1"; } catch { return false; }
+  try { return !!_unleashSource(); } catch { return false; }
 }
 function skinName(d, id) {
   const s = ((d || {}).skins || []).filter((x) => x.id === id)[0];
@@ -205,6 +276,7 @@ function load(mark) {
       done();
       if (d.error) return;
       data = d;
+      _dataListeners.forEach((fn) => { try { fn(d, !!mark); } catch { /* a listener's own problem */ } });
       if (mark) toastNew(d);
       syncSkin(d);
     }, done);
@@ -331,6 +403,16 @@ function _mkMoment(a, opts) {
     + (rwd ? '<span class="rwd"><i class="giftbox"></i>' + esc(rwd) + "</span>" : "")
     + '</div><div class="flash"></div></div>';
   tw.innerHTML = '<div class="mglow"></div>' + toastHTML;
+  if (opts.folioLink && _folioOpener) {
+    const go = document.createElement("span");
+    go.className = "rwd see-folio"; go.setAttribute("role", "button"); go.tabIndex = 0;
+    go.textContent = "See it in the Folio";
+    const open = () => { setFolioFocus(a.id); try { _folioOpener(); } catch { /* the Folio is best-effort */ } };
+    go.addEventListener("click", open);        // the moment's own click then dismisses it
+    go.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); m.click(); } });
+    const body = tw.querySelector(".tbody");
+    if (body) body.appendChild(go);
+  }
   stage.appendChild(tw); m.appendChild(stage);
   const cap = tw.querySelector(".cap");
   if (opts.badge === false) {                    // summary: trophy in the well
@@ -667,7 +749,7 @@ function _mkSkipChip() {
    on window, which puts it ahead of every Escape handler the React tree mounts afterwards
    (App.jsx's overlay closer, useCommandPalette's one global listener, the drawer/picker/panel
    ladders -- every one of them registers from an effect, and main.jsx calls installNotify()
-   before createRoot().render()). That ordering is the point: the parade layer is z-index 520,
+   before createRoot().render()). That ordering is the point: the parade layer is z-index 519,
    above everything, so while it plays Escape is its key and is consumed here.
 
    With no parade up the handler returns without touching the event at all -- the app's Escape
@@ -750,7 +832,7 @@ function _drain() {
   _chime(tier);
   const built = e.replay
     ? _mkMoment(a, { eyebrow: "Achievement · Replay", line: (e.opts || {}).line })
-    : _mkMoment(a, {});
+    : _mkMoment(a, { folioLink: tier === "feat" });
   // `replay: true` -- see _flair. A replay casts no bespoke moment, so a bespoke feat's Folio
   // card keeps the ordinary feat fanfare.
   _flair(built, a, e.replay ? { replay: true } : undefined);
@@ -863,7 +945,7 @@ function _bind(e, built) {
    Held is not the same as immediate. While a bespoke moment owns the screen -- or while a
    cast waits for the screen -- the entry waits with everything else and plays when the gate
    lifts, driven the whole time by the handle above; the exemption this used to carry put a
-   .ach-m2 at z-index 520 over a moment at 515/516, which is the overlap owner ruling 2026-09-10
+   .ach-m2 at z-index 519 over a moment at 515/516, which is the overlap owner ruling 2026-09-10
    rules out in BOTH directions.
    opts.line forces the initial roast text (the Folio's ruby-scramble reveal starts from the
    CLEAN line on its own timing). Returns the driver handle useFolio.js consumes; {} only when

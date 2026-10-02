@@ -111,6 +111,39 @@ def test_ladder_rungs_are_contiguous_within_each_track():
 
 
 @needs_donor
+def test_every_ladder_header_says_what_it_counts_in_plain_words():
+    """Owner walk 2026-09-29: a Folio ladder header read "measured in local_gens". Every live
+    track's metric has its own words in LADDER_METRIC_WORDS (not just the fallback), and what
+    the payload sends for the header has no underscore in it."""
+    out = g.compute_achievements({}, [])
+    assert out["ladders"]
+    for t in out["ladders"]:
+        assert t["metric"] in g.LADDER_METRIC_WORDS, "no plain words for " + repr(t["metric"])
+        assert t["metric_words"] == g.LADDER_METRIC_WORDS[t["metric"]]
+        assert "_" not in t["metric_words"] and t["metric_words"].strip()
+    assert "_" not in g.LADDER_METRIC_WORDS["local_gens"]
+
+
+def test_ladder_metric_words_never_carry_a_code_name(monkeypatch):
+    """Donor-free half: the table itself, the fallback for a metric it does not know yet, and
+    the payload copying (never writing into) the cached track defs."""
+    for key, words in g.LADDER_METRIC_WORDS.items():
+        assert words.strip() and "_" not in words, key
+    assert g.metric_words("local_gens") == "pictures made in the app"
+    assert g.metric_words("brand_new__metric") == "brand new metric"      # fallback: no underscore
+    assert g.metric_words(None) == ""
+    tracks = [{"id": "t1", "name": "Track", "metric": "local_gens"},
+              {"id": "t2", "name": "Other", "metric": "not_listed_yet"}]
+    monkeypatch.setattr(g, "_ladder_tracks", lambda: tracks)
+    monkeypatch.setattr(g, "_roster", lambda: [])
+    monkeypatch.setattr(g, "_skins", lambda: [])
+    out = g.compute_achievements({}, [])
+    assert [t["metric_words"] for t in out["ladders"]] == ["pictures made in the app",
+                                                           "not listed yet"]
+    assert "metric_words" not in tracks[0]                                 # the defs are untouched
+
+
+@needs_donor
 def test_epic_feats_unlock_skins():
     free = {s["id"] for s in g.compute_achievements({}, [])["skins"] if s["earned"]}
     assert free == {s["id"] for s in g._skins() if s.get("free")}   # the free skins, self-computed

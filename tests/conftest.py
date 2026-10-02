@@ -479,14 +479,33 @@ def _clear_gate_caches():
     TTL). Same isolation: one test's model rules must never answer another test's gate.
     Both reads go through _rest_get, which _no_live_card_network already blocks. The
     Unlimited Mode status cache (SCOPE_2026-09-26_unlimited-mode) is the same kind of read
-    and is cleared with them."""
+    and is cleared with them, and so is Session H's /model-config read (the live context-image
+    max)."""
     core._features_cache.clear()
     core._size_config_cache.clear()
     core._unlimited_cache.clear()
+    core._model_config_cache.clear()
     yield
     core._features_cache.clear()
     core._size_config_cache.clear()
     core._unlimited_cache.clear()
+    core._model_config_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_recipes(monkeypatch):
+    """moonglade_recipes rides _rest_get/_rest_post (blocked below) plus one DELETE of its
+    own for a recipe set's item -- blocked the same way -- and keeps a module-level read
+    cache (categories, a model's capability, market pages) that must not carry one test's
+    fake answers into the next."""
+    import moonglade_recipes
+
+    def _blocked(*a, **k):
+        raise core.PixAIError("live /v2 REST blocked in tests")
+    monkeypatch.setattr(moonglade_recipes, "_rest_delete", _blocked, raising=False)
+    moonglade_recipes.clear_cache()
+    yield
+    moonglade_recipes.clear_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -503,6 +522,9 @@ def _no_live_card_network(monkeypatch):
         raise core.PixAIError("live /v2 REST blocked in tests")
     monkeypatch.setattr(core, "_rest_get", _blocked, raising=False)
     monkeypatch.setattr(core, "_rest_post", _blocked, raising=False)
+    # The training routes' PUT and PATCH (Session J) ride the same /v2 road.
+    monkeypatch.setattr(core, "_rest_put", _blocked, raising=False)
+    monkeypatch.setattr(core, "_rest_patch", _blocked, raising=False)
     # Pin USER_ID so _make_session (now reached from generation previews) never triggers a
     # live resolve_user_id lookup. Setting the global -- not stubbing the function -- keeps
     # resolve_user_id itself testable in test_auth.
@@ -531,6 +553,8 @@ def _no_live_config(monkeypatch):
 # and is refused BY PATH there, rather than dying on a generic "blocked" message.
 _REAL_REST_GET = core._rest_get
 _REAL_REST_POST = core._rest_post
+_REAL_REST_PUT = core._rest_put
+_REAL_REST_PATCH = core._rest_patch
 
 
 @pytest.fixture()
@@ -557,6 +581,8 @@ def pixai(monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: fake)
     monkeypatch.setattr(core, "_rest_get", _REAL_REST_GET)
     monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
+    monkeypatch.setattr(core, "_rest_put", _REAL_REST_PUT)
+    monkeypatch.setattr(core, "_rest_patch", _REAL_REST_PATCH)
     return fake
 
 

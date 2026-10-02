@@ -101,6 +101,21 @@ describe("buildLoomUrl -- ONE builder, patching only what it is handed", () => {
   test("defaults to /loom when handed no pathname", () => {
     assert.equal(buildLoomUrl({ board: "abc" }, "", ""), "/loom?board=abc");
   });
+
+  // Session P, Stage B1 (P5): the "as shots, in order" hand-off rides the same builder.
+  test("the gallery builds the shots hand-off: ids in order, the collection, the nonce -- encoded", () => {
+    assert.equal(buildLoomUrl({ shots: "12,34,local_0123456789ab", from: "Loom stills", n: "k3f9" }, "", "/loom"),
+      "/loom?shots=12%2C34%2Clocal_0123456789ab&from=Loom+stills&n=k3f9");
+    assert.equal(buildLoomUrl({ shots: "1", from: "a&b=c", n: "x" }, "", "/loom"), "/loom?shots=1&from=a%26b%3Dc&n=x");
+  });
+
+  test("the Loom clears all three after reading -- and the board survives, as with cast", () => {
+    assert.equal(buildLoomUrl({ shots: null, from: null, n: null }, "?board=abc&shots=1,2&from=C&n=z", "/loom"),
+      "/loom?board=abc");
+    assert.equal(buildLoomUrl({ shots: null, from: null, n: null }, "?shots=1&from=C&n=z", "/loom"), "/loom");
+    assert.equal(buildLoomUrl({ board: "b" }, "?shots=1&n=z", "/loom"), "/loom?shots=1&n=z&board=b",
+      "a patch that does not name them leaves them");
+  });
 });
 
 describe("master-storyboard.jsx wires the address in (source structure)", () => {

@@ -120,6 +120,8 @@ TIER_SNAPSHOT = [
     "/api/account/card-history [GET] LOGIN",
     "/api/account/coupons [GET] LOGIN",
     "/api/account/credit-log [GET] LOGIN",
+    "/api/account/prefs [GET] LOGIN",
+    "/api/account/prefs [POST] LOGIN",
     # LOCALHOST -> LOGIN, 2026-09-07 ruling: the per-render nonce replaced the loopback
     # gate, so a phone can earn the three feat beacons honestly again.
     "/api/ach-event [POST] LOGIN",
@@ -144,13 +146,21 @@ TIER_SNAPSHOT = [
     "/api/claim [POST] LOGIN",
     "/api/collection [POST] LOGIN",
     "/api/collections [GET] LOGIN",
+    "/api/collections/detail [GET] LOGIN",
+    "/api/collections/manage [POST] LOGIN",
+    # wave 5, Session P (P6): a hand-picked collection's manual order
+    "/api/collections/order [GET] LOGIN",
+    "/api/collections/order [POST] LOGIN",
     "/api/contact-sheet [GET] LOGIN",
     "/api/contest/<slug>/artworks [GET] LOGIN",
     "/api/contest/<slug>/winners [GET] LOGIN",
+    "/api/contest/check [POST] LOGIN",
     "/api/contest/enter [POST] LOGIN",
     "/api/contest/mine [GET] LOGIN",
     "/api/contest/sync [POST] LOGIN",
     "/api/contests [GET] LOGIN",
+    "/api/curate [POST] LOGIN",
+    "/api/curate/restore [POST] LOGIN",
     "/api/delete-image [POST] LOCALHOST",
     "/api/delete-local [POST] LOGIN",
     "/api/delete-preview [POST] LOCALHOST",
@@ -166,7 +176,15 @@ TIER_SNAPSHOT = [
     "/api/fix [POST] LOGIN",
     "/api/gallery-images [GET] LOGIN",
     "/api/generate [POST] LOGIN",
+    "/api/generate/plan [POST] LOGIN",
+    "/api/generate/request/<task_id> [GET] LOGIN",
+    "/api/generate/run [POST] LOGIN",
+    "/api/generate/runs/<run_id> [GET] LOGIN",
     "/api/health [GET] LOGIN",
+    "/api/help/about [GET] LOGIN",
+    "/api/help/index [GET] LOGIN",
+    "/api/help/online/<slug> [GET] LOGIN",
+    "/api/help/page/<slug> [GET] LOGIN",
     "/api/image-meta/<media_id> [GET] LOGIN",
     "/api/import-local [POST] LOCALHOST",
     "/api/import-task [POST] LOGIN",
@@ -178,20 +196,30 @@ TIER_SNAPSHOT = [
     "/api/lineage/<media_id> [GET] LOGIN",
     "/api/login [POST] PUBLIC",
     "/api/logout [POST] PUBLIC",
+    # wave 5, Session P (P3): the music bed's local store -- never PixAI
+    "/api/loom/bed [GET] LOGIN",
+    "/api/loom/bed [POST] LOGIN",
+    "/api/loom/beds/sweep [POST] LOGIN",
+    "/api/loom/beds/unused [GET] LOGIN",
     "/api/loom/delete [POST] LOGIN",
     "/api/loom/export [POST] LOGIN",
     "/api/loom/export-bundle [POST] LOGIN",
     "/api/loom/export-cancel [POST] LOGIN",
+    "/api/loom/export-edl [POST] LOGIN",     # Session P (P4): the editor handoff zip
     "/api/loom/export-file [GET] LOGIN",
     "/api/loom/export-status [GET] LOGIN",
+    "/api/loom/frame [GET] LOGIN",           # Session P (P9): a local still for the ribbon, no upload
     "/api/loom/generate [POST] LOGIN",
     "/api/loom/get [GET] LOGIN",
     "/api/loom/handoff [POST] LOGIN",
     "/api/loom/import-bundle [POST] LOGIN",
     "/api/loom/import-frames [POST] LOGIN",
     "/api/loom/list [GET] LOGIN",
+    "/api/loom/prompts [GET] LOGIN",         # Session P (P5): a read-only catalog lookup
     "/api/loom/set [POST] LOGIN",
     "/api/loom/spend [POST] LOGIN",
+    "/api/loom/submit-abandon [POST] LOGIN",
+    "/api/loom/submit-status [GET] LOGIN",
     "/api/loom/video-duration [GET] LOGIN",
     "/api/mirror/connect [POST] LOGIN",
     "/api/mirror/enable [POST] LOCALHOST",
@@ -200,9 +228,11 @@ TIER_SNAPSHOT = [
     "/api/model-version [GET] LOGIN",
     "/api/myart/items [GET] LOGIN",
     "/api/myart/publish [POST] LOGIN",
+    "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
     "/api/next/detail/<media_id> [GET] LOGIN",
     "/api/next/history [GET] LOGIN",
     "/api/next/library [GET] LOGIN",
+    "/api/palettes/presets [GET] LOGIN",
     "/api/panel/cancel [POST] LOCALHOST",
     "/api/panel/run [POST] LOGIN",
     "/api/panel/schedule [GET] LOGIN",
@@ -221,6 +251,25 @@ TIER_SNAPSHOT = [
     "/api/price [POST] LOGIN",
     "/api/rate/<media_id> [POST] LOGIN",
     "/api/rebuild-poster/<media_id> [POST] LOGIN",
+    "/api/recipes/<recipe_id> [GET] LOGIN",
+    "/api/recipes/<recipe_id>/artworks [GET] LOGIN",
+    "/api/recipes/<recipe_id>/tasks [GET] LOGIN",
+    "/api/recipes/batch [GET] LOGIN",
+    "/api/recipes/capability [GET] LOGIN",
+    "/api/recipes/from-image [GET] LOGIN",
+    "/api/recipes/market [GET] LOGIN",
+    "/api/recipes/meta [GET] LOGIN",
+    "/api/recipes/mine [GET] LOGIN",
+    "/api/recipes/publish [POST] LOGIN",
+    "/api/recipes/recent [GET] LOGIN",
+    "/api/recipes/sets [GET] LOGIN",
+    "/api/recipes/sets/<set_id>/items [GET] LOGIN",
+    "/api/recipes/sets/create [POST] LOGIN",
+    "/api/recipes/sets/for/<recipe_id> [GET] LOGIN",
+    "/api/recipes/sets/toggle [POST] LOGIN",
+    "/api/recipes/style-code [GET] LOGIN",
+    "/api/recipes/transition [POST] LOGIN",
+    "/api/recipes/update [POST] LOGIN",
     "/api/replace-prompts [POST] LOGIN",
     "/api/scene [POST] LOGIN",
     "/api/scenes [GET] LOGIN",
@@ -239,11 +288,24 @@ TIER_SNAPSHOT = [
     "/api/tag-suggest [GET] LOGIN",
     "/api/task-params/<task_id> [GET] LOGIN",
     "/api/task-status [GET] LOGIN",
+    "/api/train/advanced/<task_id> [GET] LOGIN",
+    "/api/train/advanced/<task_id>/caption [POST] LOGIN",
+    "/api/train/advanced/<task_id>/captions/<media_id> [POST] LOGIN",
+    "/api/train/advanced/<task_id>/media [POST] LOGIN",
+    "/api/train/advanced/<task_id>/submit [POST] LOGIN",
+    "/api/train/advanced/draft [POST] LOGIN",
     "/api/train/cover [GET] LOGIN",
+    "/api/train/datasets [GET] LOGIN",
     "/api/train/models [GET] LOGIN",
+    "/api/train/models/<model_id>/make-public [POST] LOGIN",
+    "/api/train/models/<model_id>/rebates [GET] LOGIN",
     "/api/train/quota [GET] LOGIN",
     "/api/train/recent-tasks [GET] LOGIN",
+    "/api/train/runs [GET] LOGIN",
+    "/api/train/runs/<task_id>/publish [POST] LOGIN",
+    "/api/train/runs/<task_id>/retry [POST] LOGIN",
     "/api/train/submit [POST] LOGIN",
+    "/api/train/thumb/<media_id> [GET] LOGIN",
     "/api/trash/delete-forever [POST] LOCALHOST",
     "/api/trash/empty [POST] LOCALHOST",
     "/api/trash/list [GET] LOGIN",
@@ -267,6 +329,7 @@ TIER_SNAPSHOT = [
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",
     "/export-zip [POST] LOGIN",
+    "/feat-mask/<token>.png [GET] LOGIN",
     "/full/<media_id> [GET] LOGIN",
     "/login [GET] PUBLIC",
     "/loom [GET] LOGIN",
@@ -925,3 +988,37 @@ def test_the_pilot_codename_has_no_page_route(app):
     assert "/next" not in {str(r) for r in app.url_map.iter_rules()}, (
         "a rule for /next is registered again -- see the docstring above before adding "
         "it back")
+
+
+# The wave 2 and wave 3 lanes' own POST families (recipes, Train a LoRA, the account store
+# Help and the recipe drafts share, the narrator's poke) each check the session's CSRF token before they act.
+# Older POSTs predate the rule and are not listed here; a NEW route under one of these
+# prefixes that forgets the check fails by name.
+_CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
+                  "/api/narrator",
+                  # wave 5, Session N: bulk curation and the collections manager
+                  "/api/curate", "/api/collections/manage",
+                  # wave 5, Session P: the Loom's new local routes
+                  "/api/loom/submit-abandon",
+                  # Session P, Stage B1: the music bed, the EDL export, the manual order
+                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order")
+_CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
+
+
+def test_every_lane_post_checks_csrf(app):
+    import inspect
+    checked, missing = [], []
+    for rule in app.url_map.iter_rules():
+        if "POST" not in (rule.methods or ()) or not rule.rule.startswith(_CSRF_PREFIXES):
+            continue
+        src = inspect.getsource(app.view_functions[rule.endpoint])
+        (checked if any(h in src for h in _CSRF_HELPERS) else missing).append(rule.rule)
+    assert not missing, "POST routes with no CSRF check: %s" % sorted(missing)
+    # the families are really there (a renamed prefix would make this vacuous)
+    assert any(r.startswith("/api/train") for r in checked), checked
+    assert any(r.startswith("/api/recipes") for r in checked), checked
+    assert "/api/account/prefs" in checked, checked
+    assert "/api/narrator/poke" in checked, checked
+    assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
+    assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl",
+            "/api/collections/order"} <= set(checked), checked

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 // Pure, framework-agnostic logic (tag numbering, continuity checks, shot-text
 // assembly, reel duration/pricing math) lives in ./src/loom-core.js so it can
 // be unit-tested under `node --test` outside React. `shotPayload` is imported
@@ -11,18 +11,26 @@ import {
   usesCloseFrame,
   pickTarget, pickVideoTarget, positionTag, durOf,
   reelStats, effectivePrompt,
+  // The timeline drawer's click-to-cycle states and its fit rule (The Loom.dc.html:1001-1002).
+  timelineFit, timelineHeight, nextTimelineState,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
+  // The Generate panel's balance line: grouped, and re-read when a spend lands (walk 2026-09-30).
+  balanceLine, spendLandedKey,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
+  // Spend review S3: the card's Render POSTs the priced payload itself (plus the Loom's keys).
+  shotSendBody,
+  // Session P, Stage B1: a new shot's default fields (newCard below wraps it with uid()).
+  newCardShape,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
 // hooks extraction pass, 2026-07-16) -- same discipline as loom-core.js
 // (no React, no DOM, no fetch), consumed by the useProjectStore /
 // useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
 import {
-  patchCard, patchCardById, patchCardByIdWith, withResult, patchAct, patchAssets,
+  patchCard, patchCardById, patchCardByIdWith, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
@@ -31,7 +39,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch, importedFramesPatch, attachedVideoPatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch,
   // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
   // being imported. The in-browser Babel path inlines every module into one global scope,
   // so it happened to resolve there and the omission was invisible; esbuild builds a real
@@ -44,12 +52,58 @@ import {
   // The picked model's size grid for the two "→ W × H" readouts (SCOPE_2026-09-26 G1), the
   // same step buildImgGenBody sends.
   genStepFor,
+  // Session P (review F11): Split is refused while a render for the shot is out.
+  splitBlocked,
 } from "./src/loom-mutations.js";
+// Session P (Wave 5, BUILD-w5-p): TAKES and the render lifecycle as pure reducers and views,
+// and the per-key board save queue. Same discipline again -- no React, no DOM, no fetch. Every
+// landing goes through landTake/attachTake; nothing in this file writes takes, selectedTake or
+// takeSeq itself (loom/test/loom-render-lifecycle-wiring.test.js).
+import {
+  landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
+  beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
+  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
+  splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
+  // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
+  // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
+  // The pure Keep is renamed here because the click handler that applies it is `keepAnchor`.
+  takesOf, selectedTakeOf, selectedTakeView, takeView, inFlight,
+  selectTake, deleteTake, reuseSettingsPatch, cutPointOf,
+  anchorInfo, staleText, needsNewTake, reanchorPatch, keepAnchor as keepAnchorPatch,
+} from "./src/loom-takes-core.js";
+import { makeSaveQueue } from "./src/loom-store-core.js";
+// Session P, Stage B1 (NOTES P3, P4, P5): the music bed's rules and timing, the editor handoff
+// plan, and a collection as ordered shots -- pure modules, no React, no DOM, no fetch
+// (loom-no-auto-render.test.js pins that none of them can reach a render).
+import {
+  BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
+  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
+} from "./src/loom-bed-core.js";
+import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
+import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELECTION } from "./src/loom-shots-core.js";
+// Session P, Stage B2 (NOTES P7): the cast library -- one account-side value, each storyboard's
+// ticks, and the tick / untick / edit patches. Pure, like the modules above.
+import {
+  CASTLIB_KEY, parseLibrary, libraryRows, rowMeta, untickQuestion, shotsUsing, memberFromAsset, tickMember,
+  untickAsset, withLibId, syncPatch, addMember, editMember, editCopies, ticks, handoffCast, newMemberAsset,
+} from "./src/loom-cast-library.js";
+// Session P, Stage B2 (NOTES P8): find in storyboard -- the matching, the chips, the stepping.
+import {
+  emptyFind, findActive, findMatches, findChips, chipOn, toggleChip, currentIndex, stepIndex, findCountText,
+} from "./src/loom-find-core.js";
+// Session P, Stage B2 (NOTES P9): the continuity ribbon's pairs and its Lab colour-jump measure.
+import {
+  RIBBON_GRID, ribbonPairs, frameUrl, meanDeltaE, pairFlagged, pairTitle,
+} from "./src/loom-ribbon-core.js";
+// Session P, Stage B2 (the page's P1 "Phone:" line): the phone's swipe / long-press take math.
+import { LONG_PRESS_MS, swipeDir, adjacentTakeN } from "./src/loom-phone-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
 import {
   readBoardId, buildLoomUrl,
+  // Session P, P5: the "as shots, in order" hand-off's meta and ruling 10's one cap.
+  SHOTS_HANDOFF_CAP, readShotsMeta,
   LOOM_VIEW_KEY, readStoredView, resolveLoomView,
 } from "./src/loom-url.js";
 // The crossing's memory, library side: where the library was when it handed over, so
@@ -75,12 +129,33 @@ import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import { adjustedText } from "../gallery/src/gen/genCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
+// The in-app guide (Session I): Help, About and the what's-new sheet, and the Loom's own
+// first-run guide. The shell's "?" button opens Help through helpStore's window.mgHelp.
+import HelpRoot from "../gallery/src/help/HelpRoot.jsx";
+import GuideHost from "../gallery/src/help/GuideHost.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
+import GoalChips from "../gallery/src/components/GoalChips.jsx";
 import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
 import useActivity from "../gallery/src/notify/useActivity.js";
 // The one price transport, shared with the gallery's own cost lines (gen/usePriceProbe.js
 // rides the same function). Imported the same way as VideoDrawer/CostBadge above.
 import { requestPrice } from "../gallery/src/gen/priceRequest.js";
+// Review S2 (Session M): the Image tab's ×2-4 and a prompt using the template syntax go through
+// the run road (/api/generate/plan -> the confirm -> /run), as the Generate dock's do --
+// /api/generate is a single send. The road's pieces are loom-run.js's; the transport is the
+// gallery's own (apiPost, and submitRun, the one poster of /api/generate/run).
+import { apiPost } from "../gallery/src/api.js";
+import { submitRun } from "../gallery/src/gen/submitTask.js";
+import { accountCsrf, accountPrefs } from "../gallery/src/hooks/useAccountPrefs.js";
+import { imgSendRoute, sendImgRun } from "./src/loom-run.js";
+const LOOM_RUN_DEPS = {
+  post: apiPost, run: submitRun, confirm: (text) => window.confirm(text),
+  csrf: async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); },
+};
+// The session's CSRF token for the Loom's own local POSTs (Session P, Stage B1: the music bed,
+// its sweep, the EDL export). The account store's GET hands it out, as it does to every
+// wave-5 surface.
+const loomCsrf = async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); };
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
@@ -118,14 +193,28 @@ const priceBody = async (body) => {
 // from other statuses. `(ai*3+ci) % TINTS.length` is the design's real assignment rule --
 // ai/ci already exist on every flat() entry (loom-core.js:118), so this needs no change to
 // that pure-logic file, just reading fields it already provides.
+// TOKEN MIXES, NOT THE PAGE'S HEXES (2026-09-29, DECISIONS "Every skin reaches every surface"):
+// the page hard-codes Moonglade's violets here, and a skin has to reach the reel too. Each stop
+// is fitted to the page's hex under the default skin (within about 2 OKLab dE, below what an eye
+// separates) and follows the skin's own base / surfaces / accent / emerald elsewhere. HSL mixing
+// is what keeps the dark stops saturated: sRGB and OKLab mixes of these tokens cannot reach
+// #33236d or #643aac at all. Page hexes, in order: #33236d>#1b1733, #3a3460>#17142b,
+// #643aac>#241f5b, #2a4a58>#171f38, #4a3a6e>#1f1a36, #3a2b63>#191338.
 const LV_TINTS = [
-  "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
-  "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
-  "linear-gradient(150deg, #643aac 0%, #241f5b 100%)",
-  "linear-gradient(150deg, #2a4a58 0%, #171f38 100%)",
-  "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
-  "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--base) 69%, var(--accent)) 0%, color-mix(in oklab, var(--base) 65%, var(--surface1)) 100%)",
+  "linear-gradient(150deg, var(--surface1) 0%, color-mix(in oklab, var(--surface1) 59%, black) 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 48%, var(--accent)) 0%, color-mix(in hsl, var(--base) 78%, var(--mauve)) 100%)",
+  "linear-gradient(150deg, color-mix(in oklab, var(--surface0) 73%, var(--emerald)) 0%, color-mix(in oklch, var(--mantle) 84%, var(--emerald)) 100%)",
+  "linear-gradient(150deg, color-mix(in srgb, var(--surface1) 90%, var(--accent)) 0%, color-mix(in srgb, var(--mantle) 58%, var(--surface1)) 100%)",
+  "linear-gradient(150deg, color-mix(in hsl, var(--surface0) 80%, var(--accent)) 0%, color-mix(in hsl, var(--base) 89%, var(--accent)) 100%)",
 ];
+
+// Session P (P3): how much taller the timeline's full view is for the music bed's row (36 px,
+// the page's), its controls line and the one-line note under them.
+const LV_BED_ZONE_H = 92;
+// Session P (P9): and for the continuity ribbon under the bed row (its caption and one row of
+// frame pairs, with room for the peach dot and a scrollbar).
+const LV_RIBBON_ZONE_H = 84;
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -147,8 +236,24 @@ const STYLES = `
   --line:var(--overlay0);    --line2:color-mix(in srgb, var(--overlay0) 55%, var(--text) 45%);
   --ink:var(--text);         --ink2:var(--subtext);      --ink3:var(--overlay0);
   --amber:var(--accent);     --amber-d:color-mix(in srgb, var(--accent) 70%, black);
-  --cyan:var(--emerald);     --green:var(--green);       --coral:var(--red);
+  --coral:var(--red);
+  /* --cyan is the Loom's own cyan (--loomc, the same in every skin), not --emerald: the page
+     draws the "linked" chip and the live @tags in it (The Loom.dc.html:294, 1055, 1136).
+     There is no --green alias any more. It read var(--green) on the same :root it was
+     declared on -- a self-reference is a cycle, which makes the property invalid, so every
+     var(--green) with no fallback (the card's DONE, Deep Focus's tick) lost its colour.
+     --green now falls through to the gallery token. */
+  --cyan:var(--loomc);
   --shadow:0 10px 30px rgba(0,0,0,.45);
+  /* The page's hard-coded violet chrome as token mixes (DECISIONS "Every skin reaches every
+     surface"). Each is fitted to the page's literal under the default skin (within about
+     1 OKLab dE) and follows the skin everywhere else:
+       --lv-ink       the near-black of every veil and backdrop (rgba(5,4,13) and kin)
+       --lv-glass-hi  the glass gradient's first stop, rgba(24,18,54)
+       --lv-glass-lo  its second stop, rgba(14,11,32) */
+  --lv-ink:color-mix(in oklab, var(--mantle) 80%, black);
+  --lv-glass-hi:color-mix(in hsl, var(--base) 90%, var(--accent));
+  --lv-glass-lo:color-mix(in hsl, var(--mantle) 90%, var(--surface1));
 }
 *{box-sizing:border-box}
 /* System fonts only (no CDN) -- matches the gallery's own body{font-family:system-ui,
@@ -161,7 +266,7 @@ const STYLES = `
 .sb-projwrap{position:relative;display:inline-flex}
 .sb-projbtn{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px;margin-left:2px}
 .sb-projbtn:hover{color:var(--ink);border-color:var(--line2)}
-.sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
+.sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:318;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
 .sb-projpoph{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);padding:2px 4px}
 .sb-projlist{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto}
 .sb-projitem{display:flex;align-items:stretch;gap:4px;border-radius:7px}
@@ -174,7 +279,16 @@ const STYLES = `
 .sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:7px}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
-.sb-projveil{position:fixed;inset:0;z-index:59}
+.sb-projveil{position:fixed;inset:0;z-index:317}
+/* The desktop bar's 📱 Mobile view, moved into this popover as a row (2026-09-29, the one-row
+   bar): the Draft chip's own 12 px check square. */
+.sb-projpop .sb-projrow{display:flex;align-items:center;gap:8px;border:0;border-top:1px solid var(--line);border-radius:0;
+  background:transparent;padding:8px 8px 2px;margin:0;font:600 12px/1.2 system-ui,sans-serif;color:var(--ink2);cursor:pointer;user-select:none}
+.sb-projpop .sb-projrow:hover{color:var(--ink)}
+.sb-projpop .sb-projrow.on{color:var(--amber)}
+.sb-projrow input{appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;width:12px;height:12px;
+  border-radius:3px;border:1px solid var(--surface1);background:var(--base);flex:none}
+.sb-projrow input:checked{background:var(--accent)}
 /* Export ▾ menu reuses .sb-projwrap/.sb-projveil/.sb-projpop's POPOVER chrome as-is --
    same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
    the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
@@ -183,7 +297,52 @@ const STYLES = `
 .sb-exportitem:hover{background:rgba(255,255,255,.05)}
 .sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
 .sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
+/* Session P (P4): the Export ▾ row the Loom Handoff page highlights -- the editor handoff. */
+.sb-exportitem.sb-exportedl{background:color-mix(in srgb,var(--lavender) 14%,transparent)}
+.sb-exportitem.sb-exportedl:hover{background:color-mix(in srgb,var(--lavender) 22%,transparent)}
+/* Session P (P4): THE EDIT DECISION LIST PANEL, the page's own sizes and tokens (its #0a0818 is
+   --mantle; its darker preview well is --mantle pulled toward black). Shown over the board. */
+.sb-edlveil{background:color-mix(in srgb,var(--lv-ink) 72%,transparent)}
+.sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
+  border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
+.sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sb-edlcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0)}
+.sb-edltab{font:600 10px/1.2 system-ui,sans-serif;padding:3px 9px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--surface1);background:transparent;color:var(--subtext)}
+.sb-edltab.on{background:var(--lavender);color:var(--base)}
+.sb-edlx{font-size:10px;color:var(--overlay0);cursor:pointer;padding:0 4px;border:0;background:transparent}
+.sb-edlx:hover{color:var(--text)}
+.sb-edlpre{font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:10px 12px;border-radius:9px;
+  background:color-mix(in srgb,var(--mantle) 70%,black);border:1px solid var(--surface0);color:var(--subtext);
+  white-space:pre;overflow:auto;max-height:260px}
+.sb-edlnote{font-size:9.5px;color:var(--overlay0)}
+.sb-edlnote code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;color:var(--mauve)}
+.sb-edlfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
+/* Session P (P9): THE CONTINUITY RIBBON -- the Loom Handoff page's strip, its own sizes and tokens
+   (70x42 frames, a 7px wrap, peach-tinted and dotted when flagged). In the global sheet because
+   both the desktop timeline and the phone's review panel draw it. The page draws the wrap's border
+   in --surface0 on a panel darker than surface0; the Loom's timeline drawer IS --surface0, where
+   that border vanishes, so it is one step up (--surface1) for the same contrast. */
+.lv-ribbon{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+.lv-ribcap{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-ribrow{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 4px 0;}
+.lv-ribpair{position:relative;flex:none;display:flex;gap:2px;padding:3px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface1);outline:none;}
+.lv-ribpair.flag{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lv-ribpair:hover,.lv-ribpair:focus-visible{border-color:var(--lavender);}
+.lv-ribframe{position:relative;width:70px;height:42px;border-radius:5px;overflow:hidden;box-sizing:border-box;
+  display:flex;align-items:flex-end;background-size:cover;background-position:center;}
+.lv-ribframe img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.lv-riblab{position:relative;z-index:1;padding:2px 4px;font-size:8.5px;line-height:1.1;white-space:nowrap;
+  color:color-mix(in srgb,var(--text) 85%,transparent);text-shadow:0 1px 2px rgba(0,0,0,.65);}
+.lv-ribdot{position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:var(--peach);
+  box-shadow:0 0 0 2px var(--base);}
+.lv-ribnone{font-size:10px;color:var(--overlay0);}
+.lv-ribbon.compact .lv-ribrow{scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+.lv-ribbon.compact .lv-ribpair{scroll-snap-align:start;}
+.lv-ribbon.compact .lv-ribframe{width:84px;height:50px;}
 .sb-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
   background:#000;cursor:col-resize;max-width:460px}
@@ -209,14 +368,14 @@ const STYLES = `
   color:rgba(255,255,255,.85);background:rgba(0,0,0,.15)}
 .sb-trim{margin-top:6px}
 .sb-trim-track{position:relative;height:20px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer;touch-action:none}
-.sb-trim-sel{position:absolute;top:0;bottom:0;background:rgba(224,162,78,.26);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
+.sb-trim-sel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--gold) 26%,transparent);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
 .sb-trim-h{position:absolute;top:-3px;width:11px;height:26px;margin-left:-6px;border-radius:4px;background:var(--amber);cursor:ew-resize;box-shadow:0 1px 4px rgba(0,0,0,.55);touch-action:none;z-index:2}
 .sb-trim-h:hover{background:var(--gold)}
 .sb-trim-read{font-size:11px;color:var(--ink2);margin-top:6px;font-family:ui-monospace,monospace}
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
-.sb-seq{position:fixed;inset:0;z-index:500;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
+.sb-seq{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 92%,transparent);display:flex;align-items:center;justify-content:center;padding:22px}
 .sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
@@ -232,7 +391,7 @@ const STYLES = `
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
-.sb-pick-ov{position:fixed;inset:0;z-index:500;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+.sb-pick-ov{position:fixed;inset:0;z-index:490;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
 .sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
@@ -284,6 +443,8 @@ const STYLES = `
 .sb-ico:hover{color:var(--ink);background:var(--panel2)}
 .sb-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);cursor:pointer}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
+.sb-loadfail{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink2)}
+.sb-loadfail b{color:var(--peach);font-size:15px}
 @media (max-width:560px){.sb-conn-mid{align-self:flex-start;padding:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
@@ -326,6 +487,18 @@ const AUDIO_PALETTE = ["no music", "room tone", "ambient hum", "soft breathing",
 // vanilla-campaign work; until then the local copy stays, same as modeSendsRefs/liveTagText
 // etc. keep their own copies for values outside this file's two DO-NOT-MODIFY pure modules.)
 const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
+// The desktop Fixer paints with the SKIN's colours (2026-09-29, "Every skin reaches every
+// surface"): editCore's #b692e6 and #4fc99a are Moonglade's --lavender and --emerald, so the
+// desktop canvas reads those tokens live and keeps FIX_COLORS only as the fallback. A canvas
+// cannot take var(), hence the computed-style read.
+const FIX_TOKENS = { face: "--lavender", hand: "--emerald" };
+const fixStroke = (tag) => {
+  const k = tag === "hand" ? "hand" : "face";
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(FIX_TOKENS[k]).trim();
+    return v || FIX_COLORS[k];
+  } catch (e) { return FIX_COLORS[k]; }
+};
 const FIX_MIN_PX = 6;
 const FIX_MAX_BOXES = 20;   // clean_fix_boxes truncates at 20 server-side
 // boxes arrive as {x,y,w,h,tag} in DISPLAY pixels (the canvas's own coordinate space); the
@@ -345,7 +518,6 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 // Module scope (not a local inside useGenerationPipeline) because both pollShot (inside that
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
-const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // WHICH SKIN OF THE LOOM TO SHOW -- the "📱 Mobile view" / "🖥 Desktop" pair.
 //
 // A per-browser UI-chrome preference, backed by localStorage -- NOT window.storage (the
@@ -458,14 +630,54 @@ function storeFailed(op, k, e) {
       msg: "Your recent changes may not be saved. Check the server, then reload before editing further." });
   }
 }
+// Session P (BUILD-w5-p §1.2 / §3.5, review F15): sGetX tells four answers apart, because
+// only one of them may ever be followed by a write --
+//   {value, rev}                    the board, and the revision the compare-and-swap save sends
+//   {value:null, missing:true, rev} the server said there is no such key (rev = the sentinel)
+//   {failed:true, unreadable:true}  the file is there and will not read or parse
+//   {failed:true}                   the read itself failed (network, server)
+// Nothing seeds or writes a key that answered unreadable or failed: that is how a blank board
+// used to land over the owner's real one.
 async function sGetX(k) {
-  try { const r = await window.storage.get(k); return { value: r ? r.value : null, failed: false }; }
-  catch (e) { storeFailed("read", k, e); return { value: null, failed: true }; }
+  try {
+    const r = await window.storage.get(k);
+    if (!r || r.value == null) return { value: null, missing: true, failed: false, rev: r ? r.rev : undefined };
+    return { value: r.value, missing: false, failed: false, rev: r.rev };
+  } catch (e) {
+    storeFailed("read", k, e);
+    return { value: null, missing: false, failed: true, unreadable: !!(e && e.unreadable) };
+  }
 }
 async function sGet(k) { return (await sGetX(k)).value; }
 async function sSet(k, v) { try { await window.storage.set(k, v, false); return true; } catch (e) { storeFailed("write", k, e); return false; } }
-async function sList(p) { try { const r = await window.storage.list(p, false); if (!r) return []; return (r.keys || []).map((k) => (typeof k === "string" ? k : k.key)); } catch (e) { storeFailed("list", p, e); return []; } }
+// A failed listing is not an empty one (review F15a): the boot path migrates or seeds only
+// when the listing SUCCEEDED and came back empty.
+async function sListX(p) {
+  try {
+    const r = await window.storage.list(p, false);
+    return { keys: ((r && r.keys) || []).map((k) => (typeof k === "string" ? k : k.key)), failed: false };
+  } catch (e) { storeFailed("list", p, e); return { keys: [], failed: true }; }
+}
+async function sList(p) { return (await sListX(p)).keys; }
 async function sDel(k) { try { await window.storage.delete(k); return true; } catch (e) { storeFailed("delete", k, e); return false; } }
+// The ONE board writer, and only the board save queue calls it (loom-store-core.js): the
+// shim's compare-and-swap set. It resolves {ok, rev} or {conflict, value, rev} and THROWS on
+// any other answer, which the queue turns into {failed}. ACTIVE_KEY and thumbs keep sSet.
+const writeBoard = (k, json, baseRev) =>
+  window.storage.set(k, json, false, baseRev !== undefined ? { base_rev: baseRev } : undefined);
+// The server's revision for a key that does not exist yet (moonglade_gallery.py's
+// _LOOM_REV_MISSING): a brand-new board is written against it, so even its first save is a
+// compare-and-swap.
+const LOOM_REV_MISSING = "missing";
+// A parsed board the Loom can open. Anything else read from a key is treated as unreadable.
+const isBoard = (p) => !!(p && typeof p === "object" && Array.isArray(p.acts));
+// A submit id for one render: [A-Za-z0-9_-]{1,64}, unique per click (the server journal keys
+// every Loom render by it, so a replay can never send twice).
+const newSubmitId = () => "s" + Date.now().toString(36) + uid() + uid();
+// A cast library member's stable id (Session P, P7): the same member on every storyboard that
+// ticks it, whatever each board calls its own copy.
+const newLibId = () => "L" + Date.now().toString(36) + uid();
+const nowIso = () => new Date().toISOString();
 
 function fileToThumb(file, maxDim = 480, q = 0.72) {
   return new Promise((res, rej) => {
@@ -483,26 +695,10 @@ function fileToThumb(file, maxDim = 480, q = 0.72) {
   });
 }
 
+// The default fields live in loom-core.js's newCardShape (Session P, Stage B1), the one shape
+// the pure collection -> shots builder (loom-shots-core.js) also makes; the id stays here.
 function newCard(extra = {}) {
-  return {
-    id: uid(), title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
-    prompt: "", openFrame: emptyFrame(), closeFrame: emptyFrame(),
-    cast: [], refs: [], camera: "", lighting: "", audioCue: "",
-    // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
-    // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
-    // ("ambient room tone") that only ever influences wording, never the real generateAudio/
-    // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
-    // had it reverse-engineered but never wired to a control): the server already accepts
-    // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
-    audioGen: false, audioLanguage: "english",
-    transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null,
-    // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
-    // prompt box, durable across shot reselect/reload. When set, shotText() returns
-    // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
-    // see loom-core.js's shotText() and effectivePrompt().
-    promptOverride: false, promptOverrideText: "",
-    ...extra,
-  };
+  return newCardShape(uid(), extra);
 }
 function seedProject() {
   return {
@@ -548,7 +744,7 @@ const V2_STYLES = `
 .lv-banner{position:relative;width:100%;height:160px;overflow:hidden;background:var(--base);
   flex:none;border-bottom:1px solid var(--surface1);}
 .lv-banner-art{position:absolute;inset:0;
-  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%);}
+  background:radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, var(--base)) 0%, var(--base) 62%, color-mix(in oklab, var(--mantle) 87%, black) 100%);}
 .lv-banner-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
 .lv-banner-hide{position:absolute;top:10px;right:12px;font-size:10px;font-weight:700;letter-spacing:.04em;
   color:#fff;background:rgba(6,4,14,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.25);
@@ -556,12 +752,35 @@ const V2_STYLES = `
 .lv-banner-show{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--subtext);
   background:var(--surface1);border:1px solid var(--surface1);border-radius:7px;padding:7px 11px;
   cursor:pointer;white-space:nowrap;font-family:inherit;}
-/* Top bar geometry per The Loom.dc.html:45 (2026-08-13 styleset pass): wrapping
-   row, 8x10 gap, and NO eyebrow/hint -- the DC's bar opens straight with the
-   storyboard caret. Two .lv-fill spacers center the Generate cluster exactly
-   like the DC's twin flex-1 divs. */
+/* Top bar geometry per The Loom.dc.html:46 + Loom Handoff.dc.html:44 (2026-09-29): ONE row
+   at desktop widths -- [Banner] name ▾ · find + chips · Draft · | · Generate all · cost · Play ·
+   Render · Export ▾ · | · spend · goals · Activity · ← GALLERY. Two .lv-fill spacers center the
+   Generate cluster like the DC's twin flex-1 divs. It still wraps on a narrow window, but the
+   things that can give (the name, the find pill, its chips, the Activity chip's words) carry a
+   small flex-basis and GROW back to their natural width, so the row breaks only when even their
+   small sizes do not fit -- and .lv-topend keeps ← Gallery on the same line as whatever sits
+   before it, so it never lands alone on a row. Their grow factor (1000) is far above the
+   spacers' (1), so free space goes to them first, up to their natural width, and only what is
+   left over opens the spacers. */
 .lv-top{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 16px;border-bottom:1px solid var(--surface1);background:var(--surface0);}
 .lv-fill{flex:1 1 auto;}
+.lv-top .lv-sbwrap{flex:1000 1 80px;max-width:max-content;min-width:0;align-items:center;gap:6px;}
+.lv-top button.lv-sbname{background:none;border:0;padding:0 2px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font:italic 400 16px/1.25 Georgia,"Times New Roman",serif;color:var(--text);cursor:pointer;}
+.lv-top button.lv-sbname:hover{color:var(--accent);}
+.lv-findchips{display:flex;align-items:center;gap:8px;flex:1000 1 60px;max-width:max-content;min-width:0;
+  overflow-x:auto;scrollbar-width:none;}
+.lv-findchips::-webkit-scrollbar{display:none;}
+.lv-topend{display:flex;align-items:center;gap:10px;flex:1000 1 220px;max-width:max-content;min-width:0;justify-content:flex-end;}
+.lv-topend.withexport{flex:1 1 auto;max-width:none;}
+.lv-topend > *{flex:none;}
+.lv-topend .lv-top-act-wrap{flex:0 1 auto;min-width:0;display:flex;}
+.lv-topend > .lv-fill{flex:1 1 auto;}
+.lv-topend .at-chip{min-width:0;max-width:100%;}
+.lv-topend .at-chiptext{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+/* ← Gallery in the page's own form (The Loom.dc.html:142; the Arena brief: the same on every
+   surface): uppercase, 11 px / 700, letter-spacing .1em. */
+.lv-top a.lv-close{flex:none;white-space:nowrap;font:700 11px/12px system-ui;letter-spacing:.1em;text-transform:uppercase;}
 /* The trailing "a" in this selector is deliberate: the back-to-gallery control is an
    anchor, not a button, so a button-only selector left it as an unstyled browser link --
    rgb(0,0,238) on the dark bar, a measured 1.69:1 against a 4.5:1 floor, and the only way
@@ -583,12 +802,12 @@ const V2_STYLES = `
 .lv-top button:hover{border-color:var(--accent);}
 .lv-top button:disabled{opacity:.5;cursor:default;}
 .lv-top button:disabled:hover{border-color:var(--surface1);}
-.lv-cost-pill{opacity:.85;font-weight:600;}
+.lv-cost-pill{opacity:.85;font-weight:600;white-space:nowrap;}
 .lv-cost-pill:disabled{opacity:.5;}
 /* The storyboard caret, The Loom.dc.html caretBtnStyle: a compact 26px square,
    not a text pill. (The Export trigger next to Render is the opposite case --
    it dropped .sb-projbtn to inherit the bar's normal button idiom.) */
-.lv-top .lv-caret{width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
+.lv-top .lv-caret{flex:none;width:26px;height:26px;box-sizing:border-box;background:var(--surface0);border:1px solid var(--surface1);
   color:var(--subtext);border-radius:6px;cursor:pointer;font-size:11px;display:grid;place-items:center;padding:0;}
 .lv-top .lv-caret:hover{border-color:var(--accent);}
 /* ▶ Generate all -- the DC's "metal" treatment verbatim (The Loom.dc.html:748):
@@ -619,23 +838,26 @@ const V2_STYLES = `
    resolve their position:absolute against the WHOLE shell (board + rails),
    exactly like the design's own equivalent wrapper. */
 .lv-shell{flex:1;display:flex;min-height:0;overflow:hidden;position:relative;}
+/* The page's violet "glass" (The Loom.dc.html:921) as token mixes -- lavender at the page's own
+   32% / 14%, and the --lv-glass-* stops (see :root) at its .92 / .95 -- so a skin reaches the
+   rails and panels too (DECISIONS "Every skin reaches every surface"). */
 .lv-rail{flex:none;width:58px;box-sizing:border-box;display:flex;flex-direction:column;
   align-items:center;gap:7px;padding:10px 0;margin:10px 4px;border-radius:14px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);}
 .lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 
-.lv-backdrop{position:absolute;inset:0;z-index:40;background:rgba(5,4,13,.62);
+.lv-backdrop{position:absolute;inset:0;z-index:310;background:color-mix(in srgb,var(--lv-ink) 62%,transparent);
   backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
 .lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
-.lv-panel{position:absolute;top:20px;bottom:20px;z-index:41;box-sizing:border-box;
+.lv-panel{position:absolute;top:20px;bottom:20px;z-index:311;box-sizing:border-box;
   display:flex;flex-direction:column;min-height:0;border-radius:16px;
-  border:1px solid rgba(182,146,230,.32);
-  background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
+  border:1px solid color-mix(in srgb,var(--lavender) 32%,transparent);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--lv-glass-hi) 92%,transparent) 0%,color-mix(in srgb,var(--lv-glass-lo) 95%,transparent) 100%);
   backdrop-filter:blur(18px) saturate(1.12);
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);overflow:hidden;}
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px color-mix(in srgb,var(--lavender) 14%,transparent);overflow:hidden;}
 .lv-panel.left{left:20px;width:clamp(220px,21vw,292px);
   animation:lvSlideL .4s cubic-bezier(.18,1.02,.26,1) both;}
 .lv-panel.left.wide{width:min(572px,37vw);}
@@ -659,19 +881,28 @@ const V2_STYLES = `
   border-radius:8px;cursor:pointer;font-size:17px;line-height:1;flex:0 0 auto;}
 .lv-railbtn:hover{border-color:var(--accent);color:var(--accent);}
 .lv-railbtn.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--base));}
-/* Timeline: genuinely fixed to the banner, full width, never draggable -- unlike every
-   other region. Three states (hidden/slim/full) driven by tlState + a live drag height;
-   the preview sits ABOVE the scrubber, only rendered once mostly expanded. */
+/* THE TIMELINE DRAWER (The Loom.dc.html:146-170, 1001-1003): fixed under the top bar, full
+   width, three states -- hidden 0 / slim 86 / full -- and the only way between them is a CLICK
+   on the grip, which cycles hidden -> slim -> full. Nothing drags. The height animates on the
+   page's own curve. Full is the fit rule's height (loom-core.js timelineFit): the board keeps
+   240 px below it, the preview gives way first, and past that the drawer's own body scrolls --
+   never the page. */
 .lv-tldrawer{flex:none;position:relative;background:var(--surface0);border-bottom:1px solid var(--surface1);}
-.lv-tlcontent{overflow:hidden;position:relative;}
-.lv-tlpreviewzone{padding:10px 14px 4px;height:362px;box-sizing:border-box;}
-.lv-tlpreviewbox{height:100%;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
+.lv-tlcontent{overflow:hidden;position:relative;transition:height .36s cubic-bezier(.2,.9,.24,1);}
+.lv-tlbody{height:100%;overflow:hidden;box-sizing:border-box;}
+.lv-tlbody.full{overflow-y:auto;overscroll-behavior:contain;}
+.lv-tlpreviewzone{padding:10px 14px 4px;box-sizing:border-box;}
+.lv-tlpreviewbox{height:100%;box-sizing:border-box;border-radius:8px;background:var(--base);border:1px solid var(--surface1);
   display:flex;align-items:center;justify-content:center;text-align:center;}
-.lv-tlreelzone{padding:8px 14px 10px;}
+.lv-tlreelzone{padding:7px 14px 8px;}
+.lv-tlreelzone .lv-reel{height:44px;border-radius:8px;}
+.lv-tlreelzone .lv-tlinfo{padding-top:8px;}
 .lv-tlhandle{position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);z-index:2;
-  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;touch-action:none;}
+  display:flex;align-items:center;justify-content:center;padding:5px 22px;cursor:ns-resize;
+  background:none;border:0;margin:0;}
+.lv-tlhandle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px;}
 .lv-tlgrip{width:40px;height:4px;border-radius:3px;background:var(--surface1);transition:background .15s;}
-.lv-tlhandle:hover .lv-tlgrip{background:var(--accent);}
+.lv-tlhandle:hover .lv-tlgrip,.lv-tlhandle:focus-visible .lv-tlgrip{background:var(--accent);}
 .lv-ph{padding:14px;color:var(--subtext);font:12.5px/1.5 system-ui,sans-serif;font-style:italic;}
 .lv-board{padding:8px;}
 .lv-act{margin-bottom:12px;}
@@ -684,6 +915,11 @@ const V2_STYLES = `
 .lv-ico:hover{color:var(--accent);border-color:var(--accent);}
 .lv-ico.danger:hover{color:var(--coral,#e06c75);border-color:var(--coral,#e06c75);}
 .lv-ico.xs{width:16px;height:15px;font-size:9px;}
+/* "+ Add shot to <act>" as the page's dashed, card-sized tile at the end of the act's grid
+   (The Loom.dc.html:319). */
+.lv-addshot{border:1px dashed var(--surface1);border-radius:8px;min-height:128px;display:grid;place-items:center;
+  font:600 11px/1.3 system-ui;color:var(--subtext);background:transparent;cursor:pointer;padding:8px;text-align:center;}
+.lv-addshot:hover{border-color:var(--accent);color:var(--accent);}
 .lv-crow{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;}
 .lv-actsel{font-size:8px;background:var(--base);border:1px solid var(--surface1);color:var(--subtext);
   border-radius:4px;padding:1px 3px;cursor:pointer;max-width:100%;}
@@ -693,7 +929,15 @@ const V2_STYLES = `
    single value rather than a layout change. */
 .lv-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px;}
 .lv-card{background:var(--surface1);border:1px solid var(--surface1);border-radius:8px;padding:7px;cursor:pointer;}
+/* Session P (P2): a shot whose anchor went stale -- the page's peach card border (hover and the
+   selection outline still win over it). */
+.lv-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-card:hover{border-color:var(--accent);}
+/* Session P (P8): find -- a card that does not match dims to 35%; the current match wears the
+   page's lavender border (over the selection's accent, which it usually also is). */
+.lv-card{transition:opacity .2s;}
+.lv-card.fdim{opacity:.35;}
+.lv-card.fcur,.lv-card.fcur:hover{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-ctitle{font:600 11px/1.2 system-ui;color:var(--text);margin:4px 0;min-height:26px;}
@@ -723,26 +967,184 @@ const V2_STYLES = `
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
+/* Session P: a render that was refused, held or is unconfirmed reads PEACH (never red) -- the
+   app's colour for "nothing went wrong with your work; this needs your eye". */
+.lv-st.held{color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
+.lv-unclear{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:5px;padding:5px 6px;border-radius:6px;
+  font-size:9.5px;line-height:1.35;color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);cursor:default;}
+.lv-unclear span{flex:1 1 100%;}
+.lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
+  background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
+.lv-unclearbtn:hover{border-color:var(--peach);}
+/* Session P, Stage A2 -- the page's section A card (Loom Handoff.dc.html): the takes strip with
+   Render / Re-render, the take line, the peach stale-anchor box and the new-take prompt. Sizes,
+   radii, weights and spacing are the page's; a chip shows its take's clip thumbnail where the
+   page draws a tint pair. The shipped card is lighter than the page's (surface1, not near-base),
+   so the page's outline buttons take var(--base) as a fill to stay visible, the row wraps inside
+   the narrowest (144px) card, and the grey lines use --subtext (--overlay0 on surface1 is ~2:1). */
+.lv-takes{display:flex;flex-direction:column;gap:7px;margin-top:7px;}
+.lv-takerow{display:flex;align-items:center;flex-wrap:wrap;gap:4px;cursor:default;}
+.lv-take{flex:none;width:26px;height:20px;box-sizing:border-box;border:0;padding:0;border-radius:4px;display:grid;place-items:center;
+  font:800 9px/1 system-ui;color:rgba(236,232,248,.9);text-shadow:0 1px 2px rgba(0,0,0,.85);cursor:pointer;
+  background:var(--surface0) center/cover no-repeat;}
+.lv-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lv-takemore{font:800 9px/1 system-ui;color:var(--subtext);}
+.lv-render{margin-left:auto;font:700 10px/1 system-ui;padding:4px 8px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface1);color:var(--subtext);background:var(--base);}
+.lv-render:hover:not(:disabled){border-color:var(--accent);color:var(--text);}
+.lv-render:disabled{opacity:.5;cursor:default;}
+.lv-takeline{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-stale{display:flex;flex-direction:column;gap:6px;padding:8px 9px;border-radius:9px;cursor:default;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lv-staletxt{font-size:10.5px;line-height:1.4;color:var(--peach);}
+.lv-stalebtns{display:flex;gap:5px;}
+.lv-reanchor{font:700 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:0;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lv-reanchor:disabled{opacity:.6;cursor:default;}
+.lv-keep{font:400 10px/1 system-ui;padding:4px 9px;border-radius:7px;border:1px solid var(--surface1);color:var(--subtext);background:var(--base);cursor:pointer;}
+.lv-keep:hover{border-color:var(--accent);color:var(--text);}
+.lv-staleerr{font-size:9.5px;line-height:1.35;color:var(--peach);}
+.lv-needtake{font-size:9.5px;line-height:1.4;color:var(--subtext);}
+.lv-lastfail{font-size:9.5px;line-height:1.35;color:var(--peach);}
+/* A shot's take list (P1), beside the ★ clip's preview in the timeline's full view. Not drawn by
+   the page; the timeline's own row idiom. */
+.lv-tlprevrow{display:flex;gap:14px;height:100%;min-height:0;}
+.lv-tlprevmain{flex:1 1 auto;min-width:0;overflow:hidden;}
+/* In the drawer the clip sits at the preview box's full height with its controls BESIDE it
+   (buttons, trim track, readout), so a short box still shows a usable frame. */
+.sb-shotprev-wrap.side{margin:0;max-width:none;height:100%;display:grid;grid-template-columns:auto minmax(220px,1fr);
+  grid-template-rows:auto auto 1fr;column-gap:14px;align-items:start;}
+.sb-shotprev-wrap.side .sb-shotprev{grid-column:1;grid-row:1 / span 3;margin:0;max-width:none;}
+.sb-shotprev-wrap.side .sb-shotprev-ctrls{grid-column:2;margin-top:0;}
+.sb-shotprev-wrap.side .sb-trim{grid-column:2;}
+.lv-takelist{flex:0 1 260px;max-width:260px;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 2px 4px 0;}
+.lv-takelist-h{font:700 9px/1 system-ui;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext);margin-bottom:2px;}
+.lv-takeitem{display:flex;gap:8px;align-items:flex-start;padding:7px;border-radius:8px;background:var(--base);border:1px solid var(--surface1);}
+.lv-takeitem.on{border-color:color-mix(in srgb,var(--gold) 55%,transparent);}
+.lv-takeitem .lv-take{cursor:default;}
+.lv-takeinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.lv-taketitle{font:600 11px/1.2 system-ui;color:var(--text);}
+.lv-takemeta{font-size:9.5px;line-height:1.35;color:var(--subtext);}
+.lv-takebtns{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
+.lv-takebtn{font:600 10px/1 system-ui;padding:4px 8px;border-radius:6px;border:1px solid var(--surface1);background:var(--surface1);color:var(--subtext);cursor:pointer;}
+.lv-takebtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+.lv-takebtn:disabled{opacity:.45;cursor:default;}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
   display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
 .lv-seg.sel{outline:2px solid var(--accent);outline-offset:-2px;z-index:2;}
-.lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
+/* Session P (P2): the page's peach underline on a stale shot's segment. The segment's own
+   status bar sits on the same bottom 4px, so it steps up above the underline to keep both. */
+.lv-seg.stale{box-shadow:inset 0 -4px 0 var(--peach);}
+.lv-seg.stale .lv-segbar{bottom:4px;}
+/* Session P (P8): find's rings on the reel, the page's -- a match 1px lavender, the current
+   match 2px (over the selection's outline), a non-match at 35%. */
+.lv-seg{transition:opacity .2s;}
+.lv-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 60%,transparent);outline-offset:-1px;z-index:1;}
+.lv-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;z-index:3;}
+.lv-seg.fdim{opacity:.35;}
+/* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
+   the bar's own button chrome does not apply). */
+.lv-find{flex:1000 1 110px;max-width:150px;min-width:0;transition:max-width .2s ease;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
+.lv-find.on{border-color:var(--lavender);}
+/* Compact until it is in use, then it grows (the 2026-09-29 one-row bar). */
+.lv-find:focus-within,.lv-find.on{max-width:260px;}
+.lv-findico{font-size:11px;color:var(--overlay0);}
+.lv-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:11.5px/1.2 system-ui,sans-serif;padding:0;}
+.lv-findin::placeholder{color:var(--overlay0);}
+.lv-findcount{font-size:10px;color:var(--subtext);font-family:ui-monospace,monospace;white-space:nowrap;}
+.lv-findstep{font-size:10px;color:var(--subtext);cursor:pointer;padding:0 3px;user-select:none;}
+.lv-findstep:hover{color:var(--lavender);}
+.lv-findchip{font-size:10px;padding:4px 9px;border-radius:999px;cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);
+  white-space:nowrap;user-select:none;}
+.lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
+.lv-segcode{font-size:9px;font-weight:700;color:color-mix(in srgb,var(--lv-ink) 55%,transparent);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
 .lv-segbar.todo{background:rgba(255,255,255,.25);}
 .lv-segbar.wip{background:#f2c14a;}
 .lv-segbar.done{background:var(--green,#4fc99a);}
 .lv-segbar.error{background:var(--coral,#f38ba8);}
-.lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
+/* Session P (P3): THE MUSIC BED under the reel -- the page's section A bed row (36 px, 6 px
+   radius, thin bars, a dashed "No bed" row), its button (surface1 outline, Loom-cyan when a bed is
+   on), the level slider with the cyan accent, the fades line and the status. Loom-cyan (--loomc),
+   never gold; refusals peach. */
+.lv-bedzone{display:flex;flex-direction:column;gap:4px;margin:4px 0 6px;}
+.lv-bedrow{position:relative;display:flex;height:36px;border-radius:6px;overflow:hidden;}
+.lv-bedrow.none{border:1px dashed var(--surface1);box-sizing:border-box;}
+.lv-bedwave{position:absolute;inset:0;width:100%;height:100%;display:block;color:var(--loomc);}
+.lv-bedtitles{position:absolute;inset:0;display:flex;}
+.lv-bedtitles>div{flex:none;height:100%;}
+.lv-bedctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;color:var(--subtext);}
+.lv-bedbtn{display:inline-flex;align-items:center;gap:6px;font:600 10.5px/1.2 system-ui,sans-serif;padding:5px 10px;border-radius:8px;
+  cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:transparent;max-width:360px;box-sizing:border-box;}
+.lv-bedbtn:hover{border-color:var(--loomc);}
+.lv-bedbtn.on{border-color:var(--loomc);color:var(--text);background:color-mix(in srgb,var(--loomc) 10%,transparent);cursor:default;}
+.lv-bedbtn.busy{opacity:.6;cursor:default;}
+.lv-bedpick{display:inline-flex;align-items:center;gap:4px;min-width:0;cursor:pointer;}
+.lv-bedname{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-bedx{border:0;background:transparent;color:inherit;font:inherit;padding:0 0 0 2px;cursor:pointer;}
+.lv-bedx:hover{color:var(--loomc);}
+.lv-bedlvl{display:inline-flex;align-items:center;gap:6px;}
+.lv-bedlvl input[type=range]{width:110px;accent-color:var(--loomc);margin:0;}
+.lv-bedmono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.lv-bednote{font-size:10px;color:var(--subtext);}
+.lv-bednote.err{color:var(--peach);}
+.lv-bedlink{border:0;background:transparent;color:var(--loomc);font:inherit;padding:0;cursor:pointer;text-decoration:underline;}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
-.lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
-.lv-unbind{margin-left:auto;flex:none;font:600 10px/1 system-ui;background:var(--surface1);border:1px solid var(--surface1);
-  color:var(--subtext);border-radius:6px;padding:4px 8px;cursor:pointer;}
-.lv-unbind:hover{border-color:var(--accent);color:var(--accent);}
-.lv-fhlabel{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);margin-bottom:6px;}
+/* THE GENERATE PANEL'S HEADER (The Loom.dc.html:334-346): "⚙ A·02 · title  ✕ unbind" when a
+   shot is bound, "Generate · draft generation — route results into a shot" when not, and the
+   collapse › at the RIGHT end. The Image/Edit/Reference/Video tabs are a segmented bar at the
+   top of the scroll body (.lv-gentabs), not in the header. */
+.lv-genhdtitle{flex:0 1 auto;font:700 13px/1.2 system-ui;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdsub{flex:0 1 auto;font:italic 10.5px/1.3 system-ui;color:var(--subtext);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-genhdfill{flex:1 1 auto;}
+.lv-unbind{flex:none;font:700 10.5px/1 system-ui;background:none;border:0;padding:2px 0;
+  color:var(--subtext);cursor:pointer;white-space:nowrap;}
+.lv-unbind:hover{color:var(--accent);}
+.lv-gentabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:color-mix(in srgb,var(--base) 70%,transparent);
+  border:1px solid var(--surface1);margin-bottom:10px;}
+.lv-gentab{flex:1;min-width:0;text-align:center;padding:8px 4px;border-radius:9px;font:800 12px/1 system-ui;letter-spacing:.03em;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;
+  color:color-mix(in srgb,var(--text) 60%,transparent);}
+.lv-gentab:hover{color:var(--text);}
+.lv-gentab.on{color:var(--text);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--lavender) 32%,transparent) 0%,color-mix(in srgb,color-mix(in hsl,var(--lavender) 48%,var(--overlay0)) 24%,transparent) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 18px rgba(0,0,0,.4);}
+/* The page's segmented sub-strips (Edit / Fixer / Enhance, Face / Hand, the Continuity 2x2 --
+   The Loom.dc.html:409, 433, 501) and its FIELD SLABS (1126-1130): each group of fields sits in
+   a rounded well, and the prompt's well is outlined in lavender. Layout only. */
+.lv-segtrack{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
+  border:1px solid var(--surface1);}
+.lv-segtrack.grid2{display:grid;grid-template-columns:1fr 1fr;}
+.lv-segbtn{flex:1;min-width:0;text-align:center;padding:7px 4px;border-radius:7px;font:700 10px/1 system-ui;cursor:pointer;
+  background:transparent;border:0;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-segbtn:hover{color:var(--text);}
+.lv-segbtn.on{background:color-mix(in srgb,var(--lavender) 20%,transparent);color:var(--text);}
+.lv-slab{display:flex;flex-direction:column;gap:8px;padding:11px 13px;border-radius:12px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 55%,transparent);margin-bottom:9px;min-width:0;}
+.lv-slab.prompt{gap:7px;border-color:color-mix(in srgb,var(--lavender) 30%,transparent);
+  background:color-mix(in srgb,var(--base) 62%,transparent);}
+.lv-slablab{font:700 9.5px/1.2 system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--overlay0);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.lv-slabhint{font:400 9.5px/1.2 system-ui;letter-spacing:0;text-transform:none;color:var(--overlay0);}
+.lv-slab .lv-lab{margin:0 0 5px;}
+.lv-slab .lv-row2{margin-top:0;}
+.lv-slab .lv-ck{margin-top:0;}
+.lv-slab .lv-termspal{margin:5px 0 0;}
+.lv-slab .lv-mini2{align-self:flex-start;margin:0;}
+.lv-slab .lv-loratoggle{align-self:flex-start;margin:0;}
+.lv-slab .lv-fixwarn{margin-top:0;}
+.lv-slab .lv-fixhint{margin:0;}
+.lv-slab .lv-framehandoff{margin-bottom:0;padding-bottom:0;border-bottom:0;}
+.lv-slabrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.lv-prompt-ta{width:100%;box-sizing:border-box;background:transparent;border:none;outline:none;resize:vertical;color:var(--text);
+  font:300 15px/1.5 system-ui;padding:0;min-height:84px;
+  resize:none;field-sizing:content;max-height:320px;overflow-y:auto;}
 .lv-framehandoff{display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--surface1);}
 .lv-framehandoff .sb-frame{flex:1 1 0;min-width:0;}
 /* The @tag input (.sb-tagin) is 90px in classic Loom's own wide layout -- too wide for
@@ -837,6 +1239,36 @@ const V2_STYLES = `
 .lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-simplecard span{display:block;font-size:9px;}
 /* Footage tab: browse-the-whole-library + drop-to-add, both land as a Cast & Assets ref. */
+/* Session P (P7): THE CAST LIBRARY PANEL, the Loom Handoff page's own sizes and tokens (its
+   rgba(9,7,22,.7) well is --mantle; its lavender hover wash is --lavender at 8%). */
+.lv-lib{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:14px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--mantle) 70%,transparent);}
+.lv-libhead{display:flex;align-items:baseline;gap:6px;}
+.lv-libcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-libhint{font-size:9.5px;color:var(--overlay0);}
+.lv-libnote{font-size:9.5px;line-height:1.45;color:var(--overlay0);}
+.lv-libnote.warn{color:var(--peach);}
+.lv-librow{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:7px;cursor:pointer;outline:none;}
+.lv-librow:hover,.lv-librow:focus-visible{background:color-mix(in srgb,var(--lavender) 8%,transparent);}
+.lv-librow.busy{opacity:.55;cursor:progress;}
+.lv-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lv-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lv-libav{width:26px;height:26px;flex:none;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--surface1) center/cover no-repeat;
+  color:var(--subtext);font-size:11px;display:grid;place-items:center;}
+.lv-libav:disabled{cursor:default;}
+.lv-libav:not(:disabled):hover{box-shadow:0 0 0 1.5px var(--lavender);}
+.lv-libtext{flex:1;min-width:0;}
+.lv-libname{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-liblock{border:0;background:transparent;padding:0 0 0 4px;font-size:10px;line-height:1;cursor:pointer;opacity:0;}
+.lv-liblock.on{opacity:1;}
+.lv-librow:hover .lv-liblock:not(.on){opacity:.45;}
+.lv-libmeta{font-size:9.5px;color:var(--overlay0);font-family:ui-monospace,monospace;overflow-wrap:anywhere;}
+.lv-libadd{display:flex;align-items:center;gap:12px;padding:4px 4px 0;}
+.lv-libaddbtn{border:0;background:transparent;padding:0;font:600 10px/1.2 system-ui,sans-serif;color:var(--lavender);cursor:pointer;}
+.lv-libaddbtn:disabled{opacity:.5;cursor:default;}
+label.lv-libaddbtn{font-weight:500;color:var(--overlay0);}
+label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
 .lv-footagehead .lv-castrow-h{margin-bottom:0;}
 .lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
@@ -882,7 +1314,7 @@ const V2_STYLES = `
 .lv-advnote{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--overlay0);}
 /* Deep Focus: double-click a board card to open a maximized, distraction-free editor
    for just that shot (title/mode/duration/frames) without leaving the V2 overlay. */
-.lv-df-veil{position:fixed;inset:0;z-index:450;background:rgba(6,4,14,.72);display:flex;align-items:center;justify-content:center;padding:24px;}
+.lv-df-veil{position:fixed;inset:0;z-index:450;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);display:flex;align-items:center;justify-content:center;padding:24px;}
 .lv-df{width:min(640px,92vw);max-height:88vh;overflow:auto;background:var(--surface0);border:1px solid var(--surface1);
   border-radius:14px;padding:18px 20px 22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.7);}
 .lv-df-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
@@ -947,7 +1379,7 @@ const V2_STYLES = `
    pixel-clone the Gallery's specific side-docked mechanics). z-index 470: above
    .lv-overlay/.lv-df-veil (400/450, this picker can be opened from within Deep Focus too)
    and below .sb-seq/.sb-pick-ov (500, an unrelated picker-within-a-picker must still win). */
-.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:rgba(6,4,16,.76);display:none;align-items:center;justify-content:center;padding:20px;}
+.lv-mpick-veil{position:fixed;inset:0;z-index:470;background:color-mix(in srgb,var(--lv-ink) 76%,transparent);display:none;align-items:center;justify-content:center;padding:20px;}
 .lv-mpick-veil.open{display:flex;}
 .lv-mpick-panel{background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:var(--shadow);width:460px;max-width:94vw;height:min(640px,86vh);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;}
 .lv-mpick-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex:none;}
@@ -969,16 +1401,16 @@ const V2_STYLES = `
 .lv-fixwrap img{width:100%;max-height:280px;object-fit:contain;display:block;background:#000;}
 .lv-fixwrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;}
 .lv-fixhint{font-size:10.5px;line-height:1.5;color:var(--subtext);margin:10px 0 6px;}
-.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:rgba(232,147,95,.08);
-  border:1px solid rgba(232,147,95,.3);border-radius:8px;padding:7px 9px;margin-top:8px;}
+.lv-fixwarn{font-size:10px;line-height:1.45;color:var(--peach);background:color-mix(in srgb,var(--peach) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 30%,transparent);border-radius:8px;padding:7px 9px;margin-top:8px;}
 .lv-openfilters{display:block;width:100%;box-sizing:border-box;text-align:center;padding:10px;
   border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin:6px 0;}
 .lv-openfilters:hover{border-color:var(--accent);}
 /* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
    veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
-.lv-fc-veil{position:fixed;inset:0;z-index:47;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
-.lv-fc-host{position:fixed;inset:0;z-index:48;display:grid;place-items:center;pointer-events:none;padding:20px;}
+.lv-fc-veil{position:fixed;inset:0;z-index:312;background:color-mix(in srgb,var(--lv-ink) 72%,transparent);backdrop-filter:blur(7px);}
+.lv-fc-host{position:fixed;inset:0;z-index:313;display:grid;place-items:center;pointer-events:none;padding:20px;}
 .lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
   max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
   background:var(--surface0);box-shadow:0 34px 80px -18px rgba(0,0,0,.75);padding:16px 20px 20px;}
@@ -1031,7 +1463,10 @@ class V2Boundary extends React.Component {
 
 // Shared storyboard switcher — used in BOTH the classic header and the V2 header.
 // All project state/actions arrive bundled as `api` (built once in App).
-function ProjectSwitcher({ api }) {
+// `name` (the desktop bar): the open storyboard's name, shown before the caret as the Loom
+// Handoff page draws it ("Moonwell · ep 1", Loom Handoff.dc.html:44); a click on it opens the
+// same popover. `extra`: rows the host adds under + New / Duplicate (the desktop's Mobile view).
+function ProjectSwitcher({ api, name, extra }) {
   const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
   // Escape closes it, same as Deep Focus's handler in LoomV2. Without this the only way out
   // is a click, and .sb-projveil is a full-viewport pointer-events layer -- so until you
@@ -1043,7 +1478,11 @@ function ProjectSwitcher({ api }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [projMenu, setProjMenu]);
   return (
-    <div className="sb-projwrap">
+    <div className={"sb-projwrap" + (name != null ? " lv-sbwrap" : "")}>
+      {name != null && (
+        <button type="button" className="lv-sbname" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
+          title={(name || "Untitled storyboard") + " — switch, create, or manage storyboards"}>{name || "Untitled storyboard"}</button>
+      )}
       <button className="lv-caret" onClick={() => { setProjMenu((v) => !v); readProjList(); }}
         title="Switch, create, or manage storyboards" aria-label="Storyboards">&#9662;</button>
       {projMenu && <div className="sb-projveil" onClick={() => setProjMenu(false)} />}
@@ -1063,6 +1502,7 @@ function ProjectSwitcher({ api }) {
             <button className="sb-btn sm" onClick={newProject}>+ New</button>
             <button className="sb-btn sm ghost" onClick={duplicateProject}>&#10697; Duplicate</button>
           </div>
+          {extra}
         </div>
       )}
     </div>
@@ -1075,7 +1515,7 @@ function ProjectSwitcher({ api }) {
 // existing exportJSON), and Full bundle (.zip -- the same JSON plus the actual referenced
 // media files, for sharing with someone who doesn't share your catalog). Restore accepts
 // either file back; importBackup sniffs which one it got.
-function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
+function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling, openEdl }) {
   const [open, setOpen] = useState(false);
   // Escape closes it -- same reason as ProjectSwitcher above: this menu reuses .sb-projveil.
   useEffect(() => {
@@ -1101,6 +1541,13 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
             onClick={() => { exportBundle(); setOpen(false); }}
             title="Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog">
             {bundling ? "Building bundle…" : <>Full bundle <small>.zip</small></>}</button>
+          {/* Session P (P4): the editor handoff -- the page's highlighted row. It opens the EDL
+              panel (a plan, previewed); the panel's Download builds the zip. */}
+          {openEdl && (
+            <button className="sb-exportitem sb-exportedl" onClick={() => { openEdl(); setOpen(false); }}
+              title="A CMX3600 edit decision list and a CSV for a desktop editor, with each shot's selected take — previewed first">
+              Edit decision list <small>.edl + .csv</small></button>
+          )}
           <div className="sb-exportdiv" />
           <label className="sb-exportitem" style={{ cursor: "pointer" }}
             title="Restore either a lightweight backup or a full bundle -- always opens as a new storyboard">
@@ -1113,7 +1560,34 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
+/* THE GENERATE PANEL'S BALANCE (desktop and phone; owner walk 2026-09-30). Both views used to read
+   /api/account ONCE, on mount, so after two paid renders the panel still showed the balance from
+   when the Loom opened. It is read on open, again on a bind (`bind`: the shot the panel is bound
+   to) and again whenever a spend lands on this board (`landedKey`: spendLandedKey over the board's
+   generation states, loom-core.js); a read that a newer one overtook is dropped. Display only:
+   it never gates a submit (`lora_cap` rides the same read, as before). */
+function useAccountLine(landedKey, bind) {
+  const [acct, setAcct] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/account").then((r) => r.json()).then((d) => { if (live) setAcct(d); }).catch(() => {});
+    return () => { live = false; };
+  }, [landedKey, bind]);
+  return acct;
+}
+
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
+  // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
+  // "attach to A·0n" (all useGenerationPipeline's).
+  beginDrawerRender, recheckSubmit, releaseSubmit, attachDraftVideo,
+  // Session P, Stage A2 (the page's section A card): the card's own Render / Re-render calls
+  // generateShot -- its ONLY use in this component, pinned by loom-no-auto-render.test.js -- and
+  // the takes strip, the take list and the stale-anchor box call useTakeActions' board edits.
+  generateShot, selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork,
+  // Session P, Stage B1: the EDL panel's opener (P4) and the music bed's board edits (P3).
+  openEdl, bedApi,
+  // Session P, Stage B2: the cast library (P7) -- its view and its owner actions.
+  castApi,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -1157,7 +1631,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       ) : null}
     </div>
   );
-  const [acct, setAcct] = useState(null);  // credits/cards for the inline balance line
+  // Export ▾, built once too: it follows Render, or joins the bar's end group when Activity is
+  // docked left (see the .lv-topend comment in the bar).
+  const exportMenu = (
+    <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
+      bundling={bundling} importBackup={importBackup} openEdl={openEdl} />
+  );
+  // credits/cards for the inline balance line: re-read on a bind and whenever a spend lands
+  const acct = useAccountLine(spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState), String(selShot || ""));
   const [handoff, setHandoff] = useState("");   // frame-handoff splice state: '', 'wip', 'err'
   const [deepFocus, setDeepFocus] = useState(null);   // entry {a,c,ai,ci,code} double-clicked on the board, or null
   // Deep Focus's own body is an IIFE inside a conditional render (below), not a component or
@@ -1172,11 +1653,19 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState("base");
-  const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage' | 'library' (Session P, P7)
+  // THE LOOM OPENS ON ITS RAILS (2026-09-29, the page's `startCollapsed` prop, default true):
+  // both side panels start collapsed, so the board is what you see first. A rail button opens
+  // one; nothing is remembered, so every visit opens the same way.
+  const [leftCollapsed, setLeftCollapsed] = useState(true);
+  // Session P (P7): showing the Library tab READS the cast library and the other storyboards'
+  // ticks for "in N storyboards" -- again for another board. A read only; nothing is written.
+  useEffect(() => {
+    if (!leftCollapsed && leftTab === "library" && castApi) castApi.openCastLibrary();
+  }, [leftCollapsed, leftTab, projectApi.activeId]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [leftClosing, setLeftClosing] = useState(false);  // true for 340ms while the panel plays its slide-out, matching The Loom.dc.html's own leftClosing/lvSlideOutL
-  const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [density, setDensity] = useState("simple");      // 'simple' | 'detailed' -- Cast tab only (the page opens Simple)
+  const [rightCollapsed, setRightCollapsed] = useState(true);
   const [rightClosing, setRightClosing] = useState(false);
   const leftCloseTimer = useRef(null);
   const rightCloseTimer = useRef(null);
@@ -1196,8 +1685,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const openLeftPanel = () => { clearTimeout(leftCloseTimer.current); setLeftClosing(false); setLeftCollapsed(false); };
   const openRightPanel = () => { clearTimeout(rightCloseTimer.current); setRightClosing(false); setRightCollapsed(false); };
   useEffect(() => () => { clearTimeout(leftCloseTimer.current); clearTimeout(rightCloseTimer.current); }, []);
-  const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full'
-  const [tlDragH, setTlDragH] = useState(null);          // live px height while dragging the handle, else null
+  const [tlState, setTlState] = useState("slim");        // 'hidden' | 'slim' | 'full' -- the grip's click cycles it
   const [palFor, setPalFor] = useState(null);            // which field's "+ terms" popover is open, or null
   const [dzHover, setDzHover] = useState(false);          // footage drop-zone hover feedback
   const [overrideClearedFlash, setOverrideClearedFlash] = useState(false);   // brief notice when the native Prompt field destroys an active override
@@ -1206,7 +1694,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // project, generation-state dicts keyed by its "__draft__" id right alongside real shots'.
   // draftCard/draftTarget/draftAttachedInfo are now App()-level props (see this function's
   // own signature comment) -- lifted, not removed; every use below is unchanged.
-  const tlDrag = useRef({ dragging: false, startY: 0, startH: 0 });
   // The overlay is position:fixed, so it never visibly moves -- but classic Loom's own
   // page underneath is a normal tall document, and without this, its body/html scrollbar
   // stays live. A wheel scroll that isn't captured by one of the internal panels (already
@@ -1217,7 +1704,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prevOverflow; };
   }, []);
-  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
   useEffect(() => {
     if (!deepFocus) return;
     const onKey = (ev) => { if (ev.key === "Escape") setDeepFocus(null); };
@@ -1410,17 +1896,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   thumbsRef.current = thumbs;
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
-  // The drawer resolves its OWN completion target via activeRef at listener-registration
-  // time -- but activeRef always points at "whatever shot is currently selected," read at
-  // whatever moment mg-result/mg-error actually FIRE, which can be minutes after submit if
-  // the owner switches shots while the render is in flight. genTargetRef freezes "which shot
-  // this drawer generation belongs to" the moment mg-submit fires (the earliest point the
-  // host can observe), so a later result/error routes to the shot that was ACTUALLY
-  // generated, not whatever happens to be selected when the poll resolves. Found 2026-07-18
-  // live-testing: switching shots mid-render silently attributed the result to the wrong
-  // card. The drawer only ever has one poll in flight at a time (its own Go button disables
-  // during a render), so a single ref -- not a task_id-keyed map -- is sufficient.
-  const genTargetRef = useRef(null);
+  // WHICH SHOT A DRAWER RENDER BELONGS TO (Session P, review F7). It used to be "whatever was
+  // selected when mg-submit fired" (a single ref frozen then), which put a render on the wrong
+  // shot whenever the owner rendered A, selected B and rendered B before A answered. Now the
+  // drawer captures its target -- {board_id, card_id}, set below as the selection changes --
+  // AT THE CLICK, the Loom locks THAT card in beforeSend before anything is sent, and every
+  // drawer event names its own submit id / task id; useGenerationPipeline resolves the card
+  // from those. No listener here reads the selected shot for a render's outcome.
+  const drawerHostRef = useRef(beginDrawerRender);
+  drawerHostRef.current = beginDrawerRender;
+  // The target and Go gate as of this render (set below, beside activeRef): a drawer node that
+  // MOUNTS later -- collapsing the right panel unmounts it -- is given both when it binds, not
+  // only when the selection next changes.
+  const loomTargetRef = useRef(null);
+  const drawerBusyRef = useRef(false);
   // Tracks which shot the prefill effect below last ran for, so it can tell "the owner
   // switched shots" apart from "a field on the SAME shot changed" (both re-trigger the
   // effect, since active.c.* is in its dependency array). Only the former should clear
@@ -1433,6 +1922,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     genDrawerRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
+      // The Loom is the drawer's host: its beforeSend runs the render latch and saves the
+      // shot's lock before the drawer may POST (a refusal ends the click with no POST).
+      if (el.setHost) el.setHost({ beforeSend: (req) => drawerHostRef.current(req) });
+      if (el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+      if (el.setBusy) el.setBusy(drawerBusyRef.current);
       el.addEventListener("mg-dirty", () => { promptDirtyRef.current = true; });
       // Fired ONLY from a direct user click on the drawer's own mode-segment buttons (see
       // mg-generate-drawer.js's _userSetMode) -- never from the drawer re-asserting/auto-
@@ -1560,26 +2054,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
         }
       });
-      el.addEventListener("mg-submit", (e) => {
-        const a = activeRef.current;
-        genTargetRef.current = a.c.id;
-        // The drawer may have submitted a different mode than the card believes -- e.g. a
-        // model-gating auto-switch (_applyModelGating) that never wrote back on its own (that
-        // would let casual model-browsing silently corrupt a card's real mode). Reconcile the
-        // card's durable mode field to what ACTUALLY got submitted, at the one moment it's
-        // known for certain, so badges/shotText/telemetry never permanently disagree with the
-        // render that's about to attach to this card.
-        const submitted = e.detail.payload && e.detail.payload.mode;
-        if (a && submitted && submitted !== a.c.mode) {
-          const apply = (c) => setShotMode(c, submitted);
-          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-        }
-        onVideoSubmit(genTargetRef.current, e.detail);
-      });
-      el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-slow", (e) => onVideoSlow(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-paused", (e) => onVideoPaused(genTargetRef.current || activeRef.current.c.id, e.detail));
+      // A render's outcome, by the ids its event carries (the mode reconciliation to what was
+      // really sent happens there too, on the card that holds the submit id).
+      el.addEventListener("mg-submit", (e) => onVideoSubmit(e.detail));
+      el.addEventListener("mg-result", (e) => onVideoResult(e.detail));
+      el.addEventListener("mg-error", (e) => onVideoError(e.detail));
+      el.addEventListener("mg-slow", (e) => onVideoSlow(e.detail));
+      el.addEventListener("mg-paused", (e) => onVideoPaused(e.detail));
       // Durably persists a hand-edit made while typing normally (NOT switching shots or
       // batch-generating -- those paths call flushPromptEdit() directly, see below and the
       // toolbar button). A no-op if the committed text is identical to what auto-compose
@@ -1613,25 +2094,27 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     }
   }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
 
-  // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
-  // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
-  // to the nearest named state on release.
-  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
-  const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
-  const tlPointerMove = (e) => {
-    if (!tlDrag.current.dragging) return;
-    const h = Math.max(0, Math.min(TL_HEIGHTS.full, tlDrag.current.startH + (e.clientY - tlDrag.current.startY)));
-    tlDrag.current.lastH = h;   // read by tlPointerUp -- setTlDragH's state update is batched/async,
-    setTlDragH(h);               // so the ref (not the state) is the reliable live value on release.
-  };
-  const tlPointerUp = () => {
-    if (!tlDrag.current.dragging) return;
-    tlDrag.current.dragging = false;
-    const h = tlDrag.current.lastH;
-    let best = "hidden", bestD = Infinity;
-    Object.entries(TL_HEIGHTS).forEach(([k, v]) => { const d = Math.abs(v - h); if (d < bestD) { bestD = d; best = k; } });
-    setTlState(best); setTlDragH(null);
-  };
+  // THE TIMELINE DRAWER'S HEIGHT (The Loom.dc.html:1001-1002; loom-core.js timelineFit). A click
+  // on the grip cycles hidden -> slim -> full; nothing drags. The full height is measured, not
+  // fixed: `tlRoom` is the window height below the drawer's top edge, and the fit keeps 240 px
+  // of board below the drawer, shrinking the preview first. The page's full view is 372 px;
+  // Session P's music bed (P3) and continuity ribbon (P9) sit under the reel in full, so the
+  // design height carries their zones too.
+  const TL_DESIGN_FULL = 372 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H;
+  const tlDrawerRef = useRef(null);
+  const [tlRoom, setTlRoom] = useState(null);
+  const measureTlRoom = useCallback(() => {
+    const d = tlDrawerRef.current;
+    if (!d) return;
+    const ov = d.closest(".lv-overlay");
+    const bottom = ov ? ov.getBoundingClientRect().bottom : window.innerHeight;
+    // The drawer's own chrome (its bottom border) is not content height, so it comes off too.
+    const content = d.firstElementChild;
+    const chrome = content ? Math.max(0, d.offsetHeight - content.offsetHeight) : 0;
+    const room = Math.round(bottom - d.getBoundingClientRect().top - chrome);
+    setTlRoom((cur) => (cur === room ? cur : room));
+  }, []);
+  const cycleTl = () => setTlState((s) => nextTimelineState(s));
   const togglePal = (which) => setPalFor((p) => (p === which ? null : which));
 
   const sel = entries.find((e) => e.c.id === selShot) || null;
@@ -1640,9 +2123,18 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the selected shot when bound, or whatever's chosen in the draft-mode shot picker.
   const draftEntry = { a: { id: "__draft__" }, c: draftCard, code: "Draft" };
   const active = sel || draftEntry;
+  // Writes into the selected shot when bound, or the draft card when not -- the Generate
+  // tab bodies and frame slots (inside `let gen; { ... }` below) and Filter compare's
+  // Save/No filter all read/write through this one function either way. Declared here, at
+  // LoomV2's own scope: it used to live inside that later block, where Filter compare's
+  // handlers could not see it, so Save and No filter threw "patch is not defined".
+  const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
+  loomTargetRef.current = projectApi.activeId
+    ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
+  drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
 
   // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
   // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
@@ -1672,7 +2164,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const ctx = cvs.getContext("2d");
     ctx.clearRect(0, 0, w, h);
     const draw = (b) => {
-      ctx.strokeStyle = FIX_COLORS[b.tag] || FIX_COLORS.face;
+      ctx.strokeStyle = fixStroke(b.tag);
       ctx.lineWidth = 2;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
       ctx.fillStyle = ctx.strokeStyle;
@@ -1750,7 +2242,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
   // network call, no credit spend), same AF.groups()/AF.get()/AF.renderSwatch()/
   // AF.applyPreview()/AF.clearPreview() API LoomMobile already uses. Genuinely persists via
-  // the same `patch` every other Generate field writes through -- no new endpoint.
+  // the same `patch` every other Generate field writes through (declared beside `active`
+  // above -- it must stay above these handlers, at this scope) -- no new endpoint.
   const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
   const [fcOpen, setFcOpen] = useState(false);
   const [fcActive, setFcActive] = useState(null);
@@ -2020,13 +2513,124 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // this, reselecting a paused shot re-evaluates status==="wip" (still true by design) and
   // silently re-disables the Go button the drawer just freed, with no visible reason why
   // (found in review).
+  // Session P (BUILD-w5-p §3.3): the gate reads the shot's own render markers -- Go stays
+  // disabled while a send is out or unclear, and while a task is being polled (goBlocked in
+  // loom-takes-core.js), with the same paused carve-out.
   useEffect(() => {
     const gs = genState[active.c.id];
-    const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
+    const stillBusy = goBlocked(active.c, !!(gs && gs.phase === "paused"));
     const el = genDrawerRef.current;
     if (el && el.setBusy) el.setBusy(stillBusy);
-  }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
-  const board = (
+  }, [active.c.id, active.c.status, active.c.pendingSubmitId, active.c.pendingTaskId, genState[active.c.id] && genState[active.c.id].phase]);
+  // The drawer's TARGET: which board and shot a Go click is for. The drawer captures it at the
+  // click (review F7). A draft (no shot selected) is untargeted: it locks nothing on the board,
+  // and its result waits for the owner's "attach to A·0n".
+  useEffect(() => {
+    const el = genDrawerRef.current;
+    if (el && el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+  }, [projectApi.activeId, active.c.id]);
+  // Session P, Stage A2 (P2): anchors name a shot by its card ID; the page's words name it by its
+  // code. Both lookups are over this render's board and are read-only views.
+  const cardById = new Map(entries.map((x) => [x.c.id, x.c]));
+  const codeById = new Map(entries.map((x) => [x.c.id, x.code]));
+  const codeOf = (id) => codeById.get(id) || "the source shot";
+  const stopCard = (ev) => ev.stopPropagation();
+
+  /* ---- FIND IN STORYBOARD (Session P, NOTES P8; the page's find pill, chips and rings) ----
+     A view over the board (loom/src/loom-find-core.js): typing or a chip is runFind, ↑ ↓ /
+     Enter is stepFind (which selects the current match and scrolls to it -- a selection change
+     only), Esc is clearFind. None of them writes the board, prices or renders (roots of
+     loom-no-auto-render.test.js). Another storyboard starts with no find. */
+  const [find, setFind] = useState(emptyFind);
+  const findInputRef = useRef(null);
+  useEffect(() => { setFind(emptyFind()); }, [projectApi.activeId]);
+  // The status a card shows (its paused / rendering poll first), as the board card reads it.
+  const shownStatus = (c) => {
+    const gs = genState[c.id];
+    return gs && gs.phase === "paused" ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status);
+  };
+  // "⚠ only" also keeps the ⚠ chips the card itself shows: a cast member with no picture, one
+  // past the reference limit, and an imported picture that can't be sent yet.
+  const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
+    || unsendableRefs(buildShotPayload(e, project, imgSrc)).length > 0;
+  const findOn = findActive(find);
+  const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: cardById, statusOf: shownStatus, warn: cardWarns }) : [];
+  const findSet = new Set(findIds);
+  const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+  const findChipList = findChips(entries, { statusOf: shownStatus });
+  const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...(typeof next === "function" ? next(f) : { ...f, ...next }), cur: 0 }));
+  const stepFind = (dir) => {
+    if (!findIds.length) return;
+    // The first ↓ / Enter goes to the current match itself when it isn't the selected shot yet.
+    const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+    const id = findIds[n];
+    setFind((f) => ({ ...f, cur: n }));
+    setSelShot(id);
+    scrollToCard(id);
+  };
+  const clearFind = () => { setFind(emptyFind()); };
+  const scrollToCard = (id) => {
+    const el = typeof document !== "undefined" ? document.querySelector('.lv-card[data-card-id="' + id + '"]') : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  // THE CONTINUITY RIBBON's pair click (P9, "clicking a pair opens both shots"): the pair's
+  // second shot is selected and find narrows to exactly those two shots, so both cards ring and
+  // the reel shows them. A selection / find change only -- never a render (a root of
+  // loom-no-auto-render.test.js). Esc (or clearing the field) lets them go.
+  const openRibbonPair = (pair) => {
+    setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+    setSelShot(pair.b.cardId);
+    scrollToCard(pair.b.cardId);
+  };
+  // A shot's own reel tint -- the ribbon's stand-in when a frame can't be produced here.
+  const tintByCard = new Map(entries.map((x) => [x.c.id, LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length]]));
+  const tintOfCard = (id) => tintByCard.get(id) || LV_TINTS[0];
+  // ⌘/Ctrl F focuses the field while the Loom's board is on screen (not over Deep Focus); Esc
+  // anywhere outside a text field clears an active find, as the page's own handler does.
+  useEffect(() => {
+    const onKey = (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === "f") {
+        const el = findInputRef.current;
+        if (!el || deepFocus) return;
+        ev.preventDefault(); el.focus(); el.select();
+      } else if (ev.key === "Escape" && !deepFocus && !pickerOpen) {
+        const t = ev.target;
+        if (t && t !== findInputRef.current && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+        setFind((f) => (findActive(f) ? emptyFind() : f));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deepFocus, pickerOpen]);
+  const findKeys = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform || "") ? "⌘F" : "Ctrl F";
+  const findPill = (
+    <div className={"lv-find" + (findOn ? " on" : "")}>
+      <span className="lv-findico" aria-hidden="true">&#8981;</span>
+      <input ref={findInputRef} className="lv-findin" value={find.q} aria-label="Find in storyboard"
+        placeholder={find.only && !find.q ? find.only.map(codeOf).join(" → ") + " (continuity pair)" : "find in storyboard  " + findKeys}
+        onChange={(ev) => runFind({ q: ev.target.value, only: null })}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") { ev.preventDefault(); stepFind(ev.shiftKey ? -1 : 1); }
+          else if (ev.key === "ArrowDown") { ev.preventDefault(); stepFind(1); }
+          else if (ev.key === "ArrowUp") { ev.preventDefault(); stepFind(-1); }
+          else if (ev.key === "Escape") { ev.preventDefault(); clearFind(); }
+        }} />
+      <span className="lv-findcount">{findCountText(find, findIds.length)}</span>
+      <span className="lv-findstep" role="button" tabIndex={-1} title="Previous match (↑)" onClick={() => stepFind(-1)}>&#8593;</span>
+      <span className="lv-findstep" role="button" tabIndex={-1} title="Next match (↓ or Enter)" onClick={() => stepFind(1)}>&#8595;</span>
+    </div>
+  );
+  const findChipsRow = findChipList.map((ch) => (
+    <span key={ch.kind + ch.key} className={"lv-findchip" + (chipOn(find, ch) ? " on" : "")} role="button" tabIndex={0}
+      aria-pressed={chipOn(find, ch)}
+      title={ch.kind === "warn" ? "Only shots with a ⚠: a changed anchor, a cast member with no picture or past the reference limit, an imported picture"
+        : ch.kind === "status" ? "Only " + ch.label + " shots" : "Only " + ch.label + " shots"}
+      onClick={() => runFind((f) => toggleChip(f, ch))}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); runFind((f) => toggleChip(f, ch)); } }}>{ch.label}</span>
+  ));
+  // The board grid's JSX. Named boardGrid, not "board": a landing's {board: boardId} key is not
+  // this view, and the no-render walkers match names, so the two must not share one.
+  const boardGrid = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
         const items = entries.filter((e) => e.ai === ai);
@@ -2036,9 +2640,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <input className="lv-actname-in" value={act.name} onChange={(ev) => setAct(act.id, { name: ev.target.value })} aria-label="Act name" />
               <button className="lv-ico" onClick={() => moveAct(ai, -1)} title="Move act up">&#8593;</button>
               <button className="lv-ico" onClick={() => moveAct(ai, 1)} title="Move act down">&#8595;</button>
+              {/* The page's collapse (The Loom.dc.html:276): ⌃ folds the act's cards away, ⌄
+                  brings them back. It is the act's own `collapsed` field, so it stays folded. */}
+              <button className="lv-ico" onClick={() => setAct(act.id, { collapsed: !act.collapsed })}
+                title={act.collapsed ? "Expand this act" : "Collapse this act"} aria-expanded={!act.collapsed}>
+                {act.collapsed ? "⌄" : "⌃"}</button>
               <button className="lv-ico danger" onClick={() => delAct(act.id)} title="Delete act">&#10005;</button>
             </div>
-            <div className="lv-cards">
+            {!act.collapsed && <div className="lv-cards">
               {items.map((e) => {
                 const gs = genState[e.c.id];
                 // "paused" is its own visual state (auto-checking genuinely stopped);
@@ -2059,8 +2668,32 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 // connect:"new" (an intentional fresh look/place, per CONNECT.new's own hint),
                 // so a non-matching frame is usually the shot's INTENT, not a mistake to flag.
                 const linked = continuityLinked(entries, e.c.id);
+                // Session P, Stage A2 (P1/P2, the page's section A card): the shot's takes, its ★
+                // take, and whether its open frame's anchor has gone stale -- all pure views.
+                const shotTakes = takesOf(e.c);
+                const selN = selectedTakeOf(e.c);
+                const shownTakes = shotTakes.slice(-6);
+                const olderTakes = shotTakes.length - shownTakes.length;
+                const anchor = anchorInfo(e.c, cardById);
+                const stale = anchor.state === "stale";
+                const aw = anchorWork[e.c.id];
+                const renderBlocked = goBlocked(e.c, paused);
+                const openSet = !!(e.c.openFrame && (e.c.openFrame.mediaId || e.c.openFrame.thumbId || e.c.openFrame.source));
+                // Take numbers are never reused, so after a delete "take 3 of 2" would read as a
+                // miscount: the count is then said as a count.
+                const takeLine = selN == null
+                  ? "Not rendered yet · " + (openSet ? "open frame set" : "no open frame") + " · Play and Export skip it"
+                  : (shotTakes.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + shotTakes.length : "Take " + selN + " · " + shotTakes.length + " takes")
+                    + " ★ used by Play · Render · Export";
+                // Review F14: a shot with a ★ take stays done when a retake fails; the failure is
+                // recorded on the card instead.
+                const la = e.c.lastAttempt;
+                const retakeFailed = selN != null && !inFlight(e.c) && la && (la.state === "failed" || la.state === "refused");
                 return (
-                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "")} onClick={() => setSelShot(e.c.id)}
+                  <div key={e.c.id} data-card-id={e.c.id}
+                    className={"lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : "")
+                      + (findOn ? (findSet.has(e.c.id) ? (e.c.id === findCur ? " fcur" : "") : " fdim") : "")}
+                    onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
                     <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
                     <div className="lv-code">{e.code}</div>
@@ -2078,7 +2711,17 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       {(() => {
                         const miss = castMissingImages(e, project, imgSrc);
                         const over = castPastBudget(e, project, imgSrc);
+                        // Session P (open call 4, review F16): a picture the render route
+                        // cannot send yet (an imported local_ picture) is marked BEFORE anyone
+                        // presses Render -- the render itself refuses it before pricing.
+                        // Spend review S6: an imported reference VIDEO (or audio) is marked the same way.
+                        const unsendable = unsendableKind(buildShotPayload(e, project, imgSrc));
                         return <>
+                          {unsendable ? (
+                            <span className="lv-st warn" title={`This shot uses a ${unsendable} imported into your library (not a PixAI ${unsendable}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.`}>
+                              {unsendable === "picture" ? "imported picture — can't be sent to PixAI yet" : "imported " + unsendable + " — can't be sent to PixAI yet"}
+                            </span>
+                          ) : null}
                           {miss.length ? (
                             <span className="lv-st warn"
                               title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`}>
@@ -2106,11 +2749,73 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       })()}
                       {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
                       {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
-                      <span className={"lv-st " + st}
-                        onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
+                      <span className={"lv-st " + st + (gs && gs.held ? " held" : "")}
+                        onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId, undefined, projectApi.activeId); } : undefined}
                         style={paused ? { cursor: "pointer" } : undefined}
                         title={paused ? "Click to check again" : undefined}>
                         {gs && gs.msg ? gs.msg : st}</span></div>
+                    {/* Session P (review F3/F8): a render whose send was never confirmed keeps the
+                        shot locked; this is the way out. ↻ Check reads the server's journal again
+                        (never a re-send); the release is the owner's own call, after Activity. */}
+                    {sendUnclear(e.c) && !(gs && gs.phase === "checking") && (
+                      <div className="lv-unclear" role="status" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
+                        <span>The server didn't confirm this render. Check Activity before rendering again.</span>
+                        <button type="button" className="lv-unclearbtn" onClick={() => recheckSubmit(e.c.id)}>&#8635; Check</button>
+                        <button type="button" className="lv-unclearbtn" onClick={() => releaseSubmit(e.c.id)}>I checked Activity — release this shot</button>
+                      </div>
+                    )}
+                    {/* THE TAKES STRIP, RENDER / RE-RENDER AND THE STALE ANCHOR (Session P, Stage A2;
+                        Loom Handoff.dc.html section A's card). A take chip shows that take's clip
+                        thumbnail where the page draws a tint pair. Only the Render button can start a
+                        render -- generateShot, with its own price and confirm; ★, Re-anchor and Keep
+                        are board edits (loom-no-auto-render.test.js). Clicks here never select the
+                        card or open Deep Focus, like the .lv-crow row below. */}
+                    <div className="lv-takes">
+                      <div className="lv-takerow" onClick={stopCard} onDoubleClick={stopCard}>
+                        {olderTakes > 0 && (
+                          <span className="lv-takemore" title={olderTakes + " older take" + (olderTakes === 1 ? "" : "s") + " — the shot's full take list is under its preview in the timeline"}>+{olderTakes}</span>
+                        )}
+                        {shownTakes.map((t) => {
+                          const on = t.n === selN;
+                          return (
+                            <button type="button" key={t.id || "t" + t.n} className={"lv-take" + (on ? " on" : "")}
+                              style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}
+                              title={on ? "Take " + t.n + " (selected)" : "Take " + t.n + " · click to use"}
+                              aria-pressed={on} onClick={() => selectTakeOnCard(e.c.id, t.n)}>{on ? "★" : t.n}</button>
+                          );
+                        })}
+                        <button type="button" className="lv-render" disabled={renderBlocked}
+                          title={renderBlocked
+                            ? (sendUnclear(e.c) ? "The server didn't confirm this shot's last render — check it (or release it) first." : "This shot is already rendering.")
+                            : (shotTakes.length ? "Render a new take of this shot; it becomes the ★ take. Its price is shown before anything is sent." : "Render this shot. Its price is shown before anything is sent.")}
+                          onClick={() => generateShot(e)}>{shotTakes.length ? "Re-render" : "Render"}</button>
+                      </div>
+                      <div className="lv-takeline">{takeLine}</div>
+                      {stale && (
+                        <div className="lv-stale" role="status" onClick={stopCard} onDoubleClick={stopCard}>
+                          <div className="lv-staletxt">&#9888; anchor changed &middot; {staleText(anchor, codeOf)}</div>
+                          <div className="lv-stalebtns">
+                            <button type="button" className="lv-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
+                              title={!selectedTakeView(anchor.src)
+                                ? codeOf(anchor.src.id) + " has no rendered take to take a frame from."
+                                : "Swap in " + codeOf(anchor.src.id) + "'s frame from take " + anchor.to + ". Nothing is rendered; render a new take when you're ready."}
+                              onClick={() => reanchorShot(e.c.id)}>{aw && aw.phase === "wip" ? "Re-anchoring…" : "Re-anchor"}</button>
+                            <button type="button" className="lv-keep"
+                              title={"Keep this open frame for this pair of takes. It warns again if " + codeOf(anchor.src.id) + "'s take changes."}
+                              onClick={() => keepAnchor(e.c.id)}>Keep</button>
+                          </div>
+                          {aw && aw.phase === "err" && <div className="lv-staleerr">{aw.msg}</div>}
+                        </div>
+                      )}
+                      {!stale && needsNewTake(e.c) && (
+                        <div className="lv-needtake">Open frame updated. Render a new take to match it.</div>
+                      )}
+                      {retakeFailed && (
+                        <div className="lv-lastfail" title={"The last render of this shot didn't land. Take " + selN + " is still the ★ take."}>
+                          Last render didn't land &middot; {la.msg || (la.state === "refused" ? "refused" : "failed")}
+                        </div>
+                      )}
+                    </div>
                     <div className="lv-crow" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
@@ -2131,8 +2836,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   </div>
                 );
               })}
-            </div>
-            <button className="lv-mini2" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
+              {/* The page's dashed, card-sized "+ Add shot" tile (The Loom.dc.html:319). */}
+              <button type="button" className="lv-addshot" onClick={() => addCard(act.id)}>+ Add shot to {act.name}</button>
+            </div>}
           </div>
         );
       })}
@@ -2140,78 +2846,132 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       {!project.acts.length && <div className="lv-ph">No acts yet — add one below.</div>}
     </div>
   );
-  // Fixed drawer, banner-attached, never draggable (unlike every other region). Preview
-  // only renders once the drawer is more than halfway to full, so it doesn't paint fighting
-  // the collapse/expand animation.
-  const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
-  const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+  // The drawer's height for its state, and the full view's preview height, from the fit rule.
+  // The preview renders whenever the drawer is full.
+  const tlFit = timelineFit(tlRoom, TL_DESIGN_FULL);
+  const tlHeight = timelineHeight(tlState, tlFit);
+  const showTlPreview = tlState === "full";
+  // The clip's frame takes the preview box's whole height (less its 14 px of padding); its
+  // controls sit beside it.
+  const tlVideoH = Math.max(60, tlFit.preview - 14);
+  // Re-measure the room whenever something above the drawer can have moved it: the banner,
+  // the batch bar, the window (which also rewraps the top bar) and the overlay itself (the
+  // update strip moves its top).
+  useLayoutEffect(() => { measureTlRoom(); }, [measureTlRoom, bannerOpen, !!batchTally, tlState]);
+  useEffect(() => {
+    const on = () => measureTlRoom();
+    window.addEventListener("resize", on);
+    let ro = null;
+    const ov = tlDrawerRef.current && tlDrawerRef.current.closest(".lv-overlay");
+    if (ov && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(on);
+      ro.observe(ov);
+      const top = ov.querySelector(".lv-top");
+      if (top) ro.observe(top);
+    }
+    return () => { window.removeEventListener("resize", on); if (ro) ro.disconnect(); };
+  }, [measureTlRoom]);
+  // Session P (P3): the board's music bed, the cut it plays under, and its waveform -- views
+  // and a GET of the local file; nothing here writes the board or renders anything.
+  const bed = bedOf(project);
+  const bedSegs = cutSegments(entries, project);
+  const bedPlanNow = bedPlan(bedSegs, bed);
+  const bedPeaks = useBedPeaks(showTlPreview && bed ? bed.file : "");
+  useEffect(() => {
+    if (showTlPreview && bedApi) bedApi.refreshUnusedBeds();
+  }, [showTlPreview]);   // eslint-disable-line react-hooks/exhaustive-deps
   const timelineDrawer = (
-    <div className="lv-tldrawer">
-      <div className="lv-tlcontent" style={{ height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" }}>
+    <div className="lv-tldrawer" ref={tlDrawerRef} data-tl={tlState}>
+      <div className="lv-tlcontent" style={{ height: tlHeight }}>
+        <div className={"lv-tlbody" + (showTlPreview ? " full" : "")}>
         {showTlPreview && (
-          <div className="lv-tlpreviewzone">
+          <div className="lv-tlpreviewzone" style={{ height: tlFit.preview }}>
             {sel && sel.c.resultMid
               // key={sel.c.id}: without it, switching between two finished shots on the
               // reel reuses the same instance -- swapping `mid` on a live <video> silently
               // pauses it (no pause event fires), leaving `playing` state stuck true (button
               // stuck on the pause icon, hover-scrub disabled) and `dur` stale until the new
               // clip's metadata loads. Forcing a remount resets all of that for free.
-              ? <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
-                  onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
-                  onSplit={(t) => splitShot(sel, t)}
-                  crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
+              // Session P, Stage A2 (P1): the shot's TAKE LIST sits beside the ★ clip's preview --
+              // ★ Use, Reuse settings and Delete per take. The page does not draw this surface.
+              ? <div className="lv-tlprevrow">
+                  <div className="lv-tlprevmain">
+                    <ShotPreview key={sel.c.id} mid={sel.c.resultMid} trimIn={sel.c.trimIn} trimOut={sel.c.trimOut}
+                      onTrim={(i, o) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, trimIn: i, trimOut: o }))}
+                      onSplit={(t) => splitShot(sel, t)} videoH={tlVideoH}
+                      crop={sel.c.crop} onCrop={(rect) => setCard(sel.a.id, sel.c.id, (c) => ({ ...c, crop: rect }))} />
+                  </div>
+                  <TakeList card={sel.c} code={sel.code}
+                    onUse={(n) => selectTakeOnCard(sel.c.id, n)}
+                    onReuse={(n) => reuseTakeSettings(sel.c.id, n)}
+                    onDelete={(n) => deleteTakeOnCard(sel.c.id, n)} />
+                </div>
               : <div className="lv-tlpreviewbox lv-ph">{sel ? "This shot hasn't rendered yet." : "Select a shot to preview it here."}</div>}
           </div>
         )}
         <div className="lv-tlreelzone">
           <div className="lv-reel">
-            {/* The Loom.dc.html:906-914 -- per-shot tint (LV_TINTS, distinct from status
-                color), the diagonal-stripe texture overlay, the shot's code+duration as
-                VISIBLE text (not just the title tooltip, which stays too), and a separate
-                thin status bar under the tint instead of the status color filling the
-                whole segment. Duration-proportional width, selected outline, and the
-                drag-resize grip (elsewhere in this file) are unchanged -- those already
-                matched or exceeded the design. */}
+            {/* The Loom.dc.html:1006-1015 -- per-shot tint (LV_TINTS, distinct from status
+                color), the stripe texture overlay, the shot's code+duration as VISIBLE text
+                (the title tooltip stays too), and a thin status bar under the tint. Each
+                segment's width is its share of the CUT (scale is the cut's own length,
+                loom-core.js reelStats), so the shots always span the whole reel, as the
+                page's `flex: dur` does; there is no target marker. */}
             {entries.map((x, i) => {
               const tint = LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length];
+              // Session P, Stage A2 (P2): a shot whose anchor went stale gets the page's peach
+              // underline, and its title says so.
+              const segStale = anchorInfo(x.c, cardById).state === "stale";
               return (
-                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "")}
+                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : "")
+                  + (findOn ? (findSet.has(x.c.id) ? (x.c.id === findCur ? " fcur" : " fmatch") : " fdim") : "")}
                   style={{
                     width: `${(durOf(x.c) / scale) * 100}%`,
                     backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
                     backgroundSize: "25px 100%, 25px 100%", backgroundRepeat: "repeat-x, repeat-x",
                   }}
-                  title={`${x.code} ${x.c.title || ""}`} onClick={() => setSelShot(x.c.id)}>
+                  title={`${x.code} ${x.c.title || ""}` + (segStale ? " · ⚠ anchor changed" : "")} onClick={() => setSelShot(x.c.id)}>
                   <span className="lv-segcode">{x.code} · {durOf(x.c)}s</span>
                   <span className={"lv-segbar " + x.c.status} />
                 </div>
               );
             })}
-            <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
           <div className="lv-tlinfo">{sel
             ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
             : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
+          {/* Session P (P3, the page's section A): the music bed row under the reel, its button,
+              level, the fades/ducking line and the cut's status -- in the full view. */}
+          {showTlPreview && bedApi && (
+            <BedRow entries={entries} scale={scale} bed={bed} segs={bedSegs} plan={bedPlanNow}
+              peaks={bedPeaks} api={bedApi} />
+          )}
+          {/* Session P (P9): the continuity ribbon, in the full view only, under the bed row. */}
+          {showTlPreview && (
+            <RibbonStrip pairs={ribbonPairs(entries, cardById)} tintOf={tintOfCard} onOpen={openRibbonPair} />
+          )}
+        </div>
         </div>
       </div>
-      <div className="lv-tlhandle" onPointerDown={tlPointerDown} onPointerMove={tlPointerMove} onPointerUp={tlPointerUp} onPointerCancel={tlPointerUp}>
-        <div className="lv-tlgrip" />
-      </div>
+      {/* The grip (The Loom.dc.html:168): a CLICK cycles hidden -> slim -> full -> hidden. */}
+      <button type="button" className="lv-tlhandle" onClick={cycleTl}
+        title="Timeline — hidden / slim / full" aria-label={"Timeline: " + tlState + " — click for " + nextTimelineState(tlState)}>
+        <span className="lv-tlgrip" />
+      </button>
     </div>
   );
   // Collapsed Generate: the right-edge icon rail ("gallery-drawer muscle memory") —
   // clicking an icon expands the drawer back out AND switches to that tab.
   const GEN_ICONS = [["Image", "✦"], ["Edit", "✎"], ["Reference", "🖼"], ["Video", "🎬"]];
-  let gen;
+  let gen, genHead;
   {
     const gs = genState[active.c.id];
     // "paused" no longer counts as busy -- the auto-poll has genuinely stopped, so a manual
     // "use existing video" attach isn't racing a live network call anymore. running/slow/
     // stale (still actively polling) still block it, same as before.
     const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
-    // Writes into the selected shot when bound, or the draft card when not -- everything
-    // below (tab bodies, frame slots) reads/writes through this one function either way.
-    const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
+    // Everything below (tab bodies, frame slots) writes through LoomV2's own `patch`,
+    // declared beside `active` above.
     const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
     // Frame handoff (reparented from the classic CardEditor): open/close frame, same
     // splice-in-last-frame / inherit-close mechanics, driven by the same setCard.
@@ -2220,21 +2980,28 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const selIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
     const patchFrame = (key, fp) => patch((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
+    // Session P (BUILD-w5-p §2.1): the splice records the ANCHOR -- the previous shot's id, its
+    // ★ take and the cut point the frame came from -- through splicePatch, so a later change of
+    // that take can flag this shot. The shot and its source are captured AT THE CLICK: the
+    // frame lands on the shot that asked for it, and the anchor names the take it came from.
+    // The frame is cut where the previous shot's ★ take is cut (trim_out; none -> its end), and
+    // the anchor records the time the handoff ANSWERS it cut at (`took`: its at / at_end) -- the
+    // card may not know its clip's length (owner walk 2026-09-30: an end frame read "at 0.0 s").
     const inheritPrev = () => {
-      if (!prevEntry) return;
-      const rmid = prevEntry.c.resultMid;
+      if (!prevEntry || !sel) return;
+      const target = sel, src = prevEntry;
+      const rmid = src.c.resultMid;
       if (rmid) {
         setHandoff("wip");
         fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid, trim_out: prevEntry.c.trimOut }) })
+          body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut }) })
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
-            patchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
-              desc: "handed off from " + (prevEntry.code || "prev shot") });
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
           }).catch(() => setHandoff("err"));
       } else {
-        patchFrame("openFrame", { ...prevEntry.c.closeFrame });
+        patchFrame("openFrame", { ...src.c.closeFrame });
       }
     };
     let tabBody;
@@ -2250,11 +3017,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     let videoTrailer = null;
     if (tab === "Video") { tabBody = (
       <div>
-        <label className="lv-lab">Continuity</label>
-        <div className="lv-chips">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-chip " + (k === (active.c.connect || "new") ? "on" : "")} title={CONNECT[k].hint}
-          onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
-        <label className="lv-lab">Prompt</label>
-        <textarea className="lv-ta" value={active.c.prompt || ""} onChange={(ev) => {
+        {/* The page's slabs (The Loom.dc.html:499-519): CONTINUITY, the outlined PROMPT well with
+            its big light motion prompt, then CAMERA / LIGHTING / TRANSITION IN / OUT. */}
+        <div className="lv-slab">
+          <div className="lv-slablab">Continuity — how it joins the shot before</div>
+          <div className="lv-segtrack grid2">{Object.keys(CONNECT).map((k) => (<span key={k} className={"lv-segbtn" + (k === (active.c.connect || "new") ? " on" : "")} title={CONNECT[k].hint}
+            role="button" tabIndex={0} onClick={() => patch((c) => setShotConnect(c, k))}>{CONNECT[k].label}</span>))}</div>
+        </div>
+        <div className="lv-slab prompt">
+          <div className="lv-slablab">Prompt <span className="lv-slabhint">motion only — camera, lighting and cast weave in</span></div>
+        <textarea className="lv-prompt-ta" placeholder="Describe the motion…" value={active.c.prompt || ""} onChange={(ev) => {
           // Typing here always means "auto-compose, using this text" -- clears an active
           // override immediately (matches the drawer's own "your edit wins" rule, just
           // from the other surface). Destructive with no undo, same as every other text
@@ -2263,6 +3035,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           if (active.c.promptOverride) { setOverrideClearedFlash(true); setTimeout(() => setOverrideClearedFlash(false), 1600); }
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
         }} />
+        </div>
+        <div className="lv-slab">
+        <div>
         <label className="lv-lab">Camera <button className="lv-termsbtn" onClick={() => togglePal("camera")}>+ terms</button></label>
         <input className="lv-in" value={active.c.camera || ""} placeholder="e.g. slow push in, shallow DoF" onChange={(ev) => patch((c) => ({ ...c, camera: ev.target.value }))} />
         {palFor === "camera" && (
@@ -2273,21 +3048,29 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </div>
           ))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Lighting <button className="lv-termsbtn" onClick={() => togglePal("lighting")}>+ terms</button></label>
         <input className="lv-in" value={active.c.lighting || ""} placeholder="e.g. moonlit, soft haze" onChange={(ev) => patch((c) => ({ ...c, lighting: ev.target.value }))} />
         {palFor === "lighting" && (
           <div className="lv-termspal">{LIGHTING_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => appendTo("lighting", t)}>{t}</span>))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Transition in <button className="lv-termsbtn" onClick={() => togglePal("transIn")}>+ terms</button></label>
         <input className="lv-in" value={active.c.transIn || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transIn: ev.target.value }))} />
         {palFor === "transIn" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transIn: t }))}>{t}</span>))}</div>
         )}
+        </div>
+        <div>
         <label className="lv-lab">Transition out <button className="lv-termsbtn" onClick={() => togglePal("transOut")}>+ terms</button></label>
         <input className="lv-in" value={active.c.transOut || ""} placeholder="e.g. cut, dissolve" onChange={(ev) => patch((c) => ({ ...c, transOut: ev.target.value }))} />
         {palFor === "transOut" && (
           <div className="lv-termspal">{TRANS_PALETTE.map((t) => (<span key={t} className="lv-minichip" onClick={() => patch((c) => ({ ...c, transOut: t }))}>{t}</span>))}</div>
         )}
+        </div>
+        </div>
         <div className="lv-refline">{(active.c.cast || []).length} cast &middot; {(active.c.refs || []).length} refs <span className="lv-dim">(toggle cast in the Cast &amp; assets tab; add extra image/video/audio refs directly below)</span></div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" }}>
           {active.c.promptOverride
@@ -2322,8 +3105,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
               <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
                 if (!routeTarget) return;
-                setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }, new Date().toISOString()));
-                setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
+                // A real render made on this board: it lands as a billed take (attachTake),
+                // selected, with the draft's settings snapshot -- never over a render in flight.
+                const out = attachDraftVideo(routeTarget.c.id, { mid: gs.mid, dur: gs.duration, settings: gs.settings || null });
+                if (out === "landed" || out === "selected") setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
               }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
             </div>
             {draftAttachedInfo && draftAttachedInfo.mid === gs.mid && <div className="lv-ok2">&#10003; attached to {draftAttachedInfo.code} &middot; it's now that shot's result</div>}
@@ -2336,7 +3121,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const busyI = gi.phase === "submitting" || gi.phase === "running";
       tabBody = (
         <div>
-          <label className="lv-lab">Model</label>
+          {/* The page's slabs (The Loom.dc.html:356-403): MODEL (with the LoRAs), the outlined
+              IMAGE PROMPT well, then ASPECT with size, mode, count, seed and the two switches. */}
+          <div className="lv-slab">
+          <div className="lv-slablab">Model</div>
           {/* picker-parity-round2 (problem 2): a trigger row, not an inline-mounted picker --
               mirrors moonglade_gallery.py's own #gen-selrow. The actual <mg-model-picker
               kind="base"> lives in the always-mounted .lv-mpick-veil overlay below (outside
@@ -2427,6 +3215,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               })}
             </div>
           )}
+          <div className="lv-slabrow">
           <button type="button" className="lv-chip lv-loratoggle" onClick={() => { setPickerKind("lora"); setPickerOpen(true); }}>
             + add LoRA
           </button>
@@ -2435,10 +3224,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               {imgLoras.length} / {acct.lora_cap} LoRAs
             </span>
           )}
-          <label className="lv-lab">Image prompt</label>
+          </div>
+          </div>
+          <div className="lv-slab prompt">
+          <div className="lv-slablab">Image prompt</div>
           <textarea className="lv-ta" value={active.c.imgPrompt || ""} placeholder="describe the reference still (subject, pose, composition, light)…"
             onChange={(ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))} />
           {sel && <button className="lv-mini2" onClick={() => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, (c.openFrame && c.openFrame.desc) || "", c.lighting || ""].filter(Boolean).join(", ") }))}>&#8615; seed from shot description</button>}
+          </div>
           {/* L536: full PixAI field parity with the gallery's own Generate tab (owner-decided
               scope, 2026-07-23) -- Advanced (negative/steps/cfg), 8 aspect-ratio buttons,
               Size + custom W×H, Mode, Count, Seed, High-priority, Prompt helper. Same field
@@ -2461,7 +3254,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             const cfgB = restr.cfgScale || {};
             const offTitle = "This model doesn’t use this setting";
             return (
-          <details>
+          <details className="lv-slab">
             <summary style={{ cursor: "pointer", color: "var(--subtext)", fontSize: 11 }}>Advanced</summary>
             <textarea className={"lv-ta" + (negOff ? " cap-off" : "")} style={{ marginTop: 5 }} value={imgAdv.negative}
               placeholder="lowres, text, watermark…" disabled={negOff} title={negOff ? offTitle : ""}
@@ -2492,7 +3285,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </details>
             );
           })()}
-          <label className="lv-lab">Aspect</label>
+          <div className="lv-slab">
+          <div className="lv-slablab">Aspect</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {[[1, 1, "1:1"], [3, 4, "3:4"], [4, 3, "4:3"], [2, 3, "2:3"], [3, 2, "3:2"],
               [9, 16, "9:16"], [16, 9, "16:9"], [3, 1, "3:1"]].map(([rw, rh, label]) => (
@@ -2546,6 +3340,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           <label className="lv-ck">
             <input type="checkbox" checked={imgAdv.promptHelper}
               onChange={(ev) => setImgAdv((a) => ({ ...a, promptHelper: ev.target.checked }))} /> Prompt helper</label>
+          </div>
           <CostBadge ref={imgCostRef} hint="Pick a model and write a prompt to see the cost." cardLabel="a card" />
           {/* Gate on what genImage() itself refuses without -- a model and a prompt. It rejects
               both outright ("pick a model first" / "enter an image prompt"), so a live button
@@ -2589,20 +3384,24 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               sub-screens, same underlying real pipelines). Closes the design-fidelity punch
               list's "Edit tab has no Fixer or Enhance sub-tabs at all (desktop-only gap)"
               item -- 2026-08-04. */}
-          <div className="lv-tabs" style={{ marginBottom: 9 }}>
-            <span className={"lv-tab" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
-            <span className={"lv-tab" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
-            <span className={"lv-tab" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
+          <div className="lv-segtrack" style={{ marginBottom: 9 }}>
+            <span className={"lv-segbtn" + (editSub === "edit" ? " on" : "")} onClick={() => setEditSub("edit")}>Edit</span>
+            <span className={"lv-segbtn" + (editSub === "fixer" ? " on" : "")} onClick={() => setEditSub("fixer")}>Fixer</span>
+            <span className={"lv-segbtn" + (editSub === "enhance" ? " on" : "")} onClick={() => setEditSub("enhance")}>Enhance</span>
           </div>
 
           {editSub === "edit" && (
             <>
-              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              <div className="lv-slab">
+              <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? <img className="lv-editsrc" src={"/thumbs/" + src + ".jpg"} alt="source" />
                    : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
-              <label className="lv-lab">Edit instruction</label>
+              </div>
+              <div className="lv-slab prompt">
+              <div className="lv-slablab">Edit instruction</div>
               <textarea className="lv-ta" value={active.c.editPrompt || ""} placeholder="e.g. make it night, add rain, warmer key light…"
                 onChange={(ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))} />
+              </div>
               <CostBadge ref={editCostRef} hint="Add a source image and instruction to see the cost." cardLabel="an Edit card" />
               <button className="lv-go" disabled={busyE || !src} onClick={() => genEdit(active)}>{busyE ? (ge.msg || "editing…") : "✦ Edit the open frame"}</button>
               {ge.phase === "error" && <div className="lv-gerr">{ge.msg}</div>}
@@ -2621,7 +3420,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
           {editSub === "fixer" && (
             <>
-              <label className="lv-lab">Source — {sel ? "this shot's" : "the draft's"} open frame</label>
+              <div className="lv-slab">
+              <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? (
                 <div className="lv-fixwrap">
                   <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
@@ -2629,17 +3429,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
                 </div>
               ) : <div className="lv-ph">No open-frame image yet — {sel ? <>route one from the <b>Image</b> tab, or </> : null}pick it into the open frame above.</div>}
+              </div>
+              <div className="lv-slab">
               {src && (
                 <>
-                  <div className="lv-tabs" style={{ marginTop: 8 }}>
-                    <span className={"lv-tab" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
-                    <span className={"lv-tab" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
+                  <div className="lv-slabrow">
+                    <div className="lv-segtrack" style={{ flex: "1 1 auto" }}>
+                      <span className={"lv-segbtn" + (fixTag !== "hand" ? " on" : "")} onClick={() => setFixTag("face")}>Face</span>
+                      <span className={"lv-segbtn" + (fixTag === "hand" ? " on" : "")} onClick={() => setFixTag("hand")}>Hand</span>
+                    </div>
                     <button className="lv-mini2" disabled={!fixBoxes.length} onClick={() => setFixBoxes([])}>Clear{fixBoxes.length ? " " + fixBoxes.length : ""}</button>
                   </div>
-                  <div className="lv-fixhint">Drag a box over the hand or face on the source.</div>
                 </>
               )}
               <div className="lv-fixwarn">A fix can't be card-covered — it always spends, and always asks first.</div>
+              </div>
               <div className="lv-dim" style={{ padding: "4px 2px" }}>
                 {fixPriceEntry && fixPriceEntry.loading ? "checking…"
                   : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits — never card-covered"
@@ -2666,11 +3471,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           )}
 
           {editSub === "enhance" && (
-            <>
-              <label className="lv-lab">Art filters · free, no generation</label>
+            <div className="lv-slab">
+              <div className="lv-slablab">Art filters · free, no generation</div>
               <button className="lv-openfilters" onClick={openFilterCompare}>&#9680; Open filters</button>
-              <div className="lv-dim" style={{ padding: "6px 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
-            </>
+              <div className="lv-dim" style={{ padding: "0 2px" }}>Gradient overlays, not AI — applied right in the browser: <b style={{ color: "var(--text)" }}>no credits, no request, works offline</b>.</div>
+            </div>
           )}
         </div>
       );
@@ -2681,12 +3486,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       const refs = (project.assets || []).filter((a) => a.kind === "image" && a.mediaId);
       tabBody = (
         <div>
-          <label className="lv-lab">References — cast @image members ({refs.length})</label>
+          <div className="lv-slab">
+          <div className="lv-slablab">References — cast @image members ({refs.length})</div>
           {refs.length ? <div className="lv-refstrip">{refs.map((a) => (<img key={a.id} src={"/thumbs/" + a.mediaId + ".jpg"} title={a.tag} alt="" />))}</div>
                        : <div className="lv-ph">No cast @image references with a gallery image yet — add some in <b>Cast &amp; assets</b>.</div>}
-          <label className="lv-lab">Prompt</label>
+          </div>
+          <div className="lv-slab prompt">
+          <div className="lv-slablab">Prompt</div>
           <textarea className="lv-ta" value={active.c.refPrompt || ""} placeholder="compose a new still from the references…"
             onChange={(ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))} />
+          </div>
           <CostBadge ref={refCostRef} hint="Add references and a prompt to see the cost." cardLabel="an Edit card" />
           <button className="lv-go" disabled={busyR || !refs.length} onClick={() => genRef(active)}>{busyR ? (gr.msg || "generating…") : "✦ Generate from references"}</button>
           {gr.phase === "error" && <div className="lv-gerr">{gr.msg}</div>}
@@ -2704,13 +3513,49 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       );
     }
     else tabBody = <div className="lv-ph">The <b>{tab}</b> tab renders the shot on PixAI.</div>;
+    // THE PANEL HEADER (The Loom.dc.html:334-346): the bound shot and ✕ unbind, or "Generate ·
+    // draft generation"; the collapse › follows it at the right end (rendered by the panel).
+    genHead = sel
+      ? <>
+          <span className="lv-genhdtitle" title={sel.code + " · " + (sel.c.title || "untitled")}>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</span>
+          <span className="lv-genhdfill" />
+          <button type="button" className="lv-unbind" onClick={() => setSelShot(null)}
+            title="Unbind this shot and go back to draft generation">&#10005; unbind</button>
+        </>
+      : <>
+          <span className="lv-genhdtitle">Generate</span>
+          <span className="lv-genhdsub" title="Generate freely, then route or attach the result to a shot">draft generation — route results into a shot</span>
+          <span className="lv-genhdfill" />
+        </>;
+    // The frame handoff slab (The Loom.dc.html:452-477): on Reference and Video it leads the
+    // tab; on Edit it follows the edit controls, where the page draws it.
+    const frameHandoff = (tab === "Reference" || tab === "Video" || tab === "Edit") ? (
+      <div className="lv-slab">
+        <div className="lv-slablab">FRAME HANDOFF — {
+          tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
+        <div className="lv-framehandoff">
+          <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("openFrame", p)}
+            extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
+                title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
+                {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
+                  : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
+              : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
+          <div className="sb-conn-mid">&#8594;</div>
+          <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
+            onPatch={(p) => patchFrame("closeFrame", p)} />
+        </div>
+      </div>
+    ) : null;
     gen = (
       <div className="lv-gen">
-        <div className="lv-genhead">{sel
-          ? <>&#9881; {sel.code} &middot; {sel.c.title || "untitled"}</>
-          : <>&#10024; Draft generation <span className="lv-dim">— generate freely, then route or attach it to a shot</span></>}
-          {sel && <button className="lv-unbind" onClick={() => setSelShot(null)}
-            title="Unbind this shot and go back to draft generation">&#10005; unbind</button>}</div>
+        {/* The Image / Edit / Reference / Video tabs: the page's segmented bar at the top of the
+            panel's body (The Loom.dc.html:348-352), not in the header. */}
+        <div className="lv-gentabs" role="tablist" aria-label="Generate">
+          {["Image", "Edit", "Reference", "Video"].map((t) => (
+            <button type="button" role="tab" key={t} aria-selected={t === tab} className={"lv-gentab" + (t === tab ? " on" : "")}
+              onClick={() => setTab(t)}>{t}</button>))}
+        </div>
         {!sel && (
           <div className="lv-drafttarget">
             <label className="lv-lab">Route results into a shot <span className="lv-dim">(cast doesn't need one)</span></label>
@@ -2720,41 +3565,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             </select>
           </div>
         )}
-        {/* Gallery-era correction (handoff-2026-08-06 / The Loom.dc.html:399-427): the
-            shared Frame Handoff block shows on the THREE tabs that consume it —
-            Reference (still composition), Video (its Continuity/weave modes read these
-            frames), Edit (reads openFrame as its source) — with a contextual label
-            naming which role it plays. Hidden on Image, the one tab that doesn't use
-            it. This is the re-scope the owner sent back 2026-08-04: shared
-            infrastructure, never Reference-only. */}
-        {(tab === "Reference" || tab === "Video" || tab === "Edit") && (
-          <>
-            <div className="lv-fhlabel">FRAME HANDOFF — {
-              tab === "Video" ? "drives this shot’s motion" : tab === "Edit" ? "edit source" : "still composition"}</div>
-            <div className="lv-framehandoff">
-              <FrameSlot which="open" frame={active.c.openFrame} liveTag={positionTag(active, project, imgSrc, "openFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-                onPatch={(p) => patchFrame("openFrame", p)}
-                extraBtn={prevEntry ? <button className="sb-btn ghost sm" onClick={inheritPrev} disabled={handoff === "wip"}
-                    title={prevEntry.c.resultMid ? `Splice in ${prevEntry.code}'s generated clip's last frame` : `Copy ${prevEntry.code}'s closing frame here`}>
-                    {handoff === "wip" ? "✂ splicing…" : handoff === "err" ? "✂ splice failed — retry"
-                      : prevEntry.c.resultMid ? `✂ splice ${prevEntry.code}'s last frame` : `↳ inherit ${prevEntry.code} close`}</button>
-                  : <span className="sb-hint">{sel ? "first shot — no previous frame" : "draft — no shot sequence to inherit from"}</span>} />
-              <div className="sb-conn-mid">&#8594;</div>
-              <FrameSlot which="close" frame={active.c.closeFrame} liveTag={positionTag(active, project, imgSrc, "closeFrame")} discreet={active.c.discreet} framePrev={frameSrc} storeThumb={storeThumb} openPick={openPick}
-                onPatch={(p) => patchFrame("closeFrame", p)} />
-            </div>
-          </>
-        )}
-        {/* The Image/Edit/Reference/Video tab strip lives in the rail's .lv-sidehead
-            (like the left rail's Cast/Footage tabs), so `gen` must NOT render its own --
-            an identical strip here stacked a duplicate directly below the header one
-            whenever the right rail was expanded. Removed to match the left-rail pattern:
-            tabs in the header, content below without repeating them. */}
-        {acct && (
-          <div className="lv-bal">&#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
-            {acct.claim_credits ? <span className="lv-balclaim"> &middot; +{acct.claim_credits} claimable</span> : null}</div>
-        )}
+        {/* Gallery-era correction (handoff-2026-08-06): the shared Frame Handoff shows on the
+            THREE tabs that consume it -- Reference (still composition), Video (its Continuity /
+            weave modes read these frames), Edit (reads openFrame as its source) -- with a
+            contextual label; hidden on Image. Shared infrastructure, never Reference-only. */}
+        {tab !== "Edit" ? frameHandoff : null}
+        {acct && (() => {
+          const bal = balanceLine(acct);
+          return (
+            <div className="lv-bal">&#9889; {bal.credits} credits &middot; {bal.cards}
+              {bal.claim ? <span className="lv-balclaim"> &middot; {bal.claim}</span> : null}</div>
+          );
+        })()}
         {tabBody}
+        {tab === "Edit" ? frameHandoff : null}
         {/* Always mounted (never conditionally rendered on `tab`) so switching tabs mid-
             render can't unmount the element and kill its in-flight poll -- CSS-hidden
             instead, exactly like every other tab's content stays out of the DOM flow
@@ -2805,8 +3629,83 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       </div>
     );
   }
+  // Session P (P7): the cast library's rows for this storyboard (a view; writes nothing). A
+  // ticked library member's picture and 🔒 change everywhere it's used -- in the Library tab and
+  // in the rows below alike; this storyboard's own (not yet library) members edit here only.
+  const libRows = castApi ? libraryRows(castApi.lib, project, castApi.others) : [];
+  // A copy carrying a libId counts as a library member even before the Library tab has read the
+  // library (the edit then reads it first).
+  const libRowOf = (as) => {
+    if (!castApi || !as) return null;
+    if (castApi.lib) return libRows.find((r) => !r.boardOnly && r.asset && r.asset.id === as.id) || null;
+    return as.libId ? { key: "lib:" + as.libId, libId: String(as.libId), boardOnly: false, ticked: true, asset: as, member: null,
+      name: as.name || "", kind: as.kind || "image", lock: !!as.lock, tag: as.tag || "", usedBy: [], boards: null } : null;
+  };
+  const editAsset = (as, patch) => {
+    const row = castApi ? libRowOf(as) : null;
+    if (row) castApi.editLibraryMember(row, patch);
+    else setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, ...patch }));
+  };
+  const libEverywhere = (as) => (libRowOf(as) ? " — a library member: this changes on every storyboard that uses it" : "");
+  // THE PAGE'S CAST LIBRARY PANEL (Loom Handoff.dc.html section A, "👤 CAST LIBRARY · tick = in
+  // this storyboard"): tick box, round avatar, name + 🔒, and the "@tag · in N storyboards ·
+  // A·02 A·03" line. A row click ticks / unticks; the avatar changes the member's picture and
+  // the 🔒 its lock, everywhere it's used.
+  const libraryList = castApi ? (
+    <div className="lv-lib">
+      <div className="lv-libhead"><span className="lv-libcap">&#128100; CAST LIBRARY</span><span className="lv-libhint">tick = in this storyboard</span></div>
+      {castApi.libNote ? <div className={"lv-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
+      {libRows.map((row) => {
+        const src = frameSrc(row.picture);
+        const busy = castApi.working === row.key;
+        const act = () => { if (!castApi.working) castApi.toggleCastTick(row); };
+        return (
+          <div key={row.key} className={"lv-librow" + (busy ? " busy" : "")} role="checkbox" aria-checked={row.ticked} tabIndex={0}
+            title={row.boardOnly ? "This storyboard's own member — untick it to keep it in the library but not here"
+              : row.ticked ? "In this storyboard — click to remove it from this storyboard (the library keeps it)" : "Click to use it in this storyboard"}
+            onClick={act} onKeyDown={(ev) => { if (ev.key === " " || ev.key === "Enter") { ev.preventDefault(); act(); } }}>
+            <span className={"lv-libbox" + (row.ticked ? " on" : "")}>{row.ticked ? "✓" : ""}</span>
+            <button type="button" className="lv-libav" style={src ? { backgroundImage: `url(${src})` } : undefined}
+              disabled={row.kind === "audio" || !!castApi.working}
+              title={row.kind === "audio" ? (row.name || "audio") : "Change this member's picture — it changes on every storyboard that uses it"}
+              onClick={(ev) => { ev.stopPropagation(); openPick((mid) => castApi.editLibraryMember(row, { mediaId: String(mid), thumbId: "", source: "" }), row.kind === "video" ? "video" : "image"); }}>
+              {src ? null : (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}</button>
+            <div className="lv-libtext">
+              <div className="lv-libname">{row.name || row.kind}
+                <button type="button" className={"lv-liblock" + (row.lock ? " on" : "")} disabled={!!castApi.working}
+                  title={(row.lock ? "Locked (maintain exact appearance) — click to unlock" : "Click to lock its appearance") + " — on every storyboard that uses it"}
+                  onClick={(ev) => { ev.stopPropagation(); castApi.editLibraryMember(row, { lock: !row.lock }); }}>{row.lock ? "🔒" : "🔓"}</button>
+              </div>
+              <div className="lv-libmeta">{rowMeta(row)}</div>
+            </div>
+          </div>
+        );
+      })}
+      {!libRows.length && <div className="lv-libnote">{castApi.libPhase === "reading" ? "Reading your cast library…" : "No cast yet — + Add one."}</div>}
+      <div className="lv-libadd">
+        <button type="button" className="lv-libaddbtn" disabled={!!castApi.working}
+          title="Add a picture or video from your gallery to the library, ticked in this storyboard"
+          onClick={() => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)}>+ Add</button>
+        <label className="lv-libaddbtn" title="Add an image from this computer to the library, ticked in this storyboard">upload
+          <input type="file" accept="image/*" style={{ display: "none" }}
+            onChange={async (e) => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; const id = await storeThumb(f); castApi.addLibraryMember({ thumbId: id, source: f.name }); }} /></label>
+      </div>
+    </div>
+  ) : null;
   const castList = (
     <>
+      {/* The page's order (The Loom.dc.html:193-203): Simple / Detailed, then the project look,
+          then the "CAST & ASSETS — bound to" header and its reference-slot line. */}
+      <div className="lv-tabs lv-density">
+        <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
+        <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
+      </div>
+      <details className="lv-look" open={!!(project.look || "").trim()}>
+        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
+        <textarea className="lv-lookin" value={project.look || ""} rows={2}
+          onChange={(e) => setLook(e.target.value)}
+          placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
+      </details>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — bound to {sel.code}</span> : null}</div>
       {/* Live reference-slot budget for the bound shot (owner decision, 2026-07-27): PixAI
           takes 6 images, attached frames claim theirs only when attached, so cast/refs get
@@ -2842,16 +3741,6 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           </div>
         );
       })()}
-      <details className="lv-look" open={!!(project.look || "").trim()}>
-        <summary>🎨 Project look{(project.look || "").trim() ? "" : <span className="lv-dim"> — a style line added to every shot</span>}</summary>
-        <textarea className="lv-lookin" value={project.look || ""} rows={2}
-          onChange={(e) => setLook(e.target.value)}
-          placeholder="e.g. muted teal grade, 35mm grain, anamorphic flares — applied to every shot's prompt" />
-      </details>
-      <div className="lv-tabs lv-density">
-        <span className={"lv-tab " + (density === "simple" ? "on" : "")} onClick={() => setDensity("simple")}>Simple</span>
-        <span className={"lv-tab " + (density === "detailed" ? "on" : "")} onClick={() => setDensity("detailed")}>Detailed</span>
-      </div>
       {density === "detailed" ? (project.assets || []).map((as) => {
         const inShot = sel && (sel.c.cast || []).includes(as.id);
         const toggleInShot = () => sel && setCard(sel.a.id, sel.c.id, (c) => ({ ...c, cast: (c.cast || []).includes(as.id) ? c.cast.filter((x) => x !== as.id) : [...(c.cast || []), as.id] }));
@@ -2872,14 +3761,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const pastBudget = sel && inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
         return (
           <div key={as.id} className={"lv-assetrow" + (pastBudget ? " oob" : "")}>
-            {as.kind !== "audio" && <button className="lv-pickico" title="Pick from your gallery"
-              onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")}>🖼</button>}
+            {as.kind !== "audio" && <button className="lv-pickico" title={"Pick from your gallery" + libEverywhere(as)}
+              onClick={() => openPick((mid) => editAsset(as, { thumbId: "", source: "", mediaId: mid }), as.kind === "video" ? "video" : "image")}>🖼</button>}
             {as.kind === "image" ? (
-              <label className="lv-assetprev" title="Attach image">
+              <label className="lv-assetprev" title={"Attach image" + libEverywhere(as)}>
                 {src ? <img src={src} alt="" /> : "＋"}
                 <input type="file" accept="image/*" style={{ display: "none" }}
                   onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
-                    setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} />
+                    editAsset(as, { thumbId: id, source: as.source || f.name, mediaId: "" }); }} />
               </label>
             ) : <div className="lv-assetprev" title={as.kind === "video" ? "Video asset — poster from your gallery" : undefined}>
               {/* A gallery-picked video resolves its /thumbs/<mid>.jpg poster through
@@ -2906,11 +3795,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value }))}>
               <option value="image">image</option><option value="video">video</option><option value="audio">audio</option>
             </select>
-            <label className="lv-locklab" title="Write 'maintain exact appearance' in prompts">
-              <input type="checkbox" checked={!!as.lock} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked }))} />lock</label>
+            <label className="lv-locklab" title={"Write 'maintain exact appearance' in prompts" + libEverywhere(as)}>
+              <input type="checkbox" checked={!!as.lock} onChange={(e) => editAsset(as, { lock: e.target.checked })} />lock</label>
             {sel && <label className="lv-inshot" title="Include in the selected shot's cast">
               <input type="checkbox" checked={!!inShot} onChange={toggleInShot} />in {sel.code}</label>}
-            <button className="lv-ico xs danger" onClick={() => setAssets((a) => a.filter((x) => x.id !== as.id))} title="Remove">&#10005;</button>
+            {/* A library member is UNTICKED (asks first when shots use it, and drops it from their
+                cast; the library keeps it); this storyboard's own member is removed as before. */}
+            <button className="lv-ico xs danger" title={libRowOf(as) ? "Remove from this storyboard (the cast library keeps it)" : "Remove"}
+              onClick={() => { const row = libRowOf(as); if (row) castApi.toggleCastTick(row); else setAssets((a) => a.filter((x) => x.id !== as.id)); }}>&#10005;</button>
           </div>
         );
       }) : (
@@ -3042,31 +3934,33 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         </div>
       ) : null}
       <div className="lv-top">
+        {act.edge === "left" ? activityControl : null}
         {!bannerOpen && (
           <button type="button" className="lv-banner-show" title="Show banner"
             onClick={() => setBannerOpen(true)}>🖼 Banner</button>
         )}
-        {act.edge === "left" ? activityControl : null}
-        {/* The eyebrow title + hint line are GONE (The Loom.dc.html:45-55, the
-            2026-08-13 styleset pass): the DC's bar opens straight with the
-            storyboard caret; the document title still names the tool. */}
-        <ProjectSwitcher api={projectApi} />
+        {/* ONE ROW (The Loom.dc.html:46-143 + Loom Handoff.dc.html:44, 2026-09-29): the
+            storyboard's name and its ▾, the find pill and its chips, Draft, then the Generate
+            cluster, then the spend / goals / Activity / ← GALLERY end. No eyebrow or hint line;
+            the document title still names the tool.
+            📱 Mobile view -- the manual switch to the phone-sized board/reel view (LoomMobile) --
+            is a row in the storyboards popover now, so the bar fits one row. It is the same
+            persisted, two-way switch (useLoomView, LOOM_VIEW_KEY; it overrides the phone
+            auto-open), and draftCard/draftTarget/draftAttachedInfo are lifted to App() so
+            flipping it mid-draft never loses the draft. */}
+        <ProjectSwitcher api={projectApi} name={project.name || ""}
+          extra={(
+            <label className={"sb-projrow" + (mobileUI ? " on" : "")}
+              title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
+              <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
+          )} />
+        {/* Session P (P8): the page's find pill and filter chips, right after the storyboard's
+            name, as the page places them. */}
+        {findPill}
+        {findChipsRow.length ? <div className="lv-findchips">{findChipsRow}</div> : null}
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>
-        {/* Manual, owner-preference switch to the phone-sized board/reel view (LoomMobile,
-            below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
-            for the Loom: the main gallery only ever auto-detects viewport width for its own
-            mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
-            in this file to reuse. Persisted (useLoomView, LOOM_VIEW_KEY) so the choice
-            survives a reload -- and, since 2026-09-06, so it also OVERRIDES the phone
-            auto-open; reuses .lv-draft's own checkbox-chip visual pattern rather than
-            inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
-            see this component's own prop-list comment -- specifically so flipping this switch
-            mid-draft never loses it. */}
-        <label className={"lv-draft" + (mobileUI ? " on" : "")}
-          title="Switch to a phone-sized board/reel view — desktop chrome (panels, drawers) hides; your project and any in-progress draft are unaffected">
-          <input type="checkbox" checked={!!mobileUI} onChange={(e) => setMobileUI(e.target.checked)} />📱 Mobile view</label>
         <span className="lv-fill" />
         <button className="lv-genall" onClick={() => {
           // Flush+locally-patch BEFORE calling batchGenerate -- do not trust that a hand-
@@ -3107,14 +4001,30 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               : formatCostEstimate(costEstimate)}
           </button>
         )}
+        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
+          title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
+        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
+          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8679; Render</button>
+        {act.edge === "left" ? null : exportMenu}
+        {act.edge === "left" ? null : <span className="lv-fill" />}
+        {/* THE BAR'S END, kept on one line (.lv-topend) so ← Gallery never wraps onto a row of its
+            own (2026-09-29): the spend pill, the pinned goal and the Vigil (Session O -- the
+            Loom's header has no credits chip, so they sit at its right end; a click on the pin
+            crosses to the gallery's Folio; they render nothing unless a pin or the Vigil switch
+            is on), Activity FIRST in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
+            CSS comment), then ← Gallery. Docked left (act.edge === "left"), Activity mounts at
+            the row's START instead, and Export ▾ joins this end so ← Gallery still has company. */}
+        <div className={"lv-topend" + (act.edge === "left" ? " withexport" : "")}>
+        {act.edge === "left" ? exportMenu : null}
+        {act.edge === "left" ? <span className="lv-fill" /> : null}
         {/* Its historical sibling, and deliberately the SAME pill -- same .lv-cost-pill
             chrome, same click-to-refresh, same call-site suffix trick -- so the two read as
             one before/after pair rather than as two inventions sharing a bar. The marks are
-            the house's own and they are not interchangeable: `≈` above is an ESTIMATE
+            the house's own and they are not interchangeable: `≈` (the cost pill) is an ESTIMATE
             (/api/price's quote for what is left), `~` here is a SETTLED ACTUAL (the
             catalog's paid_credit, the same mark historyCore.costText renders every finished
             run's cost with). Only the ~-credits shape takes the "spent" suffix, exactly as
-            only the ≈-credits shape above takes "to finish"; "3 unpriced spent" is not a
+            only the ≈-credits shape of the cost pill takes "to finish"; "3 unpriced spent" is not a
             sentence, and the hover says the rest either way. */}
         {spendPillShown(spend) && (
           <button className="lv-cost-pill" onClick={refreshSpend}
@@ -3126,19 +4036,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)}
           </button>
         )}
-        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
-          title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
-        <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
-          title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8679; Render</button>
-        <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
-          bundling={bundling} importBackup={importBackup} />
-        <span className="lv-fill" />
-        {/* Activity FIRST again in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
-            own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
-            its normal gap. When docked left (act.edge === "left") the whole control instead
-            mounts near the row's START, right after the banner-show button -- see above. */}
+        <GoalChips />
         {act.edge === "left" ? null : activityControl}
         <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Gallery</a>
+        </div>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
@@ -3183,24 +4084,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <div className="lv-tabs lv-sidetabs">
                   <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
                   <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
+                  {castApi && <span className={"lv-tab " + (leftTab === "library" ? "on" : "")} onClick={() => setLeftTab("library")}
+                    title="The cast library: every member you keep, ticked where this storyboard uses it">Library</span>}
                 </div>
                 <button className="lv-col" onClick={closeLeftPanel} title="collapse">&#8249;</button>
               </div>
-              <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
+              <div className="lv-cast">{leftTab === "cast" ? castList : leftTab === "library" && libraryList ? libraryList : footageList}</div>
             </div>
           </>
         )}
 
-        <div className="lv-boardcol">{board}</div>
+        <div className="lv-boardcol">{boardGrid}</div>
 
         {(!rightCollapsed || rightClosing) && (
           <>
             <div className={"lv-backdrop" + (rightClosing ? " closing" : "")} onClick={closeRightPanel} />
             <div className={"lv-panel right" + (rightClosing ? " closing" : "")}>
               <div className="lv-sidehead">
-                <button className="lv-col" onClick={closeRightPanel} title="collapse">&#8250;</button>
-                <div className="lv-tabs lv-sidetabs">{["Image", "Edit", "Reference", "Video"].map((t) => (
-                  <span key={t} className={"lv-tab " + (t === tab ? "on" : "")} onClick={() => setTab(t)}>{t}</span>))}</div>
+                {genHead}
+                <button className="lv-col" onClick={closeRightPanel} title="Collapse to a rail">&#8250;</button>
               </div>
               {gen}
             </div>
@@ -3418,7 +4320,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <div className="sb-toolbar">
                 <button className="sb-btn amber sm" onClick={() => copyShot(live)}>Copy shot</button>
               </div>
-              <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); }}>Select in Generate &rarr;</button>
+              {/* The page's dfToDrawer (The Loom.dc.html:1315): select the shot, close, and put
+                  Generate on its Video tab -- and open the panel, which the Loom now starts
+                  with collapsed, so the button always shows what it selected. */}
+              <button className="lv-go" onClick={() => { setSelShot(c.id); setDeepFocus(null); setTab("Video"); openRightPanel(); }}>Select in Generate &rarr;</button>
             </div>
           </div>
         );
@@ -3467,7 +4372,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
    already documents for the desktop board.
    ========================================================================= */
 const LOOM_MOBILE_STYLES = `
-.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+/* Drift 122 (design handoff 2026-09-04, owner device pass 2026-09-28): the phone Loom is sized
+   by the VISIBLE viewport (dvh), like the gallery's phone shells (gallery-mobile.css). inset:0 is
+   the fallback for a browser without dvh; the update strip's height comes off the top because
+   notify.css moves this shell down by it. Its three scroll bodies and two sheets pad their foot
+   by the home indicator, so the last control in each clears it. */
+.lm-root{position:fixed;inset:0;height:calc(100dvh - var(--mg-updbanner-h, 0px));z-index:400;background:var(--mantle);color:var(--text);
   display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 .lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
@@ -3504,7 +4414,7 @@ const LOOM_MOBILE_STYLES = `
   box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
 .lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
   box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
-.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:10;display:flex;align-items:center;
+.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:301;display:flex;align-items:center;
   gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
   box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
 .lm-prevthumb{width:34px;height:34px;border-radius:7px;flex:none;background-size:cover;
@@ -3513,7 +4423,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
 .lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-prevmeta{font-size:9px;color:var(--subtext);}
-.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
@@ -3557,7 +4467,7 @@ const LOOM_MOBILE_STYLES = `
 @keyframes lmSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}
 @keyframes lmFadeIn{from{opacity:0;}to{opacity:1;}}
 @keyframes lmFadeOut{from{opacity:1;}to{opacity:0;}}
-.lm-df{position:absolute;inset:0;z-index:20;background:var(--mantle);display:flex;flex-direction:column;
+.lm-df{position:absolute;inset:0;z-index:302;background:var(--mantle);display:flex;flex-direction:column;
   animation:lmRise .22s ease both;}
 .lm-df-top{flex:none;display:flex;align-items:center;gap:8px;
   padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
@@ -3571,7 +4481,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
   border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
   font-size:13px;padding:0;}
-.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
   margin:10px 0 5px;}
 .lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
@@ -3616,16 +4526,16 @@ const LOOM_MOBILE_STYLES = `
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's 👥 button) ---- */
-.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);
+.lm-scrim{position:absolute;inset:0;z-index:306;background:color-mix(in srgb,color-mix(in oklab,var(--mantle) 64%,black) 60%,transparent);
   animation:lmFadeIn .24s ease both;}
 .lm-scrim.closing{animation:lmFadeOut .28s ease both;}
-.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
+.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:307;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
+  padding:12px 18px calc(16px + env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
-.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(12,10,28,.6);
+.lm-tabsrow{display:flex;gap:4px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--base) 60%,transparent);
   border:1px solid var(--surface1);margin-bottom:10px;}
 .lm-tabbtn{flex:1;text-align:center;padding:7px 4px;border-radius:7px;font:700 11px/1 system-ui;
   cursor:pointer;background:none;border:none;color:var(--subtext);}
@@ -3650,6 +4560,19 @@ const LOOM_MOBILE_STYLES = `
 .lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
 .lm-castlock{font-size:11px;flex:none;}
 .lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
+/* Session P (P7): the cast sheet's Library tab -- the page's tick box (lavender, ✓), round
+   avatar and monospace meta line, in the sheet's own row. */
+.lm-libhead{display:flex;align-items:baseline;gap:6px;padding:2px 4px 6px;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lm-libhead span:first-child{flex:1;}
+.lm-libhead span:last-child{font-size:9.5px;font-weight:400;letter-spacing:0;}
+.lm-libnote{font-size:10px;line-height:1.45;color:var(--overlay0);padding:0 4px 6px;}
+.lm-libnote.warn{color:var(--peach);}
+.lm-librow.busy{opacity:.55;}
+.lm-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lm-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lm-libav{border-radius:50%;}
+.lm-libmeta{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--overlay0);overflow-wrap:anywhere;}
 .lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
 .lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
@@ -3660,7 +4583,7 @@ const LOOM_MOBILE_STYLES = `
 
 /* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
    "Select in Generate →" button, matching the locked design's genOpen full-screen page. ---- */
-.lm-gen{position:absolute;inset:0;z-index:25;background:var(--mantle);display:flex;flex-direction:column;
+.lm-gen{position:absolute;inset:0;z-index:304;background:var(--mantle);display:flex;flex-direction:column;
   animation:lmRise .22s ease both;}
 .lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
   padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
@@ -3669,7 +4592,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-gen-back:hover{color:var(--text);}
 .lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;
   border:1px solid rgba(255,255,255,.3);
   color:color-mix(in oklab,var(--accent) 26%,#08040f);
@@ -3682,6 +4605,12 @@ const LOOM_MOBILE_STYLES = `
 .lm-genbtn:hover{filter:brightness(1.08);}
 .lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
 @media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
+.lm-held{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-unclear{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:8px 10px;border-radius:9px;font-size:11.5px;line-height:1.4;
+  color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);}
+.lm-unclear span{flex:1 1 100%;}
+.lm-unclearbtn{font:600 11px/1 system-ui;padding:7px 10px;border-radius:7px;cursor:pointer;color:var(--peach);
+  background:transparent;border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
   color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
   cursor:pointer;text-align:center;}
@@ -3717,10 +4646,10 @@ const LOOM_MOBILE_STYLES = `
 .lm-genmodelrow{display:flex;align-items:center;padding:8px 10px;border-radius:8px;
   background:var(--base);border:1px solid var(--surface1);font:600 12px/1.2 system-ui;color:var(--text);}
 .lm-genmodelthumb{width:26px;height:26px;border-radius:6px;flex:none;
-  background:linear-gradient(150deg,#643aac 0%,#241f5b 100%);margin-right:8px;}
+  background:linear-gradient(150deg,color-mix(in hsl,var(--surface0) 48%,var(--accent)) 0%,color-mix(in hsl,var(--base) 78%,var(--mauve)) 100%);margin-right:8px;}
 .lm-gencaps{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0;}
 .lm-gencap{font:600 9px/1.2 system-ui;padding:3px 7px;border-radius:5px;
-  border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--subtext);}
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext);}
 .lm-gencost{display:flex;flex-direction:column;gap:2px;margin-top:14px;}
 .lm-gencosttext{font-size:12px;font-weight:700;color:var(--emerald);}
 .lm-gensel{width:100%;box-sizing:border-box;background:var(--base);border:1px solid var(--surface1);
@@ -3795,9 +4724,9 @@ const LOOM_MOBILE_STYLES = `
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
    sheet: <ModelPicker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
-.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
+.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:308;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  padding:12px 16px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-pick-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -3813,7 +4742,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-reviewbadge{position:absolute;top:8px;left:10px;width:48px;height:48px;z-index:2;
   display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
   background:rgba(0,0,0,.28);border:none;border-radius:9px;cursor:pointer;padding:0;}
-.lm-review{position:absolute;inset:0;z-index:22;background:var(--mantle);display:flex;
+.lm-review{position:absolute;inset:0;z-index:303;background:var(--mantle);display:flex;
   flex-direction:column;animation:lmRise .22s ease both;}
 .lm-review-previewwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;
   overflow:hidden;background:var(--base);margin-top:4px;}
@@ -3862,7 +4791,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
   border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
-.lm-fc{position:absolute;inset:0;z-index:26;background:var(--mantle);display:flex;
+.lm-fc{position:absolute;inset:0;z-index:305;background:var(--mantle);display:flex;
   flex-direction:column;animation:lmRise .22s ease both;}
 .lm-fc-previewrow{display:flex;gap:8px;margin:4px 0 16px;}
 .lm-fc-previewcol{flex:1;min-width:0;}
@@ -3894,7 +4823,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-fc-range{width:100%;height:3px;cursor:pointer;}
 .lm-fc-btnrow{display:flex;gap:8px;margin-bottom:10px;}
 .lm-fc-btn{flex:1;text-align:center;padding:11px;border-radius:9px;font:700 11.5px/1 system-ui;
-  cursor:pointer;border:1px solid var(--surface1);background:rgba(33,31,58,.6);color:var(--text);}
+  cursor:pointer;border:1px solid var(--surface1);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--text);}
 .lm-fc-btn.primary{border-color:rgba(255,255,255,.3);background:var(--accent);color:var(--base);}
 .lm-fc-spendnote{font-size:10px;color:var(--overlay0);text-align:center;}
 
@@ -3909,6 +4838,73 @@ const LOOM_MOBILE_STYLES = `
 .lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
   color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
 .lm-actionrow.danger{color:var(--red);border-bottom:none;}
+/* ---- Session P, Stage B2: the phone for P1-P3, P8, P9 (the Handoff page's "Phone:" lines), in this
+   sheet's own language. Loom cyan, lavender for find and the ribbon, peach for a held state;
+   gold stays billing's (the ★ outline is the page's own P1 choice). ---- */
+.lm-actionrow:disabled{color:var(--overlay0);cursor:default;}
+.lm-bedbtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.lm-bedbtn.on{border-color:var(--loomc,#47cbc3);background:color-mix(in srgb,var(--loomc,#47cbc3) 12%,transparent);}
+.lm-bedbtn.busy{opacity:.6;}
+.lm-bednote{font-size:10.5px;color:var(--peach);margin-top:8px;line-height:1.4;}
+.lm-bedhead{font:600 13px/1.3 system-ui;color:var(--text);margin:2px 0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-bedlvl{display:flex;align-items:center;gap:10px;margin:2px 0 8px;}
+.lm-bedlvl input{flex:1;accent-color:var(--loomc,#47cbc3);}
+.lm-bedmono{font:11px/1 ui-monospace,monospace;color:var(--subtext);min-width:52px;text-align:right;}
+.lm-bedfades{font-size:11px;line-height:1.45;color:var(--subtext);margin:2px 0 8px;}
+/* P1: the ★ take's still (swipe it), its takes strip and a take's sheet. */
+.lm-takes{margin:8px 0 12px;}
+.lm-takeprev{position:relative;aspect-ratio:16/9;border-radius:11px;background:var(--base) center/cover no-repeat;
+  border:1px solid var(--surface1);touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;}
+.lm-takeprevlab{position:absolute;left:8px;bottom:7px;font:700 10px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);
+  border-radius:6px;padding:4px 7px;}
+.lm-takeswipe{position:absolute;right:8px;bottom:7px;font:600 9.5px/1 system-ui;color:rgba(255,255,255,.8);background:rgba(0,0,0,.45);
+  border-radius:6px;padding:4px 7px;}
+.lm-takestrip{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.lm-take{width:40px;height:30px;border-radius:6px;border:1px solid var(--surface1);display:grid;place-items:center;
+  font:800 11px/1 system-ui;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);background:var(--surface1) center/cover no-repeat;
+  cursor:pointer;padding:0;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;flex:none;}
+.lm-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lm-takemore{font:700 10px/1 system-ui;color:var(--overlay0);padding:0 2px;}
+.lm-takesheethead{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.lm-takesheettitle{font:600 13px/1.3 system-ui;color:var(--text);}
+/* P2: the peach underline on the scrub reel, the peach card edge, and Re-anchor / Keep. */
+.lm-seg.stale{box-shadow:inset 0 -3px 0 var(--peach);}
+.lm-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lm-stale{display:flex;flex-direction:column;gap:8px;padding:10px 11px;border-radius:11px;margin:0 0 12px;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lm-staletxt{font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-stalebtns{display:flex;gap:8px;}
+.lm-reanchor{font:700 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:none;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lm-reanchor:disabled{opacity:.55;cursor:default;}
+.lm-keep{font:600 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:1px solid var(--surface1);background:none;color:var(--subtext);cursor:pointer;}
+.lm-staleerr{font-size:10.5px;color:var(--peach);}
+.lm-needtake{font-size:11px;line-height:1.4;color:var(--subtext);margin:0 0 12px;}
+/* P8: the ⌕ in the header, the find field under it, and the reel's rings. */
+.lm-findbtn{font-size:12px;padding:5px 9px;}
+.lm-findbtn.open{border-color:var(--lavender);color:var(--lavender);}
+.lm-findbtn.finding{background:color-mix(in srgb,var(--lavender) 16%,transparent);}
+.lm-find{flex:none;display:flex;flex-direction:column;gap:6px;padding:0 16px 8px;}
+.lm-findpill{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 11px;border-radius:999px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 85%,transparent);}
+.lm-findpill.on{border-color:var(--lavender);}
+.lm-findico{font-size:12px;color:var(--overlay0);}
+.lm-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:13px/1.3 system-ui;padding:6px 0;}
+.lm-findin::placeholder{color:var(--overlay0);}
+.lm-findcount{font:10.5px/1 ui-monospace,monospace;color:var(--subtext);white-space:nowrap;}
+.lm-findstep{width:30px;height:30px;border:none;background:none;color:var(--subtext);font-size:13px;cursor:pointer;border-radius:50%;flex:none;}
+.lm-findchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
+.lm-findchip{flex:none;font:600 10.5px/1 system-ui;padding:6px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:none;color:var(--subtext);}
+.lm-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lm-seg{transition:opacity .2s;}
+.lm-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 70%,transparent);outline-offset:-1px;}
+.lm-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;}
+.lm-seg.fdim{opacity:.35;}
+.lm-cardrow{transition:opacity .2s;}
+.lm-cardrow[data-find="dim"]{opacity:.35;}
+.lm-card.fcur{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
+/* P9: the review panel's pair strip. */
+.lm-review .lv-ribbon{margin-top:18px;}
 `;
 
 function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
@@ -3920,6 +4916,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
   // straight through, nothing new invented.
   setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
+  // Session P, Stage B2 (P7, "Phone: the cast sheet gets a Library tab beside Cast & assets /
+  // Footage"): the same cast library view and owner actions LoomV2's Library tab uses.
+  castApi,
+  // Session P, Stage B2 -- the phone for P1-P3 (the page's "Phone:" lines): the takes strip's ★ /
+  // Reuse / Delete, the stale anchor's Re-anchor / Keep (useTakeActions) and the music bed's
+  // pick / level / remove (useBedActions) -- the same board edits the desktop calls, none of
+  // which can render. activeId: another storyboard starts with no find.
+  selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork, bedApi, activeId,
   // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
   // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
   // (useShotMutations) -- not a re-derivation of the split logic.
@@ -3945,6 +4949,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
   // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
   generateShot, priceShot, useExistingVideo,
+  // Session P (review F3/F8): the unclear-send way-out beside the Generate button.
+  recheckSubmit, releaseSubmit,
   // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
   // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
   // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
@@ -4016,7 +5022,12 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // '' | 'wip' | 'err'.
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
-  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage' | 'library' (Session P, P7)
+  // Session P (P7): the Library tab READS the cast library and the other storyboards' ticks when
+  // it shows (and again for another board). A read only; nothing is written.
+  useEffect(() => {
+    if (castSheetOpen && castSheetTab === "library" && castApi) castApi.openCastLibrary();
+  }, [castSheetOpen, castSheetTab]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Sheet-close choreography -- Loom Mobile.dc.html's own *Closing states (lmSheetDown
   // .28s + lmFadeOut on the scrim), absent until 2026-08-06: every close was an instant
   // unmount. Same closing-state + ref-held-timer pattern LoomV2's closeLeftPanel/
@@ -4088,14 +5099,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // Generate screen. "Video" is this screen's pre-existing content (third increment,
   // unchanged below) -- genTab defaults to "Video" to match LoomV2's own default tab.
   const [genTab, setGenTab] = useState("Video");
-  // Credit balance line -- purely a read-only display (matches LoomV2's identical
-  // component-local `acct` state and its own component-local fetch effect below), never
-  // gates a submit. Duplicating this one fetch per view (rather than lifting it) is the
-  // established pattern in this file for non-spend UI chrome (pickerOpen/pickerMounted are
-  // the same kind of per-view local state) -- losing it on a toggle just means one more
-  // free /api/account read next time this screen opens, not a credit-safety concern.
-  const [acct, setAcct] = useState(null);
-  useEffect(() => { fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {}); }, []);
+  // Credit balance line -- purely a read-only display (the same useAccountLine LoomV2 reads),
+  // never gates a submit. One read per view (rather than lifting it) is the established pattern
+  // in this file for non-spend UI chrome (pickerOpen/pickerMounted are the same kind of per-view
+  // local state) -- losing it on a toggle just means one more free /api/account read next time
+  // this screen opens, not a credit-safety concern. Re-read when the Generate screen opens on a
+  // shot (the bind) and whenever a spend lands (owner walk 2026-09-30: it went stale).
+  const acct = useAccountLine(spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState),
+    (genOpen ? "gen:" : "") + String(selShot || ""));
 
   // ---- Model/LoRA picker overlay for the Image tab -- a mobile sheet wrapping the SAME
   // real <ModelPicker> custom element LoomV2's own floating .lv-mpick-veil uses, bound
@@ -4312,21 +5323,23 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // splice-the-last-frame-off-a-rendered-clip endpoint, same closeFrame-copy fallback for a
   // previous shot that hasn't rendered yet), reimplemented here only because that function is
   // a private closure inside LoomV2's own component body, not something this file exports.
+  // Session P (BUILD-w5-p §2.1): records the anchor through splicePatch, exactly as desktop's
+  // inheritPrev does -- the shot and its source captured at the tap.
   const dfInheritPrev = () => {
-    if (!dfPrevEntry) return;
-    const rmid = dfPrevEntry.c.resultMid;
+    if (!dfPrevEntry || !dfLive) return;
+    const target = dfLive, src = dfPrevEntry;
+    const rmid = src.c.resultMid;
     if (rmid) {
       setDfHandoff("wip");
       fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_media_id: rmid, trim_out: dfPrevEntry.c.trimOut }) })
+        body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut }) })
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
           setDfHandoff("");
-          dfPatchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
-            desc: "handed off from " + (dfPrevEntry.code || "prev shot") });
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
         }).catch(() => setDfHandoff("err"));
     } else {
-      dfPatchFrame("openFrame", { ...dfPrevEntry.c.closeFrame });
+      dfPatchFrame("openFrame", { ...src.c.closeFrame });
     }
   };
   // "Finished shots" (Cast sheet's Footage tab): tapping a rendered shot from elsewhere in
@@ -4369,6 +5382,100 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     setActionsClosing(true);
     clearTimeout(actionsCloseTimer.current);
     actionsCloseTimer.current = setTimeout(() => { setActionsOpen(false); setActionsClosing(false); }, 280);
+  };
+
+  /* ---- SESSION P, STAGE B2: THE PHONE FOR P1, P2, P3, P8, P9 (the Handoff page's "Phone:" lines).
+     Every handler here is a board edit through the desktop's own reducers, a selection / find
+     change, or the music bed's local file -- none can price, upload to PixAI or render (roots of
+     loom/test/loom-no-auto-render.test.js; the handlers that share a desktop name are the same
+     root). ---- */
+  const phoneById = new Map(entries.map((x) => [x.c.id, x.c]));
+  const phoneCodeById = new Map(entries.map((x) => [x.c.id, x.code]));
+  const phoneCodeOf = (id) => phoneCodeById.get(id) || "the source shot";
+
+  // P1 -- "a takes strip under the shot sheet's preview; swipe the preview to change take;
+  // long-press to ★". A tap on a chip opens that take's sheet (★ Use / Reuse settings / Delete…,
+  // the sheet's own action rows); a long press stars it; a sideways swipe on the preview stars
+  // the next or previous take. Swiping never renders.
+  const [takeSheet, setTakeSheet] = useState(null);      // {cardId, n} | null
+  const pressRef = useRef({ timer: null, fired: false });
+  useEffect(() => () => clearTimeout(pressRef.current.timer), []);
+  const onTakeChipDown = (cardId, n) => {
+    clearTimeout(pressRef.current.timer);
+    pressRef.current.fired = false;
+    pressRef.current.timer = setTimeout(() => {
+      pressRef.current.fired = true;
+      selectTakeOnCard(cardId, n);
+      try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { /* no haptics here */ }
+    }, LONG_PRESS_MS);
+  };
+  const onTakeChipUp = () => { clearTimeout(pressRef.current.timer); };
+  const onTakeChipTap = (cardId, n) => {
+    if (pressRef.current.fired) { pressRef.current.fired = false; return; }   // that was the long press
+    setTakeSheet({ cardId, n });
+  };
+  const swipeRef = useRef(null);
+  const onTakeSwipeStart = (ev) => { swipeRef.current = { x: ev.clientX, y: ev.clientY }; };
+  const onTakeSwipeEnd = (ev, card) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || !card) return;
+    const n = adjacentTakeN(card, swipeDir(ev.clientX - s.x, ev.clientY - s.y));
+    if (n != null) selectTakeOnCard(card.id, n);
+  };
+  const takeSheetLive = takeSheet ? (() => {
+    const c = phoneById.get(takeSheet.cardId);
+    const t = c ? takesOf(c).find((x) => x.n === takeSheet.n) : null;
+    return c && t ? { c, t, selN: selectedTakeOf(c) } : null;
+  })() : null;
+  if (takeSheet && !takeSheetLive) { setTakeSheet(null); }
+
+  // P3 -- "'♪ Bed' in the review panel picks a file; the level and fades are in a sheet."
+  const [bedSheet, setBedSheet] = useState(false);
+  const openBedSheet = () => setBedSheet(true);
+  const phoneBed = bedOf(project);
+
+  // P8 -- "a ⌕ in the Loom header; matches highlight on the scrub reel". The same find core as the
+  // desktop; the chips ride under the field. Stepping selects the shot and scrolls to its card.
+  const [findOpen, setFindOpen] = useState(false);
+  const [find, setFind] = useState(emptyFind);
+  useEffect(() => { setFind(emptyFind()); }, [activeId]);
+  const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
+    || unsendableRefs(buildShotPayload(e, project, imgSrc)).length > 0;
+  const findOn = findActive(find);
+  const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: phoneById, statusOf, warn: phoneWarns }) : [];
+  const findSet = new Set(findIds);
+  const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+  const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...(typeof next === "function" ? next(f) : { ...f, ...next }), cur: 0 }));
+  const scrollToPhoneCard = (id) => {
+    const el = typeof document !== "undefined" ? document.querySelector('.lm-card[data-card-id="' + id + '"]') : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  const stepFind = (dir) => {
+    if (!findIds.length) return;
+    const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+    const id = findIds[n];
+    setFind((f) => ({ ...f, cur: n }));
+    setSelShot(id);
+    scrollToPhoneCard(id);
+  };
+  const clearFind = () => { setFind(emptyFind()); };
+  const toggleFindBar = () => {
+    if (findOpen) { setFindOpen(false); clearFind(); } else setFindOpen(true);
+  };
+
+  // P9 -- "a swipeable pair strip in the review panel"; a tap opens both shots, as the desktop
+  // does: the pair's second shot is selected and find narrows to exactly the two (the reel and
+  // the board show them), and the review panel closes onto the board.
+  const openRibbonPair = (pair) => {
+    setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+    setFindOpen(true);
+    setSelShot(pair.b.cardId);
+    closeReview();
+  };
+  const phoneTintOf = (id) => {
+    const x = entries.find((e) => e.c.id === id);
+    return x ? LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length] : LV_TINTS[0];
   };
 
   // ---- Generate screen helpers (third increment, 2026-08-03) ----
@@ -4718,6 +5825,9 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <span className="lm-fill" />
         <span className="lm-title">&#9642; The Loom</span>
         <span className="lm-fill" />
+        {/* Session P (P8, "Phone: a ⌕ in the Loom header"): opens the find field under the bar. */}
+        <button type="button" className={"lm-chip lm-findbtn" + (findOpen ? " open" : "") + (findOn ? " finding" : "")}
+          aria-label="Find in storyboard" aria-expanded={findOpen} title="Find in storyboard" onClick={toggleFindBar}>&#8981;</button>
         <label className={"lm-chip" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />&#9889; Draft</label>
@@ -4729,12 +5839,39 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         <button type="button" className="lm-chip" onClick={() => setMobileUI(false)}
           title="Switch back to the full desktop-style Loom">&#128421; Desktop</button>
       </div>
+      {findOpen && (
+        <div className="lm-find">
+          <div className={"lm-findpill" + (findOn ? " on" : "")}>
+            <span className="lm-findico" aria-hidden="true">&#8981;</span>
+            <input className="lm-findin" value={find.q} autoFocus aria-label="Find in storyboard" enterKeyHint="search"
+              placeholder={find.only && !find.q ? find.only.map(phoneCodeOf).join(" → ") + " (continuity pair)" : "find in storyboard"}
+              onChange={(ev) => runFind({ q: ev.target.value, only: null })}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") { ev.preventDefault(); stepFind(ev.shiftKey ? -1 : 1); }
+                else if (ev.key === "Escape") { ev.preventDefault(); clearFind(); }
+              }} />
+            <span className="lm-findcount">{findCountText(find, findIds.length)}</span>
+            <button type="button" className="lm-findstep" aria-label="Previous match" onClick={() => stepFind(-1)}>&#8593;</button>
+            <button type="button" className="lm-findstep" aria-label="Next match" onClick={() => stepFind(1)}>&#8595;</button>
+            <button type="button" className="lm-findstep" aria-label="Close find" onClick={toggleFindBar}>&#10005;</button>
+          </div>
+          <div className="lm-findchips">
+            {findChips(entries, { statusOf }).map((ch) => (
+              <button type="button" key={ch.kind + ch.key} className={"lm-findchip" + (chipOn(find, ch) ? " on" : "")}
+                aria-pressed={chipOn(find, ch)} onClick={() => runFind((f) => toggleChip(f, ch))}>{ch.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="lm-reelwrap">
         <div className="lm-reelbar"
           onPointerDown={onReelDown} onPointerMove={onReelMove} onPointerUp={onReelUp} onPointerLeave={onReelLeave}>
+          {/* Session P: P2's peach underline for a stale anchor, and P8's rings for find. */}
           {entries.map((x) => (
-            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")}
+            <div key={x.c.id} className={"lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "")
+              + (anchorInfo(x.c, phoneById).state === "stale" ? " stale" : "")
+              + (findOn ? (findSet.has(x.c.id) ? (x.c.id === findCur ? " fcur" : " fmatch") : " fdim") : "")}
               style={{ flex: `${durOf(x.c) || 1} 1 0` }} />
           ))}
         </div>
@@ -4777,9 +5914,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 // invariant silently. Reuses `st` (statusOf(e.c)), already computed above for
                 // the status pill -- one statusOf() call, not a second copy.
                 const canReview = st === "done" && !!e.c.resultMid;
+                // Session P: P2's ⚠ for a stale anchor, and the imported-picture mark the desktop
+                // card carries (open call 4: rendering it is refused before anything is priced).
+                const stalePhone = anchorInfo(e.c, phoneById).state === "stale";
+                const unsendablePhone = unsendableKind(buildShotPayload(e, project, imgSrc));
                 return (
-                  <div key={e.c.id} className="lm-cardrow">
-                    <button type="button" className={"lm-card" + (e.c.id === selShot ? " sel" : "")}
+                  <div key={e.c.id} className="lm-cardrow" data-find={findOn ? (findSet.has(e.c.id) ? "match" : "dim") : undefined}>
+                    <button type="button" data-card-id={e.c.id}
+                      className={"lm-card" + (e.c.id === selShot ? " sel" : "") + (stalePhone ? " stale" : "") + (findOn && e.c.id === findCur ? " fcur" : "")}
                       onClick={() => { setSelShot(e.c.id); setDfOpen(true); }}
                       title="Open this shot — it binds to Generate">
                       <div className="lm-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
@@ -4797,6 +5939,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                           {miss.length > 0 && (
                             <span className="lm-warn" title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt.`}>
                               &#9888; {miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`}
+                            </span>
+                          )}
+                          {stalePhone && (
+                            <span className="lm-warn" title="Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep.">
+                              &#9888; anchor changed
+                            </span>
+                          )}
+                          {unsendablePhone && (
+                            <span className="lm-warn" title={`This shot uses a ${unsendablePhone} imported into your library (not a PixAI ${unsendablePhone}). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.`}>
+                              {unsendablePhone === "picture" ? "imported picture — can't be sent to PixAI yet" : "imported " + unsendablePhone + " — can't be sent to PixAI yet"}
                             </span>
                           )}
                         </div>
@@ -4894,6 +6046,67 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               <button type="button" className="lm-df-close" title="Close" onClick={() => setDfOpen(false)}>&#10005;</button>
             </div>
             <div className="lm-df-body">
+              {(() => {
+                // Session P, Stage B2 -- P1 "a takes strip under the shot sheet's preview; swipe the
+                // preview to change take; long-press to ★" and P2 "the actions are in the shot sheet".
+                // The preview is the ★ take's still; the strip is the desktop card's chips, sized
+                // for a finger. Nothing here renders: ★, Reuse, Delete, Re-anchor and Keep are the
+                // desktop's own board edits.
+                const ts = takesOf(c);
+                const selN = selectedTakeOf(c);
+                const view = selectedTakeView(c);
+                const shown = ts.slice(-6);
+                const older = ts.length - shown.length;
+                const anchor = anchorInfo(c, phoneById);
+                const aw = anchorWork && anchorWork[c.id];
+                return (
+                  <>
+                    {view ? (
+                      <div className="lm-takes">
+                        <div className="lm-takeprev" style={{ backgroundImage: "url(/thumbs/" + view.mid + ".jpg)" }}
+                          onPointerDown={onTakeSwipeStart} onPointerUp={(ev) => onTakeSwipeEnd(ev, c)}
+                          onPointerCancel={() => { swipeRef.current = null; }}
+                          title="Swipe sideways to use the next or previous take">
+                          <span className="lm-takeprevlab">&#9733; take {selN}{ts.length > 1 ? " of " + ts.length : ""}</span>
+                          {ts.length > 1 && <span className="lm-takeswipe">&lsaquo; swipe &rsaquo;</span>}
+                        </div>
+                        <div className="lm-takestrip">
+                          {older > 0 && <span className="lm-takemore">+{older}</span>}
+                          {shown.map((t) => {
+                            const on = t.n === selN;
+                            return (
+                              <button type="button" key={t.id || "t" + t.n} className={"lm-take" + (on ? " on" : "")}
+                                style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}
+                                aria-pressed={on} title={on ? "Take " + t.n + " (selected)" : "Take " + t.n + " · tap for its actions, hold to use it"}
+                                onPointerDown={() => onTakeChipDown(c.id, t.n)} onPointerUp={onTakeChipUp}
+                                onPointerLeave={onTakeChipUp} onPointerCancel={onTakeChipUp}
+                                onContextMenu={(ev) => ev.preventDefault()}
+                                onClick={() => onTakeChipTap(c.id, t.n)}>{on ? "★" : t.n}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="lm-hint">
+                          {(ts.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + ts.length : "Take " + selN + " · " + ts.length + " takes")
+                            + " ★ used by Play · Render · Export"}</div>
+                      </div>
+                    ) : null}
+                    {anchor.state === "stale" && (
+                      <div className="lm-stale" role="status">
+                        <div className="lm-staletxt">&#9888; anchor changed &middot; {staleText(anchor, phoneCodeOf)}</div>
+                        <div className="lm-stalebtns">
+                          <button type="button" className="lm-reanchor" disabled={!!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src)}
+                            onClick={() => reanchorShot(c.id)}>{aw && aw.phase === "wip" ? "Re-anchoring…" : "Re-anchor"}</button>
+                          <button type="button" className="lm-keep" onClick={() => keepAnchor(c.id)}>Keep</button>
+                        </div>
+                        {aw && aw.phase === "err" && <div className="lm-staleerr">{aw.msg}</div>}
+                      </div>
+                    )}
+                    {anchor.state !== "stale" && needsNewTake(c) && (
+                      <div className="lm-needtake">Open frame updated. Render a new take to match it.</div>
+                    )}
+                  </>
+                );
+              })()}
               <span className="lm-microlab">Mode</span>
               <div className="lm-modechips">
                 {MODES.map((m) => (
@@ -5003,8 +6216,43 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                       onClick={() => setCastSheetTab("cast")}>Cast &amp; assets</button>
                     <button type="button" className={"lm-tabbtn" + (castSheetTab === "footage" ? " on" : "")}
                       onClick={() => setCastSheetTab("footage")}>Footage</button>
+                    {castApi && <button type="button" className={"lm-tabbtn" + (castSheetTab === "library" ? " on" : "")}
+                      onClick={() => setCastSheetTab("library")}>Library</button>}
                   </div>
-                  {castSheetTab === "cast" ? (
+                  {castSheetTab === "library" && castApi ? (() => {
+                    // Session P (P7): the page's cast library rows, in the sheet's own language. A
+                    // tap ticks / unticks (the same confirm, naming the shots, as desktop).
+                    const rows = libraryRows(castApi.lib, project, castApi.others);
+                    return (
+                      <>
+                        <div className="lm-libhead"><span>&#128100; CAST LIBRARY</span><span>tick = in this storyboard</span></div>
+                        {castApi.libNote ? <div className={"lm-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
+                        {rows.map((row) => {
+                          const src = frameSrc(row.picture);
+                          return (
+                            <button type="button" key={row.key} className={"lm-castrow lm-librow" + (castApi.working === row.key ? " busy" : "")}
+                              role="checkbox" aria-checked={row.ticked} disabled={!!castApi.working}
+                              onClick={() => castApi.toggleCastTick(row)}>
+                              <span className={"lm-libbox" + (row.ticked ? " on" : "")}>{row.ticked ? "✓" : ""}</span>
+                              <div className="lm-castthumb lm-libav" style={src ? { backgroundImage: `url(${src})` } : undefined}>
+                                {!src && (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}
+                              </div>
+                              <div className="lm-castcol">
+                                <div className="lm-castname">{row.name || row.kind}{row.lock ? " 🔒" : ""}</div>
+                                <div className="lm-libmeta">{rowMeta(row)}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {!rows.length && <div className="lm-empty">{castApi.libPhase === "reading" ? "Reading your cast library…" : "No cast yet."}</div>}
+                        <div className="lm-castaddrow">
+                          <button type="button" className="lm-addrefbtn" disabled={!!castApi.working}
+                            onClick={() => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)}>
+                            + Add</button>
+                        </div>
+                      </>
+                    );
+                  })() : castSheetTab === "cast" ? (
                     <>
                       {!modeSendsRefs(c.mode) ? (
                         <div className="lm-i2vnote">{modeSendsLine(c.mode)}</div>
@@ -5067,6 +6315,40 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 </div>
               </>
             )}
+
+            {/* Session P (P1): ONE TAKE'S SHEET -- a tapped chip's ★ Use / Reuse settings / Delete…
+                in the sheet's own action rows (the desktop take list's buttons and rules). */}
+            {takeSheetLive && takeSheetLive.c.id === c.id && (() => {
+              const { t, selN } = takeSheetLive;
+              const on = t.n === selN;
+              const tv = on ? (selectedTakeView(c) || t) : t;
+              const shut = () => setTakeSheet(null);
+              return (
+                <>
+                  <div className="lm-scrim" onClick={shut} />
+                  <div className="lm-sheet" role="dialog" aria-label={"Take " + t.n + " of " + dfLive.code}>
+                    <div className="lm-sheethandle" />
+                    <div className="lm-takesheethead">
+                      <span className={"lm-take" + (on ? " on" : "")} aria-hidden="true"
+                        style={tv.mid ? { backgroundImage: "url(/thumbs/" + tv.mid + ".jpg)" } : undefined}>{on ? "★" : t.n}</span>
+                      <div>
+                        <div className="lm-takesheettitle">{dfLive.code} &middot; take {t.n}{on ? " · ★ in use" : ""}</div>
+                        <div className="lm-hint">{takeWhen(tv)} &middot; {takeSummary(tv)}</div>
+                      </div>
+                    </div>
+                    <button type="button" className="lm-actionrow" disabled={on}
+                      onClick={() => { selectTakeOnCard(c.id, t.n); shut(); }}>&#9733; {on ? "In use for Play, Render and Export" : "Use this take"}</button>
+                    <button type="button" className="lm-actionrow" disabled={!tv.settings}
+                      onClick={() => { reuseTakeSettings(c.id, t.n); shut(); }}>
+                      Reuse settings{tv.settings ? "" : " — none were recorded for this take"}</button>
+                    <button type="button" className="lm-actionrow danger" disabled={on}
+                      onClick={() => { deleteTakeOnCard(c.id, t.n); shut(); }}>
+                      {on ? "Delete… — select another take first" : "Delete take " + t.n + "… (its clip stays in your library)"}</button>
+                    <button type="button" className="lm-sheetclose" onClick={shut}>Cancel</button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         );
       })()}
@@ -5095,7 +6377,10 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         // auto-poll has genuinely stopped, so a manual attach/re-submit isn't racing a live
         // network call).
         const gsSelf = genState[c.id];
-        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+        // Session P: the shot's own render markers decide too (goBlocked, the same gate the
+        // desktop drawer uses) -- a send that is out or unclear keeps Generate off.
+        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused")
+          || goBlocked(c, !!(gsSelf && gsSelf.phase === "paused"));
         // usesCloseFrame (loom-core.js): I2V consumes only the opening frame; FLF/R2V/V2V
         // all reserve a closing-frame slot when one resolves -- the SAME predicate
         // shotImageRefs()/the Cast sheet's own modeSendsRefs already gate on, not a second,
@@ -5118,12 +6403,15 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   onClick={() => setGenTab(t)}>{t}</button>
               ))}
             </div>
-            {acct && (
-              <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
-                &#9889; {acct.credits == null ? "—" : acct.credits} credits &middot; {acct.cards || 0} card{acct.cards === 1 ? "" : "s"}
-                {acct.claim_credits ? <span style={{ color: "var(--gold)" }}> &middot; +{acct.claim_credits} claimable</span> : null}
-              </div>
-            )}
+            {acct && (() => {
+              const bal = balanceLine(acct);
+              return (
+                <div className="lm-bal" style={{ margin: "0 16px 8px" }}>
+                  &#9889; {bal.credits} credits &middot; {bal.cards}
+                  {bal.claim ? <span style={{ color: "var(--gold)" }}> &middot; {bal.claim}</span> : null}
+                </div>
+              );
+            })()}
             <div className="lm-gen-body">
             {genTab === "Image" && (() => {
               const gi = genImgState[c.id] || {};
@@ -5647,8 +6935,19 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   submit in this file. No new endpoint, no new price math, no new confirm
                   dialog belongs to this screen. */}
               <button type="button" className="lm-genbtn" disabled={genBusy || genSubmitting || gp.noInput} onClick={genSubmit}>
-                {genBusy ? "already rendering…" : genSubmitting ? "submitting…" : "Generate video"}
+                {genBusy ? (sendUnclear(c) ? "not confirmed yet — see below" : "already rendering…") : genSubmitting ? "submitting…" : "Generate video"}
               </button>
+              {/* Session P: why a render did not go out, and the way out of an unclear send --
+                  peach, beside the button that would send it. */}
+              {sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? (
+                <div className="lm-unclear" role="status">
+                  <span>The server didn't confirm this render. Check Activity before rendering again.</span>
+                  <button type="button" className="lm-unclearbtn" onClick={() => recheckSubmit(c.id)}>&#8635; Check</button>
+                  <button type="button" className="lm-unclearbtn" onClick={() => releaseSubmit(c.id)}>I checked Activity — release this shot</button>
+                </div>
+              ) : (gsSelf && gsSelf.held && gsSelf.msg ? <div className="lm-held" role="status">{gsSelf.msg}</div>
+                : (unsendableKind(buildShotPayload(dfLive, project, imgSrc))
+                  ? <div className="lm-held" role="status">Imported {unsendableKind(buildShotPayload(dfLive, project, imgSrc))} — it can't be sent to PixAI yet.</div> : null))}
               {/* useExistingVideo -- the SAME real, already-shipped attach-without-generating
                   path LoomV2's own board already offers (no spend, no PixAI task). */}
               <button type="button" className="lm-genexisting" disabled={genBusy}
@@ -5910,8 +7209,53 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                 <button type="button" className="lm-addrefbtn" style={{ whiteSpace: "nowrap" }} onClick={doSplit}>&#9986; Split at playhead</button>
                 <button type="button" className={"lm-review-cropbtn" + (reviewCropping ? " on" : "")}
                   onClick={() => setReviewCropping((v) => !v)}>&#9974; {reviewCropping ? "Done" : "Crop"}</button>
+                {/* Session P (P3, "Phone: '♪ Bed' in the review panel picks a file; the level and
+                    fades are in a sheet"): no bed yet -> it picks a file (kept on this machine,
+                    never uploaded to PixAI); a bed -> its sheet. */}
+                {bedApi && (phoneBed ? (
+                  <button type="button" className="lm-addrefbtn lm-bedbtn on" onClick={openBedSheet}
+                    title={"Music bed: " + phoneBed.name + " — level and fades"}>&#9834; Bed</button>
+                ) : (
+                  <label className={"lm-addrefbtn lm-bedbtn" + (bedApi.bedWork.phase === "wip" ? " busy" : "")}
+                    title="Add one audio file under the whole cut — kept on this machine, never uploaded to PixAI">
+                    {bedApi.bedWork.phase === "wip" ? "♪ Adding…" : "♪ Bed"}
+                    <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }} disabled={bedApi.bedWork.phase === "wip"}
+                      onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) bedApi.pickBed(f); }} />
+                  </label>
+                ))}
               </div>
+              {bedApi && bedApi.bedWork.phase === "err" && <div className="lm-bednote" role="status">{bedApi.bedWork.msg}</div>}
+
+              {/* Session P (P9, "Phone: a swipeable pair strip in the review panel"): the same
+                  continuity ribbon as the desktop's full timeline, one pair per cut; a tap opens
+                  both shots on the board. */}
+              <RibbonStrip compact pairs={ribbonPairs(entries, phoneById)} tintOf={phoneTintOf} onOpen={openRibbonPair} />
             </div>
+
+            {bedSheet && phoneBed && bedApi && (
+              <>
+                <div className="lm-scrim" onClick={() => setBedSheet(false)} />
+                <div className="lm-sheet" role="dialog" aria-label="Music bed">
+                  <div className="lm-sheethandle" />
+                  <div className="lm-bedhead">&#9834; {phoneBed.name}{phoneBed.dur ? " · " + bedClock(phoneBed.dur) : ""}</div>
+                  <span className="lm-microlab">Level</span>
+                  <div className="lm-bedlvl">
+                    <input type="range" min={BED_DB_MIN} max={BED_DB_MAX} step={1} value={phoneBed.db} aria-label="Music bed level"
+                      onChange={(ev) => bedApi.setBedLevel(ev.target.value)} />
+                    <span className="lm-bedmono">{dbLabel(phoneBed.db)}</span>
+                  </div>
+                  <span className="lm-microlab">Fades</span>
+                  <div className="lm-bedfades">2 s in &middot; 3 s out &middot; ducks &minus;12 dB under shots with their own audio. A bed longer than the cut ends with the cut; a shorter one doesn't loop.</div>
+                  <label className="lm-actionrow">Pick a different file&hellip;
+                    <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }}
+                      onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) bedApi.pickBed(f); }} />
+                  </label>
+                  <button type="button" className="lm-actionrow danger" onClick={() => { bedApi.removeBed(); setBedSheet(false); }}>
+                    Remove the music bed (its file stays on this machine)</button>
+                  <button type="button" className="lm-sheetclose" onClick={() => setBedSheet(false)}>Done</button>
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
@@ -6037,14 +7381,233 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
 
 // ---- 1. useProjectStore: multi-project CRUD + persistence ----
 function useProjectStore(setSelShot) {
-  const [project, setProject] = useState(null);
+  const [project, setProjectState] = useState(null);
   const [thumbs, setThumbs] = useState({});
   const [busy, setBusy] = useState(false);
-  const [activeId, setActiveId] = useState(null);   // id of the open storyboard (multi-project store)
+  const [activeId, setActiveIdState] = useState(null);   // id of the open storyboard (multi-project store)
   const [projList, setProjList] = useState([]);     // [{id,name,shots}] for the switcher
   const [projMenu, setProjMenu] = useState(false);  // switcher dropdown open?
+  // Session P (review F15): the boot read failed in a way that must not be papered over with a
+  // seed -- the list failed, or no listed board would read. App shows an honest "couldn't read
+  // your storyboards" state with a Reload button instead of the eternal "Loading the bay…".
+  const [loadError, setLoadError] = useState("");
   const saveTimer = useRef(null);
   const castImported = useRef(false);
+  const shotsImported = useRef(false);     // the "as shots" hand-off is read once (Session P, P5)
+
+  /* THE CURRENT BOARD, READABLE SYNCHRONOUSLY (Session P, BUILD-w5-p §3.3). The render latch
+     reads the card it is about to lock from here, never from a render's closure, and the lock
+     flush saves exactly what this holds. So every write goes through setProject below, which
+     applies an updater to this ref at the moment it is dispatched (in dispatch order -- the
+     same order React would apply it) and hands React the resulting VALUE. A reducer passed to
+     setProject therefore runs exactly once, immediately, against the latest board: the ref
+     can never lag a queued update, and a value computed from the ref can never clobber one. */
+  const projectRef = useRef(null);
+  const setProject = useCallback((next) => {
+    const v = typeof next === "function" ? next(projectRef.current) : next;
+    projectRef.current = v;
+    setProjectState(v);
+  }, []);
+  // Which board a landing belongs to (review F4): pollShot and the drawer's events compare
+  // against this, and patch nothing when another board is open.
+  const activeIdRef = useRef(null);
+  const setActiveId = useCallback((id) => { activeIdRef.current = id; setActiveIdState(id); }, []);
+
+  /* THE BOARD SAVE QUEUE (Session P, BUILD-w5-p §3.5, review F5/F6). ONE per page: every board
+     write -- the 600 ms autosave, flushSave on a switch, the render lock's flush, the write of
+     a two-tab merge -- goes through it, so one tab never conflicts with itself and each write
+     carries the rev the one before it produced. `lastSaved` holds, per board key, the exact
+     text last read or written: the autosave writes only when the board differs from it, which
+     is what makes opening, switching and re-rendering write nothing (§1.2). */
+  const lastSavedRef = useRef({});         // PPRE+id -> the board text last read or written
+  const pendingLocalRef = useRef({});      // PPRE+id -> the newest board this tab asked to save
+  const queueRef = useRef(null);
+  if (!queueRef.current) {
+    queueRef.current = makeSaveQueue(async (k, json, baseRev) => {
+      const r = await writeBoard(k, json, baseRev);
+      if (r && r.ok) lastSavedRef.current[k] = json;   // what was really written (saves collapse)
+      return r;
+    });
+  }
+  // Submits this tab saw end (refused, released, failed, landed): a two-tab merge never
+  // brings their markers back (review F6a).
+  const resolvedRef = useRef(new Set());
+  const noteResolved = useCallback((sid) => { if (sid) resolvedRef.current.add(String(sid)); }, []);
+  // One merge per conflict answer: the queue answers every write that was built on the same
+  // stale board with the SAME conflict object, and only one of them may merge and re-save.
+  const mergesRef = useRef(new WeakMap());
+
+  const namesOf = (p, ids) => {
+    const codes = {};
+    (p ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
+    return ids.map((id) => codes[id]).filter(Boolean);
+  };
+  // A save answered 409: another tab saved this board first. Merge (the other tab's board
+  // wins every field except takes and in-flight markers), show it, save it on the rev the
+  // conflict handed back, and say what moved (open call 14, review F6).
+  const mergeAfterConflict = async (id, res, depth) => {
+    const key = PPRE + id;
+    if (res.value == null || res.rev === "unreadable") {
+      // Deleted in another tab, or its file went unreadable: never write over either one.
+      storeFailed("write", key, new Error("the storyboard changed elsewhere and could not be merged"));
+      return { failed: true, conflict: true };
+    }
+    let remote = null;
+    try { remote = JSON.parse(res.value); } catch (e) { remote = null; }
+    if (!isBoard(remote)) {
+      storeFailed("write", key, new Error("the other tab's storyboard did not parse"));
+      return { failed: true, conflict: true };
+    }
+    const open = activeIdRef.current === id;
+    const local = open ? projectRef.current : pendingLocalRef.current[key];
+    // `base`: the board this tab last read or wrote -- what tells a shot deleted elsewhere (or a
+    // stale split half) from footage that landed here (red team 2026-10-01).
+    let base = null;
+    try { base = lastSavedRef.current[key] ? JSON.parse(lastSavedRef.current[key]) : null; } catch (e) { base = null; }
+    const { project: merged, changed } = mergeBoards(local, remote,
+      { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null });
+    if (open) setProject(merged);
+    if (typeof window !== "undefined" && window.Toast) {
+      const codes = namesOf(merged, changed.map((x) => x.id));
+      window.Toast.show({ kind: "err", title: "This storyboard changed in another tab",
+        msg: "Your takes were kept; other edits from this tab were replaced."
+          + (codes.length ? " ★ or take numbers changed on " + codes.join(", ") + "." : "") });
+    }
+    const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
+    if (again.ok) return { conflict: true, remote, merged, saved: true };
+    if (again.conflict && depth < 2) {
+      const next = await handleConflict(id, again, depth + 1);
+      return { ...next, conflict: true, remote: next.remote || remote };
+    }
+    if (again.failed) storeFailed("write", key, again.error);
+    return { conflict: true, remote, merged, failed: true };
+  };
+  const handleConflict = (id, res, depth) => {
+    let pr = mergesRef.current.get(res);
+    if (!pr) { pr = mergeAfterConflict(id, res, depth || 0); mergesRef.current.set(res, pr); }
+    return pr;
+  };
+  /** Save board `id` through the queue. Skips when the text is what was last read or written.
+   *  -> {ok} | {conflict, remote, merged, saved?|failed?} | {failed} */
+  const persistBoard = useCallback(async (id, p) => {
+    if (!hasStore || !id || !p) return { ok: true, skipped: true };
+    const key = PPRE + id;
+    const json = JSON.stringify(p);
+    if (!shouldSave(json, lastSavedRef.current[key])) return { ok: true, skipped: true };
+    pendingLocalRef.current[key] = p;
+    const res = await queueRef.current.save(key, json);
+    if (res.ok) return { ok: true };
+    if (res.conflict) return handleConflict(id, res, 0);
+    storeFailed("write", key, res.error);
+    return { failed: true };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /** Save the OPEN board now, from the ref (the render lock's flush, a switch's flush): the
+   *  pending autosave is cancelled first so it can never land an older board after this. */
+  const saveBoardNow = useCallback(async (id) => {
+    clearTimeout(saveTimer.current);
+    if (!id || activeIdRef.current !== id) return { ok: true, skipped: true };
+    return persistBoard(id, projectRef.current);
+  }, [persistBoard]);
+
+  /** Read one board: {p, rev} | {missing} | {failed, unreadable?}. Never writes. */
+  const readBoard = async (id) => {
+    const got = await sGetX(PPRE + id);
+    if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+    if (got.missing) return { missing: true };
+    let p = null;
+    try { p = JSON.parse(got.value); } catch (e) { p = null; }
+    return isBoard(p) ? { p, rev: got.rev } : { failed: true, unreadable: true };
+  };
+  /** Show a board that was just read (or just created): record its rev and the text it was
+   *  read as, so the autosave sees nothing to write (nothing writes on open). */
+  const showBoard = (id, p, rev) => {
+    const key = PPRE + id;
+    if (rev !== undefined) queueRef.current.setRev(key, rev);
+    lastSavedRef.current[key] = JSON.stringify(p);
+    setActiveId(id); setProject(p);
+  };
+
+  /* THE CAST LIBRARY'S STORAGE (Session P, NOTES P7). One account-side value, CASTLIB_KEY,
+     read when the Library view opens and written ONLY by an owner action (a tick that brings a
+     storyboard-only member into the library, an edit, + Add, the gallery's cast hand-off) --
+     always a compare-and-swap through the SAME queue as the boards, so one write is in flight
+     per key and window.storage.set keeps its one CAS caller (writeBoard). A 409 re-applies the
+     ONE edit being made to the value the conflict handed back and writes once more; a second
+     conflict writes nothing and says so. A library that will not read is never written over.
+     Reading it writes nothing. */
+  const [castLib, setCastLib] = useState(null);      // {lib, rev} as last read or written
+  const castLibRef = useRef(null);
+  const noteCastLib = (v) => { castLibRef.current = v; setCastLib(v); };
+  const readCastLibrary = useCallback(async () => {
+    if (!hasStore) return { failed: true };
+    const got = await sGetX(CASTLIB_KEY);
+    if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+    const lib = parseLibrary(got.missing ? null : got.value);
+    if (!lib) return { failed: true, unreadable: true };
+    const v = { lib, rev: got.rev };
+    noteCastLib(v);
+    return v;
+  }, []);
+  const writeCastLibrary = useCallback(async (apply) => {
+    let cur = castLibRef.current;
+    if (!cur) {
+      const r = await readCastLibrary();
+      if (r.failed) return { failed: true, msg: r.unreadable ? "The cast library didn't read, so nothing was written over it." : "The cast library couldn't be read." };
+      cur = r;
+    }
+    const next = apply(cur.lib);
+    if (next === cur.lib) return { ok: true, lib: cur.lib };
+    let res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(next), { baseRev: cur.rev });
+    let wrote = next;
+    if (res.conflict) {
+      // Another tab wrote the library first: re-apply this one edit to what it wrote, once.
+      const remote = res.rev === "unreadable" ? null : parseLibrary(res.value);
+      if (!remote) return { failed: true, msg: "The cast library changed elsewhere and didn't read, so nothing was written over it." };
+      wrote = apply(remote);
+      if (wrote === remote) { noteCastLib({ lib: remote, rev: res.rev }); return { ok: true, lib: remote }; }
+      res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(wrote), { baseRev: res.rev });
+      if (res.conflict) return { failed: true, msg: "The cast library changed in another tab again, so nothing more was written. Try once more." };
+    }
+    if (!res.ok) return { failed: true, msg: "The cast library couldn't be saved. Nothing changed." };
+    noteCastLib({ lib: wrote, rev: res.rev });
+    return { ok: true, lib: wrote };
+  }, [readCastLibrary]);
+  /** Every OTHER storyboard as read now: {boards:[{id, name, project, rev}], unread:[id]}.
+   *  A read only -- "in N storyboards" and an edit's other copies come from here. */
+  const readOtherBoards = useCallback(async (exceptId) => {
+    if (!hasStore) return { boards: [], unread: [] };
+    const listed = await sListX(PPRE);
+    if (listed.failed) return { boards: [], unread: [], failed: true };
+    const boards = [], unread = [];
+    for (const k of listed.keys) {
+      const id = k.slice(PPRE.length);
+      if (id === exceptId) continue;
+      const r = await readBoard(id);
+      if (r.p) boards.push({ id, name: r.p.name || "Untitled", project: r.p, rev: r.rev });
+      else if (!r.missing) unread.push(id);
+    }
+    return { boards, unread };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** Write `apply(board)` to a storyboard that is NOT open here, compare-and-swap on the rev it
+   *  was read at; a conflict re-applies to the board the conflict handed back, once.
+   *  -> {ok, skipped?} | {failed, conflict?, gone?} */
+  const saveOtherBoard = useCallback(async (id, p, rev, apply) => {
+    const key = PPRE + id;
+    const next = apply(p);
+    if (next === p) return { ok: true, skipped: true };
+    let res = await queueRef.current.save(key, JSON.stringify(next), { baseRev: rev });
+    if (res.conflict) {
+      let remote = null;
+      try { remote = res.value == null ? null : JSON.parse(res.value); } catch (e) { remote = null; }
+      if (!isBoard(remote)) return { failed: true, gone: res.value == null };
+      const again = apply(remote);
+      if (again === remote) return { ok: true, skipped: true };
+      res = await queueRef.current.save(key, JSON.stringify(again), { baseRev: res.rev });
+      if (res.conflict) return { failed: true, conflict: true };
+    }
+    return res.ok ? { ok: true } : { failed: true };
+  }, []);
 
   // ---- Multi-project store: each storyboard lives at PPRE+id; ACTIVE_KEY names the open one.
   //      The legacy single project (PKEY) is migrated in as the first storyboard on first load. ----
@@ -6059,88 +7622,142 @@ function useProjectStore(setSelShot) {
     out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     setProjList(out); return out;
   }, []);
-  const flushSave = useCallback(async (id, p) => { if (hasStore && id && p) await sSet(PPRE + id, JSON.stringify(p)); }, []);
+  // Before switching away from a board: its pending edits are saved now, through the queue.
+  const flushSave = useCallback(async (id) => saveBoardNow(id), [saveBoardNow]);
 
-  useEffect(() => {
-    (async () => {
-      if (!hasStore) { setProject(seedProject()); return; }
-      let keys = await sList(PPRE);
-      if (!keys.length) {                                  // one-time migration of the legacy single project
-        const legacy = await sGet(PKEY);
-        const id = uid();
-        await sSet(PPRE + id, legacy || JSON.stringify(seedProject()));
-        await sSet(ACTIVE_KEY, id);
-        keys = [PPRE + id];
+  /* THE BOOT PATH, as a named function the mount effect calls (the never-auto-render test
+     roots it by name). Session P (BUILD-w5-p §1.2, review F15): it reads, and it writes only
+     in the one case that cannot lose anything -- a listing that SUCCEEDED and came back empty
+     gets today's one-time migration of the legacy single project (or a seed when there was
+     none). A failed listing, a failed legacy read, or a listed board that is missing,
+     unreadable or failed to read is NEVER written over: the next readable board opens
+     instead, and when none reads the owner is told so, with no board and no seed. */
+  const loadBoards = async () => {
+    if (!hasStore) { setProject(seedProject()); return; }
+    const listed = await sListX(PPRE);
+    if (listed.failed) { setLoadError("list"); return; }
+    let keys = listed.keys;
+    if (!keys.length) {                                  // one-time migration of the legacy single project
+      const legacy = await sGetX(PKEY);
+      if (legacy.failed) { setLoadError("legacy"); return; }
+      let first = null;
+      if (!legacy.missing) {
+        try { first = JSON.parse(legacy.value); } catch (e) { first = null; }
+        if (!isBoard(first)) { setLoadError("legacy"); return; }
       }
-      /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
-         (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
-         articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
-         back to; a bare /loom still opens the last one you had open, exactly as it always
-         has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
-         being the truth.
+      const id = uid();
+      queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+      pendingLocalRef.current[PPRE + id] = first || seedProject();
+      await queueRef.current.save(PPRE + id, JSON.stringify(pendingLocalRef.current[PPRE + id]));
+      await sSet(ACTIVE_KEY, id);
+      keys = [PPRE + id];
+    }
+    /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
+       (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
+       articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
+       back to; a bare /loom still opens the last one you had open, exactly as it always
+       has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
+       being the truth.
 
-         ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
-         exists, the pointer is rewritten FROM it immediately, so the two can never drift
-         into disagreeing -- the class of bug the library's own one-builder rule exists to
-         prevent.
+       ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
+       exists, the pointer is rewritten FROM it immediately, so the two can never drift
+       into disagreeing -- the class of bug the library's own one-builder rule exists to
+       prevent.
 
-         AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
-         app's ordinary corner note saying so. No blank page, no invented screen -- and the
-         address self-corrects to the board actually open (the effect below), so the wrong id
-         does not sit in the bar pretending. */
-      const wantedBoard = readBoardId(location.search);
-      let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
-      let boardMiss = "";
-      if (aid) {
-        await sSet(ACTIVE_KEY, aid);
-      } else {
-        if (wantedBoard) boardMiss = wantedBoard;
-        aid = await sGet(ACTIVE_KEY);
-        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
-      }
-      let p = null; try { const raw = await sGet(PPRE + aid); if (raw) p = JSON.parse(raw); } catch {}
-      if (!p) { p = seedProject(); await sSet(PPRE + aid, JSON.stringify(p)); }
-      setActiveId(aid); setProject(p);
-      if (boardMiss && typeof window !== "undefined" && window.Toast) {
+       AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
+       app's ordinary corner note saying so. No blank page, no invented screen -- and the
+       address self-corrects to the board actually open (the effect below), so the wrong id
+       does not sit in the bar pretending. */
+    const wantedBoard = readBoardId(location.search);
+    let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
+    let boardMiss = "";
+    if (aid) {
+      await sSet(ACTIVE_KEY, aid);
+    } else {
+      if (wantedBoard) boardMiss = wantedBoard;
+      aid = await sGet(ACTIVE_KEY);
+      if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+    }
+    // Read the chosen board; a listed key that will not read is skipped, NEVER seeded (F15c).
+    const order = [aid].concat(keys.map((k) => k.slice(PPRE.length)).filter((x) => x !== aid));
+    let opened = null;
+    for (const id of order) {
+      const r = await readBoard(id);
+      if (r.p) { opened = { id, p: r.p, rev: r.rev }; break; }
+    }
+    if (!opened) { setLoadError("read"); return; }
+    showBoard(opened.id, opened.p, opened.rev);
+    const p = opened.p;
+    if (typeof window !== "undefined" && window.Toast) {
+      if (opened.id !== aid) {
+        window.Toast.show({
+          kind: "err", title: "A storyboard couldn't be read",
+          msg: "The storyboard you last had open didn't read, so nothing was written over it. "
+             + "Opened “" + (p.name || "Untitled") + "” instead. Check the server, then reload.",
+        });
+      } else if (boardMiss) {
         window.Toast.show({
           kind: "err", title: "No storyboard at that address",
           msg: "The address asked for “" + boardMiss + "”, which this account has no "
              + "storyboard for. Opened “" + (p.name || "Untitled") + "” instead.",
         });
       }
-      const tkeys = await sList(TPRE); const map = {};
-      for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
-      setThumbs(map);
-      readProjList();
-    })();
-  }, []);
+    }
+    const tkeys = await sList(TPRE); const map = {};
+    for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
+    setThumbs(map);
+    readProjList();
+  };
+  useEffect(() => { loadBoards(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Opening a board READS it (sGetX) and writes nothing; a board that will not read leaves
+  // the current one open and says so.
   const openProject = useCallback(async (id) => {
-    if (!id || id === activeId) { setProjMenu(false); return; }
-    await flushSave(activeId, project);
-    let p = null; try { const raw = await sGet(PPRE + id); if (raw) p = JSON.parse(raw); } catch {}
-    if (!p) return;
+    if (!id || id === activeIdRef.current) { setProjMenu(false); return; }
+    await flushSave(activeIdRef.current);
+    await queueRef.current.idle(PPRE + id);
+    const r = await readBoard(id);
+    if (!r.p) {
+      setProjMenu(false);
+      if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't open that storyboard",
+        msg: (r.missing ? "It is no longer there (deleted in another tab?)." : "It couldn't be read.")
+           + " Your current storyboard stays open, unchanged." });
+      return;
+    }
     await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false);
-  }, [activeId, project, flushSave, setSelShot]);
+    showBoard(id, r.p, r.rev); setSelShot(null); setProjMenu(false);
+  }, [flushSave, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // A brand-new key is written against the "missing" revision, so even its first save is a
+  // compare-and-swap. showBoard then records the text; the queue already holds the new rev.
+  const createBoard = async (p) => {
+    const id = uid();
+    queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+    await persistBoard(id, p);
+    await sSet(ACTIVE_KEY, id);
+    showBoard(id, p);
+    return id;
+  };
   const newProject = useCallback(async () => {
-    await flushSave(activeId, project);
-    const id = uid(); const p = seedProject(); p.name = "New storyboard";
-    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false); readProjList();
-  }, [activeId, project, flushSave, readProjList, setSelShot]);
+    await flushSave(activeIdRef.current);
+    const p = seedProject(); p.name = "New storyboard";
+    await createBoard(p);
+    setSelShot(null); setProjMenu(false); readProjList();
+  }, [flushSave, readProjList, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // The copy never carries a render in flight (review F4): its shots' renders belong to the
+  // original, so a landing can never turn into a phantom take here.
   const duplicateProject = useCallback(async () => {
-    await flushSave(activeId, project);
-    const id = uid(); const p = { ...project, name: (project.name || "Untitled") + " copy" };
-    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setProjMenu(false); readProjList();
-  }, [activeId, project, flushSave, readProjList]);
+    await flushSave(activeIdRef.current);
+    const cur = projectRef.current;
+    const p = stripInFlight({ ...cur, name: (cur.name || "Untitled") + " copy" });
+    await createBoard(p);
+    setProjMenu(false); readProjList();
+  }, [flushSave, readProjList]);   // eslint-disable-line react-hooks/exhaustive-deps
   const deleteProject = useCallback(async (id) => {
     const list = await readProjList();
     if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
     const tgt = list.find((x) => x.id === id);
     if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
-    if (id === activeId) {
+    if (id === activeIdRef.current) {
       // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
       // flushSave(activeId) would re-create the very project we're deleting.
       // Walk the survivors rather than trusting the first one. readProjList() parsed every
@@ -6148,21 +7765,17 @@ function useProjectStore(setSelShot) {
       // candidate is almost certainly fine — refusing the whole delete because ONE key
       // blipped would be its own bug.
       // Giving up only when none of them read, and giving up WITHOUT deleting, is the
-      // point: sGet() swallows its own errors and returns null, so a failed read and an
-      // empty one look identical from here. Opening a seedProject() on that null (what
-      // this did before) hands the 600ms autosave a blank board to write over a survivor's
-      // own key — one dropped read costing TWO storyboards, the second of which nobody
-      // asked to delete.
-      let next = null, p = null, anyReadFailed = false;
+      // point: opening a seedProject() on a failed read (what this did before) hands the
+      // 600ms autosave a blank board to write over a survivor's own key — one dropped read
+      // costing TWO storyboards, the second of which nobody asked to delete.
+      let next = null, got = null, anyReadFailed = false;
       for (const cand of list) {
         if (cand.id === id) continue;
-        try {
-          const got = await sGetX(PPRE + cand.id);      // .failed distinguishes a broken read
-          if (got.failed) { anyReadFailed = true; continue; }
-          if (got.value) { p = JSON.parse(got.value); next = cand; break; }
-        } catch { anyReadFailed = true; }               // stored, but not parseable
+        const r = await readBoard(cand.id);
+        if (r.failed) { anyReadFailed = true; continue; }
+        if (r.p) { got = r; next = cand; break; }
       }
-      if (!p) {
+      if (!got) {
         window.alert(anyReadFailed
           ? "Couldn't read your other storyboards, so nothing was deleted. Check the server and try again."
           : "Couldn't open another storyboard, so nothing was deleted. Try again.");
@@ -6175,15 +7788,19 @@ function useProjectStore(setSelShot) {
       // the open board is the one being deleted — cancelling it while deleting some
       // other board would silently discard unsaved edits to the board still on screen.
       clearTimeout(saveTimer.current);
+      await queueRef.current.idle(PPRE + id);
       await sDel(PPRE + id);
+      queueRef.current.forget(PPRE + id); delete lastSavedRef.current[PPRE + id];
       await sSet(ACTIVE_KEY, next.id);
-      setActiveId(next.id); setProject(p); setSelShot(null);
+      showBoard(next.id, got.p, got.rev); setSelShot(null);
     } else {
+      await queueRef.current.idle(PPRE + id);
       await sDel(PPRE + id);
+      queueRef.current.forget(PPRE + id); delete lastSavedRef.current[PPRE + id];
     }
     await readProjList();
     setProjMenu(false);
-  }, [activeId, readProjList, setSelShot]);
+  }, [readProjList, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
   const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
   /* THE ADDRESS FOLLOWS THE OPEN BOARD (2026-09-06).
@@ -6209,7 +7826,14 @@ function useProjectStore(setSelShot) {
 
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
-  useEffect(() => {
+  // A NAMED function the effect calls (Session P, BUILD-w5-p §4): the never-auto-render test
+  // roots it by name, which it cannot do for an anonymous effect body.
+  // Session P (NOTES P7): the hand-off adds the pictures to the CAST LIBRARY and ticks them on
+  // this storyboard, as one action -- the owner's own click in the gallery. It is still read
+  // once and cleared at once (before anything is awaited, so a reload mid-write cannot import
+  // twice). The library write is a compare-and-swap; if it fails the pictures still land here,
+  // as this storyboard's own cast, and the owner is told the library wasn't updated.
+  const adoptCastHandoff = async (project) => {
     if (!project || castImported.current) return;
     castImported.current = true;
     // Two filters, deliberately: parseCastIdsFromSearch is the URL *sanitiser* (safe
@@ -6219,26 +7843,100 @@ function useProjectStore(setSelShot) {
     // dropped rather than becoming a cast member with no picture.
     const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
     if (!ids.length) return;
-    setProject((p) => {
-      const existing = p.assets || [];
-      let n = maxTagNum(existing, "@image");
-      const added = ids.map((mid) => ({ id: uid(), name: "", kind: "image",
-        tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
-      return { ...p, assets: [...existing, ...added] };
-    });
     // Clearing ?cast= now goes through the one builder instead of writing a bare
     // location.pathname (2026-09-06). The hand-off's behaviour is unchanged -- read once,
     // then gone -- but a bare pathname would also erase ?board=, which is precisely the
     // "one write throws another's away" bug gen/urlState.js was written to end.
     history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
-  }, [project]);
+    const board = activeIdRef.current;
+    const { assets: added, members } = handoffCast(ids, (projectRef.current && projectRef.current.assets) || [], uid, newLibId);
+    const w = await writeCastLibrary((lib) => members.reduce(addMember, lib));
+    if (activeIdRef.current !== board) return;
+    if (w.ok) {
+      setProject((p) => members.reduce((q, m, i) => tickMember(q, m, added[i].id), p));
+      return;
+    }
+    setProject((p) => {
+      const existing = p.assets || [];
+      let n = maxTagNum(existing, "@image");
+      const own = ids.map((mid) => ({ id: uid(), name: "", kind: "image",
+        tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
+      return { ...p, assets: [...existing, ...own] };
+    });
+    if (window.Toast) window.Toast.show({ kind: "err", title: "Added to this storyboard only",
+      msg: (w.msg || "The cast library couldn't be updated.") + " The pictures are in this storyboard's cast." });
+  };
+  useEffect(() => { adoptCastHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Gallery -> SHOTS (Session P, P5; BUILD-w5-p §5.3; rulings 9 and 10; review N4):
+     /loom?shots=<ids in order>&from=<collection>&n=<nonce>, from "▮ Send to The Loom · as
+     shots, in order". Read ONCE and cleared through the builder like ?cast=. The ids ride the
+     cast hand-off's own sanitiser and grammar; more than SHOTS_HANDOFF_CAP is refused, never
+     cut; a link on another site cannot change a board silently -- ONE confirm names the
+     collection and the count before anything is appended; an act already carrying this nonce
+     (a reload, a second tab) is never added twice. Titles come from a read-only local lookup of
+     those ids' catalog rows. NOTHING is priced or rendered: the new shots are unrendered cards
+     waiting for the owner's own Render. A named function the effect calls, so the
+     never-auto-render test can root it. */
+  const adoptShotsHandoff = async (project) => {
+    if (!project || shotsImported.current) return;
+    if (!/[?&]shots=/.test(location.search)) return;
+    shotsImported.current = true;
+    const ids = Array.from(new Set(parseCastIdsFromSearch(location.search, "shots").filter(isCatalogMediaId)));
+    const { from, nonce } = readShotsMeta(location.search);
+    history.replaceState(null, "", buildLoomUrl({ shots: null, from: null, n: null }, location.search, location.pathname));
+    const say = (title, msg, kind) => { if (window.Toast) window.Toast.show({ kind: kind || "err", title, msg }); };
+    if (!ids.length) { say("Nothing to add", "That link named no pictures this library can use. Nothing was added."); return; }
+    if (ids.length > SHOTS_HANDOFF_CAP) {
+      say("Too many pictures for one send", "That link carries " + ids.length + " pictures; the Loom takes at most "
+        + SHOTS_HANDOFF_CAP + " at once as shots. Nothing was added.");
+      return;
+    }
+    const name = from || FROM_SELECTION;
+    if (nonce && hasShotsAct(projectRef.current, nonce)) return;     // already here: a reload, a second tab
+    // What those pictures are: their prompts (for the titles), and which are videos (a video
+    // never becomes an open frame -- the gallery leaves them out too). A read of the local
+    // catalog only; a failed read just means untitled shots.
+    const facts = {};
+    try {
+      const r = await fetch("/api/loom/prompts?ids=" + encodeURIComponent(ids.join(",")));
+      const d = await r.json();
+      ((d && d.pictures) || []).forEach((x) => { facts[String(x.media_id)] = x; });
+    } catch (e) { /* titles fall back to "Picture N" */ }
+    const pics = ids.filter((id) => !(facts[id] && facts[id].is_video));
+    if (!pics.length) { say("Nothing to add", "Only pictures become shots, and that link named none. Nothing was added."); return; }
+    const open = projectRef.current;
+    const actName = shotsActName(((open && open.acts) || []).length + 1, name);
+    // ONE line (review N4): what is added, from which collection, how many, to which board.
+    if (!window.confirm("Add “" + actName + "” (" + pics.length + " image-to-video shot" + (pics.length === 1 ? "" : "s")
+      + " from “" + name + "”, in order) to “" + ((open && open.name) || "this storyboard") + "”? Nothing is rendered.")) return;
+    let added = false;
+    setProject((p) => {
+      if (!p) return p;
+      const act = shotsFromPictures(pics.map((id) => ({ id, prompt: (facts[id] && facts[id].prompt) || "" })),
+        { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid() });
+      const res = appendShotsAct(p, act);
+      added = res.added;
+      return res.project;
+    });
+    if (added) say("Added " + actName, pics.length + " shot" + (pics.length === 1 ? "" : "s") + ", nothing rendered yet.", "ok");
+  };
+  useEffect(() => { adoptShotsHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* The 600 ms autosave (Session P, BUILD-w5-p §1.2 / §3.5). It writes ONLY when the board
+     differs from the text last read or written for it, so opening, switching, duplicating,
+     importing and re-rendering write nothing; and it writes through the save queue, so the
+     save is a compare-and-swap and a conflict merges instead of silently losing a tab's work.
+     The timer saves the OPEN board as it is when the timer fires (saveBoardNow reads the ref
+     and refuses once another board is open), never an older closure's copy. */
   useEffect(() => {
-    if (!project || !hasStore || !activeId) return;
+    if (!project || !hasStore || !activeId) return undefined;
+    if (!shouldSave(JSON.stringify(project), lastSavedRef.current[PPRE + activeId])) { setBusy(false); return undefined; }
     setBusy(true); clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => { await sSet(PPRE + activeId, JSON.stringify(project)); setBusy(false); }, 600);
+    const id = activeId;
+    saveTimer.current = setTimeout(async () => { await saveBoardNow(id); setBusy(false); }, 600);
     return () => clearTimeout(saveTimer.current);
-  }, [project, activeId]);
+  }, [project, activeId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const storeThumb = useCallback(async (file) => {
     const data = await fileToThumb(file); const id = uid();
@@ -6251,15 +7949,17 @@ function useProjectStore(setSelShot) {
   // while a different board was open. Shared by both export tiers: a lightweight
   // {project, thumbs} parsed client-side, or the same shape handed back by the
   // server after a full-bundle zip's media has been reconciled into the catalog.
+  // Session P (review F4/F17): a restored board never carries a render in flight -- that
+  // render belongs to the board it was made on (or the machine it was made on), and its
+  // markers here would stay "rendering" forever or land a phantom take. The full bundle's
+  // server import strips them too; this lightweight JSON path must as well.
   const _adoptBackup = async (d) => {
-    if (!d || !d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
+    if (!d || !isBoard(d.project)) { window.alert("That file didn't parse as a storyboard backup."); return; }
     if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
-    await flushSave(activeId, project);
-    const id = uid();
-    await sSet(PPRE + id, JSON.stringify(d.project));
-    await sSet(ACTIVE_KEY, id);
+    await flushSave(activeIdRef.current);
     if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
-    setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
+    await createBoard(stripInFlight(d.project));
+    setSelShot(null); readProjList();
   };
   const importJSON = async (file) => { if (!file) return;
     try { await _adoptBackup(JSON.parse(await file.text())); }
@@ -6283,7 +7983,12 @@ function useProjectStore(setSelShot) {
     return isZip ? importBundle(file) : importJSON(file); };
 
   return { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId };
+    projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId,
+    // Session P: what the render lifecycle needs from the store -- the synchronous board and
+    // board id, the lock flush, the merge's resolved-submit record, and the boot's failure.
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError,
+    // Session P, Stage B2 (P7): the cast library's reads and compare-and-swap writes.
+    castIo: { castLib, readCastLibrary, writeCastLibrary, readOtherBoards, saveOtherBoard } };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -6297,15 +8002,9 @@ function useShotMutations(project, setProject) {
   // which needs the act id. generateShot/pollShot/useExistingVideo don't know (or care)
   // which act a shot lives in, so this stays a sibling of setCard rather than folding in.
   const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
-  // setCardResult is setCardStatus for the ONE patch that carries a new resultMid. It exists
-  // so the card being overwritten gets a say: withResult reads the resultMid it is about to
-  // replace and files it under `attempts`, which is the only reason the spend ledger can
-  // count a re-rolled shot's first, paid-for try instead of forgetting it. Every landing
-  // result goes through here or through withResult directly (the routed-video path in
-  // LoomV2 uses setCard, which already takes a function) -- a fifth write site that used
-  // plain setCardStatus would silently reintroduce the amnesia.
-  const setCardResult = (cardId, patch) =>
-    setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch, new Date().toISOString())));
+  // (setCardResult / withResult retired, Session P: every landing -- pollShot, the drawer's
+  // mg-result, "attach to A·0n", "Use an existing video" -- goes through landTake/attachTake
+  // (loom/src/loom-takes-core.js), which append a take and move ★ and never lose a paid clip.)
 
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
@@ -6350,20 +8049,436 @@ function useShotMutations(project, setProject) {
     setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] })); };
   const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
   const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
-  const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+  // Refused, with a plain message, while a render for the shot is out (review F11): the
+  // halves would split one render's lock, and its take would land on the left half only.
+  const splitShot = (entry, t) => {
+    const cur = project && flat(project).find((e) => e.c.id === entry.c.id);
+    if (splitBlocked(cur ? cur.c : entry.c)) {
+      const msg = "A render for this shot is still out. Split it after that take lands (or after you release it).";
+      if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "err", title: "Can't split this shot yet", msg });
+      else window.alert(msg);
+      return;
+    }
+    setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+  };
 
-  return { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
+  return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
+}
+
+// ---- 2b. useTakeActions: ★ select, delete a take, reuse a take's settings, Re-anchor, Keep ----
+// Session P, Stage A2 (NOTES P1/P2, BUILD-w5-p §1.4, §1.5, §2.3). Every one of these is a BOARD
+// EDIT through patchCardByIdWith and a pure reducer in loom/src/loom-takes-core.js -- nothing
+// here writes takes / selectedTake / takeSeq itself, and nothing here can price, submit or start
+// a render: they are roots of loom/test/loom-no-auto-render.test.js. The one network call is
+// Re-anchor's POST /api/loom/handoff, the same free frame handoff the ✂ splice already makes (a
+// local ffmpeg frame and one free upload; open call 3, owner-confirmed). Rendering a take from
+// the new frame stays the owner's own separate Render click.
+function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
+  // Re-anchor in progress / its last failure, per card: {phase:"wip"} | {phase:"err", msg}. The
+  // ref is the synchronous latch (a double click sends one handoff); the state is what the card shows.
+  const [anchorWork, setAnchorWork] = useState({});
+  const anchoringRef = useRef(new Set());
+  // Another storyboard open: its cards are other cards (a duplicate shares ids), so a note from
+  // this one must not show there.
+  useEffect(() => { setAnchorWork({}); }, [activeId]);
+  // The entry as the board holds it NOW (the store's synchronous ref), never a render's closure.
+  const entryNow = (id) => {
+    const p = projectRef.current;
+    return p ? (flat(p).find((x) => x.c.id === id) || null) : null;
+  };
+  // A refusal here is not an error (nothing went wrong with the owner's work), so it is the plain
+  // info toast, never the red one.
+  const sayTakes = (title, msg) => {
+    if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "", title, msg });
+    else window.alert(msg);
+  };
+
+  // ★ a take: it becomes the one Play, the local cut, Export and the ribbon use (the mirror).
+  // Never renders, prices or uploads.
+  const selectTakeOnCard = (cardId, n) => {
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => selectTake(c, n)) : p));
+  };
+
+  // Delete a take after the page's confirm. The ★ take is refused ("Select another take first.").
+  // The clip itself is an ordinary library video and is never touched; a billed take's clip moves
+  // to the ledger's attempts, so the spend is still counted.
+  const deleteTakeOnCard = (cardId, n) => {
+    const e = entryNow(cardId);
+    if (!e) return;
+    const probe = deleteTake(e.c, n, "");
+    if (probe.refused === "selected") { sayTakes("Can't delete take " + n, "Select another take first."); return; }
+    if (probe.refused) return;
+    if (!window.confirm("Delete take " + n + "? Its clip stays in your library.")) return;
+    const at = nowIso();
+    // Applied to the card as it is at the moment of the edit: if ★ moved onto this take while the
+    // confirm was open, the reducer refuses and the card is left as it is.
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => {
+      const r = deleteTake(c, n, at);
+      return r.refused ? c : r.card;
+    }) : p));
+  };
+
+  // "Reuse settings": that take's snapshot back onto the shot. A board edit only -- the owner
+  // still presses Render. Legacy and attached takes recorded no settings.
+  const reuseTakeSettings = (cardId, n) => {
+    const e = entryNow(cardId);
+    if (!e) return;
+    const t = takeView(e.c, n);
+    if (!t || !t.settings) { sayTakes("Nothing to reuse", "No settings were recorded for this take."); return; }
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) => {
+      const tk = takeView(c, n);
+      return tk && tk.settings ? reuseSettingsPatch(c, tk) : c;
+    }) : p));
+    if (typeof window !== "undefined" && window.Toast) {
+      window.Toast.show({ kind: "ok", title: "Take " + n + "'s settings are back on " + e.code,
+        msg: "Nothing was rendered. Press Render when you want a take made with them." });
+    }
+  };
+
+  // Re-anchor (BUILD-w5-p §2.3): the source shot and ITS ★ take are read from the board as it is
+  // at the click; the frame is cut where that take is cut (the splice's own request); the answer
+  // patches ONLY the open frame, the anchor and anchorKept (reanchorPatch), and only if the
+  // anchor is still the one this click saw. Status, takes and every pending marker are untouched.
+  const reanchorShot = async (cardId) => {
+    const boardId = activeIdRef.current;
+    const e = entryNow(cardId);
+    if (!e || !e.c.anchor || !e.c.anchor.shot) return;
+    const src = entryNow(e.c.anchor.shot);
+    const view = src ? selectedTakeView(src.c) : null;
+    if (!src || !view || !view.mid) {
+      setAnchorWork((s) => ({ ...s, [cardId]: { phase: "err", msg: "The shot this frame came from has no rendered take to take a frame from." } }));
+      return;
+    }
+    if (anchoringRef.current.has(cardId)) return;
+    anchoringRef.current.add(cardId);
+    const expect = e.c.anchor;
+    setAnchorWork((s) => ({ ...s, [cardId]: { phase: "wip" } }));
+    let d = null;
+    try {
+      const r = await fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_media_id: view.mid, trim_out: cutPointOf(src.c) }) });
+      d = await r.json();
+    } catch (_e) { d = null; }
+    anchoringRef.current.delete(cardId);
+    // Another storyboard is open now: nothing is patched (a copy there may share this card's id).
+    if (activeIdRef.current !== boardId) return;
+    if (!d || d.error || !d.frame_media_id) {
+      setAnchorWork((s) => ({ ...s, [cardId]: { phase: "err",
+        msg: "Couldn't take the new frame" + (d && d.error ? " — " + d.error : " — the server didn't answer") + ". Nothing was changed." } }));
+      return;
+    }
+    setAnchorWork((s) => { const n = { ...s }; delete n[cardId]; return n; });
+    setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) =>
+      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p));
+  };
+
+  // Keep: accept this pair of takes (and this cut) only; a later change of the source warns again.
+  const keepAnchor = (cardId) => {
+    setProject((p) => {
+      if (!p) return p;
+      const byId = new Map(flat(p).map((x) => [x.c.id, x.c]));
+      return patchCardByIdWith(p, cardId, (c) => {
+        const src = c.anchor ? byId.get(c.anchor.shot) : null;
+        return src ? keepAnchorPatch(c, src) : c;
+      });
+    });
+  };
+
+  return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork };
+}
+
+/* ---- 2b'. THE CAST LIBRARY (Session P, NOTES P7; the page's "👤 CAST LIBRARY · tick = in this
+   storyboard" panel and the phone cast sheet's Library tab) ---------------------------------------
+   The library is one account-side value (useProjectStore's castIo); a storyboard's ticks are its
+   assets that carry a libId (loom/src/loom-cast-library.js). Opening the Library view only READS:
+   the library, and every other storyboard for "in N storyboards" (cached for this opening, never
+   written). Every write below is an owner action:
+     toggleCastTick      tick copies a member in (a board edit); untick asks first when shots use
+                         it, naming them, then removes it and drops it from those shots' cast; a
+                         storyboard-only member joins the library before it is unticked, so the
+                         library keeps it
+     editLibraryMember   its picture or its 🔒, in the library, on this board, and on every other
+                         storyboard that ticks it -- each one read and written compare-and-swap,
+                         a conflict re-applied once, anything not updated named. The one
+                         multi-board write in the Loom; it touches nothing but that member's copy.
+     addLibraryMember    "+ Add": a picked picture into the library, ticked here
+   None of these can price, render or upload (roots of loom/test/loom-no-auto-render.test.js). */
+function useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo }) {
+  const [libPhase, setLibPhase] = useState("idle");     // idle | reading | ready | failed
+  const [libNote, setLibNote] = useState("");
+  const [others, setOthers] = useState(null);           // the other storyboards as read, or null
+  const [working, setWorking] = useState("");           // the row key being written
+  const openSeq = useRef(0);
+  const workingRef = useRef("");
+  useEffect(() => { setOthers(null); setLibPhase("idle"); setLibNote(""); }, [activeId]);
+  const say = (kind, title, msg) => { if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind, title, msg }); };
+  const lean = (b) => ({ id: b.id, name: b.name, project: { name: b.name, assets: (b.project && b.project.assets) || [] } });
+
+  // Opening the Library view: reads the library and the other storyboards. Writes nothing.
+  const openCastLibrary = async () => {
+    const seq = ++openSeq.current;
+    setLibPhase("reading"); setLibNote("");
+    const got = await castIo.readCastLibrary();
+    if (seq !== openSeq.current) return;
+    if (got.failed) {
+      setLibPhase("failed");
+      setLibNote(got.unreadable ? "The cast library didn't read. Nothing was changed, and nothing will be written over it."
+        : "The cast library couldn't be read. Check the server, then open this tab again.");
+      return;
+    }
+    const o = await castIo.readOtherBoards(activeIdRef.current);
+    if (seq !== openSeq.current) return;
+    setOthers(o.boards.map(lean));
+    setLibPhase("ready");
+    if (o.failed) setLibNote("Your other storyboards couldn't be listed, so the counts are this storyboard's only.");
+    else if (o.unread.length) setLibNote(o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read; the counts leave "
+      + (o.unread.length === 1 ? "it" : "them") + " out.");
+  };
+  const begin = (key) => { if (workingRef.current) return false; workingRef.current = key; setWorking(key); return true; };
+  const end = () => { workingRef.current = ""; setWorking(""); };
+
+  // Tick / untick one row of the Library view.
+  const toggleCastTick = async (row) => {
+    if (!row) return;
+    const board = activeIdRef.current;
+    const cur = projectRef.current;
+    if (!cur) return;
+    if (!row.ticked) {
+      if (row.member) setProject((p) => (p ? tickMember(p, row.member, uid()) : p));
+      return;
+    }
+    const asset = (cur.assets || []).find((a) => a && a.id === (row.asset && row.asset.id));
+    if (!asset) return;
+    const q = untickQuestion({ ...row, usedBy: shotsUsing(cur, asset.id) });
+    if (q && !window.confirm(q)) return;
+    if (row.boardOnly) {
+      // This storyboard's own member joins the library first, so unticking it here keeps it.
+      if (!begin(row.key)) return;
+      const libId = row.libId || newLibId();
+      const w = await castIo.writeCastLibrary((lib) => addMember(lib, memberFromAsset(asset, libId)));
+      end();
+      if (!w.ok) { say("err", "Nothing was removed", w.msg || "The cast library couldn't be updated."); return; }
+      if (activeIdRef.current !== board) return;
+    }
+    setProject((p) => (p ? untickAsset(p, asset.id) : p));
+  };
+
+  // Edit a member's picture or 🔒, everywhere it's used.
+  const editLibraryMember = async (row, patch) => {
+    const p = syncPatch(patch);
+    if (!row || !Object.keys(p).length) return;
+    if (!begin(row.key)) return;
+    try {
+      const board = activeIdRef.current;
+      const base = row.asset || row.member || {};
+      const assetId = row.asset && row.asset.id;
+      const minted = !row.libId;
+      const libId = row.libId || newLibId();
+      // The library first. A member it does not hold yet (this storyboard's own member, or a
+      // copy whose library entry is gone) is added, then edited -- joining the library is the
+      // edit's doing, never an open's.
+      const w = await castIo.writeCastLibrary((lib) => editMember(addMember(lib, memberFromAsset({ ...base, ...p }, libId)), libId, p));
+      if (!w.ok) { say("err", "Nothing was changed", w.msg || "The cast library couldn't be updated."); return; }
+      // Then the open storyboard's copy (editCopies touches only this member's copies)...
+      const openNow = activeIdRef.current;
+      setProject((q) => (q ? editCopies(assetId && openNow === board ? withLibId(q, assetId, libId) : q, libId, p) : q));
+      if (minted) return;       // a brand-new member is on no other storyboard
+      // ...then every other storyboard that ticks it, each compare-and-swap.
+      const o = await castIo.readOtherBoards(openNow);
+      const missed = [];
+      let updated = 0;
+      for (const b of o.boards) {
+        if (!ticks(b.project, libId)) continue;
+        const r = await castIo.saveOtherBoard(b.id, b.project, b.rev, (x) => editCopies(x, libId, p));
+        if (r.ok) { if (!r.skipped) updated += 1; } else missed.push("“" + b.name + "”");
+      }
+      if (o.boards.length || o.unread.length) setOthers(o.boards.map((b) => lean({ ...b, project: editCopies(b.project, libId, p) })));
+      const name = row.name || "This member";
+      if (missed.length || o.unread.length || o.failed) {
+        say("err", name + " wasn't updated everywhere",
+          (missed.length ? "Not updated: " + missed.join(", ") + " (it changed in another tab; open it and edit again). " : "")
+          + (o.unread.length ? o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read. " : "")
+          + (o.failed ? "Your other storyboards couldn't be listed. " : "")
+          + "The library and this storyboard were updated.");
+      } else if (updated) {
+        say("ok", name + " updated", "Also changed in " + updated + " other storyboard" + (updated === 1 ? "" : "s") + ".");
+      }
+    } finally { end(); }
+  };
+
+  // "+ Add": a picture (or video) from the gallery -- the Cast & assets panel's own picker
+  // road -- or an uploaded image (its local thumbnail store), into the library, ticked here.
+  const addLibraryMember = async (pick) => {
+    if (!pick || (!pick.mediaId && !pick.thumbId)) return;
+    if (!begin("add")) return;
+    try {
+      const board = activeIdRef.current;
+      const cur = projectRef.current;
+      if (!cur) return;
+      const asset = { ...newMemberAsset(pick, cur.assets || [], uid(), newLibId()),
+        ...(pick.thumbId ? { thumbId: pick.thumbId, source: pick.source || "", mediaId: "" } : {}) };
+      const m = memberFromAsset(asset, asset.libId);
+      const w = await castIo.writeCastLibrary((lib) => addMember(lib, m));
+      if (!w.ok) { say("err", "Nothing was added", w.msg || "The cast library couldn't be updated."); return; }
+      if (activeIdRef.current === board) setProject((p) => (p ? tickMember(p, m, asset.id) : p));
+    } finally { end(); }
+  };
+
+  return { libPhase, libNote, others, working, lib: castIo.castLib ? castIo.castLib.lib : null,
+    openCastLibrary, toggleCastTick, editLibraryMember, addLibraryMember };
+}
+
+/* ---- 2c. THE MUSIC BED (Session P, P3; the page's bed row under the reel) --------------------
+   One local audio file per storyboard: project.bed = {file, name, dur, db, fadeIn, fadeOut}
+   (loom-bed-core.js). Picking uploads the file to THIS machine's bed folder (never PixAI) and
+   puts it on the board; the level and Remove are board edits. Remove deletes no file -- beds
+   are never deleted automatically (ruling 15); the unused ones are offered to an explicit,
+   confirmed sweep. None of these can reach a render: pickBed, setBedLevel, removeBed and
+   sweepUnusedBeds are roots of loom-no-auto-render.test.js. */
+// A file's length from its metadata (the server answers null when ffprobe is not installed).
+const audioDuration = (url) => new Promise((res) => {
+  let settled = false;
+  const done = (v) => { if (settled) return; settled = true; res(v); };
+  try {
+    const a = new Audio();
+    a.preload = "metadata";
+    a.onloadedmetadata = () => done(Number.isFinite(a.duration) && a.duration > 0 ? a.duration : null);
+    a.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    a.src = url;
+  } catch (e) { done(null); }
+});
+const bedUrl = (file) => "/api/loom/bed?file=" + encodeURIComponent(file || "");
+
+function useBedActions({ setProject, activeIdRef }) {
+  const [bedWork, setBedWork] = useState({ phase: "", msg: "" });
+  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h} | null
+  const refreshUnusedBeds = useCallback(async () => {
+    try {
+      const r = await fetch("/api/loom/beds/unused");
+      const d = await r.json();
+      setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+    } catch (e) { setUnusedBeds(null); }
+  }, []);
+  const pickBed = async (file) => {
+    if (!file) return;
+    if (file.size > BED_MAX_BYTES) {
+      setBedWork({ phase: "err", msg: "A music bed can be up to " + Math.round(BED_MAX_BYTES / 1048576) + " MB; that file is "
+        + (file.size / 1048576).toFixed(1) + " MB. Nothing was added." });
+      return;
+    }
+    const boardId = activeIdRef.current;
+    setBedWork({ phase: "wip", msg: "" });
+    try {
+      const fd = new FormData();
+      fd.append("csrf", await loomCsrf());
+      fd.append("board", boardId || "");
+      fd.append("file", file, file.name);
+      const r = await fetch("/api/loom/bed", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d || d.error || !d.file) {
+        setBedWork({ phase: "err", msg: (d && d.error) || ("The music bed didn't upload (" + r.status + ").") });
+        return;
+      }
+      let dur = d.dur;
+      if (!(dur > 0)) dur = await audioDuration(bedUrl(d.file));
+      if (activeIdRef.current !== boardId) {
+        setBedWork({ phase: "err", msg: "You switched storyboards while it uploaded, so the bed wasn't added. Add it again here." });
+        return;
+      }
+      setProject((p) => (p ? { ...p, bed: makeBed({ file: d.file, name: d.name || file.name, dur }, p.bed ? p.bed.db : undefined) } : p));
+      setBedWork({ phase: "", msg: "" });
+      refreshUnusedBeds();
+    } catch (e) {
+      setBedWork({ phase: "err", msg: "The music bed didn't upload — network error. Nothing was added." });
+    }
+  };
+  const setBedLevel = (v) => setProject((p) => (p && p.bed ? { ...p, bed: { ...p.bed, db: clampBedDb(v) } } : p));
+  const removeBed = () => {
+    setProject((p) => {
+      if (!p || !p.bed) return p;
+      const next = { ...p };
+      delete next.bed;
+      return next;
+    });
+    setBedWork({ phase: "", msg: "" });
+  };
+  const sweepUnusedBeds = async () => {
+    const u = unusedBeds;
+    if (!u || !u.count) return;
+    if (!window.confirm("Remove " + u.count + " music bed file" + (u.count === 1 ? "" : "s") + " (" + u.h
+      + ") that no storyboard uses?\n\n" + (u.count === 1 ? "It is" : "They are")
+      + " deleted from this machine's music bed folder. No storyboard changes.")) return;
+    try {
+      const r = await fetch("/api/loom/beds/sweep", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf: await loomCsrf(), files: u.files.map((f) => f.file) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) setBedWork({ phase: "err", msg: d.error || "The unused beds weren't removed." });
+      else if (window.Toast) window.Toast.show({ kind: "ok", title: "Unused music beds removed",
+        msg: d.removed.length + " removed" + (d.kept.length ? ", " + d.kept.length + " kept (a storyboard uses them now)" : "") + "." });
+    } catch (e) { setBedWork({ phase: "err", msg: "The unused beds weren't removed — network error." }); }
+    refreshUnusedBeds();
+  };
+  return { bedWork, unusedBeds, refreshUnusedBeds, pickBed, setBedLevel, removeBed, sweepUnusedBeds };
+}
+
+// The decoded bed's waveform, once per file (a GET of the local file; WebAudio decodes it
+// offline -- no sound, no gesture needed). {peaks, dur} | {failed} | null while it loads.
+const BED_PEAKS = new Map();
+function useBedPeaks(file) {
+  const [st, setSt] = useState(() => (file && BED_PEAKS.get(file)) || null);
+  useEffect(() => {
+    if (!file) { setSt(null); return undefined; }
+    const hit = BED_PEAKS.get(file);
+    if (hit) { setSt(hit); return undefined; }
+    let dead = false;
+    setSt(null);
+    (async () => {
+      try {
+        const r = await fetch(bedUrl(file));
+        if (!r.ok) throw new Error(String(r.status));
+        const buf = await r.arrayBuffer();
+        const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const ctx = new Ctx(1, 1, 44100);
+        const audio = await new Promise((res, rej) => {
+          const pr = ctx.decodeAudioData(buf, res, rej);
+          if (pr && pr.then) pr.then(res, rej);
+        });
+        const v = { peaks: peaksToBuckets(audio.getChannelData(0), 1600), dur: audio.duration };
+        BED_PEAKS.set(file, v);
+        if (!dead) setSt(v);
+      } catch (e) {
+        if (!dead) setSt({ peaks: [], dur: 0, failed: true });
+      }
+    })();
+    return () => { dead = true; };
+  }, [file]);
+  return st;
 }
 
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
 // mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
 // dependency on the resume effect below -- see that effect's own comment for why the
 // Mobile-view toggle needs to trigger the identical resume it already runs on project load.
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
-  const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
-  const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
+function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+  const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid, held?} (video)
+  // genState read synchronously by the render latch (the paused carve-out): the click's own
+  // closure may be a render behind.
+  const genStateRef = useRef(genState);
+  genStateRef.current = genState;
+  const resumedRef = useRef({});    // taskId -> true: every task this tab has polled -- a later resume never starts a second poll of it
+  const pollingRef = useRef(new Set());   // taskIds with a live poll loop in this tab right now
+  // THE RENDER LATCH (BUILD-w5-p §3.3 step 1): card ids between a Render click and the moment
+  // their in-flight marker holds the lock. Checked and set synchronously, before any await, so
+  // a double click, an Enter repeat, a batch overlapping a single render, or the drawer's Go
+  // overlapping the card's own Render cannot both get through.
+  const inflightRef = useRef(new Set());
+  const checkingRef = useRef(new Set());  // submit ids whose submit-status check is out
+  const preLockRef = useRef({});          // submit id -> the card as it was before its lock (the drawer path's busy rollback)
+  const draftSubmitsRef = useRef({});     // submit id -> {settings} for a draft render from the drawer
+  const draftTasksRef = useRef({});       // task id -> {settings} for a draft render from the drawer
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
@@ -6421,7 +8536,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
      Wraps the pure, imported buildShotPayload with this hook's own `project` state
      + `imgSrc` (closes over `thumbs`), preserving the original single-argument
      call shape used below and in priceShot/generateShot. */
-  const shotPayload = (entry) => buildShotPayload(entry, project, imgSrc);
+  // The CURRENT board (review F12): a batch that runs for minutes, or a click after an edit
+  // the render has not caught up with, must price and send what the board says now.
+  const shotPayload = (entry) => buildShotPayload(entry, (projectRef && projectRef.current) || project, imgSrc);
   /* READ-ONLY cost + free-card check for a shot (spends nothing). The shot-shaped face of
      priceBody, the file's one price call site: -> {cost, free, cards, note}, or null when the
      check could not be verified at all. Every caller below fails CLOSED on that null. */
@@ -6453,6 +8570,52 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     }
     return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
   };
+  // GUARDRAIL: never spend credits silently. ONE video shot's ask, asked of the payload that
+  // will be sent: generateShot's (the card's Render, the phone's Generate) and the Video tab's
+  // "Generate video" in the Loom (<VideoDrawer>'s Go, through beginDrawerRender) -- the same
+  // words and the same three branches on both, so neither can drift from the other (owner walk
+  // 2026-09-30: the Video tab's Go spent 70,000 credits with no ask at all).
+  // Must fail CLOSED: priceBody answers null for a check that could not be verified, and the
+  // server's own /api/price returns HTTP 200 with cost:null on any exception -- either one
+  // used to slip straight through the confirm below (every condition short-circuited on
+  // cost==null), submitting a paid generation with zero confirmation. A verify failure now
+  // still asks. -> {go:false} when the owner said no; else {go:true, quote, expectFree}, where
+  // expectFree is true exactly when this quote was free (review F13: a render shown FREE, so no
+  // confirm, is sent as expect_free, and the server refuses it rather than charge credits if the
+  // card is gone by then).
+  const askShotSpend = async (p) => {
+    const pr = await priceBody(p);
+    if (pr && !pr.free && pr.cost != null) {
+      // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
+      // is worded as exactly what happens: no card attaches, the FULL price is charged.
+      // Not-matched keeps the original sentence. See confirmSpend's note above.
+      const line = priceIsShort(pr)
+        ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
+        : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
+      if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { go: false };
+    } else if (!pr || !pr.free) {
+      if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { go: false };
+    }
+    const quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
+    const expectFree = !!(pr && pr.free);
+    return { go: true, quote, expectFree };
+  };
+  // ---- The render lifecycle's small helpers (Session P, BUILD-w5-p §3.3) ----
+  // The card as the board holds it NOW (the store's synchronous ref), never a render closure.
+  const cardOn = (id) => {
+    const p = projectRef.current;
+    return p ? (flat(p).find((e) => e.c.id === id) || null) : null;
+  };
+  // A reducer applied to one card of the OPEN board (setProject runs it against the ref at
+  // once). Callers check the board is still the open one first.
+  const patchCardNow = (id, fn) => setProject((p) => (p ? patchCardByIdWith(p, id, fn) : p));
+  const sayCard = (id, gs) => setGenState((s) => ({ ...s, [id]: gs }));
+  // Refused / held / unclear states are PEACH on the card (held:true), never red.
+  const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
+  const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
+  const CHECKING_MSG = "Checking whether the render was sent…";
+  const STILL_SENDING_MSG = "Still being sent to PixAI — it can't be released until PixAI answers. Check again in a moment.";
+
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
   // immediately after await, not genState (a React state variable batchGenerate's closure
@@ -6460,96 +8623,247 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // never retroactively change what that already-captured closure sees -- confirmed the
   // hard way tonight: two independent adversarial reviews both caught a first-draft tally
   // design that read genState right after this call and found it silently always stale).
+  //
+  // Session P (BUILD-w5-p §3.3, review F5/F12/F13/F16) -- the steps are ordered on purpose:
+  //   1. a SYNCHRONOUS latch before any await (inflightRef + the card's own markers, read from
+  //      the store's ref -- never the entry's closure); the paused carve-out may render again;
+  //   2. the entry is re-derived from the board ONCE, and ONE payload is built: it is priced,
+  //      it is what the confirm describes, it is what is POSTed, and the take's settings
+  //      snapshot is taken from the same moment;
+  //   3. the in-flight marker IS the lock (beginRender) and it is saved BEFORE anything is
+  //      sent -- through the save queue, after any save already in flight. A save conflict
+  //      (another tab saved first) merges and ABORTS; a failed save rolls the lock back and
+  //      ABORTS. Nothing is POSTed in either case;
+  //   4. ONE POST, with loom_target + submit_id (+ expect_free when the confirmed quote was
+  //      free); never retried;
+  //   5. the answer is classified: accepted -> adopt + poll; a definite refusal -> the card
+  //      says so; the one-render-per-shot 409 -> this click's lock comes off (nothing was
+  //      sent); NO answer -> UNCLEAR: the lock stays, and the only follow-up is ONE read of
+  //      /api/loom/submit-status (never a second POST).
   const generateShot = async (entry, opts = {}) => {
-    const c = entry.c;
-    const p = shotPayload(entry);
-    if (!p.hasInput) {
-      // Investigated, not assumed, what "re-roll on imported footage" actually does (an
-      // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
-      // so hasInput is false by construction): this branch is NOT the thing that protects
-      // it in practice. generateShot has exactly one caller, batchGenerate, whose own
-      // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
-      // that -- so an imported card never reaches here via "Generate all" either. The real
-      // per-shot "Generate video" click lives entirely in <VideoDrawer>'s own
-      // doGenerate() (gallery/src/components/VideoDrawer.jsx), a SEPARATE, pre-existing guard
-      // (hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
-      // reference first.") -- live-verified: clicking it on an imported shot fires no
-      // fetch, spends nothing, and leaves the footage untouched. This message stays as a
-      // defensive fallback in case a future refactor ever re-routes per-shot generation
-      // through generateShot the way it once did (see the LoomV2-dead-generateShot-prop
-      // history) -- but do not mistake it for the operative guard today.
-      const msg = c.imported
-        ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
-        : "attach a frame or cast image first";
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
-      return { ok: false, reason: "no-input" };
-    }
-    // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
-    // Must fail CLOSED: priceShot swallows its own errors and returns null, and the server's
-    // own /api/price returns HTTP 200 with cost:null on any exception -- either one used to
-    // slip straight through the confirm below (every condition short-circuited on cost==null),
-    // submitting a paid generation with zero confirmation. A verify failure now still asks.
-    if (!opts.skipConfirm) {
-      const pr = await priceShot(entry);
-      if (pr && !pr.free && pr.cost != null) {
-        // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
-        // is worded as exactly what happens: no card attaches, the FULL price is charged.
-        // Not-matched keeps the original sentence. See confirmSpend's note above.
-        const line = priceIsShort(pr)
-          ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
-          : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
-        if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
-      } else if (!pr || !pr.free) {
-        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
-      }
-    }
-    setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
-    setCardStatus(c.id, { status: "wip" });
+    const cardId = entry.c.id;
+    const boardId = activeIdRef.current;
+    // ---- 1. the latch: synchronous -- nothing is awaited before it ----
+    const pre = cardOn(cardId);
+    if (!pre) return { ok: false, reason: "missing" };
+    const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+    if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { ok: false, reason: "in-flight" };
+    if (opts.onlyIfNeeded && !needsRender(pre.c)) return { ok: false, reason: "not-needed" };
+    inflightRef.current.add(cardId);
     try {
-      const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-          video_refs: p.video_refs, duration: p.duration, quality: p.quality,
-          generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot" }) });
-      const d = await r.json();
-      if (d.error || !d.task_id) {
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } }));
-        // Roll the optimistic status:"wip" written above back to a real terminal "error" --
-        // the same write pollShot makes when the SERVER reports a failed render, so a
-        // rejection at SUBMIT time (content policy, no credits) lands in the same visible
-        // state as one that fails mid-render. Without it the card kept status:"wip" forever:
-        // indistinguishable from a live generation, and permanently skipped by
-        // batchGenerate's own todo filter (which excludes "wip" as well as "done"), so every
-        // later "Generate all" silently passed over the shot and the failure never surfaced.
-        setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-        return { ok: false, reason: "submit-failed" };
+      // ---- 2. the entry, re-derived once; ONE payload for the price, the POST and the snapshot ----
+      const proj = projectRef.current;
+      const fresh = cardOn(cardId);
+      const c = fresh.c;
+      const p = buildShotPayload(fresh, proj, imgSrc);
+      if (!p.hasInput) {
+        // Investigated, not assumed, what "re-roll on imported footage" actually does (an
+        // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
+        // so hasInput is false by construction): Generate all never reaches here for one
+        // (its todo is the shots that NEED a render, and an imported clip is a take), and the
+        // per-shot Video-tab button lives in <VideoDrawer>'s own doGenerate()
+        // (gallery/src/components/VideoDrawer.jsx), a SEPARATE guard (hasAnyRef) with its own
+        // message ("Pick a source image first."). The phone's Generate and the card's Render
+        // do reach here, and this is what they say.
+        const msg = c.imported
+          ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
+          : "attach a frame or cast image first";
+        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
+        return { ok: false, reason: "no-input" };
       }
-      // Persist the task id on the card so a mid-render tab close is recoverable: the
-      // in-memory pollShot loop dies with the page, but a resume effect re-attaches it
-      // from pendingTaskId on next load (otherwise the shot is stuck "wip" forever while
-      // its clip lands orphaned in the gallery). Cleared on done/fail.
-      // genStartedAt is ALSO persisted (not just held in pollShot's own closure) so the
-      // give-up-timer's tiers survive a reload -- without a durable timestamp, a resumed
-      // poll would compute elapsed from a fresh Date.now() every time, silently re-arming a
-      // full 6h ceiling on every reload regardless of true elapsed time (found in review).
+      // An imported (local_) picture cannot be sent yet (open call 4, review F16): refuse
+      // BEFORE a price is asked or a confirm shown. The server refuses it too.
+      if (unsendableRefs(p).length) {
+        holdCard(c.id, "Imported " + unsendableKind(p) + " — it can't be sent to PixAI yet. Nothing was sent.");
+        return { ok: false, reason: "imported-picture" };
+      }
+      // A batch confirmed THIS payload's price; content edited since then is not sent (F12).
+      if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
+      const settings = snapshotSettings(c, proj, p.prompt, p.quality);
+      let quote = opts.quote || null;
+      let expectFree = !!opts.expectFree;
+      // GUARDRAIL: never spend credits silently -- askShotSpend (above) checks cost + free card
+      // and confirms any credit spend, failing CLOSED. The price is asked of THE payload that
+      // will be sent (review F12). A batch confirmed its own tally already (skipConfirm).
+      if (!opts.skipConfirm) {
+        const ask = await askShotSpend(p);
+        if (!ask.go) return { ok: false, reason: "cancelled" };
+        quote = ask.quote;
+        expectFree = ask.expectFree;
+      }
+      // ---- 3. the lock, saved before anything is sent ----
+      if (activeIdRef.current !== boardId || !cardOn(cardId)) return { ok: false, reason: "board-changed" };
+      const before = cardOn(cardId).c;
+      const submitId = newSubmitId();
       const startedAt = Date.now();
-      setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
-      pollShot(c.id, d.task_id, startedAt);
-      // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
-      // shows up in the activity card no matter which surface is watching -- register-ONLY (no
-      // poll loop of its own), since pollShot above already owns real completion handling;
-      // Jobs.track()'s own polling would be redundant for a submission this file already
-      // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
-      // own module scope), unlike a host-agnostic shared component that can't assume it.
-      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " · " + (c.title || "untitled"));
-      return { ok: true, taskId: d.task_id };
-    } catch {
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
-      // Same rollback as the submit-error branch above, for the same reason: a throw here
-      // (dropped connection, unparseable body) otherwise leaves the optimistic "wip" on the
-      // card forever, where it reads as a live render and is skipped by every later batch.
-      setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-      return { ok: false, reason: "network" };
+      patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
+        board: boardId, quote, startedAt }, { pausedOk: pausedNow }) || cc);
+      const locked = cardOn(cardId);
+      if (!locked || locked.c.pendingSubmitId !== submitId) return { ok: false, reason: "in-flight" };
+      setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
+      const saved = await saveBoardNow(boardId);
+      if (!saved.ok) {
+        const here = activeIdRef.current === boardId;
+        if (saved.conflict) {
+          // The merged board (the other tab's, plus this tab's takes and markers) is on
+          // screen now; this click's lock comes off it, measured against the OTHER tab's card
+          // so nothing stale from this tab (an old status, a paused task) comes back.
+          const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+          if (here) { patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || before)); await saveBoardNow(boardId); }
+          holdCard(cardId, "This storyboard changed in another tab — check the shot, then press Render again.");
+          return { ok: false, reason: "conflict" };
+        }
+        if (here) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+        holdCard(cardId, "Couldn't save the storyboard, so nothing was sent.");
+        return { ok: false, reason: "save-failed" };
+      }
+      // ---- 4. the one POST ----
+      let threw = false, status = 0, body = null;
+      try {
+        const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(shotSendBody(p, { boardId, cardId, submitId, expectFree })) });
+        status = r.status;
+        try { body = await r.json(); } catch (_e) { body = null; }
+      } catch (_e) { threw = true; }
+      // The POST answered: from here the card's own markers hold the lock.
+      inflightRef.current.delete(cardId);
+      // ---- 5. what the answer means ----
+      const here = () => activeIdRef.current === boardId;
+      const cls = classifySubmit({ threw, status, body });
+      if (cls.kind === "accepted") {
+        // Persist the task id on the card so a mid-render tab close is recoverable: the
+        // in-memory pollShot loop dies with the page, but the resume re-attaches it from
+        // pendingTaskId on next load (otherwise the shot is stuck "wip" forever while its clip
+        // lands orphaned in the gallery). genStartedAt was persisted by the lock, so the
+        // give-up-timer's tiers survive a reload too. Another board open now: that board's
+        // own resume adopts the task through /api/loom/submit-status when it is reopened.
+        if (here()) {
+          patchCardNow(cardId, (cc) => adoptTask(cc, submitId, cls.taskId));
+          pollShot(cardId, cls.taskId, startedAt, boardId);
+        }
+        // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
+        // shows up in the activity card no matter which surface is watching -- register-ONLY (no
+        // poll loop of its own), since pollShot above already owns real completion handling;
+        // Jobs.track()'s own polling would be redundant for a submission this file already
+        // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
+        // own module scope), unlike a host-agnostic shared component that can't assume it.
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(cls.taskId, fresh.code + " · " + (c.title || "untitled"));
+        return { ok: true, taskId: cls.taskId };
+      }
+      if (cls.kind === "busy") {
+        // The server's one-render-per-shot rule: nothing was sent, so this click's lock comes off.
+        if (here()) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+        holdCard(cardId, cls.error);
+        return { ok: false, reason: "busy" };
+      }
+      if (cls.kind === "refused") {
+        noteResolved(submitId);
+        const msg = friendlyGenErr(cls.error);
+        if (here()) patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+        holdCard(cardId, msg);
+        return { ok: false, reason: "refused" };
+      }
+      // UNCLEAR (review F3): no answer, or an answer that says the render may have started.
+      // The lock stays; the way to learn more is the server's journal, read ONCE -- never a
+      // second POST of this render.
+      if (here()) patchCardNow(cardId, (cc) => markUnclear(cc, submitId, CHECKING_MSG, nowIso()));
+      const settled = await checkSubmit(cardId, submitId, boardId);
+      if (settled.accepted) return { ok: true, taskId: settled.taskId };
+      return { ok: false, reason: settled.refused ? "refused" : "unclear" };
+    } finally {
+      inflightRef.current.delete(cardId);
     }
+  };
+
+  // ONE read of the journal for a render whose POST answer never came (BUILD-w5-p §3.3 step 5):
+  // accepted -> the card adopts the task and polls it; refused / not sent / released -> the card
+  // says so; still unclear -> the peach way-out (↻ Check, or release after checking Activity).
+  // It reads GET /api/loom/submit-status and nothing else: it can never send a render.
+  const checkSubmit = async (cardId, submitId, boardId) => {
+    const here = () => activeIdRef.current === boardId;
+    // Spend review B1: this tab's own POST for this card has not answered yet (a slow PixAI,
+    // then a board switch or the Mobile toggle re-ran the resume). The send is SLOW, not
+    // unclear: nothing is marked and no release is offered -- the POST's answer settles it.
+    if (inflightRef.current.has(cardId)) return { pending: true };
+    if (checkingRef.current.has(submitId)) return { unclear: true };
+    checkingRef.current.add(submitId);
+    try {
+      if (here()) holdCard(cardId, CHECKING_MSG, "checking");
+      let st = null;
+      try {
+        const r = await fetch("/api/loom/submit-status?submit_id=" + encodeURIComponent(submitId));
+        st = await r.json();
+      } catch (_e) { st = null; }
+      const cls = classifySubmitStatus(st);
+      // Another board is open now: nothing is patched; that board's resume asks again.
+      if (!here()) return cls.kind === "accepted" ? { accepted: true, taskId: cls.taskId } : { [cls.kind]: true };
+      if (cls.kind === "accepted") {
+        adoptFromJournal(cardId, submitId, cls.taskId, boardId);
+        return { accepted: true, taskId: cls.taskId };
+      }
+      if (cls.kind === "refused") {
+        noteResolved(submitId);
+        const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
+        patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+        holdCard(cardId, msg);
+        return { refused: true };
+      }
+      patchCardNow(cardId, (cc) => markUnclear(cc, submitId, UNCLEAR_MSG, nowIso()));
+      // The status pill stays short: the way-out beside it (sendUnclear) says the rest.
+      holdCard(cardId, "unconfirmed", "unclear");
+      return { unclear: true };
+    } finally {
+      checkingRef.current.delete(submitId);
+    }
+  };
+  // The journal says this render WAS sent (task id known): the card adopts it and it is polled
+  // like any other. This is a submit path for the Activity tray too -- a render whose POST
+  // answer was lost was never registered anywhere.
+  const adoptFromJournal = (cardId, submitId, taskId, boardId) => {
+    const e0 = cardOn(cardId);
+    if (!e0) return;
+    const startedAt = e0.c.genStartedAt || Date.now();
+    patchCardNow(cardId, (cc) => adoptTask(cc, submitId, taskId));
+    if (window.Jobs && window.Jobs.register) window.Jobs.register(taskId, e0.code + " · " + (e0.c.title || "untitled"));
+    pollShot(cardId, taskId, startedAt, boardId);
+  };
+  // "↻ Check": the same one read again, on the owner's click.
+  const recheckSubmit = (cardId) => {
+    const e = cardOn(cardId);
+    if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+    checkSubmit(cardId, e.c.pendingSubmitId, activeIdRef.current);
+  };
+  // "I checked Activity — release this shot" (review F8): records `abandoned` in the journal so
+  // the server stops holding the shot, and settles the card. It never re-sends anything; a
+  // render the journal knows WAS sent cannot be released -- the card adopts that task instead.
+  const releaseSubmit = async (cardId) => {
+    const e = cardOn(cardId);
+    const boardId = activeIdRef.current;
+    if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+    // Spend review B1: a render whose POST this tab is still waiting on is never released --
+    // it may be charged any second, and a release would free the shot for a second render.
+    if (inflightRef.current.has(cardId)) { holdCard(cardId, STILL_SENDING_MSG, "checking"); return; }
+    const submitId = e.c.pendingSubmitId;
+    let d = null, status = 0;
+    try {
+      const csrf = await LOOM_RUN_DEPS.csrf();
+      const r = await fetch("/api/loom/submit-abandon", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf, submit_id: submitId }) });
+      status = r.status;
+      d = await r.json();
+    } catch (_e) { d = null; }
+    if (activeIdRef.current !== boardId) return;
+    if (d && d.ok) {
+      noteResolved(submitId);
+      patchCardNow(cardId, (cc) => abandonSubmit(cc, submitId, nowIso()));
+      holdCard(cardId, "Released. If that render was sent after all, its clip is in your library.");
+      return;
+    }
+    if (status === 409 && d && d.task_id) { adoptFromJournal(cardId, submitId, String(d.task_id), boardId); return; }
+    // The server still has this render's request running (another tab's, or this page's before
+    // a reload): it refused the release. The shot stays locked; ↻ Check reads the answer later.
+    if (status === 409 && d && d.sending) { holdCard(cardId, STILL_SENDING_MSG, "unclear"); return; }
+    holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " — " + d.error : " — the server didn't answer.") + " Nothing was sent.", "unclear");
   };
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
   // the recursive setTimeout tick loop around it stays here since the polling/timing
@@ -6586,14 +8900,30 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // this, every reload would silently re-arm a full 6h budget regardless of true elapsed
   // time, reintroducing (on a per-reload cadence) the exact "dead generation indistinguishable
   // from a live one" symptom this whole softening exists to fix (found in review).
-  const pollShot = (cardId, tid, existingStartedAt) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
+  //
+  // Session P (BUILD-w5-p §1.3, review F1/F4/F14): `boardId` is the board the render was sent
+  // from. A result lands ONLY while that board is the open one, and only through landTake --
+  // which appends a take and moves ★ only for the task the card is waiting for. With another
+  // board open nothing is patched (a copy of the shot there is not its owner): the poll lets
+  // go of the task so that board's own resume lands it when it is reopened. A failure goes
+  // through failRender, so a shot that still has a ★ take stays done. The task is registered
+  // in resumedRef HERE, so no later resume can start a second poll of it.
+  const pollShot = (cardId, tid, existingStartedAt, boardId) => {
+    const key = String(tid);
+    if (pollingRef.current.has(key)) return;        // one live poll per task in this tab
+    pollingRef.current.add(key);
+    resumedRef.current[key] = true;
+    const onBoard = () => !boardId || activeIdRef.current === boardId;
+    // With another board open, let go of the task: that board's own resume polls it again.
+    const leave = () => { pollingRef.current.delete(key); delete resumedRef.current[key]; };
+    if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
     const startedAt = existingStartedAt || Date.now();
     const pause = () => {
+      pollingRef.current.delete(key);
       // NOT a giveUp() -- status stays "wip", pendingTaskId stays set, and batchTally
       // records this card's outcome as "stale" (not "failed") so a batch banner never has to
       // lie about a shot this tab has genuinely stopped checking.
-      setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
+      if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
         msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result — click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")" } }));
       setBatchOutcome(cardId, "stale");
     };
@@ -6601,15 +8931,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
       const cls = classifyTaskStatus(d);
       const elapsed = Date.now() - startedAt;
       if (cls.phase === "done") {
-        // duration is stashed here too (not just via setCardStatus below) so a draft
-        // generation -- with no real card for setCardStatus to find -- still has it
-        // on hand when the owner later attaches this result to a shot.
-        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-        // capture the clip's REAL length so the reel reflects what was rendered, not planned.
-        // Reset trims too -- a re-roll's new clip is a different length than whatever the
-        // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
-        // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        if (!onBoard()) { leave(); return; }
+        pollingRef.current.delete(key);
+        const cur = cardOn(cardId);
+        const rep = { mid: cls.mid, taskId: tid, dur: cls.duration, at: nowIso(), board: boardId };
+        const outcome = cur ? landTake(cur.c, rep).outcome : "not-owned";
+        if (cur) patchCardNow(cardId, (cc) => landTake(cc, rep).card);
+        // duration is stashed here too so a draft generation -- with no real card -- still
+        // has it on hand when the owner later attaches this result to a shot. A take lands
+        // with the clip's REAL length and trims reset (landTake): a stale trimOut past the new
+        // clip's end can hang SequencePlayer on it forever.
+        if (outcome === "landed" || (outcome === "repeat" && cur && String(cur.c.pendingTaskId) === key)) {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
+        } else if (outcome === "unselected") {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", mid: cls.mid, duration: cls.duration,
+            msg: "An earlier render finished; it was added as a take without taking ★." } }));
+        } else {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", mid: cls.mid,
+            msg: "That render finished; its clip is in your library." } }));
+        }
         setBatchOutcome(cardId, "done");
         // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
@@ -6623,8 +8963,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
         // this bundle's module scope).
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
+        if (!onBoard()) { leave(); return; }
+        pollingRef.current.delete(key);
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
+        // Status describes the ★ take (review F14): a failed retake on a rendered shot stays
+        // done, with the failure recorded; a report for a render the card is no longer waiting
+        // for changes nothing but that render's superseded record.
+        patchCardNow(cardId, (cc) => failRender(cc, { taskId: tid, state: "failed", msg: cls.msg, at: nowIso() }));
         setBatchOutcome(cardId, "failed");
         // Same nudge as the done branch above, mirroring the notify Jobs poller on its
         // own failed branch -- a failed shot must not leave the tray stuck on stale
@@ -6633,11 +8978,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
       } else if (elapsed > POLL_CEILING_MS) {
         pause();
       } else if (elapsed > POLL_STALE_AT_MS) {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "stale",
+        if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "stale",
           msg: "Still going after " + elapsedLabel(elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(tid).slice(-6) + ")" } }));
         setTimeout(tick, POLL_STALE_MS);
       } else if (elapsed > POLL_SLOW_AT_MS) {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "slow",
+        if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "slow",
           msg: "Taking longer than expected (" + elapsedLabel(elapsed) + ", task " + String(tid).slice(-6) + ")" } }));
         setTimeout(tick, POLL_SLOW_MS);
       } else setTimeout(tick, 4000);
@@ -6651,54 +8996,292 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // Resume any shot whose render was interrupted by a tab close: the card kept
   // status:"wip" + pendingTaskId, but its in-memory poll loop died with the page. On
   // project load (activeId change), re-attach a poll so the finished clip lands on the
-  // card. Deduped per task id so flipping projects back and forth mid-render doesn't
-  // stack loops; a resumed poll clears pendingTaskId itself on done/fail.
+  // card. Deduped per task id (pollShot registers every task it polls in resumedRef itself)
+  // so flipping projects back and forth mid-render doesn't stack loops.
   //
-  // mobileUI ALSO in the dependency array (mobile-generate-rail pass, 2026-08-03 --
-  // credit-safety finding): the desktop rail's Video tab submits through <mg-generate-
-  // drawer>, whose OWN poll is genuinely component-local (mg-generate-drawer.js's
-  // disconnectedCallback clears every _pollTimers entry -- confirmed by reading that
-  // file). LoomV2 -- and any <mg-generate-drawer> mounted inside it -- unmounts
-  // completely the instant the "📱 Mobile view" toggle flips (the same class of gap
-  // increment 3 built generateShot/pollShot specifically to route around for a shot's
-  // own clip). Unlike the drawer's documented 6h-ceiling pause, an unmount fires NO
-  // 'mg-paused' event -- genState silently freezes on "Rendering…" with nothing left
-  // polling, recoverable today only via a full page reload (which re-fires this same
-  // effect from a fresh activeId). Re-running the identical, already-idempotent scan on
-  // every mobileUI flip closes that gap immediately: any card left "wip"+pendingTaskId
-  // by a just-unmounted drawer gets a fresh, hook-level pollShot() the instant the
-  // toggle fires, regardless of whether LoomV2 or LoomMobile is the one now unmounting.
+  // mobileUI ALSO triggers it (mobile-generate-rail pass, 2026-08-03 -- credit-safety
+  // finding): LoomV2 -- and the <VideoDrawer> inside it -- unmounts completely the instant
+  // the "📱 Mobile view" toggle flips, and an unmount fires NO 'mg-paused' event, so a
+  // drawer-submitted render would sit on "Rendering…" with nothing left watching it here.
+  // Re-running the identical, already-idempotent scan on every flip closes that gap: any card
+  // left "wip"+pendingTaskId gets a hook-level pollShot() the instant the toggle fires.
   // resumedRef dedupes by taskId (not by trigger reason), so this is a genuine no-op for
-  // every task already resumed or still actively polling -- no double-poll risk, and
-  // none of Image/Edit/Reference's OWN generation needs this at all: genImage/genEdit/
-  // genRef's polls (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains
-  // living in this hook, never a DOM element's lifecycle, so they already survive the
-  // toggle with no fix required -- verified by reading their implementations, not
-  // assumed. See this increment's own report for the injected-state verification.
+  // every task already resumed or still actively polling. genImage/genEdit/genRef's polls
+  // (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains living in this hook,
+  // never a DOM element's lifecycle, so they already survive the toggle with no fix.
   //
-  // WHICH cards need it is cardsToResume (loom-core.js) -- a pure walk over the board and
-  // the already-resumed record, so the dedup rule is provable without a mounted tree. WHEN
-  // to ask is this effect's dep array, and that is the whole of what lives here.
-  useEffect(() => {
-    if (!project) return;   // project is null until the store loads the first board
-    cardsToResume(project, resumedRef.current)
-      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
-  }, [activeId, mobileUI]);   // eslint-disable-line
+  // Session P (BUILD-w5-p §3.3, review F3/F8): a card whose SEND is unclear (a submit id, no
+  // task yet) is resumed by ONE read of /api/loom/submit-status -- never by a render.
+  //
+  // WHICH cards need it is cardsToResume (loom-core.js) and submitsToCheck
+  // (loom-takes-core.js) -- pure walks over the board, so the rules are provable without a
+  // mounted tree. It is a NAMED function so the never-auto-render test can root it.
+  const resumeInterrupted = () => {
+    const proj = projectRef.current;
+    if (!proj) return;   // null until the store loads the first board
+    const boardId = activeIdRef.current;
+    cardsToResume(proj, resumedRef.current)
+      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt, boardId));
+    // A card whose POST this tab is still waiting on is slow, not unclear (spend review B1).
+    submitsToCheck(proj, Object.create(null))
+      .filter((c) => !inflightRef.current.has(c.id))
+      .forEach((c) => checkSubmit(c.id, c.submitId, boardId));
+  };
+  useEffect(() => { resumeInterrupted(); }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
-  // generation involved. /api/loom/export already treats every resultMid as just "a video
-  // file to trim+concat," so this writes the exact same shape pollShot does on completion.
+  // generation involved. It lands as a take (attachTake, imported: the spend ledger never
+  // bills a borrowed clip), selected; a render still out for the shot is not cancelled by it
+  // (its late clip lands as a take without ★), and a shot whose send is unclear refuses.
   const useExistingVideo = (entry) => {
+    const cardId = entry.c.id, boardId = activeIdRef.current;
     openPick((mid, thumb, isVideo, duration) => {
-      setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      // THE SAME PATCH THE FOOTAGE TAB'S IMPORT APPLIES (attachedVideoPatch, loom-mutations.js
-      // -- see its own note). Same picker, same borrowed clip, so the same `imported: true`
-      // provenance: this shot's video was rendered elsewhere at some other time, and the
-      // spend ledger must not bill it to this project. It was written out by hand here and
-      // missed that flag, which is the whole of the bug. pendingTaskId/genStartedAt clearing
-      // moved into the shared patch with it.
-      setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
+      const cur = cardOn(cardId);
+      if (!cur || activeIdRef.current !== boardId) return;
+      const rep = { mid, dur: duration, imported: true, at: nowIso() };
+      const out = attachTake(cur.c, rep);
+      if (out.outcome === "unclear") {
+        holdCard(cardId, "This shot's last render isn't confirmed yet — check it (or release it) before attaching a video.", "unclear");
+        return;
+      }
+      if (out.outcome === "invalid") return;
+      patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+      setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Attached from your gallery", mid } }));
     }, "video");
   };
+  // The Video tab's draft result, "attach to A·0n": a real render made on this board, so a
+  // BILLED take, carrying the draft's settings snapshot when the draft recorded one. Returns
+  // attachTake's outcome for the button to report.
+  const attachDraftVideo = (cardId, { mid, dur, settings }) => {
+    const cur = cardOn(cardId);
+    if (!cur || !mid) return "invalid";
+    const rep = { mid, dur, imported: false, settings: settings || null, at: nowIso() };
+    const out = attachTake(cur.c, rep);
+    if (out.outcome === "unclear") {
+      holdCard(cardId, "This shot's last render isn't confirmed yet — check it (or release it) before attaching.", "unclear");
+      return "unclear";
+    }
+    if (out.outcome === "invalid") return "invalid";
+    patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+    return out.outcome;
+  };
+
+  /* ---- The Video drawer's host (BUILD-w5-p §3.3, review F7) ----
+     The drawer asks beforeSend({submit_id, card_id, board_id, payload}) before it POSTs, with
+     the target it captured AT THE CLICK. For a card this runs generateShot's steps 1 to 3:
+     the synchronous latch, the spend ask (askShotSpend, asked of the payload the drawer will
+     POST -- the same words generateShot asks with), then the lock (beginRender) saved through
+     the queue. Any refusal ends the click with the Loom's message and NO POST; a "no" to the
+     ask ends it as cancelled, with nothing locked and nothing sent. Every drawer event is then
+     resolved by the ids it carries -- mg-submit by the card's pendingSubmitId, mg-result /
+     mg-error / mg-slow / mg-paused by the card's task id -- and never by whichever shot is
+     selected. A draft render (no card: "__draft__") is asked the same, locks nothing and is
+     sent without a loom_target. The answer carries the quote the owner said yes to and
+     whether it was free (expectFree), which is what the drawer then sends. */
+  const beginDraftRender = async (submitId, payload) => {
+    // An imported picture, video or audio can't be sent: refuse before pricing, as the card
+    // paths do (S6), so the owner is never asked to confirm a render that could not go out.
+    if (unsendableRefs(payload).length) {
+      return { refused: "Imported " + unsendableKind(payload) + " — it can't be sent to PixAI yet. Nothing was sent." };
+    }
+    const ask = await askShotSpend(payload);
+    if (!ask.go) return { cancelled: true };
+    const dc = (draftCardRef && draftCardRef.current) || {};
+    draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
+      { ...dc, mode: payload.mode || dc.mode, duration: payload.duration != null ? payload.duration : dc.duration,
+        audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage },
+      projectRef.current, payload.prompt, payload.quality) };
+    return { ok: true, expectFree: ask.expectFree };
+  };
+  const beginDrawerRender = async (req) => {
+    const q = req || {};
+    const cardId = String(q.card_id || ""), boardId = String(q.board_id || ""), submitId = String(q.submit_id || "");
+    const payload = q.payload || {};
+    if (!cardId || !boardId || !submitId) return { refused: "This render isn't tied to a shot, so nothing was sent." };
+    if (cardId === "__draft__") return beginDraftRender(submitId, payload);
+    if (activeIdRef.current !== boardId) return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+    // ---- step 1: the latch, synchronous ----
+    const pre = cardOn(cardId);
+    if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
+    const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+    if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { refused: "This shot is already rendering. Nothing was sent." };
+    if (unsendableRefs(payload).length) {
+      const msg = "Imported " + unsendableKind(payload) + " — it can't be sent to PixAI yet. Nothing was sent.";
+      holdCard(cardId, msg);
+      return { refused: msg };
+    }
+    inflightRef.current.add(cardId);
+    // ---- step 2: the spend ask, of the payload the drawer will send ----
+    // The latch is released on every way out of the ask, a throw included: a stuck latch
+    // reads "already rendering" until a reload (fails closed, but strands the shot).
+    let ask;
+    try { ask = await askShotSpend(payload); }
+    catch (e) { inflightRef.current.delete(cardId); throw e; }
+    if (!ask.go) { inflightRef.current.delete(cardId); return { cancelled: true }; }
+    if (activeIdRef.current !== boardId || !cardOn(cardId)) {
+      inflightRef.current.delete(cardId);
+      return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+    }
+    // ---- step 3: the lock, saved before anything is sent ----
+    const c = cardOn(cardId).c;
+    const settings = snapshotSettings({ ...c, mode: payload.mode || c.mode,
+      duration: payload.duration != null ? payload.duration : c.duration,
+      audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
+      audioLanguage: payload.audio_language || c.audioLanguage }, projectRef.current, payload.prompt, payload.quality);
+    const quote = ask.quote;
+    preLockRef.current[submitId] = c;
+    patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
+      board: boardId, quote, startedAt: Date.now() }, { pausedOk: pausedNow }) || cc);
+    const locked = cardOn(cardId);
+    if (!locked || locked.c.pendingSubmitId !== submitId) {
+      inflightRef.current.delete(cardId); delete preLockRef.current[submitId];
+      return { refused: "This shot is already rendering. Nothing was sent." };
+    }
+    setGenState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
+    const saved = await saveBoardNow(boardId);
+    if (saved.ok) return { ok: true, expectFree: ask.expectFree };
+    inflightRef.current.delete(cardId); delete preLockRef.current[submitId];
+    const here = activeIdRef.current === boardId;
+    if (saved.conflict) {
+      const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+      if (here) { patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || c)); await saveBoardNow(boardId); }
+      const msg = "This storyboard changed in another tab — check the shot, then press Render again.";
+      holdCard(cardId, msg);
+      return { refused: msg };
+    }
+    if (here) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, c));
+    const msg = "Couldn't save the storyboard, so nothing was sent.";
+    holdCard(cardId, msg);
+    return { refused: msg };
+  };
+  // mg-submit: the drawer's POST was accepted. The card that holds this submit id adopts the
+  // task (and its durable mode is reconciled to what was really sent) -- found by its
+  // pendingSubmitId, never by the selected shot.
+  const onVideoSubmit = useCallback((detail) => {
+    const d = detail || {};
+    if (d.card_id) inflightRef.current.delete(String(d.card_id));
+    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's own
+    // registration. The drawer's shared submit road registers on the way past too; register is
+    // idempotent by design, and this stays the Loom's own guarantee (every Loom submit path
+    // registers, pinned by loom-image-job-register.test.js).
+    if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Rendered");
+    const submitted = d.payload && d.payload.mode;
+    if (d.card_id === "__draft__") {
+      draftTasksRef.current[String(d.task_id)] = draftSubmitsRef.current[String(d.submit_id)] || {};
+      delete draftSubmitsRef.current[String(d.submit_id)];
+      setGenState((s) => ({ ...s, __draft__: { phase: "running", msg: "Rendering… (task " + String(d.task_id).slice(-6) + ")" } }));
+      if (submitted && setDraftCard) setDraftCard((c) => (submitted !== c.mode ? setShotMode(c, submitted) : c));
+      return;
+    }
+    delete preLockRef.current[String(d.submit_id)];
+    // Another board open: its own resume adopts the task through /api/loom/submit-status.
+    if (d.board_id && d.board_id !== activeIdRef.current) return;
+    const card = cardForSubmit(projectRef.current, d.submit_id);
+    if (!card) return;
+    // The drawer may have submitted a different mode than the card believes -- e.g. a
+    // model-gating auto-switch (_applyModelGating) that never wrote back on its own (that
+    // would let casual model-browsing silently corrupt a card's real mode). Reconcile the
+    // card's durable mode field to what ACTUALLY got submitted, at the one moment it's
+    // known for certain -- on THIS card.
+    patchCardNow(card.id, (cc) => {
+      const a = adoptTask(cc, d.submit_id, d.task_id);
+      return (submitted && submitted !== a.mode) ? setShotMode(a, submitted) : a;
+    });
+    setGenState((s) => ({ ...s, [card.id]: { phase: "running", msg: "Rendering… (task " + String(d.task_id).slice(-6) + ")" } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-result: lands on the card waiting for THIS task (or that superseded it), via landTake.
+  const onVideoResult = useCallback((detail) => {
+    const d = detail || {};
+    const mid = (d.media_ids || [])[0];
+    if (d.card_id === "__draft__") {
+      const rec = draftTasksRef.current[String(d.task_id)] || {};
+      setGenState((s) => ({ ...s, __draft__: { phase: "done", msg: "Done", mid, duration: d.duration, settings: rec.settings || null } }));
+      return;
+    }
+    const tid = d.task_id;                  // a result, never a submit: it takes no task id from one
+    if (!mid || !tid) return;
+    if (d.board_id && d.board_id !== activeIdRef.current) return;   // its board's resume lands it
+    const card = cardForTask(projectRef.current, tid);
+    if (!card) return;
+    const rep = { mid, taskId: tid, dur: d.duration, at: nowIso(), board: d.board_id || activeIdRef.current };
+    const outcome = landTake(card, rep).outcome;
+    patchCardNow(card.id, (cc) => landTake(cc, rep).card);
+    const landed = outcome === "landed" || (outcome === "repeat" && String(card.pendingTaskId) === String(tid));
+    setGenState((s) => ({ ...s, [card.id]: landed ? { phase: "done", msg: "Done", mid, duration: d.duration }
+      : { phase: "done", mid, msg: outcome === "unselected" ? "An earlier render finished; it was added as a take without taking ★."
+        : "That render finished; its clip is in your library." } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-error: a render that failed after it was sent (task id), or a submit that did not go
+  // through (submit id): refused -> the card says so; the one-render-per-shot 409 -> this
+  // click's lock comes off; NO answer -> unclear, and the one submit-status read.
+  const onVideoError = useCallback((detail) => {
+    const d = detail || {};
+    if (d.card_id === "__draft__") {
+      setGenState((s) => ({ ...s, __draft__: { phase: "error", msg: d.unclear ? UNCLEAR_MSG : d.error } }));
+      return;
+    }
+    if (d.task_id) {
+      if (d.board_id && d.board_id !== activeIdRef.current) return;
+      const card = cardForTask(projectRef.current, d.task_id);
+      if (!card) return;
+      patchCardNow(card.id, (cc) => failRender(cc, { taskId: d.task_id, state: "failed", msg: d.error, at: nowIso() }));
+      setGenState((s) => ({ ...s, [card.id]: { phase: "error", msg: d.error } }));
+      return;
+    }
+    if (!d.submit_id) return;               // not a render (an audio upload's error line, say)
+    if (d.card_id) inflightRef.current.delete(String(d.card_id));
+    const before = preLockRef.current[String(d.submit_id)];
+    delete preLockRef.current[String(d.submit_id)];
+    if (d.board_id && d.board_id !== activeIdRef.current) return;   // its board's resume checks it
+    const card = cardForSubmit(projectRef.current, d.submit_id);
+    if (!card) return;
+    const cls = d.answer ? classifySubmit(d.answer) : { kind: d.unclear ? "unclear" : "refused", error: d.error };
+    if (cls.kind === "unclear" || cls.kind === "accepted") {
+      patchCardNow(card.id, (cc) => markUnclear(cc, d.submit_id, CHECKING_MSG, nowIso()));
+      checkSubmit(card.id, d.submit_id, activeIdRef.current);
+      return;
+    }
+    if (cls.kind === "busy") {
+      // Nothing was sent: this click's lock comes off (back to the card as it was before it).
+      if (before) patchCardNow(card.id, (cc) => cancelRender(cc, d.submit_id, before));
+      else patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg: cls.error || d.error, at: nowIso() }));
+      holdCard(card.id, cls.error || d.error);
+      return;
+    }
+    noteResolved(d.submit_id);
+    const msg = d.error || friendlyGenErr(cls.error);
+    patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg, at: nowIso() }));
+    holdCard(card.id, msg);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-slow: the drawer's poll downshifted cadence without a real result. Board-grid cards
+  // read their badge text from genState, not the drawer's own inline line (only visible while
+  // this shot's Video tab is open) -- this is the mirror write that keeps them in sync. Never
+  // touches the card or batchTally: drawer-submitted shots are never part of a batch run.
+  const drawerCardFor = (d) => {
+    if (d.card_id === "__draft__") return "__draft__";
+    if (d.board_id && d.board_id !== activeIdRef.current) return null;
+    const card = cardForTask(projectRef.current, d.task_id);
+    return card ? card.id : null;
+  };
+  const onVideoSlow = useCallback((detail) => {
+    const d = detail || {};
+    const id = drawerCardFor(d);
+    if (!id) return;
+    setGenState((s) => ({ ...s, [id]: {
+      phase: d.tier,
+      msg: d.tier === "stale"
+        ? "Still going after " + elapsedLabel(d.elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(d.task_id).slice(-6) + ")"
+        : "Taking longer than expected (" + elapsedLabel(d.elapsed) + ", task " + String(d.task_id).slice(-6) + ")",
+    } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-paused: the drawer's poll hit its 6h ceiling and stopped for this task. Same
+  // non-verdict as pollShot's own pause() -- the card's markers are untouched.
+  const onVideoPaused = useCallback((detail) => {
+    const d = detail || {};
+    const id = drawerCardFor(d);
+    if (!id) return;
+    setGenState((s) => ({ ...s, [id]: { phase: "paused",
+      msg: "Paused auto-checking with no result — click to check again, or check pixai.art (task " + String(d.task_id).slice(-6) + ")" } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
   // Shared drawer poll. pollShot has had a POLL_CEILING_MS guard since the
   // give-up-timer pass; these drawer polls never did, so a task that never reached
@@ -6747,6 +9330,26 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     setTimeout(tick, 2500);
   };
   const pollImg = (cardId, tid) => pollTaskWithCeiling(tid, setGenImgState, cardId);
+  // Review S2 (Session M): the Image tab's ×2-4, or a prompt using the template syntax -- which
+  // /api/generate refuses -- goes through the run road, as the Generate dock's does: /plan, this
+  // file's window.confirm carrying the server's own quote, then ONE /run with the plan's
+  // acknowledgement (loom/src/loom-run.js). Every task it made is registered (register-ONLY, as
+  // genImage) and polled through pollTaskWithCeiling: the first drives this drawer, the others
+  // are polled quietly so each is collected and closed out in the tray.
+  const genImageRun = async (entry, body) => {
+    const c = entry.c;
+    const label = `Generate ${body.count > 1 ? body.count + " reference images" : "a reference image"} for ${c.title || "this shot"}?`;
+    const out = await sendImgRun(body, label, LOOM_RUN_DEPS, { key: c.id,
+      onSending: () => setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } })) });
+    if (!out.ok) { if (out.error) setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: out.error } })); return; }
+    const jobLabel = "Image · " + entry.code + " · " + (c.title || "untitled");
+    setGenImgState((s) => ({ ...s, [c.id]: { phase: "running", msg: out.note || "Generating…" } }));
+    out.taskIds.forEach((tid, k) => {
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(tid, jobLabel);
+      if (k === 0) pollImg(c.id, tid);
+      else pollTaskWithCeiling(tid, () => {}, c.id);
+    });
+  };
   const genImage = async (entry) => {
     const c = entry.c;
     const prompt = (c.imgPrompt || "").trim();
@@ -6755,6 +9358,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     if (anyLoraUnresolved(imgLoras)) { setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: "still waiting on a LoRA to resolve" } })); return; }
     // L536: ONE body, shared by the price check just below and the real submit two lines
     // later -- so the free-card/cost check the user is agreeing to is exactly what fires.
+    // Review S2: more than one image, or a template prompt, takes the run road (genImageRun).
+    const asked = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
+    if (imgSendRoute(asked) === "run") return genImageRun(entry, asked);
     const body = buildImgGenBody(imgModel, imgLoras, imgAdv, prompt);
     if (!(await confirmSpend(body, `Generate a reference image for ${c.title || "this shot"}?`))) return;
     setGenImgState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
@@ -6901,20 +9507,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
       "Fix · " + entry.code + " · " + (c.title || "untitled"));
   };
-  // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
-  // the submits don't collide. Each shot manages its own status/poll via generateShot.
-  // Takes `entries` as a call-site argument (computed by App() from the current
-  // project) rather than closing over it, since this hook has no `entries` of its own.
+  // Batch-generate the whole board: fire every shot that needs a render in sequence,
+  // staggered so the submits don't collide. Each shot manages its own status/poll via
+  // generateShot. `entries` is the caller's (the toolbar's) view; the todo list is taken from
+  // the CURRENT board (the store's ref), which already holds any hand-edit the click flushed.
   const batchGenerate = async (entries) => {
-    // Exclude "wip" alongside "done" -- a shot already mid-render (started individually via
-    // the drawer, or reattached by the resume-on-load effect) must not be resubmitted just
-    // because it isn't finished yet. Found in review: the batching flag only guards the
-    // TOOLBAR button, not this filter, so a batch launched while some other shot happens to
-    // already be rendering used to fire a second, duplicate /api/loom/generate for it.
-    const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
+    // Session P (review F14, BUILD-w5-p §3.4): a shot needs a render when it has no ★ take and
+    // no render in flight (needsRender) -- NOT "status is not done". A rendered shot whose
+    // retake failed keeps its take and is never paid for again by Generate all; a shot already
+    // mid-render (started from the drawer or its own Render, or reattached by the resume) is
+    // never resubmitted.
+    const board = projectRef.current ? flat(projectRef.current) : (entries || []);
+    const todo = board.filter((e) => needsRender(e.c));
     if (!todo.length) return;
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
+    // The fingerprint each shot's confirmed price is held to (review F12) is taken from the
+    // same board in the same synchronous step as the payloads priced on the next line;
+    // generateShot later refuses to send a shot whose payload no longer matches it.
     setBatching(true);
+    const fps = todo.map((e) => priceFingerprint(shotPayload(e)));
     const prices = await Promise.all(todo.map((e) => priceShot(e)));
     // tallyPricesDetailed (loom-core.js) fails closed the same way this loop always did (a
     // failed price check buckets as "unknown", never a false "0 credits") -- the one shared
@@ -6958,22 +9569,60 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     // since nothing else would ever touch it again.
     const ids = new Set(todo.map((e) => e.c.id));
     setBatchTally({ total: todo.length, submitted: 0, ids, outcomes: {} });
-    for (const e of todo) {
+    // Which shots the pool-aware tally counted as COVERED by a card (review F13): only those are
+    // sent expect_free, so the server refuses one rather than charge it if the card is gone.
+    // An overflow shot was confirmed as a paid one and is sent as one.
+    const covered = prices.map((pr, i) => !!(pr && pr.free) && !(overflowIndexes || []).includes(i));
+    const dropFromTally = (id) => setBatchTally((prev) => {
+      if (!prev || !prev.ids.has(id)) return prev;
+      const next = new Set(prev.ids); next.delete(id);
+      return { ...prev, ids: next, total: prev.total - 1 };
+    });
+    const changed = [], skipped = [];
+    let stopped = null;
+    for (const [i, e] of todo.entries()) {
       // generateShot never throws (every failure path returns {ok:false,...}), so this
       // try/catch is defensive only -- the tally itself is driven by the return value, not
       // by whether an exception escaped (a first-draft design tried the latter and, since
       // generateShot swallows every failure internally, it never actually caught anything).
       let r;
-      try { r = await generateShot(e, { skipConfirm: true }); } catch (_e) { r = { ok: false }; }
+      try {
+        r = await generateShot(e, { skipConfirm: true, onlyIfNeeded: true, confirmedFp: fps[i], expectFree: covered[i],
+          quote: prices[i] ? { cost: prices[i].cost == null ? null : prices[i].cost, free: covered[i] } : null });
+      } catch (_e) { r = { ok: false }; }
       // A successful submit only bumps `submitted` -- its eventual done/failed/stale outcome
       // is recorded later by pollShot via setBatchOutcome. An immediate submit-time failure
       // (r.ok===false) never gets a pollShot at all, so it records its own "failed" outcome
       // right here, the one place that will ever happen for this card.
       if (r.ok) setBatchTally((prev) => (prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + 1 } : prev));
-      else setBatchOutcome(e.c.id, "failed");
-      await new Promise((res) => setTimeout(res, 2200));
+      else if (r.reason === "changed") { changed.push(e.code); dropFromTally(e.c.id); continue; }
+      else if (r.reason === "not-needed" || r.reason === "in-flight" || r.reason === "missing") { skipped.push(e.code); dropFromTally(e.c.id); continue; }
+      // An unclear send MAY exist: the bar says "check manually" (its way-out is on the card),
+      // never "failed".
+      else setBatchOutcome(e.c.id, r.reason === "unclear" ? "stale" : "failed");
+      // The board changed in another tab, the server says the shot is already rendering, or
+      // its answers are getting lost: nothing more is sent (BUILD-w5-p §3.4). A definite
+      // refusal of one shot is recorded above and the batch goes on.
+      if (!r.ok && (r.reason === "conflict" || r.reason === "busy" || r.reason === "unclear"
+        || r.reason === "save-failed" || r.reason === "board-changed")) {
+        stopped = { code: e.code, reason: r.reason };
+        todo.slice(i + 1).forEach((x) => dropFromTally(x.c.id));
+        break;
+      }
+      if (i < todo.length - 1) await new Promise((res) => setTimeout(res, 2200));
     }
     setBatching(false);
+    if (changed.length || skipped.length || stopped) {
+      const WHY = { conflict: "the storyboard changed in another tab", busy: "the server says that shot is already rendering",
+        unclear: "the server didn't confirm that render", "save-failed": "the storyboard couldn't be saved",
+        "board-changed": "another storyboard was opened" };
+      const lines = [];
+      if (changed.length) lines.push("Skipped " + changed.join(", ") + ": changed since you confirmed. Nothing was sent for them.");
+      if (skipped.length) lines.push("Skipped " + skipped.join(", ") + ": already rendering or rendered.");
+      if (stopped) lines.push("Stopped at " + stopped.code + " (" + (WHY[stopped.reason] || stopped.reason) + "). Nothing after it was sent.");
+      if (window.Toast) window.Toast.show({ kind: "err", sticky: !!stopped, title: "Generate all", msg: lines.join(" ") });
+      else window.alert(lines.join("\n"));
+    }
   };
 
   // ---- Standing cost-to-finish estimate: a per-shot price CACHE, warm without gating on
@@ -7010,7 +9659,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // the board is busiest (found in review).
   const { notDone, notDoneFp } = useMemo(() => {
     const boardEntries = project ? flat(project) : [];
-    const nd = boardEntries.filter((e) => e.c.status !== "done");
+    // The same rule Generate all sends by (review F14): a shot with a ★ take is finished even
+    // when its last retake failed, and a shot in flight is not "to finish".
+    const nd = boardEntries.filter((e) => needsRender(e.c));
     const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload(e))).join("|");
     return { notDone: nd, notDoneFp: fp };
   }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -7093,12 +9744,22 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate, priceShot,
     spend, refreshSpend,
+    // Session P: the unclear-send way-out, the draft's "attach to A·0n", and the Video
+    // drawer's host (its beforeSend and the handlers of its events).
+    recheckSubmit, releaseSubmit, attachDraftVideo,
+    beginDrawerRender, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused,
   };
 }
 
 // ---- 4. useExportPipeline: shot-list/backup export, play-sequence, ffmpeg cut ----
 function useExportPipeline(project, thumbs) {
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
+  // Session P (P3): the music bed Play mixes under that sequence -- {bed, plan, segs} or null.
+  const [seqMix, setSeqMix] = useState(null);
+  // Session P (P4): the EDL panel -- {tab: "edl"|"csv"} while it is open, else null. The plan
+  // itself is recomputed from the board on every render, so it always shows the board as it is.
+  const [edlView, setEdlView] = useState(null);
+  const [edlBusy, setEdlBusy] = useState(false);
   const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
   const exportPoll = useRef(null);
 
@@ -7148,17 +9809,30 @@ function useExportPipeline(project, thumbs) {
   };
   // Play-sequence: every finished shot (persisted resultMid), in order, with its
   // in/out trim -- a rough cut played back-to-back, nothing rendered.
+  // Session P (P3): the board's music bed plays under the cut at its level, fading 2 s in and
+  // 3 s out, ducking −12 dB under shots with their own audio -- loom-bed-core.js's plan,
+  // scheduled by SequencePlayer. A GET of the local bed file; nothing is rendered.
   const playSequence = (entries) => {
     const clips = buildPlaySequence(entries);
-    if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
+    if (!clips.length) { alert("No finished shots yet — generate one first."); return; }
+    const bed = bedOf(project);
+    const segs = cutSegments(entries, project);
+    setSeqMix(bed ? { bed, segs, plan: bedPlan(segs, bed) } : null);
+    setSeq(clips);
   };
-  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side).
+  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side). Session P
+  // (P3): the bed rides along by name; the server mixes it by the same rules (ownAudio decides
+  // the ducking, from the one definition), from the caller's own bed folder.
   const exportCut = (entries) => {
     const { clips, total } = buildExportClips(entries);
     if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
+    const bed = bedOf(project);
+    const segs = cutSegments(entries, project);
     setExp({ status: "running", progress: 0, elapsed: 0 });
     fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop })), total_seconds: total }) })
+      body: JSON.stringify({ clips: clips.map((c, i) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop,
+        span: c.span, own_audio: !!(segs[i] && segs[i].ownAudio) })), total_seconds: total,
+        ...(bed ? { bed: { file: bed.file, db: bed.db, dur: bed.dur } } : {}) }) })
       .then((r) => r.json()).then((d) => {
         if (d.error) { setExp({ status: "failed", error: d.error }); return; }
         const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
@@ -7175,11 +9849,38 @@ function useExportPipeline(project, thumbs) {
   // exposed by this hook (only seq was) -- every close/next-past-the-end click threw
   // ReferenceError: setSeq is not defined, silently (only visible in the console), which
   // is exactly why it looked like the buttons just didn't respond.
-  const closeSequence = () => setSeq(null);
+  const closeSequence = () => { setSeq(null); setSeqMix(null); };
 
-  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+  /* THE EDITOR HANDOFF EXPORT (Session P, P4). Opening the panel only plans (pure,
+     loom-edl-core.js); the Download posts that plan to the local zip route. Neither touches
+     PixAI or renders anything -- exportEdl is a root of loom-no-auto-render.test.js. */
+  const openEdl = () => setEdlView({ tab: "edl" });
+  const closeEdl = () => setEdlView(null);
+  const exportEdl = async () => {
+    const bed = bedOf(project);
+    const plan = edlPlan(project, { bed });
+    if (!plan.clips.length) { alert("No rendered shots to hand off yet — render one first."); return; }
+    setEdlBusy(true);
+    try {
+      const r = await fetch("/api/loom/export-edl", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf: await loomCsrf(), name: plan.slug, edl: plan.edl, csv: plan.csv, clips: plan.clips,
+          ...(bed && plan.bedName ? { bed_file: bed.file, bed_name: plan.bedName } : {}) }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert("The edit decision list didn't export: " + (d.error || r.status)); return; }
+      const missing = Number(r.headers.get("X-Edl-Missing-Count") || 0);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = plan.slug + ".zip"; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (missing && window.Toast) window.Toast.show({ kind: "err", title: "Exported, " + missing + " clip(s) left out",
+        msg: "Their files aren't complete in your library. The zip's MISSING.txt names them." });
+    } catch (e) { alert("The edit decision list didn't export — network error."); }
+    finally { setEdlBusy(false); }
+  };
+
+  return { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
-    bundleMissing, closeBundleMissing: () => setBundleMissing(null) };
+    bundleMissing, closeBundleMissing: () => setBundleMissing(null),
+    edlView, setEdlView, openEdl, closeEdl, exportEdl, edlBusy };
 }
 
 export default function App() {
@@ -7190,7 +9891,10 @@ export default function App() {
   // LoomMobile's own top bar). Since 2026-09-06 a PHONE opens LoomMobile by itself when
   // neither switch has ever been flipped -- see useLoomView above for the whole rule, and
   // useIsMobile for the phone test it defers to (a tablet fails it, deliberately).
-  const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
+  // `landscapePhones: false` (Session Q, Q4): the app's phone shell now claims a phone held sideways
+  // too, but THIS board is at home in landscape -- so a phone opened sideways gets the wide board and
+  // an upright one gets the board-and-reel view, which is what the Loom always did.
+  const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
   // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
   // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
   // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)
@@ -7209,11 +9913,23 @@ export default function App() {
   const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
   const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
+    projList, projMenu, setProjMenu, projectApi, importBackup, activeId,
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError, castIo } = useProjectStore(setSelShot);
+  // Session P, Stage B2 (P7): the cast library's view and its owner actions (none can render).
+  const castApi = useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo });
+  // The draft card as it is now, for the drawer host's settings snapshot of a draft render.
+  const draftCardRef = useRef(draftCard);
+  draftCardRef.current = draftCard;
 
-  const { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
+  const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
+  // Session P, Stage A2: the takes strip, a shot's take list and the stale-anchor box. Board edits
+  // only -- none of them can reach a render (loom/test/loom-no-auto-render.test.js).
+  const { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork }
+    = useTakeActions({ projectRef, activeIdRef, setProject, activeId });
+  // Session P, Stage B1 (P3): the music bed's board edits -- none can reach a render.
+  const bedApi = useBedActions({ setProject, activeIdRef });
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
@@ -7247,74 +9963,15 @@ export default function App() {
     // reference to them.
     generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
-    costEstimate, refreshEstimate, spend, refreshSpend }
+    costEstimate, refreshEstimate, spend, refreshSpend,
+    recheckSubmit, releaseSubmit, attachDraftVideo,
+    beginDrawerRender, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused }
     // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
     // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
-  // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
-  // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
-  // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
-  // landing on the shot all keep working identically regardless of which UI submitted.
-  const onVideoSubmit = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(detail.task_id).slice(-6) + ")" } }));
-    // genStartedAt persisted here too, not just in generateShot's own submit site -- the
-    // resume-on-reload effect (useGenerationPipeline) resumes ANY wip+pendingTaskId card via
-    // pollShot regardless of which path originally submitted it (the drawer's own in-memory
-    // poll dies with the page same as pollShot's would). Without this, reloading a page with a
-    // still-pending drawer-submitted shot would resume with no persisted start time, silently
-    // re-arming a full 6h give-up budget on every reload (found while implementing).
-    setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
-    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's
-    // own registration -- deliberately done HERE (the Loom's own host code), not inside
-    // mg-generate-drawer.js itself, so the shared drawer component stays genuinely
-    // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
-    // "Rendered" matches the gallery's own existing label for this same /api/loom/generate
-    // endpoint (Gen.videoGenerate()'s runTask call).
-    // 2026-08-23: the drawer now submits through the gallery's shared submit road, which
-    // registers on the way past, so by the time this runs the id is usually already in the
-    // log and register() no-ops on its `seen` map. KEPT anyway, and not as an oversight:
-    // register is idempotent by design, this stays the Loom's own guarantee (every Loom
-    // submit path registers, pinned by loom-image-job-register.test.js) rather than a
-    // dependency on what another bundle's road happens to do, and it is still the only
-    // registration if a future host mounts this drawer without the gallery's Jobs engine.
-    if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
-  }, [setGenState, setCardStatus]);
-  const onVideoResult = useCallback((cardId, detail) => {
-    const mid = (detail.media_ids || [])[0];
-    setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-    setCardResult(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
-      ...(detail.duration ? { actualDur: detail.duration } : {}) });
-  }, [setGenState, setCardResult]);
-  const onVideoError = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
-    // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
-    // genState -- previously only pendingTaskId cleared here, leaving status:"wip" forever,
-    // indistinguishable from a shot that's still genuinely rendering. Found 2026-07-18.
-    // NOTE (2026-07-18(pm)): this now only ever fires on a REAL d.phase==='failed' from the
-    // drawer's own poll -- elapsed-time-alone timeouts route through onVideoSlow/onVideoPaused
-    // below instead, and never touch card.status at all.
-    setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
-  }, [setGenState, setCardStatus]);
-  // mg-slow: the drawer's poll downshifted cadence without a real result. Board-grid cards
-  // read their badge text from genState, not the drawer's own inline `res` div (only visible
-  // while this shot's Video tab is open) -- this is the mirror write that keeps them in sync.
-  // Never touches setCardStatus or batchTally: status stays "wip", and drawer-submitted shots
-  // are never part of a batch run (batchGenerate only ever calls generateShot/pollShot
-  // directly, never the drawer).
-  const onVideoSlow = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: {
-      phase: detail.tier,
-      msg: detail.tier === "stale"
-        ? "Still going after " + elapsedLabel(detail.elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")"
-        : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")",
-    } }));
-  }, [setGenState]);
-  // mg-paused: the drawer's poll hit its 6h ceiling and stopped scheduling calls for this
-  // task. Same non-verdict as pollShot's own pause() -- status/pendingTaskId untouched.
-  const onVideoPaused = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
-      msg: "Paused auto-checking with no result — click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")" } }));
-  }, [setGenState]);
+    = useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+  // The Video drawer's events (mg-submit / mg-result / mg-error / mg-slow / mg-paused) are
+  // handled by useGenerationPipeline itself since Session P (review F7): each resolves its card
+  // by the submit id or task id the event carries, never by the selected shot.
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
@@ -7329,9 +9986,10 @@ export default function App() {
     setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft); setGenFixState(clearDraft);
   }, [activeId]);
 
-  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+  const { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
-    bundleMissing, closeBundleMissing } = useExportPipeline(project, thumbs);
+    bundleMissing, closeBundleMissing,
+    edlView, setEdlView, openEdl, closeEdl, exportEdl, edlBusy } = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
   // -> free reference at generate time). Tags continue from the current max @imageN.
@@ -7358,6 +10016,23 @@ export default function App() {
   const setLook = (v) => setProject((p) => ({ ...p, look: v }));
   const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
 
+  // Session P (review F15): a boot that could not read the storyboards says so, and writes and
+  // seeds nothing -- a Reload is the way on. Never the eternal "Loading the bay…".
+  if (!project && loadError) {
+    return (
+      <div className="sb-root"><style>{STYLES}</style><NotifyRoot />
+        <div className="sb-empty sb-loadfail" role="alert">
+          <b>Couldn't read your storyboards</b>
+          <span>{loadError === "list"
+            ? "The list of storyboards didn't load."
+            : loadError === "legacy"
+              ? "Your saved storyboard didn't read."
+              : "None of your storyboards would read."} Nothing was changed or written — check the server, then reload.</span>
+          <button type="button" className="sb-btn" onClick={() => window.location.reload()}>&#8635; Reload</button>
+        </div>
+      </div>
+    );
+  }
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
   const entries = flat(project);
@@ -7371,17 +10046,23 @@ export default function App() {
     <div className="sb-root">
       <style>{STYLES}</style>
       <NotifyRoot />
+      <HelpRoot />
+      <GuideHost surface="loom" phone={mobileUI} />
       {mobileUI ? (
         <V2Boundary><LoomMobile
           project={project} entries={entries} thumbs={thumbs} genState={genState}
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
+          castApi={castApi}
+          selectTakeOnCard={selectTakeOnCard} deleteTakeOnCard={deleteTakeOnCard} reuseTakeSettings={reuseTakeSettings}
+          reanchorShot={reanchorShot} keepAnchor={keepAnchor} anchorWork={anchorWork} bedApi={bedApi} activeId={activeId}
           storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
           moveCard={moveCard} dupCard={dupCard} delCard={delCard}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
           generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo}
+          recheckSubmit={recheckSubmit} releaseSubmit={releaseSubmit}
           genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
           imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
           modelDefaults={modelDefaults} setModelDefaults={setModelDefaults} genImage={genImage} routeImg={routeImg}
@@ -7390,7 +10071,7 @@ export default function App() {
           genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix} /></V2Boundary>
       ) : (
         <V2Boundary><LoomV2
-          project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
+          project={project} setCard={setCard} setAssets={setAssets} castApi={castApi} entries={entries} durOf={durOf} scale={scale}
           selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
           thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
           setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
@@ -7405,16 +10086,27 @@ export default function App() {
           batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
           addRef={addRef} setRef={setRef} delRef={delRef}
           exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
+          openEdl={openEdl} bedApi={bedApi}
           importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
+          beginDrawerRender={beginDrawerRender} recheckSubmit={recheckSubmit} releaseSubmit={releaseSubmit}
+          attachDraftVideo={attachDraftVideo}
+          generateShot={generateShot}
+          selectTakeOnCard={selectTakeOnCard} deleteTakeOnCard={deleteTakeOnCard} reuseTakeSettings={reuseTakeSettings}
+          reanchorShot={reanchorShot} keepAnchor={keepAnchor} anchorWork={anchorWork}
           costEstimate={costEstimate} refreshEstimate={refreshEstimate}
           spend={spend} refreshSpend={refreshSpend}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
       )}
-      {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
+      {seq && <SequencePlayer clips={seq} mix={seqMix} onClose={closeSequence} />}
+      {/* Session P (P4): the EDIT DECISION LIST panel (desktop only -- "Phone: not offered"). */}
+      {edlView && !mobileUI && (
+        <EdlPanel project={project} view={edlView} setView={setEdlView} onClose={closeEdl}
+          onDownload={exportEdl} busy={edlBusy} />
+      )}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
           <div className="sb-export-box">
@@ -7493,7 +10185,62 @@ export default function App() {
    handles that store trimIn/trimOut (seconds) on the shot. Nothing is re-encoded
    here -- trims are just metadata that Play-sequence and Export will honor.
    /video-file/<id> supports Range requests, so every seek is instant. */
-function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
+/* A SHOT'S TAKE LIST (Session P, Stage A2 -- NOTES P1: "each take keeps its settings snapshot, so
+   Reuse settings works per take"; "deleting a take asks first; you can't delete the selected
+   take"). The Handoff page does not draw this surface, so it is kept small and in the timeline
+   drawer's own language, beside the ★ clip's preview: one row per take, newest first -- its clip
+   chip, its number, when it landed, what it was rendered with, and ★ Use / Reuse settings /
+   Delete…. Every button is a board edit handed in by LoomV2 (useTakeActions); none renders. */
+const takeWhen = (t) => {
+  if (t.source === "legacy" || !t.at) return "an earlier render";
+  const d = new Date(t.at);
+  if (Number.isNaN(d.getTime())) return "an earlier render";
+  const when = d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return (t.source === "attach" ? "attached " : "landed ") + when;
+};
+const takeSummary = (t) => {
+  const s = t.settings;
+  if (!s) return t.imported ? "from your library · no settings recorded" : "no settings recorded";
+  return [s.mode, s.duration != null ? s.duration + " s" : "", s.quality].filter(Boolean).join(" · ");
+};
+function TakeList({ card, code, onUse, onReuse, onDelete }) {
+  const list = takesOf(card);
+  const selN = selectedTakeOf(card);
+  if (!list.length) return null;
+  const rows = list.map((t) => (t.n === selN ? selectedTakeView(card) || t : t)).slice().reverse();
+  return (
+    <div className="lv-takelist" aria-label={"Takes of " + code}>
+      <div className="lv-takelist-h">{code} &middot; {list.length} take{list.length === 1 ? "" : "s"}</div>
+      {rows.map((t) => {
+        const on = t.n === selN;
+        return (
+          <div key={t.id || "t" + t.n} className={"lv-takeitem" + (on ? " on" : "")}>
+            <span className={"lv-take" + (on ? " on" : "")} aria-hidden="true"
+              style={t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : undefined}>{on ? "★" : t.n}</span>
+            <div className="lv-takeinfo">
+              <div className="lv-taketitle">take {t.n}{on ? " · ★ in use" : ""}</div>
+              <div className="lv-takemeta">{takeWhen(t)} &middot; {takeSummary(t)}</div>
+              <div className="lv-takebtns">
+                {!on && <button type="button" className="lv-takebtn" title={"Use take " + t.n + " for Play, Render and Export"}
+                  onClick={() => onUse(t.n)}>&#9733; Use</button>}
+                <button type="button" className="lv-takebtn" disabled={!t.settings}
+                  title={t.settings ? "Put take " + t.n + "'s settings back on this shot. Nothing is rendered." : "No settings were recorded for this take"}
+                  onClick={() => onReuse(t.n)}>Reuse settings</button>
+                <button type="button" className="lv-takebtn" disabled={on}
+                  title={on ? "Select another take first" : "Delete take " + t.n + " from this shot (its clip stays in your library)"}
+                  onClick={() => onDelete(t.n)}>Delete&hellip;</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// videoH (the timeline drawer only): the 16:9 frame's height, the drawer's preview box less its
+// padding -- the fit rule shrinks that box first -- with the controls laid out beside the frame.
+function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop, videoH }) {
   const vidRef = useRef(null), trackRef = useRef(null);
   const [dur, setDur] = useState(0);
   const [range, setRange] = useState({ in: trimIn || 0, out: trimOut });
@@ -7606,8 +10353,9 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   const shownCrop = cropDraft || crop;   // draft while drawing, else the committed rect
   const trimmed = range.in > 0 || range.out != null;
   return (
-    <div className="sb-shotprev-wrap">
+    <div className={"sb-shotprev-wrap" + (videoH ? " side" : "")}>
       <div className="sb-shotprev" onMouseMove={cropping ? undefined : scrub}
+        style={videoH ? { width: Math.round(videoH * 16 / 9), height: videoH } : undefined}
         onMouseLeave={() => { if (playing || cropping) return; const v = vidRef.current; if (v) v.currentTime = range.in; }}>
         <video ref={vidRef} src={"/video-file/" + mid} muted preload="metadata" playsInline
           onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
@@ -7646,10 +10394,248 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   );
 }
 
+/* THE MUSIC BED ROW (Session P, P3; Loom Handoff.dc.html section A, under the reel). The bed's
+   real waveform (decoded from the file) as the page's thin bars, laid out under the reel's own
+   segments -- a rendered shot's slice of the cut under that shot, nothing under an unrendered
+   one -- hatched and pulled in where the bed ducks under a shot with its own audio, faded in
+   and out as the page's masks fade it. A dashed "No bed" row when there is none. Loom-cyan
+   (--loomc), never gold. Then the page's controls: the bed button, the level slider and its dB,
+   the fades/ducking line, and the cut's status. Every control is a board edit or an upload of
+   the owner's own file to this machine -- none renders. */
+function drawBedWave(cv, { entries, scale, segs, plan, peaks, db }) {
+  if (!cv || !cv.getContext) return;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (!plan) return;
+  const col = getComputedStyle(cv).color;             // .lv-bedwave's color is var(--loomc)
+  const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+  const strength = 0.35 + ((clampBedDb(db) + 24) / 24) * 0.5;     // the page's level -> bar strength
+  const fileDur = peaks && peaks.dur > 0 ? peaks.dur : plan.bedLen;
+  let x = 0;
+  entries.forEach((e) => {
+    const x0 = x, x1 = x + (durOf(e.c) / scale) * W;
+    x = x1;
+    const sg = bySeg.get(e.c.id);
+    if (!sg || sg.start >= plan.bedLen) return;
+    const ducked = sg.ownAudio;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, 0, x1 - x0, H); ctx.clip();
+    ctx.fillStyle = col;
+    ctx.strokeStyle = col;
+    if (ducked) {                                        // the page's 135° hatch where it ducks
+      ctx.globalAlpha = 0.18; ctx.lineWidth = 2.8;
+      for (let k = -H; k < (x1 - x0) + H; k += 8) {
+        ctx.beginPath(); ctx.moveTo(x0 + k, H); ctx.lineTo(x0 + k + H, 0); ctx.stroke();
+      }
+    }
+    for (let bx = Math.ceil(x0 / 4) * 4; bx < x1 - 1; bx += 4) {
+      const t = sg.start + ((bx - x0) / Math.max(1, x1 - x0)) * sg.span;
+      if (t >= plan.bedLen) break;
+      const pk = peaks && peaks.peaks && peaks.peaks.length ? peakAt(peaks.peaks, fileDur, t) : 0.35;
+      const fade = Math.max(0, Math.min(1, plan.fadeIn > 0 ? t / plan.fadeIn : 1,
+        plan.fadeOut > 0 ? (plan.bedLen - t) / plan.fadeOut : 1));
+      const band = ducked ? 0.4 : 1;                     // a ducked bed sits in the middle 40%
+      const h = Math.max(1.5, pk * H * 0.92 * band);
+      ctx.globalAlpha = (ducked ? 0.3 : strength) * fade;
+      ctx.fillRect(bx, (H - h) / 2, 2, h);
+    }
+    ctx.restore();
+  });
+}
+function BedWave({ entries, scale, segs, plan, peaks, db }) {
+  const ref = useRef(null);
+  const [, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const upd = () => setW(el.clientWidth);
+    upd();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => { drawBedWave(ref.current, { entries, scale, segs, plan, peaks, db }); });
+  return <canvas ref={ref} className="lv-bedwave" aria-hidden="true" />;
+}
+function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
+  const busy = api.bedWork.phase === "wip";
+  const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+  const u = api.unusedBeds;
+  const dur = bed ? (bed.dur || (peaks && peaks.dur) || null) : null;
+  const picker = (label, cls, title) => (
+    <label className={cls + (busy ? " busy" : "")} title={title}>{label}
+      <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }} disabled={busy}
+        onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) api.pickBed(f); }} />
+    </label>
+  );
+  return (
+    <div className="lv-bedzone">
+      {bed ? (
+        <div className="lv-bedrow" aria-label={"Music bed: " + bed.name}>
+          <BedWave entries={entries} scale={scale} segs={segs} plan={plan} peaks={peaks} db={bed.db} />
+          <div className="lv-bedtitles">
+            {entries.map((x) => {
+              const sg = bySeg.get(x.c.id);
+              return <div key={x.c.id} style={{ width: `${(durOf(x.c) / scale) * 100}%` }}
+                title={!sg ? x.code + " · not rendered"
+                  : sg.ownAudio ? x.code + " · bed ducks −12 dB under its own audio" : x.code + " · bed at " + dbLabel(bed.db)} />;
+            })}
+          </div>
+        </div>
+      ) : <div className="lv-bedrow none" title="No bed" />}
+      <div className="lv-bedctl">
+        {bed ? (
+          <span className="lv-bedbtn on">
+            {picker(<>&#9834; <span className="lv-bedname">{bed.name}</span>{dur ? " · " + bedClock(dur) : ""}</>,
+              "lv-bedpick", "Pick a different music bed for this storyboard")}
+            <button type="button" className="lv-bedx" aria-label="Remove the music bed"
+              title="Remove the music bed from this storyboard. Its file stays on this machine."
+              onClick={() => api.removeBed()}>&#10005;</button>
+          </span>
+        ) : picker(busy ? "♪ Adding…" : "♪ Add a music bed", "lv-bedbtn",
+          "One audio file under the whole cut — kept on this machine, never uploaded to PixAI")}
+        {bed && (
+          <>
+            <span className="lv-bedlvl">level
+              <input type="range" min={BED_DB_MIN} max={BED_DB_MAX} step={1} value={bed.db} aria-label="Music bed level"
+                onChange={(ev) => api.setBedLevel(ev.target.value)} />
+              <span className="lv-bedmono">{dbLabel(bed.db)}</span></span>
+            <span>fade 2 s in / 3 s out · ducks &minus;12 dB under shots with their own audio (hatched)</span>
+          </>
+        )}
+        <span className="lv-fill" />
+        <span className="lv-bedmono">{cutStatusLine(entries, segs)}</span>
+      </div>
+      {api.bedWork.phase === "err" ? <div className="lv-bednote err" role="status">{api.bedWork.msg}</div>
+        : bed && peaks && peaks.failed ? <div className="lv-bednote err" role="status">The music bed's file couldn't be read on this machine, so Play and &#8679; Render leave it out.</div>
+        : u && u.count > 0 ? (
+          <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
+            <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>
+        ) : null}
+    </div>
+  );
+}
+
+/* THE CONTINUITY RIBBON (Session P, NOTES P9; Loom Handoff.dc.html section A's strip under the
+   reel, "close frame → next open frame"). One pair per cut between rendered shots, from their ★
+   takes (loom-ribbon-core.js's ribbonPairs). Each frame is GET /api/loom/frame -- a local ffmpeg
+   still, never an upload, never PixAI -- and the colour jump is measured HERE, from the two images
+   drawn into a small same-origin canvas: mean CIE76 ΔE in Lab, over 25 = a peach dot, labelled a
+   heuristic. A frame that cannot be produced shows the shot's own reel tint and no ΔE (only a
+   stale anchor can flag that pair). A click is the owner's "open both" (openRibbonPair: a
+   selection / find change, never a render). `compact` is the phone's review-panel strip. */
+function RibbonFrame({ url, tint, label, onState }) {
+  const [ok, setOk] = useState(null);
+  useEffect(() => { setOk(null); }, [url]);
+  return (
+    <div className="lv-ribframe" style={{ backgroundImage: tint }}>
+      <img src={url} alt="" draggable={false} style={ok === false ? { display: "none" } : undefined}
+        onLoad={(ev) => { setOk(true); onState(ev.currentTarget); }} onError={() => { setOk(false); onState(null); }} />
+      <span className="lv-riblab">{label}</span>
+    </div>
+  );
+}
+function RibbonPair({ pair, tintOf, onOpen }) {
+  const ua = frameUrl(pair.a.mid, pair.a.at), ub = frameUrl(pair.b.mid, pair.b.at);
+  const imgs = useRef({ a: undefined, b: undefined });
+  const [meas, setMeas] = useState({ frames: "loading", mean: null });
+  useEffect(() => { imgs.current = { a: undefined, b: undefined }; setMeas({ frames: "loading", mean: null }); }, [ua, ub]);
+  const got = (side) => (el) => {
+    imgs.current[side] = el;
+    const { a, b } = imgs.current;
+    if (a === undefined || b === undefined) return;
+    if (!a || !b) { setMeas({ frames: "missing", mean: null }); return; }
+    let mean = null;
+    try {
+      const cv = document.createElement("canvas");
+      cv.width = RIBBON_GRID.w; cv.height = RIBBON_GRID.h;
+      const cx = cv.getContext("2d", { willReadFrequently: true });
+      cx.drawImage(a, 0, 0, cv.width, cv.height);
+      const da = cx.getImageData(0, 0, cv.width, cv.height).data;
+      cx.clearRect(0, 0, cv.width, cv.height);
+      cx.drawImage(b, 0, 0, cv.width, cv.height);
+      const db = cx.getImageData(0, 0, cv.width, cv.height).data;
+      mean = meanDeltaE(da, db);
+    } catch (e) { mean = null; }
+    setMeas({ frames: mean == null ? "missing" : "ok", mean });
+  };
+  const flag = pairFlagged(pair, meas.frames === "ok" ? meas.mean : null);
+  const title = pairTitle(pair, meas.frames === "ok" ? meas.mean : null, meas.frames)
+    + (meas.frames === "ok" && meas.mean != null ? " · mean Lab ΔE " + meas.mean.toFixed(1) : "")
+    + " — click to open both shots";
+  return (
+    <div className={"lv-ribpair" + (flag ? " flag" : "")} role="button" tabIndex={0} title={title}
+      data-pair={pair.a.code + ">" + pair.b.code} data-delta={meas.mean == null ? "" : meas.mean.toFixed(2)}
+      onClick={() => onOpen(pair)} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onOpen(pair); } }}>
+      <RibbonFrame url={ua} tint={tintOf(pair.a.cardId)} label={pair.a.code + " out"} onState={got("a")} />
+      <RibbonFrame url={ub} tint={tintOf(pair.b.cardId)} label={pair.b.code + " in"} onState={got("b")} />
+      {flag && <span className="lv-ribdot" />}
+    </div>
+  );
+}
+function RibbonStrip({ pairs, tintOf, onOpen, compact }) {
+  return (
+    <div className={"lv-ribbon" + (compact ? " compact" : "")}>
+      <div className="lv-ribcap">CONTINUITY RIBBON &middot; close frame &rarr; next open frame</div>
+      {pairs.length
+        ? <div className="lv-ribrow">{pairs.map((p) => <RibbonPair key={p.key} pair={p} tintOf={tintOf} onOpen={onOpen} />)}</div>
+        : <div className="lv-ribnone">Nothing to compare yet: the ribbon pairs each rendered shot with the next rendered one.</div>}
+    </div>
+  );
+}
+
+/* THE EDIT DECISION LIST PANEL (Session P, P4; Loom Handoff.dc.html's EDL panel). The plan is
+   pure (loom-edl-core.js) and recomputed from the board as it is now; .edl / .csv tabs show the
+   files exactly as they will be written; Download posts them to the local zip route. The page's
+   "P4 ·" label prefix is its own annotation and is not drawn. Desktop only. */
+function EdlPanel({ project, view, setView, onClose, onDownload, busy }) {
+  const bed = bedOf(project);
+  const plan = edlPlan(project, { bed });
+  const text = view.tab === "csv" ? plan.csv : plan.edl;
+  useEffect(() => {
+    const esc = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="sb-seq sb-edlveil" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sb-edl" role="dialog" aria-label="Edit decision list">
+        <div className="sb-edlhead">
+          <div className="sb-edlcap">EDIT DECISION LIST &middot; {plan.slug} &middot; 24 fps &middot; selected takes and trims</div>
+          {[["edl", ".edl"], ["csv", ".csv"]].map(([k, l]) => (
+            <button key={k} type="button" className={"sb-edltab" + (view.tab === k ? " on" : "")} aria-pressed={view.tab === k}
+              onClick={() => setView({ tab: k })}>{l}</button>
+          ))}
+          <button type="button" className="sb-edlx" onClick={onClose} aria-label="Close">&#10005;</button>
+        </div>
+        <div className="sb-edlpre" tabIndex={0}>{text.replace(/\r\n/g, "\n")}</div>
+        <div className="sb-edlnote">The download is a .zip holding the .edl, the .csv and each selected take's rendered clip,
+          named <code>{"{code}_t{take}.mp4"}</code> to match the reel names.{bed && plan.bedName ? " The music bed rides along as " + plan.bedName + "." : ""}</div>
+        <div className="sb-edlfoot">
+          <span className="sb-edlcount">{plan.events} shot{plan.events === 1 ? "" : "s"}{plan.skipped.length ? " · " + plan.skipped.length + " unrendered skipped" : ""}</span>
+          <button type="button" className="sb-btn amber sm" disabled={busy || !plan.clips.length} onClick={onDownload}>
+            {busy ? "Building the zip…" : "⇩ Download (.zip)"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Play-sequence overlay: plays finished shots back-to-back, each from its in
    point to its out point, then advances. A rough cut with zero rendering --
-   the browser just seeks a single <video> through /video-file/<id> per clip. */
-function SequencePlayer({ clips, onClose }) {
+   the browser just seeks a single <video> through /video-file/<id> per clip.
+   Session P (P3): `mix` = {bed, plan, segs} plays the board's music bed under the cut -- an
+   <audio> of the local file through a WebAudio gain whose automation is loom-bed-core.js's
+   (level, 2 s / 3 s fades, the −12 dB ducks), re-synced to the cut's clock at every play,
+   pause, wait and shot change, and following the same mute toggle as the clips. */
+function SequencePlayer({ clips, onClose, mix }) {
   const vRef = useRef(null);
   const [i, setI] = useState(0);
   // Starts muted so autoplay is never blocked (browsers refuse autoplay WITH sound without
@@ -7695,6 +10681,75 @@ function SequencePlayer({ clips, onClose }) {
     const esc = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc);
   }, []);
+  // ---- the music bed (Session P, P3) ----
+  const mixRef = useRef(null);                  // {audio, ctx, gain} while a bed plays under the cut
+  const [bedNow, setBedNow] = useState(null);   // the bed's dB at the playhead, for the bar
+  useEffect(() => {
+    if (!mix || !mix.bed || !mix.plan) return undefined;
+    let audio = null, ctx = null;
+    try {
+      audio = new Audio(bedUrl(mix.bed.file));
+      audio.preload = "auto";
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      ctx = new Ctx();
+      const src = ctx.createMediaElementSource(audio);
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(gain); gain.connect(ctx.destination);
+      mixRef.current = { audio, ctx, gain };
+    } catch (e) { mixRef.current = null; }
+    return () => {
+      try { if (audio) audio.pause(); } catch (e) { /* gone */ }
+      try { if (ctx) ctx.close(); } catch (e) { /* gone */ }
+      mixRef.current = null;
+    };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Where the playhead is in the CUT: this shot's start in the cut plus how far into its kept
+  // range the video is (mix.segs lines up with clips: both are the rendered shots, in order).
+  const cutTime = () => {
+    const v = vRef.current, sg = mix && mix.segs && mix.segs[i];
+    return v && sg ? sg.start + Math.max(0, v.currentTime - (clip.in || 0)) : null;
+  };
+  const bedStop = () => {
+    const m = mixRef.current;
+    if (!m) return;
+    try { m.audio.pause(); } catch (e) { /* gone */ }
+    const now = m.ctx.currentTime;
+    m.gain.gain.cancelScheduledValues(now);
+    m.gain.gain.setValueAtTime(0, now);
+  };
+  const bedGo = () => {
+    const m = mixRef.current, v = vRef.current;
+    if (!m || !v || v.paused || muted) { bedStop(); return; }
+    const T = cutTime();
+    if (T == null || T >= mix.plan.bedLen) { bedStop(); return; }
+    if (Math.abs(m.audio.currentTime - T) > 0.2) { try { m.audio.currentTime = T; } catch (e) { /* not seekable yet */ } }
+    if (m.ctx.state === "suspended") m.ctx.resume().catch(() => {});
+    m.audio.play().catch(() => {});
+    const g = m.gain.gain, now = m.ctx.currentTime;
+    g.cancelScheduledValues(now);
+    bedAutomation(mix.plan, T).forEach((pt, k) => {
+      const at = now + Math.max(0, pt.t - T);
+      if (k === 0 || pt.step) g.setValueAtTime(pt.v, at); else g.linearRampToValueAtTime(pt.v, at);
+    });
+  };
+  useEffect(() => {
+    const v = vRef.current;
+    if (!v || !mix || !mixRef.current) return undefined;
+    const onPlay = () => bedGo();
+    const onStop = () => bedStop();
+    const onTime = () => {
+      const T = cutTime();
+      if (T != null) setBedNow(bedDbAt(mix.plan, T));
+      const m = mixRef.current;
+      // A stall the video recovered from without a "waiting": pull the bed back into step.
+      if (m && !v.paused && !muted && T != null && T < mix.plan.bedLen && Math.abs(m.audio.currentTime - T) > 0.35) bedGo();
+    };
+    const evs = [["playing", onPlay], ["pause", onStop], ["waiting", onStop], ["seeking", onStop], ["timeupdate", onTime]];
+    evs.forEach(([n, f]) => v.addEventListener(n, f));
+    if (!v.paused && v.readyState >= 3) bedGo(); else bedStop();
+    return () => { evs.forEach(([n, f]) => v.removeEventListener(n, f)); bedStop(); };
+  }, [i, muted]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!clip) return null;
   return (
     <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -7702,7 +10757,9 @@ function SequencePlayer({ clips, onClose }) {
         <video ref={vRef} key={clip.mid} src={"/video-file/" + clip.mid} autoPlay muted playsInline
           onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
         <div className="sb-seq-bar">
-          <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
+          <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}
+            {mix && mix.plan ? (muted ? " · bed muted" : bedNow == null ? " · bed ended"
+              : " · bed " + (bedNow < mix.plan.db ? "ducked " : "") + (bedNow < 0 ? "\u2212" + Math.abs(bedNow) : String(bedNow)) + " dB") : ""}</span>
           <button className="sb-btn ghost sm" onClick={() => setMuted(!muted)}
             title={muted ? "Unmute — the rendered mp4 has audio" : "Mute"}
             aria-pressed={!muted}>{muted ? "\u{1F507} muted" : "\u{1F50A} sound"}</button>

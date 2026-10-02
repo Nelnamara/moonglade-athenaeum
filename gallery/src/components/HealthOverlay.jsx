@@ -1,5 +1,6 @@
 import React from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
+import StorageBars from "./StorageBars.jsx";
 import "../styles/overlays.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -60,9 +61,9 @@ function donutData(models) {
   return { data, total, gradient: "conic-gradient(" + stops.join(", ") + ")" };
 }
 
-export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates }) {
+export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates, onStoragePick }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
-  const { h, err, stats, monthMax, modelMax, tier, buckets } = useHealth();
+  const { h, err, stats, monthMax, modelMax, tier, buckets, storage } = useHealth();
   const [monthView, setMonthView] = React.useState("trend");   // DC default
   const [modelView, setModelView] = React.useState("bars");    // DC default
 
@@ -101,6 +102,10 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                   </div>
                 ))}
               </div>
+
+              {/* N6: Storage used, as three stacked bars. A segment closes this and opens the
+                  gallery filtered to it (App's onStoragePick). */}
+              <StorageBars storage={storage} onPick={onStoragePick} />
 
               <div className="mgh-hrow">
                 <div className="mgh-h">Images over time</div>

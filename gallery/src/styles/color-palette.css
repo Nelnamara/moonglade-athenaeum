@@ -1,0 +1,295 @@
+/* The Generate drawer's colour palette -- components/ColorPalette.jsx. The PALETTE row, the
+   overlay (Library · Custom) and the editor, drawn to Tsubaki3 Generate Handoff.dc.html frame D
+   (the editor, desktop card and phone sheet) and frame A (the row in the Tuning slab); the
+   Library grid follows PixAI's own pattern (reference 23) in these tokens.
+
+   Z: the overlay is a scrim/host pair at 346/347 -- in the overlays band, above the dock (7),
+   its run tooltip (330), the model flyout (335), the Darkroom (336) and the phone's model sheet
+   (345), so it opens over either the desktop dock or the phone's Advanced screen (308), and
+   under the gallery picker (490) that "Extract from image" opens on top of it. The pair moves
+   together (tests/test_z_ladder.py). Everything inside the panel is local: 1-6.
+
+   Motion: enter .42 s, exit .35 s (the phone sheet .28 s), reduced motion shows the rest state.
+   Peach for held and refusal notes, ruby only on the second press of Delete. */
+
+@keyframes cpalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cpalFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes cpalIn { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes cpalOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px); } }
+@keyframes cpalSheetIn { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes cpalSheetOut { from { transform: none; } to { transform: translateY(100%); } }
+@keyframes cpalPop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- the row (dock Tuning slab / phone Advanced screen) ---- */
+.cpal-row { display: flex; flex-direction: column; gap: 4px; padding-top: 6px;
+  border-top: 1px solid var(--surface0); }
+.cpal-row.phone { border-top: none; padding-top: 0; gap: 6px; }
+.cpal-rowhead { display: flex; align-items: center; gap: 8px; }
+.cpal-row .cpal-link { font-size: 9.5px; }
+.cpal-row.phone .cpal-link { font-size: 12px; min-height: 44px; }
+.cpal-rowbody { display: flex; flex-direction: column; gap: 3px; transition: opacity .3s; }
+.cpal-rowbody.held { opacity: .38; }
+.cpal-rowstrip { height: 12px; border-radius: 4px; gap: 1px; }
+.cpal-rowstrip.thin { height: 8px; border-radius: 3px; }
+.cpal-row.phone .cpal-rowstrip { height: 16px; }
+.cpal-row.phone .cpal-rowstrip.thin { height: 10px; }
+.cpal-rowname { display: flex; align-items: center; gap: 6px; font-size: 9.5px; color: var(--subtext); }
+.cpal-row.phone .cpal-rowname { font-size: 12px; }
+.cpal-rowname > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpal-rowx { flex: none; width: 18px; height: 18px; display: grid; place-items: center; padding: 0;
+  border-radius: 50%; border: 1px solid var(--surface1); background: transparent; color: var(--overlay0);
+  font-size: 11px; line-height: 1; cursor: pointer; font-family: inherit; }
+.cpal-rowx:hover { color: var(--text); border-color: var(--lavender); }
+.cpal-row.phone .cpal-rowx { width: 44px; height: 44px; border-radius: 12px; font-size: 16px; }
+.cpal-rownone { min-height: 28px; padding: 5px 8px; border-radius: 8px; border: 1px dashed var(--surface1);
+  background: transparent; color: var(--subtext); font-size: 10px; font-family: inherit; cursor: pointer;
+  text-align: center; }
+.cpal-rownone:hover { border-color: var(--lavender); color: var(--text); }
+.cpal-rownone.phone { min-height: 44px; font-size: 12px; border-radius: 12px; }
+/* Held on the Context side (owner walk 2026-09-29): the link and the empty row dim to the same
+   .38 the negative (.mgts-held) and the recipes (.rcp-row-chips.held) use there. */
+.cpal-row .cpal-link.held, .cpal-rownone.held { opacity: .38; transition: opacity .3s; }
+.cpal-rownote { font-size: 9.5px; color: var(--overlay0); }
+.cpal-row.phone .cpal-rownote { font-size: 11px; }
+
+/* ---- shared atoms ---- */
+.cpal-sp { flex: 1 1 auto; }
+.cpal-dim { font-size: 9.5px; line-height: 1.4; color: var(--overlay0); }
+.cpal-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.cpal-link { background: none; border: none; padding: 0; color: var(--lavender); font-size: 10px;
+  font-family: inherit; cursor: pointer; white-space: nowrap; }
+.cpal-link:hover { color: var(--mauve); text-decoration: underline; }
+.cpal-strip { display: flex; height: 13px; overflow: hidden; }
+.cpal-strip > i { display: block; min-width: 2px; }
+.cpal-btn { font-size: 11px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+  background: transparent; color: var(--subtext); white-space: nowrap; cursor: pointer; font-family: inherit;
+  transition: border-color .2s, color .2s, background .2s; }
+.cpal-btn:hover { color: var(--text); border-color: var(--overlay0); }
+.cpal-btn.on { border-color: var(--lavender); color: var(--text); background: rgba(182, 146, 230, .12); }
+.cpal-btn.ruby { border-color: var(--ruby); color: var(--ruby); }
+.cpal-btn.big { min-height: 44px; border-radius: 12px; font-size: 12.5px; flex: 1; }
+.cpal-primary { font-size: 11px; font-weight: 700; padding: 7px 14px; border-radius: 9px; border: none;
+  background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; font-family: inherit; }
+.cpal-primary:disabled { opacity: .45; cursor: not-allowed; }
+.cpal-primary.big { min-height: 44px; border-radius: 12px; font-size: 12.5px; flex: 1.4; }
+.cpal-x { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border-radius: 8px;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6); color: var(--subtext);
+  font-size: 13px; cursor: pointer; font-family: inherit; }
+.cpal-x:hover { color: var(--text); border-color: var(--lavender); }
+.cpal-held { font-size: 10px; line-height: 1.45; color: var(--peach); }
+.cpal-held.pad { padding: 0 18px; }
+
+/* the group switch: 26 x 14 desktop, 38 x 22 phone (frame D) */
+.cpal-sw { position: relative; flex: none; width: 26px; height: 14px; padding: 0; border-radius: 999px;
+  border: none; background: var(--surface1); cursor: pointer; transition: background .2s; }
+.cpal-sw > i { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--overlay0); transition: transform .2s, background .2s; }
+.cpal-sw.on { background: var(--lavender); }
+.cpal-sw.on > i { transform: translateX(12px); background: var(--base); }
+.cpal-sw.locked { opacity: .5; cursor: not-allowed; }
+.cpal-sw.big { width: 38px; height: 22px; }
+.cpal-sw.big > i { top: 3px; left: 3px; width: 16px; height: 16px; }
+.cpal-sw.big.on > i { transform: translateX(16px); }
+/* a 44 px target around the phone switch without moving it */
+.cpal-sw.big::before { content: ""; position: absolute; inset: -11px -4px; }
+
+/* ---- the overlay shell ---- */
+.cpal-scrim { position: fixed; inset: 0; z-index: 346; background: rgba(5, 4, 13, .62);
+  animation: cpalFadeIn .3s ease both; }
+.cpal-scrim.closing { animation: cpalFadeOut .35s ease both; }
+.cpal-host { position: fixed; inset: 0; z-index: 347; display: grid; place-items: center; padding: 24px 16px; }
+.cpal-host.phone { place-items: end stretch; padding: 0; pointer-events: none; }
+.cpal-panel { position: relative; width: 760px; max-width: 100%; max-height: calc(100vh - 48px);
+  display: flex; flex-direction: column; border-radius: 18px; border: 1px solid var(--surface1);
+  background: var(--base); color: var(--text); box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  animation: cpalIn .42s cubic-bezier(.2, .9, .24, 1) both; overflow: hidden; }
+.cpal-panel.closing { animation: cpalOut .35s ease both; }
+.cpal-panel:focus { outline: none; }
+.cpal-panel.phone { width: 100%; max-height: 92vh; border-radius: 22px 22px 0 0; border-bottom: none;
+  background: var(--mantle); pointer-events: auto; animation: cpalSheetIn .28s cubic-bezier(.2, .9, .24, 1) both; }
+.cpal-panel.phone.closing { animation: cpalSheetOut .28s ease both; }
+.cpal-grab { align-self: center; flex: none; width: 36px; height: 4px; margin: 10px 0 2px;
+  border-radius: 999px; background: var(--surface1); }
+
+/* ---- tabs view (Library · Custom) ---- */
+.cpal-tabsview { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.cpal-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px 6px; }
+.cpal-title { font-size: 17px; font-family: Georgia, serif; font-style: italic; }
+.cpal-tabs { display: flex; gap: 18px; padding: 0 18px; border-bottom: 1px solid var(--surface0); }
+.cpal-tab { position: relative; padding: 8px 0 9px; border: none; background: none; color: var(--subtext);
+  font-size: 12px; font-family: inherit; cursor: pointer; }
+.cpal-tab.on { color: var(--text); }
+.cpal-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  border-radius: 2px; background: var(--lavender); }
+.cpal-panel.phone .cpal-tab { min-height: 44px; font-size: 13px; }
+.cpal-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 18px; }
+.cpal-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.cpal-grid.phone { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.cpal-card { display: flex; flex-direction: column; padding: 0; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--surface1); background: var(--surface0); cursor: pointer; font-family: inherit;
+  color: var(--text); text-align: center; transition: border-color .2s, transform .2s, box-shadow .2s; }
+.cpal-card:hover { border-color: var(--overlay0); transform: translateY(-2px); }
+.cpal-card.sel { border-color: var(--lavender); box-shadow: 0 0 0 1px var(--lavender); }
+.cpal-card.skel { aspect-ratio: 3 / 4.3; background: var(--surface0); opacity: .5; cursor: default; }
+.cpal-cover { position: relative; aspect-ratio: 3 / 4; overflow: hidden; background: var(--mantle); }
+.cpal-cover > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cpal-cardname { position: absolute; left: 6px; right: 6px; bottom: 7px; font-size: 12px; font-weight: 700;
+  line-height: 1.2; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .75); }
+.cpal-tick { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; display: grid;
+  place-items: center; border-radius: 50%; background: var(--lavender); color: var(--base);
+  font-size: 11px; font-weight: 800; }
+.cpal-card > .cpal-strip { flex: none; height: 11px; }
+.cpal-new { aspect-ratio: 3 / 4.3; justify-content: center; align-items: center; gap: 6px;
+  border-style: dashed; background: transparent; color: var(--subtext); font-size: 11px; }
+.cpal-new:hover { color: var(--text); border-color: var(--lavender); }
+.cpal-plus { font-size: 20px; line-height: 1; }
+.cpal-mcover { position: absolute; inset: 0; }
+.cpal-mfigure { position: absolute; left: 22%; right: 22%; bottom: 0; top: 30%; border-radius: 40% 40% 0 0; }
+.cpal-empty { grid-column: 1 / -1; padding: 24px 0; text-align: center; font-size: 11px; color: var(--subtext); }
+.cpal-selbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 18px 14px;
+  border-top: 1px solid var(--surface0); min-height: 34px; animation: cpalPop .3s ease both; }
+.cpal-selbar.empty { justify-content: center; }
+.cpal-selbar.phone { flex-wrap: wrap; padding: 10px 16px 16px; }
+.cpal-selbar.phone .cpal-btn, .cpal-selbar.phone .cpal-primary { min-height: 44px; border-radius: 12px; font-size: 12px; }
+.cpal-selstrip { width: 64px; height: 12px; border-radius: 4px; flex: none; }
+.cpal-selname { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.cpal-selname > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- the editor (frame D) ---- */
+.cpal-ed { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; overflow-y: auto; min-height: 0; }
+.cpal-edhead { display: flex; align-items: center; gap: 10px; }
+.cpal-back { border: none; background: none; color: var(--subtext); font-size: 18px; line-height: 1;
+  padding: 0 4px; cursor: pointer; font-family: inherit; }
+.cpal-back:hover { color: var(--text); }
+.cpal-edtitle { flex: 1; min-width: 0; font-size: 17px; font-family: Georgia, serif; font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.cpal-rename { flex: 1; min-width: 0; font-size: 15px; font-family: Georgia, serif; font-style: italic;
+  padding: 3px 8px; border-radius: 8px; border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
+  color: var(--text); }
+.cpal-edhead .cpal-link { color: var(--overlay0); }
+.cpal-edbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.cpal-libwrap { position: relative; }
+.cpal-libmenu { position: absolute; z-index: 6; top: calc(100% + 4px); left: 0; width: 260px; max-height: 280px;
+  overflow-y: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--surface1); background: var(--mantle);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .55); display: flex; flex-direction: column; gap: 2px;
+  animation: cpalPop .3s ease both; }
+.cpal-ed.phone .cpal-libmenu { position: static; width: auto; max-height: 240px; }
+.cpal-libitem { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 8px;
+  border: none; background: transparent; color: var(--text); font-size: 11px; text-align: left;
+  font-family: inherit; cursor: pointer; }
+.cpal-libitem:hover { background: rgba(182, 146, 230, .12); }
+.cpal-libitem .cpal-strip { height: 8px; border-radius: 3px; }
+.cpal-ed.phone .cpal-libitem { min-height: 44px; font-size: 12.5px; justify-content: center; }
+.cpal-extract { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px;
+  border: 1px dashed var(--surface1); background: rgba(12, 10, 28, .6);
+  animation: cpalPop .42s cubic-bezier(.2, .9, .24, 1) both; flex-wrap: wrap; }
+.cpal-exthumb { width: 54px; height: 68px; border-radius: 8px; flex: none; background: var(--surface0) center / cover no-repeat; }
+.cpal-extext { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.cpal-ed.phone .cpal-extract .cpal-btn { min-height: 44px; flex: 1; }
+.cpal-edbody { display: flex; gap: 18px; }
+.cpal-edmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.cpal-group { display: flex; flex-direction: column; gap: 5px; }
+.cpal-ghead { display: flex; align-items: center; gap: 8px; }
+.cpal-glabel { border: none; background: none; padding: 0; font-family: inherit; cursor: pointer;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.cpal-glabel.focus { color: var(--text); }
+.cpal-gtotal { font-size: 9.5px; color: var(--overlay0); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cpal-gempty { height: 36px; border-radius: 8px; border: 1px dashed var(--surface1); background: transparent;
+  color: var(--subtext); font-size: 10.5px; font-family: inherit; cursor: pointer; }
+.cpal-gempty:hover { border-color: var(--lavender); color: var(--text); }
+.cpal-gempty.phone { height: 44px; border-radius: 10px; font-size: 12px; }
+.cpal-bar { display: flex; height: 36px; border-radius: 8px; gap: 2px; touch-action: none; }
+.cpal-bar.phone { height: 44px; border-radius: 10px; }
+.cpal-band { position: relative; min-width: 6px; cursor: pointer; transition: transform .2s; }
+.cpal-band:first-child { border-radius: 8px 0 0 8px; }
+.cpal-band:last-child { border-radius: 0 8px 8px 0; }
+.cpal-band:only-child { border-radius: 8px; }
+.cpal-band.sel { box-shadow: inset 0 0 0 2px var(--text); transform: translateY(-2px); }
+.cpal-pct { position: absolute; left: 0; right: 0; bottom: 3px; text-align: center; font-size: 8.5px;
+  font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; }
+.cpal-pct.dark { color: rgba(12, 10, 28, .8); }
+.cpal-pct.light { color: rgba(255, 255, 255, .9); }
+.cpal-handle { position: absolute; z-index: 2; right: -8px; top: 50%; margin-top: -7px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--text); color: var(--base); font-size: 8px; line-height: 14px;
+  text-align: center; cursor: ew-resize; box-shadow: 0 1px 3px rgba(0, 0, 0, .5); touch-action: none;
+  user-select: none; }
+.cpal-handle:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+/* the phone's 44 px grab area around the same 14 px handle */
+.cpal-bar.phone .cpal-handle::before { content: ""; position: absolute; left: -15px; top: -15px; width: 44px; height: 44px; }
+.cpal-hint { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
+.cpal-ed.phone .cpal-hint { font-size: 11px; color: var(--subtext); }
+.cpal-list { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 12px;
+  background: rgba(12, 10, 28, .7); border: 1px solid var(--surface1); }
+.cpal-listhead { display: flex; align-items: center; gap: 8px; padding: 0 2px 4px; }
+.cpal-rows { display: flex; flex-direction: column; gap: 2px; max-height: 196px; overflow-y: auto; }
+.cpal-crow { display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 10px; cursor: pointer; }
+.cpal-crow.sel { background: rgba(182, 146, 230, .12); }
+.cpal-crow.big { gap: 8px; flex-wrap: wrap; padding: 6px 0; cursor: default; }
+.cpal-hexpill { position: relative; display: flex; align-items: center; gap: 7px; padding: 3px 9px 3px 3px;
+  border-radius: 999px; border: 1px solid var(--surface1); cursor: pointer; }
+.cpal-hexpill > i { width: 18px; height: 18px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+.cpal-hexpill > span { font-size: 10.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cpal-hexpill > input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none; padding: 0; }
+.cpal-crow.big .cpal-hexpill { min-height: 44px; padding: 4px 14px 4px 5px; }
+.cpal-crow.big .cpal-hexpill > i { width: 32px; height: 32px; }
+.cpal-crow.big .cpal-hexpill > span { font-size: 13px; }
+.cpal-stepper { display: flex; align-items: center; gap: 6px; padding: 2px; border-radius: 999px; border: 1px solid var(--surface1); }
+.cpal-stepper > button { width: 20px; height: 20px; border-radius: 50%; border: none; display: grid; place-items: center;
+  padding: 0; background: var(--surface0); color: var(--text); font-size: 12px; cursor: pointer; font-family: inherit; }
+.cpal-stepper > button:disabled { opacity: .3; cursor: not-allowed; }
+.cpal-stepper > b { min-width: 30px; text-align: center; font-weight: 400; font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cpal-count > b { min-width: 58px; }
+.cpal-crow.big .cpal-stepper > button, .cpal-bandsheet .cpal-stepper > button { width: 44px; height: 44px; font-size: 16px; }
+.cpal-crow.big .cpal-stepper > b { font-size: 13px; min-width: 44px; }
+.cpal-rowbtns { display: flex; gap: 3px; }
+.cpal-rowbtns > button { width: 20px; height: 20px; border-radius: 50%; border: none; display: grid; place-items: center;
+  padding: 0; background: var(--surface0); color: var(--subtext); font-size: 10px; cursor: pointer; font-family: inherit; }
+.cpal-rowbtns > button:disabled { opacity: .3; cursor: not-allowed; }
+.cpal-rowbtns > button:not(:disabled):hover { color: var(--text); }
+.cpal-crow.big .cpal-rowbtns > button { width: 44px; height: 44px; font-size: 15px; border-radius: 12px; }
+.cpal-preview { width: 150px; flex: none; display: flex; flex-direction: column; gap: 6px; }
+.cpal-pcard { display: flex; flex-direction: column; border-radius: 10px; overflow: hidden; border: 1px solid var(--surface1); }
+.cpal-pfield { position: relative; height: 170px; transition: background .3s; }
+.cpal-pfigure { position: absolute; left: 22%; right: 22%; bottom: 0; top: 30%; border-radius: 40% 40% 0 0; transition: background .3s; }
+.cpal-pcardname { position: absolute; left: 9px; bottom: 8px; right: 9px; font-size: 12px; font-weight: 700;
+  color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpal-pcard > .cpal-pstrip { height: 13px; }
+.cpal-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.cpal-footnotes { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cpal-foot.phone { position: sticky; bottom: 0; padding: 8px 0 4px; background: var(--mantle); }
+
+/* phone editor (frame D, right) */
+.cpal-ed.phone { padding: 8px 14px 16px; gap: 10px; }
+.cpal-phead { display: flex; gap: 12px; align-items: center; }
+.cpal-pmini { width: 60px; height: 76px; flex: none; border-radius: 9px; overflow: hidden; display: flex;
+  flex-direction: column; justify-content: flex-end; border: 1px solid var(--surface1); }
+.cpal-pmini > .cpal-strip { height: 8px; }
+.cpal-pname { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cpal-ed.phone .cpal-edtitle { font-size: 13px; font-family: inherit; font-style: normal; font-weight: 600; }
+.cpal-ed.phone .cpal-dim { font-size: 11px; color: var(--subtext); }
+.cpal-ed.phone .cpal-phead .cpal-link { min-height: 44px; font-size: 12px; }
+.cpal-pbtns { display: flex; gap: 6px; }
+.cpal-ed.phone .cpal-ghead { min-height: 44px; }
+.cpal-ed.phone .cpal-glabel { font-size: 12px; letter-spacing: 0; color: var(--subtext); }
+.cpal-ed.phone .cpal-glabel.focus { color: var(--text); }
+.cpal-ed.phone .cpal-gtotal { font-size: 10.5px; }
+.cpal-bandscrim { position: fixed; inset: 0; z-index: 5; background: rgba(5, 4, 13, .45); animation: cpalFadeIn .24s ease both; }
+.cpal-bandsheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; flex-direction: column;
+  gap: 10px; padding: 8px 16px 18px; border-radius: 20px 20px 0 0; border: 1px solid var(--surface1);
+  border-bottom: none; background: var(--base); animation: cpalSheetIn .28s cubic-bezier(.2, .9, .24, 1) both; }
+.cpal-bandsheet .cpal-glabel { font-size: 12px; letter-spacing: 0; }
+
+@media (max-width: 720px) {
+  .cpal-grid:not(.phone) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cpal-edbody { flex-direction: column; }
+  .cpal-preview { width: 100%; flex-direction: row; align-items: flex-start; }
+  .cpal-pcard { width: 120px; flex: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cpal-scrim, .cpal-scrim.closing, .cpal-panel, .cpal-panel.closing, .cpal-panel.phone,
+  .cpal-panel.phone.closing, .cpal-libmenu, .cpal-extract, .cpal-selbar, .cpal-bandscrim,
+  .cpal-bandsheet { animation: none; }
+  .cpal-band, .cpal-card, .cpal-pfield, .cpal-pfigure, .cpal-rowbody { transition: none; }
+}

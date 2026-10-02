@@ -18,8 +18,8 @@
    regions instead of one big scrolling slab. ---- */
 .mgfo-slab {
   width: min(1460px, calc(100vw - 48px));
-  height: min(94vh, 940px);
-  max-height: 94vh;
+  height: min(94vh, 940px); height: min(94dvh, 940px);
+  max-height: 94vh; max-height: 94dvh;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -268,45 +268,9 @@
 .mgfo-reachpts { font-size: 10.5px; color: var(--gold); }
 .mgfo-reachcard .mgfo-bar { margin-top: 8px; }
 
-/* ---- Relics ---- */
-.mgfo-relicnote { font-size: 10.5px; font-style: italic; color: rgba(214, 210, 226, .5); margin-bottom: 10px; }
+/* ---- Relics: the note over the kind rows (the rows themselves are folio-completionist.css) ---- */
 .mgfo-relics {
   border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 6px 16px 12px;
-}
-.mgfo-relicrow {
-  position: relative; display: flex; align-items: center; gap: 9px; padding: 8px 0;
-  border-bottom: 1px dashed var(--surface0); opacity: .6; cursor: pointer;
-}
-.mgfo-relicrow.unlocked, .mgfo-relicrow.active { opacity: 1; }
-.mgfo-relicnm { font-size: 11.5px; color: var(--subtext); }
-.mgfo-relicrow.active .mgfo-relicnm { color: var(--text); font-weight: 600; }
-.mgfo-relicsub { font-size: 9px; color: var(--overlay0); white-space: nowrap; }
-.mgfo-relicrow.active .mgfo-relicsub { color: var(--emerald); }
-.mgfo-relicnm-small {
-  flex: none; width: 54px; text-align: right; font-size: 8.5px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0);
-}
-.mgfo-relicsub-txt { font-size: 11.5px; color: var(--subtext); }
-.mgfo-relicrow.dim { opacity: .55; }
-
-/* ---- Relic swatches + hover tooltip, Folio of Honors.dc.html lines 176-190 ---- */
-.mgfo-relic-sw { display: flex; gap: 3px; flex: none; }
-.mgfo-relic-sw span { width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, .14); }
-.mgfo-relic-tip {
-  display: none; position: absolute; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 50;
-  pointer-events: none; width: 210px; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, .65));
-  border-radius: 10px; padding: 10px 13px; background: rgba(9, 7, 22, .97);
-  border: 1px solid var(--surface1); border-top: 2px solid var(--accent);
-}
-.mgfo-relicrow:hover .mgfo-relic-tip { display: block; }
-.mgfo-relic-tip-nm {
-  margin: 0 0 4px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
-  letter-spacing: .16em; text-transform: uppercase; color: var(--accent);
-}
-.mgfo-relic-tip-ds { margin: 0; font-size: 11px; color: var(--subtext); line-height: 1.5; }
-.mgfo-relic-secret {
-  font-size: 10px; font-style: italic; color: var(--overlay0);
-  padding-top: 6px; border-top: 1px dashed var(--surface0);
 }
 
 /* ---- Empty states ---- */
@@ -477,10 +441,6 @@
   box-shadow: 0 0 14px color-mix(in srgb, var(--tc) 40%, transparent),
     0 0 28px color-mix(in srgb, var(--tc) 14%, transparent);
 }
-.mgfo-card.masked { background: rgba(5, 4, 13, .66); }
-.mgfo-card.masked .mgfo-card-nm { color: var(--overlay0); }
-.mgfo-card.masked .mgfo-card-ds { color: #3e3459; }
-.mgfo-card.masked .mgfo-card-gem { display: none; }
 .mgfo-card-gem {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 13px 13px 0 0;
   pointer-events: none; opacity: .35;
@@ -494,10 +454,6 @@
   border: 1px solid color-mix(in srgb, var(--tc) 25%, transparent);
 }
 .mgfo-card.earned .mgfo-card-ico { filter: none; }
-/* The mystery mask keeps its character: a masked (hidden, unearned) feat withholds its
-   NAME and TEXT, not its icon -- graying the secret icon flattened it (owner, 2026-08-22).
-   Locked VISIBLE badges stay grayed: that is their designed locked look. */
-.mgfo-card.masked .mgfo-card-ico { filter: none; }
 .mgfo-card-badge { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
 .mgfo-card-body { flex: 1 1 auto; min-width: 0; }
 .mgfo-card-nm {
@@ -611,7 +567,7 @@
 
 /* ---- Mobile stacking, matching the DC's own <860px collapse ---- */
 @media (max-width: 860px) {
-  .mgfo-slab { width: 100vw; height: 100vh; max-height: none; border-radius: 0; }
+  .mgfo-slab { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
   .mgfo-body { flex-direction: column; }
   .mgfo-rail { width: auto; border-left: none; border-top: 1px solid rgba(255, 255, 255, .06); }
   .mgfo-grid2, .mgfo-grid2.even { grid-template-columns: 1fr; }

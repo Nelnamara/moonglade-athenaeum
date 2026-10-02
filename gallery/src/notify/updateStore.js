@@ -144,6 +144,13 @@ export function note(payload) {
    one answer, either way; the second reload shows nothing. A boot that cannot tell what it
    is running (no stamp) leaves the record alone rather than eating it. --------------- */
 const RECEIPT_KEY = "mg_update_receipt";
+// The receipt toast this boot put up, so the post-update "what's new" toast (help/
+// whatsNew.js) can stand in for it: one "Updated to" notice per update, not two.
+let receiptToast = null;
+export function retireReceiptToast() {
+  if (receiptToast) { try { receiptToast(); } catch { /* already gone */ } }
+  receiptToast = null;
+}
 
 /* The build stamp is "vX.Y.Z" or "vX.Y.Z · <sha>" -- the version is the first token. */
 export function versionFromStamp(stamp) {
@@ -182,7 +189,7 @@ export function claimReceipt(stamp) {
   clearReceipt();                       // ONCE, whichever answer comes back
   if (cmpVersions(have, want) !== 0) return false;   // it did not land: silence
   const label = /^v/i.test(want) ? want : "v" + want;
-  toastShow({
+  receiptToast = toastShow({
     kind: "ok",
     sticky: true,
     title: "Updated to " + label,

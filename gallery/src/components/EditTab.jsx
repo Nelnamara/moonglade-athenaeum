@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  buildEditPayload, editAspectLabel, editCaps, editGate, EDIT_CAPS, EDIT_PRICE_KEY_SKIP,
-  refTag, switchEditModel,
+  buildEditPayload, editAspectExtreme, editAspectGroups, editAspectLabel, editCaps, editGate,
+  editModelIsNew, EDIT_CAPS, EDIT_PRICE_KEY_SKIP, refTag, switchEditModel,
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
@@ -201,36 +201,37 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
 
       {/* SLAB 2 -- EDIT MODEL (Frontend Gallery.dc.html 1470-1520): the heading (1471,
           editSlabLabel 'EDIT MODEL' under the Edit sub-tab), the model <select> (1473-1476;
-          option labels are the REAL edit-model list, EDIT_CAPS -- the same two the DC drew),
-          the RESOLUTION / ASPECT two-column row (1479-1497; option lists are the real per-
-          model caps, a documented divergence: the DC's fixed four aspects vs the probe's
-          eleven / ten) and the clampEditNote (1517-1519). Styles are the DC's inline
-          strings, one class each (dock.css .mgdock-editmodel / -editcols / -editcol /
-          -editcap / -editsel / -editnote). */}
+          option labels are the REAL edit-model list, EDIT_CAPS), RESOLUTION and ASPECT --
+          chips since Session L 6 (the L6 page draws them as chips so the extremes can sit
+          under More ▾; the DC's two selects are replaced) -- and the clampEditNote
+          (1517-1519). Styles: dock.css .mgdock-editmodel / -editmodelrow / -newtag /
+          -editcap / -editchips / -editchip / -editnote. */}
       <div className="mgdock-slab" style={{ animationDelay: "60ms" }}>
         <div className="mgdock-lbl">EDIT MODEL</div>
-        <select className="mgdock-editmodel" value={s.model} title="Edit model"
-          onChange={(e) => chooseModel(e.target.value)}>
-          {Object.keys(EDIT_CAPS).map((k) => (
-            <option key={k} value={k}>{EDIT_CAPS[k].label}</option>
-          ))}
-        </select>
-        <div className="mgdock-editcols">
-          <div className="mgdock-editcol">
-            <div className="mgdock-editcap">RESOLUTION</div>
-            <select className="mgdock-editsel" value={s.resolution}
-              onChange={(e) => set({ resolution: e.target.value })}>
-              {caps.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div className="mgdock-editcol">
-            <div className="mgdock-editcap">ASPECT</div>
-            <select className="mgdock-editsel" value={s.aspect}
-              onChange={(e) => set({ aspect: e.target.value })}>
-              {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
-            </select>
-          </div>
+        {/* Session L decision 6 (Small Calls Handoff, L6): Edit v4.0 is the first option,
+            with the emerald "new" tag beside the select while it is the pick (30 days);
+            resolution and the common aspects are chips, the extremes sit under More ▾ --
+            only for a model that takes one. Values are each model's own record (EDIT_CAPS). */}
+        <div className="mgdock-editmodelrow">
+          <select className="mgdock-editmodel" value={s.model} title="Edit model"
+            onChange={(e) => chooseModel(e.target.value)}>
+            {Object.keys(EDIT_CAPS).map((k) => (
+              // "new" rides the option's words in the list; once picked, the tag beside says it
+              <option key={k} value={k}>{EDIT_CAPS[k].label}{editModelIsNew(k) && s.model !== k ? " · new" : ""}</option>
+            ))}
+          </select>
+          {editModelIsNew(s.model) ? <span className="mgdock-newtag">new</span> : null}
         </div>
+        <div className="mgdock-editcap">RESOLUTION</div>
+        <div className="mgdock-editchips" role="radiogroup" aria-label="Resolution">
+          {caps.resolutions.map((r) => (
+            <button key={r} type="button" role="radio" aria-checked={s.resolution === r}
+              className={"mgdock-editchip" + (s.resolution === r ? " on" : "")}
+              onClick={() => set({ resolution: r })}>{r}</button>
+          ))}
+        </div>
+        <div className="mgdock-editcap">ASPECT</div>
+        <AspectChips s={s} set={set} />
 
         {/* EXTRA -- REAL CAPABILITY, KEPT (owner ruling 2026-08-16; checklist region 2
             'Toolbox preset row'): the DC never drew a preset picker, but the server has one
@@ -311,6 +312,45 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
           </>
         )}
       </div>
+    </>
+  );
+}
+
+/* The aspect chips (L6): Auto and the common ratios as chips, the extremes (long side at
+   least twice the short: 21:9, 1:3, 1:4, 1:8 and their flips) behind "More ▾", shown only for
+   a model that has one. More opens a second chip row under the first; it opens by itself when
+   the current pick is one of the extremes, and its chip then names that pick. */
+export function AspectChips({ s, set }) {
+  const { common, extreme } = editAspectGroups(s.model);
+  const onExtreme = editAspectExtreme(s.aspect);
+  const [more, setMore] = useState(false);
+  // A model switch starts closed: its own extremes differ, and the pick was corrected anyway.
+  useEffect(() => { setMore(false); }, [s.model]);
+  const open = more || onExtreme;
+  return (
+    <>
+      <div className="mgdock-editchips" role="radiogroup" aria-label="Aspect">
+        {common.map((a) => (
+          <button key={a} type="button" role="radio" aria-checked={s.aspect === a}
+            className={"mgdock-editchip" + (s.aspect === a ? " on" : "")}
+            onClick={() => set({ aspect: a })}>{editAspectLabel(a)}</button>
+        ))}
+        {extreme.length ? (
+          <button type="button" aria-expanded={open}
+            className={"mgdock-editchip more" + (onExtreme ? " on" : "")}
+            title={"More ratios: " + extreme.join(" · ")}
+            onClick={() => setMore(!open)}>{onExtreme ? s.aspect + " ▾" : "More ▾"}</button>
+        ) : null}
+      </div>
+      {open && extreme.length ? (
+        <div className="mgdock-editchips mgdock-editmore" role="radiogroup" aria-label="More ratios">
+          {extreme.map((a) => (
+            <button key={a} type="button" role="radio" aria-checked={s.aspect === a}
+              className={"mgdock-editchip" + (s.aspect === a ? " on" : "")}
+              onClick={() => { set({ aspect: a }); setMore(false); }}>{a}</button>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

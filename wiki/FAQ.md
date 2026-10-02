@@ -43,10 +43,16 @@ Nothing phones home.
 Yes — launch the gallery with `--host 0.0.0.0 --https` and open it on your device
 (installable as a PWA). [Select mode](Collections) is touch-friendly.
 
-On a portrait phone the Generate drawer opens as a full-width sheet and the model browser
-appears as a centred panel, with finger-sized dock and close buttons. (Before 2026-07-24 the
-drawer left a dead strip down one side and the model browser opened half off the top of the
-screen — if that is what you remember seeing, update.)
+A phone gets its own layout: three tabs along the bottom — **Gallery**, **Create** (the Generate
+dock as a screen of its own) and **Control** — and a row of icons at the top for the Folio,
+The Loom, Activity, the **?** guide and the **☰ Menu** (My Art, Collections, Publish, Train a LoRA,
+Import, Contests, Health and Log Out). Turned sideways it is still the phone app, laid out for a
+wide, short screen. See
+[The Gallery](Gallery) for the phone's feed, pull to refresh and landscape layout.
+
+**Can I save data on a phone?** Yes: **Control → Data saver**. See
+[Control Panel](Control-Panel). On an iPhone the browser cannot tell Moonglade whether you are on a
+metered connection, so pick **Always** rather than **Auto**.
 
 **How the phone's Back gesture behaves.** Anything the phone opens *over* your library —
 a picture full-screen, a picture's own record, anything from the **☰** menu, the Folio, the
@@ -106,6 +112,14 @@ writes it to `config.json`. It *adds or updates*, so it also resets a forgotten 
 `--list-web-users` and `--remove-web-user <name>` are the companions. Full flow in
 [Setup](Setup).
 
+**Where is the help, and how do I turn the tips off?**
+Press **?** (outside a text field) or click the round **?** button on any screen: the guide — this
+wiki — opens over what you were doing, on that screen's page. **Nel's notes** (the small notes
+the first-run guide pins beside controls) stop with **hide notes** on any note, or **Hide Nel's
+notes** in the guide's left column, and **Reset guides** there starts the welcome cards and the
+tour over. The guide's last page, **About**, says which version you are running. See
+[Help inside the app](Home#help-inside-the-app).
+
 **Does organizing files break the gallery?**
 No. Lookups are by `media_id`, so files can live in any subfolder.
 [Collections](Collections) are catalog-based and survive Organize too.
@@ -115,8 +129,9 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 new release about once an hour, and when one turns up a notice appears in the corner —
 *"Moonglade v3.7.3 is ready — open the Control Panel to update"* — once per version, wherever
 in the app you are. **Open the Control Panel** (it re-checks on the spot) and the version
-stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and the
-confirm tells you what will happen — the update is pulled atomically, dependencies install
+stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and **About**
+opens leading with *"v3.7.3 is out"* and **View the update ›**; that opens the confirm, which
+tells you what will happen — the update is pulled atomically, dependencies install
 only if they changed, the server restarts, and the tab reloads itself.
 Nothing is applied until you press **Update now**; there is no silent update, ever. The app
 notices releases by itself; it never installs one by itself.
@@ -134,7 +149,10 @@ corner — *"Updated to v3.8.1"* — and stays until you close it, so you don't 
 into the Control Panel to find out whether it landed. It is checked rather than assumed: it
 appears only when the version the app is really running is the one you were promised, an
 update that failed or was rolled back says nothing at all, and it appears once — reloading
-the page again does not bring it back.
+the page again does not bring it back. The first time your account signs in on the new
+version the note also names the release and carries a **What's new** button (a one-time sheet
+for a feature release, **About** for a patch); see
+[Control Panel → Updates and About](Control-Panel#updates-and-about).
 
 The one-click path needs the managed launcher (**`Serve Gallery.pyw`**) — without it the
 server would stop instead of restarting into the new version — and a clean checkout on

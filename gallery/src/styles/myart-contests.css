@@ -18,7 +18,7 @@
    .mgma-footnote did NOT come back with it, and was dropped 2026-09-07: the 2026-09-06
    revival above restored the bar only, and nothing in gallery/src ever referenced the
    footnote. ---- */
-.mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; display: flex;
+.mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; max-height: 90dvh; display: flex;
   flex-direction: column; padding: 0; }
 .mgma2-head { flex: none; padding: 22px 26px 0; }
 .mgma2-titlerow { display: flex; align-items: flex-start; gap: 12px; }
@@ -519,7 +519,7 @@ html.mg-noblur .mgct-subscrim {
 
 .mgct-subhost { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center;
   pointer-events: none; }
-.mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; overflow-y: auto;
+.mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; max-height: 88dvh; overflow-y: auto;
   border-radius: 18px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18,14,42,.99), rgba(10,8,24,.99));
   box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;
@@ -665,9 +665,45 @@ button.mgcte-row:hover { border-color: var(--accent); }
   color: var(--overlay0); }
 .mgcte-foot { display: flex; align-items: baseline; padding-top: 14px; }
 .mgcte-foot .n { font-size: 10px; color: var(--overlay0); }
-button.mgcte-record { margin-left: auto; font-size: 10.5px; color: var(--overlay0);
+/* "It won but isn't shown…": the page's own link (Small Calls Handoff, L3): dotted underline,
+   lavender. It opens the Check dialog below. */
+button.mgcte-record { margin-left: auto; font-size: 10px; color: var(--lavender);
   text-decoration: underline dotted; background: none; border: none; font-family: inherit;
-  cursor: not-allowed; padding: 0; }
+  cursor: pointer; padding: 0; }
+button.mgcte-record:hover { color: var(--text); }
+button.mgcte-record:focus-visible { outline: 2px solid var(--lavender); outline-offset: 3px; }
+/* A verified row's second line: the tier and the prize, in the gold the pill uses. */
+.mgcte-sub .win { color: var(--gold); font-weight: 700; }
+.mgcte-sub .win a { color: inherit; text-decoration: underline dotted; }
+
+/* ---- E4 · Record a win, as the checked fallback (L3) ------------------------------------
+   The dialog rides the confirm dialog's own scrim + host (424/425), so it adds no z rung.
+   Field chrome is the page's: the CONTEST box is E4's, the URL row and Check button are the
+   L3 panel's (gold Check beside the input). Peach, never ruby, for a refused or failed check. */
+.mgcrw-blurb { font-size: 11px; color: var(--subtext); line-height: 1.6; padding-bottom: 14px; }
+.mgcrw-lab { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  color: var(--overlay0); padding: 12px 0 6px; }
+.mgcrw-lab:first-of-type { padding-top: 0; }
+.mgcrw-input { box-sizing: border-box; width: 100%; background: rgba(12,10,28,.8);
+  border: 1px solid var(--surface1); border-radius: 10px; color: var(--text);
+  font-family: inherit; }
+.mgcrw-input.sel { padding: 10px 13px; font-size: 12.5px; }
+.mgcrw-input.sel.dim { color: var(--overlay0); }
+.mgcrw-input:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
+.mgcrw-row { display: flex; gap: 6px; align-items: center; }
+.mgcrw-input.url { flex: 1; min-width: 0; width: auto; font-size: 10.5px; padding: 7px 9px;
+  border-radius: 9px; }
+button.mgcrw-check { flex: none; font-size: 10.5px; font-weight: 700; padding: 7px 12px;
+  border-radius: 9px; color: var(--gold); border: 1px solid rgba(212,175,55,.45);
+  background: rgba(212,175,55,.12); font-family: inherit; cursor: pointer; }
+button.mgcrw-check:disabled { opacity: .5; cursor: not-allowed; }
+button.mgcrw-check:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.mgcrw-msg { font-size: 10.5px; line-height: 1.5; padding-top: 9px; color: var(--subtext); }
+.mgcrw-msg.ok { color: var(--gold); font-weight: 700; }
+.mgcrw-msg.quiet { color: var(--overlay0); }
+.mgcrw-msg.warn { color: var(--peach); }
+.mgcrw-msg a { color: inherit; text-decoration: underline dotted; }
+.mgcrw-foot { font-size: 9.5px; color: var(--overlay0); line-height: 1.5; padding-top: 12px; }
 .mgcte-empty { text-align: center; padding: 28px 30px; }
 .mgcte-empty .glyph { font-size: 26px; color: var(--overlay0); padding-bottom: 10px; }
 .mgcte-empty .t { font-size: 13.5px; font-weight: 700; padding-bottom: 7px; }

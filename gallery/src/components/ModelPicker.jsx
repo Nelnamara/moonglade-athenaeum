@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
@@ -87,6 +88,7 @@ const SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most
 export default function ModelPicker({
   kind = "base", multi = false, market = false, baseType = "",
   value = null, selected = [], onPick, onToggle, visible = true, style,
+  favs = null, onFav = null,
 }) {
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
@@ -389,6 +391,14 @@ export default function ModelPicker({
               <div className="mg-cov">
                 {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                 {m.official && <span className="mg-pill">Official</span>}
+                {/* Session M (NOTES 6): the ☆ that puts this model / LoRA on the dock's quick-pick
+                    row. Only where the host handles it (the dock and the phone's Create tab). */}
+                {onFav ? (
+                  <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
+                    aria-pressed={(favs || []).includes(String(m.model_id))}
+                    title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
+                    onClick={(e) => { e.stopPropagation(); onFav(m); }} />
+                ) : null}
                 {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
               </div>
               <div className="mg-meta">
@@ -407,30 +417,42 @@ export default function ModelPicker({
       <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
       <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
 
-      <div className={"mg-preview" + (p ? " open" : "")} aria-hidden={p ? "false" : "true"}
-        style={p ? { left: preview.x, top: preview.y } : undefined}>
-        {p && (
-          <>
-            {(p.cover_url || p.preview_url) && <img src={p.cover_url || p.preview_url} className={p.should_blur ? "blur" : undefined} alt="" />}
-            <div className="mp-meta">
-              <div className="mp-nm">{p.title}</div>
-              <div className="mp-sub">
-                <span>{tyShort(p.type)}</span>
-                {p.ref_count ? <span><Icon name="uses" /> {fmtCompact(p.ref_count)} uses</span> : null}
-                <span>♥ {fmt(p.liked_count)}</span>
-                {p.comment_count ? <span>💬 {fmt(p.comment_count)}</span> : null}
-              </div>
-              {(baseLabel(p.base_model) || p.official) && (
-                <div className="mp-badges">
-                  {baseLabel(p.base_model) && <span className="bdg base">{baseLabel(p.base_model)}</span>}
-                  {p.official && <span className="bdg official" title="In-house / official model">✓ Official</span>}
+      {/* PORTALED to <body> (owner walk 2026-09-29: hovering a card on the desktop showed
+          nothing). The preview is position:fixed at viewport coordinates, but the dock's model
+          palette (.mgx-dock-host .mfly, dock.css) carries transform: translateX(-50%) and
+          overflow: hidden -- a transformed ancestor becomes the containing block for fixed
+          descendants, so the card was placed relative to the palette and clipped by it. The
+          same trap the video prompt's chip preview had (VideoDrawer's .mgd-preview). The
+          wrapper keeps the .model-picker class so the preview's own rules (model-picker.css,
+          `.model-picker .mg-preview`, z 500 over the palette's 335) still reach it;
+          display:contents gives it no box of its own. */}
+      {typeof document !== "undefined" ? createPortal(
+        <div className="model-picker" style={{ display: "contents" }}>
+          <div className={"mg-preview" + (p ? " open" : "")} aria-hidden={p ? "false" : "true"}
+            style={p ? { left: preview.x, top: preview.y } : undefined}>
+            {p && (
+              <>
+                {(p.cover_url || p.preview_url) && <img src={p.cover_url || p.preview_url} className={p.should_blur ? "blur" : undefined} alt="" />}
+                <div className="mp-meta">
+                  <div className="mp-nm">{p.title}</div>
+                  <div className="mp-sub">
+                    <span>{tyShort(p.type)}</span>
+                    {p.ref_count ? <span><Icon name="uses" /> {fmtCompact(p.ref_count)} uses</span> : null}
+                    <span>♥ {fmt(p.liked_count)}</span>
+                    {p.comment_count ? <span>💬 {fmt(p.comment_count)}</span> : null}
+                  </div>
+                  {(baseLabel(p.base_model) || p.official) && (
+                    <div className="mp-badges">
+                      {baseLabel(p.base_model) && <span className="bdg base">{baseLabel(p.base_model)}</span>}
+                      {p.official && <span className="bdg official" title="In-house / official model">✓ Official</span>}
+                    </div>
+                  )}
+                  {p.description && <div className="mp-desc">{p.description}</div>}
                 </div>
-              )}
-              {p.description && <div className="mp-desc">{p.description}</div>}
-            </div>
-          </>
-        )}
-      </div>
+              </>
+            )}
+          </div>
+        </div>, document.body) : null}
     </div>
   );
 }

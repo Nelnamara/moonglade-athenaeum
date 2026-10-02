@@ -170,7 +170,8 @@ export default function useCommandPalette(commands) {
         gTimer.current = setTimeout(() => { gTimer.current = null; setPending(false); }, G_TIMEOUT_MS);
         return;
       }
-      if (k === "?") { e.preventDefault(); s.openSheet(); return; }
+      // The ? key opens the guide now (Session I decision 2), from help/helpStore.js's own
+      // listener; the cheat-sheet stays one palette row away ("Show keyboard shortcuts").
       // A single-key command that isn't currently offered is ABSENT, not dead: R with no
       // focused image finds nothing here because App never built the row (DC frame H).
       const cmd = (s.commands || []).find((c) => c.hotkey === k.toLowerCase());

@@ -24,7 +24,7 @@ export const LORA_SHEET_DONE_LABEL = "Confirm selection";
 
 export default function ModelFlyout({
   open, kind, setKind, baseType, value, selected, onBasePick, onLoraPick, onClose,
-  phone = false,
+  phone = false, favs = null, onFav = null,
 }) {
   return (
     <div className={"mfly" + (open ? " open" : "")} aria-hidden={!open}>
@@ -42,11 +42,13 @@ export default function ModelFlyout({
       </div>
       <div style={{ display: kind === "base" ? "" : "none" }}>
         <ModelPicker kind="base" market visible={open && kind === "base"}
-          value={value} onPick={onBasePick} />
+          value={value} onPick={onBasePick}
+          favs={favs && favs.base} onFav={onFav ? (row) => onFav("base", row) : null} />
       </div>
       <div style={{ display: kind === "lora" ? "" : "none" }}>
         <ModelPicker kind="lora" multi market baseType={baseType} visible={open && kind === "lora"}
-          selected={selected || []} onToggle={onLoraPick} />
+          selected={selected || []} onToggle={onLoraPick}
+          favs={favs && favs.lora} onFav={onFav ? (row) => onFav("lora", row) : null} />
       </div>
     </div>
   );

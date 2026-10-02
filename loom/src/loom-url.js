@@ -41,6 +41,7 @@ export function readBoardId(search) {
    Starts from the CURRENT query string and applies ONLY the keys the patch names:
      { board: id }   -> ?board=id; null/""/an unusable id drops the param
      { cast: null }  -> drops ?cast= (the hand-off's own cleanup, once it has been read)
+     { shots, from, n } -> the "as shots" hand-off (P5); null drops each, like cast
    A key the patch doesn't mention is left exactly as it was. Built from URLSearchParams,
    never string-concatenated, so encoding and any other parameter present survive. */
 export function buildLoomUrl(patch, search, pathname) {
@@ -56,8 +57,36 @@ export function buildLoomUrl(patch, search, pathname) {
     if (patchObj.cast) p.set("cast", String(patchObj.cast));
     else p.delete("cast");
   }
+  // Session P, Stage B1 (P5): the "as shots, in order" hand-off -- the ids in order, the
+  // collection they came from, and a nonce -- read once by the Loom and cleared like ?cast=.
+  ["shots", "from", "n"].forEach((k) => {
+    if (!(k in patchObj)) return;
+    if (patchObj[k]) p.set(k, String(patchObj[k]));
+    else p.delete(k);
+  });
   const qs = p.toString();
   return (pathname || "/loom") + (qs ? "?" + qs : "");
+}
+
+/* THE "AS SHOTS, IN ORDER" HAND-OFF (Session P, P5; rulings 9 and 10; review N4).
+
+   The gallery sends /loom?shots=<ids in order>&from=<collection>&n=<nonce>. The ids are read
+   by the Loom with the cast hand-off's own sanitiser and grammar (parseCastIdsFromSearch with
+   the "shots" key, then isCatalogMediaId); this reads the other two.
+
+   SHOTS_HANDOFF_CAP is ruling 10's one number: how many pictures one hand-off may carry. The
+   gallery refuses a larger send BEFORE navigating, naming the cap, and the Loom refuses a link
+   that carries more -- never silently truncated on either side. */
+export const SHOTS_HANDOFF_CAP = 60;
+
+/* {from, nonce}: the collection's name (control characters dropped, 64 characters at most;
+   "" when absent) and the nonce ([A-Za-z0-9_-]{1,32}, or "" when absent or unusable). */
+export function readShotsMeta(search) {
+  let p;
+  try { p = new URLSearchParams(search || ""); } catch (e) { return { from: "", nonce: "" }; }
+  const from = String(p.get("from") || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 64);
+  const n = String(p.get("n") || "");
+  return { from, nonce: /^[A-Za-z0-9_-]{1,32}$/.test(n) ? n : "" };
 }
 
 /* THE PHONE'S AUTO-OPEN (owner call 5, 2026-09-06).

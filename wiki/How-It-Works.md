@@ -1,6 +1,6 @@
 # How It Works
 
-Four Python modules around one SQLite catalog, plus the Loom's JS surface.
+The Python modules below sit around one SQLite catalog, with the Loom's JS surface and the gallery's React front end on top.
 
 ```
 moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
@@ -8,6 +8,11 @@ moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (th
 moonglade_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
 moonglade_mcp.py          local stdio MCP server: curation tools over the catalog, a duplicate
                           finder, and a read-only PixAI tag-suggestion tool
+moonglade_recipes.py      PixAI recipes: the market, Mine and Sets, the creator, and attaching
+                          recipes to a generation
+moonglade_runs.py         the prompt template (`{a|b}` variables, saved lists), Random and Matrix
+                          runs, and the Runs store behind Inspect
+moonglade_contest_wins.py what counts as a verified contest win and when it is checked
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
@@ -75,6 +80,8 @@ pixai_backup/
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)
 ├─ view_presets/      per-account saved gallery views (<account>.json each)
+├─ account_prefs/     per-account settings (<account>.json each): your pinned goal, saved
+│                     lists and presets, recipe row and drafts, and your answers to the first-run guide
 ├─ organize_manifest.csv   reversible move log (--undo-organize)
 ├─ achievements.json  earned achievements + earn dates
 ├─ telemetry.json     achievement counters
@@ -83,6 +90,7 @@ pixai_backup/
 ├─ prompt_snippets.json    saved prompt snippets
 ├─ toolbox_presets.json    saved Toolbox presets
 ├─ catalog.db         the source of truth
+├─ runs.db            the Runs store: each multi-send's template and the exact request it sent
 └─ raw_tasks.jsonl    raw task data
 ```
 

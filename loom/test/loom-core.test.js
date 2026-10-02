@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import {
   CONNECT, CONTINUITY_PHRASE, actLetter,
   maxTagNum, nextTag, frameLinked, connectMeta, continuityLinked,
-  flat, shotText, castMissingImages, shotPayload, durOf, reelStats, effectivePrompt,
+  flat, shotText, castMissingImages, shotPayload, shotSendBody, durOf, reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip,
+  timelineFit, timelineHeight, nextTimelineState, TL_SLIM, TL_REEL, TL_PREVIEW_MAX, TL_PREVIEW_MIN, TL_BOARD_MIN,
 } from "../src/loom-core.js";
 
 /* ---------- fixtures ---------- */
@@ -550,6 +551,28 @@ describe("shotPayload", () => {
     assert.equal(shotPayload(flat(proj2)[0], proj2, fakeImgSrc).is_private, true);
   });
 
+  test("spend review S3: every key of the priced payload but hasInput reaches the card's POST body, unchanged", () => {
+    // A Private R2V shot with a video ref, audio on and Draft on: every field non-default.
+    const card = makeCard({ cast: [], isPrivate: true, audioGen: true, audioLanguage: "none",
+      openFrame: { thumbId: "t", source: "", desc: "", tag: "@image1" },
+      refs: [{ id: "v1", kind: "video", tag: "@video1", source: "733917871331404290" }] });
+    const proj = makeProject([{ id: "a1", name: "Act", cards: [card] }]);
+    proj.draft = true;
+    const p = shotPayload(flat(proj)[0], proj, fakeImgSrc);
+    assert.equal(p.is_private, true);
+    const body = shotSendBody(p, { boardId: "b1", cardId: card.id, submitId: "s1", expectFree: false });
+    for (const k of Object.keys(p)) {
+      if (k === "hasInput") { assert.equal(k in body, false, "hasInput is client-only"); continue; }
+      assert.deepEqual(body[k], p[k], k + " must reach the POST exactly as it was priced");
+    }
+    assert.equal(body.origin, "loom-shot");
+    assert.deepEqual(body.loom_target, { board_id: "b1", card_id: card.id });
+    assert.equal(body.submit_id, "s1");
+    assert.equal("expect_free" in body, false);
+    assert.equal(shotSendBody(p, { boardId: "b1", cardId: card.id, submitId: "s1", expectFree: true }).expect_free, true);
+    assert.equal(p.hasInput, true, "the payload itself is not mutated");
+  });
+
   test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
     const card = makeCard({
       mode: "FLF",
@@ -649,15 +672,18 @@ describe("durOf / reelStats", () => {
     ];
     const { total, scale, over } = reelStats(entries, 15);
     assert.equal(total, 20);          // 8 + 12 (actualDur wins for the second)
-    assert.equal(scale, 20);          // max(total, target)
+    assert.equal(scale, 20);          // the cut itself
     assert.equal(over, 5);            // 20 - 15
   });
 
-  test("reelStats under target: scale follows target, over is negative", () => {
+  // Flipped 2026-09-29 (the Loom build to the Design Handoff): the reel spans the cut
+  // (The Loom.dc.html:1009), so a short cut is NOT drawn against a longer target any more --
+  // a 480 s default target used to draw one 6 s shot as a 1% sliver.
+  test("reelStats under target: the reel still spans the cut, over is negative", () => {
     const entries = [{ c: { duration: 5 } }];
     const { total, scale, over } = reelStats(entries, 30);
     assert.equal(total, 5);
-    assert.equal(scale, 30);
+    assert.equal(scale, 5);
     assert.equal(over, -25);
   });
 
@@ -666,5 +692,57 @@ describe("durOf / reelStats", () => {
     assert.equal(total, 0);
     assert.equal(scale, 1);
     assert.equal(over, 0);
+  });
+});
+
+/* ---------- the timeline drawer's fit rule ---------- */
+
+describe("timelineFit / timelineHeight / nextTimelineState", () => {
+  const designFull = 372 + 92 + 84;
+
+  test("the grip cycles hidden -> slim -> full -> hidden", () => {
+    assert.equal(nextTimelineState("hidden"), "slim");
+    assert.equal(nextTimelineState("slim"), "full");
+    assert.equal(nextTimelineState("full"), "hidden");
+  });
+
+  test("a tall window gets the design's full height and the whole 300 px preview", () => {
+    const fit = timelineFit(1200, designFull);
+    assert.equal(fit.full, designFull);
+    assert.equal(fit.preview, TL_PREVIEW_MAX);
+    assert.equal(fit.scrolls, false);
+  });
+
+  test("the board always keeps TL_BOARD_MIN px below the drawer", () => {
+    for (const room of [900, 700, 609, 500, 420]) {
+      const fit = timelineFit(room, designFull);
+      assert.ok(room - fit.full >= TL_BOARD_MIN, "room " + room + " left the board " + (room - fit.full));
+    }
+  });
+
+  test("the preview shrinks first, never under 150, then the drawer body scrolls", () => {
+    const fit = timelineFit(609, designFull);          // the owner's 1444x815 window, banner up
+    assert.equal(fit.full, 609 - TL_BOARD_MIN);
+    assert.equal(fit.preview, TL_PREVIEW_MIN);
+    assert.equal(fit.scrolls, true);
+    const mid = timelineFit(designFull + TL_BOARD_MIN - 60, designFull);
+    assert.equal(mid.preview, TL_PREVIEW_MAX - 60);
+    assert.equal(mid.scrolls, false);
+  });
+
+  test("a tiny window floors the drawer at the slim strip plus one reel", () => {
+    assert.equal(timelineFit(200, designFull).full, TL_SLIM + TL_REEL);
+  });
+
+  test("heights per state: hidden 0, slim 86, full from the fit", () => {
+    const fit = timelineFit(900, designFull);
+    assert.equal(timelineHeight("hidden", fit), 0);
+    assert.equal(timelineHeight("slim", fit), TL_SLIM);
+    assert.equal(TL_SLIM, 86);
+    assert.equal(timelineHeight("full", fit), fit.full);
+  });
+
+  test("an unmeasured room falls back to the design height", () => {
+    assert.equal(timelineFit(null, designFull).full, designFull);
   });
 });

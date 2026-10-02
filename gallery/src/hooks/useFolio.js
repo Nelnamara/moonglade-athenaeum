@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet } from "../api.js";
-import { sendAchEvent } from "../notify/achNonce.js";
+import { apiGet, apiPost } from "../api.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { peek, put } from "./swrCache.js";
+import useAccountPrefs, { accountPrefs, accountCsrf } from "./useAccountPrefs.js";
+import { takeFolioFocus, takeFolioRow } from "../folio/folioFocus.js";
+import { vigilView, togglePin, canPin, PIN_KEY, VIGIL_HEADER_KEY, pinnedId, vigilInHeader } from "../folio/goalCore.js";
+import { honorsCardModel } from "../folio/honorsCardCore.js";
+import { pokeView, choiceValue } from "../folio/pokeCore.js";
+import { UNLEASH_KEY, isUnleashed } from "../folio/unleashPref.js";
+import {
+  SEEN_KEY, REVEAL, orderFeats, unseenFeatIds, nextSeen, veilState, revealFrame,
+} from "../folio/maskedFeatsCore.js";
+import {
+  progressOf, completionOf, loadSort, saveSort, sortHonors, relicRows,
+} from "../folio/completionistCore.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -66,31 +77,9 @@ export const RARITY_ORDER = ["common", "rare", "epic", "legendary"];
 // constant) -- FolioMobile.jsx uses this full array rather than hand-copying
 // the mock's shorter one, one narrator voice, one source of truth, matching
 // this file's own established rule for shared product copy.
-// Byte-for-byte from static/mg-notify.js's own `poke()` (~line 1061) -- the
-// REAL escalating warning toast every poke already shows in the classic
-// Trophy Hall. The React port was posting to /api/ach-event silently with no
-// per-click feedback at all, which is what made 5 real pokes feel trivial/
-// unearned compared to classic's actual build-up -- not a missing time-gate,
-// just this missing feedback loop.
-// The "no cooldown anywhere, client or server" this comment used to record was
-// true until 2026-09-07 and is not any more: /api/ach-event now debounces the
-// same (session, event) inside 150ms and refuses past 30 beacon calls a minute
-// (see its handler, and notify/achNonce.js). The debounce is a wall-clock gap
-// and can tell nothing else apart, so the width is the whole claim: 150ms is
-// under a hand and over a double-fired DOM event. It shipped at 400ms earlier
-// the SAME DAY, and this comment said then that it "separates a double-fired
-// click from a second click" -- it did not: at a phone's ordinary ~3 taps/sec
-// every second real poke was thrown away, so Triggered wanted about ten taps.
-// Narrowed to 150ms, 5 real, separate clicks is again the only real gate there
-// is. A swallowed tap says nothing at all (pokeNarrator returns on
-// res.debounced) rather than rewinding the escalating toast to its first line.
-export const POKES = [
-  "The narrator ignores you.",
-  "The narrator raises an eyebrow. Do you mind?",
-  "The narrator is DESCRIBING things. Hands off.",
-  "The narrator’s eye twitches. Last warning.",
-  "FINE. You want the REAL commentary? Unleashed. Happy now?",
-];
+// (The narrator's poke lines are NOT here: the server keeps the count and chooses each line
+// from the sealed pack, and the page only shows what it is told -- see pokeNarrator below and
+// folio/pokeCore.js.)
 
 export const NARRATOR_LINES = [
   "Keep going. The Void will not archive itself.",
@@ -214,15 +203,18 @@ export function buildViewModel(data) {
 
   // ---- Within reach: closest LOCKED non-feat achievements to their threshold.
   // Feats are excluded -- most are one-shot triggers where a "% there" number
-  // would be meaningless (or a de-facto spoiler) rather than informative. ----
+  // would be meaningless (or a de-facto spoiler) rather than informative. Only an honor the
+  // server sent a count for is measured: one whose metric is not tracked has no count, so it
+  // is not "within reach" of anything (Session O, O1: no count, no moon).
   const withinReach = nonFeat
-    .filter((a) => !a.earned && a.threshold > 0)
-    .map((a) => ({ ...a, _ratio: Math.min(1, a.current / a.threshold) }))
+    .map((a) => ({ a, p: progressOf(a) }))
+    .filter(({ p }) => p && p.threshold > 0)
+    .map(({ a, p }) => ({ ...a, _ratio: p.fraction }))
     .sort((x, y) => y._ratio - x._ratio)
     .slice(0, 3);
 
-  // ---- Relics: read-only skin display; active = the currently-applied skin. ----
-  const relics = (data.skins || []).map((s) => ({ ...s, active: s.id === data.skin }));
+  // The relics are drawn by kind from relicRows (folio/completionistCore.js), not from here:
+  // the skins list carries locked skins too, and only what is earned is ever shown.
   const skinsById = {};
   (data.skins || []).forEach((s) => { skinsById[s.id] = s; });
 
@@ -241,10 +233,23 @@ export function buildViewModel(data) {
     milestones: achievements.filter((a) => displayBucket(a) === "milestone"),
     masteries: achievements.filter((a) => displayBucket(a) === "mastery"),
     feats,
-    buckets, recent, withinReach, relics, skinsById, rarityRows, ladderRows,
+    buckets, recent, withinReach, skinsById, rarityRows, ladderRows,
     earnedNonFeat: nonFeat.filter((a) => a.earned).length, totalNonFeat: nonFeat.length,
     earnedFeats: feats.filter((a) => a.earned).length, totalFeats: feats.length,
   };
+}
+
+// Today's date on THIS device, YYYY-MM-DD (the card's foot line).
+function localDate() {
+  const d = new Date();
+  const z = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate());
+}
+
+// localStorage, or null when the browser refuses even to hand it over (private windows,
+// blocked site data): the sort then simply does not persist.
+function safeStorage() {
+  try { return window.localStorage || null; } catch { return null; }
 }
 
 export default function useFolio() {
@@ -260,13 +265,20 @@ export default function useFolio() {
   const [bucketFilter, setBucketFilter] = useState(null);
   const [activeLadderId, setActiveLadderId] = useState(null);
   const [quoteIdx, setQuoteIdx] = useState(0);
+  // The All tab's sort (Session O, O3): remembered per DEVICE (this browser's storage), read
+  // once here and written only when a chip is clicked -- never on open.
+  const [sortKey, setSortKey] = useState(() => loadSort(
+    typeof window !== "undefined" ? safeStorage() : null));
 
   // ---- Unleash + glitch-reveal state (folio-glitch-spec.md). `triggered`
   // gates the pill's existence; `unleashed` is the free toggle once it
   // exists. `reveal`/`activeToast` are the shared per-id source of truth
   // driving both a card's inline description and the replay toast. ----
   const [triggered, setTriggered] = useState(false);
-  const [unleashed, setUnleashed] = useState(false);
+  // The account's own switch (folio/unleashPref.js): the same person sees the same narrator
+  // on every device. The server still decides whether the spicier line is released at all.
+  const prefs = useAccountPrefs();
+  const unleashed = isUnleashed(prefs.prefs);
   const [reveal, setReveal] = useState({});
   const [activeToast, setActiveToast] = useState(null);
   // Per-id interval/timeout handles -- plain instance maps (ref, not state):
@@ -274,6 +286,28 @@ export default function useFolio() {
   const scrIvRef = useRef({});
   const scrTRef = useRef({});
   const mountedRef = useRef(true);
+
+  // ---- Masked feats (Session G). `seen` is the account's record of which earned feats it has
+  // been shown (the wave-1 store, key SEEN_KEY); an earned feat NOT on it plays the glitch
+  // reveal once, on the first Folio view after the earn. `freshIds` are the feats revealing
+  // in THIS visit (they keep their ribbon until the Folio closes, then are on the record);
+  // `clock` is how many milliseconds of the Feats section the reader has actually had on
+  // screen -- the reveal's own timeline, paused while they are on another tab. ----
+  const seenRaw = prefs.get(SEEN_KEY, undefined);
+  const [focusId] = useState(() => takeFolioFocus());
+  // The honor the header's pinned-goal chip asked to see (folio/folioFocus.js setFolioRow): the
+  // Folio opens on the All tab with that row scrolled to and ringed. `ringId` stays until the
+  // Folio closes. An id that is not a listed honor with a count is simply ignored.
+  const [rowFocus] = useState(() => takeFolioRow());
+  const [ringId, setRingId] = useState(null);
+
+  const [freshIds, setFreshIds] = useState(() => new Set());
+  const [clock, setClock] = useState(0);
+  const [scrollTarget, setScrollTarget] = useState(null);
+  const clockRef = useRef(0);
+  const startRef = useRef({});          // id -> the clock reading when it became new
+  const wroteRef = useRef(new Set());   // ids whose "seen" write has been sent
+  const introRef = useRef(false);       // the one time the Folio steers itself to the Feats
   // The REAL celebration moment currently on screen (Ach.replay()'s handle,
   // tagged with the achievement id it belongs to) -- NOT React-rendered; it
   // lives in its own DOM node appended straight to document.body by
@@ -281,6 +315,10 @@ export default function useFolio() {
   // scramble's setInterval tick can write into it directly without a
   // re-render, and so close/unmount can dismiss it if one is still showing.
   const replayHandleRef = useRef(null);
+  // The celebration currently up, as replayToast() recorded it: a callback that outlives one
+  // render (the choice toast's buttons) reads this, not the `activeToast` it closed over.
+  const activeToastRef = useRef(null);
+  const pokingRef = useRef(false);      // a poke is on its way to the server
 
   useEffect(() => {
     let dead = false;
@@ -435,6 +473,7 @@ export default function useFolio() {
     clearScr(a.id);
     if (replayHandleRef.current && replayHandleRef.current.dismiss) replayHandleRef.current.dismiss();
     const at = { id: a.id, name: a.name, tier: a.tier || "feat", sfw, nsfw };
+    activeToastRef.current = at;
     setActiveToast(at);
     const h = window.Ach && window.Ach.replay ? window.Ach.replay(a, { line: sfw }) : null;
     replayHandleRef.current = h ? { id: a.id, ...h } : null;
@@ -446,51 +485,67 @@ export default function useFolio() {
   // reverse-animation) -- the moment itself stays open, only its text reacts.
   function toggleUnleash() {
     const next = !unleashed;
-    setUnleashed(next);
+    prefs.set(UNLEASH_KEY, next);
     setReveal({});
     clearAllScr();
     rerunToast(activeToast, next);
   }
-  // Real onClick on the narrator avatar: POSTs to the SAME /api/ach-event
-  // endpoint mg-notify.js's own Ach.poke() uses (narrator_pokes, persisted,
-  // cross-session/cross-surface -- poking here counts toward the identical
-  // "Triggered" feat poking in the classic Trophy Hall does). On snap,
-  // refetch /api/achievements so the newly-unblanked roast_nsfw text is
-  // actually there to scramble to (mirrors mg-notify.js's poke()->load(true)).
-  // Through sendAchEvent since 2026-09-07: it carries this page's nonce and adopts
-  // the next one, so five pokes in a row are five accepted events (a bare post would
-  // spend the boot nonce and have the other four refused). A refusal -- a stale page
-  // it could not refresh, or the rate limit -- comes back as {error} and is dropped
-  // below, exactly as before.
+  // Real onClick on the narrator avatar (and the rail portrait, and the phone's quote).
+  // POST /api/narrator/poke: the SERVER keeps the count and the clocks for this account,
+  // decides whether the poke counts and chooses the line; the reply is a line and nothing
+  // else, and a poke that did not count is shown exactly like one that did. A refusal (an
+  // expired page, a busy store) is a quiet no-op, as every beacon has always been.
+  // One request at a time: a click that fires twice is one poke, not a spam line.
   function pokeNarrator() {
-    sendAchEvent("narrator")
+    if (pokingRef.current) return;
+    pokingRef.current = true;
+    accountPrefs().ensureLoaded()
+      .then(() => apiPost("/api/narrator/poke", { csrf: accountCsrf() }))
       .then((res) => {
+        pokingRef.current = false;
         if (!mountedRef.current) return;
-        if (res.error) return;
-        // A debounced reply means the server read this tap as the second half of
-        // one gesture and counted nothing -- so hold the line you are on: no toast
-        // at all, silence rather than a rewind (2026-09-07, refining the same day's
-        // debounce ruling). Before this the reply's missing `pokes` fell through to
-        // the `|| 1` below and re-showed POKES[0], so a fast second tap visibly
-        // un-escalated the toast. It carries the real count now, but ONE gesture
-        // gets ONE toast, so this returns before showing anything.
-        if (res.debounced) return;
-        // Same escalating warning toast the classic poke() shows on every
-        // single click, byte-for-byte (POKES above) -- the real feedback
-        // loop that makes 5 pokes feel earned, not the count alone.
-        if (window.Toast && res) {
-          const n = Math.max(1, Math.min(res.pokes || 1, POKES.length));
-          window.Toast.show({ title: POKES[n - 1], kind: n >= POKES.length ? "err" : "", icon: "👆" });
-        }
-        if (res && (res.snapped || (res.pokes || 0) >= 5)) {
-          setTriggered(true);
-          apiGet("/api/achievements")
-            .then((d) => {
-              put("/api/achievements", d);
-              if (mountedRef.current && !d.error) setData(d);
-            });
-        }
-      });
+        const v = pokeView(res);
+        if (!v.show) return;
+        if (v.final) { endOfLadder(v); return; }
+        if (window.Toast) window.Toast.show({ title: v.line, icon: "👆" });
+      })
+      .catch(() => { pokingRef.current = false; });
+  }
+  // The poke that ended the ladder (and earned the feat behind the pill): read the roster
+  // once more -- marking it seen, so the ordinary earn toast does not follow -- and put the
+  // feat's own celebration on screen with its clean line, then ask which narrator the
+  // account wants from now on. "Unleash" turns the switch on and plays the glitch reveal on
+  // the celebration already up; "Keep" writes the switch off, so it is an answer, not a blank.
+  function endOfLadder(v) {
+    setTriggered(true);
+    apiGet("/api/achievements?mark=1").then((d) => {
+      if (!d || d.error) return;
+      put("/api/achievements", d);
+      if (!mountedRef.current) return;
+      setData(d);
+      const card = (d.achievements || []).find((a) => a.id === v.card);
+      if (card) replayToast(card);
+      offerChoice(v.choice);
+    });
+  }
+  function chooseUnleash(pick) {
+    const on = choiceValue(pick);
+    prefs.set(UNLEASH_KEY, on);
+    if (!on || !mountedRef.current) return;
+    setReveal({});
+    clearAllScr();
+    rerunToast(activeToastRef.current, true);
+  }
+  function offerChoice(copy) {
+    if (!window.Toast) return;
+    window.Toast.show({
+      kind: "choice", icon: "👆", sticky: true,
+      title: copy.title, foot: copy.foot,
+      actions: [
+        { label: copy.keep, run: () => chooseUnleash("keep") },
+        { label: copy.unleash, tone: "ruby", run: () => chooseUnleash("unleash") },
+      ],
+    });
   }
   // Cleanup only -- clears every in-flight scramble, resets reveal/toast,
   // dismisses any still-open celebration. Deliberately does NOT navigate:
@@ -501,12 +556,50 @@ export default function useFolio() {
     clearAllScr();
     setReveal({});
     setActiveToast(null);
+    activeToastRef.current = null;
     if (replayHandleRef.current && replayHandleRef.current.dismiss) replayHandleRef.current.dismiss();
     replayHandleRef.current = null;
   }
 
   const vm = useMemo(() => (data ? buildViewModel(data) : null), [data]);
   const earnedAt = (data && data.earned_at) || {};
+
+  // ---- The completion meter (O2): ladders + milestones + masteries only; feats are "N found"
+  // and never part of the total. Relics by kind (Small Calls L2): earned rewards only, one row
+  // per kind, hidden when empty.
+  const meter = useMemo(() => (data ? completionOf(data.achievements) : null), [data]);
+  const relics = useMemo(() => (data ? relicRows({
+    skins: data.skins, achievements: data.achievements,
+    marks: data.relics && data.relics.marks, earnedAt: data.earned_at, activeSkin: data.skin,
+  }) : []), [data]);
+  // The relics are display only (owner, 2026-09-29): nothing in the Folio wears a skin.
+  function chooseSort(key) {
+    setSortKey(key);
+    saveSort(safeStorage(), key);
+  }
+
+  // ---- The Vigil (O5) and the pinned goal (O4). The Vigil's numbers come from the payload; the
+  // "show it in the app header" switch and the pin are the ACCOUNT's own preferences, written
+  // only by a click (setVigilOn / pinToggle) -- never on open.
+  const vigil = useMemo(() => vigilView(data && data.vigil), [data]);
+  const pin = pinnedId(prefs.prefs);
+  const vigilOn = vigilInHeader(prefs.prefs);
+  function setVigilOn(on) {
+    return on ? prefs.set(VIGIL_HEADER_KEY, true) : prefs.unset(VIGIL_HEADER_KEY);
+  }
+  // One pin: pinning another honor replaces it, pinning the pinned one lets go, and an honor
+  // with no count (a feat, an unmeasured metric, one already earned) changes nothing.
+  function pinToggle(a) {
+    const next = togglePin(pin, a);
+    if (next === null) return null;
+    return next ? prefs.set(PIN_KEY, next) : prefs.unset(PIN_KEY);
+  }
+  // The Honors card's model (O6): drawn on this device, from what the Folio already holds.
+  const cardModel = useMemo(() => (data ? honorsCardModel({
+    user: (typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.user) || "",
+    achievements: data.achievements, earnedPoints: data.earned_points,
+    earnedAt: data.earned_at, vigil: data.vigil, date: localDate(),
+  }) : null), [data]);
 
   // Default ladder: "archive" (The Archive), matching the DC script's own
   // state default -- falls back to whichever ladder actually exists first if
@@ -532,7 +625,22 @@ export default function useFolio() {
   const filteredActiveTiers = activeLadder ? activeLadder.tiers.filter((t) => matchesQuery(t, qlc)) : [];
   const filteredMilestones = vm ? vm.milestones.filter((a) => matchesQuery(a, qlc)) : [];
   const filteredMasteries = vm ? vm.masteries.filter((a) => matchesQuery(a, qlc)) : [];
-  const filteredFeats = vm ? vm.feats.filter((a) => matchesQuery(a, qlc)) : [];
+  // Earned feats stand in the order they were found; the search filters them like any other
+  // card. The veil is never one of them (see `veil` below).
+  const filteredFeats = vm ? orderFeats(vm.feats.filter((a) => matchesQuery(a, qlc)), data.earned_at) : [];
+
+  // ---- The sorted view (O3). Any sort but Default lays the ladders' rungs, the milestones and
+  // the masteries out as ONE list in the chosen order, under the same search and category
+  // filter as the sections it replaces. Feats are never in it (sortHonors sets them aside) and
+  // keep their own section below, in the order they were found. ----
+  const sortedHonors = useMemo(() => {
+    if (!vm || sortKey === "default") return [];
+    const flat = [];
+    if (showLadders) vm.ladders.forEach((l) => l.tiers.forEach((t) => { if (matchesQuery(t, qlc)) flat.push(t); }));
+    if (showMilestones) filteredMilestones.forEach((a) => flat.push(a));
+    if (showMasteries) filteredMasteries.forEach((a) => flat.push(a));
+    return sortHonors(flat, sortKey, earnedAt);
+  }, [vm, sortKey, showLadders, showMilestones, showMasteries, qlc, filteredMilestones, filteredMasteries, earnedAt]);
 
   // ---- "Every rung, every ladder" (desktop-only, Folio of Honors.dc.html's
   // showGroups/ladderGroups): every ladder's OWN filtered tiers, grouped --
@@ -560,8 +668,109 @@ export default function useFolio() {
     (!showFeats || filteredFeats.length === 0)
   );
 
+  // ---- THE VEIL AND THE REVEAL -------------------------------------------------------
+  const featsPayload = (data && data.feats) || null;
+  const veil = veilState(featsPayload, { query: qlc, unleashed });
+  const reduced = reducedMotion();
+  // The Feats section is on screen: its own tab, and not filtered out by a category.
+  const featsOnScreen = tab === "all" && showFeats;
+
+  // Which earned feats are new to this account. Runs when the roster and the account's own
+  // record have both arrived, and again if a new earn lands while the Folio is open. The FIRST
+  // time it finds any (or when the earn moment's link asked for one) it steers the Folio to
+  // the All tab and scrolls the card into view -- "the Folio opens scrolled to the Feats".
+  useEffect(() => {
+    if (!data || !prefs.ready) return;
+    const feats = (data.achievements || []).filter((a) => displayBucket(a) === "feat");
+    const fresh = unseenFeatIds({ feats, earnedAt: data.earned_at, seen: seenRaw })
+      .filter((id) => !Object.prototype.hasOwnProperty.call(startRef.current, id));
+    if (fresh.length) {
+      fresh.forEach((id) => { startRef.current[id] = clockRef.current; });
+      setFreshIds((prev) => new Set([...prev, ...fresh]));
+    }
+    if (!introRef.current) {
+      const aim = (focusId && feats.some((a) => a.id === focusId && a.earned)) ? focusId : fresh[fresh.length - 1];
+      if (aim) {
+        introRef.current = true;
+        setTab("all");
+        setBucketFilter(null);
+        setScrollTarget(aim);
+      }
+    }
+  }, [data, prefs.ready, seenRaw, focusId]);
+
+  // The pinned-goal chip's row: once the roster is here, go to the All tab, pick that honor's
+  // ladder, ring its row and scroll it into view. Once per open, and never for an id that is not
+  // a listed honor with a count (a feat, an earned honor, an unmeasured metric, or nothing).
+  const [rowScroll, setRowScroll] = useState(null);
+  const rowDoneRef = useRef(false);
+  useEffect(() => {
+    if (!rowFocus || !vm || rowDoneRef.current) return;
+    rowDoneRef.current = true;
+    const a = vm.achievements.find((x) => x.id === rowFocus);
+    if (!a || !canPin(a)) return;
+    setTab("all");
+    setBucketFilter(null);
+    if (a.bucket === "ladder" && a.track) setActiveLadderId(a.track);
+    setRingId(a.id);
+    setRowScroll(a.id);
+  }, [rowFocus, vm]);
+  useEffect(() => {
+    if (!rowScroll || tab !== "all") return undefined;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-honor-id="' + String(rowScroll).replace(/["\\]/g, "") + '"]');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "auto" });
+      setRowScroll(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [rowScroll, tab, vm]);
+
+  // Scroll the aimed-at card into view once it is on the page.
+  useEffect(() => {
+    if (!scrollTarget || !featsOnScreen) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-feat-id="' + String(scrollTarget).replace(/["\\]/g, "") + '"]');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "auto" });
+      setScrollTarget(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollTarget, featsOnScreen, vm]);
+
+  // The reveal's clock: runs only while a revealing feat is unfinished AND the Feats section is
+  // on screen, so a reader who tabs away mid-reveal does not miss it.
+  const unfinished = [...freshIds].some((id) => (clock - (startRef.current[id] || 0)) < REVEAL.VEIL + REVEAL.VEIL_FADE);
+  useEffect(() => {
+    if (!featsOnScreen || !unfinished) return;
+    const t0 = performance.now() - clockRef.current;
+    const iv = setInterval(() => {
+      clockRef.current = performance.now() - t0;
+      setClock(clockRef.current);
+    }, 30);
+    return () => clearInterval(iv);
+  }, [featsOnScreen, unfinished]);
+
+  // The one-time "seen" write: only when the reader has actually had the revealing card on
+  // screen for the whole reveal, and never on open. It records every earned feat now on the
+  // page, so a first write cannot leave an older feat "new" next time.
+  useEffect(() => {
+    if (!data || !prefs.ready) return;
+    const due = [...freshIds].filter((id) => !wroteRef.current.has(id)
+      && (clock - (startRef.current[id] || 0)) >= REVEAL.VEIL);
+    if (!due.length) return;
+    due.forEach((id) => wroteRef.current.add(id));
+    const feats = (data.achievements || []).filter((a) => displayBucket(a) === "feat");
+    prefs.set(SEEN_KEY, nextSeen(seenRaw, feats));
+  }, [clock, freshIds, data, prefs.ready]);
+
+  // One card's reveal frame (null when it is not revealing) and whether the next veil must
+  // still wait for the reveal to reach its last beat.
+  const frameFor = (id) => (freshIds.has(id)
+    ? revealFrame(featsOnScreen ? clock - (startRef.current[id] || 0) : 0, reduced) : null);
+  const veilWaiting = [...freshIds].some((id) => !frameFor(id).veilIn);
+
   return {
     data, err, vm, earnedAt,
+    veil, frameFor, veilWaiting, freshIds, foundCount: vm ? vm.earnedFeats : 0,
     tab, setTab, q, setQ, onSearchChange,
     bucketFilter, toggleBucket, setBucketFilter,
     activeLadderId, setActiveLadderId, ladderId, activeLadder,
@@ -570,6 +779,8 @@ export default function useFolio() {
     reveal, activeToast,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
+    meter, relics, sortKey, chooseSort, sortedHonors,
+    vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
     filteredLadderGroups, showGroups, groupedTierCount,
   };

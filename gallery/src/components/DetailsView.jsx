@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
+import YourLayer from "./YourLayer.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import RunInspector from "./RunInspector.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
@@ -172,8 +174,8 @@ function groupSeriesSteps(steps, currentTaskId) {
    follow the design's layout. There should be NO page scrolling. The image stays static
    and the details pane scrolls if needed."). The structure is the DC's, line for line:
 
-     shell (DC:36)       fixed inset-0, 100vh, overflow hidden, flex column -- the document
-                         NEVER scrolls
+     shell (DC:36)       fixed inset-0, the visible viewport (100dvh; drift 122), overflow
+                         hidden, flex column -- the document NEVER scrolls
      top bar (DC:38-46)  Back · divider · ⛶ Lightbox · spacer · N of M · Prev · Next (+ the
                          app's Focus toggle last, a shipped owner feature)
      body (DC:345)       grid, two EQUAL columns always (minmax(0,1fr) x2); F collapses the
@@ -199,7 +201,7 @@ function groupSeriesSteps(steps, currentTaskId) {
    classic, file-existence isn't precomputed server-side -- the <img>/<video>
    onError below gets the same "not found" message for free. */
 export default function DetailsView({
-  mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onVideo, onDeleted,
+  mediaId, onClose, onNavigate, onRate, onCurate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
   items, onOpenLightbox, onPublish, onSimilar,
   morph = true,
@@ -212,6 +214,8 @@ export default function DetailsView({
     () => (typeof localStorage !== "undefined" && localStorage.getItem(MORE_KEY) === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
+  // Session M (NOTES 7): the Inspector the More row's { } Inspect chip opens
+  const [inspectOpen, setInspectOpen] = useState(false);
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
   // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
@@ -235,6 +239,7 @@ export default function DetailsView({
     busy, deleteLocal, deleteCloud,
     upEl,
     handleRate,
+    personal,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   // ◈ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
@@ -247,6 +252,7 @@ export default function DetailsView({
   useEffect(() => {
     setMediaOk(true);
     setPosterSrc(null);   // a rebuilt poster belongs to ONE row; don't carry it to the next
+    setInspectOpen(false);
   }, [mediaId]);
 
   useEffect(() => {
@@ -455,9 +461,13 @@ export default function DetailsView({
             {/* ⇱ Upscale opens the float (Image Details.dc.html:393-394 / :143-189): the
                 same fixed UpscalePanel the Lightbox uses, over the page -- never in flow,
                 where it would have to squeeze the frame or scroll the document. The hook's
-                close-on-navigate still governs it (useImageDetails.js, correction 2). */}
-            <button className="btn" title="Upscale or Hires"
-              onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
+                close-on-navigate still governs it (useImageDetails.js, correction 2).
+                Stills only (owner walk 2026-09-29): on a video the panel could only answer
+                "Upscaling applies to images, not videos", so a video is not offered it. */}
+            {row.is_video !== "1" ? (
+              <button className="btn" title="Upscale or Hires"
+                onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
+            ) : null}
             <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
               onClick={deleteLocal}>Delete locally</button>
           </div>
@@ -499,6 +509,13 @@ export default function DetailsView({
               {tagList.map((t) => <span key={"t" + t} className="p-tag">{t}</span>)}
               {collectionList.map((c) => <span key={"c" + c} className="p-tag p-tag-shelf">{c}</span>)}
             </div>
+          ) : null}
+
+          {/* YOUR LAYER (Session N3): keeper / reject, tags and a note -- the owner's own,
+              in the local catalog, never sent to PixAI. Rendered once the detail read has
+              landed its `personal`; a change made elsewhere reaches it through the bus. */}
+          {onCurate && personal ? (
+            <YourLayer mediaId={row.media_id} personal={personal} onCurate={onCurate} />
           ) : null}
 
           {/* THE LEDGER -- Image Details.dc.html:90-100 + :375-387: exactly the DC's eleven
@@ -736,6 +753,13 @@ export default function DetailsView({
             </div>
           ) : null}
 
+          {/* Session M (NOTES 7, page M5): the exact request this picture's task was sent with, secrets
+              stripped, Copy JSON / Copy as CLI. Opened by the More row's { } Inspect chip; nothing is read
+              until then. Only for a picture PixAI made from a numeric task. */}
+          {inspectOpen && /^\d+$/.test(String(row.task_id || "")) && (
+            <RunInspector source={{ kind: "task", taskId: String(row.task_id) }} onClose={() => setInspectOpen(false)} />
+          )}
+
           {/* MORE -- the app's actions the DC never drew (it designs ten; the app
               carries more, each with real function). A quieter row, LAST, so the
               designed groups keep their shape; nothing here lost its handler.
@@ -760,6 +784,12 @@ export default function DetailsView({
               ? "Load this video's full recipe into the Video composer"
               : "Load this picture's full recipe into Generate"}
               onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+            {/* Session M (NOTES 7): { } Inspect -- a chip in this row, not a sixth in the record group (the
+                record group is the locked design's five). */}
+            {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
+              <button className="btn" title="The exact request this picture's task was sent with"
+                onClick={() => setInspectOpen((v) => !v)}>{"{ } Inspect"}</button>
+            ) : null}
             {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
                 clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
                 without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}

@@ -23,10 +23,12 @@ import path from "node:path";
    source-level device as request-module-structure.test.js next door: there is no jsdom or
    React harness here, so the guard reads the source.
 
-   The Loom's classic help modal posts its own `docs` beacon from an inline script inside
-   moonglade_gallery.py's _LOOM_SHELL -- outside gallery/src, so outside this walk. It
-   carries the same three rules by hand (send, adopt, refresh-once-on-403); its Python-side
-   comment says so, and tests/test_telemetry.py proves the route's half of the contract. */
+   The `docs` beacon used to be the one exception: the Loom's classic help modal posted it
+   from an inline script inside moonglade_gallery.py's _LOOM_SHELL, carrying the same three
+   rules by hand. Since Session I (2026-09-28) that modal is retired and the guide's own open
+   sends it (help/helpStore.js) through this same module, on both shells -- the Loom's shell
+   only writes the nonce it seeds from. tests/test_loom_notify.py pins that the shell posts
+   nothing, and tests/test_telemetry.py proves the route's half of the contract. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(__dirname, "../../gallery/src");
@@ -69,8 +71,8 @@ describe("one module owns the /api/ach-event beacon", () => {
     assert.match(mod, /apiPost\(\s*"\/api\/ach-event"\s*,\s*\{[^}]*\bnonce\b/,
       "the POST body must carry `nonce` -- without it every event is a 403 stale page");
     assert.match(mod, /\bnext_nonce\b/,
-      "an accepted event returns next_nonce; a poster that drops it earns exactly one feat "
-      + "event per page render, which is one poke out of the five Triggered needs");
+      "an accepted event returns next_nonce; a poster that drops it gets exactly one feat "
+      + "event accepted per page render");
     assert.match(mod, /"\/api\/ach-nonce"/,
       "a page idle past the 60s window needs the top-up route to recover, or an open tab "
       + "loses the beacon for good");
@@ -91,10 +93,12 @@ describe("one module owns the /api/ach-event beacon", () => {
       + "second poster this file exists to prevent. Found: " + JSON.stringify(offenders));
   });
 
-  test("the two known callers still go through it", () => {
+  test("the known callers still go through it", () => {
     // Not a completeness claim -- a new caller is fine. This is the regression direction:
-    // the konami egg and the narrator poke are the two that HAD their own bare posts.
-    for (const name of ["moments/starfallTrigger.js", "hooks/useFolio.js"]) {
+    // the konami egg HAD its own bare post, and the docs beacon had a hand-rolled one in the
+    // Loom shell until the guide took it over (Session I). (The narrator's poke left this
+    // beacon for its own route, whose ladder the server keeps: loom/test/poke-ladder-client.test.js.)
+    for (const name of ["moments/starfallTrigger.js", "help/helpStore.js"]) {
       const src = codeOnly(fileNamed(name));
       assert.match(src, /\bsendAchEvent\(/,
         name + " stopped using sendAchEvent -- if its beacon moved, move this line with it; "

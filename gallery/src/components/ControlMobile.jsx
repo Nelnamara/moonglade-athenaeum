@@ -5,10 +5,14 @@ import {
   MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import DataSaverRow from "./DataSaverRow.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
 import { apiGet } from "../api.js";
+import GuideHost from "../help/GuideHost.jsx";
+import { openAbout } from "../help/helpStore.js";
+import { versionFromStamp } from "../notify/updateStore.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
 import "../styles/control-mobile.css";
@@ -228,6 +232,9 @@ export default function ControlMobile({ account, brandRequest }) {
   }
 
   const isLocal = summary.panel_is_local;
+  // "About Moonglade · v3.14": the running version as the guide prints it (x.y for a .0).
+  const aboutVer = versionFromStamp((window.MG_BOOT && window.MG_BOOT.build_stamp) || "")
+    .replace(/^(v?\d+\.\d+)\.0$/, "$1");
   const credits = account && account.credits != null ? Number(account.credits).toLocaleString() : "—";
 
   const mirrorLine = !watch
@@ -261,6 +268,16 @@ export default function ControlMobile({ account, brandRequest }) {
           </div>
         </div>
       )}
+
+      {/* About (Session I decision 3a): under the update row, always -- the phone's door to
+          the version, this release's changelog, the guide and the release pages. Opens as a
+          sheet (help/AboutLayers.jsx). */}
+      <div className="ctm-sec">
+        <button type="button" className="mghelp-aboutrow" onClick={() => openAbout(pending ? "update" : "")}>
+          <span>About Moonglade{aboutVer ? " · " : ""}<span className="v">{aboutVer}</span></span>
+          <span className="c" aria-hidden="true">›</span>
+        </button>
+      </div>
 
       <div className="ctm-sec">
         <div className="mgcp-sidehead">At a glance</div>
@@ -556,6 +573,11 @@ export default function ControlMobile({ account, brandRequest }) {
           This is the surface it matters MOST on: a phone is the machine the owner's
           ruling names as wanting the blur off while the home desktop keeps it. The tile
           takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
+      {/* Session Q (Q7): the Data saver row -- Off / Auto on metered / Always, per device. */}
+      <div className="ctm-sec">
+        <DataSaverRow />
+      </div>
+
       <div className="ctm-sec">
         <BlurToggleTile className="mgcp-tile" />
       </div>
@@ -582,6 +604,12 @@ export default function ControlMobile({ account, brandRequest }) {
       {power && (
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
       )}
+
+      {/* The Control tab's first-run guide, and Branding's while its drill-in is open (Session
+          I decision 1: Branding's guide exists only where its tab does). Held while one of
+          this tab's own layers covers it. */}
+      <GuideHost key={brandOpen ? "branding" : "panel"} surface={brandOpen ? "branding" : "panel"} phone
+        paused={!!subOverlay || !!power || updScreen} />
 
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
         <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}

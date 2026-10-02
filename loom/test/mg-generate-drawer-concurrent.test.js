@@ -158,8 +158,14 @@ describe("<VideoDrawer> reports submit-time failures to the host (review #3)", (
     // Both failure classes now arrive as the SAME signal -- the road returns null -- so the host
     // half is one branch instead of two. The Loom's onVideoError must still run either way, or a
     // rejected shot shows no error badge on the board when the Video tab is collapsed.
-    assert.match(genBody(), /if \(!tid\) \{ emit\("mg-error", \{ error: lastErr \|\| "submit failed" \}\); return; \}/,
+    // Session P (review F3/F7) CHANGED ON PURPOSE: in the Loom the detail also names the render
+    // (tag: submit id, shot, board) and says whether the road got NO answer (answerFlags ->
+    // unclear), so the Loom keeps an unconfirmed shot locked instead of freeing it for a second
+    // paid render. The gallery's own Video tab gets exactly the detail it always got.
+    assert.match(genBody(), /if \(!tid\) \{ emit\("mg-error", tag\(\{ error: lastErr \|\| "submit failed", \.\.\.\(loomIds \? answerFlags\(answer\) : \{\}\) \}\)\); return; \}/,
       "a null task id from the road must raise mg-error to the host, carrying whatever the road said");
+    assert.match(genBody(), /const tag = \(detail, withTask\) => \(loomIds \? \{ \.\.\.detail, \.\.\.loomIds, \.\.\.\(withTask \? \{ task_id: taskId \} : \{\}\) \} : detail\);/,
+      "outside the Loom every event detail must pass through unchanged");
     assert.match(genBody(), /lastErr = patch\.text;/,
       "the adapter must remember the road's error text -- a submit-time rejection never reaches " +
       "onPhase, so this is the only place the host's message can come from");

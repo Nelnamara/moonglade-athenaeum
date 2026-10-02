@@ -16,15 +16,20 @@
    surface that changes type per host was the original bug (owner spotted it comparing
    screenshots, 2026-07-21).
 
-   z-index contract (raised to clear the Loom's own full-screen overlays): celebrations
-   .ach-m2=520, toasts #mg-toasts=510. The parade's two chips bracket the celebration: the
-   counter .ach-trailchip=519 sits behind it (it is never clicked), the skip control
-   .ach-skipchip=521 in front of it (it must be). The Activity panel (.at-panel, z-index:60)
+   z-index contract: the AMBIENT/CELEBRATION band, 510-520 (drift §3; every value in the app
+   sits in one of the three bands since the 2026-09-28 normalization -- overlays.css has the
+   whole account). In order: the update strip .mg-updbanner=510, toasts #mg-toasts=511, the
+   clip moments 515/516 (moments.css), then the parade: its counter .ach-trailchip=518
+   behind the celebration (it is never clicked), the celebration .ach-m2=519, and the skip
+   control .ach-skipchip=520 in front of it (it must be -- at or under the moment's rung the
+   click would land on the moment's own full-screen layer and merely advance it). The skip
+   control is why the moment sits at 519 rather than the design's 520: the band's ceiling is
+   520 and the control has to clear the moment. The Activity panel (.at-panel, z-index 318)
    only ever needs to clear its own host's local header content now, not the Loom's bands --
    it lives inside the header, not body-level. */
 
 /* ---- achievement celebration (the locked 335ef4e7 toast-v2 moment) ---- */
-.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:var(--font-system,system-ui,sans-serif);}
+.ach-m2{position:fixed;inset:0;z-index:519;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:var(--font-system,system-ui,sans-serif);}
 .ach-m2.go{opacity:1;}
 .ach-m2.out{opacity:0;transition:opacity .5s;}
 /* ---- the flood TRAIL (owner ruling 2026-09-03): a receded moment keeps its card on screen,
@@ -38,7 +43,7 @@
 .ach-m2.trail-2 .tw{transform:translateY(235px) scale(.8);filter:brightness(.54);}
 .ach-m2.trail-3 .tw{transform:translateY(300px) scale(.71);filter:brightness(.4);}
 .ach-m2.trail-4 .tw{transform:translateY(348px) scale(.64);filter:brightness(.28);opacity:.6;}
-.ach-trailchip{position:fixed;left:50%;transform:translateX(-50%);bottom:5vh;z-index:519;
+.ach-trailchip{position:fixed;left:50%;transform:translateX(-50%);bottom:5vh;z-index:518;
   font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--gold);
   background:rgba(10,8,24,.85);border:1px solid rgba(212,175,55,.4);border-radius:999px;
   padding:3px 11px;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1;transition:opacity .5s;}
@@ -47,10 +52,10 @@
    the counter chip's twin, one line above it, borrowing .ach-trailchip whole so this stays one
    pill family rather than two that drift. Only what a <button> genuinely needs is added here --
    the UA appearance reset, the pointer events the counter deliberately refuses, and a z-index
-   ABOVE .ach-m2's 520: at the counter's 519 the click would land on the moment's own
+   ABOVE .ach-m2's 519: at the counter's 518 the click would land on the moment's own
    full-screen layer in front of it and merely advance to the next one. Hover/focus move colour
    only, never transform, so the reduced-motion block below has nothing here to switch off. */
-.ach-skipchip{bottom:calc(5vh + 27px);z-index:521;pointer-events:auto;cursor:pointer;
+.ach-skipchip{bottom:calc(5vh + 27px);z-index:520;pointer-events:auto;cursor:pointer;
   -webkit-appearance:none;appearance:none;margin:0;line-height:1.5;}
 .ach-skipchip:hover,.ach-skipchip:focus-visible{border-color:rgba(212,175,55,.75);background:rgba(10,8,24,.95);}
 .ach-skipchip:focus-visible{outline:2px solid rgba(212,175,55,.75);outline-offset:2px;}
@@ -125,6 +130,8 @@
 @keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}
 .ach-m2 .rwd{display:inline-block;margin:8px 0 0 8px;font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:7px;padding:3px 9px;opacity:0;}
 .ach-m2 .tw.go .rwd{animation:m2fade .4s ease 1.34s forwards;}
+.ach-m2 .rwd.see-folio{cursor:pointer;color:var(--text);border-color:color-mix(in srgb,var(--tc) 55%,transparent);background:color-mix(in srgb,var(--tc) 12%,transparent);}
+.ach-m2 .rwd.see-folio:hover,.ach-m2 .rwd.see-folio:focus-visible{background:color-mix(in srgb,var(--tc) 24%,transparent);outline:none;}
 /* Confetti sheet sits BEHIND the card: .ach-m2 is its own stacking context, so "behind" is
    local z 1 -- under the toast (z 3) and mascot (z 2), above the veil. */
 .m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:m2conffall linear forwards;}
@@ -154,26 +161,30 @@
    float beside the row in #jt-detail now expands INLINE under the row itself (.at-detail),
    so there is no separate popover to anchor/reposition/click-outside-close at all.
    Class prefix `at-` (Activity Tracker) so nothing here collides with the retired `jt-`
-   selectors while both still exist in git history/diffs. */
-.at-chip{display:flex;align-items:center;gap:8px;padding:6px 13px;border-radius:999px;cursor:pointer;box-sizing:border-box;border:1px solid rgba(255,255,255,.14);background:rgba(12,10,28,.55);transition:border-color .2s,background .2s;font-family:var(--font-system,system-ui,sans-serif);font-size:10.5px;font-weight:600;color:rgba(214,210,226,.7);white-space:nowrap;}
-.at-chip.live{border-color:rgba(182,146,230,.5);color:var(--mauve);}
-.at-chip.open{background:rgba(24,18,48,.75);border-color:var(--accent,var(--lavender));}
+   selectors while both still exist in git history/diffs.
+   SKINS (2026-09-29, DECISIONS "Every skin reaches every surface"): the chip's violet literals
+   are token mixes at the design's own alphas -- --base 55% and 92%, --text 70% and 30%,
+   --lavender 50% / 80% / 28% / 14% / 22% -- and the open state's rgba(24,18,48) is an HSL mix
+   fitted to it, so they read as before under the default skin and follow any other. */
+.at-chip{display:flex;align-items:center;gap:8px;padding:6px 13px;border-radius:999px;cursor:pointer;box-sizing:border-box;border:1px solid rgba(255,255,255,.14);background:color-mix(in srgb,var(--base) 55%,transparent);transition:border-color .2s,background .2s;font-family:var(--font-system,system-ui,sans-serif);font-size:10.5px;font-weight:600;color:color-mix(in srgb,var(--text) 70%,transparent);white-space:nowrap;}
+.at-chip.live{border-color:color-mix(in srgb,var(--lavender) 50%,transparent);color:var(--mauve);}
+.at-chip.open{background:color-mix(in srgb,color-mix(in hsl,var(--mantle) 83%,var(--overlay0)) 75%,transparent);border-color:var(--accent,var(--lavender));}
 .at-chip:hover{filter:brightness(1.15);}
 .at-chip .at-caret{font-size:8px;color:var(--overlay0);}
-.at-dot{width:7px;height:7px;border-radius:50%;flex:none;background:rgba(214,210,226,.3);}
-.at-chip.live .at-dot{background:var(--accent,var(--lavender));box-shadow:0 0 10px rgba(182,146,230,.8);animation:mgPulse 1.5s ease-in-out infinite;}
+.at-dot{width:7px;height:7px;border-radius:50%;flex:none;background:color-mix(in srgb,var(--text) 30%,transparent);}
+.at-chip.live .at-dot{background:var(--accent,var(--lavender));box-shadow:0 0 10px color-mix(in srgb,var(--lavender) 80%,transparent);animation:mgPulse 1.5s ease-in-out infinite;}
 /* Owned here, not assumed from a host page (the Loom shell carries no gallery page CSS) --
    same rule the old .jt-spin block stated for gen-spin, now also covering mgPulse since the
    live-dot pulse moved into this file from the old ambient-only mgx-act rule. */
 @keyframes gen-spin{to{transform:rotate(360deg);}}
 @keyframes mgPulse{0%,100%{opacity:.45;transform:scale(1);}50%{opacity:1;transform:scale(1.35);}}
 .at-stack{display:flex;align-items:center;}
-.at-ministack{position:relative;width:20px;height:20px;border-radius:50%;flex:none;box-shadow:0 0 0 2px rgba(12,10,28,.92);}
-.at-ministack.indet{border:2px solid rgba(182,146,230,.28);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
-.at-overflow{width:18px;height:18px;border-radius:50%;background:var(--surface1);margin-left:-8px;box-shadow:0 0 0 2px rgba(12,10,28,.92);display:grid;place-items:center;font-size:8px;color:var(--overlay0);z-index:1;}
+.at-ministack{position:relative;width:20px;height:20px;border-radius:50%;flex:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--base) 92%,transparent);}
+.at-ministack.indet{border:2px solid color-mix(in srgb,var(--lavender) 28%,transparent);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
+.at-overflow{width:18px;height:18px;border-radius:50%;background:var(--surface1);margin-left:-8px;box-shadow:0 0 0 2px color-mix(in srgb,var(--base) 92%,transparent);display:grid;place-items:center;font-size:8px;color:var(--overlay0);z-index:1;}
 @media (prefers-reduced-motion: reduce){ .at-ministack.indet,.at-dot{animation:none;} }
 
-.at-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:380px;max-width:calc(100vw - 28px);max-height:min(64vh,560px);box-sizing:border-box;display:flex;flex-direction:column;padding:14px;border-radius:14px;border:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),var(--mantle) 60%);box-shadow:0 24px 60px rgba(0,0,0,.6);font-family:var(--font-system,system-ui,sans-serif);animation:atSlideIn .22s cubic-bezier(.2,.9,.24,1) both;}
+.at-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:318;width:380px;max-width:calc(100vw - 28px);max-height:min(64vh,560px);box-sizing:border-box;display:flex;flex-direction:column;padding:14px;border-radius:14px;border:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),var(--mantle) 60%);box-shadow:0 24px 60px rgba(0,0,0,.6);font-family:var(--font-system,system-ui,sans-serif);animation:atSlideIn .22s cubic-bezier(.2,.9,.24,1) both;}
 /* Docked left instead: the trigger itself moves to the header's left side (see
    SeparatorBar.jsx/the Loom toolbar), so the panel anchors off its own LEFT edge
    here too -- always flush against whichever edge the trigger actually lives near,
@@ -196,7 +207,7 @@
 .at-edgeseg{display:flex;gap:2px;flex:none;margin-right:2px;}
 .at-edgebtn{width:20px;height:20px;border-radius:6px;border:1px solid var(--surface1);background:none;display:grid;place-items:center;font-size:11px;color:var(--overlay0);cursor:pointer;}
 .at-edgebtn:hover{color:var(--text);background:var(--surface1);}
-.at-edgebtn.on{color:var(--accent);border-color:var(--accent);background:rgba(182,146,230,.14);}
+.at-edgebtn.on{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);}
 .at-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:5px;margin-top:10px;}
 .at-empty{color:var(--overlay0);font-size:12px;text-align:center;padding:30px 16px;line-height:1.55;}
 .at-empty-nel{width:104px;height:104px;object-fit:contain;margin:0 auto 8px;display:block;opacity:.92;}
@@ -222,7 +233,7 @@
    through every orientation). The ring is the only thing that reads as in-motion. */
 .at-spin{position:relative;width:80px;height:80px;flex-shrink:0;}
 .at-spin .at-nel{inset:9px;width:62px;height:62px;border-radius:50%;object-fit:cover;object-position:60% 32%;}
-.at-spin .at-ring{position:absolute;inset:4px;border-radius:50%;border:4px solid rgba(182,146,230,.22);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
+.at-spin .at-ring{position:absolute;inset:4px;border-radius:50%;border:4px solid color-mix(in srgb,var(--lavender) 22%,transparent);border-top-color:var(--lavender);animation:gen-spin .8s linear infinite;}
 .at-spin.at-queued .at-nel{opacity:.62;}
 .at-spin.at-queued .at-ring{animation:none;border-color:var(--surface1);border-top-color:var(--overlay0);}
 .at-main{flex:1;min-width:0;}
@@ -257,7 +268,7 @@
 .at-copy.copied{color:var(--emerald);}
 
 /* ---- Toasts: small, corner-stacked, reusable ---- */
-#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
+#mg-toasts{position:fixed;right:16px;top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
 .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}
 .mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}
 .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}
@@ -269,6 +280,24 @@
 /* Thumb is a background-image span, not <img src> -- the design-spec toast icon rule. */
 .mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;background-position:center;background-size:cover;background-repeat:no-repeat;flex:none;}
 .mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
+/* The post-update toast (Session I 3b, Help and First Run Handoff.dc.html section C ①): Nel's
+   30px portrait in the glyph's place, the version in mono, one bordered "What's new" button.
+   Its own card face -- the base surface with an even border, no kind stripe -- because it is
+   news about the app, not a result. */
+.mg-toast .mt-avatar{width:30px;height:30px;border-radius:50%;flex:none;background-color:var(--surface0);background-position:center;background-size:cover;background-repeat:no-repeat;}
+.mg-toast .mt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;}
+.mg-toast .mt-act{flex:none;align-self:center;font:700 10.5px/1 var(--font-system,system-ui,sans-serif);padding:5px 10px;border-radius:8px;border:1px solid var(--lavender);background:none;color:var(--text);cursor:pointer;white-space:nowrap;}
+.mg-toast .mt-act:hover{background:color-mix(in srgb,var(--lavender) 14%,transparent);}
+/* A toast that asks (the narrator's choice): its buttons sit in a row under the text, not
+   beside it, and a small foot line closes it. The ruby one is the switch's own red. */
+.mg-toast .mt-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.mg-toast .mt-acts .mt-act{align-self:auto;}
+.mg-toast .mt-act.ruby{border-color:var(--red);color:var(--red);}
+.mg-toast .mt-act.ruby:hover{background:color-mix(in srgb,var(--red) 14%,transparent);}
+.mg-toast .mt-foot{font-size:9.5px;line-height:1.45;color:var(--overlay0);margin-top:7px;}
+.mg-toast.whatsnew{align-items:center;background:var(--base);border:1px solid var(--surface1);border-radius:12px;padding:10px 12px;}
+.mg-toast.whatsnew .mt-title{font-size:12px;font-weight:400;}
+.mg-toast.whatsnew .mt-msg{font-size:10.5px;}
 .mg-toast .mt-x:hover{color:var(--text);}
 @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
@@ -287,7 +316,7 @@
    again below) and publishes --mg-updbanner-h on <html>; each shell's top chrome moves by
    exactly that. z-index sits just under the toasts, which stack from 64px down the right and
    never meet it. */
-.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:509;box-sizing:border-box;
+.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:510;box-sizing:border-box;
   display:flex;align-items:center;gap:10px;
   padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
   background:var(--surface0);border-bottom:1px solid var(--accent);
@@ -334,7 +363,7 @@ html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(-
    same day, refining the block above -- which moved only the shells that sit in normal flow).
    A `position:fixed; inset:0` root is pinned to the VIEWPORT: no padding on any ancestor can
    push it down, so `.sb-root`'s padding-top left the Loom's real shells (.lv-overlay on the
-   desktop, .lm-root on the phone) starting at y=0 with the z-509 strip painting over their top
+   desktop, .lm-root on the phone) starting at y=0 with the strip (then z-509, now 510) painting over their top
    bar -- the phone Loom's only "< Gallery" link among them -- and the full-screen viewer (.lbx)
    was covered the same way. The rule is therefore stated for the whole class: every fixed
    inset:0 layer that ranks BELOW the strip starts where the strip ends. Its `bottom:0` stays,
@@ -343,10 +372,15 @@ html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(-
    The two deliberate exceptions, both above or beneath the argument rather than in it:
      .mgx-veil   -- z-index 2, pointer-events:none, a decorative bottom gradient that must
                     reach the viewport edge; it covers nothing and eats no click.
-     .ach-m2     -- z-index 520, ABOVE the strip on purpose: an earned achievement owns the
+     .ach-m2     -- z-index 519, ABOVE the strip on purpose: an earned achievement owns the
                     whole screen for its few seconds, strip included.
    loom/test/mg-updbanner-layers.test.js re-derives this list from the stylesheets and fails on
-   any new fixed inset:0 root that is neither offset here nor named in its exemption list. */
+   any new fixed inset:0 root that is neither offset here nor named in its exemption list.
+   It reads gallery/src/styles.css too since 2026-09-28: the desktop details page (.detail-wrap)
+   and the delete dialog's scrim (.lb) live there, the test never looked, and the strip sat
+   over the details page's Back bar the whole time. .detail-wrap states its own height, which
+   beats bottom:0, so the rule after this block takes the strip off that height too. */
+html.mg-updbanner-on .detail-wrap, html.mg-updbanner-on .lb,
 html.mg-updbanner-on .lbx,
 html.mg-updbanner-on .mgv-scrim, html.mg-updbanner-on .mgv-host,
 html.mg-updbanner-on .mgai-scrim,
@@ -359,6 +393,7 @@ html.mg-updbanner-on .mgclaim-scrim, html.mg-updbanner-on .mgclaim-host,
 html.mg-updbanner-on .mgl-scrim,
 html.mg-updbanner-on .mgpal-scrim, html.mg-updbanner-on .mgpal-host,
 html.mg-updbanner-on .mgks-scrim, html.mg-updbanner-on .mgks-host,
+html.mg-updbanner-on .cpal-scrim, html.mg-updbanner-on .cpal-host, html.mg-updbanner-on .cpal-bandscrim,
 html.mg-updbanner-on .mg-gallery-picker,
 html.mg-updbanner-on .mgdock-scrim, html.mg-updbanner-on .mgdk,
 html.mg-updbanner-on .glm-scrim,
@@ -373,4 +408,16 @@ html.mg-updbanner-on .lv-overlay, html.mg-updbanner-on .lm-root,
 html.mg-updbanner-on .lv-df-veil, html.mg-updbanner-on .lv-mpick-veil,
 html.mg-updbanner-on .lv-fc-veil, html.mg-updbanner-on .lv-fc-host,
 html.mg-updbanner-on .sb-projveil,
-html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .rcp-scrim, html.mg-updbanner-on .rcp-host, html.mg-updbanner-on .rcp-m,
+html.mg-updbanner-on .mgcu-scrim,
+html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov,
+html.mg-updbanner-on .mghelp-scrim, html.mg-updbanner-on .mghelp-host,
+html.mg-updbanner-on .mgab-scrim, html.mg-updbanner-on .mgab-host,
+html.mg-updbanner-on .mgwn-scrim, html.mg-updbanner-on .mgwn-host,
+html.mg-updbanner-on .mgguide-block{top:var(--mg-updbanner-h,0px);}
+/* The details page is the one layer above with an explicit height (styles.css, 100dvh for
+   drift 122); pushed down without this it would run off the bottom by exactly the strip,
+   taking its last action row with it. No 100vh twin: a browser without dvh finds this
+   invalid at computed-value time (it holds a var()), height falls back to auto, and the
+   top/bottom pair fills the rest -- the same reasoning as gallery-mobile.css's shells. */
+html.mg-updbanner-on .detail-wrap{height:calc(100dvh - var(--mg-updbanner-h,0px));}

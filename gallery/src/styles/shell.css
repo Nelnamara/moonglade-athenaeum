@@ -223,6 +223,36 @@
 .mgx-statsrow { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .mgx-actrow { display: flex; flex-wrap: nowrap; align-items: center;
   justify-content: flex-end; gap: 8px; }
+/* THE BAND STACKS BELOW 1181px (owner walk 2026-09-29, an iPad on the desktop build). Side by
+   side, the right column is flex:none at ~410-450px (three stat pills over ? · Generate · The
+   Loom · Folio) and the library column takes whatever is left -- ~550px on a 1024px iPad Pro,
+   ~350px on an 820px iPad Air, nothing at all near 650. Its bar needs ~570-700px on one row, so
+   it ran on underneath the right column: Select, Actions and the layout cells under Generate,
+   and with Filters open the Operators chips under the IMAGES pill.
+   From here down the two columns become two rows: stats and actions on top, right-aligned, on
+   one row when they fit and two when they do not; the library below them at the band's full
+   width, beside the separator bar and the grid it filters. The bar itself may wrap as well
+   (librarybar.css), which is what still holds at the 521px phone line. Above 1180 the band is
+   the hero as drawn, and a bar that ever runs short of room there wraps rather than sliding
+   under the buttons. */
+@media (max-width: 1180px) {
+  .mgx-bottom { flex-direction: column-reverse; align-items: stretch; gap: 10px; }
+  .mgx-bnrright { flex-direction: row; flex-wrap: wrap; justify-content: flex-end;
+    align-items: center; }
+  .mgx-statsrow, .mgx-actrow { flex-wrap: wrap; }
+}
+/* The Advanced flyout (Flyout.jsx) hangs from the search slab in this band, and never runs off
+   the screen: Flyout.jsx measures where its top landed (--fly-top) and this caps it at the rest
+   of the visible height, 12px short of the edge. It scrolls inside, and its action row (Clear ·
+   Contact sheet · Export view · Apply · ✕) is sticky to its bottom -- the row carries the
+   flyout's bottom padding and ground so the list scrolls away beneath it (owner walk
+   2026-09-29: on a 708px page that row sat below the screen). The rest of its look is
+   styles.css's .fly block; these outrank it by being scoped to the band. */
+.mgx-libslot .fly { overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0;
+  max-height: max(180px, calc(100vh - var(--fly-top, 0px) - 12px));
+  max-height: max(180px, calc(100dvh - var(--fly-top, 0px) - 12px)); }
+.mgx-libslot .fly .flyft { position: sticky; bottom: 0; z-index: 1; padding-bottom: 11px;
+  background: var(--mantle); }
 
 /* metallic stat pills (silver-lavender; emerald variant for backed-up) */
 .mgx-statpill { display: flex; align-items: baseline; gap: 7px; padding: 6px 13px;
@@ -370,9 +400,13 @@
    skin retints the whole control rather than stranding one hardcoded stop).
 
    NO MOBILE SWITCHER (handoff, verbatim): below the desktop breakpoint the
-   control does not render at all -- mobile is masonry only. App.jsx itself only
-   mounts above 430px (useIsMobile), so this rule covers the in-between case, a
-   desktop window dragged narrow, rather than being the only guard. */
+   control does not render at all -- mobile is masonry only. The desktop
+   breakpoint is the phone build's own line, 520px (useIsMobile's MOBILE_QUERY):
+   an iPad runs the DESKTOP build, and this rule used to hide the strip up to
+   860px, so at 744 and 820 the four view buttons were simply gone while the
+   grid kept whatever layout was last picked, with no way to change it (owner
+   walk 2026-09-29; the owner's finding wins over the old 860 reading). The bar
+   wraps (librarybar.css), so the strip takes a second row where it must. */
 .mgx-lay { display: flex; gap: 2px; padding: 2px; border-radius: 8px; flex: none;
   border: 1px solid var(--surface1);
   background: color-mix(in srgb, var(--base) 70%, transparent); }
@@ -384,7 +418,7 @@
 .mgx-laycell:hover { color: var(--text);
   background: color-mix(in srgb, var(--lavender) 14%, transparent); }
 .mgx-laycell.on, .mgx-laycell.on:hover { background: var(--lavender); color: var(--mantle); }
-@media (max-width: 860px) { .mgx-lay { display: none; } }
+@media (max-width: 520px) { .mgx-lay { display: none; } }
 @media (prefers-reduced-motion: reduce) { .mgx-laycell { transition: none; } }
 
 .mgx-size { display: flex; align-items: center; gap: 7px; padding: 4px 11px;

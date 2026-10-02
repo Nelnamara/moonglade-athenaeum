@@ -15,12 +15,75 @@ import {
   applySetRefs as applySetRefsState,
   applyPrefill as applyPrefillState,
   flfMissingStart as flfMissingStartOf,
+  VIDEO_RATIOS, ratioLabel, ratioOffered,
+  linesShown,
 } from "../gen/videoDrawerCore.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import { CEILING_MS } from "../notify/pollCadence.js";
 import { chipify as refChipify, promptText as refPromptText } from "../gen/refChips.js";
 import "../styles/gen-drawer.css";
+
+/* ---- the Tsubaki Multi-Reference aspect ratio (reference 36: PixAI's "Aspect Ratio" popover on
+   the prompt bar -- Auto · 1:1 · 2:3 · 3:2 · 3:4 · 4:3 · 9:16 · 16:9 · 21:9, each with its shape).
+   Lane w2-small, 2026-09-28. In the dock it is a chip on the composer's top row that opens the
+   popover upward, PixAI's own pattern; elsewhere (the phone's Video mode) the same grid sits in
+   the SHOT MODE slab, where CAMERA stands for the other modes. The pick rides the payload as
+   `ratio` only for a Tsubaki engine in Multi-Reference and never as Auto
+   (videoDrawerCore.ratioForPayload). ---- */
+function RatioGlyph({ r }) {
+  if (!r || r === "adaptive") return <span className="mgd-rglyph auto" aria-hidden="true" />;
+  const [x, y] = r.split(":").map(Number);
+  const L = 12;
+  const w = x >= y ? L : Math.max(4, Math.round((L * x) / y));
+  const h = y >= x ? L : Math.max(4, Math.round((L * y) / x));
+  return <span className="mgd-rglyph" style={{ width: w, height: h }} aria-hidden="true" />;
+}
+function RatioGrid({ value, onPick, big }) {
+  return (
+    <div className={"mgd-rgrid" + (big ? " big" : "")} role="radiogroup" aria-label="Aspect ratio">
+      {VIDEO_RATIOS.map((r) => (
+        <button key={r} type="button" role="radio" aria-checked={value === r}
+          className={"mgd-rchip" + (value === r ? " on" : "")}
+          title={r === "adaptive" ? "Auto — PixAI works the frame out from the references" : r}
+          onClick={() => onPick(r)}>
+          <RatioGlyph r={r} /><span>{ratioLabel(r)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+function RatioPopover({ value, onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // Escape closes the popover only -- stopped here so the dock under it stays open.
+    const key = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <span className="mgd-ratiowrap" ref={ref}>
+      <button type="button" className={"mgd-ratiochip" + (open ? " open" : "")}
+        aria-haspopup="dialog" aria-expanded={open} title="Aspect ratio"
+        onClick={() => setOpen(!open)}>
+        <RatioGlyph r={value} /><span>{ratioLabel(value)}</span><span className="mgd-ratiocaret">▾</span>
+      </button>
+      {open ? (
+        <div className="mgd-ratiopop" role="dialog" aria-label="Aspect Ratio">
+          <div className="mgd-ratiotitle">Aspect Ratio</div>
+          <RatioGrid value={value} onPick={(r) => { onPick(r); setOpen(false); }} />
+        </div>
+      ) : null}
+    </span>
+  );
+}
 
 /* VideoDrawer -- the React port of static/mg-generate-drawer.js's <mg-generate-drawer> (no-vanilla
    campaign, component 7, the last one). The shared VIDEO generation form: 3 modes (i2v / first-
@@ -90,6 +153,19 @@ import "../styles/gen-drawer.css";
 
 let lineSeq = 0;
 
+// A Loom render's submit id ([a-z0-9], well inside the server's [A-Za-z0-9_-]{1,64}): one per
+// Go click, so the server's journal can tell a replay of THIS render from a new one.
+const newSubmitId = () => "d" + Date.now().toString(36)
+  + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+// The Loom's reading of a POST that returned no task: `unclear` when the road got no answer (a
+// throw, an unreadable body) or the server said the render may have started; `answer` is the
+// raw {threw, status, body} for the host's own classifier.
+const answerFlags = (a) => {
+  const b = a && a.body;
+  const unclear = !a || !!a.threw || !b || typeof b !== "object" || !!b.unclear;
+  return { unclear, answer: a || { threw: true } };
+};
+
 const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // `style`/`className` pass through to the root so a host can position/hide the node exactly as
   // it did the custom element (the Loom mounts it once and toggles style.display by tab).
@@ -111,10 +187,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     audioGen: false,
     audioLanguage: "english",
     videoHelper: false,  // DC 1919: 'Video prompt helper' off by default (the opposite of image gen)
+    ratio: "adaptive",   // the Tsubaki Multi-Reference aspect ratio; Auto (nothing sent) by default
     negative: "",
     modeNote: "",
     rendering: false,
     hostBusy: false,
+    // The Loom's target for a Go click (loomCtx only): {board_id, card_id, draft}, set by the
+    // host as its selection changes (node.setLoomTarget) and CAPTURED at the click.
+    loomTarget: null,
     // The price VERDICT no longer lives here: it is the shared probe's React state
     // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
     // rerender() that used to sit beside each verdict write by hand.
@@ -146,6 +226,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // mg-paused all leave through this same retained node.
   const liveNode = useRef(null);
   const setRoot = useCallback((n) => { rootRef.current = n; if (n) liveNode.current = n; }, []);
+  // The Loom's host hooks (loomCtx only), set through node.setHost: {beforeSend}.
+  const hostRef = useRef(null);
 
   const chipTimer = useRef(0);
   const previewTimer = useRef(0);
@@ -294,6 +376,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // adjusts the shot mode to a supported one and clamps duration to the engine's cap), then
   // re-price. userDriven=true so a dropped shot mode explains itself (DC pickVideoModel note).
   const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); };
+  // The aspect ratio pick (Tsubaki, Multi-Reference). HELD across a mode or engine switch like
+  // the other held fields; ratioForPayload sends it only where it applies. Re-prices, because
+  // it rides the priced referenceVideo block.
+  const pickRatio = (r) => {
+    if (st.current.ratio === r || VIDEO_RATIOS.indexOf(r) < 0) return;
+    st.current.ratio = r;
+    rerender();
+    reprice();
+  };
 
   // ---- payload + live cost -------------------------------------------------------------------
   // payload/hasAnyRef/flfMissingStart are the PURE spend-gate predicates (videoDrawerCore.js); the
@@ -332,9 +423,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const reprice = probe.refresh;
 
   // ---- submit -> poll -> result (concurrent; each submission its own line + poll loop) --------
+  // In the Loom a line belongs to a shot (linesShown, videoDrawerCore.js): the one it names
+  // (`line.shot`, a render's captured target), else the shot the drawer is bound to right now.
+  const boundShot = () => ((loomCtx && st.current.loomTarget && st.current.loomTarget.card_id) || "");
   const pushLine = (line) => {
     const id = ++lineSeq;
-    setResults((rs) => rs.concat([{ id, ...line }]));
+    const shot = loomCtx ? (line.shot != null ? String(line.shot) : boundShot()) : undefined;
+    setResults((rs) => rs.concat([{ id, ...line, ...(loomCtx ? { shot } : {}) }]));
     return id;
   };
   const updateLine = (id, patch) => setResults((rs) => rs.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -373,11 +468,60 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       if (!checkInFlight) reprice();
       return;
     }
-    const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
+    /* THE LOOM'S RENDER (loomCtx only; Session P, BUILD-w5-p §3.3, review F7/F13). The render
+       belongs to the shot the host named when Go was clicked -- the target is CAPTURED HERE,
+       before any await, so selecting another shot while this one is being sent cannot move
+       it. Without a target there is nothing to lock, so nothing is sent. The submit id makes
+       the send one the server's journal can recognise if it is ever asked about again. */
+    const target = loomCtx ? st.current.loomTarget : null;
+    if (loomCtx && !(target && target.board_id && target.card_id)) {
+      pushLine({ kind: "error", text: "This render isn't tied to a shot, so nothing was sent." });
+      return;
+    }
+    const submitId = loomCtx ? newSubmitId() : null;
+    const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
+    // The settled verdict Go was allowed on (canSubmit above): was THIS payload quoted free?
+    // In the Loom the host's own ask (below) re-prices this payload and says so instead.
+    const quoted = probe.response || null;
+    let expectFree = !!(quoted && quoted.free);
+    // The render's line is its shot's (the target captured above), whatever is bound later.
+    const id = pushLine({ kind: "status", moon: true, text: "Submitting…", ...(loomCtx ? { shot: target.card_id } : {}) });
     setReuseChip(null);   // a new submission goes out -- the recipe is no longer "from" the old run
     st.current.rendering = true;
     rerender();
     const unlock = () => { st.current.rendering = false; rerender(); };
+    if (loomCtx) {
+      // The host's beforeSend runs the Loom's latch, ASKS before any credit spend (the same
+      // fail-closed confirm as the Loom's own Render -- priced off this exact payload), and
+      // saves the shot's lock BEFORE anything is sent; a refusal (or no host at all) ends the
+      // click here with its message, unsent. A "no" to the ask sends nothing and leaves no line.
+      const host = hostRef.current;
+      let verdict = null;
+      try {
+        verdict = (host && host.beforeSend) ? await host.beforeSend({ ...loomIds, payload: p,
+          quote: quoted ? { cost: quoted.cost == null ? null : quoted.cost, free: !!quoted.free } : null }) : null;
+      } catch (e) { verdict = null; }
+      if (!verdict || verdict.refused || !verdict.ok) {
+        if (verdict && verdict.cancelled) setResults((rs) => rs.filter((l) => l.id !== id));
+        else updateLine(id, { kind: "error", moon: false,
+          text: (verdict && verdict.refused) || "The storyboard didn't take this render, so nothing was sent." });
+        unlock();
+        return;
+      }
+      // What the owner said yes to is what is sent: expect_free exactly when the host's quote
+      // was free (the server then refuses rather than charge if the card is gone by then).
+      if (typeof verdict.expectFree === "boolean") expectFree = verdict.expectFree;
+    }
+    // Every Loom event of this render names it: its submit id, its shot, its board (and its task
+    // once known). The gallery's own Video tab emits exactly what it always did.
+    const tag = (detail, withTask) => (loomIds ? { ...detail, ...loomIds, ...(withTask ? { task_id: taskId } : {}) } : detail);
+    // What is POSTed: the gallery's own Video tab sends the form's payload, byte for byte; the
+    // Loom adds its keys (a draft has no shot, so no loom_target), which the server pops before
+    // anything is priced or sent.
+    const sent = loomIds ? { ...p, submit_id: submitId,
+      ...(target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } }),
+      ...(expectFree ? { expect_free: true } : {}) } : p;
+    let answer = null;       // loomCtx: what the POST itself answered, for the host's classification
 
     const startedAt = Date.now();
     let taskId = null;
@@ -413,24 +557,24 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       const elapsed = Date.now() - startedAt;
       if (phase === "done") {
         updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-        emit("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+        emit("mg-result", tag({ media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit }, true));
       } else if (phase === "failed") {
         // The drawer's own friendlyGenErr, not the road's: this string is what the Loom prints on
         // the shot card, and it is pinned in parity with loom-mutations.js's copy so a PixAI
         // content-filter refusal reads identically on both surfaces (mg-generate-drawer-parity).
         const msg = friendlyGenErr(d.error || ("task " + (d.status || "failed")));
         updateLine(id, { kind: "error", text: msg, moon: false });
-        emit("mg-error", { error: msg });
+        emit("mg-error", tag({ error: msg }, true));
       } else if (phase === "stalled") {
         updateLine(id, {
           kind: "plain",
           text: "Paused auto-checking after " + elapsedLabel(CEILING_MS) + " with no result — check pixai.art, or reopen this shot to check again (task " + short() + ")",
         });
-        emit("mg-paused", { task_id: taskId });
+        emit("mg-paused", tag({ task_id: taskId }));
       } else if (phase === "slow" || phase === "stale") {
         tier = phase;
         updateLine(id, tierLine(phase, elapsed));
-        emit("mg-slow", { tier: phase, elapsed, task_id: taskId });
+        emit("mg-slow", tag({ tier: phase, elapsed, task_id: taskId }));
       } else {   // running -- every poll; the tier decides whether it is amber
         updateLine(id, tier === "normal"
           ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse… (task " + short() + ")" }
@@ -438,17 +582,20 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       }
     };
 
-    const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
+    const tid = await submitTask("/api/loom/generate", sent, { label: "Rendered", emit: emitLine, onPhase,
+      ...(loomIds ? { onAnswer: (a) => { answer = a; } } : {}) });
     unlock();   // the server answered (accepted or rejected) -- free the button for the NEXT submission
     // A submit-time failure (server rejection, no task_id, or no answer at all) must emit
     // mg-error, exactly as the vanilla's _renderErrorInto did -- otherwise the Loom's
     // onVideoError never runs and a rejected shot shows no error badge on the board when the
     // Video tab is collapsed. The road returns null for every one of those cases and has
     // already painted the line; this is the host half of the same event. (No credits are spent
-    // on a failed submit, so this is a status regression, not a spend one.)
-    if (!tid) { emit("mg-error", { error: lastErr || "submit failed" }); return; }
+    // on a failed submit, so this is a status regression, not a spend one.) In the Loom it also
+    // says whether the road got NO answer (unclear: the render may exist, so the Loom keeps the
+    // shot locked and asks the server's journal) and hands over the answer it did get.
+    if (!tid) { emit("mg-error", tag({ error: lastErr || "submit failed", ...(loomIds ? answerFlags(answer) : {}) })); return; }
     taskId = tid;
-    emit("mg-submit", { task_id: tid, payload: p });
+    emit("mg-submit", tag({ task_id: tid, payload: p }));
     // The submit just DEBITED tickets, so the settled verdict is stale even though the
     // payload is byte-identical -- identity-by-payload cannot see a balance change caused
     // by the drawer's own submit. Without this, a second click on the unchanged form passed
@@ -498,6 +645,17 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   };
   // The video ↺-from chip's setter, exposed to the dock's prefillVideoFromRun. Null clears it.
   const setReuse = (info) => setReuseChip(info || null);
+  // The Loom's target (board + shot) for the next Go click; null = none. Stored -- the click
+  // captures it (doGenerate) -- and, when the SHOT changes, repainted: the result lines drawn
+  // are the bound shot's own (linesShown). Never submits.
+  const setLoomTarget = (t) => {
+    const was = boundShot();
+    st.current.loomTarget = (t && t.board_id && t.card_id)
+      ? { board_id: String(t.board_id), card_id: String(t.card_id), draft: !!t.draft } : null;
+    if (boundShot() !== was) rerender();
+  };
+  // The Loom's host hooks: {beforeSend}. Stored only. Never submits.
+  const setHost = (h) => { hostRef.current = h || null; };
 
   // The vanilla was a CUSTOM ELEMENT: hosts held the DOM node itself and called node.prefill(),
   // node.setRefs(), read node.mode, and node.addEventListener('mg-*'). To stay a drop-in, the ref
@@ -517,6 +675,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       node.insertText = insertText;
       node.promptText = promptText;
       node.setReuse = setReuse;
+      // The Loom's two host hooks (Session P): which shot a Go click is for, and the beforeSend
+      // that locks that shot before anything is sent. Neither submits anything.
+      node.setLoomTarget = setLoomTarget;
+      node.setHost = setHost;
       Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
     }
     return node;
@@ -645,6 +807,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         <span>{chosenModel ? chosenModel.label : s.model}</span>
       </span>
       <span className="mgdock-frames">{SHOT_LABEL[s.mode] || s.mode} · {s.duration}s</span>
+      {ratioOffered(s) ? <RatioPopover value={s.ratio} onPick={pickRatio} /> : null}
       {reuse && (
         <button type="button" className={"mgdock-reusefrom" + (reuse.partial ? " warn" : "")}
           onClick={() => setReuseChip(null)}
@@ -727,6 +890,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               its space but goes invisible (cameraVis: visibility:hidden) -- the payload already
               drops camera_movement for r2v. Camera rides the priced payload (i2vPro.cameraMovement),
               so each change re-prices like every other priced field. */}
+          {/* The aspect ratio outside the dock (the phone's Video mode): the same grid inline,
+              44 px targets. Not in the Loom, whose shots carry no ratio of their own. */}
+          {!inDock && !loomCtx && ratioOffered(s) ? (
+            <div className="mgd-ratioblock">
+              <div className="mgd-sec">ASPECT RATIO</div>
+              <RatioGrid value={s.ratio} onPick={pickRatio} big />
+            </div>
+          ) : null}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
             <div className="mgd-sec">CAMERA</div>
             <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} disabled={!modelTakes(s.model, "camera")} title={modelTakes(s.model, "camera") ? undefined : "Camera — not used by this engine (kept, not sent)"} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
@@ -856,10 +1027,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           the History strip and the banner -- so the drawer's own inline PROGRESS and result-media are
           redundant there and are suppressed; only its refusals / submit-time errors ('Pick a source
           image first.', a rejected submit), which never reach the reel, still show (owner 2026-08-18).
-          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines.
+          The Loom and mobile Video mode render inline WITHOUT a reel, so they keep the full lines --
+          in the Loom, the BOUND shot's lines only (linesShown; owner walk 2026-09-30).
           Every mg-* event is emitted regardless above -- this only gates the inline RENDER. */}
       {(() => {
-        const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+        const shown = linesShown(results, { dock: inDock, loom: !!loomCtx, shot: boundShot() });
         return (
           <div className={"mgd-result" + (shown.length ? " has" : "")}>
             {shown.map((l) => (

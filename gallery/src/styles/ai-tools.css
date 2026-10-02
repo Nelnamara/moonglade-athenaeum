@@ -16,7 +16,7 @@
 html.mg-noblur .mgai-scrim {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
-.mgai-modal { width: min(980px, 100%); max-height: min(720px, 92vh); display: flex; flex-direction: column;
+.mgai-modal { width: min(980px, 100%); max-height: min(720px, 92vh); max-height: min(720px, 92dvh); display: flex; flex-direction: column;
   border: 1px solid var(--surface1); border-radius: 16px; overflow: hidden; background: rgba(8, 6, 20, .98);
   box-shadow: 0 40px 100px rgba(0, 0, 0, .6); }
 

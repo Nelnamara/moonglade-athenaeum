@@ -1,0 +1,124 @@
+/* ============================================================================
+   The Folio's masked feats (Session G). Pixel source of truth:
+   design/handoff-2026-09-04/Masked Feats Handoff.dc.html (sections A desktop, C phone);
+   decisions in design/notes/masked-feats/NOTES.md. mgfm- prefix (Masked Feats), shared by the
+   desktop Folio (folio-overlay.css) and the phone Folio (folio-mobile.css). Colours are the
+   app's tokens; the numbers (92 px well, 4 px inset, the two drop-shadows, 135% / 50% 45%
+   art, the scrim) are the page's own.
+   ============================================================================ */
+
+/* ---- the veil art seen through a mask: the ONE mask declaration ---- */
+.mgfm-fill {
+  width: 100%; height: 100%;
+  background: url('/branding/mystery/secret_feat.png') 50% 45% / 135% auto;
+  -webkit-mask: var(--mgfm-mask) center / contain no-repeat;
+  mask: var(--mgfm-mask) center / contain no-repeat;
+}
+
+/* ---- desktop: the veil card ---- */
+.mgfm-veil {
+  position: relative; display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+  border-radius: 13px; min-height: 128px; box-sizing: border-box; cursor: default;
+  background: rgba(5, 4, 13, .7);
+  border: 1px dashed color-mix(in srgb, var(--gunmetal) 35%, transparent);
+  transition: opacity .42s, transform .42s;
+}
+.mgfm-veil.waiting { opacity: 0; transform: translateY(6px); }
+.mgfm-well { position: relative; flex: none; width: 92px; height: 92px; border-radius: 12px; background: var(--base, #0a0818); }
+.mgfm-rim {
+  position: absolute; inset: 4px;
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--ruby) 90%, transparent))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--ruby) 45%, transparent));
+}
+.mgfm-veil-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mgfm-cap { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600; letter-spacing: .12em; color: var(--gunmetal); }
+.mgfm-riddle { font-family: Georgia, serif; font-style: italic; font-size: 14.5px; line-height: 1.35; color: var(--text); }
+
+/* ---- "Every secret found" ---- */
+.mgfm-all {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 13px; box-sizing: border-box;
+  min-height: 128px; border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  background: color-mix(in srgb, var(--gold) 5%, transparent); transition: opacity .42s, transform .42s;
+}
+.mgfm-all.waiting { opacity: 0; transform: translateY(6px); }
+.mgfm-all-h { font-family: Georgia, serif; font-style: italic; font-size: 15.5px; color: var(--text); }
+.mgfm-all-s { font-size: 11.5px; font-style: italic; color: var(--subtext); margin-top: 4px; }
+.mgfm-all.phone { min-height: 0; padding: 14px; border-radius: 14px; display: block; }
+.mgfm-all.phone .mgfm-all-h { font-size: 14px; }
+.mgfm-all.phone .mgfm-all-s { font-size: 11px; margin-top: 0; }
+
+/* ---- the reveal's layers, laid over a well (desktop 92 px well, phone 46 px thumb) ---- */
+.mgfm-cover {
+  position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: url('/branding/mystery/secret_feat.png') center / cover;
+}
+.mgfm-split {
+  position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background-position: center; background-size: cover; mix-blend-mode: screen; transition: opacity .2s;
+}
+
+/* ---- "NEWLY FOUND" ---- */
+.mgfm-ribbon {
+  position: absolute; top: 12px; right: -4px; z-index: 3; font-size: 8.5px; font-weight: 800; letter-spacing: .1em;
+  padding: 3px 8px; border-radius: 4px 0 0 4px; background: var(--ruby); color: #fff; pointer-events: none;
+}
+.mgfm-new {
+  flex: none; font-size: 8px; font-weight: 800; letter-spacing: .08em; padding: 2px 6px; border-radius: 4px;
+  background: var(--ruby); color: #fff;
+}
+
+/* ---- desktop feats grid: the page's own grid, and the earned card as this section draws it ---- */
+.mgfo-featgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+.mgfo-card.mgfo-card-feat { min-height: 128px; }
+.mgfo-card-feat .mgfo-card-ico { width: 92px; height: 92px; border: 0; background: none; }
+.mgfo-card-feat .mgfo-card-nm { font-size: 15.5px; }
+.mgfo-card-feat .mgfo-card-ds { font-size: 11.5px; line-height: 1.45; min-height: 0; }
+.mgfo-card-feat .mgfo-card-gem {
+  background: linear-gradient(90deg, transparent 0%, var(--gunmetal) 18%, #c7ccd6 50%, var(--gunmetal) 82%, transparent 100%);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--gunmetal) 40%, transparent); opacity: 1; transition: opacity .2s;
+}
+.mgfo-card-feat .mgfo-pill {
+  background: linear-gradient(180deg, #c7ccd6 0%, var(--gunmetal) 50%, var(--gunmetal-deep) 100%); color: #171a20;
+}
+/* a card mid-reveal: it has not yet snapped to the badge, so the glow and the band wait for it */
+.mgfo-card.mgfo-card-feat.fresh { border-color: color-mix(in srgb, var(--ruby) 50%, transparent); }
+.mgfo-card.mgfo-card-feat.fresh.pre { box-shadow: none; }
+.mgfo-card-feat.fresh.pre .mgfo-card-gem { opacity: 0; }
+.mgfo-card.mgfo-card-feat { transition: border-color .15s, box-shadow .25s; }
+
+/* ---- phone: the veil banner (NOTES decision 4, the curtain art) ---- */
+.mgfm-bn { position: relative; width: 100%; aspect-ratio: 1013 / 672; transition: opacity .42s, transform .42s; }
+.mgfm-bn.waiting, .mgfm-bn-panel.waiting { opacity: 0; transform: translateY(6px); }
+.mgfm-bn-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mgfm-bn-text {
+  position: absolute; left: 6%; right: 6%; bottom: 8%; padding: 8px 10px; border-radius: 0 0 10px 10px;
+  display: flex; flex-direction: column; gap: 5px;
+  background: linear-gradient(to top, rgba(5, 4, 13, .9) 55%, rgba(5, 4, 13, 0));
+}
+.mgfm-bn-row { display: flex; align-items: center; gap: 7px; }
+.mgfm-bn-sil {
+  position: relative; flex: none; width: 30px; height: 30px;
+  filter: drop-shadow(0 0 1px color-mix(in srgb, var(--ruby) 90%, transparent))
+    drop-shadow(0 0 3px color-mix(in srgb, var(--ruby) 45%, transparent));
+}
+.mgfm-bn-cap { font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 600; letter-spacing: .12em; color: var(--gunmetal); }
+.mgfm-bn-riddle {
+  font-family: Georgia, serif; font-style: italic; font-size: 12.5px; line-height: 1.35; color: var(--text);
+  text-shadow: 0 1px 4px rgba(5, 4, 13, .9);
+}
+/* the pack has no curtain art yet: the same scrim gradient as a panel, so the riddle and the
+   silhouette still show */
+.mgfm-bn-panel {
+  border-radius: 14px; border: 1px dashed color-mix(in srgb, var(--gunmetal) 35%, transparent);
+  background: linear-gradient(to top, rgba(5, 4, 13, .9) 55%, rgba(5, 4, 13, .45));
+  transition: opacity .42s, transform .42s;
+}
+.mgfm-bn-text.flow { position: static; padding: 14px; border-radius: 14px; background: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgfm-veil, .mgfm-all, .mgfm-bn, .mgfm-bn-panel, .mgfm-split, .mgfo-card.mgfo-card-feat { transition: none; }
+}
+
+/* "N found" is wider than "N/M": the feats row of a count column gives it the room */
+.mgfo-progrow-ct.found { width: 58px; }
+.fm-progrow-ct.found { width: 54px; }

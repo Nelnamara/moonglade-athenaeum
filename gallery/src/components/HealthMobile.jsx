@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
+import StorageBars from "./StorageBars.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
@@ -73,8 +74,8 @@ import "../styles/menu-screens-mobile.css";
       Import screen directly, a real destination that didn't exist before
       this batch, instead of the design's plain static note. */
 
-export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved }) {
-  const { h, err, stats, monthMax, modelMax, buckets, tier } = useHealth();
+export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved, onStoragePick }) {
+  const { h, err, stats, monthMax, modelMax, buckets, tier, storage } = useHealth();
 
   // Duplicate Review drill-in -- MobileScreen.jsx's ownership contract,
   // mirrored exactly from ControlMobile.jsx's own Branding screen (open/
@@ -115,6 +116,10 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
           </div>
         ))}
       </div>
+
+      {/* Session N6: Storage used, the same three stacked bars the desktop draws. A tap on a
+          segment filters the Gallery tab to it (AppMobile's filterFromHealth). */}
+      <StorageBars storage={storage} onPick={onStoragePick} compact />
 
       <div className="cm-subhead">Images by month</div>
       <div className="mgh-rows">

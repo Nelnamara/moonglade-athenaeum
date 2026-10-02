@@ -144,19 +144,18 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
                                        created_at="2025-01-01T00:00:00")])
     with mock.patch("datetime.datetime", _FixedNoon):   # never trip a time-of-day feat mid-test
         d = cli.get("/api/achievements").get_json()
-    # every hidden feat is unearned here, and they COLLAPSE to one placeholder
-    # (2026-08-13): the payload must not reveal how many remain undiscovered --
-    # previously the array carried one hidden-feat-N entry per secret, so its
-    # length counted them for anyone reading devtools
+    # every hidden feat is unearned here, and NONE of them is in the array: the one "???"
+    # placeholder that used to stand for them all is gone (Session G) -- the payload must not
+    # reveal how many remain undiscovered, and an entry count that moved with them would.
     n_hidden = sum(1 for a in g._roster() if a.get("hidden"))
-    assert n_hidden > 1                     # the collapse is genuinely collapsing
-    assert len(d["achievements"]) == len(g._roster()) - n_hidden + 1
-    hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
-    assert len(hidden) == 1 and hidden[0]["name"] == "???"
-    # devtools must not spoil the secrets: no real id/metric on the masked card,
-    # and the metrics echo drops every still-hidden feat's counter
-    assert hidden[0]["id"] == "hidden-feat" and hidden[0]["metric"] == ""
-    assert hidden[0]["roast"] == "" and hidden[0]["roast_nsfw"] == ""
+    assert n_hidden > 1                     # there really are several hidden feats to hide
+    assert len(d["achievements"]) == len(g._roster()) - n_hidden
+    assert not [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]
+                and a.get("hidden")]
+    assert not [a for a in d["achievements"] if a["name"] == "???" or a["id"] == "hidden-feat"]
+    # ...and before a first feat is earned the veil is cloaked too: no riddle, no mask url
+    assert d["feats"] == {"masked": None, "all_found": False}
+    # devtools must not spoil the secrets: the metrics echo drops every still-hidden feat's counter
     # Self-computed: a metric used ONLY by hidden achievements (all unearned here) must be
     # stripped from the echo; a metric shared with any visible achievement must survive.
     by_metric = {}
@@ -203,8 +202,10 @@ def test_api_masked_feats_leak_no_points(tmp_path):
     with mock.patch("datetime.datetime", _FixedNoon):
         d = cli.get("/api/achievements").get_json()
     assert "earned_points" in d and "possible_points" in d
-    masked = [a for a in d["achievements"] if a["name"] == "???"]
-    assert masked and all(a["points"] == 0 for a in masked)
+    # no hidden feat rides the array at all now, so nothing carries a point value that could
+    # hint at one, and every feat that does ride it scores zero
+    assert not [a for a in d["achievements"] if a["name"] == "???"]
+    assert all(a["points"] == 0 for a in d["achievements"] if a["tier"] == "feat")
 
 
 @needs_donor
@@ -217,8 +218,9 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     assert "earned_at" in d
     earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
     assert earned_ids and all(i in d["earned_at"] for i in earned_ids)   # every earned gets a date
-    masked = [a for a in d["achievements"] if a["name"] == "???"]        # hidden feats never leak a date
-    assert all(a["id"] not in d["earned_at"] for a in masked)
+    hidden_unearned = [h for h in g._roster() if h.get("hidden") and h["id"] not in earned_ids]
+    assert hidden_unearned                                               # hidden feats never leak a date
+    assert all(h["id"] not in d["earned_at"] for h in hidden_unearned)
     st = g.load_ach_state(out)                                           # persisted to disk
     assert st["earned_at"] and all(i in st["earned_at"] for i in earned_ids)
 
@@ -250,14 +252,16 @@ def test_badge_thumb_cache(tmp_path):
 # calls a minute -- because nothing else in the suite would notice it silently stopping.
 #
 # Two of them turn the debounce off (monkeypatch _ACH_DEBOUNCE_S) rather than sleeping:
-# a test client's calls land microseconds apart, which is a double-FIRE, not the five
-# separate human clicks Triggered is about. The debounce has its own test below, with real
+# a test client's calls land microseconds apart, which is a double-FIRE, not
+# separate human clicks. The debounce has its own test below, with real
 # time, and that is where it belongs.
 
 
 @needs_donor
 def test_api_ach_event_beacon(tmp_path, monkeypatch):
-    """The three events still earn what they always earned, now each with a nonce."""
+    """The two events still earn what they always earned, now each with a nonce. (Narrator
+    pokes left this beacon for /api/narrator/poke, whose ladder keeps the count on the
+    server per account -- tests/test_narrator_route.py owns that.)"""
     monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
@@ -266,19 +270,11 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     assert g.telemetry_metrics(out)["konami_triggered"] == 1
     ach_event(cli, "docs")
     assert g.telemetry_metrics(out)["docs_opened"] == 1
-    # narrator pokes count up and snap at 5 (Triggered). Each poke spends the nonce the
-    # previous one handed back -- the rotation IS the client contract, so ride it here.
-    nonce = ach_nonce(cli)
-    for i in range(1, 5):
-        r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
-        assert r["pokes"] == i and r["snapped"] is False
-        nonce = r["next_nonce"]
-    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
-    assert r["pokes"] == 5 and r["snapped"] is True and r["next_nonce"]
-    d = cli.get("/api/achievements").get_json()
-    trg = [a for a in d["achievements"] if a["id"] == "triggered"][0]
-    assert trg["earned"] and trg["name"] == "Triggered"
-    assert d["feats_revealed"] is True and d["unleash_available"] is True
+    # the narrator is not a beacon event any more: a valid nonce buys it nothing, and the
+    # counter its ladder feeds does not move (no second road to that count)
+    r = ach_event(cli, "narrator")
+    assert r.status_code == 400 and r.get_json()["error"] == "unknown event"
+    assert "narrator_pokes" not in g.telemetry_metrics(out)
     # unknown events are rejected, nonce or no nonce
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
     assert ach_event(cli, "nope").status_code == 400
@@ -305,11 +301,11 @@ def test_ach_nonce_is_spent_once(tmp_path):
     """A replayed nonce earns nothing -- the whole point of minting per event."""
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)
-    assert cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}
-                    ).get_json()["pokes"] == 1
-    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    assert cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce}
+                    ).get_json()["ok"] is True
+    r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1   # no counter change
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1   # no counter change
 
 
 def test_ach_nonce_expires(tmp_path):
@@ -319,9 +315,9 @@ def test_ach_nonce_expires(tmp_path):
     nonce = ach_nonce(cli)
     issued, sid = g._ach_nonces[nonce]
     g._ach_nonces[nonce] = (issued - (g._ACH_NONCE_TTL_S + 1), sid)
-    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+    assert "docs_opened" not in g.telemetry_metrics(tmp_path)
 
 
 def test_ach_nonce_is_bound_to_its_session(tmp_path):
@@ -335,32 +331,28 @@ def test_ach_nonce_is_bound_to_its_session(tmp_path):
     mine = login_test_client(app)
     theirs = login_test_client(app, username="other", password="a-real-test-password-2")
     nonce = ach_nonce(theirs)
-    r = mine.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    r = mine.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
-    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
-    assert theirs.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}
-                       ).get_json()["pokes"] == 1
+    assert "docs_opened" not in g.telemetry_metrics(tmp_path)
+    assert theirs.post("/api/ach-event", json={"event": "docs", "nonce": nonce}
+                       ).get_json()["ok"] is True
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
 
 
 def test_ach_event_debounces_a_double_fire(tmp_path):
-    """Two pokes inside the window are one click fired twice. The second is accepted (and
-    still hands back a nonce, or the page would be left with none) but counts nothing --
-    and it carries the count it did NOT move, so the client can hold its line."""
+    """Two events inside the window are one click fired twice. The second is accepted (and
+    still hands back a nonce, or the page would be left with none) but counts nothing."""
     cli = login_client(tmp_path)
-    first = cli.post("/api/ach-event", json={"event": "narrator", "nonce": ach_nonce(cli)}
+    first = cli.post("/api/ach-event", json={"event": "docs", "nonce": ach_nonce(cli)}
                      ).get_json()
-    assert first["pokes"] == 1
+    assert first["ok"] is True and not first.get("debounced")
     second = cli.post("/api/ach-event",
-                      json={"event": "narrator", "nonce": first["next_nonce"]}).get_json()
+                      json={"event": "docs", "nonce": first["next_nonce"]}).get_json()
     assert second["debounced"] is True and second["next_nonce"]
-    # The debounced reply carries the LAST COUNTED value, read not bumped (2026-09-07):
-    # without it useFolio.js's `res.pokes || 1` fell back to 1 and rewound the escalating
-    # toast to its first line on the swallowed half of every double-fire.
-    assert second["pokes"] == first["pokes"] and second["snapped"] is False
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
-    # ...and the debounce is per (session, event): a different event is not held back.
-    cli.post("/api/ach-event", json={"event": "docs", "nonce": second["next_nonce"]})
     assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+    # ...and the debounce is per (session, event): a different event is not held back.
+    cli.post("/api/ach-event", json={"event": "konami", "nonce": second["next_nonce"]})
+    assert g.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 
 def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
@@ -369,27 +361,26 @@ def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
     taps and must both count; 50ms apart is one gesture fired twice and counts once.
 
     It shipped at 400ms on 2026-09-07 and this is what that cost -- an ordinary phone
-    tap-rate of ~3/sec landed every second poke inside the window, so Triggered wanted
-    about ten taps for its five, while three separate comments said separate clicks were
-    never touched. 150ms is over a double-fired DOM event and under a hand."""
+    tap-rate of ~3/sec landed every second tap inside the window, so the second of every
+    pair of real taps was thrown away, while three separate comments said separate clicks
+    were never touched. 150ms is over a double-fired DOM event and under a hand."""
     cli = login_client(tmp_path)
     n = ach_nonce(cli)
-    a = cli.post("/api/ach-event", json={"event": "narrator", "nonce": n}).get_json()
-    assert a["pokes"] == 1
+    a = cli.post("/api/ach-event", json={"event": "docs", "nonce": n}).get_json()
+    assert a["ok"] is True and not a.get("debounced")
     time.sleep(0.2)                                  # two separate taps at ~5/sec
-    b = cli.post("/api/ach-event", json={"event": "narrator", "nonce": a["next_nonce"]}
+    b = cli.post("/api/ach-event", json={"event": "docs", "nonce": a["next_nonce"]}
                  ).get_json()
     assert b.get("debounced") is not True, "a real second tap must not be swallowed"
-    assert b["pokes"] == 2
     time.sleep(0.2)                                  # clear the window again
-    c = cli.post("/api/ach-event", json={"event": "narrator", "nonce": b["next_nonce"]}
+    c = cli.post("/api/ach-event", json={"event": "docs", "nonce": b["next_nonce"]}
                  ).get_json()
-    assert c["pokes"] == 3
+    assert c.get("debounced") is not True
     time.sleep(0.05)                                 # the second half of ONE click
-    d = cli.post("/api/ach-event", json={"event": "narrator", "nonce": c["next_nonce"]}
+    d = cli.post("/api/ach-event", json={"event": "docs", "nonce": c["next_nonce"]}
                  ).get_json()
-    assert d["debounced"] is True and d["pokes"] == 3
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 3
+    assert d["debounced"] is True
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 3
     # A hand cannot do this; that is the whole basis of the window.
     assert g._ACH_DEBOUNCE_S <= 0.15
 
@@ -401,12 +392,12 @@ def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
     cli = login_client(tmp_path)
     nonce = ach_nonce(cli)                       # call 1 of 30
     for i in range(2, g._ACH_RATE_MAX + 1):      # calls 2..30
-        d = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
-        assert d["pokes"] == i - 1, "call %d should still be accepted" % i
+        d = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce}).get_json()
+        assert d["ok"] is True, "call %d should still be accepted" % i
         nonce = d["next_nonce"]
-    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    r = cli.post("/api/ach-event", json={"event": "docs", "nonce": nonce})
     assert r.status_code == 429 and r.get_json()["error"] == "slow down"
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == g._ACH_RATE_MAX - 1
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == g._ACH_RATE_MAX - 1
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
@@ -438,15 +429,15 @@ def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
         c = replay()
         d = c.get("/api/ach-nonce").get_json()
         assert d.get("nonce"), "round %d refused early: %r" % (i + 1, d)
-        r = c.post("/api/ach-event", json={"event": "narrator", "nonce": d["nonce"]})
+        r = c.post("/api/ach-event", json={"event": "docs", "nonce": d["nonce"]})
         assert r.status_code == 200, "round %d: %r" % (i + 1, r.get_json())
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == rounds
     # call 31 of the window, on a cookie as fresh as every other replay: still refused.
     c = replay()
     assert c.get("/api/ach-nonce").status_code == 429
     assert c.post("/api/ach-event",
-                  json={"event": "narrator", "nonce": "anything"}).status_code == 429
-    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
+                  json={"event": "docs", "nonce": "anything"}).status_code == 429
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == rounds
 
 
 @needs_donor

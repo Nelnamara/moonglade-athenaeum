@@ -1,6 +1,11 @@
 # The Gallery
 
-A local web gallery over your whole catalog.
+A local web gallery over your whole catalog. Double-click **`Serve Gallery.pyw`** to start
+it — a no-console launcher that opens the gallery in your browser once it is ready. The
+gallery is a viewer of `catalog.db` + your files, but can also make authenticated API calls
+for prune / reconcile (see [Deleting & Sync](Deleting)).
+
+## Running it from a terminal
 
 ```bash
 python moonglade_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
@@ -9,22 +14,33 @@ python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + 
 python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
-…or double-click **`Serve Gallery.pyw`** for a no-console launcher. The gallery is a
-viewer of `catalog.db` + your files, but can also make authenticated API calls for prune /
-reconcile (see [Deleting & Sync](Deleting)).
-
 ## The header
 
-A row of frosted glow-pill buttons, one hue per destination:
+The banner across the top carries the big buttons at its right, and a row of smaller destinations
+sits under it. On a narrow window — an iPad, say — the rows wrap onto a second line rather than
+overlapping, and the four layout marks stay visible. Along the banner:
 
+- **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
+  anywhere outside a text field). The first time you open the gallery, a **Welcome to the stacks**
+  card offers a short tour.
 - **✦ Generate** — the dockable Generate / Edit / Video drawer, right over the grid. See
   [Generating](Generating).
 - **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
   at `/loom`. Also [Generating](Generating); full manual on [The Loom](The-Loom).
-- **🏆** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
+- **🏆 Folio** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
-  closes it).
-- **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
+  closes it). A goal you pin there, and your **Vigil**, can sit beside your credits as small chips.
+
+The row under the banner holds the other destinations — **My Art**, **Publish**, **Train**,
+**Import**, **Contests**, **Health**, **Panel** and **Log Out** — plus **✦ AI Tools** at the start
+of it once **Mirror to PixAI** is armed, and **Activity** at one end. **Import** is drawn only
+on the machine running the gallery (see below). **Publish** publishes a picture of yours on PixAI,
+**Train** is [training your own LoRA](Generating#training-your-own-lora), and **Log Out** signs
+you out everywhere.
+
+- **Contests** — live PixAI contests, your entries and their verified results (see
+  [Generating → Contests](Generating#contests---contests)).
+- **My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
   flagged it, so a moderated work is no longer shown as a plain "Public". Every card carries
   its **♥ likes** and **💬 comments**, and every published one its **view count** with a small
@@ -52,8 +68,8 @@ A row of frosted glow-pill buttons, one hue per destination:
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows, likes or comments on your behalf.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
-  the `Runs itself` job list, server Stop/Restart, branding.
-- **♡ Health** — the [collection health](Health) dashboard.
+  the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
+- **Health** — the [collection health](Health) dashboard, with the storage bars.
 - **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
   card led by its own artwork, with a colour-coded chip on the art saying how much work the
   tool wants of you before you open it: **1-Click**, **Select**, **Text**, **Language** or
@@ -101,6 +117,27 @@ bar first. Open the gallery from the serving machine's own `localhost` address a
 restriction lifts. (Earlier builds showed a **🌐 LAN session** chip naming what was hidden;
 the current shell does not.)
 
+## Help, About and the first-run guide
+
+The round **?** in the header (or the **?** key) opens the Guide: these pages, inside the app.
+How it works, **About** and the first-run guide are described on
+[Help inside the app](Home#help-inside-the-app).
+
+## The command palette
+
+**Ctrl K** (**⌘ K** on a Mac) opens the command palette over any screen of the gallery: type a few
+letters and press **Enter** on the row you want. It lists **Go to** (the Library, the Loom, the
+Control Panel, Contests, My Art, Health, the Folio, and every collection — smart ones marked **⟳**),
+**Layout** (masonry, grid, hero, timeline, and **Toggle Stack sessions**), **Do** (**New generation**,
+**Jump to Search**, **Sync now**, **Manage collections**, **Rate 1–5**, **Browse recipes**, and **Claim**
+while credits are waiting), **On this image** while a picture is open or focused (**Again — new seed**,
+Remix, Send to Video, Find similar, Edit, Edit with Tsubaki, Open details, Copy id, Publish) and **Help**
+(**Open the guide**, **Show keyboard shortcuts**, and — as you type — any page or heading of the
+[guide](Home#help-inside-the-app)). A few rows show their own keys: **N** starts a generation, **/**
+jumps to the search field, **R** re-runs the open picture with a new seed, and **G** then **L**, **S** or
+**C** goes to the Library, the Loom or the Control Panel. The keys work with the palette closed, but not while you
+are typing in a field.
+
 ## Browsing & filtering
 
 The filter bar:
@@ -112,7 +149,8 @@ The filter bar:
 - **Min rating**, **Tag / contest**, **LoRA**, **Published only**.
 - **Media** — All / Images / Videos.
 - **Source** — All / PixAI history / Generated / Imported / **Deleted on PixAI**.
-- **Collection** — filter to a named [collection](Collections).
+- **Collection** — the chip opens the list of your [collections](Collections), hand-picked and
+  smart, with Manage.
 - **Sort** — newest/oldest, rating, aesthetic, likes, resolution.
 - Per-page selector, thumbnail-size slider, saved filter presets, privacy blur. Saved
   views are stored server-side, so a view saved at the desktop is in the tablet's
@@ -121,9 +159,9 @@ The filter bar:
   choice, being purely cosmetic, is still install-wide.)
 - **Layout** — four small marks sit beside the SIZE slider in the header: **▤** masonry,
   **▦** grid, **▣** hero, **≡** timeline. Hover one and it names itself. The layout you pick
-  is remembered the same way your thumbnail size is. **There is no switcher on a phone** —
-  the phone lays the library out one way, so a control that changed nothing was worse than
-  no control.
+  is remembered the same way your thumbnail size is. **A phone has no masonry / grid / hero /
+  timeline switcher** — it lays the library out in two staggered columns — but it has its own
+  two-way toggle, **▦ Grid | ▭ Feed**, in the pill row (see "The phone's reading feed" below).
 - When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
@@ -152,7 +190,39 @@ collection:"Elf Portraits"       exact collection name, same as the dropdown
 source:api                       online / api / local / deleted, same as the dropdown
 tag:elf lora:detail sampler:euler title:grove batch:B1 filename:mp4
 task:900000001  media:100000003  exact ids (a bare long number still works as before)
+keeper  reject                   your own mark on a picture (see Collections & curation)
+tag:pose-study                   your own tag; tag: also still reads PixAI's published tags
+note:"good hands"                words in your own note
+★4+                              four stars or more (★4 means the same)
+keeper -reject  -tag:draft       a leading - leaves matches out, for any of the above
+ar:tall  ar:wide  ar:square      by shape: tall is 9:16 or taller, wide is 16:9 or wider
+ar:portrait  ar:landscape        taller than wide / wider than tall
+ar:3:2  ar:9:16  ar:1.91:1       a shape, within 3% of that ratio
+ar:>2  ar:<0.5                   wider than 2:1 / narrower than 1:2 (width divided by height)
+type:image  type:video  type:loom   which kind: the Loom's own renders are their own kind
 ```
+
+`tag:` reads two stores: PixAI's published art tags (a substring, as it always did) and your own
+personal tags (a whole tag). `art_tags:` keeps the PixAI-only reading. Your marks, tags and notes
+live in your local catalog and are never sent to PixAI.
+
+**Searching by shape.** `ar:` reads each picture's width and height, so it finds *every* matching
+picture in the library, not just the ones on the page you are looking at. A picture with no size
+on record (some old imports) matches no shape, and turns up under `-ar:tall` since it is not
+known to be tall. Type `ar:` in the search field and it suggests the values; the ▾ **Advanced**
+panel has an **Aspect** field that does the same without typing, and each card names its own
+shape (`3:2`) in the row that appears when you hover it. A value the search doesn't understand
+(`ar:banana`) is said out loud under the field instead of quietly finding nothing.
+
+**Operator chips.** Open **⚲ Filters** and the last row of the tray is a set of one-tap chips
+(`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`): tap one
+to add it to the search, tap again to take it out. A shape chip replaces any other shape chip, since
+a picture only has one shape.
+
+**`type:`** splits the library three ways with no overlap: `type:image`, `type:video`, and
+`type:loom` for pictures and clips [The Loom](The-Loom) made (a shot's result, or a re-roll it
+kept; footage you imported into a shot is not the Loom's). This is what the storage bars in
+[Collection Health](Health) open when you click a segment.
 
 Text operators match substrings, case-insensitively, and take the same `*` / `?`
 wildcards as free text (`model:eth*mix`). An unrecognized key (or a malformed value
@@ -185,7 +255,9 @@ so you can bookmark one, and the browser's Back button closes it.
 - **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`/Space
   slideshow, `Esc` or ✕ to close. Arrow keys **roll over page boundaries** — reach the
   end of a page and it loads the next one, continuing seamlessly. Closing leaves your
-  scroll and selections intact.
+  scroll and selections intact. Every still picture carries a **Describe your
+  edits…** bar (`E` to jump to it) that sends a Tsubaki.3 edit of it, priced before you send —
+  see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
   metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
@@ -238,6 +310,15 @@ so you can bookmark one, and the browser's Back button closes it.
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).
 
+**On a phone, the curation tools are there too.** **Advanced** has an **Aspect** row of chips (Square,
+Portrait, Landscape, Tall, Wide) after Min rating, its **Collection** list marks smart collections
+with ⟳, and **Save as smart collection ⟳** saves what the sheet shows. Long-press a picture to start
+selecting; **Actions** then opens with the stars, a tag box and **Keeper** / **Reject** on top, with
+the same honest count and 10-second **Undo** as the desktop. In the full-screen viewer a **✓** and a
+**✕** sit at the right of the model line, and the stars are big enough to hit: tap the star you have
+to take the rating off. **Details** carries the same **Your layer** card as the desktop. See
+[Collections](Collections).
+
 **On a phone, three more things about where you are.** Each of the three tabs —
 **Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
 your library and stepping over to the composer no longer drops you into the middle of it,
@@ -246,6 +327,62 @@ and the library is still deep when you come back. Turning the page with **‹ Pr
 media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
+
+### The phone's reading feed, the new-since line, and pull to refresh
+
+**▦ Grid | ▭ Feed.** The toggle sits in the pill row, beside **Sort**. **Feed** shows one picture per
+row, edge to edge, at its own shape, with its prompt and stars over the bottom edge; tapping a
+picture opens the viewer, and long-press still starts selecting. Your choice is remembered **on that
+phone** (in the browser, like the popup blur), not on your account.
+
+**"N new since 21:40".** When you leave the Gallery tab — or close or hide the page — the phone
+remembers the newest picture it showed you and the time. Next time, a lavender line reading **N new
+since HH:MM** marks where the new pictures end. There is no line when nothing is new, and none on a
+filtered view, a later page or the lookalikes view; those never change what the phone remembers. After
+one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top.
+
+**Pull to refresh.** At the very top of the Gallery, pull down: the moon fills as you pull (it is a real
+fraction of the distance to the release line — a full moon means "let go now"). Release past the line
+and the phone runs the same **Sync now** the Control tab has, spins the moon while it works, then
+re-reads the page you are on, so anything new lands above the line. Letting go short of the line does
+nothing. A pull is something you asked for, so it works even with **Data saver** on. **My Art** has
+the same pull; there it just re-reads your list and totals from this library (the published-artwork sync
+is the Control tab's, because it counts a view on each of your works).
+
+**In the phone's full-screen viewer:** under the picture sits the **placard** — the catalog number and
+date (*ACC. 2026·0918·4401 · 18 SEP*; the number is the last four characters of the picture's id) and
+the other pictures from the same batch. Tap one to swap to it in place; the current one is ringed. A
+picture on its own says *single image*. **▶ To Video** and, on a picture's record, **↻ Remix** and
+**▶ Send to Video** all only open the **Create** tab already filled in — Remix fills the Image form with
+the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
+Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
+Generate.
+
+### The phone turned sideways
+
+Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop
+one), laid out for a wide, short screen:
+
+- **The tab bar becomes a slim rail on the left** — Gallery, Create, Control as icons, the current one
+  tinted. The banner at the top folds to a single bar (name, your counts, the **◐ Saver** chip when Data
+  saver is on, credits and the icon buttons), and the search bar scrolls away with the list so the
+  pictures get the height.
+- **The gallery shows 4 columns** (3 on a screen under 700 px wide), each row lined up. **Feed** stays one
+  picture per row, but no picture is drawn taller than the screen. The **N new since** line, **↑ Newest**
+  and pull to refresh work exactly as upright.
+- **In the viewer the picture fits the height** and the actions — Edit, To Video, Similar, Upscale, Enter
+  contest, Details, Slideshow — are a column down the right edge, ahead of the placard, the prompt and the
+  film strip, which scroll beneath them.
+- **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the
+  model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
+  is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
+- **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
+  columns re-flow, and a picture you have open stays open. A notch or the home bar on either side is left
+  clear.
+
+A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
+wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks
+you to turn the phone.
 
 ## Editing & curating
 
@@ -257,6 +394,10 @@ when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes
   failure left the widget privately believing you'd set 4 stars while the display still read
   0, so clicking the same star again to retry was read as "you already rated it 4, clear
   it" and submitted a 0. Two clicks through one dropped connection unrated the image.
+- **Rating keys** — hover a picture (or open it, or tick several) and press **1–5** to rate it,
+  **0** to clear; a gold ★ flash confirms. See [Collections](Collections).
+- **Keeper / Reject, tags and notes** — your own layer over each picture, local to your catalog;
+  the Details page edits it. See [Collections](Collections).
 - **Edit Prompt** — fix/annotate a single image's prompt on its detail page.
 - **Find/Replace** — bulk substring replace across selected prompts.
 - **Download ZIP** — bundle the selected full-res images (selection persists across pages).
@@ -276,7 +417,7 @@ an undo taxes only the mistake, where a prompt would tax every delete you meant.
 ### Sending a selection onward
 
 Selections persist across pages, which is the point of them — and it's also what made
-**Actions → ▮ Send to The Loom (cast)** miss a video. The cast is images only, but the check
+**Actions → ▮ Send to The Loom · as cast** miss a video. The cast is images only, but the check
 asked the *page you were looking at*, so a video ticked on page 2 and sent from page 1 was
 invisible to it and went through. The kinds are now remembered alongside the selection
 itself, so the exclusion holds wherever a video was picked.

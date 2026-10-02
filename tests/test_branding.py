@@ -566,18 +566,36 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     server HTML GET /login now returns (see moonglade_gallery.py's login()
     route), so this checks the JSX source directly. Same "source-presence
     assertion" pattern loom/test/loom-image-job-register.test.js already
-    established for JSX this suite has no browser harness to render."""
+    established for JSX this suite has no browser harness to render.
+
+    2026-09-28 (Session I decision 4b): the ladder moved, unchanged, into ONE shared
+    hooks/useLogin.js so the desktop and phone sign-in pages cannot disagree, and it gained
+    one rung at the very end -- the app's own carried still (art/loginArt.js's LOGIN_NEL),
+    so a fresh install shows the mascot before its pack arrives. The contract is the same;
+    only where it lives changed, so this follows it there: each page's <img> starts on the
+    root webp and hands its errors to the shared onMascotError, and the shared ladder holds
+    every later rung IN ORDER with the carried still last, before the final hide."""
     import pathlib
-    src = pathlib.Path("gallery/src/components/LoginPage.jsx").read_text(encoding="utf-8")
-    assert '"/branding/login_nel.webp"' in src, "webp must be tried FIRST -- animated wins"
-    for later in ("/branding/login_nel.png",
-                  "/branding/mascots/login_nel.webp",
-                  "/branding/mascots/login_nel.png",
-                  "/branding/mascots/nel_narrator.png"):
-        assert later in src, later + " is missing from the fallback ladder"
+    import re
+    hook = pathlib.Path("gallery/src/hooks/useLogin.js").read_text(encoding="utf-8")
+    for page in ("LoginPage.jsx", "LoginPageMobile.jsx"):
+        src = pathlib.Path("gallery/src/components/" + page).read_text(encoding="utf-8")
+        assert '<img src="/branding/login_nel.webp" alt="" onError={onMascotError} />' in src, \
+            page + ": webp must be tried FIRST -- animated wins -- then the shared ladder"
+        assert re.search(r'import[^;]*\bonMascotError\b[^;]*from "\.\./hooks/useLogin\.js"', src), \
+            page + " must use the ONE shared ladder, not a private copy"
+    m = re.search(r"export const MASCOT_FALLBACKS = \[(.*?)\];", hook, re.S)
+    assert m, "hooks/useLogin.js must export the MASCOT_FALLBACKS ladder"
+    rungs = [r.strip().strip('"') for r in m.group(1).split(",") if r.strip()]
+    assert rungs == ["/branding/login_nel.png",
+                     "/branding/mascots/login_nel.webp",
+                     "/branding/mascots/login_nel.png",
+                     "/branding/mascots/nel_narrator.png",
+                     "LOGIN_NEL"], rungs
+    assert re.search(r'import \{[^}]*\bLOGIN_NEL\b[^}]*\} from "\.\./art/loginArt\.js"', hook)
     # It must still END by hiding the element: a broken-image icon is the one
     # thing worse than no mascot at all.
-    assert 'img.style.display = "none"' in src
+    assert 'img.style.display = "none"' in hook
 
 
 # ---- Banner write-through (2026-08-06, owner: "Yes, seems obvious") -------------------

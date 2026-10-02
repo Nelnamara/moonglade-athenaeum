@@ -15,14 +15,23 @@ import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import PublishOverlay from "./components/PublishOverlay.jsx";
 import TrainOverlay from "./components/TrainOverlay.jsx";
+import { trainOwnsEscape } from "./components/train/useTraining.js";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
+import CollectionsManager from "./components/CollectionsManager.jsx";
+import CollectionOrderEditor from "./components/CollectionOrderEditor.jsx";
+import { planShotsSend } from "./curation/loomSend.js";
+import CurationBar from "./components/CurationBar.jsx";
+import CurateToast from "./components/CurateToast.jsx";
+import SmartStrip from "./components/SmartStrip.jsx";
 import FolioOverlay from "./components/FolioOverlay.jsx";
 import AiToolsModal from "./components/AiToolsModal.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
+import RecipesHost from "./recipes/RecipesHost.jsx";
+import { isRecipesOpen, openRecipes } from "./recipes/recipesStore.js";
 import ClaimModal from "./components/ClaimModal.jsx";
 import useClaimModal from "./hooks/useClaimModal.js";
 import { CommandPalette, ShortcutSheet, GPendingChip } from "./components/CommandPalette.jsx";
@@ -30,13 +39,20 @@ import useCommandPalette from "./hooks/useCommandPalette.js";
 import { shortId } from "./palette/paletteCore.js";
 import "./styles/shell.css";
 import {
-  fetchAccount, fetchCollections,
+  fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections,
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
+import useCurate from "./hooks/useCurate.js";
+import { flashRating } from "./curation/flash.js";
+import {
+  addedSummary, checkTag, composeSmartQuery, isTypingTarget, pickHotkeyTargets, ratingFromKey,
+} from "./curation/curationCore.js";
 import { isMomentUp } from "./moments/momentStore.js";
 import { installStarfallTrigger } from "./moments/starfallTrigger.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "./notify/panelRequest.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
+import { ADV_DEFAULTS } from "./hooks/useLibrary.js";
+import { storageFilterPatch } from "./curation/storageCore.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
@@ -44,6 +60,12 @@ import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
+import { registerFolioOpener } from "./notify/ach.js";
+import { readFolioHash, setFolioRow } from "./folio/folioFocus.js";
+import GuideHost from "./help/GuideHost.jsx";
+import { openHelp, OPEN_SURFACE_EVENT, isHelpUp, isAboutUp, isWhatsNewUp } from "./help/helpStore.js";
+import { useGuideIndex } from "./help/helpData.js";
+import { githubSlug } from "./help/helpCore.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -149,6 +171,21 @@ export default function App({ boot }) {
   const refreshAccount = () => fetchAccount().then(setAccount);
   const claimModal = useClaimModal(account, refreshAccount);
   const [collections, setCollections] = useState(boot.collections || []);
+  /* SMART COLLECTIONS (Session N1): saved searches, listed beside the hand-picked ones.
+     `collections` stays the HAND-PICKED names (the import, contest and "Add to" flows all
+     mean exactly that); a smart collection is browsed, never added to. */
+  const [smart, setSmart] = useState(boot.smart_collections || []);
+  const isSmartShelf = !!shelf && smart.some((c) => c.name === shelf);
+  const smartOpen = isSmartShelf ? smart.find((c) => c.name === shelf) : null;
+  // the name of the smart collection whose query is being edited in the search field, or ""
+  const [editingSmart, setEditingSmart] = useState("");
+  const refreshCollections = useCallback(async () => {
+    const rows = await fetchCollectionDetail();
+    if (!rows) return null;
+    setCollections(rows.filter((c) => c.kind === "hand").map((c) => c.name));
+    setSmart(rows.filter((c) => c.kind === "smart").map((c) => ({ name: c.name, query: c.query })));
+    return rows;
+  }, []);
   // ui -- blur shares the classic gallery's localStorage key on purpose: one
   // setting, both surfaces, exactly the classic semantics (all thumbs 16px,
   // flagged 28px, hover reveals). The key moved into lib/privacyBlur.js on
@@ -256,6 +293,9 @@ export default function App({ boot }) {
      registration and one flag, rather than a prop chain from the body-level banner down
      into the overlay's own state. */
   useEffect(() => registerUpdateHost(() => setOverlay("panel")), []);
+  /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. The feat to
+     scroll to is left for the Folio itself (folio/folioFocus.js). */
+  useEffect(() => registerFolioOpener(() => setOverlay("folio")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection
@@ -283,7 +323,9 @@ export default function App({ boot }) {
       if (isMomentUp()) return;                     // a clip moment ends FIRST (momentStore)
       if (overlayRef.current === "panel") return;   // panel runs its own ladder
       if (isPickerOpen()) return;                   // picker dismisses itself
+      if (isRecipesOpen()) return;                  // the recipes overlay runs its own ladder
       if (paletteUpRef.current) return;             // the palette/cheat-sheet close FIRST
+      if (overlayRef.current === "train" && trainOwnsEscape()) return;   // focus view -> grid
       e.stopPropagation();
       setOverlay(null);
     };
@@ -314,6 +356,18 @@ export default function App({ boot }) {
     setDockOpen(true);
     setDockClosing(false);
   }, []);
+  /* THE FOLIO'S "→" (Session O, O1): each honor with a count points at the surface that advances
+     it -- Generate, The Loom, Contests or Publish. The Folio names the target (folio/
+     completionistCore.js JUMPS); this shell knows how to get there. Generate closes the overlay
+     and opens the dock; the Loom is a page of its own; Contests and Publish are overlays that
+     replace the Folio (there is one overlay at a time). Nothing is written by the jump. */
+  const jumpFromFolio = useCallback((to) => {
+    if (to === "loom") { window.location.href = "/loom"; return; }
+    if (to === "contests") { setOverlay("contests"); return; }
+    if (to === "publish") { setPublishFor(""); setOverlay("publish"); return; }
+    setOverlay(null);
+    openDock();
+  }, [openDock]);
   const toggleDock = useCallback(() => {
     const st = dockStateRef.current;
     if (st.open && !st.closing) closeDock();
@@ -331,8 +385,13 @@ export default function App({ boot }) {
       const st = dockStateRef.current;
       if (!st.open || st.closing) return;
       if (isMomentUp()) return;                     // a click on a moment ends the moment only
-      if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
+      // ...nor a click inside a layer that stands OVER the dock without replacing it: the
+      // guide's cards, Help, About and the what's-new sheet (Session I) mark themselves
+      // [data-keeps-dock], so answering the dock's own welcome card, or reading its page
+      // of the guide, does not shut the dock out from under it.
+      if (ev.target.closest && ev.target.closest("[data-dock-toggle], [data-keeps-dock]")) return;
       if (isPickerOpen()) return;
+      if (isRecipesOpen()) return;                  // the recipe picker adds TO the dock
       const host = dockHostRef.current;
       if (host && !host.contains(ev.target)) closeDock();
     };
@@ -347,12 +406,21 @@ export default function App({ boot }) {
      contract -- the drawer now skips the i2v prefill for a midless request,
      so the deep link lands on the Video tab with clean slots
      in the shared video component — the GenerateDock retab owns fixing that. */
+  /* ...and "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it
+     crosses here with the request in the address (folio/folioFocus.js). Opened once, then the
+     same single strip below takes the hash off. */
   useEffect(() => {
     const hash = (window.location.hash || "").replace("#", "");
-    if (hash !== "image" && hash !== "edit" && hash !== "video") return;
-    openDock();
-    if (hash === "edit") setGenRequest({ tab: "edit", mid: "", nonce: Math.random() });
-    else if (hash === "video") setGenRequest({ tab: "video", mid: "", nonce: Math.random() });
+    const fh = readFolioHash(window.location.hash);
+    if (!fh && hash !== "image" && hash !== "edit" && hash !== "video") return;
+    if (fh) {
+      setFolioRow(fh.row);
+      setOverlay("folio");
+    } else {
+      openDock();
+      if (hash === "edit") setGenRequest({ tab: "edit", mid: "", nonce: Math.random() });
+      else if (hash === "video") setGenRequest({ tab: "video", mid: "", nonce: Math.random() });
+    }
     try {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     } catch { /* hash simply stays; harmless */ }
@@ -748,6 +816,15 @@ export default function App({ boot }) {
       setSelected(new Set()); // selection is consumed into the Loom cast
       window.location.href = "/loom?cast=" + encodeURIComponent(keep.join(","));
     },
+    // Session P (P5): "as shots, in order" -- the selection in the order of the collection in
+    // view (a hand-picked one's manual order; a smart one's matches, oldest first), else oldest
+    // first; videos left out; past the cap, refused with the cap named. Navigation only.
+    sendShots: async () => {
+      const r = await planShotsSend({ ids: selIds, collection: shelf || "" });
+      if (!r.ok) { if (window.Toast) window.Toast.show({ kind: "err", title: "Not sent to The Loom", msg: r.error }); else window.alert(r.error); return; }
+      setSelected(new Set());
+      window.location.href = r.href;
+    },
     // Native React overlay + native print (window.print(), scoped by @media
     // print) -- NOT a hand-off to the classic /contact-sheet page. That route
     // stays for classic's own use only; the new front door never opens it.
@@ -822,6 +899,104 @@ export default function App({ boot }) {
     afterMutation();
   };
 
+  /* ======================= CURATION (Session N, wave 5) =============================
+     Handoff: Curation Handoff.dc.html (moonglade-internal/design/handoff-2026-09-04), notes
+     in design/notes/curation/NOTES.md. Everything here is the LOCAL catalog: smart
+     collections are saved searches, the mark / tags / note never leave it, and nothing on this
+     surface reaches PixAI.
+
+     useCurate owns the server answers -- the honest count and the per-picture Undo -- and the
+     toast; the verbs below are what the bulk bar, the rating keys, the palette and the
+     collections manager call. ---------------------------------------------------------- */
+  const curate = useCurate({ csrf: boot.csrf || "", setItems });
+
+  const openCollectionsManager = useCallback(() => setOverlay("collections"), []);
+  /* Session P (P6): the manual-order editor for one hand-picked collection -- opened from the
+     manager's row slot ("Order") and from the collection view's Manual sort. It rides the
+     manager's layer, drawn after it. Saving a new order reloads the view when it is showing
+     that collection in its manual order. */
+  const [orderFor, setOrderFor] = useState("");
+  const closeOrder = useCallback(() => {
+    setOrderFor("");
+    invalidate(["/api/next/library"]);
+    if (shelf && lib.adv && lib.adv.sort === "manual") load(1, true);
+  }, [shelf, lib.adv, load]);
+  const orderSlot = useCallback((c) => (
+    <button type="button" className="mgco-slotbtn" title={"Put “" + c.name + "” in your own order"}
+      onClick={() => setOrderFor(c.name)}>{"⇅ Order"}</button>
+  ), []);
+  /* The manager tells the shell what moved. The open collection follows its own rename, falls
+     back to the target when it was merged away, and goes back to the whole library when it was
+     deleted; a merge INTO the open collection reloads it so the newcomers show. */
+  const onCollectionsChanged = useCallback(async (chg) => {
+    await refreshCollections();
+    invalidate(["/api/next/library"]);
+    if (chg.renamed && shelf === chg.renamed.from) applyAdvanced({ shelf: chg.renamed.to });
+    else if (chg.merged && chg.merged.others.indexOf(shelf) >= 0) applyAdvanced({ shelf: chg.merged.target });
+    else if (chg.merged && chg.merged.target === shelf) load(1, true);
+    else if (chg.deleted && shelf === chg.deleted) applyAdvanced({ shelf: "" });
+  }, [refreshCollections, shelf, applyAdvanced, load]);
+
+  /* N1: "Save as smart collection" stores the search in the field as a query and opens the
+     new collection. Nothing is stored about which pictures match. */
+  const say = curate.say;
+  const saveSmart = useCallback(async (query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query });
+    if (d.error) { say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    applyAdvanced({ shelf: d.name, q: "" });
+    say("Saved \u201c" + d.name + "\u201d \u27f3. It updates as you make and mark pictures.");
+  }, [boot.csrf, say, refreshCollections, applyAdvanced]);
+  const saveSmartOver = useCallback(async (name, query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query, replace: name });
+    if (d.error) { say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    applyAdvanced({ shelf: d.name, q: "" });
+    say("Updated \u201c" + d.name + "\u201d \u27f3 with the new search.");
+  }, [boot.csrf, say, refreshCollections, applyAdvanced]);
+  // opening a smart collection IS running its query; this runs it again
+  const refreshSmart = useCallback(() => {
+    invalidate(["/api/next/library"]);
+    userLoad(1, true);
+    refreshCollections();
+  }, [userLoad, refreshCollections]);
+  useEffect(() => { if (shelf && editingSmart) setEditingSmart(""); }, [shelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* WHAT "SAVE" SAVES: the whole view as a search -- the field's text plus every chip and
+     flyout filter that has an operator (curationCore.composeSmartQuery) -- so a smart
+     collection matches what was on screen, not just what was typed. `applied` is what the grid
+     is showing (the draft strip); `query` is what is typed now (the edit strip). A smart
+     collection open as the shelf is its own query, so it contributes no collection: term. */
+  const composeView = (text) => composeSmartQuery({
+    q: text, media, shelf: isSmartShelf ? "" : shelf, adv,
+  });
+  const draftQuery = composeView(applied);
+
+  /* N5/N4: rate any set of pictures. A flash confirms on each target; more than one gets the
+     honest-count toast with Undo, one is quiet. */
+  const rateTargets = useCallback((ids, n, openId) => {
+    flashRating(ids, n, openId);
+    return curate.apply(ids, { rating: n }, ids.length > 1);
+  }, [curate.apply]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const bulk = {
+    star: (n) => rateTargets(selIds, n, null),
+    tag: (raw) => {
+      const chk = checkTag(raw, []);
+      if (!chk.ok) { say(chk.error, null, "peach"); return; }
+      curate.apply(selIds, { add_tag: chk.tag }, true);
+    },
+    keeper: () => curate.apply(selIds, { mark: "keeper" }, true),
+    reject: () => curate.apply(selIds, { mark: "reject" }, true),
+    addTo: async (name) => {
+      const d = await apiPost("/api/collection", { action: "add", collection: name, media_ids: selIds });
+      if (d.error) { say(d.error, null, "peach"); return; }
+      invalidate(["/api/next/library"]);
+      say(addedSummary(d.count || 0, name, selIds.length));
+    },
+  };
+
   const rate = useCallback(async (mid, value) => {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
@@ -856,6 +1031,17 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "remix", mid, nonce: Math.random() });
   };
+  /* "Edit with Tsubaki" (Session H decision 2): the Image tab on Tsubaki.3 with this picture in
+     context slot 1 and the prompt seeded "Use @image1 …". The same one-shot genRequest shape
+     as Edit / Video / Remix; the picture's size rides along for the dock's Auto frame. Prefill
+     only -- the owner presses Generate. */
+  const requestTsubaki = (mid) => {
+    const it = items.find((x) => x.media_id === mid) || {};
+    setLbIndex(null);
+    openDock();
+    setGenRequest({ tab: "tsubaki", mid, thumb: it.thumb || "/thumbs/" + mid + ".jpg",
+      w: Number(it.w) || 0, h: Number(it.h) || 0, nonce: Math.random() });
+  };
   /* "↻ Again — new seed" (the palette's R / its On-this-image row). Owner ruling,
      2026-08-31: SEND TO REMIX, NO INSTANT SPEND. This is the SAME shipped Remix path
      above -- the picture's full recipe prefilled into the composer -- with one field
@@ -876,6 +1062,14 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "scene", scene, nonce: Math.random() });
   };
+  /* Train a LoRA's "Use" (Training Handoff 5c): a trained LoRA into the dock -- close the
+     overlay, open the dock on the Image tab and add the LoRA there, the same one-shot genRequest
+     shape. Adding a LoRA is a pick, never a submit. */
+  const requestLora = (lora) => {
+    setOverlay(null);
+    openDock();
+    setGenRequest({ tab: "lora", lora, nonce: Math.random() });
+  };
 
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
   const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
@@ -886,6 +1080,7 @@ export default function App({ boot }) {
     onEdit: requestEdit,
     onVideo: requestVideo,
     onRemix: requestRemix,
+    onTsubaki: requestTsubaki,
     // B2: the right-click row is a ◈ door like the other three, so it calls the SAME
     // verb rather than setting the state itself -- it used to be the one entry point
     // that skipped showSimilar's "close whatever is open first" step.
@@ -1138,7 +1333,7 @@ export default function App({ boot }) {
     if (!similarFor) return undefined;
     const onKey = (e) => {
       if (e.key !== "Escape") return;
-      if (overlayRef.current || paletteUpRef.current || isPickerOpen()) return;
+      if (overlayRef.current || paletteUpRef.current || isPickerOpen() || isRecipesOpen()) return;
       e.stopPropagation();
       setSimilarFor(null);
     };
@@ -1215,6 +1410,25 @@ export default function App({ boot }) {
     setFocusSearchAt((n) => n + 1);
   }, [goLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* "Show me ›" (the what's-new sheet, Session I 3c): open a surface this shell owns, with
+     the same verbs its own buttons use. The Loom is a page of its own -- not claimed here,
+     so helpStore navigates there. */
+  useEffect(() => {
+    const onSurface = (e) => {
+      const s = e.detail && e.detail.surface;
+      if (s === "gallery") { e.preventDefault(); goLibrary(); }
+      else if (s === "dock") { e.preventDefault(); goLibrary(); openDock(); }
+      else if (s === "folio" || s === "panel") { e.preventDefault(); setOverlay(s); }
+    };
+    window.addEventListener(OPEN_SURFACE_EVENT, onSurface);
+    return () => window.removeEventListener(OPEN_SURFACE_EVENT, onSurface);
+  }, [goLibrary, openDock]);
+
+  /* The guide's page list, for the palette's Help group (Session I: "the palette's Help
+     group lists the same hits" as Help's own search -- the same titles and headings, the
+     same subsequence matcher). */
+  const guideIndex = useGuideIndex();
+
   /* "Sync now" -- the Control Panel's own ↻ Sync now button, same route, same body
      (useControlPanel.runAction's sync case). Ruling, NOTES §2.2: while a job is already
      running the row STAYS and the refusal shows as the busy toast, in the server's own
@@ -1281,6 +1495,18 @@ export default function App({ boot }) {
         keys: [],
       });
     }
+    // Smart collections (N1) open the same way, marked as saved searches.
+    for (const c of smart) {
+      list.push({
+        id: "collection:" + c.name,
+        group: "Go to",
+        icon: <Icon name="collection" />,
+        label: "Collection: " + c.name,
+        sub: "smart \u27f3",
+        run: () => { goLibrary(); applyAdvanced({ shelf: c.name }); },
+        keys: [],
+      });
+    }
 
     // The layout picker's own modes and its own exact glyphs, active one marked with the
     // emerald ✓. §8.2's ruling is "the layout picker's exact glyphs", so these follow the
@@ -1316,6 +1542,36 @@ export default function App({ boot }) {
       keys: ["/"], hotkey: "/", run: jumpToSearch,
     });
     list.push({ id: "do.sync", group: "Do", icon: "⟳", label: "Sync now", keys: [], run: syncNow });
+    // N2: the collections manager.
+    list.push({
+      id: "do.collections", group: "Do", icon: <Icon name="collection" />, label: "Manage collections",
+      keys: [], run: () => openOverlay("collections"),
+    });
+    // N5: "Rate 1-5". The row is the hotkeys' own listing (the keys are global and work with
+    // the palette shut); typing "rate" also offers each rating as a row, aimed at the
+    // selection, else the picture in focus -- absent while there is nothing to rate.
+    list.push({
+      id: "do.rate", group: "Do", icon: "\u2605", label: "Rate 1\u20135", sub: "0 clears",
+      keys: ["1\u20135"],
+      run: () => curate.say("Press 1\u20135 to rate the selection, the open picture or the one under the pointer. 0 clears."),
+    });
+    const rateIds = selected.size ? Array.from(selected) : focusItem ? [focusItem.media_id] : [];
+    if (rateIds.length) {
+      for (let n = 0; n <= 5; n++) {
+        list.push({
+          id: "do.rate." + n, group: "Do", icon: "\u2605",
+          label: n ? "Rate \u2605" + n : "Clear rating",
+          sub: rateIds.length > 1 ? rateIds.length + " pictures" : "",
+          keys: [], queryOnly: true,
+          run: () => rateTargets(rateIds, n, focusItem ? focusItem.media_id : null),
+        });
+      }
+    }
+    // K decision 1: the palette's "Browse recipes" opens the recipe picker at market size.
+    list.push({
+      id: "do.recipes", group: "Do", icon: "⁂", label: "Browse recipes", sub: "the recipe market",
+      keys: [], run: () => openRecipes({ view: "picker", size: "market" }),
+    });
     // Claimable credits: present ONLY while there are some, running the exact claim the
     // header pill runs (useClaimModal.claim -- POST /api/claim, then the account refetch
     // that drops claim_credits to 0 and takes this row away again).
@@ -1344,24 +1600,79 @@ export default function App({ boot }) {
       // mirrors the buttons, so it wears the buttons' mark.
       img("similar", "◈", "Find similar", () => showSimilar(mid));
       img("edit", "✎", "Edit", () => ctxActions.onEdit(mid));
+      if (!focusItem.is_video) img("tsubaki", "✦", "Edit with Tsubaki", () => requestTsubaki(mid));
       img("details", "ⓘ", "Open details", () => ctxActions.onDetails(mid));
       img("copyid", "⎘", "Copy id", () => ctxActions.onCopyId(mid), { sub: shortId(mid) });
       img("publish", "☁", "Publish", () => openPublish(mid));
     }
 
+    /* Help (Session I decision 2): the guide itself on the ? key, the cheat-sheet a row
+       away, and -- only against a typed query (queryOnly) -- every page and heading of the
+       guide, which is exactly the set Help's own search covers. */
     list.push({
-      id: "help.keys", group: "Help", icon: "?", label: "Show keyboard shortcuts",
-      keys: ["?"], run: () => paletteRef.current && paletteRef.current.openSheet(),
+      id: "help.guide", group: "Help", icon: "?", label: "Open the guide",
+      sub: "Help", keys: ["?"], run: () => openHelp(),
     });
+    list.push({
+      id: "help.keys", group: "Help", icon: "⌨", label: "Show keyboard shortcuts",
+      keys: [], run: () => paletteRef.current && paletteRef.current.openSheet(),
+    });
+    for (const p of (guideIndex && guideIndex.pages) || []) {
+      list.push({
+        id: "help.page:" + p.slug, group: "Help", icon: "?", label: p.title, sub: "Guide",
+        keys: [], queryOnly: true, run: () => openHelp({ slug: p.slug }),
+      });
+      for (const h of p.headings || []) {
+        const anchor = githubSlug(h.text);
+        list.push({
+          id: "help.h:" + p.slug + "#" + anchor, group: "Help", icon: "?", label: h.text,
+          sub: p.title, keys: [], queryOnly: true,
+          run: () => openHelp({ slug: p.slug, anchor }),
+        });
+      }
+    }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collections, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
-      openDock, openOverlay, applyAdvanced, openPublish]);
+  }, [collections, smart, selected, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
+      openDock, openOverlay, applyAdvanced, openPublish, guideIndex, rateTargets, curate.say]);
 
   const palette = useCommandPalette(commands);
   paletteRef.current = palette;
   // The Escape ladder guard App's own overlay closer reads (see that listener above).
   useEffect(() => { paletteUpRef.current = palette.open || palette.sheetOpen; });
+
+  /* RATING HOTKEYS (Session N5). 1-5 rate and 0 clears. The target is the selection if there
+     is one, otherwise the open Lightbox picture, otherwise the open record, otherwise the
+     picture under the pointer; the keys are ignored while typing in a field and while any
+     layer that owns the keyboard is up (an overlay, the palette, a menu, the guide). A gold
+     flash confirms on each target, static under reduced motion. Several targets share the
+     undo toast, one target stays quiet. The hover is read off the DOM's own :hover rather than
+     tracked in state, because the grid is memoized and takes no per-pointer props. */
+  const hotRef = useRef({});
+  hotRef.current = {
+    selIds,
+    lbId: lbIndex != null && items[lbIndex] ? items[lbIndex].media_id : null,
+    detailsFor,
+    blocked: !!(overlay || ctxMenu || stackFor || claimModal.open || palette.active || palette.sheetActive),
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      const n = ratingFromKey(e);
+      if (n == null || e.defaultPrevented || e.repeat) return;
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+      const st = hotRef.current;
+      if (st.blocked || isPickerOpen() || isRecipesOpen() || isMomentUp()
+          || isHelpUp() || isAboutUp() || isWhatsNewUp()) return;
+      const hoverEl = document.querySelector(".mgg-card:hover");
+      const hoverId = hoverEl && !hoverEl.classList.contains("mgg-stack") ? hoverEl.getAttribute("data-id") : null;
+      const t = pickHotkeyTargets({ selected: st.selIds, lightboxId: st.lbId, detailsId: st.detailsFor, hoverId });
+      if (!t.ids.length) return;
+      e.preventDefault();
+      rateTargets(t.ids, n, st.lbId || st.detailsFor || null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rateTargets]);
 
   /* Grid arrow-key navigation (#31, Refit #7) only while the grid is the top
      layer: no lightbox, no Details, no nav overlay, no dock, no context menu, no
@@ -1419,7 +1730,16 @@ export default function App({ boot }) {
               lib={lib}
               boot={boot}
               actions={actions}
-              collections={collections}
+              curation={{
+                names: collections.map((name) => ({ name, kind: "hand" }))
+                  .concat(smart.map((c) => ({ name: c.name, kind: "smart", query: c.query })))
+                  .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+                smartShelf: isSmartShelf,
+                onManage: openCollectionsManager,
+                onClear: () => setEditingSmart(""),
+                // Session P (P6): the Manual sort's editor (hand-picked collections only)
+                onEditOrder: (name) => setOrderFor(name),
+              }}
               group={group} setGroup={setGroup}
               layout={layout} setLayout={setLayout}
               similar={similarToken} onClearSimilar={() => setSimilarFor(null)}
@@ -1450,7 +1770,8 @@ export default function App({ boot }) {
           createPortal(
             <DetailsView
               mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-              onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
+              onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
+              onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
               /* Same policy as the completion handler: deleting the picture you were
                  reading is not a reason to be thrown back to the top of the library, so
                  the CURRENT page reloads in place. The one case that has to move is the
@@ -1501,6 +1822,25 @@ export default function App({ boot }) {
             onClear={() => setSimilarFor(null)}
           />
         ) : (
+          <>
+          {/* N1: a smart collection is open (or its query is being edited) */}
+          {(smartOpen || editingSmart || draftQuery) ? (
+            <SmartStrip
+              name={smartOpen ? smartOpen.name : ""} query={smartOpen ? smartOpen.query : ""}
+              editing={editingSmart} draft={draftQuery} canSave={!!composeView(query)}
+              onSaveDraft={() => saveSmart(draftQuery)}
+              onRefresh={refreshSmart}
+              onEdit={() => { setEditingSmart(smartOpen.name); applyAdvanced({ shelf: "", q: smartOpen.query }); }}
+              onSaveOver={() => saveSmartOver(editingSmart, composeView(query))}
+              onSaveNew={() => saveSmart(composeView(query))}
+              onCancel={() => { const back = editingSmart; setEditingSmart(""); applyAdvanced({ shelf: back, q: "" }); }} />
+          ) : null}
+          {/* N4: the bulk bar, while anything is ticked */}
+          {selected.size > 0 ? (
+            <CurationBar count={selected.size} handCollections={collections}
+              onStar={bulk.star} onTag={bulk.tag} onKeeper={bulk.keeper} onReject={bulk.reject}
+              onAddTo={bulk.addTo} onClear={() => setSelected(new Set())} />
+          ) : null}
           <Grid
             items={items} total={total} loading={loading}
             page={page} pages={pages}
@@ -1519,6 +1859,7 @@ export default function App({ boot }) {
             onOpenSeries={openSeries}
             onOpenBatch={openBatch}
           />
+          </>
         )}
       </main>
 
@@ -1554,6 +1895,7 @@ export default function App({ boot }) {
           onOpenDetails={openDetails}
           onPublish={openPublish}
           onSimilar={showSimilar}
+          member={account ? account.is_member : null}
         />
       )}
 
@@ -1563,8 +1905,9 @@ export default function App({ boot }) {
           pipelines); Import is still `soon`-dimmed in NavSpine until its own
           backend route exists (My
           Art and Contests already had real, working routes sitting unused --
-          see docs/DECISIONS.md 2026-08-02). Scrim z 300, slab 301 (band per
-          drift §3); Esc-first is handled by the capture listener above. The
+          see docs/DECISIONS.md 2026-08-02). Scrim z 410, slab 411 (the overlay
+          band, drift §3; the ladder is overlays.css's); Esc-first is handled by the
+          capture listener above. The
           model/tag/LoRA click-throughs close the overlay and apply the filter
           through the same applyAdvanced path every filter control uses. */}
       {overlay === "health" && (
@@ -1574,6 +1917,9 @@ export default function App({ boot }) {
           onTagFilter={(t) => { setOverlay(null); applyAdvanced({ tag: t }); }}
           onLoraFilter={(l) => { setOverlay(null); applyAdvanced({ lora: l }); }}
           onOpenDuplicates={() => setOverlay("duprev")}
+          /* N6: a Storage segment closes Health and opens the library filtered to it; the whole
+             filter set starts over, because the bars measure the whole library */
+          onStoragePick={(f) => { setOverlay(null); applyAdvanced({ ...ADV_DEFAULTS, ...storageFilterPatch(f) }); }}
         />
       )}
       {overlay === "duprev" && (
@@ -1598,7 +1944,7 @@ export default function App({ boot }) {
           onOpenPublish={() => { setPublishFor(""); setOverlay("publish"); }} />
       )}
       {overlay === "train" && (
-        <TrainOverlay onClose={() => setOverlay(null)} />
+        <TrainOverlay onClose={() => setOverlay(null)} onUseLora={requestLora} />
       )}
       {overlay === "publish" && (
         <PublishOverlay
@@ -1626,8 +1972,15 @@ export default function App({ boot }) {
         />
       )}
       {overlay === "folio" && (
-        <FolioOverlay onClose={() => setOverlay(null)} />
+        <FolioOverlay onClose={() => setOverlay(null)} onJump={jumpFromFolio} />
       )}
+      {overlay === "collections" && (
+        <CollectionsManager csrf={boot.csrf || ""} onClose={() => setOverlay(null)}
+          onChanged={onCollectionsChanged} renderRowSlot={orderSlot} />
+      )}
+      {orderFor ? (
+        <CollectionOrderEditor key={orderFor} name={orderFor} csrf={boot.csrf || ""} onClose={closeOrder} />
+      ) : null}
       {overlay === "aitools" && (
         <AiToolsModal open onClose={() => setOverlay(null)} onPick={requestScene} />
       )}
@@ -1644,6 +1997,7 @@ export default function App({ boot }) {
           request={genRequest} />
       </div>
       <PickerHost />
+      <RecipesHost />
       {claimModal.open && (
         <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
           claiming={claimModal.claiming} error={claimModal.error}
@@ -1654,6 +2008,19 @@ export default function App({ boot }) {
           cheat-sheet's own scrim 470/471, the G… chip 462 — see command-palette.css and
           the ladder comment in overlays.css). Each surface is its own deferred-exit
           mount, exactly like the dock host and the toasts. */}
+      {/* The first-run guide (Session I decision 1): the library's while nothing is over it,
+          the dock's while the dock is the top thing. The Folio and the Control Panel mount
+          their own. A palette, a cheat-sheet or the claim modal holds either one. */}
+      {!overlay && !detailsFor && lbIndex == null && !stackFor && !similarFor && !ctxMenu && !dockActive && (
+        <GuideHost surface="gallery"
+          paused={palette.active || palette.sheetActive || claimModal.open} />
+      )}
+      {dockActive && !overlay && (
+        <GuideHost surface="dock"
+          paused={palette.active || palette.sheetActive || claimModal.open || isPickerOpen()} />
+      )}
+
+      <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
       <CommandPalette palette={palette} />
       <ShortcutSheet open={palette.sheetOpen} closing={palette.sheetClosing}
         onClose={palette.closeSheet} />

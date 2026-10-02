@@ -154,6 +154,21 @@ export const AUDIO_LANGS = [
   ["none", "SE only (no dialogue)"],
 ];
 
+// The output aspect ratio (reference 36, PixAI's Tsubaki Video Multi-Reference popover on the
+// prompt bar; lane w2-small 2026-09-28). Mirrors moonglade_backup.VIDEO_RATIOS and
+// VIDEO_RATIO_MODELS: the Tsubaki pair, Multi-Reference only, PixAI's own set and order.
+// "adaptive" is Auto -- PixAI infers the frame from the references, and nothing is sent.
+export const VIDEO_RATIOS = ["adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"];
+export const RATIO_MODELS = { "tbkv1.0": true, "tbkv1.0.1": true };
+export const ratioLabel = (r) => (r === "adaptive" || !r ? "Auto" : r);
+// Offered only where the server can send it: a Tsubaki engine in Multi-Reference.
+export function ratioOffered(s) { return !!(s && s.mode === "r2v" && RATIO_MODELS[s.model]); }
+// What the payload carries: the pick, when it is offered and not Auto; else "" (key absent).
+export function ratioForPayload(s) {
+  const r = s && s.ratio;
+  return ratioOffered(s) && r && r !== "adaptive" && VIDEO_RATIOS.indexOf(r) >= 0 ? r : "";
+}
+
 // Matches the server's VIDEO_DURATIONS / _snap_video_duration -- prefill() snaps to the nearest
 // so an out-of-range shot duration (a hand-typed "8") never lands the <select> on a value with
 // no matching <option>, which resolves to "" and silently submits duration:0.
@@ -326,6 +341,9 @@ export function applySetRefs(s, refs) {
 export function applyPrefill(s, o) {
   o = o || {};
   s.modeNote = "";
+  // A prefill is a NEW shot: its ratio is the one it names, else Auto -- the previous shot's
+  // pick never rides into it (spend review N7).
+  s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : "adaptive";
   if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
   if (o.video_model != null) s.model = o.video_model;
   if (o.duration != null) s.duration = snapDuration(o.duration);
@@ -363,6 +381,7 @@ export function buildPayload(s, promptText) {
     ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos"))
     : [];
   const audio_refs = (s.mode === "r2v" && s.audSlot && s.audSlot.media_id) ? [s.audSlot.media_id] : [];
+  const ratio = ratioForPayload(s);
   return {
     mode: s.mode.toUpperCase(),
     prompt: promptText || "",
@@ -382,6 +401,9 @@ export function buildPayload(s, promptText) {
     // verified referenceVideo shape has no such field), and so lives in priceKey like every
     // other submitted field.
     prompt_helper: !!s.videoHelper,
+    // The Tsubaki Multi-Reference aspect ratio -> referenceVideo.ratio. Only when offered and
+    // not Auto; ABSENT otherwise, so every other video payload is byte-identical to before.
+    ...(ratio ? { ratio } : {}),
   };
 }
 
@@ -402,6 +424,21 @@ export {
 // the cost badge (pricing what Go would refuse is the split that let a disabled control charge).
 export function flfMissingStart(s) {
   return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
+}
+
+/* WHICH RESULT LINES THE DRAWER DRAWS. In the gallery's Generate dock only its refusals and
+   submit-time errors (the RUNS reel and History carry the rest); in mobile's Video mode every
+   line. In the Loom (`loom`) the drawer is one panel shared by every shot, so a line belongs to
+   the shot it was pushed for (`line.shot`, stamped at the click) and only the BOUND shot's lines
+   are drawn (`shot`: the drawer's current target, "" for none). Owner walk 2026-09-30: with E·02
+   bound, the panel still showed "✓ Rendered — 70,000 credits" and E·01's picture, and E·02's
+   own "Rendering…" line went in underneath it. Lines are never dropped -- binding E·01 again
+   shows its lines again. */
+export function linesShown(results, { dock, loom, shot } = {}) {
+  const rs = Array.isArray(results) ? results : [];
+  if (dock) return rs.filter((l) => l && l.kind === "error");
+  if (loom) return rs.filter((l) => l && (l.shot || "") === (shot || ""));
+  return rs;
 }
 
 /* LOCAL PORT of loom/src/loom-mutations.js's friendlyGenErr(raw) -- same regex patterns, same

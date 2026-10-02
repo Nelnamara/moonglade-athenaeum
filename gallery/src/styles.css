@@ -57,10 +57,11 @@ button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Z-LADDER (one place, so nothing guesses): header 100 · drawer scrim 300 ·
-   model flyout 305 · drawer 310 · lightbox + picker 400. Anything that must sit
-   OVER the sticky header has to clear 100 -- the drawer sat at 90 and the header
-   ate its top half. notify.css owns 234/235 (tray) and 510/520 (celebrations). */
+/* Z: THREE BANDS, ONE LADDER (drift §3, normalized 2026-09-28). components 0-7 ·
+   overlays/modals 300-500 · ambient/celebration 510-520, nothing between. The ladder
+   lives in ONE place, styles/overlays.css's THE OVERLAY LADDER, so nothing guesses
+   (the note that stood here named a header at 100 and a tray at 234/235 -- both long
+   gone: the header is the component band's 7, the tray is retired). */
 :root { --drawer-w: min(640px, 96vw); }   /* the drawer's one width */
 /* The classic collapsing banner (header.mg-head + .artband/.rail/.strip/.gt-stats
    and the .mk brand-mark treatment) was removed by the 2026-09-04 dead-code sweep.
@@ -97,7 +98,7 @@ button:disabled { cursor: default; }
    Its old trigger pill .adv/.adv.has was removed 2026-09-07: FiltersPanel.jsx:281
    renders the caret as .mgl-scaret (librarybar.css) now. .fly itself is still live,
    rendered by Flyout.jsx:96. ---- */
-.fly { position: absolute; left: 0; top: calc(100% + 8px); width: 440px; z-index: 60;
+.fly { position: absolute; left: 0; top: calc(100% + 8px); width: 440px; z-index: 318;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 12px; padding: 12px 13px 11px; text-align: left;
   box-shadow: 0 18px 44px rgba(0, 0, 0, .65), 0 0 30px -10px color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -148,7 +149,7 @@ button:disabled { cursor: default; }
    (.am-wrap/.am-menu/.am-item/.am-div, the classic Actions dropdown, went in the
    2026-09-04 dead-code sweep: ActionsMenu.jsx renders the shared .mgl-item menu.) */
 .card.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); }
-.cd-inner { max-width: min(760px, 92vw); max-height: 90vh; overflow-y: auto;
+.cd-inner { max-width: min(760px, 92vw); max-height: 90vh; max-height: 90dvh; overflow-y: auto;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--red) 50%, transparent);
   border-radius: 12px; padding: 14px 15px 12px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .8); }
@@ -238,7 +239,7 @@ button:disabled { cursor: default; }
    full-screen Darkroom -- Darkroom.jsx, styled in styles/dock.css as .mgdk-*.) */
 
 /* the model/LoRA browser panel, left of the drawer */
-.mfly { position: fixed; top: 0; right: var(--drawer-w); bottom: 0; z-index: 305;
+.mfly { position: fixed; top: 0; right: var(--drawer-w); bottom: 0; z-index: 335;
   width: min(560px, 80vw); display: none; flex-direction: column; gap: 8px;
   padding: 12px; overflow: hidden;
   background: var(--mantle); border-left: 1px solid var(--surface1);
@@ -312,17 +313,15 @@ button:disabled { cursor: default; }
 
 /* ---- .lb: the full-screen modal ground ----
    Still live, and now used only by ActionsMenu.jsx's cloud-delete dialog.
-   z-index 315, NOT the classic's 300: the drawer sits at 310 (its flyouts
-   305/306), and this must still cover an open drawer -- but <UpscalePanel>'s
-   flyout mode hardcodes z-index:320 internally (that number clears the CLASSIC
-   lightbox's 300; it does not know this ladder exists), so this stays the one
-   value that satisfies both: above 310, below 320.
+   z-index 340: it must cover an open dock (.mgdock, 7) and the dock's own flyouts
+   (the model flyout .mfly 335, the Darkroom .mgdk 336), and stay under the
+   standalone Upscale panel (420) and the rest of the overlay band above it.
 
    The classic lightbox CHROME that once sat inside it -- .lbinner, .lbstage,
    .lbnav/.lbprev/.lbnext, .lbbar, .lbcap, .lbacts/.lbact, .lbprompt -- went in
    the 2026-09-04 dead-code sweep: Lightbox.jsx renders .lbx-* (styles/lightbox.css)
    and nothing rendered an .lb* element besides .lb itself. */
-.lb { position: fixed; inset: 0; z-index: 315; display: grid; place-items: center;
+.lb { position: fixed; inset: 0; z-index: 340; display: grid; place-items: center;
   background: rgba(6, 4, 14, .88); backdrop-filter: blur(6px); }
 
 /* The similar-images MODAL's rules (.similar-scrim/.similar-modal/.pick-head/
@@ -342,11 +341,18 @@ button:disabled { cursor: default; }
    playReveal() (the reveal locked 2026-07-30, docs/DECISIONS.md "Direction C"); this
    sheet holds the rest state each animated piece starts from (opacity:0) and the look. */
 @keyframes dvFrame { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
-/* THE SHELL (DC:36): a fixed full-window takeover, 100vh, overflow hidden, a flex column
-   -- the DOCUMENT NEVER SCROLLS. z 40: above the page chrome, below the app's overlay
-   band (300+) so the Lightbox and the Upscale float still paint over it. Background is
-   the DC's literal radial -- the page behind is covered, so the takeover carries its own. */
-.detail-wrap { position: fixed; inset: 0; z-index: 40; height: 100vh; overflow: hidden;
+/* THE SHELL (DC:36): a fixed full-window takeover, overflow hidden, a flex column
+   -- the DOCUMENT NEVER SCROLLS. z 310: the overlay band's floor (drift §3), above the
+   page chrome (the header's 7, the dock's 7) and under every overlay that can open over
+   it -- the dock's tooltip and flyouts (330-336), the Lightbox (400), the Upscale float
+   (420) -- the same order it held at 40. Background is
+   the DC's literal radial -- the page behind is covered, so the takeover carries its own.
+   Its height is the VISIBLE viewport (100dvh), with 100vh only for a browser without dvh
+   (drift 122, owner device pass 2026-09-28): this is the details page a TABLET gets, and on
+   an iPad with Safari's toolbars up 100vh is taller than the screen they leave, so the
+   bottom of the record -- its last action row -- sat under the toolbar, past the end of
+   the scroll. */
+.detail-wrap { position: fixed; inset: 0; z-index: 310; height: 100vh; height: 100dvh; overflow: hidden;
   display: flex; flex-direction: column; padding: 0;
   background: radial-gradient(120% 80% at 22% -10%, #17123a 0%, #0a0818 52%, #05040d 100%);
   animation: dvFrame .34s cubic-bezier(.2, .9, .24, 1) both; }

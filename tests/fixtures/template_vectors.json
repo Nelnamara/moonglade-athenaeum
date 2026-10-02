@@ -1,0 +1,2623 @@
+{
+ "lists": {
+  "poses": [
+   "kneeling",
+   "looking back",
+   "arms raised",
+   "mid-stride",
+   "seated",
+   "leaning on staff",
+   "turning",
+   "crouched",
+   "reaching up",
+   "profile",
+   "hand on heart",
+   "over the shoulder"
+  ],
+  "lights": [
+   "moonlight",
+   "lantern glow",
+   "dawn haze"
+  ],
+  "empty": [
+   "  ",
+   ""
+  ],
+  "dupes": [
+   "a",
+   "a",
+   "b"
+  ],
+  "a__b": [
+   "x",
+   "y"
+  ],
+  "long": [
+   "i0",
+   "i1",
+   "i2",
+   "i3",
+   "i4",
+   "i5",
+   "i6",
+   "i7",
+   "i8",
+   "i9",
+   "i10",
+   "i11",
+   "i12",
+   "i13",
+   "i14",
+   "i15",
+   "i16",
+   "i17",
+   "i18",
+   "i19",
+   "i20",
+   "i21",
+   "i22",
+   "i23",
+   "i24",
+   "i25",
+   "i26",
+   "i27",
+   "i28",
+   "i29",
+   "i30",
+   "i31",
+   "i32",
+   "i33",
+   "i34",
+   "i35",
+   "i36",
+   "i37",
+   "i38",
+   "i39",
+   "i40",
+   "i41",
+   "i42",
+   "i43",
+   "i44",
+   "i45",
+   "i46",
+   "i47",
+   "i48",
+   "i49",
+   "i50",
+   "i51",
+   "i52",
+   "i53",
+   "i54",
+   "i55",
+   "i56",
+   "i57",
+   "i58",
+   "i59",
+   "i60",
+   "i61",
+   "i62",
+   "i63",
+   "i64",
+   "i65",
+   "i66",
+   "i67",
+   "i68",
+   "i69",
+   "i70",
+   "i71",
+   "i72",
+   "i73",
+   "i74",
+   "i75",
+   "i76",
+   "i77",
+   "i78",
+   "i79",
+   "i80",
+   "i81",
+   "i82",
+   "i83",
+   "i84",
+   "i85",
+   "i86",
+   "i87",
+   "i88",
+   "i89",
+   "i90",
+   "i91",
+   "i92",
+   "i93",
+   "i94",
+   "i95",
+   "i96",
+   "i97",
+   "i98",
+   "i99",
+   "i100",
+   "i101",
+   "i102",
+   "i103",
+   "i104",
+   "i105",
+   "i106",
+   "i107",
+   "i108",
+   "i109",
+   "i110",
+   "i111",
+   "i112",
+   "i113",
+   "i114",
+   "i115",
+   "i116",
+   "i117",
+   "i118",
+   "i119",
+   "i120",
+   "i121",
+   "i122",
+   "i123",
+   "i124",
+   "i125",
+   "i126",
+   "i127",
+   "i128",
+   "i129",
+   "i130",
+   "i131",
+   "i132",
+   "i133",
+   "i134",
+   "i135",
+   "i136",
+   "i137",
+   "i138",
+   "i139",
+   "i140",
+   "i141",
+   "i142",
+   "i143",
+   "i144",
+   "i145",
+   "i146",
+   "i147",
+   "i148",
+   "i149",
+   "i150",
+   "i151",
+   "i152",
+   "i153",
+   "i154",
+   "i155",
+   "i156",
+   "i157",
+   "i158",
+   "i159",
+   "i160",
+   "i161",
+   "i162",
+   "i163",
+   "i164",
+   "i165",
+   "i166",
+   "i167",
+   "i168",
+   "i169",
+   "i170",
+   "i171",
+   "i172",
+   "i173",
+   "i174",
+   "i175",
+   "i176",
+   "i177",
+   "i178",
+   "i179",
+   "i180",
+   "i181",
+   "i182",
+   "i183",
+   "i184",
+   "i185",
+   "i186",
+   "i187",
+   "i188",
+   "i189",
+   "i190",
+   "i191",
+   "i192",
+   "i193",
+   "i194",
+   "i195",
+   "i196",
+   "i197",
+   "i198",
+   "i199",
+   "i200"
+  ],
+  "big": [
+   "v0",
+   "v1",
+   "v2",
+   "v3",
+   "v4",
+   "v5",
+   "v6",
+   "v7",
+   "v8",
+   "v9",
+   "v10",
+   "v11",
+   "v12",
+   "v13",
+   "v14",
+   "v15",
+   "v16",
+   "v17",
+   "v18",
+   "v19",
+   "v20",
+   "v21",
+   "v22",
+   "v23",
+   "v24",
+   "v25",
+   "v26",
+   "v27",
+   "v28",
+   "v29",
+   "v30",
+   "v31",
+   "v32",
+   "v33",
+   "v34",
+   "v35",
+   "v36",
+   "v37",
+   "v38",
+   "v39",
+   "v40",
+   "v41",
+   "v42",
+   "v43",
+   "v44",
+   "v45",
+   "v46",
+   "v47",
+   "v48",
+   "v49",
+   "v50",
+   "v51",
+   "v52",
+   "v53",
+   "v54",
+   "v55",
+   "v56",
+   "v57",
+   "v58",
+   "v59",
+   "v60",
+   "v61",
+   "v62",
+   "v63",
+   "v64",
+   "v65",
+   "v66",
+   "v67",
+   "v68",
+   "v69",
+   "v70",
+   "v71",
+   "v72",
+   "v73",
+   "v74",
+   "v75",
+   "v76",
+   "v77",
+   "v78",
+   "v79",
+   "v80",
+   "v81",
+   "v82",
+   "v83",
+   "v84",
+   "v85",
+   "v86",
+   "v87",
+   "v88",
+   "v89",
+   "v90",
+   "v91",
+   "v92",
+   "v93",
+   "v94",
+   "v95",
+   "v96",
+   "v97",
+   "v98",
+   "v99",
+   "v100",
+   "v101",
+   "v102",
+   "v103",
+   "v104",
+   "v105",
+   "v106",
+   "v107",
+   "v108",
+   "v109",
+   "v110",
+   "v111",
+   "v112",
+   "v113",
+   "v114",
+   "v115",
+   "v116",
+   "v117",
+   "v118",
+   "v119",
+   "v120",
+   "v121",
+   "v122",
+   "v123",
+   "v124",
+   "v125",
+   "v126",
+   "v127",
+   "v128",
+   "v129",
+   "v130",
+   "v131",
+   "v132",
+   "v133",
+   "v134",
+   "v135",
+   "v136",
+   "v137",
+   "v138",
+   "v139",
+   "v140",
+   "v141",
+   "v142",
+   "v143",
+   "v144",
+   "v145",
+   "v146",
+   "v147",
+   "v148",
+   "v149",
+   "v150",
+   "v151",
+   "v152",
+   "v153",
+   "v154",
+   "v155",
+   "v156",
+   "v157",
+   "v158",
+   "v159",
+   "v160",
+   "v161",
+   "v162",
+   "v163",
+   "v164",
+   "v165",
+   "v166",
+   "v167",
+   "v168",
+   "v169",
+   "v170",
+   "v171",
+   "v172",
+   "v173",
+   "v174",
+   "v175",
+   "v176",
+   "v177",
+   "v178",
+   "v179",
+   "v180",
+   "v181",
+   "v182",
+   "v183",
+   "v184",
+   "v185",
+   "v186",
+   "v187",
+   "v188",
+   "v189",
+   "v190",
+   "v191",
+   "v192",
+   "v193",
+   "v194",
+   "v195",
+   "v196",
+   "v197",
+   "v198",
+   "v199"
+  ],
+  "one": [
+   "only"
+  ]
+ },
+ "cases": [
+  {
+   "name": "plain single",
+   "template": "1girl, moonlit glade",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "1girl, moonlit glade",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "plain batch",
+   "template": "1girl, moonlit glade",
+   "var_mode": "random",
+   "count": 3,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "batch",
+    "images": 3,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "1girl, moonlit glade",
+      "vars": [],
+      "seed": null,
+      "batch": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "page template random x4",
+   "template": "1girl, {silver|cobalt|ember} hair, __poses__, moonlit glade",
+   "var_mode": "random",
+   "count": 4,
+   "run_seed": 1740283991,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 4,
+    "product": 36,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "1girl, cobalt hair, reaching up, moonlit glade",
+      "vars": [
+       {
+        "token": "{silver|cobalt|ember}",
+        "value": "cobalt"
+       },
+       {
+        "token": "__poses__",
+        "value": "reaching up"
+       }
+      ],
+      "seed": 1740283991,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "1girl, ember hair, crouched, moonlit glade",
+      "vars": [
+       {
+        "token": "{silver|cobalt|ember}",
+        "value": "ember"
+       },
+       {
+        "token": "__poses__",
+        "value": "crouched"
+       }
+      ],
+      "seed": 1740283992,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "1girl, silver hair, turning, moonlit glade",
+      "vars": [
+       {
+        "token": "{silver|cobalt|ember}",
+        "value": "silver"
+       },
+       {
+        "token": "__poses__",
+        "value": "turning"
+       }
+      ],
+      "seed": 1740283993,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "1girl, silver hair, seated, moonlit glade",
+      "vars": [
+       {
+        "token": "{silver|cobalt|ember}",
+        "value": "silver"
+       },
+       {
+        "token": "__poses__",
+        "value": "seated"
+       }
+      ],
+      "seed": 1740283994,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "page template matrix over cap",
+   "template": "1girl, {silver|cobalt|ember} hair, __poses__, moonlit glade",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "36 combinations is over the 24-cell cap — narrow an axis.",
+    "product": 36
+   }
+  },
+  {
+   "name": "matrix last axis fastest",
+   "template": "{a|b} and {x|y|z}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 6,
+    "product": 6,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a and x",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "a"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "a and y",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "a"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "a and z",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "a"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "z"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "b and x",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "b"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 4,
+      "prompt": "b and y",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "b"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 5,
+      "prompt": "b and z",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "b"
+       },
+       {
+        "token": "{x|y|z}",
+        "value": "z"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "{a|b}",
+      "values": [
+       "a",
+       "b"
+      ]
+     },
+     {
+      "token": "{x|y|z}",
+      "values": [
+       "x",
+       "y",
+       "z"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "matrix three axes",
+   "template": "{p|q} {1|2} {x|y|z} __lights__",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "36 combinations is over the 24-cell cap — narrow an axis.",
+    "product": 36
+   }
+  },
+  {
+   "name": "matrix no variables",
+   "template": "just text",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "just text",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a brace group with no | is literal (matrix)",
+   "template": "{solo} and {only}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{solo} and {only}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "escapes: dropped only where they change the parse",
+   "template": "\\{not a var\\} and \\{a|b\\} and \\__poses__ and a\\_b",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 9,
+   "syntax": true,
+   "plan": {
+    "mode": "batch",
+    "images": 2,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "\\{not a var\\} and {a|b} and __poses__ and a\\_b",
+      "vars": [],
+      "seed": null,
+      "batch": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "backslash elsewhere literal",
+   "template": "a\\|b \\n c\\x",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 9,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a\\|b \\n c\\x",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "pipe outside braces literal",
+   "template": "a | b",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 9,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a | b",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "newlines kept",
+   "template": "line one\n{a|b}\nline three",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 11,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 2,
+    "product": 2,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "line one\na\nline three",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "a"
+       }
+      ],
+      "seed": 11,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "line one\na\nline three",
+      "vars": [
+       {
+        "token": "{a|b}",
+        "value": "a"
+       }
+      ],
+      "seed": 12,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty options dropped and trimmed",
+   "template": "{ a ||  b }",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 2,
+    "product": 2,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a",
+      "vars": [
+       {
+        "token": "{ a ||  b }",
+        "value": "a"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "b",
+      "vars": [
+       {
+        "token": "{ a ||  b }",
+        "value": "b"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "{ a ||  b }",
+      "values": [
+       "a",
+       "b"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "an unclosed brace with no | after it is literal",
+   "template": "a {b",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a {b",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nested braces with no | are literal",
+   "template": "{a{b}c}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a{b}c}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a stray closing brace is literal",
+   "template": "a } b",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a } b",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an empty brace pair is literal",
+   "template": "x {} y",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "x {} y",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "blank group",
+   "template": "x { | } y",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": true,
+   "plan": {
+    "error": "Empty variable."
+   }
+  },
+  {
+   "name": "unknown list",
+   "template": "x __nope__ y",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": true,
+   "plan": {
+    "error": "No list named __nope__."
+   }
+  },
+  {
+   "name": "empty list",
+   "template": "x __empty__",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": true,
+   "plan": {
+    "error": "The list __empty__ is empty."
+   }
+  },
+  {
+   "name": "list over bounds",
+   "template": "x __long__",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": true,
+   "plan": {
+    "error": "The list __long__ is too long — up to 200 items of up to 200 characters."
+   }
+  },
+  {
+   "name": "nine variables",
+   "template": "{a|b} {a|b} {a|b} {a|b} {a|b} {a|b} {a|b} {a|b} {a|b}",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 3,
+   "syntax": true,
+   "plan": {
+    "error": "Up to 8 variables in one prompt."
+   }
+  },
+  {
+   "name": "65 options",
+   "template": "{o0|o1|o2|o3|o4|o5|o6|o7|o8|o9|o10|o11|o12|o13|o14|o15|o16|o17|o18|o19|o20|o21|o22|o23|o24|o25|o26|o27|o28|o29|o30|o31|o32|o33|o34|o35|o36|o37|o38|o39|o40|o41|o42|o43|o44|o45|o46|o47|o48|o49|o50|o51|o52|o53|o54|o55|o56|o57|o58|o59|o60|o61|o62|o63|o64}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 3,
+   "syntax": true,
+   "plan": {
+    "error": "Up to 64 options in one variable."
+   }
+  },
+  {
+   "name": "matrix duplicate",
+   "template": "{a|b|a}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "{a|b|a} has ‘a’ twice — a matrix would pay for the same cell twice."
+   }
+  },
+  {
+   "name": "matrix duplicate in a list",
+   "template": "__dupes__",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "__dupes__ has ‘a’ twice — a matrix would pay for the same cell twice."
+   }
+  },
+  {
+   "name": "random allows a duplicate",
+   "template": "__dupes__ {x|y}",
+   "var_mode": "random",
+   "count": 4,
+   "run_seed": 77,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 4,
+    "product": 6,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a x",
+      "vars": [
+       {
+        "token": "__dupes__",
+        "value": "a"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": 77,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "a y",
+      "vars": [
+       {
+        "token": "__dupes__",
+        "value": "a"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": 78,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "b x",
+      "vars": [
+       {
+        "token": "__dupes__",
+        "value": "b"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": 79,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "a x",
+      "vars": [
+       {
+        "token": "__dupes__",
+        "value": "a"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": 80,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "list name greedy",
+   "template": "__a__b__ z",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 2,
+    "product": 2,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "x z",
+      "vars": [
+       {
+        "token": "__a__b__",
+        "value": "x"
+       }
+      ],
+      "seed": 5,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "y z",
+      "vars": [
+       {
+        "token": "__a__b__",
+        "value": "y"
+       }
+      ],
+      "seed": 6,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "run seed zero",
+   "template": "{a|b|c|d}",
+   "var_mode": "random",
+   "count": 4,
+   "run_seed": 0,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 4,
+    "product": 4,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "a"
+       }
+      ],
+      "seed": 0,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "b",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "b"
+       }
+      ],
+      "seed": 1,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "c",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "c"
+       }
+      ],
+      "seed": 2,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "c",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "c"
+       }
+      ],
+      "seed": 3,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "run seed max",
+   "template": "{a|b|c|d} {e|f}",
+   "var_mode": "random",
+   "count": 4,
+   "run_seed": 2147483646,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 4,
+    "product": 8,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "c f",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "c"
+       },
+       {
+        "token": "{e|f}",
+        "value": "f"
+       }
+      ],
+      "seed": 2147483646,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "d e",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "d"
+       },
+       {
+        "token": "{e|f}",
+        "value": "e"
+       }
+      ],
+      "seed": 0,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "c f",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "c"
+       },
+       {
+        "token": "{e|f}",
+        "value": "f"
+       }
+      ],
+      "seed": 1,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "d e",
+      "vars": [
+       {
+        "token": "{a|b|c|d}",
+        "value": "d"
+       },
+       {
+        "token": "{e|f}",
+        "value": "e"
+       }
+      ],
+      "seed": 2,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "first error by position",
+   "template": "x __nope__ {a|{b}} y {c|",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": true,
+   "plan": {
+    "error": "No list named __nope__."
+   }
+  },
+  {
+   "name": "over a million",
+   "template": "__big__ __big__ __big__ __big__ __big__ __big__ __big__ __big__",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "More than a million combinations is over the 24-cell cap — narrow an axis.",
+    "product": 1000001
+   }
+  },
+  {
+   "name": "exactly 24",
+   "template": "{a|b|c} {1|2|3|4} {x|y}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 24,
+    "product": 24,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a 1 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "a 1 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "a 2 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 3,
+      "prompt": "a 2 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 4,
+      "prompt": "a 3 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 5,
+      "prompt": "a 3 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 6,
+      "prompt": "a 4 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 7,
+      "prompt": "a 4 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "a"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 8,
+      "prompt": "b 1 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 9,
+      "prompt": "b 1 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 10,
+      "prompt": "b 2 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 11,
+      "prompt": "b 2 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 12,
+      "prompt": "b 3 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 13,
+      "prompt": "b 3 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 14,
+      "prompt": "b 4 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 15,
+      "prompt": "b 4 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "b"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 16,
+      "prompt": "c 1 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 17,
+      "prompt": "c 1 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "1"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 18,
+      "prompt": "c 2 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 19,
+      "prompt": "c 2 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "2"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 20,
+      "prompt": "c 3 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 21,
+      "prompt": "c 3 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "3"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 22,
+      "prompt": "c 4 x",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "x"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 23,
+      "prompt": "c 4 y",
+      "vars": [
+       {
+        "token": "{a|b|c}",
+        "value": "c"
+       },
+       {
+        "token": "{1|2|3|4}",
+        "value": "4"
+       },
+       {
+        "token": "{x|y}",
+        "value": "y"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "{a|b|c}",
+      "values": [
+       "a",
+       "b",
+       "c"
+      ]
+     },
+     {
+      "token": "{1|2|3|4}",
+      "values": [
+       "1",
+       "2",
+       "3",
+       "4"
+      ]
+     },
+     {
+      "token": "{x|y}",
+      "values": [
+       "x",
+       "y"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "25 is over",
+   "template": "{a|b|c|d|e} {1|2|3|4|5}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": null,
+   "syntax": true,
+   "plan": {
+    "error": "25 combinations is over the 24-cell cap — narrow an axis.",
+    "product": 25
+   }
+  },
+  {
+   "name": "unicode kept",
+   "template": "’{été|hiver}”",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 42,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 2,
+    "product": 2,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "’été”",
+      "vars": [
+       {
+        "token": "{été|hiver}",
+        "value": "été"
+       }
+      ],
+      "seed": 42,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "’été”",
+      "vars": [
+       {
+        "token": "{été|hiver}",
+        "value": "été"
+       }
+      ],
+      "seed": 43,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a backslash before a brace group with no | stays",
+   "template": "\\{x}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 1,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "\\{x}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "brace emphasis is literal, byte for byte",
+   "template": "{masterpiece}, {{best quality}}, 1girl",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "batch",
+    "images": 2,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{masterpiece}, {{best quality}}, 1girl",
+      "vars": [],
+      "seed": null,
+      "batch": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "a kaomoji's backslash and a\\_b stay",
+   "template": "¯\\_(ツ)_/¯ a\\_b \\x",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "¯\\_(ツ)_/¯ a\\_b \\x",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "pipes outside a brace group are literal",
+   "template": "(a|b) {x} | {y}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "(a|b) {x} | {y}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped | group is literal",
+   "template": "\\{a|b\\} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped opener alone makes the group literal",
+   "template": "\\{a|b} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped closer makes the group literal",
+   "template": "{a|b\\} hair",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a|b} hair",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a backslash before a backslash stays",
+   "template": "\\\\{a|b}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "\\{a|b}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an unclosed brace with a | after it is refused",
+   "template": "a {b|c",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "an escaped unclosed brace with a | is literal",
+   "template": "a \\{b|c",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "a {b|c",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "a | group inside braces is refused",
+   "template": "{{a|b}}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a | group holding braces is refused",
+   "template": "{a|{b}}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a | group inside a literal group is refused",
+   "template": "{x {a|b} y}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "error": "Unclosed or nested brace. Nesting isn’t supported."
+   }
+  },
+  {
+   "name": "a list token inside literal braces",
+   "template": "{__lights__}",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 3,
+    "product": 3,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{moonlight}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "moonlight"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "{lantern glow}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "lantern glow"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     },
+     {
+      "cell": 2,
+      "prompt": "{dawn haze}",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "dawn haze"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "__lights__",
+      "values": [
+       "moonlight",
+       "lantern glow",
+       "dawn haze"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "an escaped list token is literal",
+   "template": "\\__lights__ and __lights__",
+   "var_mode": "random",
+   "count": 2,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "random",
+    "images": 2,
+    "product": 3,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "__lights__ and moonlight",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "moonlight"
+       }
+      ],
+      "seed": 5,
+      "batch": 1
+     },
+     {
+      "cell": 1,
+      "prompt": "__lights__ and dawn haze",
+      "vars": [
+       {
+        "token": "__lights__",
+        "value": "dawn haze"
+       }
+      ],
+      "seed": 6,
+      "batch": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "matrix one cell",
+   "template": "{solo|} and __one__",
+   "var_mode": "matrix",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": true,
+   "plan": {
+    "mode": "matrix",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "solo and only",
+      "vars": [
+       {
+        "token": "{solo|}",
+        "value": "solo"
+       },
+       {
+        "token": "__one__",
+        "value": "only"
+       }
+      ],
+      "seed": null,
+      "batch": 1
+     }
+    ],
+    "axes": [
+     {
+      "token": "{solo|}",
+      "values": [
+       "solo"
+      ]
+     },
+     {
+      "token": "__one__",
+      "values": [
+       "only"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "a closing brace inside a literal pair keeps its backslash",
+   "template": "{a\\}|b}",
+   "var_mode": "random",
+   "count": 1,
+   "run_seed": 5,
+   "syntax": false,
+   "plan": {
+    "mode": "single",
+    "images": 1,
+    "product": 1,
+    "jobs": [
+     {
+      "cell": 0,
+      "prompt": "{a\\}|b}",
+      "vars": [],
+      "seed": null,
+      "batch": 1
+     }
+    ]
+   }
+  }
+ ],
+ "escape": [
+  {
+   "text": "plain",
+   "escaped": "plain"
+  },
+  {
+   "text": "{x}",
+   "escaped": "{x}"
+  },
+  {
+   "text": "{{x}}",
+   "escaped": "{{x}}"
+  },
+  {
+   "text": "a\\{b",
+   "escaped": "a\\{b"
+  },
+  {
+   "text": "long_hair, __x__",
+   "escaped": "long_hair, \\__x__"
+  },
+  {
+   "text": "___y__",
+   "escaped": "\\___y__"
+  },
+  {
+   "text": "a\\_b",
+   "escaped": "a\\_b"
+  },
+  {
+   "text": "\\\\{",
+   "escaped": "\\\\{"
+  },
+  {
+   "text": "end\\",
+   "escaped": "end\\"
+  },
+  {
+   "text": "}{",
+   "escaped": "}{"
+  },
+  {
+   "text": "_",
+   "escaped": "_"
+  },
+  {
+   "text": "__",
+   "escaped": "__"
+  },
+  {
+   "text": "a__b",
+   "escaped": "a__b"
+  },
+  {
+   "text": "\\",
+   "escaped": "\\"
+  },
+  {
+   "text": "mixed {a|b} __l__ \\x",
+   "escaped": "mixed \\{a|b} \\__l__ \\x"
+  },
+  {
+   "text": "{masterpiece}, 1girl",
+   "escaped": "{masterpiece}, 1girl"
+  },
+  {
+   "text": "{{a|b}}",
+   "escaped": "{\\{a|b}}"
+  },
+  {
+   "text": "{a|{b}}",
+   "escaped": "\\{a|{b}}"
+  },
+  {
+   "text": "a {b|c",
+   "escaped": "a \\{b|c"
+  },
+  {
+   "text": "\\{a|b}",
+   "escaped": "\\\\{a|b}"
+  },
+  {
+   "text": "{a|b\\}",
+   "escaped": "\\{a|b\\\\}"
+  },
+  {
+   "text": "\\\\{a|b}",
+   "escaped": "\\\\\\{a|b}"
+  },
+  {
+   "text": "\\__x__",
+   "escaped": "\\\\__x__"
+  },
+  {
+   "text": "¯\\_(ツ)_/¯",
+   "escaped": "¯\\_(ツ)_/¯"
+  },
+  {
+   "text": "{a\\}|b}",
+   "escaped": "{a\\}|b}"
+  },
+  {
+   "text": "x {y",
+   "escaped": "x {y"
+  }
+ ],
+ "trim": [
+  {
+   "raw": "\tx y\t\t",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\nx y\n\n",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u000bx y\u000b\u000b",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\fx y\f\f",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\rx y\r\r",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001cx y\u001c\u001c",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001dx y\u001d\u001d",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001ex y\u001e\u001e",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "\u001fx y\u001f\u001f",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "x y",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": " x y  ",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "　x y　　",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "﻿x y﻿﻿",
+   "trimmed": "x y"
+  },
+  {
+   "raw": "​x​",
+   "trimmed": "​x​"
+  },
+  {
+   "raw": "᠎x᠎",
+   "trimmed": "᠎x᠎"
+  },
+  {
+   "raw": "­x­",
+   "trimmed": "­x­"
+  },
+  {
+   "raw": "﻿\u001c\u001d\u001e\u001f",
+   "trimmed": ""
+  }
+ ],
+ "invariant": [
+  "{masterpiece}, 1girl",
+  "{{best quality}}",
+  "a } b",
+  "x {y",
+  "{}",
+  "\\{x\\}",
+  "(a|b)",
+  "a | b",
+  "{a} | {b}",
+  "a\\_b",
+  "¯\\_(ツ)_/¯",
+  "\\\\",
+  "__",
+  "a__b",
+  "{a\\}|b}",
+  "}{",
+  "{{}}",
+  "\\}",
+  "long_hair, {red eyes}"
+ ]
+}

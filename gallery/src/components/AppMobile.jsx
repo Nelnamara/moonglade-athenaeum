@@ -1,13 +1,23 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
+import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
+import { storageFilterPatch } from "../curation/storageCore.js";
 import useSheet from "../hooks/useSheet.js";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
-import { apiPost, fetchAccount, fetchCollections, rateImage } from "../api.js";
+import { apiGet, apiPost, fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections, rateImage } from "../api.js";
+import useCurate from "../hooks/useCurate.js";
+import { composeSmartQuery } from "../curation/curationCore.js";
+import { invalidate } from "../hooks/swrCache.js";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { isFrontPage, makeMarker, syncOutcomeText } from "../lib/phoneCore.js";
+import { readMarker, writeMarker } from "../lib/phonePrefs.js";
+import { syncNow } from "../lib/syncNow.js";
+import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
 import { buildUrl, readPage, readImage } from "../gen/urlState.js";
 import { cameFromLoom, readLibraryReturn, setLibraryPlace } from "../lib/loomCrossing.js";
 import GalleryMobile from "./GalleryMobile.jsx";
@@ -17,11 +27,17 @@ import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
+import GoalChips from "./GoalChips.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
+import RecipesHost from "../recipes/RecipesHost.jsx";
 import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
+import CollectionsMobile from "./CollectionsMobile.jsx";
+import CollectionOrderMobile from "./CollectionOrderMobile.jsx";
+import CurateToast from "./CurateToast.jsx";
+import SmartStrip from "./SmartStrip.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
 import ContestChooserMobile from "./ContestChooserMobile.jsx";
@@ -35,10 +51,18 @@ import useClaimModal from "../hooks/useClaimModal.js";
 import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
+import { registerFolioOpener } from "../notify/ach.js";
+import { readFolioHash, setFolioRow } from "../folio/folioFocus.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
+import { OPEN_SURFACE_EVENT } from "../help/helpStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
+/* Last, on purpose: the landscape rules re-flow rules from every sheet above, and at equal specificity
+   the later stylesheet wins (Session Q, Q4). */
+import "../styles/phone-landscape.css";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -344,6 +368,9 @@ import "../styles/create-mobile.css";
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
+  // Session N2: the collections screen. The books mark, not the page's ❖ -- the Glyph Ledger
+  // (2026-09-05) gave that character to the Folio's skin flag alone.
+  { icon: <Icon name="collection" />, label: "Collections", screen: "collections" },
   // ☁ since the 2026-09-05 post-audit rulings: Publish wears the cloud on every OTHER
   // surface that offers it (the desktop record, the Lightbox, this phone's own picture
   // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
@@ -362,6 +389,7 @@ const MENU_ITEMS = [
 // component below -- every Menu destination is now live, matching desktop.
 const SCREEN_TITLES = {
   myart: "My Art",
+  collections: "Collections",
   publish: "Publish",
   train: "Train a LoRA",
   import: "Import",
@@ -378,6 +406,31 @@ export default function AppMobile({ boot }) {
      intent up on mount and pushes its update screen. Same two-part contract App.jsx uses
      for the Panel overlay -- see notify/bannerStore.js. */
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
+  /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. */
+  useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
+  /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
+     here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
+  useEffect(() => {
+    const fh = readFolioHash(window.location.hash);
+    if (!fh) return;
+    setFolioRow(fh.row);
+    setFolioOpen(true);
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch { /* hash simply stays; harmless */ }
+  }, []);
+  /* "Show me ›" (the what's-new sheet, Session I 3c), on the phone: the surface's own tab,
+     or the Folio. The Loom is a page of its own -- not claimed, so helpStore navigates. */
+  useEffect(() => {
+    const onSurface = (e) => {
+      const s = e.detail && e.detail.surface;
+      const tabFor = { gallery: "gallery", dock: "create", panel: "control" }[s];
+      if (tabFor) { e.preventDefault(); setTab(tabFor); }
+      else if (s === "folio") { e.preventDefault(); setFolioOpen(true); }
+    };
+    window.addEventListener(OPEN_SURFACE_EVENT, onSurface);
+    return () => window.removeEventListener(OPEN_SURFACE_EVENT, onSurface);
+  }, []);
   /* OPEN THE CONTROL PANEL ON A TAB, on the phone (notify/panelRequest.js). The phone's
      panel is its Control tab, and Branding is the drill-in there, so a request for that tab
      -- the key-turn moment's button, or one carried over from the Loom -- lands on Control
@@ -406,6 +459,11 @@ export default function AppMobile({ boot }) {
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);
+  /* SMART COLLECTIONS (Session N1): saved searches, listed beside the hand-picked ones.
+     `collections` stays the HAND-PICKED names (Import, "Add to" and the Actions sheet all mean
+     exactly that); a smart collection is browsed, never added to. */
+  const [smart, setSmart] = useState(boot.smart_collections || []);
+  const [editingSmart, setEditingSmart] = useState("");   // the smart collection whose query is being edited
   // 'loom' | 'menu' | null -- shared timer-safe state machine (hooks/useSheet.js,
   // 2026-08-07 review fix: the hand-rolled pair let a reopen inside the 280ms exit
   // window inherit a stale unmount timer and vanish).
@@ -442,11 +500,26 @@ export default function AppMobile({ boot }) {
   const [loomReturn] = useState(() =>
     cameFromLoom(document.referrer, window.location.origin));
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
+  /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
+     shell uses. It patches the loaded page in place from the server's answer and says how many
+     pictures REALLY changed; Undo puts each one back to its own previous values. Local catalog
+     only -- nothing here reaches PixAI. */
+  const curate = useCurate({ csrf: boot.csrf || "", setItems: lib.setItems });
   const costRef = useRef(null);
-  const gen = useGenerate({ costRef });
+  const gen = useGenerate({ costRef, isMember: account ? account.is_member : null });
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
   const edit = useEditGenerate({ costRef: editCostRef });
   const [cmode, setCmode] = useState("image"); // Create's Image/Edit/Video mode -- lifted, see header comment
+  /* SESSION Q (2026-09-29), the phone. Data saver (Q7) is read by the shell once for the header chip and
+     for what counts as a background read; each surface that draws differently under it (the grid, the
+     Lightbox, the record) asks the same hook itself. `videoRef` is the video drawer's own handle, held
+     here so Send to Video and a video's Remix can prefill it (gen/phoneRemix.js) -- it sends nothing. */
+  const saver = useDataSaver();
+  const saverRef = useRef(false);
+  saverRef.current = saver.active;
+  const videoRef = useRef(null);
+  const [videoNote, setVideoNote] = useState("");
+  useEffect(() => { if (cmode !== "video") setVideoNote(""); }, [cmode]);
 
   // Image Details Mobile (2026-08-03) -- lifted HERE (not GalleryMobile.jsx)
   // for the identical reason `screen`/VideoMode/cmode are: it must survive
@@ -509,6 +582,16 @@ export default function AppMobile({ boot }) {
   const [folioOpen, setFolioOpen] = useState(false);
   const openFolio = () => setFolioOpen(true);
   const closeFolio = () => setFolioOpen(false);
+  /* The Folio's "→" (Session O, O1), on the phone: each honor with a count points at the surface
+     that advances it -- Generate (the Create tab), The Loom (a page of its own), Contests or
+     Publish (screens this shell pushes). The Folio closes first; nothing is written by the jump. */
+  const jumpFromFolio = (to) => {
+    setFolioOpen(false);
+    if (to === "loom") { window.location.href = "/loom"; return; }
+    if (to === "contests") { openScreenKey("contests"); return; }
+    if (to === "publish") { openPublish(""); return; }
+    setTab("create");
+  };
 
   // Contact Sheet Mobile (2026-08-03) -- lifted HERE for the identical reason
   // detailsFor/lbIndex/folioOpen are: reachable from the Gallery tab's
@@ -657,6 +740,46 @@ export default function AppMobile({ boot }) {
     };
   }, [lib.items.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Q5, "N new since": the marker is the newest picture seen when the gallery was last LEFT, read once
+     when the phone opens (a read; nothing is written) and measured against what page 1 holds now. It is
+     written only when the gallery is left -- a tap on another tab, or the page being hidden -- and only
+     from the library's own front page (page 1, newest first, unfiltered), so a filtered look never moves
+     it. A completed pull does NOT write it: the rule stays where it was until you leave. */
+  const [marker, setMarker] = useState(() => readMarker());
+  const libNowRef = useRef(lib);
+  libNowRef.current = lib;
+  const frontPage = isFrontPage({
+    page: lib.page, advCount: lib.advCount, applied: lib.applied, media: lib.media, shelf: lib.shelf,
+    similar: !!similarFor, loaded: lib.total != null,
+  });
+  const frontRef = useRef(false);
+  frontRef.current = frontPage;
+  const saveSeen = useCallback(() => {
+    if (!frontRef.current) return null;
+    const m = makeMarker(libNowRef.current.items, Date.now());
+    if (m) writeMarker(m);
+    return m;
+  }, []);
+  const prevTabRef = useRef(tab);
+  useEffect(() => {
+    const was = prevTabRef.current;
+    prevTabRef.current = tab;
+    if (was === "gallery" && tab !== "gallery") {
+      const m = saveSeen();
+      if (m) setMarker(m);
+    }
+  }, [tab, saveSeen]);
+  useEffect(() => {
+    const hide = () => { if (tabRef.current === "gallery") saveSeen(); };
+    const onVis = () => { if (document.visibilityState === "hidden") hide(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", hide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", hide);
+    };
+  }, [saveSeen]);
+
   const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
@@ -676,6 +799,53 @@ export default function AppMobile({ boot }) {
   // miss (page replaced mid-tap) it opens Details by id instead of toasting.
   const openLightboxFromGrid = (mid) => openLightbox(mid, openDetails);
   const closeLightbox = () => setLbIndex(null);
+  /* "Edit with Tsubaki" from Image Details (Session H decision 2, the phone's image menu): the
+     Create tab's Image mode on Tsubaki.3, the picture in context slot 1, the prompt seeded
+     "Use @image1 …". Prefill only -- the owner presses Generate. */
+  const editWithTsubaki = (img) => {
+    if (!img || !img.media_id) return;
+    setDetailsFor(null);
+    setLbIndex(null);
+    setTab("create");
+    setCmode("image");
+    gen.tsubakiEdit(img);
+  };
+  /* Q2: Remix and Send to Video (the record's foot, and the Lightbox's To Video chip). Both OPEN the
+     Create tab already filled in and stop there -- nothing here can send, price or submit a generation
+     (gen/phoneRemix.js says what it may reach, and a structural test holds it to that). A still remixes
+     into the Image composer (a Generate power tools run restores its template, anything else its
+     recorded prompt); a video's Remix fills the Video drawer's recipe; Send to Video puts the picture in
+     the drawer as its start frame. */
+  const leaveViewers = () => { setDetailsFor(null); setLbIndex(null); };
+  const remixPicture = async (mid, isVideo) => {
+    if (!mid) return;
+    leaveViewers();
+    setTab("create");
+    if (isVideo) {
+      setCmode("video");
+      setVideoNote("");
+      const r = await remixVideoInto(videoRef.current, mid);
+      if (!r.ok && window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that clip's settings", msg: r.error || "" });
+      else if (r.notes && r.notes.length && window.Toast) {
+        window.Toast.show({ kind: "info", title: "Remix is partial", msg: r.notes.join("; ") + " \u2014 review before generating." });
+      }
+      return;
+    }
+    setCmode("image");
+    const r = await remixImageInto(gen, mid);
+    if (!r.ok && window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that picture's settings", msg: r.error || "" });
+    else if (r.notes.length && window.Toast) {
+      window.Toast.show({ kind: "info", title: "Remix is partial", msg: r.notes.join("; ") + " \u2014 review before generating." });
+    }
+  };
+  const sendPictureToVideo = (mid) => {
+    if (!mid) return;
+    leaveViewers();
+    setTab("create");
+    setCmode("video");
+    if (sendStartFrame(videoRef.current, mid)) setVideoNote(VIDEO_NOTE);
+  };
+
   const openDetailsFromLightbox = (mid) => {
     setLbIndex(null);
     openDetails(mid);
@@ -818,6 +988,22 @@ export default function AppMobile({ boot }) {
     };
     return lib.load(p, replace).then((d) => { settle(d); return d; }, (e) => { settle(); throw e; });
   }, [lib.load]);
+  /* Q6: what a release past the line runs. The SAME Sync now job the Control tab runs (whitelisted, a
+     read of the owner's own history into the local catalog; lib/syncNow.js), then a reload of the page
+     in view through the owner's own road (userLoad: the intent goes on the record first). It works under
+     Data saver on purpose -- a pull is an explicit request. Whatever the ending, a job that started may
+     have brought pictures in, so the page is re-read unless the sync never started. */
+  const refreshFromPull = useCallback(async () => {
+    const out = await syncNow({ post: apiPost, get: apiGet });
+    if (out.state !== "error") {
+      invalidate(["/api/health", "/api/achievements", "/api/your-art", "/api/next/detail/"]);
+      const d = await userLoad(shownPageRef.current, true);
+      if (d) pruneSelected(setLibSelected, d.items);
+    }
+    const msg = syncOutcomeText(out);
+    if (msg && window.Toast) window.Toast.show({ title: "Sync", msg });
+    return out;
+  }, [userLoad]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     genLoadRef.current = lib.load;
     genSimilarRef.current = similarFor;
@@ -837,6 +1023,10 @@ export default function AppMobile({ boot }) {
          land, and the page he is leaving is not the perch. See navRef above. */
       const nav = navRef.current;
       if (nav.inFlight || nav.want !== 1) return;
+      /* Data saver (Q7): this reload is the phone's own BACKGROUND read -- nobody asked for it -- so it
+         waits while the saver acts. The new picture is one pull away (a pull is explicit and never
+         asks). The credits chip and the achievement check above are tiny and still run. */
+      if (saverRef.current) return;
       // ...and not under the ◈ token even at the perch: the library grid is not rendered
       // there at all, and the ✕ has to hand back exactly what was underneath.
       if (genSimilarRef.current) return;
@@ -889,9 +1079,64 @@ export default function AppMobile({ boot }) {
     return () => document.removeEventListener("mg-open-details", onOpenDetails);
   }, []);
 
+  // Hand-picked names and smart collections in one read (the counts and covers ride along, the
+  // Collections screen reads them itself); the plain names list is the fallback for an old server.
   const refreshCollections = async () => {
+    const rows = await fetchCollectionDetail();
+    if (rows) {
+      setCollections(rows.filter((c) => c.kind === "hand").map((c) => c.name));
+      setSmart(rows.filter((c) => c.kind === "smart").map((c) => ({ name: c.name, query: c.query })));
+      return rows;
+    }
     const c = await fetchCollections();
     if (c) setCollections(c);
+    return null;
+  };
+  const isSmartShelf = !!lib.shelf && smart.some((c) => c.name === lib.shelf);
+  const smartOpen = isSmartShelf ? smart.find((c) => c.name === lib.shelf) : null;
+  useEffect(() => { if (lib.shelf && editingSmart) setEditingSmart(""); }, [lib.shelf]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* WHAT "SAVE" SAVES: the whole view as a search (curationCore.composeSmartQuery) -- the field's
+     text plus the media pill and every Advanced Search filter that has an operator -- so the
+     smart collection matches what the sheet showed, not just what was typed. A smart collection
+     open as the shelf is its own query, so it contributes no collection: term. */
+  const composeView = (text, over) => composeSmartQuery({
+    q: text, media: lib.media,
+    shelf: isSmartShelf ? "" : (over && over.shelf !== undefined ? over.shelf : lib.shelf),
+    adv: (over && over.adv) || lib.adv,
+  });
+  const saveSmart = async (query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query });
+    if (d.error) { curate.say(d.error, null, "peach"); return false; }
+    await refreshCollections();
+    setEditingSmart("");
+    lib.applyAdvanced({ shelf: d.name, q: "" });
+    curate.say("Saved “" + d.name + "” ⟳. It updates as you make and mark pictures.");
+    return true;
+  };
+  const saveSmartOver = async (name, query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query, replace: name });
+    if (d.error) { curate.say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    lib.applyAdvanced({ shelf: d.name, q: "" });
+    curate.say("Updated “" + d.name + "” ⟳ with the new search.");
+  };
+  // opening a smart collection IS running its query; this runs it again
+  const refreshSmart = () => { lib.load(1, true); refreshCollections(); };
+  /* The Collections screen tells the shell what moved. The open collection follows its own
+     rename, falls back to the target when it was merged away and to the whole library when it
+     was deleted; a merge INTO the open collection reloads it so the newcomers show. */
+  const onCollectionsChanged = async (chg) => {
+    await refreshCollections();
+    if (chg.renamed && lib.shelf === chg.renamed.from) lib.applyAdvanced({ shelf: chg.renamed.to });
+    else if (chg.merged && chg.merged.others.indexOf(lib.shelf) >= 0) lib.applyAdvanced({ shelf: chg.merged.target });
+    else if (chg.merged && chg.merged.target === lib.shelf) lib.load(1, true);
+    else if (chg.deleted && lib.shelf === chg.deleted) lib.applyAdvanced({ shelf: "" });
+  };
+  const openCollection = (name) => {
+    lib.applyAdvanced({ shelf: name });
+    setTab("gallery");
+    closeScreen();
   };
 
   // Menu row -> pushed screen. Both state changes fire in the SAME click,
@@ -910,6 +1155,16 @@ export default function AppMobile({ boot }) {
   const closeScreen = () => {
     closeScreenRaw();
     setPublishFor("");
+    setOrderFor("");
+  };
+  /* Session P (P6): the Collections screen's manual-order sub-view for one hand-picked
+     collection -- reached from its row slot ("⇅ Order") and from the gallery's Manual sort.
+     Closing it returns to the list (and reloads the grid when it is showing that order). */
+  const [orderFor, setOrderFor] = useState("");
+  const openOrder = (name) => { setOrderFor(name); openScreenKey("collections"); };
+  const backFromOrder = () => {
+    setOrderFor("");
+    if (lib.shelf && lib.adv && lib.adv.sort === "manual") lib.load(1, true);
   };
 
   /* EVERY LAYER THIS SHELL PUSHES, ON THE ONE BACK LEDGER (2026-09-06) -- registered
@@ -968,6 +1223,22 @@ export default function AppMobile({ boot }) {
   // that badge honest if the owner backs out to Details right after.
   const afterPublishOrTrain = async () => { lib.load(1, true); };
 
+  /* Train a LoRA (Session J, one step per screen): the screen's head ‹ steps back inside the
+     train flow first (TrainMobile sets trainBack), and closes the screen only from its chooser.
+     Its Runs "Use" puts a trained LoRA on the Create tab's composer, on the LoRA side (off the
+     Context side, where a LoRA is held and never sent) -- useGenerate.takeLora, then the same
+     addLora the model sheet's LoRA pick calls (trigger words and all); a pick, never a submit. */
+  const trainBack = useRef(null);
+  const screenBack = () => {
+    if (screen === "train" && trainBack.current && trainBack.current()) return;
+    closeScreen();
+  };
+  const takeTrainedLora = (lora) => {
+    gen.takeLora(lora);
+    closeScreen();
+    setTab("create");
+  };
+
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
   const logOut = () => {
@@ -999,10 +1270,14 @@ export default function AppMobile({ boot }) {
             ◉
             {jobsRunning ? <span className="glm-iconbtn-badge" aria-hidden="true" /> : null}
           </button>
+          {/* The guide's "?" (Session I decision 2): Help on the page for the tab in view. */}
+          <HelpButton plain className="glm-iconbtn glm-iconbtn-lav glm-help"
+            surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
             onClick={() => openSheet("menu")}>☰</button>
         </div>
         <div className="glm-hero-stats">
+          {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"\u25D0"} Saver</span> : null}
           <span><b>{Number(stats.images || 0).toLocaleString()}</b> img</span>
           <span><b>{Number(stats.videos || 0).toLocaleString()}</b> vid</span>
           <span><b>{Number(stats.collections || 0).toLocaleString()}</b> coll</span>
@@ -1042,7 +1317,23 @@ export default function AppMobile({ boot }) {
             load={userLoad}
             onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet}
             similar={similarToken} similarState={similar} similarSource={similarSource}
-            onSimilar={showSimilar} onClearSimilar={clearSimilar} />
+            onSimilar={showSimilar} onClearSimilar={clearSimilar}
+            marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
+            curation={{
+              smart, curate, saveSmart, composeView,
+              // Session P (P6): the Manual sort's editor, on the Collections screen
+              onEditOrder: openOrder,
+              strip: (smartOpen || editingSmart) ? (
+                <SmartStrip
+                  name={smartOpen ? smartOpen.name : ""} query={smartOpen ? smartOpen.query : ""}
+                  editing={editingSmart} draft="" canSave={!!composeView(lib.query)}
+                  onRefresh={refreshSmart}
+                  onEdit={() => { setEditingSmart(smartOpen.name); lib.applyAdvanced({ shelf: "", q: smartOpen.query }); }}
+                  onSaveOver={() => saveSmartOver(editingSmart, composeView(lib.query))}
+                  onSaveNew={() => saveSmart(composeView(lib.query))}
+                  onCancel={() => { const back = editingSmart; setEditingSmart(""); lib.applyAdvanced({ shelf: back, q: "" }); }} />
+              ) : null,
+            }} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
@@ -1069,7 +1360,8 @@ export default function AppMobile({ boot }) {
                   className={"cm-segbtn" + (k === "video" ? " on" : "")}>{label}</button>
               ))}
             </div>
-            <VideoMode visible={tab === "create" && cmode === "video"} />
+            <VideoMode visible={tab === "create" && cmode === "video"} drawerRef={videoRef}
+              note={videoNote} onDismissNote={() => setVideoNote("")} />
           </div>
         </div>
 
@@ -1081,16 +1373,27 @@ export default function AppMobile({ boot }) {
             tab) because the hamburger is reachable from all three tabs --
             switching Gallery/Create/Control while a screen is pushed must
             not unmount it. */}
-        <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
+        <MobileScreen open={!!screen} closing={screenClosing} onClose={screenBack}
           title={screen ? SCREEN_TITLES[screen] : ""}>
           {screen === "myart" && (
             <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => openScreenKey("train")} />
           )}
+          {screen === "collections" && (orderFor ? (
+            <CollectionOrderMobile key={orderFor} name={orderFor} csrf={boot.csrf || ""} onBack={backFromOrder} />
+          ) : (
+            <CollectionsMobile csrf={boot.csrf || ""} onOpenCollection={openCollection}
+              onChanged={onCollectionsChanged}
+              renderRowSlot={(c) => (
+                <button type="button" className="mgco-slotbtn" aria-label={"Put " + c.name + " in your own order"}
+                  onClick={(e) => { e.stopPropagation(); setOrderFor(c.name); }}>{"⇅ Order"}</button>
+              )} />
+          ))}
           {screen === "health" && (
             <HealthMobile
               onModelFilter={(m) => filterFromHealth({ model: m })}
               onTagFilter={(t) => filterFromHealth({ tag: t })}
               onLoraFilter={(l) => filterFromHealth({ lora: l })}
+              onStoragePick={(f) => filterFromHealth({ ...ADV_DEFAULTS, ...storageFilterPatch(f) })}
               onOpenImport={() => openScreenKey("import")}
               boot={boot}
               onDuplicatesResolved={afterDuplicatesResolved}
@@ -1105,13 +1408,25 @@ export default function AppMobile({ boot }) {
             <PublishMobile mediaId={publishFor} onClose={closeScreen} onPublished={afterPublishOrTrain} />
           )}
           {screen === "train" && (
-            <TrainMobile onClose={closeScreen} />
+            <TrainMobile onClose={closeScreen} onUseLora={takeTrainedLora} backRef={trainBack} />
           )}
         </MobileScreen>
       </div>
 
+      {/* The pinned goal and (optionally) the Vigil, one 32 px row above the tab bar (Session O,
+          O4/O5). Swipe the pin sideways to unpin. Draws nothing unless one is on. */}
+      <GoalChips phone />
       <TabBarMobile tab={tab} setTab={setTab} />
+      {/* The first-run guide (Session I decision 1) for the tab in view, while nothing this
+          shell pushes covers it. Control's lives in ControlMobile, beside its Branding
+          drill-in; the Folio's in FolioMobile. */}
+      {!screen && !detailsFor && lbIndex == null && !folioOpen && !contactSheetTarget && !contestEntry
+        && (tab === "gallery" || tab === "create") ? (
+          <GuideHost key={tab} surface={tab === "create" ? "dock" : "gallery"} phone
+            paused={!!sheet || claimModal.open} />
+        ) : null}
       <PickerHost />
+      <RecipesHost />
       {claimModal.open && (
         <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
           claiming={claimModal.claiming} error={claimModal.error}
@@ -1124,13 +1439,15 @@ export default function AppMobile({ boot }) {
       {detailsFor && (
         <ImageDetailsMobile
           mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-          onRate={rate}
+          onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
           onDeleted={() => { closeDetails(); lib.load(1, true); }}
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
           advParams={detailsAdvParams} items={lib.items}
           onOpenLightbox={openLightbox}
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
           onEnterContest={openContestFor}
+          onTsubakiEdit={editWithTsubaki}
+          onRemix={remixPicture} onSendToVideo={sendPictureToVideo}
         />
       )}
 
@@ -1144,17 +1461,20 @@ export default function AppMobile({ boot }) {
         <LightboxMobile
           items={lib.items} index={lbIndex} setIndex={setLbIndex}
           onClose={closeLightbox} onRate={rate}
+          onCurate={(ids, op) => curate.apply(ids, op, false)}
           page={lib.page} pages={lib.pages} loadPage={userLoad}
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
           onEnterContest={openContestFor}
+          member={account ? account.is_member : null}
+          onSendToVideo={sendPictureToVideo}
         />
       )}
 
       {/* Folio Mobile -- a fixed, full-viewport overlay above the hero/tab
           bar, same level as ImageDetailsMobile/LightboxMobile (see header
           comment for why it's not nested in MobileScreen). */}
-      {folioOpen && <FolioMobile onClose={closeFolio} />}
+      {folioOpen && <FolioMobile onClose={closeFolio} onJump={jumpFromFolio} />}
 
       {/* Contact Sheet Mobile -- a fixed, full-viewport overlay above the
           hero/tab bar, same level as ImageDetailsMobile/LightboxMobile/
@@ -1169,7 +1489,7 @@ export default function AppMobile({ boot }) {
       )}
 
       {/* Contest entry (Contest Mobile Handoff.dc.html D3) -- a fixed, full-viewport
-          surface at z 70, above LightboxMobile's own sheet (66), because the lightbox is
+          surface at z 324, above LightboxMobile's own sheet (321), because the lightbox is
           one of the three places it opens from. See its own header comment for the
           always-a-confirm contract and the disclosed "/N max". */}
       {contestEntry && (
@@ -1184,8 +1504,8 @@ export default function AppMobile({ boot }) {
           entry points. The board's own Enter bar skips it: the contest is already known.
           `cmb-choosersheet` is the ONLY sheet on this screen that carries a class, and it
           is carrying a z-index: this one mounts while a viewer is up, so MobileSheet's
-          shared 30/31 put its scrim and slab BEHIND the opaque .lbm-root/.idm-root that
-          opened it and the chip read as dead. contest-mobile.css's rung (67/68) states the
+          shared 306/307 put its scrim and slab BEHIND the opaque .lbm-root/.idm-root that
+          opened it and the chip read as dead. contest-mobile.css's rung (322/323) states the
           whole phone ladder; the other three sheets here open over the app shell only and
           stay on the shared rung. */}
       <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
@@ -1224,17 +1544,19 @@ export default function AppMobile({ boot }) {
         )}
       </MobileSheet>
 
+      {/* the toast a bulk change leaves behind: what happened and, for ten seconds, Undo */}
+      <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
+
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
-        {/* THE ROTATE LINE WAS TRUE UNTIL 2026-09-06 and is not any more: the Loom now
-            opens a phone layout by itself on a phone, built for a narrow screen. Telling
-            the owner to turn the phone right before the button that gives him a portrait
-            tool was the sheet contradicting the app. The wide four-panel board is still
-            there and still wants landscape -- but only once he has asked for it, so that
-            is what this now says. */}
+        {/* THE ROTATE LINE IS GONE (Session Q, Q4). It was untrue on 2026-09-06, when the Loom began
+            opening a phone layout by itself on a phone, and it is doubly so now that the phone has a
+            landscape of its own: nothing here asks the owner to turn the phone. The wide four-panel
+            board is still one tap away in the Loom's own bar, and it opens by itself when the phone is
+            already sideways. */}
         <div className="glm-loom-note">
-          Weave shots into a video sequence. On a phone it opens a <b>board and reel</b> view
-          built for the narrow screen. The wide four-panel board is still one tap away —
-          tap <b>🖥 Desktop</b> in the Loom's own bar, and turn the phone to landscape for it.
+          Weave shots into a video sequence. On a phone held upright it opens a <b>board and reel</b>{" "}
+          view built for the narrow screen; held sideways it opens the wide four-panel board. Either
+          way the other view is one tap away in the Loom's own bar (<b>🖥 Desktop</b> or <b>Mobile view</b>).
         </div>
         <div className="glm-sheet-actions">
           <a className="glm-primary glm-primary-loom" href="/loom">Open The Loom</a>

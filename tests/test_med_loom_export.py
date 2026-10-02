@@ -412,3 +412,50 @@ def test_bundle_import_ignores_the_missing_manifest(tmp_path):
     assert back.status_code == 200
     assert d["project"]["name"] == "Bundle Test"
     assert d["thumbs"] == {"t1": "data"}
+
+
+def test_a_failed_export_says_what_ffmpeg_said_not_only_its_exit_code(tmp_path, monkeypatch):
+    """A refusal used to reach the export dialog as "ffmpeg exited 1" and nothing else,
+    though ffmpeg had printed the reason on stderr. The last few non-progress lines now
+    ride along (redacted like every other error string, and bounded); progress lines
+    never do, and the library's own path is not echoed back."""
+    import io as _io
+    import subprocess
+    import time
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
+    monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
+    monkeypatch.setattr(g, "probe_duration", lambda path: None)
+    seen = {}
+
+    class FailingProc:
+        def __init__(self, argv, kw):
+            seen["stdin"] = kw.get("stdin")
+            self.stderr = _io.StringIO(
+                "frame=1 time=00:00:01.00 bitrate=x\n"
+                "[mp4 @ 0x1] Could not find tag for codec h264 in "
+                + str(tmp_path / "videos" / "shot_v1.mp4") + "\n"
+                "Conversion failed!\n")
+
+        def wait(self):
+            return 1
+
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **k: FailingProc(argv, k) if argv and argv[0] == "ffmpeg"
+                        else subprocess.CompletedProcess(argv, 1))
+    cli = _video_client(tmp_path)
+    r = cli.post("/api/loom/export", json={"clips": [{"mid": "v1", "in": 0}],
+                                           "total_seconds": 1})
+    assert r.status_code == 200
+    for _ in range(100):
+        st = cli.get("/api/loom/export-status").get_json()
+        if st["status"] in ("failed", "done"):
+            break
+        time.sleep(0.05)
+    assert st["status"] == "failed"
+    assert st["error"].startswith("ffmpeg exited 1: ")
+    assert "Conversion failed!" in st["error"]
+    assert "time=00:00:01" not in st["error"], "a progress line is not a reason"
+    assert str(tmp_path) not in st["error"], "the host path must be redacted"
+    assert seen["stdin"] is subprocess.DEVNULL

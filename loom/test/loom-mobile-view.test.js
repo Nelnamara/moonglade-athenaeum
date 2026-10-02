@@ -75,16 +75,24 @@ describe("the Mobile-view toggle: a new, persisted, manual owner-preference swit
   });
 
   test("App() wires mobileUI/setMobileUI through useLoomView, keyed on the app's phone rule", () => {
-    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\)\);/);
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\{ landscapePhones: false \}\)\);/);
   });
 
-  test("a toggle chip lives in LoomV2's own .lv-top bar, reusing .lv-draft's exact visual pattern", () => {
-    const topBarMatch = src.match(/<div className="lv-top">[\s\S]*?<\/div>/);
-    assert.ok(topBarMatch, "expected to find the .lv-top toolbar's own JSX block");
-    assert.match(topBarMatch[0], /<label className=\{"lv-draft" \+ \(mobileUI \? " on" : ""\)\}/,
-      "expected the Mobile-view chip to reuse the .lv-draft checkbox-chip class, not invent a new visual language");
-    assert.match(topBarMatch[0], /checked=\{!!mobileUI\}/);
-    assert.match(topBarMatch[0], /onChange=\{\(e\) => setMobileUI\(e\.target\.checked\)\}/);
+  // Flipped 2026-09-29 (the Loom build to the Design Handoff, call 5: the top bar fits one row
+  // at desktop widths). The switch left the bar and became a row in the storyboards ▾ popover
+  // -- the same persisted, two-way checkbox, handed to ProjectSwitcher as its `extra` row.
+  test("the Mobile-view switch is a row in the storyboards popover, handed to LoomV2's ProjectSwitcher", () => {
+    const topStart = src.indexOf('<div className="lv-top">');
+    assert.ok(topStart > 0, "expected to find the .lv-top toolbar's own JSX block");
+    const sw = src.slice(topStart).match(/<ProjectSwitcher api=\{projectApi\}[\s\S]*?\)\} \/>/);
+    assert.ok(sw, "expected LoomV2's bar to mount ProjectSwitcher with an extra row");
+    assert.match(sw[0], /<label className=\{"sb-projrow" \+ \(mobileUI \? " on" : ""\)\}/);
+    assert.match(sw[0], /checked=\{!!mobileUI\}/);
+    assert.match(sw[0], /onChange=\{\(e\) => setMobileUI\(e\.target\.checked\)\}/);
+    assert.match(src, /function ProjectSwitcher\(\{ api, name, extra \}\)/);
+    assert.match(src, /<\/div>\r?\n\s*\{extra\}\r?\n\s*<\/div>/, "the popover renders the host's extra rows under + New / Duplicate");
+    assert.doesNotMatch(src, /<label className=\{"lv-draft" \+ \(mobileUI \? " on" : ""\)\}/,
+      "the Mobile-view chip is back in the bar itself");
   });
 
   test("LoomMobile carries its own reciprocal switch back to desktop (never a one-way trap)", () => {
@@ -880,8 +888,13 @@ describe("Credit safety: the drawer's own component-local poll vs. this incremen
     // WHEN it fires is the dep array, and that is all that is left here to read: an
     // unmounted <mg-generate-drawer> fires no event, so the toggle itself has to be the
     // trigger. Sliced to the resume effect rather than matched anywhere in the file.
-    const effect = src.slice(src.indexOf("cardsToResume(project, resumedRef.current)"));
-    assert.match(effect.slice(0, 200), /\}, \[activeId, mobileUI\]\);/);
+    // Session P: the scan is the NAMED function resumeInterrupted (the never-auto-render test
+    // roots it by name); the effect just calls it -- on the same two triggers.
+    const at = src.indexOf("const resumeInterrupted = () => {");
+    assert.ok(at >= 0, "the resume scan is resumeInterrupted");
+    const scan = src.slice(at, src.indexOf("\n  };", at));
+    assert.match(scan, /cardsToResume\(proj, resumedRef\.current\)/);
+    assert.match(src.slice(at), /useEffect\(\(\) => \{ resumeInterrupted\(\); \}, \[activeId, mobileUI\]\);/);
   });
 
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
@@ -990,6 +1003,13 @@ describe("Filter compare: genuine persistence onto the real shot/card data (no f
     const newCardMatch = src.match(/function newCard\(extra = \{\}\) \{[\s\S]*?\n\}/);
     assert.ok(newCardMatch, "expected to find newCard()");
     assert.doesNotMatch(newCardMatch[0], /\bfilter\b|\bfilterStrength\b|\bfilterAngle\b/,
+      "filter/filterStrength/filterAngle must stay optional card fields (read with a fallback), not required base-shape fields");
+    // Session P, Stage B1: newCard() wraps loom-core.js's newCardShape, where the default
+    // fields now live -- so the same check runs over them there.
+    const coreSrc = readFileSync(path.join(__dirname, "../src/loom-core.js"), "utf8").replace(/\r\n/g, "\n");
+    const shapeMatch = coreSrc.match(/export const newCardShape = \(id, extra = \{\}\) => \(\{[\s\S]*?\n\}\);/);
+    assert.ok(shapeMatch, "expected to find loom-core.js's newCardShape()");
+    assert.doesNotMatch(shapeMatch[0].replace(/\/\/.*$/gm, ""), /\bfilter\b|\bfilterStrength\b|\bfilterAngle\b/,
       "filter/filterStrength/filterAngle must stay optional card fields (read with a fallback), not required base-shape fields");
   });
 

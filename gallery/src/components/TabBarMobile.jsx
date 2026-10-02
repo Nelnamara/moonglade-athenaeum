@@ -11,7 +11,11 @@ import Icon from "../icons/Icons.jsx";
 
    Control's mark is the drawn laptop-cog since the 2026-09-05 Glyph Ledger (⚙
    before it) -- the Control Panel's own mark, shared with the command palette's
-   "Control Panel" row so both of the Panel's doors wear the same thing. */
+   "Control Panel" row so both of the Panel's doors wear the same thing.
+
+   SESSION Q, Q4: turned sideways this same nav becomes the 56 px left rail (styles/phone-landscape.css
+   -- icons only, so each button carries its name as an aria-label for a screen reader and for touch
+   hold-to-reveal). Nothing about the tabs themselves changes. */
 
 const TABS = [
   { key: "gallery", icon: "⛰", label: "Gallery" },
@@ -28,6 +32,7 @@ export default function TabBarMobile({ tab, setTab }) {
           type="button"
           className={"glm-navitem" + (tab === t.key ? " on" : "")}
           aria-current={tab === t.key ? "page" : undefined}
+          aria-label={t.label}
           onClick={() => setTab(t.key)}
         >
           <span className="glm-navicon" aria-hidden="true">{t.icon}</span>

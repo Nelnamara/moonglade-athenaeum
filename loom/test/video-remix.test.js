@@ -333,10 +333,13 @@ describe("host wiring source guards (no React harness in this suite)", () => {
     assert.doesNotMatch(app, /requestAgain[\s\S]{0,400}?apiPost\(/);
     const i = dock.indexOf("const prefillFromRun = useCallback(");
     const body = dock.slice(i, dock.indexOf("}, [g]);", i));
-    assert.match(body, /seed: opts && opts\.newSeed \? String\(Math\.floor\(Math\.random\(\)/);
+    // Session M: a run sent through the dock restores its template and its seed field; the
+    // row's own seed road below is the one every other picture still takes.
+    assert.match(body, /: opts && opts\.newSeed \? String\(Math\.floor\(Math\.random\(\)/);
     assert.match(body, /: \(row\.seed \|\| ""\)/, "without the option the row's own seed still wins");
-    // prompt/negative/frame/steps/cfg are still the recipe's, untouched by the re-roll
-    for (const f of [/prompt: row\.prompt_full/, /negative: row\.negative_prompt/,
+    // prompt/negative/frame/steps/cfg are still the recipe's, untouched by the re-roll (the
+    // prompt escaped when it has no run record, so it re-sends byte-identical: open call 3)
+    for (const f of [/escapeLiteral\(row\.prompt_full/, /negative: row\.negative_prompt/,
                      /steps: row\.steps/, /cfg: row\.cfg_scale/]) assert.match(body, f);
   });
 

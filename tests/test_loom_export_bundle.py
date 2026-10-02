@@ -131,6 +131,25 @@ def test_export_bundle_collects_every_reference_shape(tmp_path):
     assert names == {"project.json", "media/1.png", "media/2.png", "media/3.png", "media/4.png"}
 
 
+def test_export_bundle_carries_every_take_not_only_the_selected_one(tmp_path):
+    """Session P (review F17): a board with three takes per shot must restore elsewhere with
+    all three clips, or ★-selecting another take there plays nothing."""
+    (tmp_path / "videos").mkdir()
+    rows = []
+    for mid in ("501", "502", "503"):
+        (tmp_path / "videos" / "v_{}.mp4".format(mid)).write_bytes(b"clip " + mid.encode())
+        rows.append(_row(media_id=mid, filename="videos/v_{}.mp4".format(mid), is_video="1"))
+    cli = _authed_client(tmp_path, rows)
+    project = _project(acts=[{"id": "a1", "name": "Act 1", "cards": [{
+        "id": "c1", "resultMid": "502", "selectedTake": 2, "takeSeq": 3,
+        "takes": [{"n": 1, "mid": "501"}, {"n": 2, "mid": "502"}, {"n": 3, "mid": "503"}],
+        "openFrame": {}, "closeFrame": {}, "refs": []}]}])
+    r = _post_json(cli, "/api/loom/export-bundle", {"project": project, "thumbs": {}})
+    assert r.headers.get("X-Bundle-Missing-Count") == "0"
+    names = set(zipfile.ZipFile(io.BytesIO(r.data)).namelist())
+    assert {"media/501.mp4", "media/502.mp4", "media/503.mp4"} <= names
+
+
 def test_export_bundle_localhost_only(tmp_path):
     """An unauthenticated request is refused regardless of address -- checked FIRST,
     while `cli` is still anonymous (api_loom_export_bundle() has no extra
@@ -197,6 +216,22 @@ def test_reimporting_the_same_bundle_twice_is_a_noop_the_second_time(tmp_path):
     assert d2["media_added"] == 0
 
 
+def test_import_bundle_never_carries_a_render_in_flight(tmp_path):
+    """Session P (review F4/F17): a board exported mid-render imports settled."""
+    cli = _authed_client(tmp_path, [])
+    project = _project(acts=[{"id": "a1", "name": "Act 1", "cards": [
+        {"id": "c1", "status": "wip", "resultMid": "9", "pendingSubmitId": "s", "pendingTaskId": "t",
+         "pendingBoard": "b", "genStartedAt": 1, "supersededTasks": ["t0"], "openFrame": {}, "closeFrame": {}, "refs": []},
+        {"id": "c2", "status": "wip", "resultMid": "", "pendingSubmitId": "s2", "openFrame": {}, "closeFrame": {}, "refs": []},
+    ]}])
+    r = _post_zip(cli, "/api/loom/import-bundle", _make_bundle(project))
+    cards = r.get_json()["project"]["acts"][0]["cards"]
+    for c in cards:
+        for k in ("pendingTaskId", "pendingSubmitId", "pendingBoard", "genStartedAt", "supersededTasks"):
+            assert k not in c
+    assert [c["status"] for c in cards] == ["done", "error"]
+
+
 def test_import_bundle_rejects_a_zip_with_no_project_json(tmp_path):
     cli = _authed_client(tmp_path, [])
     mem = io.BytesIO()
@@ -225,3 +260,38 @@ def test_import_bundle_localhost_only(tmp_path):
     r = cli.post("/api/loom/import-bundle", data={"file": (io.BytesIO(zip_bytes), "b.zip")},
                  content_type="multipart/form-data", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 401
+
+
+def test_import_bundle_skips_every_entry_that_is_not_a_plain_picture_or_video(tmp_path):
+    """Red team 2026-10-01: the media loop trusted the zip's entry names. A bundle someone
+    hands you could carry media/x.html or .svg (served back from /full on the gallery's own
+    origin with live script: stored XSS as the owner), or on Windows a drive-relative stem
+    like "C:evil" that resolves outside the library. Only media/<id>.<picture|video ext>
+    with a plain id is stored; everything else is skipped unread and catalogs nothing."""
+    import io
+    import zipfile
+    from moonglade_gallery import create_app, save_catalog
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [])
+    cli = login_test_client(create_app(tmp_path))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("project.json", json.dumps({"project": {"name": "x", "acts": []}}))
+        z.writestr("media/990001.html", b"<script>alert(1)</script>")
+        z.writestr("media/990002.svg", b"<svg onload=alert(1)></svg>")
+        z.writestr("media/C:evil.png", b"x")
+        z.writestr("media/../../escape.png", b"x")
+        z.writestr("media/sub/990003.png", b"x")
+        z.writestr("media/990004.png", b"\x89PNG not really")
+    r = cli.post("/api/loom/import-bundle",
+                 data={"file": (io.BytesIO(buf.getvalue()), "b.zip")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200
+    stored = sorted(p.name for p in (tmp_path / "imported").iterdir())
+    assert stored == ["990004.png"], stored
+    assert not (tmp_path / "escape.png").exists() and not (tmp_path.parent / "escape.png").exists()
+    import sqlite3
+    con = sqlite3.connect(str(tmp_path / "catalog.db"))
+    mids = sorted(r[0] for r in con.execute("select media_id from catalog"))
+    con.close()
+    assert mids == ["990004"], mids

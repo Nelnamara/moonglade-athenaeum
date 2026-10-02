@@ -8,6 +8,8 @@ import ContestDetail from "./ContestDetail.jsx";
 import ContestMyEntries from "./ContestMyEntries.jsx";
 import ContestPicker from "./ContestPicker.jsx";
 import ContestConfirm from "./ContestConfirm.jsx";
+import ContestRecordWin from "./ContestRecordWin.jsx";
+import { defaultContestId } from "../lib/contestWinCore.js";
 
 /* Contests overlay — ported from the Frontend Gallery DC's ovContests slab
    (lines ~601-645): one official contest, a grid of community ones. Real
@@ -59,6 +61,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
   const [detail, setDetail] = useState(null);     // the contest whose detail is open
   const [picking, setPicking] = useState(null);   // the contest we are picking art for
   const [entering, setEntering] = useState(null); // {contest, art} -> the confirm
+  const [recording, setRecording] = useState(false); // E4 "Record a win" (the checked fallback)
 
   // A card no longer links out; it opens the in-app detail (the DC's A annotation).
   const openDetail = (c) => { setDetail(c); setTab("contests"); };
@@ -103,7 +106,9 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
     <>
       <div className="mgv-scrim" onClick={onClose} />
       <div className="mgv-host">
-        <div className="mgv-slab mgct-slab" role="dialog" aria-label="Contests">
+        {/* mgv-steady (overlays.css): one size through loading, both tabs and the detail, so
+            nothing moves under the pointer (owner walk 2026-09-29). */}
+        <div className="mgv-slab mgct-slab mgv-steady" role="dialog" aria-label="Contests">
           {detail ? (
             <ContestDetail contest={detail} mineRow={entriesFor(detail)}
               onBack={() => setDetail(null)} onClose={onClose}
@@ -127,7 +132,8 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
           {tab === "mine" && (
             <ContestMyEntries rows={mineRows} loaded={mine !== null || mineErr !== null}
               syncing={syncing} err={mineErr}
-              onOpen={openFromRow} onBrowse={() => setTab("contests")} />
+              onOpen={openFromRow} onBrowse={() => setTab("contests")}
+              onRecord={() => setRecording(true)} />
           )}
 
           {tab === "contests" && !d && !err && <div className="mgh-loading">loading live contests…</div>}
@@ -275,6 +281,13 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
             setEntering({ contest: picking, art });
             setPicking(null);
           }} />
+      )}
+
+      {/* E4 -- record a win, the fallback: paste the link, press Check. A verified win
+          re-pulls My entries so the row turns gold at once. */}
+      {recording && (
+        <ContestRecordWin rows={mineRows} initialContestId={defaultContestId(mineRows)}
+          onClose={() => setRecording(false)} onDone={() => reloadMine()} />
       )}
 
       {/* D -- the always-confirm. A successful entry re-pulls My entries so the tab,

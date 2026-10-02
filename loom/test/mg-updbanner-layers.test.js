@@ -11,7 +11,7 @@ import path from "node:path";
    the phone stage, `.sb-root`, the wizard. `.sb-root` was the Loom's whole answer -- and it
    is a padding on an ordinary in-flow div, while the Loom's REAL shells (`.lv-overlay` on the
    desktop, `.lm-root` on the phone) are `position:fixed; inset:0` layers pinned to the
-   viewport. No ancestor's padding can move a fixed layer, so the z-509 strip painted over
+   viewport. No ancestor's padding can move a fixed layer, so the strip (z 509 then, 510 now) painted over
    the Loom's top bar and the phone Loom's only "< Gallery" link, and took their clicks with
    it (the expanded strip is not pointer-events:none). The full-screen viewer `.lbx` was
    covered the same way.
@@ -25,6 +25,11 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STYLES_DIR = path.join(__dirname, "../../gallery/src/styles");
+/* The main sheet sits one level up, beside the styles/ folder, and holds two fixed full-screen
+   roots of its own: the desktop details page (.detail-wrap) and the delete dialog's scrim
+   (.lb). This test read only styles/ until 2026-09-28, so the strip covered the details
+   page's Back bar with every check here green. */
+const MAIN_SHEET = path.join(__dirname, "../../gallery/src/styles.css");
 const LOOM_JSX = path.join(__dirname, "../master-storyboard.jsx");
 const read = (p) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 
@@ -35,7 +40,7 @@ const EXEMPT = new Map([
     "z-index 2, pointer-events:none -- a decorative bottom gradient that must reach the " +
     "viewport edge. It covers no control and can eat no click."],
   [".ach-m2",
-    "z-index 520, ABOVE the strip on purpose -- an earned achievement owns the whole screen " +
+    "z-index 519, ABOVE the strip on purpose -- an earned achievement owns the whole screen " +
     "for its few seconds, the strip included."],
 ]);
 
@@ -81,7 +86,7 @@ function allSheets() {
     .filter((f) => f.endsWith(".css"))
     .sort()
     .map((f) => ({ name: `styles/${f}`, css: read(path.join(STYLES_DIR, f)) }));
-  return sheets.concat(loomStylesets());
+  return [{ name: "styles.css", css: read(MAIN_SHEET) }, ...sheets, ...loomStylesets()];
 }
 
 /* Every fixed full-screen layer root in the app, as {selector -> {sheet, z}}. */
@@ -129,7 +134,7 @@ const STRIP_Z = (() => {
 
 describe("the update strip and the app's fixed full-screen layers", () => {
   test("the strip's own rung is where the rest of this test reasons from", () => {
-    assert.equal(STRIP_Z, 509, "the strip sits at 509; a move here changes every verdict below");
+    assert.equal(STRIP_Z, 510, "the strip sits at 510 (the ambient band's floor, under the toasts' 511); a move here changes every verdict below");
   });
 
   test("every fixed inset:0 layer under the strip is pushed down by it", () => {
@@ -161,7 +166,7 @@ describe("the update strip and the app's fixed full-screen layers", () => {
       assert.ok(roots.has(sel), `${sel} is exempted but is no longer a fixed inset:0 layer`);
       assert.ok(why.length > 40, `${sel}'s exemption must say why, not just name it`);
     }
-    assert.ok(EXEMPT.get(".ach-m2").includes("520"),
+    assert.ok(EXEMPT.get(".ach-m2").includes("519"),
       "the achievement modal is exempt because it deliberately outranks the strip");
   });
 
@@ -174,6 +179,22 @@ describe("the update strip and the app's fixed full-screen layers", () => {
         `${sel} must start at the strip's bottom edge -- it is the shell's own top bar ` +
         "(the phone Loom's only '< Gallery' link is inside .lm-root) and the strip takes clicks");
     }
+  });
+
+  /* The desktop details page: the one pushed layer that states its own height (100dvh, drift
+     122), and a stated height beats bottom:0 -- so the offset alone slides it off the bottom
+     by exactly the strip, its last action row with it. Named, like the three above, so the
+     sweep cannot be satisfied by the offset alone. */
+  test("the desktop details page starts under the strip and gives the strip's height back", () => {
+    const offset = offsetSelectors();
+    assert.ok(offset.has(".detail-wrap"), ".detail-wrap must start at the strip's bottom edge");
+    assert.ok(offset.has(".lb"), "the delete dialog's scrim is pushed like every other scrim");
+    const css = stripComments(read(path.join(STYLES_DIR, "notify.css")));
+    const decls = [...rules(css)]
+      .filter(({ sel }) => sel.split(",").some((s) => s.trim() === "html.mg-updbanner-on .detail-wrap"))
+      .map(({ decl }) => flat(decl)).join(";");
+    assert.match(decls, /height:calc\(100dvh-var\(--mg-updbanner-h,0px\)\)/,
+      "the pushed details page must be 100dvh minus the strip, or its foot runs off the screen");
   });
 
   /* The rule that made .sb-root's padding useless, stated once so it cannot be re-learned the

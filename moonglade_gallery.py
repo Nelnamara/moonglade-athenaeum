@@ -18,6 +18,8 @@ Usage:
 
 import argparse
 import csv
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -32,6 +34,7 @@ from pathlib import Path
 
 import moonglade_assets
 import moonglade_container
+import moonglade_contest_wins as contest_wins
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -422,6 +425,37 @@ _MIGRATIONS = [
     # VIDEO ROW REPAIR (2026-09-26) -- a data statement, not DDL; see _VIDEO_ROW_REPAIR_SQL.
     # Last, so every column it reads (is_video, video_model) already exists.
     _VIDEO_ROW_REPAIR_SQL,
+    # CURATION (Session N, 2026-09-29) -- two NEW tables, no catalog column and no rewrite of
+    # any existing row, so an existing library upgrades in place with everything it holds
+    # untouched. They are tables of their own, and not columns on `catalog`, for the same
+    # reason `catalog_repairs` is: every re-pull and --update rewrites catalog rows through
+    # _UPSERT, and a personal tag or a saved query living on that row would be at the mercy of
+    # a writer that does not know it exists. Nothing here is ever sent to PixAI.
+    #
+    # personal_meta: the owner's own layer over a picture -- tags (comma-joined, lowercase,
+    # hyphenated), a keeper|reject mark, a note. Keyed by media_id and NOT a foreign key: a
+    # trash purge deletes the catalog row and a restore puts it back, and the layer must be
+    # waiting when it does. A row whose three fields are all empty is deleted, never stored.
+    "CREATE TABLE IF NOT EXISTS personal_meta ("
+    "media_id TEXT PRIMARY KEY, tags TEXT NOT NULL DEFAULT '', "
+    "mark TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', "
+    "updated_at TEXT NOT NULL DEFAULT '')",
+    # smart_collections: a saved SEARCH, never a membership list (N1). The picture set is
+    # computed from `query` every time the collection is opened, so a rating, tag or mark
+    # moves a picture in or out live and there is nothing here to go stale.
+    "CREATE TABLE IF NOT EXISTS smart_collections ("
+    "name TEXT PRIMARY KEY, query TEXT NOT NULL DEFAULT '', "
+    "created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
+    # MANUAL ORDER (Session P, P6, 2026-09-29) -- a NEW table, no catalog column and no rewrite
+    # of any row, so an existing library gains an empty table and keeps every row byte for
+    # byte. Membership stays the comma-joined `collections` label (add_to_collection writes
+    # nothing here); `position` lives "on the membership" as one row per (collection,
+    # picture). ordered_members() reads it; a row whose picture has left the collection is
+    # ignored until the next order write prunes it. Hand-picked collections only: a smart
+    # collection's membership is live, so it has no order to keep. Local; never PixAI.
+    "CREATE TABLE IF NOT EXISTS collection_order ("
+    "name TEXT NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL, "
+    "PRIMARY KEY (name, media_id))",
 ]
 
 # ---------------------------------------------------------------------------
@@ -491,15 +525,31 @@ def migrate(db_path, force=False):
         if key in _MIGRATED and not force:   # another thread got here first
             return
         con = sqlite3.connect(str(db_path))
+        busy = False
         try:
             for sql in _MIGRATIONS:
                 try:
                     con.execute(sql)
                     con.commit()
-                except sqlite3.OperationalError:
-                    pass  # column/index already exists
+                except sqlite3.OperationalError as e:
+                    # "duplicate column" / "already exists" is the re-run's success case. A
+                    # LOCKED or BUSY catalog (a --sync holding its write lock past the busy
+                    # timeout) is not: stop at once -- every later statement would wait out the
+                    # same timeout -- and leave the catalog UN-memoized, so the next access
+                    # runs the migration again instead of the new tables staying missing for
+                    # the life of the process (red team 2026-10-01).
+                    msg = str(e).lower()
+                    if "locked" in msg or "busy" in msg:
+                        busy = True
+                        break
         finally:
             con.close()
+        if busy:
+            import logging
+            logging.getLogger(__name__).warning(
+                "catalog migration deferred: %s is locked; it will run again on the "
+                "next catalog access", db_path)
+            return
         _MIGRATED.add(key)
 
 
@@ -518,6 +568,20 @@ def catalog(db_path):
     migrate(db_path)
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
+    # mg_loom_render(media_id) -> 1|0: is this picture a render the Loom made? Only the
+    # `type:loom` search operator (and its Storage-bar segment) calls it; nothing runs it
+    # unless asked, and it reads the Loom's boards from disk, never the network.
+    # The set is read ONCE per connection, on the first row that asks: a search calls this for
+    # every row it looks at, and a directory listing per row would cost more than the search.
+    _loom_root = Path(db_path).parent
+    _loom_seen = {}
+
+    def _is_loom_render(mid):
+        ids = _loom_seen.get("ids")
+        if ids is None:
+            ids = _loom_seen["ids"] = loom_render_ids(_loom_root)
+        return 1 if str(mid or "") in ids else 0
+    con.create_function("mg_loom_render", 1, _is_loom_render)
     try:
         yield con
     finally:
@@ -627,6 +691,23 @@ _SORT_SQL = {
 }
 _DEFAULT_SORT_SQL = "created_at DESC"
 
+# "manual" (Session P, P6): a hand-picked collection's own order -- its saved positions, then
+# the pictures added since, OLDEST first (ruling 9), the same order ordered_members() gives.
+# Offered only on a hand-picked collection's view; anywhere else (no collection, or a smart one,
+# which _expand_smart has already turned into a search) it falls back to the default sort.
+_MANUAL_SORT_SQL = ("(SELECT o.position FROM collection_order o WHERE o.name = ? AND o.media_id = catalog.media_id) IS NULL, "
+                    "(SELECT o.position FROM collection_order o WHERE o.name = ? AND o.media_id = catalog.media_id), "
+                    "created_at ASC, media_id ASC")
+
+
+def _order_sql(sort, collection=""):
+    """(ORDER BY text, its parameters) for a sort key. Only "manual" takes parameters."""
+    if sort == "manual":
+        if collection:
+            return _MANUAL_SORT_SQL, [collection, collection]
+        return _DEFAULT_SORT_SQL, []
+    return _SORT_SQL.get(sort, _DEFAULT_SORT_SQL), []
+
 
 def _like_pattern(term):
     r"""Translate a user search term into a SQL LIKE pattern.
@@ -686,8 +767,13 @@ def _like_escape(s):
 #   date       created_at prefix (2026 / 2026-07 / 2026-07-04) or a </>/<=/>=
 #              prefix-compare (created:<2026-07 = strictly before July)
 #   collection exact-token match in the comma-joined list, same as the dropdown
+#   tag        the art_tags substring OR a whole personal tag (Session N3)
+#   note       substring of the personal note (Session N3)
 #   source     the dropdown's semantics (online = blank-or-online, deleted =
 #              deleted_remote flag), else substring on the source column
+#   aspect     width/height: W:H (within 3 percent), square, portrait, landscape, tall,
+#              wide, >N, <N (Session N7)
+#   type       image | video | loom, a partition of the library (Session N6)
 #
 # Deliberately NOT operators (one line each):
 #   url             expiring PixAI CDN link -- nothing sane to filter on
@@ -707,8 +793,13 @@ _SEARCH_OPS = {
     "negative": ("text", "negative_prompt"), "negative_prompt": ("text", "negative_prompt"),
     "model":    ("text", "model_name"),      "model_name": ("text", "model_name"),
     "lora":     ("text", "loras"),           "loras": ("text", "loras"),
-    "tag":      ("text", "art_tags"),        "tags": ("text", "art_tags"),
+    # tag: reads BOTH tag stores (Session N3): PixAI's published art tags, substring as it
+    # always did, and the owner's own personal tags, whole-tag. `art_tags:` keeps the
+    # PixAI-only reading for anyone who needs it. See _operator_clause's "tag" kind.
+    "tag":      ("tag", "art_tags"),         "tags": ("tag", "art_tags"),
     "art_tags": ("text", "art_tags"),
+    # note: reads the owner's personal note (Session N3), substring, case-insensitive.
+    "note":     ("note", None),              "notes": ("note", None),
     "title":    ("text", "title"),
     "sampler":  ("text", "sampler"),
     "filename": ("text", "filename"),
@@ -738,6 +829,14 @@ _SEARCH_OPS = {
     "collection": ("collection", "collections"),
     "collections": ("collection", "collections"),
     "source":   ("source", "source"),
+    # ar: the picture's shape, read from the width and height already on every row (Session
+    # N7). Evaluated HERE, in SQL, because the grid is paginated: a client-side filter would
+    # only ever see the page it holds. See _aspect_clause for the accepted values.
+    "ar":       ("aspect", None),            "aspect": ("aspect", None),
+    # type: which kind of picture -- image, video or loom (Session N6). The three PARTITION the
+    # library (a Loom render is a loom, whether it is a clip or a still), which is what lets
+    # the Storage bars' segments add up to the total and each segment's click land on exactly it.
+    "type":     ("type", None),
 }
 
 # Tokens: quoted runs group (model:"Ether Real" / "night elf" are ONE token each);
@@ -757,6 +856,378 @@ def _unquote(s):
     return s
 
 
+def _personal_tag_pattern(value):
+    r"""LIKE pattern matching ONE whole personal tag inside personal_meta's `,a,b,` list.
+    The value is folded the way tags are stored (lowercase, whitespace and underscores to
+    hyphens) so `tag:"Pose Study"` finds pose-study; `*` and `?` keep their wildcard meaning."""
+    t = re.sub(r"[\s_]+", "-", str(value).strip().lower())
+    t = t.replace("\\", "\\\\").replace("%", "\\%")
+    return "%," + t.replace("*", "%").replace("?", "_") + ",%"
+
+
+# A leading `-` negates a search token (Session N3: `-reject`, `-tag:x`, `-blurry`). A `-` in
+# front of a bare number stays what it always was, literal text -- "-5" is a prompt fragment.
+_SEARCH_NEG_NUMBER_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+_SEARCH_STAR_RE = re.compile("^★([0-5])\\+?$")
+
+
+def _personal_mark_clause(mark):
+    return ("EXISTS (SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+            "AND pm.mark = ?)", [mark])
+
+
+def _search_token_clause(tok):
+    """One whitespace-delimited search token -> (sql, params). The token is already stripped
+    of any leading `-` negation by the caller."""
+    # the bare marks are operators on their own (an UNQUOTED word: "reject" in quotes is a
+    # phrase and stays a prompt search)
+    if tok.lower() in ("keeper", "reject"):
+        return _personal_mark_clause(tok.lower())
+    m = _SEARCH_STAR_RE.match(tok)
+    if m:
+        # star-N-plus (and star-N): that many stars or more, unrated counting as 0 -- the
+        # Min-rating dropdown's own semantics
+        return ("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?", [int(m.group(1))])
+    if ":" in tok and not tok.startswith(":"):
+        key, _, raw = tok.partition(":")
+        if _SEARCH_KEY_RE.fullmatch(key):
+            hit = _operator_clause(key, _unquote(raw))
+            if hit:
+                return hit
+    term = _unquote(tok)
+    if term.isdigit() and len(term) >= 8:
+        return ("(task_id = ? OR media_id = ?)", [term, term])
+    like = _like_pattern(term)
+    return ("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+            "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')", [like, like])
+
+
+# ---- ar: the aspect operator (Session N7) -------------------------------------------------
+# The picture's shape as width / height. The width and height columns are TEXT and blank on
+# old imports, so the ratio is NULL for those rows; every comparison below is wrapped in
+# COALESCE(.., 0) so an unmeasured picture matches no ar: filter and, because NOT of a false
+# is true, still shows up under `-ar:tall` (the unknown is not "tall").
+#
+#   ar:W:H        within 3 percent of W/H       ar:3:2  ar:9:16  ar:1.91:1
+#   ar:square     0.97 to 1.03
+#   ar:portrait   below 1                        ar:landscape   above 1
+#   ar:tall       9:16 or taller                 ar:wide        16:9 or wider
+#   ar:>N ar:<N   the ratio itself               ar:>2  ar:<0.5
+#
+# The bounds are the design page's own (Curation Handoff, N7): "tall" is 9/16 with 0.005 to
+# spare and "wide" 16/9 with 0.01 to spare, so an exact 576x1024 and an exact 1920x1080
+# count without a rounding argument. Values are bound parameters; only the fixed expression is interpolated.
+_AR_EXPR = ("(CAST(COALESCE(NULLIF(width,''),'0') AS REAL) / "
+            "NULLIF(CAST(COALESCE(NULLIF(height,''),'0') AS REAL), 0))")
+AR_SQUARE = (0.97, 1.03)
+AR_TALL_MAX = 9 / 16 + 0.005
+AR_WIDE_MIN = 16 / 9 - 0.01
+AR_TOLERANCE = 0.03
+_AR_WH_RE = re.compile(r"^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$")
+_AR_CMP_RE = re.compile(r"^([<>])(\d*\.?\d+)$")
+
+
+def _aspect_clause(value):
+    """`ar:` value -> (sql, params), or None when the value is not one of the accepted forms
+    (the token then degrades to a plain prompt search, like any malformed operator)."""
+    v = str(value).strip().lower()
+    e = _AR_EXPR
+    if v == "square":
+        return ("COALESCE({0} >= ? AND {0} <= ?, 0)".format(e), [AR_SQUARE[0], AR_SQUARE[1]])
+    if v == "portrait":
+        return ("COALESCE({} < 1, 0)".format(e), [])
+    if v == "landscape":
+        return ("COALESCE({} > 1, 0)".format(e), [])
+    if v == "tall":
+        return ("COALESCE({} <= ?, 0)".format(e), [AR_TALL_MAX])
+    if v == "wide":
+        return ("COALESCE({} >= ?, 0)".format(e), [AR_WIDE_MIN])
+    m = _AR_CMP_RE.match(v)
+    if m:
+        return ("COALESCE({} {} ?, 0)".format(e, m.group(1)), [float(m.group(2))])
+    m = _AR_WH_RE.match(v)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if w <= 0 or h <= 0:
+            return None
+        n = w / h
+        # within 3 percent of n, either side; the epsilon keeps an exact 3 percent in
+        return ("COALESCE(ABS({} - ?) <= ?, 0)".format(e), [n, n * AR_TOLERANCE + 1e-9])
+    return None
+
+
+# ---- type: image | video | loom (Session N6) -----------------------------------------------
+def _type_clause(value):
+    v = str(value).strip().lower()
+    if v == "loom":
+        return ("mg_loom_render(media_id) = 1", [])
+    if v == "video":
+        return ("(is_video = '1' AND mg_loom_render(media_id) = 0)", [])
+    if v == "image":
+        return ("(COALESCE(is_video,'') != '1' AND mg_loom_render(media_id) = 0)", [])
+    return None
+
+
+_LOOM_IDS_CACHE = {}          # str(out_dir) -> (signature, frozenset of media ids)
+
+
+def _loom_board_files(out_dir):
+    """Every saved Loom board on disk: this install's per-account folders and the legacy shared
+    layer, both under loom/kv, keyed `storyboard:v2:proj:<id>` (the Loom's own PPRE) or the
+    legacy single-project key. Read-only; a missing folder is simply no boards."""
+    from urllib.parse import unquote
+    kv = Path(out_dir) / "loom" / "kv"
+    out = []
+    try:
+        entries = list(kv.iterdir())
+    except OSError:
+        return out
+    for p in entries:
+        try:
+            files = list(p.iterdir()) if p.is_dir() else [p]
+        except OSError:
+            continue
+        for f in files:
+            if f.suffix != ".json":
+                continue
+            key = unquote(f.stem)
+            if key.startswith("storyboard:v2:proj:") or key == "storyboard:v2:project":
+                out.append(f)
+    return out
+
+
+def loom_render_ids(out_dir):
+    """The media ids the Loom rendered: every board's shot result and every re-roll attempt it
+    kept, minus footage the owner imported into a shot (that is theirs, not a render). This is
+    what "Loom renders" means in the Storage bars and `type:loom`.
+
+    It reads the boards straight off disk -- nothing is written and no network is touched -- and
+    remembers the answer until a board's file moves (path, mtime and size are the key), so a
+    search that runs it per row costs one directory listing, not a re-parse."""
+    files = _loom_board_files(out_dir)
+    sig = []
+    for f in files:
+        try:
+            st = f.stat()
+            sig.append((str(f), st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    sig = tuple(sorted(sig))
+    hit = _LOOM_IDS_CACHE.get(str(out_dir))
+    if hit and hit[0] == sig:
+        return hit[1]
+    ids = set()
+    for f in files:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(data, str):            # the Loom stores a project as a JSON string
+                data = json.loads(data)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for act in data.get("acts") or []:
+            for card in (act or {}).get("cards") or []:
+                if not isinstance(card, dict) or card.get("imported"):
+                    continue
+                if card.get("resultMid"):
+                    ids.add(str(card["resultMid"]))
+                for a in card.get("attempts") or []:
+                    if isinstance(a, dict) and a.get("media_id"):
+                        ids.add(str(a["media_id"]))
+    frozen = frozenset(ids)
+    _LOOM_IDS_CACHE[str(out_dir)] = (sig, frozen)
+    return frozen
+
+
+# ---------------------------------------------------------------------------
+# THE LOOM'S MUSIC BED AND EDL EXPORT (Session P, Stage B1: NOTES P3/P4; BUILD-w5-p §5.1/§5.5;
+# rulings 6-8 and 15; review F18/F19/N2). Pure helpers here; the routes are in create_app.
+#
+# A bed is one local audio file per storyboard, stored content-addressed at
+# out_dir/loom/_beds/<account key>/<sha1>.<ext> -- never uploaded, never sent to PixAI, and
+# never deleted automatically (an explicit, confirmed sweep of beds no board of the account
+# references is offered instead). Its name is the sha1 of its bytes, so a duplicated board
+# shares it and an imported bundle's bed is RE-HASHED on arrival, never trusted by name.
+# ---------------------------------------------------------------------------
+
+LOOM_BED_MAX_BYTES = 50 * 1024 * 1024
+# The multipart envelope around the file (boundaries, headers, the csrf and board fields). A
+# request whose declared length is over the cap plus this is refused before a byte is read.
+LOOM_BED_FORM_SLACK = 64 * 1024
+LOOM_BED_FILE_RE = re.compile(r"^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$")
+# A bundle import stores at most this many beds (the one its board names), each under the cap
+# above -- so one import writes at most LOOM_BED_MAX_BYTES of beds (spend review S5).
+LOOM_BUNDLE_MAX_BEDS = 1
+LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
+                  "ogg": "audio/ogg", "flac": "audio/flac"}
+# A bed added in the last few minutes may belong to a board whose save has not landed yet, so
+# the unused list never offers it (the sweep re-checks the same rule).
+LOOM_BED_UNUSED_GRACE_S = 10 * 60
+# A bed upload's or a bundle import's temp file (.upload-*.part / .import-*.part) that a crash
+# left in _beds/<account>/ is swept at the next start once it is this old (spend review N5):
+# the unused-bed list and its sweep only ever see finished, content-hashed names.
+LOOM_BED_TEMP_SWEEP_AGE_S = 3600
+# THE EDL ZIP'S NAMES -- the same patterns as loom/src/loom-edl-core.js's EDL_CLIP_FILE_RE and
+# EDL_BED_NAME_RE (tests/test_loom_p_routes.py compares the two sources).
+LOOM_EDL_CLIP_RE = re.compile(r"^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$")
+LOOM_EDL_BED_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$")
+LOOM_MEDIA_ID_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})$")
+# A bundle's media entry: exactly media/<id><picture or video extension>, nothing else; the id
+# is letters, digits, '_' and '-' only (no separator, drive letter, colon or dot).
+# The name inside a zip is the sender's to choose, so it is never trusted as a path: anything
+# else (another extension such as .html/.svg, a separator, a drive letter, "..") is skipped
+# unread (red team 2026-10-01). Each entry is copied under this cap.
+LOOM_BUNDLE_MEDIA_RE = re.compile(
+    r"^media/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.(png|jpg|jpeg|webp|gif|avif|mp4|webm|mov|mkv|m4v)$")
+LOOM_BUNDLE_MEDIA_MAX_BYTES = 1024 * 1024 * 1024
+LOOM_EDL_MAX_EDL_CHARS = 1024 * 1024
+LOOM_EDL_MAX_CSV_CHARS = 4 * 1024 * 1024
+LOOM_EDL_MAX_CLIPS = 2000
+LOOM_EXPORT_SWEEP_AGE_S = 3600
+
+# THE CONTINUITY RIBBON'S FRAMES (Session P, P9; review F18). GET /api/loom/frame extracts ONE
+# small still from a local clip -- ffmpeg on this machine, never an upload, never PixAI -- and
+# keeps it in out_dir/loom/_frames/ as <mid>_<frame>.png, the time quantised to a 24 fps frame
+# so a trim dragged across a second makes at most 24 files, not one per float. The cache is
+# capped by count and by bytes, least-recently-used first, swept on every write; only files of
+# exactly this name shape are ever swept (the ✂ splice's own <mid>_last.png is not).
+LOOM_FRAME_FPS = 24
+LOOM_FRAME_WIDTH = 160
+LOOM_FRAME_MAX_SECONDS = 6 * 3600
+LOOM_FRAME_CACHE_MAX_FILES = 600
+LOOM_FRAME_CACHE_MAX_BYTES = 64 * 1024 * 1024
+LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7})\.png$")
+
+# The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
+LOOM_BED_FADE_IN = 2.0
+LOOM_BED_FADE_OUT = 3.0
+LOOM_BED_DUCK_DB = -12
+
+
+def sniff_audio_ext(head):
+    """The audio type of a file from its first bytes -- the magic, never the file name.
+    mp3 (an ID3 tag or an MPEG layer I-III frame sync), wav (RIFF/WAVE), m4a (an ISO-BMFF
+    ftyp box of an audio brand), aac (ADTS), ogg (OggS), flac (fLaC). None for anything else,
+    a video mp4 included."""
+    b = bytes(head or b"")
+    if len(b) < 4:
+        return None
+    if b[:4] == b"fLaC":
+        return "flac"
+    if b[:4] == b"OggS":
+        return "ogg"
+    if b[:4] == b"RIFF" and b[8:12] == b"WAVE":
+        return "wav"
+    if b[:3] == b"ID3":
+        return "mp3"
+    if len(b) >= 12 and b[4:8] == b"ftyp":
+        try:
+            size = int.from_bytes(b[:4], "big")
+        except ValueError:
+            size = 0
+        box = b[8:min(len(b), max(16, size))]
+        brands = {box[i:i + 4] for i in range(0, len(box) - 3, 4)}
+        if brands & {b"M4A ", b"M4B ", b"M4P ", b"F4A ", b"F4B "}:
+            return "m4a"
+        return None
+    if b[0] == 0xFF and (b[1] & 0xF0) == 0xF0 and ((b[1] >> 1) & 3) == 0:
+        return "aac"                        # ADTS: 12-bit sync, layer 00
+    if b[0] == 0xFF and (b[1] & 0xE0) == 0xE0 and ((b[1] >> 1) & 3) in (1, 2, 3):
+        return "mp3"                        # MPEG audio frame sync, layer I-III
+    return None
+
+
+def _unlink_quiet(path):
+    """Remove a file if it is there; a missing file or a held handle is not an error (the
+    export sweep collects what a Windows handle kept)."""
+    try:
+        os.unlink(str(path))
+    except OSError:
+        pass
+
+
+def loom_edl_zip_stem(name):
+    """The export's file stem: the board's name kept to [A-Za-z0-9 _.-], 64 characters at
+    most, never empty and never starting with a dot (review F19: it goes into
+    Content-Disposition and the zip's entry names)."""
+    s = re.sub(r"[^A-Za-z0-9 _.-]", "", str(name or ""))[:64].strip().lstrip(".").strip()
+    return s or "storyboard"
+
+
+def loom_board_beds(projects):
+    """The bed files a list of parsed boards references (project.bed.file), valid names only."""
+    out = set()
+    for p in projects or []:
+        bed = p.get("bed") if isinstance(p, dict) else None
+        f = str((bed or {}).get("file") or "") if isinstance(bed, dict) else ""
+        if LOOM_BED_FILE_RE.match(f):
+            out.add(f)
+    return out
+
+
+def loom_bed_windows(spans, own_audio, bed_len=None):
+    """Where the bed ducks: [(start, end)] in cut seconds, one per run of consecutive shots
+    with their own audio, clipped to the bed's length. `spans` and `own_audio` are per
+    segment, in cut order (the twin of loom-bed-core.js's bedPlan windows)."""
+    out, at = [], 0.0
+    for span, own in zip(spans or [], own_audio or []):
+        a, b = at, at + max(0.0, float(span or 0))
+        at = b
+        if not own:
+            continue
+        if bed_len is not None:
+            b = min(b, float(bed_len))
+        if b <= a:
+            continue
+        if out and abs(out[-1][1] - a) < 1e-9:
+            out[-1] = (out[-1][0], b)
+        else:
+            out.append((a, b))
+    return out
+
+
+def loom_bed_audio_graph(bed_idx, db, cut_len, bed_dur=None, windows=(), cut_label="acut",
+                         out_label="aout"):
+    """The ffmpeg filter text that mixes a music bed under the Loom's local cut (⇧ Render),
+    by the page's rules -- the server's twin of loom-bed-core.js, which Play uses:
+      level `db` (−24…0), −12 dB more inside each duck window, a 2 s in-fade and a 3 s
+      out-fade, the bed cut to the cut (atrim) and ending with its out-fade there; a shorter
+      bed ends where it ends, with its own out-fade, and never loops.
+    `bed_idx` is the bed's ffmpeg input index. With `cut_label` (the concatenated shots'
+    audio) the two are summed by amix without normalising, so the shots keep their level;
+    with cut_label=None the bed IS the cut's audio track. Returns filter chains joined by ';'.
+    Pure: tests/test_loom_p_routes.py pins the text."""
+    cut_len = max(0.0, float(cut_len or 0))
+    try:
+        bd = float(bed_dur) if bed_dur not in (None, "") else None
+    except (TypeError, ValueError):
+        bd = None
+    bed_len = min(bd, cut_len) if bd and bd > 0 else cut_len
+    try:
+        level = int(round(float(db)))
+    except (TypeError, ValueError):
+        level = -8
+    level = max(-24, min(0, level))
+    fin = min(LOOM_BED_FADE_IN, bed_len / 2.0)
+    fout = min(LOOM_BED_FADE_OUT, bed_len / 2.0)
+    chain = ["atrim=end=%.3f" % bed_len, "asetpts=PTS-STARTPTS",
+             "aformat=sample_rates=48000:channel_layouts=stereo", "volume=%ddB" % level]
+    wins = [(a, min(b, bed_len)) for (a, b) in (windows or ()) if min(b, bed_len) > a]
+    if wins:
+        chain.append("volume=%ddB:enable='%s'" % (
+            LOOM_BED_DUCK_DB, "+".join("between(t,%.3f,%.3f)" % (a, b) for (a, b) in wins)))
+    chain.append("afade=t=in:st=0:d=%.3f" % fin)
+    chain.append("afade=t=out:st=%.3f:d=%.3f" % (max(0.0, bed_len - fout), fout))
+    if cut_label is None:
+        return "[%d:a]%s[%s]" % (bed_idx, ",".join(chain), out_label)
+    return ";".join([
+        "[%d:a]%s[bed]" % (bed_idx, ",".join(chain)),
+        "[%s]aformat=sample_rates=48000:channel_layouts=stereo[acutf]" % cut_label,
+        "[acutf][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[%s]" % out_label,
+    ])
+
+
 def _operator_clause(key, value):
     """Compile one key:value search token into (sql_clause, params), or None when
     the token isn't a valid operator and should be searched as plain prompt text
@@ -766,6 +1237,19 @@ def _operator_clause(key, value):
     if not spec or value == "":
         return None
     kind, col = spec
+    if kind == "aspect":
+        return _aspect_clause(value)
+    if kind == "type":
+        return _type_clause(value)
+    if kind == "tag":
+        # Session N3: the published art tags (substring, as before) OR a whole personal tag.
+        return ("(LOWER(COALESCE(art_tags,'')) LIKE ? ESCAPE '\\' OR EXISTS ("
+                "SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+                "AND (',' || pm.tags || ',') LIKE ? ESCAPE '\\'))",
+                [_like_pattern(value), _personal_tag_pattern(value)])
+    if kind == "note":
+        return ("EXISTS (SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+                "AND LOWER(pm.note) LIKE ? ESCAPE '\\')", [_like_pattern(value)])
     if kind == "text":
         return ("LOWER(COALESCE({},'')) LIKE ? ESCAPE '\\'".format(col),
                 [_like_pattern(value)])
@@ -867,25 +1351,14 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         # Short numeric terms stay prompt-only: a substring match on ids made a
         # term like "88" match ~14% of the whole catalog by id chance alone,
         # swamping any real prompt hits (found 2026-07-16).
+        #
+        # A leading `-` negates the token (Session N3): -reject, -tag:x, -"night elf". The
+        # clause is wrapped, never rewritten, so a token without one builds the same SQL.
         for tok in _SEARCH_TOKEN_RE.findall(q):
-            op_clause = None
-            if ":" in tok and not tok.startswith(":"):
-                key, _, raw = tok.partition(":")
-                if _SEARCH_KEY_RE.fullmatch(key):
-                    op_clause = _operator_clause(key, _unquote(raw))
-            if op_clause:
-                clauses.append(op_clause[0])
-                params += op_clause[1]
-                continue
-            term = _unquote(tok)
-            if term.isdigit() and len(term) >= 8:
-                clauses.append("(task_id = ? OR media_id = ?)")
-                params += [term, term]
-            else:
-                clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-                               "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
-                like = _like_pattern(term)
-                params += [like, like]
+            neg = len(tok) > 1 and tok[0] == "-" and not _SEARCH_NEG_NUMBER_RE.match(tok)
+            clause, cparams = _search_token_clause(tok[1:] if neg else tok)
+            clauses.append("NOT " + clause if neg else clause)
+            params += cparams
     if model:
         clauses.append("model_name = ?")
         params.append(model)
@@ -948,10 +1421,17 @@ _COLLECTIONS_LOCK = threading.Lock()
 
 def add_to_collection(db_path, media_ids, name):
     """Add a collection label to each media_id (no-op if already in it). Names may
-    contain spaces but not commas. Returns the number of rows changed."""
+    contain spaces but not commas. Returns the number of rows changed.
+
+    Raises CurationError for a SMART collection's name (Session N1): a smart collection
+    is a saved search, not a list, so nothing can be added to it by hand."""
     name = (name or "").strip().replace(",", " ").strip()
     if not name or not media_ids:
         return 0
+    if _is_smart_name(db_path, name):
+        raise CurationError(
+            "“{}” is a smart collection, a saved search. Pictures join it by matching "
+            "the search, not by being added.".format(name))
     changed = 0
     with catalog(db_path) as con:
         with _COLLECTIONS_LOCK:
@@ -990,6 +1470,589 @@ def remove_from_collection(db_path, media_ids, name):
     return changed
 
 
+# ---------------------------------------------------------------------------
+# CURATION (Session N, 2026-09-29): smart collections, the collections manager, and the
+# personal layer (tags, a keeper|reject mark, a note).
+#
+# WHERE THINGS LIVE, and the fact the whole session hangs on: the app's "collections" are
+# LOCAL. A collection is nothing but a label in the comma-joined `catalog.collections`
+# column (moonglade_gallery.add_to_collection above); PixAI has no part in it and nothing in
+# this block reaches the network. Hand-picked membership stays there, unchanged. Two new
+# tables (see _MIGRATIONS) hold the rest:
+#   smart_collections  a saved SEARCH -- the query is stored, the membership never is; it is
+#                      computed from the query every time the collection is opened
+#   personal_meta      the owner's tags / mark / note, keyed by media_id
+# Both are additive: an existing library gains two empty tables and keeps every row.
+#
+# NOTHING HERE DELETES A PICTURE. Deleting or merging a collection rewrites LABELS on rows;
+# it never removes a row, a file or a thumbnail (tests/test_curation.py counts them).
+# ---------------------------------------------------------------------------
+
+class CurationError(ValueError):
+    """A curation request refused for a reason the owner can read (a taken name, a smart
+    collection used as a hand-picked one, an over-long tag). The routes answer it as a 400
+    carrying str(e)."""
+
+
+PERSONAL_MARKS = ("keeper", "reject")
+PERSONAL_TAG_MAX_LEN = 32      # characters in one tag
+PERSONAL_TAGS_MAX = 32         # tags on one picture (the handoff page's own cap, N3)
+PERSONAL_NOTE_MAX = 500        # characters in a note
+CURATE_MAX_IDS = 5000          # pictures one bulk request may touch
+
+_TAG_SPACE_RE = re.compile(r"[\s_]+")
+_TAG_STRIP_RE = re.compile(r"[^\w-]", re.UNICODE)
+_TAG_DASHES_RE = re.compile(r"-{2,}")
+
+
+def normalize_tag(raw):
+    """A personal tag in its stored form: lowercase, hyphenated, letters/digits/hyphens only
+    (any script). "Pose Study!" -> "pose-study". Returns "" when nothing is left. The length
+    cap is the caller's to enforce (it wants to say so, not silently truncate)."""
+    t = _TAG_SPACE_RE.sub("-", str(raw or "").strip().lower())
+    t = _TAG_STRIP_RE.sub("", t)
+    return _TAG_DASHES_RE.sub("-", t).strip("-")
+
+
+def _split_tags(s):
+    return [t for t in (s or "").split(",") if t]
+
+
+_CURATION_LOCK = threading.Lock()
+
+
+def _now_stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _clean_collection_name(name):
+    """A collection name as stored: commas become spaces (the column is comma-joined), runs of
+    whitespace collapse, ends are trimmed."""
+    return re.sub(r"\s+", " ", str(name or "").replace(",", " ")).strip()
+
+
+def _all_collection_names(con):
+    """(hand_picked, smart) name lists, from one open connection."""
+    hand = set()
+    for (s,) in con.execute("SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
+        hand.update(_split_collections(s))
+    smart = [r[0] for r in con.execute("SELECT name FROM smart_collections")]
+    return sorted(hand, key=str.lower), sorted(smart, key=str.lower)
+
+
+def _is_smart_name(db_path, name):
+    """Does `name` belong to a smart collection (compared without regard to case, since
+    names are unique that way)? A hand-picked label may not take a smart collection's name."""
+    low = str(name or "").strip().lower()
+    if not low:
+        return False
+    with catalog(db_path) as con:
+        return any(r[0].lower() == low for r in con.execute("SELECT name FROM smart_collections"))
+
+
+def list_smart_collections(db_path):
+    """[{name, query}] for every smart collection, A-Z without regard to case."""
+    with catalog(db_path) as con:
+        rows = con.execute("SELECT name, query FROM smart_collections").fetchall()
+    return sorted(({"name": r["name"], "query": r["query"]} for r in rows),
+                  key=lambda d: d["name"].lower())
+
+
+def smart_collection_query(db_path, name):
+    """The saved query of the smart collection called exactly `name`, or None."""
+    if not name:
+        return None
+    with catalog(db_path) as con:
+        r = con.execute("SELECT query FROM smart_collections WHERE name=?", (str(name),)).fetchone()
+    return r["query"] if r else None
+
+
+def _expand_smart(db_path, q, collection):
+    """(q, collection) with a smart collection folded into the search. Opening a smart
+    collection IS running its saved query, ANDed with whatever the search field holds: its
+    tokens are prepended to `q` and the collection filter drops away. A hand-picked name (or
+    none) passes through untouched, so this costs one indexed lookup and only when a
+    collection is named."""
+    if not collection:
+        return q, collection
+    saved = smart_collection_query(db_path, collection)
+    if saved is None:
+        return q, collection
+    return ((saved + " " + q).strip() if q else saved), ""
+
+
+def _auto_smart_name(query):
+    """The name a smart collection gets when the owner did not type one: the query with its
+    operator punctuation softened, 28 characters at most (the handoff page's own rule)."""
+    n = re.sub(r"\s+", " ", re.sub("[★:\"]", " ", str(query or ""))).strip()[:28].strip()
+    return n or "Smart collection"
+
+
+def save_smart_collection(db_path, query, name="", replace=""):
+    """Create a smart collection from a search, or (with `replace`) save a new query over an
+    existing one. Only the QUERY is stored. Returns {name, query, created}.
+
+    A typed `name` that is taken raises CurationError; an unnamed one takes the query's own
+    words and, when that is taken too, the next free "… 2", "… 3"."""
+    q = " ".join(str(query or "").split())
+    if not q:
+        raise CurationError("Type a search first, then save it.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            if replace:
+                if not con.execute("SELECT 1 FROM smart_collections WHERE name=?",
+                                   (replace,)).fetchone():
+                    raise CurationError("There is no smart collection called “{}”.".format(replace))
+                con.execute("UPDATE smart_collections SET query=?, updated_at=? WHERE name=?",
+                            (q, _now_stamp(), replace))
+                con.commit()
+                return {"name": replace, "query": q, "created": False}
+            hand, smart = _all_collection_names(con)
+            taken = {n.lower() for n in hand + smart}
+            typed = _clean_collection_name(name)
+            base = typed or _auto_smart_name(q)
+            if typed and base.lower() in taken:
+                raise CurationError("A collection called “{}” already exists.".format(base))
+            final, n = base, 2
+            while final.lower() in taken:
+                final = "{} {}".format(base, n)
+                n += 1
+            now = _now_stamp()
+            con.execute("INSERT INTO smart_collections (name, query, created_at, updated_at) "
+                        "VALUES (?,?,?,?)", (final, q, now, now))
+            con.commit()
+            return {"name": final, "query": q, "created": True}
+
+
+def _rows_with_label(con, name):
+    """(media_id, collections) of every catalog row carrying exactly the label `name`."""
+    return con.execute(
+        "SELECT media_id, collections FROM catalog WHERE (',' || COALESCE(collections,'') || ',') "
+        "LIKE ? ESCAPE '\\'", ("%," + _like_escape(name) + ",%",)).fetchall()
+
+
+def rename_collection(db_path, old, new):
+    """Rename a collection, hand-picked or smart. The new name is trimmed and must be unique
+    (case-insensitively) among ALL collections; renaming only the case of its own name is
+    allowed. Every picture keeps its membership: a hand-picked rename rewrites the label on
+    the rows that carry it, a smart rename changes one row of smart_collections."""
+    old = str(old or "").strip()
+    new = _clean_collection_name(new)
+    if not old:
+        raise CurationError("Say which collection to rename.")
+    if not new:
+        raise CurationError("A collection needs a name.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            if old not in smart and old not in hand:
+                raise CurationError("There is no collection called “{}”.".format(old))
+            if new.lower() in {n.lower() for n in hand + smart if n != old}:
+                raise CurationError("A collection called “{}” already exists.".format(new))
+            if new == old:
+                return {"name": new, "kind": "smart" if old in smart else "hand", "changed": 0}
+            if old in smart:
+                con.execute("UPDATE smart_collections SET name=?, updated_at=? WHERE name=?",
+                            (new, _now_stamp(), old))
+                con.commit()
+                return {"name": new, "kind": "smart", "changed": 1}
+            changed = 0
+            # P6: the manual order follows the rename (any stale rows under the new name go
+            # first, so the move cannot collide on the primary key).
+            con.execute("DELETE FROM collection_order WHERE name=?", (new,))
+            con.execute("UPDATE collection_order SET name=? WHERE name=?", (new, old))
+            for r in _rows_with_label(con, old):
+                cols = [new if c == old else c for c in _split_collections(r["collections"])]
+                seen, out = set(), []
+                for c in cols:            # a row can never end up holding the label twice
+                    if c not in seen:
+                        seen.add(c)
+                        out.append(c)
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(out), r["media_id"]))
+                changed += 1
+            con.commit()
+            return {"name": new, "kind": "hand", "changed": changed}
+
+
+def merge_collections(db_path, names):
+    """Merge two or more HAND-PICKED collections into the first name given: every picture in
+    any of them ends up in the first (once, however many it was in), and the others cease to
+    exist. A smart collection cannot merge (it holds no pictures to move). Returns
+    {target, merged, pictures, changed}. No picture is removed from the library."""
+    order = []
+    for n in names or []:
+        n = str(n or "").strip()
+        if n and n not in order:
+            order.append(n)
+    if len(order) < 2:
+        raise CurationError("Pick two or more hand-picked collections to merge.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            for n in order:
+                if n in smart:
+                    raise CurationError("“{}” is a smart collection and can’t merge. "
+                                        "Edit its query instead.".format(n))
+                if n not in hand:
+                    raise CurationError("There is no hand-picked collection called “{}”.".format(n))
+            target, others = order[0], set(order[1:])
+            changed = 0
+            # P6: the target keeps its manual order; the merged-in pictures have no position
+            # there, so they follow it, oldest first. The merged collections' orders go.
+            con.executemany("DELETE FROM collection_order WHERE name=?", [(n,) for n in sorted(others)])
+            for r in con.execute("SELECT media_id, collections FROM catalog "
+                                 "WHERE COALESCE(collections,'') != ''").fetchall():
+                cols = _split_collections(r["collections"])
+                if not any(c in others for c in cols):
+                    continue
+                out = []
+                for c in cols:
+                    c = target if c in others else c
+                    if c not in out:
+                        out.append(c)
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(out), r["media_id"]))
+                changed += 1
+            con.commit()
+            pictures = len(_rows_with_label(con, target))
+    return {"target": target, "merged": order[1:], "pictures": pictures, "changed": changed}
+
+
+def delete_collection(db_path, name):
+    """Delete a collection: a hand-picked one loses its label from every picture, a smart one
+    loses its saved query. THE PICTURES STAY, always; `kept` says how many were in it (for a
+    smart collection, how many matched a moment ago). Returns {name, kind, kept}."""
+    name = str(name or "").strip()
+    if not name:
+        raise CurationError("Say which collection to delete.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            if name in smart:
+                kind = "smart"
+            elif name in hand:
+                kind = "hand"
+            else:
+                raise CurationError("There is no collection called “{}”.".format(name))
+    if kind == "smart":
+        _, kept = query_catalog(db_path, collection=name, page=1, page_size=1)
+        with catalog(db_path) as con:
+            with _CURATION_LOCK:
+                con.execute("DELETE FROM smart_collections WHERE name=?", (name,))
+                con.commit()
+        return {"name": name, "kind": "smart", "kept": kept}
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            kept = 0
+            con.execute("DELETE FROM collection_order WHERE name=?", (name,))   # P6: its order goes too
+            for r in _rows_with_label(con, name):
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(c for c in _split_collections(r["collections"]) if c != name),
+                             r["media_id"]))
+                kept += 1
+            con.commit()
+    return {"name": name, "kind": "hand", "kept": kept}
+
+
+# ---- manual order (Session P, P6) --------------------------------------------
+
+def _collection_kind(con, name):
+    """"smart" | "hand" | None for a collection name, from one open connection."""
+    hand, smart = _all_collection_names(con)
+    if name in smart:
+        return "smart"
+    if name in hand:
+        return "hand"
+    return None
+
+
+def ordered_members(db_path, name):
+    """The members of collection `name`, in its order: {name, kind, media_ids, manual}.
+
+    Hand-picked: the labelled pictures (those the collection's own view shows, a file on
+    disk) -- the ones with a position first, by position; then the ones without (added since
+    the order was saved) OLDEST first (ruling 9). A position whose picture has left the
+    collection is ignored. `manual` says whether any position is in force.
+    Smart: its query's current matches, oldest first; never manual (membership is live).
+    Unknown name: kind None, no ids. Read-only."""
+    name = str(name or "").strip()
+    if not name:
+        return {"name": "", "kind": None, "media_ids": [], "manual": False}
+    with catalog(db_path) as con:
+        kind = _collection_kind(con, name)
+        if kind == "hand":
+            rows = con.execute(
+                "SELECT c.media_id, o.position FROM catalog c LEFT JOIN collection_order o "
+                "ON o.name = ? AND o.media_id = c.media_id "
+                "WHERE c.filename != '' AND (',' || COALESCE(c.collections,'') || ',') LIKE ? ESCAPE '\\' "
+                "ORDER BY (o.position IS NULL), o.position, c.created_at ASC, c.media_id ASC",
+                (name, "%," + _like_escape(name) + ",%")).fetchall()
+            return {"name": name, "kind": "hand", "media_ids": [str(r[0]) for r in rows],
+                    "manual": any(r[1] is not None for r in rows)}
+    if kind == "smart":
+        rows, _ = query_catalog(db_path, collection=name, sort="oldest", page_size=None)
+        return {"name": name, "kind": "smart", "media_ids": [str(r["media_id"]) for r in rows],
+                "manual": False}
+    return {"name": name, "kind": None, "media_ids": [], "manual": False}
+
+
+def set_collection_order(db_path, name, media_ids):
+    """Save a hand-picked collection's manual order: positions 0..n-1 for `media_ids`, in ONE
+    transaction, replacing the collection's old positions (which also prunes the rows of
+    pictures no longer in it). Refuses a smart collection (its membership is live), an unknown
+    one, a repeated id and any id that is not a member. Returns ordered_members() after."""
+    name = str(name or "").strip()
+    ids = [str(m).strip() for m in (media_ids or [])]
+    if not name:
+        raise CurationError("Say which collection to order.")
+    if len(ids) > CURATE_MAX_IDS:
+        raise CurationError("A collection order holds at most {} pictures.".format(CURATE_MAX_IDS))
+    if len(set(ids)) != len(ids) or any(not m for m in ids):
+        raise CurationError("Each picture appears once in an order.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            kind = _collection_kind(con, name)
+            if kind == "smart":
+                raise CurationError("“{}” is a smart collection. Its pictures are the search's "
+                                    "matches, so it can’t be ordered by hand.".format(name))
+            if kind != "hand":
+                raise CurationError("There is no hand-picked collection called “{}”.".format(name))
+            members = {str(r["media_id"]) for r in _rows_with_label(con, name)}
+            stray = [m for m in ids if m not in members]
+            if stray:
+                raise CurationError("{} of those {} not in “{}”.".format(
+                    len(stray), "is" if len(stray) == 1 else "are", name))
+            con.execute("DELETE FROM collection_order WHERE name=?", (name,))
+            con.executemany("INSERT INTO collection_order (name, media_id, position) VALUES (?,?,?)",
+                            [(name, m, i) for i, m in enumerate(ids)])
+            con.commit()
+    return ordered_members(db_path, name)
+
+
+def collection_summaries(db_path):
+    """Every collection with what the manager and the list show: {name, kind, count, cover,
+    query?}. Hand-picked counts are pictures that still have a file (the count a search
+    would give); a smart collection's count is its query run right now. `cover` is the
+    newest member's media_id. A-Z without regard to case, hand-picked and smart together.
+    Read-only."""
+    hand = {}
+    with catalog(db_path) as con:
+        for r in con.execute(
+                "SELECT media_id, filename, collections FROM catalog "
+                "WHERE COALESCE(collections,'') != '' ORDER BY created_at DESC"):
+            for n in _split_collections(r["collections"]):
+                h = hand.setdefault(n, {"count": 0, "cover": ""})
+                if (r["filename"] or "") != "":
+                    h["count"] += 1
+                    if not h["cover"]:
+                        h["cover"] = str(r["media_id"])
+    out = [{"name": n, "kind": "hand", "count": h["count"], "cover": h["cover"]}
+           for n, h in hand.items()]
+    for s in list_smart_collections(db_path):
+        rows, total = query_catalog(db_path, collection=s["name"], page=1, page_size=1)
+        out.append({"name": s["name"], "kind": "smart", "count": total, "query": s["query"],
+                    "cover": str(rows[0]["media_id"]) if rows else ""})
+    return sorted(out, key=lambda d: d["name"].lower())
+
+
+# ---- the personal layer -----------------------------------------------------
+
+def personal_get(db_path, media_ids):
+    """{media_id: {tags: [...], mark, note}} for the given pictures. Only pictures that have
+    something are present -- a picture with no personal layer is simply absent, and the
+    caller treats it as tags [] / mark "" / note ""."""
+    ids = [str(m) for m in (media_ids or []) if str(m)]
+    out = {}
+    if not ids:
+        return out
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for r in con.execute(
+                    "SELECT media_id, tags, mark, note FROM personal_meta WHERE media_id IN ({})"
+                    .format(",".join("?" * len(chunk))), chunk):
+                out[r["media_id"]] = {"tags": _split_tags(r["tags"]),
+                                      "mark": r["mark"] or "", "note": r["note"] or ""}
+    return out
+
+
+def _curation_state(con, mid):
+    """One picture's curation state -- {rating, mark, tags, note} -- or None when it is not in
+    the catalog. `rating` is the ordinary catalog rating (the stars on every card); the rest
+    is the personal layer."""
+    row = con.execute("SELECT rating FROM catalog WHERE media_id=?", (mid,)).fetchone()
+    if row is None:
+        return None
+    rs = str(row[0] or "")
+    p = con.execute("SELECT tags, mark, note FROM personal_meta WHERE media_id=?", (mid,)).fetchone()
+    return {"rating": min(5, int(rs)) if rs.isdigit() else 0,
+            "mark": (p["mark"] if p else "") or "",
+            "tags": _split_tags(p["tags"]) if p else [],
+            "note": (p["note"] if p else "") or ""}
+
+
+def _write_curation_state(con, mid, new, old):
+    """Write `new` where it differs from `old`. The personal row is created, updated, or -- when
+    all three fields are empty -- deleted, so the table only ever holds pictures that have
+    something to say."""
+    if new["rating"] != old["rating"]:
+        con.execute("UPDATE catalog SET rating=? WHERE media_id=?",
+                    (str(new["rating"]) if new["rating"] else "", mid))
+    if (new["mark"], new["tags"], new["note"]) != (old["mark"], old["tags"], old["note"]):
+        if not (new["mark"] or new["tags"] or new["note"]):
+            con.execute("DELETE FROM personal_meta WHERE media_id=?", (mid,))
+        else:
+            con.execute("INSERT OR REPLACE INTO personal_meta (media_id, tags, mark, note, updated_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (mid, ",".join(new["tags"]), new["mark"], new["note"], _now_stamp()))
+
+
+def _clean_tag(raw):
+    t = normalize_tag(raw)
+    if not t:
+        raise CurationError("A tag needs a letter or a number in it.")
+    if len(t) > PERSONAL_TAG_MAX_LEN:
+        raise CurationError("A tag is up to {} characters.".format(PERSONAL_TAG_MAX_LEN))
+    return t
+
+
+def _clean_note(raw):
+    note = str(raw if raw is not None else "").strip()
+    if len(note) > PERSONAL_NOTE_MAX:
+        raise CurationError("A note is up to {} characters.".format(PERSONAL_NOTE_MAX))
+    return note
+
+
+def _clean_mark(raw):
+    m = str(raw if raw is not None else "").strip().lower()
+    if m in ("", "none", "null"):
+        return ""
+    if m not in PERSONAL_MARKS:
+        raise CurationError("A mark is keeper, reject or none.")
+    return m
+
+
+def _clean_rating(raw):
+    if isinstance(raw, bool):
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    if not 0 <= n <= 5:
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    return n
+
+
+def _clean_ids(media_ids):
+    if not isinstance(media_ids, (list, tuple)):
+        raise CurationError("No pictures given.")
+    seen, out = set(), []
+    for m in media_ids:
+        m = str(m).strip()
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    if not out:
+        raise CurationError("No pictures given.")
+    if len(out) > CURATE_MAX_IDS:
+        raise CurationError("That is more than {} pictures at once.".format(CURATE_MAX_IDS))
+    return out
+
+
+def curate_apply(db_path, media_ids, op):
+    """Apply one change -- rating, mark, add_tag, remove_tag or note -- to every given picture.
+
+    Returns {changed, prev, after, skipped, refused}. `prev` and `after` hold the full
+    {rating, mark, tags, note} state of exactly the pictures that CHANGED, so the caller can
+    put each picture back the way IT was (curate_restore) rather than resetting them all to
+    one value, and so the count it shows is what really changed: setting a rating a picture
+    already has is a no-op, not a change. `skipped` counts ids not in the catalog; `refused`
+    counts pictures already at the tag cap. Local catalog only -- nothing here is sent to PixAI."""
+    if not isinstance(op, dict) or not op:
+        raise CurationError("Nothing to change.")
+    clean = {}
+    if "rating" in op:
+        clean["rating"] = _clean_rating(op["rating"])
+    if "mark" in op:
+        clean["mark"] = _clean_mark(op["mark"])
+    if "add_tag" in op:
+        clean["add_tag"] = _clean_tag(op["add_tag"])
+    if "remove_tag" in op:
+        clean["remove_tag"] = normalize_tag(op["remove_tag"])
+    if "note" in op:
+        clean["note"] = _clean_note(op["note"])
+    if not clean:
+        raise CurationError("Nothing to change.")
+    ids = _clean_ids(media_ids)
+    prev, after, skipped, refused = {}, {}, 0, 0
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            for mid in ids:
+                cur = _curation_state(con, mid)
+                if cur is None:
+                    skipped += 1
+                    continue
+                new = {"rating": cur["rating"], "mark": cur["mark"],
+                       "tags": list(cur["tags"]), "note": cur["note"]}
+                if "rating" in clean:
+                    new["rating"] = clean["rating"]
+                if "mark" in clean:
+                    new["mark"] = clean["mark"]
+                if "add_tag" in clean and clean["add_tag"] not in new["tags"]:
+                    if len(new["tags"]) >= PERSONAL_TAGS_MAX:
+                        refused += 1
+                    else:
+                        new["tags"].append(clean["add_tag"])
+                if "remove_tag" in clean:
+                    new["tags"] = [t for t in new["tags"] if t != clean["remove_tag"]]
+                if "note" in clean:
+                    new["note"] = clean["note"]
+                if new == cur:
+                    continue
+                _write_curation_state(con, mid, new, cur)
+                prev[mid], after[mid] = cur, new
+            con.commit()
+    return {"changed": len(after), "prev": prev, "after": after,
+            "skipped": skipped, "refused": refused}
+
+
+def curate_restore(db_path, prev):
+    """Undo for curate_apply: put each picture back to the state `prev` holds for it. Every
+    entry is validated before anything is written, so a bad request changes nothing. Returns
+    {restored, after}."""
+    if not isinstance(prev, dict) or not prev:
+        raise CurationError("Nothing to restore.")
+    if len(prev) > CURATE_MAX_IDS:
+        raise CurationError("That is more than {} pictures at once.".format(CURATE_MAX_IDS))
+    wanted = {}
+    for mid, st in prev.items():
+        if not isinstance(st, dict):
+            raise CurationError("A saved state is missing its values.")
+        tags = []
+        for t in st.get("tags") or []:
+            t = _clean_tag(t)
+            if t not in tags:
+                tags.append(t)
+        if len(tags) > PERSONAL_TAGS_MAX:
+            raise CurationError("A picture holds at most {} tags.".format(PERSONAL_TAGS_MAX))
+        wanted[str(mid)] = {"rating": _clean_rating(st.get("rating", 0)),
+                            "mark": _clean_mark(st.get("mark")), "tags": tags,
+                            "note": _clean_note(st.get("note"))}
+    after = {}
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            for mid, new in wanted.items():
+                cur = _curation_state(con, mid)
+                if cur is None or new == cur:
+                    continue
+                _write_curation_state(con, mid, new, cur)
+                after[mid] = new
+            con.commit()
+    return {"restored": len(after), "after": after}
+
+
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
@@ -1015,6 +2078,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     silently shipped the OLD match count out of the new, larger match set, with nothing in
     the downloaded file admitting it was short. One statement has nothing to disagree with.
     """
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
@@ -1025,12 +2089,12 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             params = list(params) + member_ids
         else:
             where += " AND 1=0"   # unknown sid -> empty result, not an error
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         if page_size is None:
             rows = con.execute(
                 "SELECT * FROM catalog WHERE {} ORDER BY {}".format(where, order),
-                params,
+                list(params) + order_params,
             ).fetchall()
             # No second COUNT on purpose -- taking one here would reintroduce exactly the
             # two-snapshot disagreement this branch exists to avoid, and a total that can
@@ -1041,7 +2105,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         ).fetchone()[0]
         rows = con.execute(
             "SELECT * FROM catalog WHERE {} ORDER BY {} LIMIT ? OFFSET ?".format(where, order),
-            params + [page_size, (max(1, page) - 1) * page_size],
+            list(params) + order_params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
 
@@ -1647,32 +2711,257 @@ def sibling_media(db_path, task_ids):
         return [dict(r) for r in rows]
 
 
-def recent_train_tasks(db_path, limit=18, pool=400):
-    """Recent generations grouped by TASK, newest task first, for the mobile Train
-    dataset picker -- each entry is one generation and its real image count, never a
-    fixed batch size (real batches are 1-4). Videos, task-less imports and rows with
-    no file are excluded: a training set is made of images that exist on disk.
+def recent_train_task_page(db_path, limit=18, before=None, q=""):
+    """Generations grouped by TASK, newest task first, for the Train dataset pickers (the
+    phone's tiles are tasks; desktop's "Grouped" view) -- each entry is one generation and its
+    real image count, never a fixed batch size (real batches are 1-4). Videos, task-less
+    imports and rows with no file are excluded: a training set is made of images that exist on
+    disk.
 
-    `pool` is how many recent rows are read before grouping -- the tasks come out of
-    the newest `pool` media rows, which is what makes this one indexed query instead of
-    a GROUP BY over the whole catalog. Returns [{task_id, media_ids, count}]."""
+    PAGED BY TASK (issue #56: the phone stopped at the 18 newest). A task is ordered by its
+    newest image; `before` is the previous page's `next_before` cursor -- that newest
+    created_at and the task id, the tie-breaker -- and the page holds the next `limit` tasks
+    strictly older than it. Every image of a task on the page comes with it, whatever its own
+    timestamp, so a task is never split across two pages.
+
+    `q` is the library's own search (_build_where: prompt words, field operators, a pasted
+    id); a task is on the page when any of its images matches, and then all of its images come.
+
+    Returns (tasks, next_before): tasks = [{task_id, media_ids, count, newest}], newest image
+    first within a task; next_before is None when there is nothing older."""
+    limit = max(1, int(limit))
+    where = ("task_id != '' AND COALESCE(is_video,'') != '1' AND filename != ''")
+    head_where, head_params = where, []
+    if (q or "").strip():
+        qw, qp = _build_where(q.strip(), "", "", "", media_type="image")
+        head_where, head_params = where + " AND " + qw, qp
+    params = []
+    having = ""
+    if before and before.get("at") is not None:
+        having = " HAVING (newest < ? OR (newest = ? AND task_id < ?))"
+        params = [before["at"], before["at"], str(before.get("task") or "")]
     with catalog(db_path) as con:
+        heads = con.execute(
+            "SELECT task_id, MAX(created_at) AS newest FROM catalog WHERE " + head_where +
+            " GROUP BY task_id" + having +
+            " ORDER BY newest DESC, task_id DESC LIMIT ?",
+            head_params + params + [limit + 1]).fetchall()
+        more = len(heads) > limit
+        heads = heads[:limit]
+        ids = [h["task_id"] for h in heads]
         rows = con.execute(
-            "SELECT media_id, task_id, is_video, created_at FROM catalog"
-            " WHERE task_id != '' AND is_video != '1' AND filename != ''"
-            " ORDER BY created_at DESC LIMIT ?", (int(pool),)).fetchall()
-    groups, order = {}, []
+            "SELECT media_id, task_id FROM catalog WHERE " + where +
+            " AND task_id IN (%s) ORDER BY created_at DESC, media_id" % ",".join("?" * len(ids)),
+            ids).fetchall() if ids else []
+    groups = {tid: [] for tid in ids}
     for r in rows:
-        tid = r["task_id"]
-        if tid not in groups:
-            if len(order) >= limit:
-                continue
-            groups[tid] = []
-            order.append(tid)
-        if tid in groups:
-            groups[tid].append(r["media_id"])
-    return [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid])}
-            for tid in order]
+        groups[r["task_id"]].append(r["media_id"])
+    tasks = [{"task_id": h["task_id"], "media_ids": groups[h["task_id"]],
+              "count": len(groups[h["task_id"]]), "newest": h["newest"]} for h in heads]
+    nxt = ({"at": heads[-1]["newest"], "task": heads[-1]["task_id"]} if more and heads else None)
+    return tasks, nxt
+
+
+def recent_train_tasks(db_path, limit=18):
+    """The first page of recent_train_task_page: the newest `limit` tasks."""
+    return recent_train_task_page(db_path, limit)[0]
+
+
+class TrainGuard:
+    """The two spend guards the training routes keep ON DISK (train_guard.json in the library
+    folder), so neither a restart nor a second tab can clear them (spend review 2026-09-28,
+    findings 1 and 2; BUILD-w3-train.md section 7).
+
+      * BASIC START: a Basic run has no task id until PixAI creates it, so the per-task lock
+        cannot cover it. The guard is keyed on what the run IS (base, dataset, name), checked
+        and ARMED before the mutation under the one Basic lock, and resolved after it: a run
+        PixAI started keeps it armed for DUPLICATE_WINDOW (a second identical Start inside a
+        minute is a double click, not an intent); a definite refusal disarms it; an unclear
+        failure -- a timeout, a dropped connection, a 5xx, after which PixAI may well have
+        created and charged the run -- keeps it as "ambiguous" for AMBIGUOUS_WINDOW, and the
+        panel says the run may have started.
+      * RETRY: PixAI leaves a failed run as it is after a retry, so it would accept a second
+        retry and charge a second run. The failed id is armed before the POST; a success
+        records the new run's id for good; an unclear failure is "ambiguous" for
+        AMBIGUOUS_RETRY_WINDOW; only a definite refusal disarms it.
+      * ADVANCED DESCRIBE / START (spend review of waves 2+3, finding F1): the per-task lock
+        covers two requests at once, and the task's status covers a POST PixAI answered --
+        but after an UNCLEAR failure the status may not have moved yet, so a second confirm
+        would send a second paid POST. Each is armed (keyed "<what>:<task id>", with the
+        status it was confirmed from) before the POST; a success or a definite refusal
+        clears it; an unclear failure keeps it "ambiguous" for AMBIGUOUS_WINDOW. While it
+        stands, the next confirm is refused unless the task's status has moved on since.
+
+    Every read-modify-write holds one lock, and the file is rewritten whole each time."""
+
+    DUPLICATE_WINDOW = 60.0
+    AMBIGUOUS_WINDOW = 15 * 60.0
+    AMBIGUOUS_RETRY_WINDOW = 24 * 3600.0
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+
+    def _load(self):
+        try:
+            d = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        d.setdefault("basic", {})
+        d.setdefault("retried", {})
+        d.setdefault("paid", {})
+        return d
+
+    def _save(self, d):
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, indent=1, sort_keys=True), encoding="utf-8")
+        os.replace(str(tmp), str(self.path))
+
+    @staticmethod
+    def basic_key(base_model_id, media_ids, dataset_task_id, title):
+        import hashlib
+        parts = [str(base_model_id or ""), "reuse:" + str(dataset_task_id) if dataset_task_id
+                 else ",".join(sorted(str(m) for m in (media_ids or []))),
+                 " ".join(str(title or "").split()).lower()]
+        return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()
+
+    def basic_blocked(self, key, now=None):
+        """None when a Basic start with this key may go ahead, else the refusal's words."""
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            e = d["basic"].get(key)
+            if not isinstance(e, dict):
+                return None
+            age = now - float(e.get("at") or 0)
+            # "armed" seen here is a start that never resolved -- the process stopped between
+            # the arm and the answer (the one Basic lock means no live request can be holding
+            # it) -- so it is as unclear as an ambiguous one.
+            if e.get("state") in ("ambiguous", "armed") and age < self.AMBIGUOUS_WINDOW:
+                return ("Your last start of this run may have gone through: PixAI didn't "
+                        "answer clearly. Check Runs before starting it again (this guard "
+                        "clears by itself after 15 minutes). Nothing was sent.")
+            if e.get("state") == "started" and age < self.DUPLICATE_WINDOW:
+                return ("You just started this run. Nothing was sent again; it is in Runs.")
+            return None
+
+    def basic_arm(self, key, now=None):
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            d["basic"] = {k: v for k, v in d["basic"].items()
+                          if now - float((v or {}).get("at") or 0) < self.AMBIGUOUS_WINDOW}
+            d["basic"][key] = {"at": now, "state": "armed"}
+            self._save(d)
+
+    def basic_resolve(self, key, outcome, now=None):
+        """outcome: "started" (keep for the duplicate window), "refused" (disarm),
+        "ambiguous" (keep, say it may have started)."""
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            if outcome == "refused":
+                d["basic"].pop(key, None)
+            else:
+                d["basic"][key] = {"at": now, "state": outcome}
+            self._save(d)
+
+    def retry_state(self, task_id, now=None):
+        """None (never retried here, or an old unclear attempt), else {state, new_id}."""
+        now = time.time() if now is None else now
+        with self._lock:
+            e = self._load()["retried"].get(str(task_id))
+        if not isinstance(e, dict):
+            return None
+        st = e.get("state") or "armed"
+        if st == "armed":            # never resolved: the process stopped mid-retry
+            st = "ambiguous"
+        if st == "ambiguous" and now - float(e.get("at") or 0) >= self.AMBIGUOUS_RETRY_WINDOW:
+            return None
+        return {"state": st, "new_id": e.get("new_id") or ""}
+
+    def retry_arm(self, task_id, now=None):
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            d["retried"][str(task_id)] = {"at": now, "state": "armed", "new_id": ""}
+            self._save(d)
+
+    def retry_resolve(self, task_id, outcome, new_id="", now=None):
+        """outcome: "done" (keep for good, with the new run's id), "refused" (disarm),
+        "ambiguous"."""
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            if outcome == "refused":
+                d["retried"].pop(str(task_id), None)
+            else:
+                d["retried"][str(task_id)] = {"at": now, "state": outcome,
+                                              "new_id": str(new_id or "")}
+            self._save(d)
+
+    @staticmethod
+    def paid_key(what, task_id):
+        return "%s:%s" % (what, task_id)
+
+    def paid_blocked(self, what, task_id, status, now=None):
+        """True when an earlier `what` ("caption" | "submit") confirm on this task may have
+        gone through and the task's status (`status`, read just now) has not moved on from
+        the one it was confirmed from. A status that moved clears the entry: PixAI took it,
+        and the route's own status check says what happens next. "armed" seen here is a
+        confirm that never resolved (the process stopped mid-POST): as unclear as
+        "ambiguous"."""
+        now = time.time() if now is None else now
+        key = self.paid_key(what, task_id)
+        with self._lock:
+            d = self._load()
+            e = d["paid"].get(key)
+            if not isinstance(e, dict):
+                return False
+            fresh = now - float(e.get("at") or 0) < self.AMBIGUOUS_WINDOW
+            if fresh and str(e.get("status") or "") == str(status or ""):
+                return True
+            d["paid"].pop(key, None)
+            self._save(d)
+            return False
+
+    def paid_arm(self, what, task_id, status, now=None):
+        now = time.time() if now is None else now
+        with self._lock:
+            d = self._load()
+            d["paid"] = {k: v for k, v in d["paid"].items()
+                         if now - float((v or {}).get("at") or 0) < self.AMBIGUOUS_WINDOW}
+            d["paid"][self.paid_key(what, task_id)] = {"at": now, "state": "armed",
+                                                       "status": str(status or "")}
+            self._save(d)
+
+    def paid_resolve(self, what, task_id, outcome, now=None):
+        """outcome: "done" or "refused" (clear: PixAI answered, and its status now says what
+        happened), "ambiguous" (keep for AMBIGUOUS_WINDOW)."""
+        now = time.time() if now is None else now
+        key = self.paid_key(what, task_id)
+        with self._lock:
+            d = self._load()
+            if outcome == "ambiguous":
+                e = d["paid"].get(key) or {}
+                d["paid"][key] = {"at": now, "state": "ambiguous",
+                                  "status": str(e.get("status") or "")}
+            else:
+                d["paid"].pop(key, None)
+            self._save(d)
+
+    def retried(self):
+        """{failed_id: {state, new_id}} for the Runs list (a guarded id shows no Retry)."""
+        with self._lock:
+            ids = list(self._load()["retried"])
+        out = {}
+        for tid in ids:
+            st = self.retry_state(tid)
+            if st:
+                out[tid] = st
+        return out
 
 
 def history_page(db_path, since_utc, until_utc, media="", source=""):
@@ -2228,6 +3517,10 @@ def _derive_sealed(defs):
     defs.setdefault("skin_unlock", {})
     defs.setdefault("ach_criteria", {})
     defs.setdefault("ladder_tracks", [])
+    # The narrator's poke lines (moonglade_narrator.clean_pools' shape). Carried whole from
+    # the pack like the roster; a pack that has none leaves the narrator on its neutral line.
+    if not isinstance(defs.get("poke_lines"), dict):
+        defs["poke_lines"] = {}
     defs["_ach_ids"] = frozenset(a["id"] for a in roster)
     defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
     defs["_ach_rung"] = _build_ach_rung(roster)
@@ -2256,6 +3549,7 @@ def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
 def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
 def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 def _moment_ach():    return _sealed_defs()["_moment_ach"]     # noqa: E704
+def _poke_lines():    return _sealed_defs()["poke_lines"]      # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
@@ -2945,6 +4239,174 @@ def _earned_roster_flags(entry):
                                if isinstance(k, str) and isinstance(v, str)}
                               if isinstance(copy, dict) else {})
     return out
+
+
+def earned_relic_marks(out_dir, earned_ids):
+    """The marks an achievement AWARDED and the account has earned -- the Folio's Marks row
+    (Small Calls L2, relics by kind). A free mark (no `unlock` binding) is not a relic, and an
+    unearned one is never listed at all, so nothing here says a locked mark exists: the row is
+    built from earned marks only and the client shows no empty slot. `unlock` is the awarding
+    achievement's id (list_marks blanks it for a hidden feat until that feat is earned, so a
+    listed mark's binding is always one the account already holds); the client dates the mark
+    by that achievement's earned_at. `earned_ids` is the set of currently-earned ids."""
+    out = []
+    for m in list_marks(out_dir, set(earned_ids or ())):
+        if m.get("earned") and m.get("unlock"):
+            out.append({"id": m["id"], "label": m["label"], "png": m["png"],
+                        "animated": bool(m.get("animated")), "unlock": m["unlock"]})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# MASKED FEATS (Session G): the Folio's ONE veil card. The payload carries a riddle and an
+# alpha-only silhouette of the NEXT unfound feat's badge, and nothing else about it -- no
+# id, name, description, count, order, points, earned-by, badge art or file name. The
+# roster fields it reads are the sealed `riddle` (and its unleashed twin `riddle_nsfw`);
+# a feat whose roster entry carries no riddle is never picked, so a pack that has none yet
+# shows no veil at all rather than invented copy.
+# ---------------------------------------------------------------------------
+FEAT_MASK_PX = 256
+
+
+def feat_mask_png(badge_bytes, max_px=FEAT_MASK_PX):
+    """The alpha-only mask of one badge: white on transparent, cut from the badge's OWN
+    alpha channel and never carrying its colours. `badge_bytes` is the badge file's bytes
+    (any format Pillow reads); the result is PNG bytes at most `max_px` on the long edge,
+    or None when the bytes are not an image. A badge with no alpha at all yields a solid
+    silhouette (its honest outline) rather than a leak of its pixels.
+
+    A small PURE helper on purpose: the pack build (pack v6) calls it too, to pre-cut the
+    masks it ships, so the lazy cut below and the pre-cut file can never disagree."""
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(badge_bytes)) as im:
+            im.load()
+            if "A" in im.getbands() or "transparency" in im.info:
+                alpha = im.convert("RGBA").getchannel("A")
+            else:
+                alpha = Image.new("L", im.size, 255)
+        alpha.thumbnail((int(max_px), int(max_px)))
+        out = Image.new("RGBA", alpha.size, (255, 255, 255, 255))
+        out.putalpha(alpha)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _feat_riddles(entry):
+    """(riddle, riddle_nsfw) from one sealed roster entry: stripped strings, "" when the
+    field is absent or not text. Never invents a riddle."""
+    if not isinstance(entry, dict):
+        return "", ""
+    out = []
+    for key in ("riddle", "riddle_nsfw"):
+        v = entry.get(key)
+        out.append(v.strip() if isinstance(v, str) else "")
+    return out[0], out[1]
+
+
+def _pick_masked_feat(earned_ids, roster=None, has_art=None):
+    """The roster entry the veil card is drawn for, or None. It is the first hidden feat,
+    in roster order, that is not earned yet, carries a riddle and (when `has_art` is given)
+    has badge art to cut a silhouette from. None until a feat has been earned at all (the
+    Feats section stays cloaked until then), and None once nothing eligible is left.
+
+    The server picks; the client never names which. Roster order is used only to choose --
+    it is never sent."""
+    roster = _roster() if roster is None else roster
+    entries = [a for a in roster if isinstance(a, dict)]
+    if not any(a.get("tier") == "feat" and a.get("id") in earned_ids for a in entries):
+        return None
+    for a in entries:
+        aid = a.get("id")
+        if not a.get("hidden") or not aid or aid in earned_ids:
+            continue
+        if not _feat_riddles(a)[0]:
+            continue
+        if has_art is not None and not has_art(aid):
+            continue
+        return a
+    return None
+
+
+def _feat_mask_token(secret, aid):
+    """The opaque token that names the veil's mask in its URL: an HMAC of the achievement
+    id under this install's own secret, so it reveals nothing about the feat's id, name or
+    file, is stable for one feat on one install (the browser can cache the mask), and
+    cannot be computed by anyone who lacks the secret."""
+    key = ("feat-mask:" + str(secret)).encode("utf-8")
+    return hmac.new(key, str(aid).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def _feats_payload(earned_ids, n_masked, feats_revealed, unleashed, secret):
+    """The `feats` object /api/achievements carries beside the earned feats (which stay in
+    `achievements`, unchanged):
+
+        masked     None, or {"riddle", "mask_url"[, "riddle_nsfw"]} for the ONE feat the
+                   server picks. `riddle_nsfw` is the unleashed twin, present only where
+                   roast_nsfw is (the account has earned Triggered) and the pack has one:
+                   the client's Unleash switch chooses which line to show, exactly as it
+                   does for the roast.
+        all_found  True only when the roster has hidden feats and none is left. It is what
+                   tells the client "Every secret found" apart from "no veil yet" (a pack
+                   with no riddles), and it says nothing a masked veil does not already.
+
+    Both are cloaked (None / False) until a feat has been earned, so devtools before the
+    first earn learns nothing. Nothing else about a masked feat is ever built into this."""
+    out = {"masked": None, "all_found": False}
+    if not feats_revealed:
+        return out
+    hidden_total = len(_ach_hidden())
+    out["all_found"] = bool(hidden_total) and n_masked == 0
+    pick = _pick_masked_feat(
+        earned_ids, has_art=lambda aid: _branding_exists(_role_rel("badges", aid + ".png")))
+    if pick is not None:
+        riddle, riddle_nsfw = _feat_riddles(pick)
+        masked = {"riddle": riddle,
+                  "mask_url": "/feat-mask/" + _feat_mask_token(secret, pick["id"]) + ".png"}
+        if unleashed and riddle_nsfw:
+            masked["riddle_nsfw"] = riddle_nsfw
+        out["masked"] = masked
+    return out
+
+
+def feat_mask_cache_dir(out_dir):
+    """Where the lazily cut masks live: `out_dir/gallery/cache/_masks/`, a sibling of
+    badge_cache_dir()'s `_badges` for the same reasons (outside the coded branding tree,
+    under `gallery/`, which every walker skips). Files are named by the opaque token, never
+    by the achievement id."""
+    return Path(out_dir) / "gallery" / "cache" / "_masks"
+
+
+def _feat_mask_bytes(out_dir, aid, token):
+    """The mask PNG bytes for one feat: the pack's badge cut to its alpha silhouette once
+    and cached under the library folder (re-cut when the badge master changes). None when
+    the badge is missing or unreadable. A cache that cannot be written still answers."""
+    rel = _role_rel("badges", aid + ".png")
+    if not _branding_exists(rel):
+        return None
+    dst = feat_mask_cache_dir(out_dir) / (token + ".png")
+    src_mtime = _branding_mtime(rel)
+    try:
+        if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
+            return dst.read_bytes()
+    except OSError:
+        pass
+    raw = _branding_bytes(rel)
+    if raw is None:
+        return None
+    png = feat_mask_png(raw)
+    if png is None:
+        return None
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(png)
+    except OSError:
+        pass
+    return png
 
 
 def _ach_name(aid):
@@ -4778,6 +6240,37 @@ def achievement_metrics(db_path, use_cache=True):
 
 _TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
 
+# PLAIN WORDS FOR WHAT A LADDER COUNTS (owner walk 2026-09-29). The Folio's ladder headers read
+# "<track> — measured in <metric>", and the metric is the roster's own key: "images" reads fine,
+# "local_gens" is a code name on screen. Every metric a ladder track uses has its words here,
+# sent on each track as `metric_words`; a metric this list does not know yet (a roster that grows
+# a track before this does) falls back to its key with the underscores spaced out, so no header
+# can ever show one. tests/test_achievements.py holds every live track to an entry here.
+LADDER_METRIC_WORDS = {
+    "images": "images",
+    "videos": "videos",
+    "local_gens": "pictures made in the app",
+    "collections": "collections",
+    "models": "models used",
+    "tagged": "tagged pictures",
+    "published": "published pictures",
+    "edits": "edits",
+    "culled": "pictures deleted",
+    "days_used": "days you opened the app",
+    "rated": "rated pictures",
+    "loras_trained": "LoRAs trained",
+    "contest_entries": "contest entries",
+    "jobs_concurrent": "jobs running at once",
+    "loras_distinct": "different LoRAs used",
+    "distinct_active_days": "days you made or sorted pictures",
+}
+
+
+def metric_words(metric):
+    """What a ladder's metric counts, in words a person reads (never a code name)."""
+    m = str(metric or "")
+    return LADDER_METRIC_WORDS.get(m) or " ".join(m.replace("_", " ").split())
+
 
 def _build_ach_rung(roster):
     """Rung = the ordinal step within a ladder family. A ladder family = the
@@ -4937,8 +6430,68 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
     newly = [a["id"] for a in achs if a["earned"] and a["id"] not in seen]
     earned_points = sum(x["points"] for x in achs if x["earned"])
     possible_points = sum(x["points"] for x in achs)
-    return {"achievements": achs, "skins": skins, "ladders": _ladder_tracks(), "newly": newly,
+    # Each track also carries its metric in plain words, for the Folio's "measured in" header
+    # (copies: the sealed defs are cached and shared, never written into).
+    ladders = [dict(t, metric_words=metric_words(t.get("metric"))) if isinstance(t, dict) else t
+               for t in _ladder_tracks()]
+    return {"achievements": achs, "skins": skins, "ladders": ladders, "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
+
+
+# THE METRICS THIS SERVER MEASURES THAT A FRESH INSTALL DOES NOT YET HOLD A KEY FOR. The bundle
+# behind /api/achievements is open-ended: a telemetry counter, maximum or flag exists in it only
+# once something has bumped it, so "the key is absent" cannot tell "measured, and still zero"
+# from "a metric nobody counts". The first is a true 0-of-N; only the second shows no count.
+# Every name below is one code in this app bumps (telem_bump / telem_max), plus the metrics
+# compute_achievements() resolves ITSELF in a post-pass (Skin Changer counts the skins that very
+# computation unlocked). Feat metrics are deliberately NOT listed: achievement_progress refuses
+# a feat before it ever reads this set. tests/test_achievement_progress.py pins that every
+# non-feat metric in the sealed roster is either in the bundle or here, so a new honor added
+# without its metric being declared fails a test instead of silently losing its count.
+_MEASURED_METRICS = frozenset({
+    "claims", "culled", "edits", "enhances", "free_cards_applied", "jobs_concurrent",
+    "lora_stacked", "lora_used", "loras_trained", "organize_runs", "similar_uses",
+    "skin_changed_runs", "storyboards", "uploads",
+    "skins_unlocked",
+})
+
+
+def achievement_progress(entry, metrics):
+    """The "N to go" numbers for ONE unearned achievement entry (Folio for completionists, O1),
+    or None when there is nothing true to say:
+
+        {"current": int, "threshold": int, "left": int, "fraction": float}
+
+    `left` is threshold - current from the server's own metric, never negative; `fraction` is
+    current / threshold clamped to [0, 1] -- the true fraction the moon gauge draws.
+
+    NONE for every case that must show no count, no moon and no pin:
+      * a FEAT of any kind (tier or bucket feat, or a meta): feats leak nothing (Session G), so
+        this function refuses them by construction rather than trusting a caller to skip them;
+      * an entry already earned (there is nothing to go);
+      * a metric this server does not measure (neither in the bundle nor in _MEASURED_METRICS --
+        compute_achievements reads a missing metric as 0, which would draw a false "N to go"
+        from a metric nobody counts);
+      * a threshold that is not a positive whole number.
+    Pure: it reads the entry and the metric bundle it is handed."""
+    if not isinstance(entry, dict) or entry.get("earned"):
+        return None
+    if entry.get("tier") == "feat" or entry.get("bucket") in ("feat", "meta"):
+        return None
+    metric = entry.get("metric")
+    if not isinstance(metrics, dict) or (
+            metric not in metrics and metric not in _MEASURED_METRICS):
+        return None
+    try:
+        threshold = int(entry.get("threshold") or 0)
+        current = int(entry.get("current") or 0)
+    except (TypeError, ValueError):
+        return None
+    if threshold <= 0 or current < 0:
+        return None
+    return {"current": current, "threshold": threshold,
+            "left": max(0, threshold - current),
+            "fraction": min(1.0, current / threshold)}
 
 
 def claim_job_label(claimed, credits):
@@ -5120,7 +6673,7 @@ def set_telemetry_out(out_dir):
 
 
 _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
-                "day_lists": {}, "baselines": {}}
+                "day_lists": {}, "baselines": {}, "contest_results": {}}
 # `baselines` is the ONE section telemetry_metrics() deliberately ignores: it is
 # not a metric, it is remembered STATE -- a snapshot of what was already on disk
 # the first time a detector looked, so a later comparison can tell "this was
@@ -5130,6 +6683,12 @@ _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [
 # LIBRARY, the tree does not, so one library can legitimately hold one snapshot
 # per app folder it has been pointed at. A dict of named snapshots rather than a
 # bare map, so a second detector can never have to rename the first one's key.
+#
+# `contest_results` is the other structured section (L3, moonglade_contest_wins.py): the
+# VERIFIED contest wins ({"wins": {contest_id: {artwork_id: record}}}) and the schedule of the
+# automatic win check ({"checks": {contest_id: row}}). The contest-win metric counts `wins`
+# and nothing else; the flat `contest_win_keys` set an older sweep wrote is left in place,
+# untouched, as the record that a contest was once believed won.
 
 
 def load_telemetry(out_dir):
@@ -5168,9 +6727,17 @@ def _telem_file_lock(out_dir):
     the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
     proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
     path if acquired (caller unlinks), else None."""
+    return _excl_lockfile(_telemetry_path(out_dir).with_suffix(".lock"))
+
+
+def _excl_lockfile(lock, wait_s=2.0, stale_s=10.0):
+    """The O_EXCL lockfile behind _telem_file_lock, shared with the per-account prefs
+    store: create `lock` exclusively, spinning up to `wait_s`; a lock older than
+    `stale_s` is a crashed writer's and is taken over. Returns the lock path if
+    acquired (the caller unlinks it), else None -- what a None MEANS is the caller's
+    call: telemetry proceeds anyway, the prefs store refuses the write."""
     import time as _t
-    lock = _telemetry_path(out_dir).with_suffix(".lock")
-    deadline = _t.monotonic() + 2.0
+    deadline = _t.monotonic() + wait_s
     while True:
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -5178,7 +6745,7 @@ def _telem_file_lock(out_dir):
             return lock
         except FileExistsError:
             try:                       # a crashed writer's lock goes stale fast
-                if _t.time() - lock.stat().st_mtime > 10:
+                if _t.time() - lock.stat().st_mtime > stale_s:
                     lock.unlink()
                     continue
             except OSError:
@@ -5326,6 +6893,44 @@ def _best_day_streak(days):
     return best
 
 
+def vigil_status(days, today=None):
+    """The Vigil chip's numbers (Folio for completionists, O5): {"day": int, "best": int}.
+
+    `days` is the ISO-date list of days that had at least one generation collected (the same
+    `gen_days` ledger Seven Candles reads, marked by the server's LOCAL date, date.today()).
+
+    `day` is the run of consecutive generation days that ends today -- or ends yesterday when
+    today has none YET, because a day that has not finished is not a missed one. A run that
+    ended before yesterday is over: the chip starts again at day 1. It is never 0 and never
+    says a word about a miss; there is no message, no toast and no state to explain, only a
+    smaller number. `best` is the longest run ever recorded, and is never below `day`.
+
+    A malformed list, a date in the future or an unparseable entry is skipped, never raised."""
+    import datetime as _dt
+    if today is None:
+        today = _dt.date.today()
+    elif isinstance(today, str):
+        today = _dt.date.fromisoformat(today)
+    dates = set()
+    for s in (days or []):
+        try:
+            d = _dt.date.fromisoformat(str(s))
+        except (TypeError, ValueError):
+            continue
+        if d <= today:
+            dates.add(d)
+    one = _dt.timedelta(days=1)
+    anchor = today if today in dates else (today - one if (today - one) in dates else None)
+    run = 0
+    if anchor is not None:
+        cur = anchor
+        while cur in dates:
+            run += 1
+            cur -= one
+    day = max(1, run)
+    return {"day": day, "best": max(day, _best_day_streak([d.isoformat() for d in dates]))}
+
+
 def telemetry_metrics(out_dir, telem=None):
     """Flatten the telemetry store into the achievement metric namespace.
     Counters/maxima pass through, sets become cardinalities, flags become 0/1.
@@ -5364,7 +6969,13 @@ def telemetry_metrics(out_dir, telem=None):
     # count does. Deliberately NOT also counters: the assignment below would shadow a
     # same-named counter, and one source of truth is the point.
     m["contest_entries"] = _card("contest_entry_keys")
-    m["contest_wins"] = _card("contest_win_keys")
+    # VERIFIED wins only (L3). `contest_win_keys` is what the old sweep wrote when a winners
+    # row merely carried this account's authorId: no artwork id, no tier, no receipt. That set
+    # is kept on disk but no longer counted; a win counts once a check has matched the entry's
+    # artwork id to a row with an integer rank (moonglade_contest_wins.verify).
+    _cres = d.get("contest_results")
+    m["contest_wins"] = contest_wins.verified_count(
+        _cres.get("wins") if isinstance(_cres, dict) else None)
     # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
     # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
     # emotion in the universe has been used. The preset keys and the emotion-universe size come
@@ -5545,10 +7156,11 @@ def _contest_detection_sync(out_dir, force=False):
     Returns True when the sweep ran, False when it gave up.
 
     Per kept contest: the owner's own entries (`/contest/{slug}/artwork/{userId}`) become
-    contest_entry_keys, and -- only once the contest's result date has actually passed --
-    the winners list is checked for the owner's own authorId, which becomes a
-    contest_win_key. Winners are not polled before `result_at` because the endpoint answers
-    an empty array until then; asking early is a request that cannot inform anything.
+    contest_entry_keys. WINS ARE NOT READ HERE ANY MORE (L3): a win is a verified fact, and
+    the automatic check that establishes it (contest_win_pass, below) reads the winners list
+    once per contest at the result time and then daily, matching the entry's artwork id and
+    an integer tier rank. This sweep used to match the author alone, which recorded a win
+    with no artwork, no tier and no receipt, and read the winners list a second time.
 
     `force` drops the recent-window filter (every row the board returns is kept, ended ones
     still capped). The publish kick uses it: the app has just been TOLD an entry was made,
@@ -5628,17 +7240,16 @@ def _contest_detection_sync(out_dir, force=False):
                     if art_id and row_id and art_id != row_id:
                         telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
                                           out_dir=out_dir)
-                result_ts = _series_ts(c.get("result_at"))
-                if result_ts is None or result_ts > time.time():
-                    continue
-                for w in core.contest_winners(session, slug) or []:
-                    if str((w or {}).get("authorId") or "") == uid:
-                        telem_set_add("contest_win_keys", cid, out_dir=out_dir)
-                        break
             except Exception as e:                           # one bad contest, not the sweep
                 log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
                             _redact_host_paths_cli(out_dir, str(e))[:200])
                 continue
+        # The board this sweep just read also tells the win check when each contest's results
+        # land; a result time that moved is followed here (local, no network).
+        try:
+            contest_win_refresh(out_dir, contest_board(core, session) or [])
+        except Exception:                                     # noqa: BLE001
+            pass
         # Only a sweep that actually completed counts as recent -- a failed one must not
         # buy ten minutes of silence.
         _contest_sync_last_ok["at"] = time.time()
@@ -5661,6 +7272,319 @@ def _contest_sync_kick(out_dir, force=False):
         return _contest_detection_sync(out_dir, force=force)
     finally:
         _contest_sync_lock.release()
+
+
+# --- verified contest wins (L3) ------------------------------------------------------
+# A contest win is a fact PixAI states, so it is recorded only when PixAI's own winners list
+# says so: the entry's artwork id is in the list, its `entry.rank` is an integer, and the
+# author is this account. The rules live in moonglade_contest_wins.py (pure, tested); this is
+# the part that reads and writes.
+#
+#   * THE AUTOMATIC CHECK (contest_win_pass). For each contest the account entered, per the
+#     app's own entry record: one GET of the winners list at the contest's result time, then
+#     once a day for up to 14 days. An EMPTY list is undecided, never "lost". It stops early
+#     when the contest's rewardStatus is "distributed" and the entries are settled. It rides
+#     the scheduler's existing 60-second tick (see _contest_win_tick in create_app), reads
+#     nothing at import and nothing when a page opens, and is single-flight.
+#   * THE CHECK BUTTON (contest_win_check, POST /api/contest/check). The owner pastes an
+#     entry's link; one GET of that contest's winners; verified only when matched. The link is
+#     kept as the receipt.
+#
+# Both are GETs. Neither can write to PixAI: there is no such call on this road.
+_CW_PAUSE = 1.0                     # between two contests inside one pass
+_CW_BOARD_BACKOFF_S = 900.0         # a failed board read is not asked again for a quarter hour
+_cw_lock = threading.Lock()         # single flight, like the entry sweep's
+_cw_state = {"board_retry_at": 0.0, "manual": {}}
+
+
+def _cw_sections(d):
+    """The two sub-records of telemetry's `contest_results` section, made real dicts in place
+    (a hostile file can hold anything there) -> (wins, checks)."""
+    res = d.get("contest_results")
+    if not isinstance(res, dict):
+        res = d["contest_results"] = {}
+    for k in ("wins", "checks"):
+        if not isinstance(res.get(k), dict):
+            res[k] = {}
+    return res["wins"], res["checks"]
+
+
+def _cw_edit(out_dir, fn):
+    """fn(wins, checks) under the telemetry lock. Fail-soft, like every telemetry write."""
+    _telem_mutate(out_dir, lambda d: fn(*_cw_sections(d)))
+
+
+def _cw_inputs(d):
+    """(entries, legacy_wins, wins, checks) read from a loaded telemetry bundle. Copies:
+    nothing here writes through them."""
+    sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
+    entries = contest_wins.entries_by_contest(sets.get("contest_entry_keys"))
+    legacy = sets.get("contest_win_keys")
+    legacy = [str(x) for x in legacy] if isinstance(legacy, list) else []
+    res = d.get("contest_results") if isinstance(d.get("contest_results"), dict) else {}
+    wins = res.get("wins") if isinstance(res.get("wins"), dict) else {}
+    checks = res.get("checks") if isinstance(res.get("checks"), dict) else {}
+    checks = {str(k): dict(v) for k, v in checks.items() if isinstance(v, dict)}
+    return entries, legacy, wins, checks
+
+
+def contest_win_due(out_dir, now=None):
+    """Whether anything is worth waking the check for. LOCAL ONLY -- one small file read and
+    some arithmetic, so the 60-second tick can ask it every minute for nothing."""
+    now = time.time() if now is None else now
+    try:
+        entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+    except Exception:                                         # noqa: BLE001
+        return False
+    plan = contest_wins.plan_pass(entries, legacy, wins, checks, now)
+    if plan["due"]:
+        return True
+    # A seed needs the contest board; a board that just failed is left alone for a while.
+    return bool(plan["seed"] or plan["legacy"]) and now >= _cw_state["board_retry_at"]
+
+
+def contest_win_refresh(out_dir, board, now=None):
+    """Follow contests whose result time moved (local; no network). `board` is the list of
+    contest rows list_contests returns. Only rows that have not been checked yet move."""
+    now = time.time() if now is None else now
+    by_id = {str(c.get("id")): c for c in (board or []) if isinstance(c, dict) and c.get("id")}
+    if not by_id:
+        return
+
+    def _do(wins, checks):
+        for cid, st in checks.items():
+            c = by_id.get(str(cid))
+            if isinstance(st, dict) and c:
+                contest_wins.refresh_state(st, contest_wins.parse_ts(c.get("result_at")),
+                                           str(c.get("slug") or ""), now)
+    _cw_edit(out_dir, _do)
+
+
+def contest_win_pass(out_dir, now=None, pause=None):
+    """ONE automatic pass. Returns {ran, checked, recorded, errors} (for the log and the tests).
+
+    Decided from the local record first (moonglade_contest_wins.plan_pass): nothing due and
+    nothing to seed means no network at all. Otherwise the contest board is read ONCE (the
+    memoized snapshot every contest surface shares) to give new contests their schedule and
+    to learn each due contest's rewardStatus, and then each due contest's winners list is
+    read ONCE, `_CW_PAUSE` apart. A failed read is logged, pushed an hour out and never
+    retried in a loop; one bad contest does not stop the pass."""
+    import logging as _logging
+    import moonglade_backup as core
+    log = _logging.getLogger(__name__)
+    out = {"ran": False, "checked": [], "recorded": 0, "errors": 0}
+    clock = (lambda: now) if now is not None else time.time
+    pause = _CW_PAUSE if pause is None else pause
+    entries, legacy, wins, checks = _cw_inputs(load_telemetry(out_dir))
+    plan = contest_wins.plan_pass(entries, legacy, wins, checks, clock())
+    if not (plan["seed"] or plan["legacy"] or plan["due"]):
+        return out
+    try:
+        session = core._make_session(None)
+        uid = str(core._client_of(session).user_id or "")
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("contest win check: no session: %s: %s", type(e).__name__,
+                    _redact_host_paths_cli(out_dir, str(e))[:200])
+        return out
+    if not uid:
+        log.info("contest win check: no account id resolved -- nothing to verify")
+        return out
+    out["ran"] = True
+    board = {}
+    if clock() >= _cw_state["board_retry_at"]:
+        try:
+            board = {str(c.get("id")): c for c in (contest_board(core, session) or [])
+                     if isinstance(c, dict) and c.get("id")}
+        except Exception as e:                                # noqa: BLE001
+            _cw_state["board_retry_at"] = clock() + _CW_BOARD_BACKOFF_S
+            log.warning("contest win check: the board read failed: %s: %s", type(e).__name__,
+                        _redact_host_paths_cli(out_dir, str(e))[:200])
+    # -- give every entered contest (and every unverified legacy win) a schedule row
+    fresh = {}
+    if board:
+        for cid in list(plan["seed"]) + [c for c in plan["legacy"] if c not in plan["seed"]]:
+            c = board.get(cid)
+            is_legacy = cid in plan["legacy"]
+            if c is None and cid not in entries:
+                continue                         # a legacy win for a contest we cannot see
+            anchor = None if is_legacy else contest_wins.parse_ts((c or {}).get("result_at"))
+            fresh[cid] = contest_wins.new_state((c or {}).get("slug") or "", anchor, clock(),
+                                                legacy=is_legacy)
+    if fresh:
+        _cw_edit(out_dir, lambda w, ch: [ch.setdefault(k, v) for k, v in fresh.items()])
+        checks.update({k: v for k, v in fresh.items() if k not in checks})
+    now_t = clock()
+    due = [cid for cid, st in checks.items()
+           if (cid in entries or st.get("legacy")) and contest_wins.is_due(st, now_t)]
+    for i, cid in enumerate(due):
+        if i and pause:
+            time.sleep(pause)
+        st = dict(checks[cid])
+        c = board.get(cid) or {}
+        slug = str(st.get("slug") or c.get("slug") or "")
+        t = clock()
+        try:
+            if not slug:
+                raise ValueError("no slug known for this contest")
+            rows = core.contest_winners(session, slug)          # one GET, nothing else
+        except Exception as e:                                # noqa: BLE001
+            out["errors"] += 1
+            log.warning("contest win check: one contest failed: %s: %s", type(e).__name__,
+                        _redact_host_paths_cli(out_dir, str(e))[:200])
+            contest_wins.after_error(st, t)
+
+            def _fail(w, ch, cid=cid, st=st):
+                ch[cid] = st
+            _cw_edit(out_dir, _fail)
+            continue
+        st["slug"] = slug
+        res = contest_wins.verify(rows, uid, entries.get(cid) or None)
+        contest_wins.after_read(st, t, res, c.get("reward_status"))
+        fresh_wins = res["wins"]
+
+        def _ok(w, ch, cid=cid, st=st, fresh_wins=fresh_wins, t=t):
+            ch[cid] = st
+            for win in fresh_wins:
+                contest_wins.record_win(w, cid, win, "auto", t,
+                                        contest_wins.artwork_url(win["artwork_id"]))
+        _cw_edit(out_dir, _ok)
+        out["checked"].append(cid)
+        out["recorded"] += len(fresh_wins)
+    return out
+
+
+def contest_win_kick(out_dir, now=None):
+    """Start one pass OFF-THREAD if anything is due, under a single-flight lock. The tick calls
+    this every minute and it costs a local file read when there is nothing to do. Returns
+    whether a pass was started."""
+    if not contest_win_due(out_dir, now):
+        return False
+    if not _cw_lock.acquire(False):
+        return False
+
+    def _go():
+        try:
+            contest_win_pass(out_dir, now)
+        except Exception as e:                                # noqa: BLE001
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "contest win check: gave up: %s: %s", type(e).__name__,
+                _redact_host_paths_cli(out_dir, str(e))[:200])
+        finally:
+            _cw_lock.release()
+    try:
+        threading.Thread(target=_go, daemon=True).start()
+    except Exception:                                         # noqa: BLE001
+        _cw_lock.release()
+        return False
+    return True
+
+
+def contest_win_check(out_dir, body, now=None):
+    """The Check button. Returns (http status, payload). Verified ONLY when matched.
+
+    `body` carries `url` (a pasted pixai.art link: an entry's, or a contest's), and optionally
+    `contest_id` (a contest from the account's own entries) and `slug` (a contest typed in).
+    The artwork read the app already has does not carry the artwork's contest, so the contest
+    comes from the row's pick, a contest link, a typed slug, or the contest the app recorded
+    the linked artwork in -- in that order (moonglade_contest_wins.plan_manual). Then ONE GET
+    of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
+    """
+    import moonglade_backup as core
+    cw = contest_wins
+    now = time.time() if now is None else now
+    url_text = str((body or {}).get("url") or "").strip()
+    cid_in = str((body or {}).get("contest_id") or "").strip()
+    slug_in = str((body or {}).get("slug") or "").strip()
+
+    def _say(state, entry="", **extra):
+        p = {"verified": False, "state": state, "message": cw.message(state, entry), "wins": []}
+        p.update(extra)
+        return 200, p
+
+    parsed = {"ok": True, "receipt": "", "artwork_id": "", "slug": ""}
+    if url_text:
+        parsed = cw.parse_evidence(url_text)
+        if not parsed["ok"]:
+            return _say(parsed["reason"])
+    elif not (cid_in or slug_in):
+        return _say("no_link")
+    entries, _legacy, _wins, checks = _cw_inputs(load_telemetry(out_dir))
+    lazy = {"board": None}
+
+    def _board():
+        """The contest board by id, read at most once and only if a lookup needs it."""
+        if lazy["board"] is None:
+            try:
+                sess = core._make_session(None)
+                lazy["board"] = {str(c.get("id")): c for c in (contest_board(core, sess) or [])
+                                 if isinstance(c, dict) and c.get("id")}
+            except Exception:                                 # noqa: BLE001
+                lazy["board"] = {}
+        return lazy["board"]
+
+    def _slug_of(cid):
+        st = checks.get(str(cid)) or {}
+        return str(st.get("slug") or (_board().get(str(cid)) or {}).get("slug") or "")
+
+    def _cid_of(slug):
+        for k, st in checks.items():
+            if st.get("slug") == slug:
+                return k
+        for k, c in _board().items():
+            if c.get("slug") == slug:
+                return k
+        return ""
+
+    plan = cw.plan_manual(parsed, cid_in, slug_in, entries, _slug_of, _cid_of)
+    if not plan["ok"]:
+        return _say(plan["reason"])
+    slug, cid = plan["slug"], plan["cid"]
+    last = _cw_state["manual"].get(slug)
+    if last is not None and 0 <= now - last < cw.MANUAL_COOLDOWN_S:
+        return _say("cooldown", cid=cid, slug=slug)
+    _cw_state["manual"][slug] = now
+    ids = plan["entry_ids"]
+    entry = ids[0] if ids and len(ids) == 1 else ""
+    try:
+        session = core._make_session(None)
+        uid = str(core._client_of(session).user_id or "")
+        if not uid:
+            raise ValueError("no account id resolved")
+        rows = core.contest_winners(session, slug)              # one GET, nothing else
+    except Exception as e:                                    # noqa: BLE001
+        return _say("failed", entry, cid=cid, slug=slug,
+                    detail=_redact_host_paths_cli(out_dir, str(e))[:200])
+    res = cw.verify(rows, uid, ids)
+    if not res["wins"]:
+        return _say(res["outcome"], entry, cid=cid, slug=slug, decided=res["decided"])
+    reward = str(((_board().get(cid) if cid else None) or {}).get("reward_status") or "")
+
+    def _do(w, ch):
+        for win in res["wins"]:
+            cw.record_win(w, cid or slug, win, "check", now,
+                          parsed["receipt"] or cw.artwork_url(win["artwork_id"]))
+        st = ch.get(cid)
+        if isinstance(st, dict) and st.get("status") == cw.PENDING:
+            cw.after_read(st, now, res, reward)
+    _cw_edit(out_dir, _do)
+    listed = [{"artwork_id": x["artwork_id"], "tier": x["tier"], "prize_amount": x["prize"],
+               "label": cw.tier_label(x["tier"], x["prize"])} for x in res["wins"]]
+    return 200, {"verified": True, "state": "verified", "message": cw.message("verified"),
+                 "wins": listed, "cid": cid, "slug": slug,
+                 "receipt_url": parsed["receipt"] or cw.artwork_url(res["wins"][0]["artwork_id"])}
+
+
+def _cw_check_view(state, now):
+    """Where the daily check stands for one contest, for the My-entries row: {state, last_at,
+    next_at, until, decided}. `state` is "none" (no schedule yet), "pending", "settled" or
+    "expired"; times are epoch seconds (0 when not applicable)."""
+    if not isinstance(state, dict):
+        return {"state": "none", "last_at": 0, "next_at": 0, "until": 0, "decided": False}
+    status = contest_wins.effective_status(state, now)
+    return {"state": status, "last_at": float(state.get("last_at") or 0.0),
+            "next_at": float(state.get("next_at") or 0.0) if status == contest_wins.PENDING else 0,
+            "until": contest_wins.deadline(state), "decided": bool(state.get("decided"))}
 
 
 # ======================================================================================
@@ -6460,13 +8384,15 @@ def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newe
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
                    media_type="", source="", collection=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
+            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order),
+            list(params) + order_params
         ).fetchall()
         return [r[0] for r in rows]
 
@@ -6487,14 +8413,15 @@ def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="new
     Bounded work -- ids-only over the catalog (~36k rows max); measured in
     tests/test_series_grouping.py. No `series=` param here on purpose: grouping is
     the alternative to a single-series view, never combined with it."""
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, task_id, created_at, is_video FROM catalog "
-            "WHERE {} ORDER BY {}".format(where, order), params
+            "WHERE {} ORDER BY {}".format(where, order), list(params) + order_params
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -6601,8 +8528,16 @@ def collection_health(out_dir, db_path):
     # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
     # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
     # anything if it watches exactly the roots this walk descends into.
+    size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
+    size_by_mid = {}          # (kind, media_id) -> bytes of its largest copy (the Storage bars)
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
-        on_disk_rels.add(str(e.rel).replace("\\", "/"))
+        _rel = str(e.rel).replace("\\", "/")
+        on_disk_rels.add(_rel)
+        if e.size is not None:
+            size_by_rel[_rel] = e.size
+            _k = (e.kind, e.media_id)
+            if e.size > size_by_mid.get(_k, -1):
+                size_by_mid[_k] = e.size
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
         if e.size is None:
@@ -6666,6 +8601,10 @@ def collection_health(out_dir, db_path):
         # health count and what --import-local/Import would actually do stay in sync
         catalog_ids = {mid for (mid,) in con.execute(
             "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
+        # what the Storage bars group by (Session N6): one small row per picture that has a file
+        storage_rows = con.execute(
+            "SELECT media_id, filename, is_video, model_name, collections FROM catalog "
+            "WHERE filename != ''").fetchall()
 
     tag_counter = Counter()
     for (tags,) in tag_rows:
@@ -6726,6 +8665,95 @@ def collection_health(out_dir, db_path):
         "top_tags": top_tags,
         "top_loras": top_loras,
         "top_words": top_words,
+        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir),
+                                     size_by_mid),
+    }
+
+
+# ---------------------------------------------------------------------------
+# STORAGE BREAKDOWN (Session N6). Collection Health's one "Storage used" number became three
+# stacked bars: by TYPE (images, videos, Loom renders), by MODEL, and by COLLECTION. Sizes are
+# the bytes each catalogued picture's file takes on disk (the health walk already stats every
+# file; it just kept only the images' before). A picture whose file is not on disk is left out
+# -- it takes no space we can measure -- so the bars total what is really there, catalogued
+# pictures only, which can be less than the folder (an uncataloged file counts in the folder
+# and in no bar).
+#
+# FINDING A ROW'S FILE. The catalog's `filename` is a path relative to the library only on
+# newer rows (videos/..., images/..., imported/...); every older row holds the bare file name
+# while the file sits in images/. Matching on `filename` alone therefore measured 263 of a
+# 37,535-picture library (owner walk, 2026-09-29). So a row is found the way the rest of the
+# app finds a file: its relative path first, else its media id through the walk's own
+# media_id_of (INVARIANT 1), in the same kind (a video row never borrows an image's bytes).
+# Both lookups come off the health walk that already ran -- no second walk, no stat per row.
+# A media id on disk twice counts once, at its larger copy (the Duplicates tile's own keeper
+# rule; the other copy is what Reclaimable counts).
+#
+#   type        an exclusive split: a Loom render (a board's shot result or a kept re-roll) is
+#               "loom" whether it is a clip or a still, else "video", else "image". It is the
+#               same partition `type:` searches by, so a segment's click lands on exactly it.
+#   model       the model name on the row; the top four by bytes, the rest (and any picture
+#               with no model recorded) folded into "Other", which is not a filter.
+#   collection  hand-picked collections only (a smart one is a search, it owns no bytes). A
+#               picture in two collections counts in both, so this bar can overlap and says
+#               so; its segments are shares of their own sum, not of the library. Top four by
+#               bytes plus "Other" for the rest.
+STORAGE_TOP = 4
+_STORAGE_TYPES = (("image", "Images"), ("video", "Videos"), ("loom", "Loom renders"))
+
+
+def storage_breakdown(rows, size_by_rel, loom_ids, size_by_mid=None):
+    """Pure: catalog rows (media_id, filename, is_video, model_name, collections), the walk's
+    {relative path: bytes}, the Loom's render ids and the walk's {(kind, media_id): bytes}
+    -> the payload's `storage` block. A row is measured by its relative path, else by its
+    media id in its own kind (see the section comment: most rows hold a bare file name)."""
+    size_by_mid = size_by_mid or {}
+    by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
+    by_model, by_coll = {}, {}                                 # name -> [bytes, count]
+    total, files = 0, 0
+    for r in rows:
+        fn = str(r["filename"] or "").replace("\\", "/")
+        mid = str(r["media_id"] or "")
+        is_video = str(r["is_video"] or "") == "1"
+        size = size_by_rel.get(fn)
+        if size is None and mid:
+            size = size_by_mid.get(("video" if is_video else "image", mid))
+        if size is None:
+            continue
+        total += size
+        files += 1
+        kind = "loom" if mid in loom_ids else ("video" if is_video else "image")
+        by_type[kind][0] += size
+        by_type[kind][1] += 1
+        name = str(r["model_name"] or "").strip()
+        m = by_model.setdefault(name, [0, 0])
+        m[0] += size
+        m[1] += 1
+        for c in _split_collections(r["collections"]):
+            cc = by_coll.setdefault(c, [0, 0])
+            cc[0] += size
+            cc[1] += 1
+
+    def seg(name, b, n, **extra):
+        return dict({"name": name, "bytes": b, "h": _fmt_size(b), "count": n}, **extra)
+
+    def top_plus_other(table, skip_blank):
+        named = sorted(((k, v) for k, v in table.items() if not (skip_blank and not k)),
+                       key=lambda kv: (-kv[1][0], kv[0].lower()))
+        segs = [seg(k, v[0], v[1], other=False) for k, v in named[:STORAGE_TOP]]
+        rest = named[STORAGE_TOP:]
+        rb = sum(v[0] for _, v in rest) + (table.get("", [0, 0])[0] if skip_blank else 0)
+        rn = sum(v[1] for _, v in rest) + (table.get("", [0, 0])[1] if skip_blank else 0)
+        if rb:
+            segs.append(seg("Other", rb, rn, other=True))
+        return segs
+
+    coll_segs = top_plus_other(by_coll, False)
+    return {
+        "total_bytes": total, "total_h": _fmt_size(total), "files": files,
+        "by_type": [seg(label, by_type[k][0], by_type[k][1], key=k) for k, label in _STORAGE_TYPES],
+        "by_model": top_plus_other(by_model, True),
+        "by_collection": {"sum_bytes": sum(sg["bytes"] for sg in coll_segs), "segments": coll_segs},
     }
 
 
@@ -8522,9 +10550,12 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 DESIGN_TOKENS_CSS = r"""
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
      components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that
-     must paint over any modal: achievement moment 520, its confetti sheet 517 behind it).
-     The legacy 200s cluster and the stray 99 live only in classic surfaces, which retire
-     with the React conversion -- do not add new values outside the three bands. */
+     must paint over any modal). Normalized 2026-09-28: the legacy 200s cluster and the
+     stray 99 went with the classic surfaces, and every other value that sat outside a band
+     was renumbered into one in its old order. The achievement moment is 519, not the
+     design's 520: its parade's skip control must paint in front of it and 520 is the
+     ceiling. The ladder is gallery/src/styles/overlays.css's -- do not add values outside
+     the three bands. */
   :root {
     /* Palette sampled from two reference images:
        731004762264180451.webp — teal "magic glow", green gems, rare gold trim.
@@ -8771,68 +10802,38 @@ __UPSCALE_CONST__
      of 2026-08-09 (Claude Design handoff, drift item 39): the Activity control is inline in
      the toolbar (master-storyboard.jsx's own .lv-top-act-wrap) now, not body-level. -->
 <script>
-window.storage = {
-  get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){ return (d&&d.value!=null)?{value:d.value}:null; }); },
-  set:function(k,v){ return fetch('/api/loom/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})}); },
-  list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
-  delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
-};
-/* The Read the Manual beacon, and the nonce it needs (2026-09-07 ruling -- see
-   api_ach_event()). The classic Loom shell has no bundle seam to import
-   gallery/src/notify/achNonce.js from, so it carries the same three rules by hand:
-   send the nonce, adopt the next_nonce an accepted event returns, and on a stale-page
-   403 ask /api/ach-nonce once and retry once -- but ONLY when the nonce it just lost is
-   missing or older than the 60s window (2026-09-07, refining the same day's ruling; see
-   achNonce.js's own writeup). A double-fired click on the ? button sends one nonce twice;
-   the twin that loses is refused 403 as consumed, and retrying THAT one with a fresh nonce
-   counts one press as two the moment the round trip outruns the server's 150ms debounce.
-   Anything else is a quiet no-op -- the feat stays earnable on the next open. The value
-   below is a PLACEHOLDER the /loom route substitutes on the way out -- a fresh mint per
-   render, exactly as app_page puts one in MG_BOOT. (Naming the placeholder token in this
-   comment would substitute it here too.) */
+/* Session P (BUILD-w5-p s3.5, review F15): every call now REJECTS on a failed answer instead
+   of reading one as "nothing there" -- a failed or unreadable get used to come back null, and
+   the boot path seeded a blank board over the key. get also hands back the board's rev (and
+   missing:true for an absent key); set takes an optional {base_rev} and resolves {ok, rev} or
+   {conflict, value, rev} (the server's compare-and-swap), throwing on anything else. */
+window.storage = (function(){
+  function fail(r, d){ var e = new Error((d && d.error) || ('HTTP ' + r.status)); e.status = r.status; e.unreadable = !!(d && d.error === 'unreadable'); throw e; }
+  function body(r){ return r.json().catch(function(){ return null; }); }
+  return {
+    get:function(k){ return fetch('/api/loom/get?key='+encodeURIComponent(k)).then(function(r){ return body(r).then(function(d){ if(!r.ok || !d) fail(r, d); if (d.value != null) return {value:d.value, rev:d.rev}; return d.missing ? {value:null, missing:true, rev:d.rev} : null; }); }); },
+    set:function(k,v,shared,opts){ var b={key:k,value:v}; if (opts && opts.base_rev != null) b.base_rev = opts.base_rev; return fetch('/api/loom/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){ return body(r).then(function(d){ if (r.status === 409 && d && d.conflict) return {conflict:true, value:d.value, rev:d.rev}; if(!r.ok || !d || d.ok === false) fail(r, d); return {ok:true, rev:d.rev}; }); }); },
+    list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){ return body(r).then(function(d){ if(!r.ok || !d) fail(r, d); return {keys:(d.keys)||[]}; }); }); },
+    delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}).then(function(r){ return body(r).then(function(d){ if(!r.ok || (d && d.ok === false)) fail(r, d); return d; }); }); }
+  };
+})();
+/* The feat beacon's per-render nonce (2026-09-07 ruling -- see api_ach_event()). Since
+   Session I (2026-09-28) this shell posts NOTHING itself: the "?" below opens the guide, and
+   the guide's own open sends the docs event through gallery/src/notify/achNonce.js, which the
+   Loom bundle carries -- the one poster, with the one set of rules (send the nonce, adopt
+   next_nonce, one conditional stale-page retry). That module reads its first nonce from
+   here when there is no MG_BOOT. The value below is a PLACEHOLDER the /loom route substitutes
+   on the way out -- a fresh mint per render, exactly as app_page puts one in MG_BOOT.
+   (Naming the placeholder token in this comment would substitute it here too.) */
 window.MG_ACH_NONCE = "__ACH_NONCE__";
-window.MG_ACH_NONCE_AT = Date.now();     // when the nonce we hold was minted
-window.mgAchDocs = function (retried) {
-  // Read the age BEFORE the request: a twin that beat us may adopt its own next_nonce
-  // while ours is in flight, and reset the clock this decision reads.
-  var stale = !window.MG_ACH_NONCE || (Date.now() - window.MG_ACH_NONCE_AT) >= 60000;
-  fetch('/api/ach-event', {method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({event:'docs', nonce: window.MG_ACH_NONCE})})
-    .then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d || {}}; },
-                                              function () { return {status: r.status, body: {}}; }); })
-    .then(function (x) {
-      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce;
-                               window.MG_ACH_NONCE_AT = Date.now(); return; }
-      // 429, anything else, or a 403 on a nonce young enough to have been spent by this
-      // click's own twin: give up quietly.
-      if (x.status !== 403 || retried || !stale) return;
-      return fetch('/api/ach-nonce').then(function (r) { return r.json(); }).then(function (d) {
-        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.MG_ACH_NONCE_AT = Date.now();
-                            window.mgAchDocs(true); }
-      });
-    })
-    .catch(function () {});
-};
 </script>
 __RUNTIME_SCRIPT_BLOCK__
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{window.mgAchDocs()}catch(e){}"
+<!-- The Loom's "?" (Session I decision 2): the hand-written quick guide that used to open
+     here retired; the button opens the in-app guide (the wiki this install carries) on The
+     Loom's page, through the verb the bundle publishes (gallery/src/help/helpStore.js). -->
+<button id="eb-help-btn" onclick="if(window.mgHelp)window.mgHelp.open('The-Loom')"
   style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
-  title="How The Loom works">?</button>
-<div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
-  style="position:fixed;inset:0;z-index:402;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
-  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
-    <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
-    <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
-    <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
-    <p><b>Modes.</b> Each shot has a generation mode: <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip. (Text-only T2V is retired &mdash; these video models all need an input frame or reference.)</p>
-    <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
-    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first, so the cut is continuous; once a shot has rendered, the same button offers "&#9986; splice" to take its real last frame instead.</p>
-    <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
-    <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
-    <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
-    <p style="color:var(--subtext);">Full manual: the wiki&rsquo;s <a href="https://github.com/Nelnamara/moonglade-athenaeum/wiki/The-Loom" target="_blank" rel="noopener">The Loom</a> page.</p>
-  </div>
-</div>
+  title="The Loom's page of the guide (?)" aria-label="Open the guide">?</button>
 </body></html>"""
 
 # The Loom's ONE delivery path (bundle-only since the Babel-standalone retirement,
@@ -8873,6 +10874,363 @@ def _build_stamp():
     except Exception:
         sha = ""
     return "v{}".format(ver) + (" · {}".format(sha) if sha else "")
+
+
+# ---------------------------------------------------------------------------
+# THE IN-APP GUIDE AND THE ABOUT CARD (Session I, 2026-09-28 -- the committed
+# Design Handoff is ../moonglade-internal/design/handoff-2026-09-04/Help and First
+# Run Handoff.dc.html; its numbered decisions are design/notes/help-first-run/NOTES.md).
+#
+# Help renders the wiki/ folder SHIPPED WITH THIS INSTALL. The app is a git checkout (see
+# the updater's header below), so the pages on disk are the pages for the version that is
+# running -- the online wiki follows the newest release instead, which is exactly why it
+# is only ever offered as "a newer version of this page is online", never read in place.
+#
+# The server's part is small on purpose. It lists the pages in _Sidebar.md's order with
+# their headings (the overlay's search covers titles and headings), hands ONE page's
+# markdown over as text (the client parses it into plain data and React escapes every
+# character -- there is no HTML sink anywhere on this road), reads the Glossary's terms,
+# and cuts this version's CHANGELOG entry for About and what's new.
+#
+# A slug is served only if it is one of the files the listing itself found: it is looked
+# up, never joined onto a path.
+# ---------------------------------------------------------------------------
+WIKI_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/wiki"
+WIKI_RAW_URL = ("https://raw.githubusercontent.com/wiki/Nelnamara/moonglade-athenaeum/"
+                "{slug}.md")
+RELEASES_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/releases"
+ISSUES_WEB_URL = "https://github.com/Nelnamara/moonglade-athenaeum/issues"
+_WIKI_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_WIKI_LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
+_MD_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+_GLOSSARY_ITEM_RE = re.compile(r"^- \*\*(.+?)\*\*\s*[—–-]+\s*(.*)$")
+_CHANGELOG_HEAD_RE = re.compile(
+    r"^## \[(\d+\.\d+\.\d+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*(?:[—–-]+\s*(.*))?$")
+_SURFACE_MARK_RE = re.compile(r"<!--\s*surface:\s*([a-z]+)\s*-->")
+# The surfaces a what's-new highlight's "Show me" can open -- the first-run guide's own
+# surfaces, less Branding, which no public text may point at.
+HELP_SURFACES = ("gallery", "dock", "loom", "folio", "panel")
+# Keyword inference for a highlight's surface when its CHANGELOG line carries no explicit
+# <!-- surface: x --> mark: the bullet's bold lead is read first and its body only if the
+# lead names nothing, and within one of them the EARLIEST keyword wins. No match means no
+# "Show me" on that card rather than a guess.
+_SURFACE_WORDS = (
+    ("loom", ("the loom", "loom's", "storyboard")),
+    ("folio", ("folio", "achievement")),
+    ("panel", ("control panel", "job console", "runs itself")),
+    ("dock", ("generate drawer", "generate dock", "the dock", "create screen",
+              "cost badge", "the drawer", "generate", "generation")),
+    ("gallery", ("the gallery", "gallery's", "the library", "lightbox", "the grid")),
+)
+WIKI_ONLINE_TTL = 1800           # a page compared against the online wiki: 30 min
+WIKI_ONLINE_FAILURE_TTL = 90     # an unreachable GitHub is asked again soon, not hammered
+_wiki_online_cache = {}
+_wiki_online_lock = threading.Lock()
+
+
+def wiki_dir():
+    """The wiki/ folder beside this module -- the one shipped with this install."""
+    return Path(__file__).resolve().parent / "wiki"
+
+
+def changelog_path():
+    """CHANGELOG.md beside this module -- this install's own history."""
+    return Path(__file__).resolve().parent / "CHANGELOG.md"
+
+
+def md_plain(text):
+    """Inline markdown -> the words a reader sees: a link keeps its label, the emphasis and
+    code marks go, whitespace collapses. Titles, headings, glossary cards and changelog
+    lines are all shown as plain text, so this is the one place they are flattened."""
+    s = _WIKI_LINK_RE.sub(lambda m: m.group(1), str(text or ""))
+    s = re.sub(r"`([^`]*)`", r"\1", s)
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+    s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"\1", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def display_version(version):
+    """What the guide prints for a version: x.y for a .0 release, x.y.z for a patch --
+    the same string `seen.whatsnew` stores, so 3.14 -> 3.14.1 is a change and 3.14.0
+    -> 3.14 is not."""
+    v = version_tuple(version)
+    if not v:
+        return str(version or "")
+    return "%d.%d" % v[:2] if v[2] == 0 else "%d.%d.%d" % v
+
+
+def release_kind(version):
+    """major | minor | patch. A patch release gets the toast only (it opens About); a
+    minor or major one gets the what's-new sheet too (decision 3)."""
+    v = version_tuple(version)
+    if not v:
+        return "patch"
+    if v[2]:
+        return "patch"
+    return "major" if v[1] == 0 else "minor"
+
+
+def wiki_web_url(slug):
+    """The online copy of one page; the wiki's own address for Home."""
+    return WIKI_WEB_URL if slug == "Home" else WIKI_WEB_URL + "/" + slug
+
+
+def _wiki_pages_on_disk(root):
+    """{slug: path} for every page file in `root` whose name is a valid slug. Files named
+    _Something (the sidebar, a footer) are chrome, not pages."""
+    out = {}
+    try:
+        for p in sorted(Path(root).glob("*.md")):
+            if not p.stem.startswith("_") and _WIKI_SLUG_RE.match(p.stem):
+                out[p.stem] = p
+    except OSError:
+        pass
+    return out
+
+
+def md_headings(md):
+    """[(level, plain text)] for every ATX heading outside a fenced code block."""
+    out, fence = [], False
+    for line in str(md or "").splitlines():
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        m = _MD_HEADING_RE.match(line)
+        if m:
+            text = md_plain(m.group(2))
+            if text:
+                out.append((len(m.group(1)), text))
+    return out
+
+
+def wiki_index(root=None):
+    """The guide's page list: [{slug, title, heading, headings:[{level, text}]}].
+
+    ORDER is _Sidebar.md's -- the same order the online wiki's own sidebar shows -- with
+    any page the sidebar does not link appended by name, so a page can never be missing
+    from the guide just because nobody added it to the sidebar. `title` is the sidebar's
+    label (what the reader knows the page as); `heading` is the page's own # line."""
+    root = Path(root) if root else wiki_dir()
+    pages = _wiki_pages_on_disk(root)
+    order, labels = [], {}
+    try:
+        side = (root / "_Sidebar.md").read_text(encoding="utf-8")
+    except OSError:
+        side = ""
+    for label, target in _WIKI_LINK_RE.findall(side):
+        slug = target.split("#", 1)[0]
+        if slug in pages and slug not in labels:
+            order.append(slug)
+            labels[slug] = md_plain(label)
+    order += [s for s in sorted(pages) if s not in labels]
+    out = []
+    for slug in order:
+        try:
+            heads = md_headings(pages[slug].read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        h1 = next((t for lvl, t in heads if lvl == 1), "")
+        out.append({
+            "slug": slug,
+            "title": labels.get(slug) or h1 or slug.replace("-", " "),
+            "heading": h1,
+            "headings": [{"level": lvl, "text": t} for lvl, t in heads if lvl > 1],
+        })
+    return out
+
+
+def wiki_glossary(root=None):
+    """[{term, def}] from Glossary.md's `- **term** -- definition` bullets (a definition may
+    wrap onto indented lines under its bullet). No Glossary.md answers [] -- the guide then
+    underlines nothing; it never invents a term."""
+    root = Path(root) if root else wiki_dir()
+    try:
+        lines = (root / "Glossary.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out, cur = [], None
+    for line in lines:
+        m = _GLOSSARY_ITEM_RE.match(line)
+        if m:
+            cur = {"term": md_plain(m.group(1)), "def": m.group(2).strip()}
+            out.append(cur)
+        elif cur is not None and line.startswith("  ") and line.strip():
+            cur["def"] += " " + line.strip()
+        else:
+            cur = None
+    for t in out:
+        t["def"] = md_plain(t["def"])
+    return [t for t in out if t["term"] and t["def"]]
+
+
+def _changelog_surface(*texts):
+    """The surface the first text that names one names, earliest keyword first."""
+    for text in texts:
+        low = str(text or "").lower()
+        best, at = "", None
+        for surface, words in _SURFACE_WORDS:
+            for w in words:
+                i = low.find(w)
+                if i >= 0 and (at is None or i < at):
+                    best, at = surface, i
+        if best:
+            return best
+    return ""
+
+
+def _changelog_item(raw, section):
+    """One CHANGELOG bullet -> {lead, text, surface, section}. The lead is the bullet's
+    bold opening sentence when it has one (the house style), else its first sentence; the
+    trailing "(2026-09-26)" date tag is dropped. An explicit <!-- surface: x --> mark names
+    the surface a what's-new "Show me" opens; without one it is inferred from the words."""
+    raw = str(raw or "").strip()
+    mark = _SURFACE_MARK_RE.search(raw)
+    raw = _SURFACE_MARK_RE.sub("", raw).strip()
+    raw = re.sub(r"\s*\(\d{4}-\d{2}-\d{2}[^)]*\)\s*$", "", raw)
+    m = re.match(r"^\*\*(.+?)\*\*\s*(.*)$", raw, re.S)
+    if m:
+        lead, text = md_plain(m.group(1)), md_plain(m.group(2))
+    else:
+        plain = md_plain(raw)
+        cut = re.search(r"[.!?](?:\s|$)", plain)
+        lead = plain[:cut.end()].strip() if cut else plain
+        text = plain[len(lead):].strip() if cut else ""
+    lead = lead.rstrip(" .:")
+    if mark and mark.group(1) in HELP_SURFACES:
+        surface = mark.group(1)
+    else:
+        surface = _changelog_surface(lead, text)
+    return {"lead": lead[:240], "text": text[:700], "surface": surface, "section": section}
+
+
+def changelog_entries(text=None):
+    """Every RELEASED version block in CHANGELOG.md, in file order (newest first):
+    [{version, date, title, items:[...]}]. [Unreleased] is not a release and is skipped.
+    Items are the top-level `- ` bullets; a `### Heading` inside a block names the
+    section the bullets under it belong to ("" for the block's own list)."""
+    if text is None:
+        try:
+            text = changelog_path().read_text(encoding="utf-8")
+        except OSError:
+            return []
+    entries, cur, item, section = [], None, None, ""
+
+    def _close_item():
+        if cur is not None and item:
+            cur["items"].append(_changelog_item(" ".join(item), section))
+
+    for line in str(text).splitlines():
+        if line.startswith("## "):
+            _close_item()
+            item = None
+            m = _CHANGELOG_HEAD_RE.match(line.strip())
+            cur = None
+            section = ""
+            if m:
+                cur = {"version": m.group(1), "date": m.group(2),
+                       "title": md_plain(m.group(3) or ""), "items": []}
+                entries.append(cur)
+            continue
+        if cur is None:
+            continue
+        if line.startswith("### "):
+            _close_item()
+            item = None
+            section = md_plain(line[4:])
+        elif line.startswith("- "):
+            _close_item()
+            item = [line[2:].strip()]
+        elif line.strip() and item is not None:
+            item.append(line.strip())
+        elif not line.strip():
+            _close_item()
+            item = None
+    _close_item()
+    return entries
+
+
+def art_pack_info(container_path):
+    """{installed, version} for the About card's "art pack vN". The version comes from the
+    installed pack's own marker when the downloader wrote one, else from the manifest when
+    the pack on disk is the one this build expects; a missing pack says so."""
+    try:
+        present = Path(container_path).exists()
+    except OSError:
+        present = False
+    if not present:
+        return {"installed": False, "version": ""}
+    marker = moonglade_assets._read_marker(Path(container_path)) or {}
+    if marker.get("version"):
+        return {"installed": True, "version": str(marker["version"])}
+    man = moonglade_assets.read_manifest()
+    try:
+        current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
+    except Exception:                            # noqa: BLE001 -- a label, never a failure
+        current = False
+    return {"installed": True, "version": str(man["version"]) if current else ""}
+
+
+def about_payload(version, container_path, entries=None):
+    """What the About card, the post-update toast and the what's-new sheet read: this
+    version's CHANGELOG entry (the running version's, not the newest in the file), the
+    release's size (major/minor/patch), the art pack, and the earlier entries for "Earlier
+    versions"."""
+    entries = changelog_entries() if entries is None else entries
+    vt = version_tuple(version)
+    cur = next((e for e in entries if e["version"] == str(version)), None)
+    earlier = [e for e in entries
+               if vt and version_tuple(e["version"]) and version_tuple(e["version"]) < vt][:24]
+    return {
+        "version": str(version),
+        "display_version": display_version(version),
+        "kind": release_kind(version),
+        "date": (cur or {}).get("date", ""),
+        "title": (cur or {}).get("title", ""),
+        "items": (cur or {}).get("items", []),
+        "earlier": earlier,
+        "pack": art_pack_info(container_path),
+        "releases_url": RELEASES_WEB_URL,
+        "issues_url": ISSUES_WEB_URL,
+        "wiki_url": WIKI_WEB_URL,
+    }
+
+
+def _md_same(a, b):
+    def norm(s):
+        return "\n".join(ln.rstrip() for ln in str(s or "").replace("\r\n", "\n").strip().split("\n"))
+    return norm(a) == norm(b)
+
+
+def wiki_online_differs(slug, local_md, behind, opener=None, now=None):
+    """Is a NEWER copy of this page online? Only asked when a newer release is known to be
+    out (`behind`, from the updater's own cached answer): the online wiki is re-published
+    at every release tag, so with no newer release there is no newer page, and GitHub is
+    not asked at all. When it is asked, the answer is cached per page (WIKI_ONLINE_TTL; an
+    unreachable GitHub for WIKI_ONLINE_FAILURE_TTL), and a failure answers False -- a quiet
+    link that is missing is fine, one that is wrong is not. `opener` is the seam the tests
+    substitute; nothing in the suite touches the network."""
+    if not behind:
+        return False
+    now = time.time() if now is None else now
+    with _wiki_online_lock:
+        c = _wiki_online_cache.get(slug)
+        if c and (now - c["at"]) < c["ttl"]:
+            return c["differs"]
+    import urllib.request
+    opener = opener or urllib.request.urlopen
+    try:
+        req = urllib.request.Request(WIKI_RAW_URL.format(slug=slug), headers={
+            "User-Agent": "moonglade-athenaeum-guide"})
+        with opener(req, timeout=6) as resp:
+            online = resp.read(2 * 1024 * 1024).decode("utf-8", "replace")
+        differs, ttl = (not _md_same(online, local_md)), WIKI_ONLINE_TTL
+    except Exception:                            # noqa: BLE001 -- offline is not an error here
+        differs, ttl = False, WIKI_ONLINE_FAILURE_TTL
+    with _wiki_online_lock:
+        _wiki_online_cache[slug] = {"at": now, "ttl": ttl, "differs": differs}
+    return differs
 
 
 LIBRARY_DIR_KEY = "LIBRARY_DIR"
@@ -9439,6 +11797,314 @@ def _account_key(username):
     config.json's AUTH_USERS."""
     import hashlib
     return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Per-account preferences -- one small JSON document per app login account
+# ---------------------------------------------------------------------------
+# The home for state that belongs to ONE signed-in account rather than to the library:
+# which first-run guides it has dismissed, the "what's new" it has seen, per-base-family
+# generate defaults, a pinned goal. Deliberately generic -- a flat {key: JSON value}
+# document validated at the write boundary -- so each later consumer is a key name
+# (`guide.<surface>`, `seen.whatsnew`, `unleash`, ...), never another store.
+#
+# ON DISK: out_dir/account_prefs/<key>.json, where <key> is _account_key(username) --
+# the same case-safe digest every per-account store uses, never the raw name.
+#
+# WHICH ACCOUNT: the route passes session["user"] and nothing else; the body can never
+# name one. There is no web "no accounts" mode to key: the gallery has no localhost
+# bypass, and with zero accounts nothing past /login is reachable (DECISIONS: "The
+# gallery is default-deny, with no localhost bypass"), so every request that reaches
+# the route carries a real username. ACCOUNT_LOCAL is for a SERVER-SIDE caller that has
+# no web session at all (the CLI, the MCP server): it lands on account_prefs/_local.json.
+# It cannot collide with an account: a digest is 16 hex characters and never "_local",
+# and the sentinel is an object, not a string, so no session cookie can carry it. An
+# empty or missing username is refused outright -- it never falls back to _local.
+#
+# CORRUPT FILES: a read of a missing, unparsable or non-object file answers {} (fail
+# soft: a torn preference must never break a page). A WRITE never silently replaces a
+# corrupt file with that empty reading: the bad file is moved aside to
+# <key>.corrupt-<UTC stamp>.json (kept, logged) before the new document lands. A file
+# that exists but cannot be READ (a sharing violation, a permission error) refuses the
+# write instead -- what could not be read is not overwritten.
+#
+# LOCKING: one thread lock around every read-modify-write, plus a per-account O_EXCL
+# lockfile (_excl_lockfile, telemetry's) so a second process writing the same document
+# cannot interleave. A lockfile that cannot be taken in time refuses the write
+# (AccountPrefsBusy) rather than risk a lost update. Writes are atomic: temp file in
+# the same directory + core._atomic_replace.
+ACCOUNT_PREFS_DIRNAME = "account_prefs"
+ACCOUNT_PREF_KEY_MAX = 64
+ACCOUNT_PREF_VALUE_MAX = 64 * 1024        # one value's compact JSON, UTF-8 bytes
+ACCOUNT_PREFS_DOC_MAX = 1024 * 1024       # the whole document as written, UTF-8 bytes
+# Lowercase dotted names: segments of [a-z0-9_-], the first starting with a letter, the
+# rest with a letter or digit (so `seen.feat.12` works), no empty segment.
+ACCOUNT_PREF_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
+_ACCOUNT_LOCAL_FILEKEY = "_local"
+_ACCOUNT_PREFS_LOCK = threading.Lock()
+
+
+class _AccountLocal(object):
+    """The type of ACCOUNT_LOCAL. A distinct object, not a string, on purpose."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "ACCOUNT_LOCAL"
+
+
+ACCOUNT_LOCAL = _AccountLocal()
+
+
+class AccountPrefsError(ValueError):
+    """A change the store refuses (bad key, value not JSON, over a size cap, bad
+    shape). str(e) is a plain sentence the route returns verbatim with a 400."""
+
+
+class AccountPrefsBusy(RuntimeError):
+    """Another process held this account's document lock past the wait."""
+
+
+def account_prefs_path(out_dir, account):
+    """The one file `account`'s preferences live in. `account` is a username (the
+    session's own) or ACCOUNT_LOCAL; anything else -- None, "", whitespace, a
+    non-string -- raises ValueError rather than landing on some shared file."""
+    if account is ACCOUNT_LOCAL:
+        key = _ACCOUNT_LOCAL_FILEKEY
+    elif isinstance(account, str) and account.strip():
+        key = _account_key(account)
+    else:
+        raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
+    return Path(out_dir) / ACCOUNT_PREFS_DIRNAME / (key + ".json")
+
+
+def _account_prefs_read(p):
+    """(document, state) for one prefs file. state: "ok", "missing", "corrupt" (not
+    UTF-8 JSON, or not an object) or "unreadable" (it exists, the OS would not hand it
+    over). The document is {} for every state but "ok"."""
+    try:
+        raw = p.read_bytes()
+    except FileNotFoundError:
+        return {}, "missing"
+    except OSError:
+        return {}, "unreadable"
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):      # UnicodeDecodeError is a ValueError
+        return {}, "corrupt"
+    if not isinstance(doc, dict):
+        return {}, "corrupt"
+    return doc, "ok"
+
+
+def account_pref_key_problem(key):
+    """A plain sentence saying why `key` is not a valid preference key, or None."""
+    if not isinstance(key, str) or not key:
+        return "Preference keys must be non-empty strings."
+    if len(key) > ACCOUNT_PREF_KEY_MAX:
+        return "Preference key '{}...' is longer than {} characters.".format(
+            key[:24], ACCOUNT_PREF_KEY_MAX)
+    if not ACCOUNT_PREF_KEY_RE.match(key):
+        return ("'{}' is not a valid preference key: use lowercase dotted names "
+                "like guide.library or seen.whatsnew.".format(key))
+    return None
+
+
+def _account_pref_normalise(key, value):
+    """`value` round-tripped through JSON exactly as it will be stored, or
+    AccountPrefsError. allow_nan=False: NaN/Infinity are not JSON, and the browser's
+    JSON.parse would choke on the file forever after."""
+    try:
+        enc = json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, RecursionError):
+        raise AccountPrefsError("The value for '{}' is not plain JSON.".format(key))
+    size = len(enc.encode("utf-8"))
+    if size > ACCOUNT_PREF_VALUE_MAX:
+        raise AccountPrefsError(
+            "The value for '{}' is too large ({:,} bytes; the limit is {:,}).".format(
+                key, size, ACCOUNT_PREF_VALUE_MAX))
+    return json.loads(enc)
+
+
+def account_prefs_get(out_dir, account):
+    """`account`'s preferences document ({} when it has none, or its file is
+    corrupt or unreadable). Returns a fresh dict the caller may keep."""
+    p = account_prefs_path(out_dir, account)
+    with _ACCOUNT_PREFS_LOCK:
+        doc, _state = _account_prefs_read(p)
+    return doc
+
+
+def account_prefs_update(out_dir, account, set_=None, unset=None):
+    """Apply {key: value} sets and a list of key removals to `account`'s document, in
+    one locked, atomic read-modify-write. Returns the updated document.
+
+    Every key and value is validated before anything is written; one bad entry
+    refuses the whole change (AccountPrefsError, nothing written). The document cap is
+    checked on the result, except for a change that only REMOVES keys -- that is
+    always accepted, so an over-cap document (a hand-edited file) can still shrink.
+    Unsetting a key that is not there is a no-op, not an error. A change that alters
+    nothing writes nothing -- except over a corrupt file, which any change sets aside
+    and replaces.
+
+    Raises AccountPrefsError (refused change), AccountPrefsBusy (another process held
+    the lock), OSError (the file could not be read, preserved or written)."""
+    set_ = {} if set_ is None else set_
+    unset = [] if unset is None else unset
+    if not isinstance(set_, dict):
+        raise AccountPrefsError("'set' must be an object of {key: value}.")
+    if not isinstance(unset, (list, tuple)):
+        raise AccountPrefsError("'unset' must be a list of keys.")
+    clean = {}
+    for k, v in set_.items():
+        problem = account_pref_key_problem(k)
+        if problem:
+            raise AccountPrefsError(problem)
+        clean[k] = _account_pref_normalise(k, v)
+    drop = []
+    for k in unset:
+        problem = account_pref_key_problem(k)
+        if problem:
+            raise AccountPrefsError(problem)
+        if k in clean:
+            raise AccountPrefsError("'{}' is in both 'set' and 'unset'.".format(k))
+        drop.append(k)
+
+    p = account_prefs_path(out_dir, account)
+    with _ACCOUNT_PREFS_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lock = _excl_lockfile(p.with_suffix(".lock"))
+        if lock is None:
+            raise AccountPrefsBusy("Preferences are being saved elsewhere; try again.")
+        try:
+            doc, state = _account_prefs_read(p)
+            if state == "unreadable":
+                raise OSError("could not read the saved preferences to update them")
+            new = dict(doc)
+            new.update(clean)
+            for k in drop:
+                new.pop(k, None)
+            if new == doc and state != "corrupt":
+                return new      # nothing changed (a missing file stays missing)
+            data = json.dumps(new, indent=1, sort_keys=True, ensure_ascii=False,
+                              allow_nan=False).encode("utf-8")
+            if clean and len(data) > ACCOUNT_PREFS_DOC_MAX:
+                raise AccountPrefsError(
+                    "Saved preferences would be too large ({:,} bytes; the limit "
+                    "is {:,}).".format(len(data), ACCOUNT_PREFS_DOC_MAX))
+            if state == "corrupt":
+                _account_prefs_set_aside(p)
+            import moonglade_backup as core
+            tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+            try:
+                tmp.write_bytes(data)
+                core._atomic_replace(tmp, p)
+            except OSError:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+            return new
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Per-account narrator state -- SERVER-ONLY, deliberately not the prefs store
+# ---------------------------------------------------------------------------
+# The narrator's ladder (moonglade_narrator.py) is progress an account earns slowly, so it
+# cannot live where the account itself can write: /api/account/prefs takes any key from the
+# browser, which would make "the count" one console line away. This is a sibling store with
+# the same key rule (_account_key), the same locking (a thread lock plus a per-account
+# lockfile) and the same atomic write, and NO route that takes a state from a client: the
+# poke route below is the only writer, and it writes what moonglade_narrator.poke() returned.
+#
+# ON DISK: out_dir/account_state/<key>.json. A missing, torn or non-object file reads as a
+# fresh state (fail soft: a torn file must not break a click); a write never fails a poke
+# silently -- the route answers what it could not save.
+ACCOUNT_STATE_DIRNAME = "account_state"
+_ACCOUNT_STATE_LOCK = threading.Lock()
+
+
+def account_state_path(out_dir, account):
+    """The file `account`'s server-only state lives in. A username (the session's own);
+    anything else -- None, "", whitespace, a non-string -- raises ValueError rather than
+    landing on some shared file."""
+    if not (isinstance(account, str) and account.strip()):
+        raise ValueError("account state needs a signed-in account")
+    return Path(out_dir) / ACCOUNT_STATE_DIRNAME / (_account_key(account) + ".json")
+
+
+@contextmanager
+def account_state_locked(out_dir, account):
+    """Hold this account's state lock (thread + process) for a read-modify-write.
+    Yields the path. Raises AccountPrefsBusy when another process held the lockfile past the
+    wait -- the caller refuses the request rather than risk a lost update."""
+    p = account_state_path(out_dir, account)
+    with _ACCOUNT_STATE_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lock = _excl_lockfile(p.with_suffix(".lock"))
+        if lock is None:
+            raise AccountPrefsBusy("Busy; try again.")
+        try:
+            yield p
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
+def _narrator_clock():
+    """(epoch seconds, local calendar day) -- the two readings the ladder is given. The day
+    is the SERVER's local date, the same convention the Vigil's day ledger uses
+    (telem_mark_day). One seam so a test can drive a fortnight without sleeping."""
+    import datetime as _dt
+    return time.time(), _dt.date.today().isoformat()
+
+
+def account_state_read(p):
+    """The stored document ({} when missing, unreadable, torn or not an object)."""
+    doc, _state = _account_prefs_read(p)
+    return doc
+
+
+def account_state_write(p, doc):
+    """Atomically replace `p` with `doc`. Raises OSError."""
+    import moonglade_backup as core
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(doc, sort_keys=True, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
+    tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+    try:
+        tmp.write_bytes(data)
+        core._atomic_replace(tmp, p)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _account_prefs_set_aside(p):
+    """Move a corrupt prefs file out of the way (kept, never deleted) so the write
+    about to land does not silently destroy it. Raises OSError if it cannot be moved:
+    a file that could not be preserved is not overwritten."""
+    import logging as _logging
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    aside = p.with_name("{}.corrupt-{}.json".format(p.stem, stamp))
+    n = 1
+    while aside.exists():
+        n += 1
+        aside = p.with_name("{}.corrupt-{}-{}.json".format(p.stem, stamp, n))
+    os.replace(p, aside)
+    _logging.getLogger(__name__).warning(
+        "account prefs: %s was not a JSON object; kept it as %s and started a fresh "
+        "document", p.name, aside.name)
 
 
 # Any-OS user-home prefixes: X:\Users\<name>, /home/<name>, /Users/<name>.
@@ -10780,6 +13446,24 @@ def create_app(out_dir: Path):
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
+    def _contest_win_tick():
+        """The verified-contest-wins check (L3), on the scheduler's existing 60-second heartbeat
+        like the release check above: no thread or timer of its own. All this does each minute
+        is contest_win_kick's local look at the schedule (one small file read, no network); a
+        pass starts only when a contest's check is actually due, off-thread and single-flight,
+        because a pass paces itself between contests.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check, sampled above) for the same reason
+        the contest sweep and the release check do: it reaches PixAI with this machine's real
+        credentials, and the suite's conftest sets that flag precisely so create_app() cannot
+        make that request."""
+        if not _bg_release_check:
+            return
+        try:
+            contest_win_kick(out_dir)
+        except Exception:              # noqa: BLE001 -- a check must never kill the loop
+            pass
+
     def _living_tick():
         """THE LIVING LIBRARY'S HEARTBEAT -- the job LIST, riding the same sixty-second tick
         as everything else in this process. No new thread, no second poll loop: the standing
@@ -10874,6 +13558,8 @@ def create_app(out_dir: Path):
             # first `continue` down there (schedule disabled -- the default) would
             # otherwise skip the update tick on every install that never set one up.
             _update_check_tick()
+            # Same place, same reason: contest wins are verified on this heartbeat too.
+            _contest_win_tick()
             # Same reason, same place: the living library's job list is not the legacy
             # standing order, and that `continue` would skip it on every install that
             # never configured one.
@@ -11541,6 +14227,11 @@ def create_app(out_dir: Path):
                 _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
                              "reconnecting. Anything that completed during the silence was "
                              "NOT mirrored.", getattr(core, "_WS_STALE_TIMEOUT", "?"))
+                # A stale connection had subscribed and lived a full stale window, so it is
+                # not a failing connect for the backoff to slow down: reconnect at the
+                # shortest step (it had climbed to 60s, so the Panel read "Reconnecting"
+                # for a whole minute after every one).
+                backoff = 5
             except Exception as e:
                 with _watch_lock:
                     _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
@@ -13864,8 +16555,125 @@ def create_app(out_dir: Path):
         media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
+        if action == "remove" and _is_smart_name(db_path, name):
+            return jsonify({"error": "“{}” is a smart collection, a saved search. Pictures "
+                                     "leave it by no longer matching.".format(name)}), 400
         fn = add_to_collection if action == "add" else remove_from_collection
-        return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
+        try:
+            return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
+        except CurationError as e:        # adding to a smart collection (N1)
+            return jsonify({"error": str(e)}), 400
+
+    # ------------------------------------------------------------------------------------
+    # CURATION (Session N). Local catalog only: none of these routes touches PixAI, and none
+    # can delete a picture or a file. Every POST checks the session's CSRF token (the token
+    # rides in the body, as for the Panel's account routes).
+    # ------------------------------------------------------------------------------------
+    @app.route("/api/collections/detail")
+    @tier(LOGIN)
+    def api_collections_detail():
+        """Every collection, hand-picked and smart, with its count and cover -- what the
+        collections list and the manager draw. Read-only; a smart collection's count is its
+        saved query run now."""
+        return jsonify({"collections": collection_summaries(db_path)})
+
+    @app.route("/api/collections/manage", methods=["POST"])
+    @tier(LOGIN)
+    def api_collections_manage():
+        """The collections manager's writes and Save-as-smart, one route, `action` picks:
+        rename {name, new_name} · merge {names: [target, ...others]} · delete {name} ·
+        smart {query, name?, replace?}. Labels and saved queries only -- a delete or a merge
+        never removes a picture. A refusal is a 400 with the reason in words."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        action = str(body.get("action") or "").strip()
+        try:
+            if action == "rename":
+                res = rename_collection(db_path, body.get("name"), body.get("new_name"))
+            elif action == "merge":
+                names = body.get("names")
+                res = merge_collections(db_path, names if isinstance(names, list) else [])
+            elif action == "delete":
+                res = delete_collection(db_path, body.get("name"))
+            elif action == "smart":
+                res = save_smart_collection(db_path, body.get("query"),
+                                            name=body.get("name") or "",
+                                            replace=str(body.get("replace") or "").strip())
+            else:
+                return jsonify({"error": "action must be rename, merge, delete or smart"}), 400
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
+
+    # ---- MANUAL ORDER (Session P, P6) -------------------------------------------------------
+    # A hand-picked collection's order: read by the order editor, the collection view's
+    # "Manual" sort, the Contact sheet and "as shots, in order". Local catalog only, never
+    # PixAI; the write is one transaction and needs the session's CSRF token.
+    @app.route("/api/collections/order", methods=["GET"])
+    @tier(LOGIN)
+    def api_collections_order_get():
+        """{name, kind, media_ids, manual} -- the collection's members in its order
+        (ordered_members). Read-only: opening the editor writes nothing."""
+        name = (request.args.get("name") or "").strip()
+        res = ordered_members(db_path, name)
+        if res["kind"] is None:
+            return jsonify(dict(res, error="There is no collection called “{}”.".format(name))), 404
+        return jsonify(res)
+
+    @app.route("/api/collections/order", methods=["POST"])
+    @tier(LOGIN)
+    def api_collections_order_set():
+        """{csrf, name, media_ids} -> the saved order (ordered_members after). A smart
+        collection, an unknown one and any id that is not a member are refused (400)."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        ids = body.get("media_ids")
+        try:
+            res = set_collection_order(db_path, body.get("name"), ids if isinstance(ids, list) else [])
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
+
+    @app.route("/api/curate", methods=["POST"])
+    @tier(LOGIN)
+    def api_curate():
+        """Bulk (or single) curation: {media_ids, op} with op one of {rating: 0-5} ·
+        {mark: keeper|reject|""} · {add_tag} · {remove_tag} · {note}. Answers what really
+        changed -- `changed` counts pictures whose values differ afterwards, `prev` / `after`
+        carry each changed picture's full state -- so the client can show an honest count and
+        an Undo that restores each picture's OWN previous values (POST /api/curate/restore).
+        Tags, marks and notes live in the local catalog and are never sent to PixAI."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        try:
+            res = curate_apply(db_path, body.get("media_ids"), body.get("op"))
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        if res["changed"] and isinstance(body.get("op"), dict) and "rating" in body["op"]:
+            # Rating is curation whichever door it came through (see /api/rate).
+            try:
+                telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+            except Exception:
+                pass
+        return jsonify(dict(res, ok=True))
+
+    @app.route("/api/curate/restore", methods=["POST"])
+    @tier(LOGIN)
+    def api_curate_restore():
+        """Undo for /api/curate: {prev: {media_id: {rating, mark, tags, note}}} -- exactly
+        the `prev` map that call returned. Puts each picture back to its own previous
+        values; a request with any invalid entry changes nothing."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        try:
+            res = curate_restore(db_path, body.get("prev"))
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
 
     @app.route("/api/replace-prompts", methods=["POST"])
     @tier(LOGIN)
@@ -13909,13 +16717,18 @@ def create_app(out_dir: Path):
     _STRIP_CACHE = _THUMB_CACHE   # same 300s as the 768: media_id is an identity, not a hash
     _STRIP_ID_OK = re.compile(r"[0-9A-Za-z_-]+")
 
-    def strip_cache_dir():
-        return out_dir / "gallery" / "cache" / "_strip"
+    # The allowlist of derived thumb sizes, ?s=<key> -> (longest side in px, cache folder).
+    # 32 is the Sibling Strip's; 256 is the phone's Data saver tier (Session Q, Q7): the
+    # same derive-from-the-768, cache-beside-the-badges, self-healing shape, additive and
+    # read-only -- an unlisted key still answers the plain 768 thumb.
+    _THUMB_TIERS = {"32": (32, "_strip"), "256": (256, "_t256")}
 
-    def _strip_thumb(media_id):
-        """Path of the cached 32px strip thumb for media_id, (re)cut from the 768
-        thumb when missing or stale. None when there is no 768 thumb to derive from
-        or the cut fails -- the caller then falls through to the normal thumb."""
+    def _sized_thumb(media_id, key):
+        """Path of the cached derived thumb (`key` names a tier in _THUMB_TIERS) for
+        media_id, (re)cut from the 768 thumb when missing or stale. None when there is
+        no 768 thumb to derive from or the cut fails -- the caller then falls through
+        to the normal thumb."""
+        side, folder = _THUMB_TIERS[key]
         # ALLOWLIST the id here, inside the helper, so every caller is covered. A
         # denylist of / \ .. missed the Windows drive letter: pathlib's `/` RESETS to
         # a drive-relative path when the right operand carries one, so
@@ -13927,7 +16740,7 @@ def create_app(out_dir: Path):
         src = thumb_dir / (media_id + ".jpg")
         if not src.is_file():
             return None
-        dst = strip_cache_dir() / (media_id + ".jpg")
+        dst = out_dir / "gallery" / "cache" / folder / (media_id + ".jpg")
         try:
             src_mtime = src.stat().st_mtime
             if dst.is_file() and dst.stat().st_mtime >= src_mtime:
@@ -13943,7 +16756,7 @@ def create_app(out_dir: Path):
             try:
                 with Image.open(src) as im:
                     im = im.convert("RGB")
-                    im.thumbnail((32, 32))
+                    im.thumbnail((side, side))
                     im.save(tmp, "JPEG", quality=80)
                 os.replace(tmp, dst)
             finally:
@@ -13959,10 +16772,11 @@ def create_app(out_dir: Path):
     @app.route("/thumbs/<media_id>.jpg")
     @tier(LOGIN)
     def thumb(media_id):
-        # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
-        if (request.args.get("s") or "") == "32" and "/" not in media_id \
+        # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
+        size_key = request.args.get("s") or ""
+        if size_key in _THUMB_TIERS and "/" not in media_id \
                 and "\\" not in media_id and ".." not in media_id:
-            p = _strip_thumb(media_id)
+            p = _sized_thumb(media_id, size_key)
             if p is not None:
                 resp = send_from_directory(str(p.parent), p.name, max_age=86400)
                 resp.headers["Cache-Control"] = _STRIP_CACHE
@@ -14850,7 +17664,9 @@ def create_app(out_dir: Path):
                         "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
-                        "duration": (r.get("video_duration") or "") if isv else ""})
+                        "duration": (r.get("video_duration") or "") if isv else "",
+                        # Session H: a context image's size, for the drawer's Auto frame
+                        "w": str(r.get("width") or ""), "h": str(r.get("height") or "")})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
@@ -15088,6 +17904,42 @@ def create_app(out_dir: Path):
         resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
+    @app.route("/feat-mask/<token>.png")
+    @tier(LOGIN)
+    def feat_mask(token):
+        """The veil card's silhouette: an alpha-only PNG (white on transparent) cut from the
+        badge of the NEXT unfound feat, named in the URL by an opaque HMAC token
+        (_feat_mask_token) that says nothing about the feat's id, name or file.
+
+        It serves ONLY the current pick's mask. A token for any other feat, a token that is
+        not one, a feat already earned (the pick has moved on) and every request made before
+        a first feat is earned all answer the same bare 404, so the route is not an oracle
+        for which feats exist or which is next. The pick is recomputed from a fresh earned
+        set on every request -- never from the 5-second cache -- so the mask for the feat
+        that became the veil a moment ago is never refused off stale state. Read-only; no
+        spend and nothing written beyond the regenerable cache file."""
+        from flask import abort
+        if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+            abort(404)
+
+        def has_art(aid):
+            return _branding_exists(_role_rel("badges", aid + ".png"))
+
+        # need="" is in no cached set, so the helper recomputes instead of answering from its
+        # 5-second cache -- an earn that landed since the cache was filled is never missed.
+        earned = _earned_achievement_ids(out_dir, db_path, need="")
+        pick = _pick_masked_feat(earned, has_art=has_art)
+        if pick is None:
+            abort(404)
+        if not hmac.compare_digest(_feat_mask_token(app.secret_key, pick["id"]), token):
+            abort(404)
+        png = _feat_mask_bytes(out_dir, pick["id"], token)
+        if png is None:
+            abort(404)
+        resp = app.response_class(png, mimetype="image/png")
+        resp.headers["Cache-Control"] = "private, max-age=86400"
+        return resp
+
     @app.route("/contact-sheet")
     @tier(LOGIN)
     def contact_sheet():
@@ -15116,8 +17968,9 @@ def create_app(out_dir: Path):
             rows = rows_for_media_ids(db_path, ids)
             title = "{} selected".format(len(rows))
         elif collection:
-            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
-                                    page=1, page_size=400)
+            # P6: a collection prints in its own order (a hand-picked one's manual order, then
+            # pictures added since, oldest first; a smart one's matches, oldest first).
+            rows = rows_for_media_ids(db_path, ordered_members(db_path, collection)["media_ids"][:400])
             title = "Collection: {}".format(escape(collection))
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
@@ -15219,8 +18072,8 @@ def create_app(out_dir: Path):
             rows = rows_for_media_ids(db_path, ids)
             collection_name = "{} selected".format(len(rows))
         elif collection:
-            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
-                                    page=1, page_size=400)
+            # P6: the collection's own order, the same as the print view above.
+            rows = rows_for_media_ids(db_path, ordered_members(db_path, collection)["media_ids"][:400])
             collection_name = collection
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
@@ -16075,10 +18928,12 @@ def create_app(out_dir: Path):
         passed; asking early is simply empty, never wrong.
 
         `mine` marks the owner's own row (the design's YOU chip) by comparing authorId to
-        the authenticated account -- the id never reaches the client. Rank comes from
-        whichever rank-ish field upstream sends, whose name was never verified against a
-        real decided contest, falling back to the row's position in a list PixAI returns
-        in podium order. Soft-error-as-200, like every other read on this surface."""
+        the authenticated account -- the id never reaches the client. `rank` is the row's
+        real PRIZE TIER (its `entry.rank`: 1, 2 or 3, shared by every winner in that tier)
+        and `prize_amount` what that tier paid (PROBE 2026-09-29). It used to be the row's
+        position in the list and 0, which on a 65-winner podium read as places 1 to 65 with
+        no prize. A row that carries no placement gets rank 0 (unknown), never a guess.
+        Soft-error-as-200, like every other read on this surface."""
         try:
             core, session = _gen_session()
             rows = core.contest_winners(session, slug)
@@ -16086,24 +18941,15 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
         winners = []
-        for i, w in enumerate(rows or []):
-            rank = 0
-            for key in ("rank", "place", "position"):
-                try:
-                    rank = int(w.get(key) or 0)
-                except (TypeError, ValueError):
-                    rank = 0
-                if rank:
-                    break
+        for w in rows or []:
+            ent = contest_wins.entry_of(w)
+            rank = ent["rank"] if ent and ent["rank"] else 0
+            prize = ent["prize"] if ent else 0
             mid = str(w.get("mediaId") or "")
             aid = str(w.get("authorId") or "")
-            try:
-                prize = int(w.get("prizeAmount") or 0)
-            except (TypeError, ValueError):
-                prize = 0
             winners.append({
                 "id": str(w.get("id") or ""),
-                "rank": rank or (i + 1),
+                "rank": rank,
                 "author_name": str(w.get("authorName") or ""),
                 "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
                 "prize_amount": prize,
@@ -16130,12 +18976,18 @@ def create_app(out_dir: Path):
         artwork the library does not hold gets no thumb rather than a broken image.
 
         `won` is contest FACT and belongs on this surface -- the DC's results rows show
-        it. No metric name and no ladder language appears in this payload."""
+        it -- and since L3 it means VERIFIED: PixAI's own winners list carried the entry
+        with an integer tier. `wins` lists them (tier, prize, how it was verified, the
+        receipt link), `check` says where the daily check stands for the contest, and
+        `unverified_legacy` marks a contest an older sweep once believed won that no check
+        has confirmed yet. No metric name and no ladder language appears in this payload."""
         d = load_telemetry(out_dir)
         sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
         raw_keys = sets.get("contest_entry_keys")
-        raw_wins = sets.get("contest_win_keys")
-        won_ids = {str(w) for w in raw_wins} if isinstance(raw_wins, list) else set()
+        raw_legacy = sets.get("contest_win_keys")
+        legacy_ids = {str(w) for w in raw_legacy} if isinstance(raw_legacy, list) else set()
+        _e, _l, verified, checks = _cw_inputs(d)
+        now_t = time.time()
         by_contest, order = {}, []
         for k in (raw_keys if isinstance(raw_keys, list) else []):
             cid, _, aid = str(k).partition(":")
@@ -16185,7 +19037,11 @@ def create_app(out_dir: Path):
                 "entries": [{"artwork_id": a, "media_id": thumbs.get(a, ""),
                              "thumb": ("/thumbs/%s.jpg" % thumbs[a]) if thumbs.get(a) else ""}
                             for a in shown],
-                "won": cid in won_ids,
+                "won": bool(contest_wins.wins_for(verified, cid)),
+                "wins": contest_wins.wins_for(verified, cid),
+                "check": _cw_check_view(checks.get(cid), now_t),
+                "unverified_legacy": bool(cid in legacy_ids
+                                          and not contest_wins.wins_for(verified, cid)),
             })
         return jsonify({"contests": rows,
                         "total_entries": sum(len(shown_by_contest[cid]) for cid in order),
@@ -16330,6 +19186,34 @@ def create_app(out_dir: Path):
                             "error": _redact_host_paths(str(e))[:200],
                             "contest_entries": entries}), 200
         return jsonify({"started": True, "contest_entries": entries})
+
+    @app.route("/api/contest/check", methods=["POST"])
+    @tier(LOGIN)
+    def api_contest_check():
+        """The Check button (E4, L3): "it won but isn't shown". The owner pastes the link to an
+        entry (or to its contest) and presses Check; the app reads that contest's winners
+        ONCE and records a win ONLY when the entry's artwork id is in the list with an integer
+        tier rank and the author is this account. The link is kept as the receipt. Nothing else
+        counts: no self-reported wins, no name-alike, no empty list read as "lost" (it reads as
+        "not published yet").
+
+        Body: {csrf, url, contest_id?, slug?}. `contest_id` is a contest from the account's
+        own entries (the picker); `slug` a contest typed in; either may be left off when the
+        link names the contest or the app already recorded the linked artwork's contest. The
+        answer is always 200 with {verified, state, message, wins[]} -- a miss is an answer,
+        not an error; `state` is one of verified, undecided, not_found, no_placement,
+        not_yours, not_pixai, no_link, no_contest, failed, cooldown.
+
+        LOGIN tier, CSRF required (it reaches PixAI with the owner's credentials on a
+        cross-site-triggerable POST, like /api/contest/sync). It is a GET of PixAI's winners
+        list and nothing else: there is no write to PixAI on this road, so READ_ONLY has
+        nothing to refuse. Only pixai.art links are accepted, the slug is shape-checked
+        before it becomes a path, and a contest is not re-read within a few seconds."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        status, payload = contest_win_check(out_dir, body)
+        return jsonify(payload), status
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -16889,14 +19773,22 @@ def create_app(out_dir: Path):
         exactly 4 images (a fixed demo constant); real batches are 1-4, so this returns
         each task's REAL image count and media_id list rather than a hardcoded number --
         the mobile picker's running total is a sum of real counts, not tiles*4.
+
+        PAGES BY TASK (issue #56): `next_before` is the cursor for the page below this one
+        (null when there is nothing older); the picker sends it back as `before_at` +
+        `before_task` when its sentinel scrolls into view, the desktop pool's mechanism.
         Pure catalog read, no network."""
         try:
             limit = max(1, min(int(request.args.get("limit") or 18), 60))
         except ValueError:
             limit = 18
-        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0])
-                 for t in recent_train_tasks(db_path, limit)]
-        return jsonify({"tasks": tasks})
+        at = (request.args.get("before_at") or "").strip()
+        before = {"at": at, "task": (request.args.get("before_task") or "").strip()} \
+            if at else None
+        page, nxt = recent_train_task_page(db_path, limit, before,
+                                           (request.args.get("q") or "").strip())
+        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0]) for t in page]
+        return jsonify({"tasks": tasks, "next_before": nxt})
 
     @app.route("/api/train/quota")
     @tier(LOGIN)
@@ -16928,9 +19820,23 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             cfg = core.training_config()
+            pause = core.training_pause()
             return jsonify({"groups": core.list_trainable_base_models(config=cfg),
                             "pricing": cfg["pricing"],
-                            "default_version_id": core.default_training_base(cfg)})
+                            "default_version_id": core.default_training_base(cfg),
+                            # Session J: the Recommended tab (6a), Advanced's two bases, the
+                            # four goals, PixAI's own estimate at its default length, the set
+                            # rule, and its pause switch -- all read here, nothing written
+                            "recommended_arch": core.TRAIN_RECOMMENDED_TYPE,
+                            "advanced_bases": core.advanced_training_bases(cfg),
+                            "goals": [{"value": v, "label": lab} for v, lab in core.TRAIN_GOALS],
+                            "eta": core.training_eta(
+                                core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+                            "image_constraints": cfg["image_constraints"],
+                            "min_images": core.TRAIN_MIN_IMAGES,
+                            "max_images": core.TRAIN_MAX_IMAGES,
+                            "paused": pause is not None,
+                            "resumes_at": (pause or {}).get("resumes_at") or ""})
         except Exception as e:
             return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -16972,10 +19878,35 @@ def create_app(out_dir: Path):
         except Exception:
             return ("fetch failed", 502)
 
+    _basic_start_lock = threading.Lock()
+
+    def _reuse_ok(core, session, dataset_task_id, media_ids):
+        """Is this Basic start a REUSE of an earlier set (PixAI's `reuse` price, sent as
+        `trainingTaskId` with no images)? Only for a FINISHED Basic run that made a LoRA --
+        found in the account's own LoRA list, the list the import shows -- and only when the
+        posted images are exactly that run's set, same length, same ids (the site's own
+        check; spend review, finding 7). Anything else, a failed read included, is a fresh
+        set priced and sent in full. Never raises."""
+        try:
+            loras = core.list_my_trained_loras(session, pages=5)
+        except Exception:                               # noqa: BLE001
+            return False
+        posted = [str(m) for m in (media_ids or [])]
+        for m in loras:
+            t = m.get("task") or {}
+            if str(t.get("id") or "") != str(dataset_task_id):
+                continue
+            if t.get("trainingMode") == "advanced" or str(t.get("status") or "") != "completed":
+                return False
+            ds = [str(x) for x in ((t.get("parameters") or {}).get("mediaIds") or [])]
+            return (len(ds) == len(posted) and len(set(posted)) == len(posted)
+                    and set(ds) == set(posted))
+        return False
+
     @app.route("/api/train/submit", methods=["POST"])
     @tier(LOGIN)
     def api_train_submit():
-        """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
+        """Submit a Basic LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
 
         Without `confirm: true` this makes NO mutating call: it validates the request
         with the site's own rules and reports the real cost position (how many free
@@ -16987,10 +19918,15 @@ def create_app(out_dir: Path):
         refuses the whole run, named; an image whose size the catalog does not know is
         listed as not checked, never passed as checked.
 
+        A REUSED SET (Session J 2a, 2026-09-28). `dataset_task_id` names an earlier Basic run
+        whose set the grid holds exactly (imported whole); when _reuse_ok confirms it, the run
+        is priced at PixAI's `reuse` tier and sent as PixAI's own page sends it --
+        `trainingTaskId` and no images. Anything that is not exactly such a set is a fresh run,
+        priced and sent in full; the preview says which (`reuse`, `price_reason`).
+
         COST. PixAI's train pages price a run from the same config the base list comes
-        from (core.training_config -- `price` for a fresh dataset), so the app quotes the
-        real number now; the "cannot say how many" this used to say stopped being true on
-        2026-09-26. A run is FREE when either
+        from (core.training_config -- `price` for a fresh dataset, `reuse` for a reused one).
+        A run is FREE when either
           * the account is a member (membership tier present, 0 included) with free-training
             quota left -- it consumes one quota unit; or
           * a training free card matches the base (core.match_training_kaisuuken, checked
@@ -16998,64 +19934,76 @@ def create_app(out_dir: Path):
             site, see the comment at the check) and its held count is known to cover it --
             its id rides the submit.
         Anything else charges credits, and the confirmed call is REFUSED unless the caller
-        also sends `accept_credit_cost` -- including a run whose price could not be quoted --
-        so nobody spends by clicking the button they used when it was free. The panels send
-        the AMOUNT they showed (a number; `true` only when no amount could be quoted), and a
-        number that is no longer this run's price refuses with 409: the acknowledgement is
-        for the price the user read, not for whatever the base picked since costs. A card
-        check that FAILS treats the run as paid (owner, 2026-09-26): the preview says the
-        cards couldn't be checked, and the confirm goes through only on that paid
-        acknowledgement. Single attempt -- no new retry on a spend path.
+        sends `accept_credit_cost` as the AMOUNT it showed, equal to this run's price (409
+        when it is not). A bare `true` is accepted only for a run whose price could not be
+        quoted; whenever there is a number to name, the number is required (spend review
+        2026-09-28, finding 6). A card check that FAILS treats the run as paid (owner,
+        2026-09-26).
 
-        PAUSE. On the confirm, after validation and before the submit, PixAI's
-        /config/trainLoraStatus switch is read (core.training_pause); a paused service
-        refuses, naming when it expects to resume. A failed read proceeds as before.
-        READ_ONLY still refuses the confirmed form inside core. Explicit-token CSRF."""
+        DOUBLE STARTS (spend review 2026-09-28, finding 1). A Basic run has no id until PixAI
+        creates it, so one account-wide lock serialises confirms (a second concurrent one gets
+        409), and the on-disk TrainGuard is checked and ARMED before the mutation: the same
+        run confirmed again within a minute is refused as a double click, and an unclear
+        failure (a timeout, a dropped connection, a 5xx -- PixAI may have created and charged
+        it) keeps the guard for 15 minutes and says the run may have started. Only a definite
+        refusal disarms it.
+
+        ORDER on the confirm: CSRF -> READ_ONLY (before ANY read, the reuse read included) ->
+        validation -> quota / card -> the lock -> the guard -> the pause switch -> the
+        amount -> arm -> one createTrainingTask -> resolve. Single attempt."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
         media_ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else []
+        media_ids = [str(m) for m in media_ids if str(m).strip()]
         base_model_id = str(body.get("base_model_id") or "").strip()
         title = str(body.get("title") or "")
         trigger = str(body.get("trigger_words") or "")
         category = str(body.get("category") or "")
+        dataset_task_id = str(body.get("dataset_task_id") or "").strip()
+        confirming = bool(body.get("confirm"))
+        if confirming:
+            # READ_ONLY refuses the spend BEFORE the confirm's own reads -- the reuse check, the
+            # free-card check and the pause switch -- so a read-only install makes no call on
+            # the account for a submit it is going to refuse. submit_training checks it too.
+            try:
+                core._check_read_only("submit a LoRA training task")
+            except Exception as e:                    # noqa: BLE001
+                return jsonify({"error": str(e)}), 502
         try:
             core, session = _gen_session()
         except Exception as e:
             return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
 
         cfg = core.training_config()
+        reuse = bool(dataset_task_id) and dataset_task_id.isdigit() and \
+            _reuse_ok(core, session, dataset_task_id, media_ids)
         try:
             tw = core.validate_training(base_model_id, media_ids, title, trigger, category,
+                                        training_task_id=dataset_task_id if reuse else "",
                                         config=cfg)
         except Exception as e:
             return jsonify({"error": str(e)}), 400
-        rejected, unchecked = core.check_training_images(
-            media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
-        if rejected:
-            return jsonify({"error": core.describe_rejected_training_images(rejected),
-                            "rejected_images": rejected}), 400
-        image_note = ("" if not unchecked else
-                      "%d image%s could not be checked against PixAI's size rule (this library "
-                      "doesn't know %s size)." % (len(unchecked),
-                                                  "" if len(unchecked) == 1 else "s",
-                                                  "its" if len(unchecked) == 1 else "their"))
-        confirming = bool(body.get("confirm"))
-        if confirming:
-            # READ_ONLY refuses the spend BEFORE the confirm's own reads -- the free-card
-            # check and the pause switch -- so a read-only install makes no call on the
-            # account for a submit it is going to refuse (the rule core.submit follows for
-            # the generation card check). submit_training still checks it too.
-            try:
-                core._check_read_only("submit a LoRA training task")
-            except Exception as e:                    # noqa: BLE001
-                return jsonify({"error": str(e)}), 502
+        unchecked, image_note = [], ""
+        if not reuse:
+            rejected, unchecked = core.check_training_images(
+                media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
+            if rejected:
+                return jsonify({"error": core.describe_rejected_training_images(rejected),
+                                "rejected_images": rejected}), 400
+            image_note = ("" if not unchecked else
+                          "%d image%s could not be checked against PixAI's size rule (this "
+                          "library doesn't know %s size)." % (
+                              len(unchecked), "" if len(unchecked) == 1 else "s",
+                              "its" if len(unchecked) == 1 else "their"))
 
         free_left = core.training_free_quota(session)
         free_by_quota = free_left > 0
         # credits, or None -- off `cfg`, the very config the validation above read, so one
         # request can never validate against the live config and price off the snapshot
-        price = core.training_price_for_version(base_model_id, cfg)
+        list_price = core.training_price_for_version(base_model_id, cfg)
+        price = core.training_price_tier(base_model_id, "reuse", cfg) if reuse else list_price
         # The training free card (owner ruling 4): checked only when the quota does not
         # already make the run free -- "before a paid run", as SCOPE_2026-09-26 E7 words it.
         # A DELIBERATE DIFFERENCE FROM THE SITE: PixAI's basic trainer runs the card check
@@ -17081,6 +20029,7 @@ def create_app(out_dir: Path):
                 card = best
         free_by_card = card is not None
         is_free = free_by_quota or free_by_card
+        reason = "reusing a dataset" if reuse else ""
         if free_by_quota:
             cost_note = "Free — uses 1 of your %d free trainings." % free_left
         elif free_by_card:
@@ -17089,7 +20038,9 @@ def create_app(out_dir: Path):
                                                    if card.get("name") else ""))
         elif price is not None:
             cost_note = ("No free trainings or training free card for this base — it costs "
-                         "%s credits to train." % "{:,}".format(price))
+                         "%s credits to train%s." % ("{:,}".format(price),
+                                                     " (the rate for reusing a dataset)"
+                                                     if reuse else ""))
         else:
             cost_note = ("No free trainings or training free card for this base, and PixAI's "
                          "price list has no price for it — the amount could not be quoted.")
@@ -17105,38 +20056,72 @@ def create_app(out_dir: Path):
                 "free_by": "quota" if free_by_quota else ("card" if free_by_card else None),
                 "card": ({"name": card.get("name"), "expires": card.get("expiresAt")}
                          if card else None),
-                "price": price, "cost_note": cost_note,
+                "price": price, "list_price": list_price, "reuse": reuse,
+                "price_reason": reason, "cost_note": cost_note,
+                "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
                 "unchecked_images": unchecked, "image_note": image_note,
             })
-        pause = core.training_pause()
-        if pause is not None:
-            return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing was "
-                                     "submitted. Runs already training carry on." %
-                                     (" — it expects to be back around %s" % pause["resumes_at"]
-                                      if pause.get("resumes_at") else "")}), 409
-        accepted = body.get("accept_credit_cost")
-        if not is_free and not bool(accepted):
-            return jsonify({"error": "This training charges credits (%s). Re-send with "
-                                     "accept_credit_cost to proceed."
-                                     % (("{:,}".format(price)) if price is not None
-                                        else "amount unknown")}), 402
-        # The acknowledgement names an amount (the panels send the price they showed): it
-        # must still be THIS run's price. A base changed after the quote, or a price list that
-        # moved, refuses here instead of charging a number nobody accepted.
-        if not is_free and isinstance(accepted, (int, float)) \
-                and not isinstance(accepted, bool) and accepted != price:
-            return jsonify({"error": "The price changed since you accepted it — you accepted "
-                                     "%s credits, and this training costs %s. Nothing was "
-                                     "spent; check the cost and confirm again."
-                                     % ("{:,}".format(int(accepted)),
-                                        ("{:,}".format(price)) if price is not None
-                                        else "an amount that could not be quoted")}), 409
+        if not _basic_start_lock.acquire(blocking=False):
+            return jsonify({"error": "Another training start is already on its way. Nothing "
+                                     "was sent again."}), 409
         try:
-            task = core.submit_training(session, base_model_id, media_ids, title, trigger,
-                                        category,
-                                        kaisuuken_id=(card["id"] if free_by_card else ""))
-        except Exception as e:
-            return jsonify({"error": str(e)}), 502
+            key = TrainGuard.basic_key(base_model_id, media_ids,
+                                       dataset_task_id if reuse else "", title)
+            blocked = train_guard.basic_blocked(key)
+            if blocked:
+                return jsonify({"error": blocked}), 409
+            pause = core.training_pause()
+            if pause is not None:
+                return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing "
+                                         "was submitted. Runs already training carry on." %
+                                         (" — it expects to be back around %s"
+                                          % pause["resumes_at"]
+                                          if pause.get("resumes_at") else "")}), 409
+            accepted = body.get("accept_credit_cost")
+            if not is_free:
+                if price is None:
+                    if not bool(accepted):
+                        return jsonify({"error": "This training charges credits (amount "
+                                                 "unknown). Re-send with accept_credit_cost "
+                                                 "to proceed."}), 402
+                elif accepted is None or accepted is False:
+                    return jsonify({"error": "This training charges credits (%s). Re-send "
+                                             "with accept_credit_cost to proceed."
+                                             % "{:,}".format(price)}), 402
+                elif not _exact_amount(accepted, price):
+                    # The acknowledgement names an amount (the panels send the price they
+                    # showed): it must still be THIS run's price. A base changed after the
+                    # quote, a set no longer a reuse, or a price list that moved refuses here
+                    # instead of charging a number nobody accepted; a bare `true` is refused
+                    # because there IS a number to name.
+                    return jsonify({"error": "The price changed since you accepted it — you "
+                                             "accepted %s, and this training costs %s credits. "
+                                             "Nothing was spent; check the cost and confirm "
+                                             "again." % (
+                                                 ("{:,} credits".format(accepted)
+                                                  if isinstance(accepted, (int, float))
+                                                  and not isinstance(accepted, bool)
+                                                  else "an unnamed amount"),
+                                                 "{:,}".format(price))}), 409
+            train_guard.basic_arm(key)
+            try:
+                task = core.submit_training(
+                    session, base_model_id, [] if reuse else media_ids, title, trigger,
+                    category, training_task_id=dataset_task_id if reuse else "",
+                    kaisuuken_id=(card["id"] if free_by_card else ""), config=cfg)
+            except Exception as e:
+                if core.definite_refusal(e):
+                    train_guard.basic_resolve(key, "refused")
+                    return jsonify({"error": str(e)}), 502
+                train_guard.basic_resolve(key, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so this run may have "
+                                         "started. Check Runs before starting it again.",
+                                "maybe_started": True}), 502
+            train_guard.basic_resolve(key, "started")
+        finally:
+            _basic_start_lock.release()
+        _runs_dirty()
         # The Academy (loras_trained): a LoRA training this server actually submitted.
         # Silent-soft -- a telemetry blip must not fail a submit that already happened.
         try:
@@ -17144,9 +20129,822 @@ def create_app(out_dir: Path):
         except Exception:
             pass
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
-                        "used_card": free_by_card,
+                        "used_card": free_by_card, "reuse": reuse,
                         "free_trainings_left": (max(0, free_left - 1) if free_by_quota
                                                 else free_left)})
+
+    # ---- Training, Session J (2026-09-28): the advanced flow, runs, publish -------------------
+    # The design, its adversarial review and the guard order per route are in
+    # ../moonglade-internal/design/notes/training/BUILD-w3-train.md. Every route here is LOGIN
+    # tier like the rest of /api/train, every POST checks the CSRF token first, and every
+    # confirm checks READ_ONLY before it reads anything else. OPENING a screen only reads
+    # (DECISIONS 2026-09-28, "Nothing writes on open").
+    #
+    # LOCKS. One lock per training task (and per model, for make-public). The paid and
+    # irreversible routes (describe, start, retry, publish, make public) take it WITHOUT
+    # waiting and refuse with 409 when another request holds it: the second of two clicks, two
+    # tabs or a phone and a desktop never sends a second paid POST. The free writes (the set,
+    # a description) wait for it (up to 15 s), so quick edits queue instead of being dropped.
+    _train_locks = {}
+    _train_locks_mu = threading.Lock()
+
+    def _train_lock(key):
+        with _train_locks_mu:
+            lk = _train_locks.get(key)
+            if lk is None:
+                lk = _train_locks[key] = threading.Lock()
+            return lk
+
+    _BUSY = ("Another request is already working on this run. Nothing was sent again -- give "
+             "it a moment, then look again.")
+    # An advanced describe/start confirm refused by TrainGuard.paid_blocked (finding F1).
+    _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
+                           "answer clearly. Check Runs before trying again (this guard clears "
+                           "by itself after 15 minutes). Nothing was sent.")
+    train_guard = TrainGuard(out_dir / "train_guard.json")
+    _runs_cache = {"full": None, "light": None}
+
+    def _runs_dirty():
+        _runs_cache["full"] = _runs_cache["light"] = None
+
+    def _train_csrf_body():
+        body = request.get_json(silent=True) or {}
+        return body, _check_csrf(body)
+
+    def _train_refusal(e, status=502):
+        import moonglade_backup as core
+        if isinstance(e, core.PixAIRestError):
+            payload = {"error": core.training_error_words(e), "code": e.code}
+            ids = e.data.get("mediaIds")
+            if isinstance(ids, list):
+                payload["rejected_ids"] = [str(x) for x in ids]
+            return jsonify(payload), (e.status if e.status and 400 <= e.status < 500 else 502)
+        return jsonify({"error": _redact_host_paths(str(e))[:300]}), status
+
+    def _read_only_refusal(core, what):
+        try:
+            core._check_read_only(what)
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"error": str(e)}), 502
+        return None
+
+    def _pause_refusal(core):
+        pause = core.training_pause()
+        if pause is None:
+            return None
+        return jsonify({"error": "PixAI has paused LoRA training%s, so nothing was sent. Runs "
+                                 "already training carry on." %
+                                 (" -- it expects to be back around %s" % pause["resumes_at"]
+                                  if pause.get("resumes_at") else ""),
+                        "paused": True}), 409
+
+    def _exact_amount(accepted, price):
+        """The acknowledgement a paid confirm must carry: the NUMBER the user was shown, equal to
+        the fresh quote. A bool is never an amount (True == 1 in Python), and a bare `true` is
+        refused whenever there is a price to name (spend review, finding 6). A fractional
+        amount is never the quote: int() would truncate 1200.5 onto a quote of 1200, so the
+        number must be integer-valued AND equal (waves 2+3 review, finding F6)."""
+        if isinstance(accepted, bool) or not isinstance(accepted, (int, float)):
+            return False
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            return False
+        try:
+            a, p = float(accepted), float(price)
+        except (OverflowError, ValueError):
+            return False
+        return a.is_integer() and a == p
+
+    def _amount_refusal(accepted, price, what):
+        if accepted is None or accepted is False:
+            return jsonify({"error": "%s costs %s credits. Nothing was sent: confirm the amount "
+                                     "to go ahead." % (what, "{:,}".format(price))}), 402
+        return jsonify({"error": "The price changed since you saw it -- %s now costs %s "
+                                 "credits. Nothing was sent; check it and confirm again."
+                                 % (what.lower(), "{:,}".format(price)),
+                        "price": price}), 409
+
+    def _base_names(cfg):
+        return {m["version_id"]: m["title"] for m in cfg["models"]}
+
+    def _thumb_for(mid):
+        return "/api/train/thumb/%s" % mid if mid else ""
+
+    @app.route("/api/train/datasets")
+    @tier(LOGIN)
+    def api_train_datasets():
+        """Earlier training sets to import ("Import from previous datasets", Session J 2a): the
+        account's own finished Basic runs that made a LoRA -- the list PixAI's own import
+        dialog shows (advanced runs are left out, as there). Each: {task_id, model_id, title,
+        trigger_words, category, base_version_id, media_ids, count, cover}. Read-only."""
+        try:
+            core, session = _gen_session()
+            loras = core.list_my_trained_loras(session, pages=3)
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"datasets": [], "error": _redact_host_paths(str(e))[:200]}), 200
+        out = []
+        for m in loras:
+            t = m.get("task") or {}
+            p = t.get("parameters") or {}
+            ids = [str(x) for x in (p.get("mediaIds") or []) if str(x).strip()]
+            if not t.get("id") or t.get("trainingMode") == "advanced" or not ids \
+                    or str(t.get("status") or "") != "completed":
+                continue
+            out.append({"task_id": str(t["id"]), "model_id": m["model_id"],
+                        "title": str(p.get("title") or m["title"]),
+                        "trigger_words": str(p.get("triggerWords") or ""),
+                        "category": str(p.get("category") or ""),
+                        "base_version_id": str(p.get("baseModelId") or ""),
+                        "media_ids": ids, "count": len(ids),
+                        "cover": _thumb_for(ids[0])})
+        return jsonify({"datasets": out})
+
+    _thumb_url_cache = {}
+
+    @app.route("/api/train/thumb/<media_id>")
+    @tier(LOGIN)
+    def api_train_thumb(media_id):
+        """A training-set image's picture, for any PixAI media id: this library's own thumbnail
+        when it has one, otherwise PixAI's (an upload, or an image from an earlier set), read
+        through the host-guarded CDN proxy. Read-only."""
+        import urllib.parse as _up
+        mid = str(media_id or "").strip()
+        if not mid.isdigit():
+            return ("bad id", 400)
+        if (thumb_dir / ("%s.jpg" % mid)).is_file():
+            return redirect("/thumbs/%s.jpg" % mid)
+        url = _thumb_url_cache.get(mid)
+        if url is None:
+            try:
+                core, session = _gen_session()
+                url = core.media_thumbnail_url(session, mid) or ""
+            except Exception:                           # noqa: BLE001
+                url = ""
+            if len(_thumb_url_cache) > 2000:
+                _thumb_url_cache.clear()
+            _thumb_url_cache[mid] = url
+        if not url or _up.urlparse(url).netloc != "images-ng.pixai.art":
+            return ("no picture", 404)
+        return redirect("/api/pixai-cdn/thumb?u=" + _up.quote(url, safe=""))
+
+    def _run_row_advanced(t, names, done=False):
+        base = str(t.get("baseModelId") or "")
+        row = {"id": str(t.get("id") or ""), "mode": "advanced",
+               "title": str(t.get("title") or "") or "Untitled LoRA",
+               "base_version_id": base, "base_name": names.get(base, ""),
+               "image_count": int(t.get("mediaCount") or 0),
+               "cover": "", "progress": None, "eta_left_ms": None, "reason": "",
+               "model_id": "", "version_id": "", "visibility": "", "rebate": None,
+               "trigger_words": ""}
+        if done:
+            row.update(status="done", model_id=str(t.get("modelId") or ""),
+                       at=str(t.get("completedAt") or ""))
+            row["published"] = bool(row["model_id"])
+        else:
+            st = str(t.get("status") or "")
+            row.update(status=st, at=str(t.get("updatedAt") or ""), published=False)
+            if st == "draft":
+                row["step"] = "images" if row["image_count"] < 10 else "descriptions"
+            elif st == "captioning":
+                row["step"] = "describing"
+            elif st == "captionReady":
+                row["step"] = "descriptions"
+        return row
+
+    def _apply_detail(row, task):
+        """Progress, the time left and PixAI's reason off a GraphQL TrainingTask."""
+        extra = task.get("extra") or {}
+        p = extra.get("progress")
+        if isinstance(p, (int, float)) and row["status"] == "running":
+            row["progress"] = max(0.0, min(100.0, float(p)))
+            est = extra.get("estimatedTotalTime")
+            if isinstance(est, (int, float)) and est > 0:
+                row["eta_left_ms"] = int(est * (100.0 - row["progress"]) / 100.0)
+        msg = ((task.get("outputs") or {}).get("message") or "")
+        if row["status"] == "failed" and msg:
+            row["reason"] = str(msg)[:300]
+        ids = (task.get("parameters") or {}).get("mediaIds") or []
+        if ids and not row.get("cover"):
+            row["cover"] = _thumb_for(str(ids[0]))
+        if (task.get("parameters") or {}).get("triggerWords"):
+            row["trigger_words"] = str(task["parameters"]["triggerWords"])
+
+    @app.route("/api/train/runs")
+    @tier(LOGIN)
+    def api_train_runs():
+        """Runs (Session J 5c): advanced drafts, describe rounds, queued, training, failed and
+        finished runs (PixAI's REST in-progress / completed lists) and Basic runs (the
+        account's own LoRA list, where PixAI keeps them), one list, newest first, each with a
+        status, PixAI's percentage while it trains, and the one action it offers. `running`
+        is what the pinned strip shows. `?running=1` is the strip's light read (no finished
+        runs). Read-only; answered from a 10-second cache so several open surfaces polling at
+        once cost PixAI one read."""
+        light = (request.args.get("running") or "") == "1"
+        key = "light" if light else "full"
+        hit = _runs_cache.get(key)
+        if hit is not None and time.time() - hit[0] < 10.0:
+            return jsonify(hit[1])
+        errors = []
+        try:
+            core, session = _gen_session()
+        except Exception as e:                          # noqa: BLE001
+            return jsonify({"runs": [], "running": [], "error": str(e)[:200]}), 200
+        cfg = core.training_config()
+        names = _base_names(cfg)
+        rows, details = [], []
+        try:
+            for t in core.list_training_in_progress(session, 100):
+                rows.append(_run_row_advanced(t, names))
+        except Exception as e:                          # noqa: BLE001
+            errors.append("advanced runs: " + _redact_host_paths(str(e))[:120])
+        loras = []
+        try:
+            loras = core.list_my_trained_loras(session, pages=1 if light else 2)
+        except Exception as e:                          # noqa: BLE001
+            errors.append("your LoRAs: " + _redact_host_paths(str(e))[:120])
+        by_model = {m["model_id"]: m for m in loras}
+        if not light:
+            try:
+                for t in core.list_training_completed(session, 100):
+                    r = _run_row_advanced(t, names, done=True)
+                    m = by_model.get(r["model_id"])
+                    if m:
+                        r["visibility"] = "private" if m["is_private"] else "public"
+                        r["version_id"] = m["version_id"]
+                        if m.get("task"):
+                            _apply_detail(r, m["task"])
+                    rows.append(r)
+            except Exception as e:                      # noqa: BLE001
+                errors.append("finished runs: " + _redact_host_paths(str(e))[:120])
+        smap = {"completed": "done", "waiting": "waiting", "running": "running",
+                "failed": "failed", "cancelled": "failed", "canceled": "failed"}
+        for m in loras:
+            t = m.get("task") or {}
+            if not t.get("id") or t.get("trainingMode") == "advanced":
+                continue                                 # advanced runs come from REST above
+            st = smap.get(str(t.get("status") or ""), "")
+            if not st or (light and st not in ("waiting", "running")):
+                continue
+            p = t.get("parameters") or {}
+            r = {"id": str(t["id"]), "mode": "basic",
+                 "title": str(p.get("title") or m["title"] or "Untitled LoRA"),
+                 "base_version_id": str(p.get("baseModelId") or ""),
+                 "base_name": names.get(str(p.get("baseModelId") or ""), ""),
+                 "image_count": len(p.get("mediaIds") or []), "status": st,
+                 "at": str(t.get("endAt") or t.get("updatedAt") or m["created_at"] or ""),
+                 "cover": "", "progress": None, "eta_left_ms": None, "reason": "",
+                 "model_id": m["model_id"], "version_id": m["version_id"],
+                 "published": True, "rebate": None, "trigger_words": "",
+                 "visibility": "private" if m["is_private"] else "public"}
+            _apply_detail(r, t)
+            rows.append(r)
+        # PixAI's percentage for advanced runs that are training (the REST list has none) and
+        # its reason for failed ones: a few GraphQL reads, newest first.
+        for r in rows:
+            if r["mode"] == "advanced" and r["status"] in ("running", "failed") \
+                    and len(details) < (3 if light else 6):
+                details.append(r)
+        for r in details:
+            try:
+                _apply_detail(r, core.training_task(session, r["id"]))
+            except Exception:                           # noqa: BLE001
+                pass
+        guarded = train_guard.retried()
+        for r in rows:
+            g = guarded.get(r["id"])
+            if g:
+                r["retry"] = g
+        # newest first, then (stable) the live ones on top: training, queued, describing
+        order = {"running": 0, "waiting": 1, "captioning": 2}
+        rows.sort(key=lambda r: r.get("at") or "", reverse=True)
+        rows.sort(key=lambda r: order.get(r["status"], 3))
+        running = [r for r in rows if r["status"] in ("running", "waiting")]
+        payload = {"runs": rows if not light else running, "running": running,
+                   "errors": errors}
+        _runs_cache[key] = (time.time(), payload)
+        return jsonify(payload)
+
+    @app.route("/api/train/advanced/<task_id>")
+    @tier(LOGIN)
+    def api_train_advanced_get(task_id):
+        """One advanced draft as its wizard needs it: the fixed set-up (name, trigger, category,
+        base), the image set, each image's description (PixAI's machine text, and the owner's
+        where he rewrote it), PixAI's describe quote while describing is possible, and its
+        start quote once every image is described. READ-ONLY -- opening or continuing a draft
+        writes nothing."""
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not a training task"}), 400
+        try:
+            core, session = _gen_session()
+            t = core.training_task(session, tid)
+        except Exception as e:                          # noqa: BLE001
+            return _train_refusal(e)
+        if t.get("trainingMode") != "advanced":
+            return jsonify({"error": "that run isn't an advanced one"}), 400
+        cfg = core.training_config()
+        p = t.get("parameters") or {}
+        ids = [str(x) for x in (p.get("mediaIds") or [])]
+        status = str(t.get("status") or "")
+        out = {"task": {"id": tid, "status": status, "title": str(p.get("title") or ""),
+                        "trigger_words": str(p.get("triggerWords") or ""),
+                        "category": str(p.get("category") or ""),
+                        "base_version_id": str(p.get("baseModelId") or ""),
+                        "base_name": _base_names(cfg).get(str(p.get("baseModelId") or ""), ""),
+                        "media_ids": ids},
+               "captions": {}, "caption_quote": None, "quote": None,
+               "eta": core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"]),
+               "caption_max": core.TRAIN_CAPTION_MAX, "errors": []}
+        if status != "draft":
+            try:
+                items = core.training_captions(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                items = []
+                out["errors"].append("descriptions: " + _redact_host_paths(str(e))[:120])
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _texts(it):
+                text = core.fetch_caption_text(it["caption_url"])
+                machine = text if it["source"] != "user" else \
+                    core.fetch_caption_text(it["machine_url"]) if it["machine_url"] else None
+                return it["media_id"], {"source": it["source"], "text": text,
+                                        "machine_text": machine}
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for mid, c in ex.map(_texts, items):
+                    out["captions"][mid] = c
+        if status in ("draft", "captionReady") and ids:
+            try:
+                out["caption_quote"] = core.training_caption_quote(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                out["errors"].append("describe price: " + _redact_host_paths(str(e))[:120])
+        if status == "captionReady":
+            try:
+                out["quote"] = core.training_quote(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                out["errors"].append("price: " + _redact_host_paths(str(e))[:120])
+        return jsonify(out)
+
+    @app.route("/api/train/advanced/draft", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_advanced_draft():
+        """Create an advanced draft -- the user's deliberate "Next · creates a draft" and
+        nothing else (Session J 3c). Free, but a write: CSRF, then READ_ONLY before any read,
+        then PixAI's pause switch, then one createTrainingTask."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        refused = _read_only_refusal(core, "create a LoRA training draft")
+        if refused:
+            return refused
+        refused = _pause_refusal(core)
+        if refused:
+            return refused
+        try:
+            core_, session = _gen_session()
+            d = core.create_advanced_training_draft(
+                session, str(body.get("base_model_id") or ""), str(body.get("title") or ""),
+                str(body.get("trigger_words") or ""), str(body.get("category") or ""))
+        except core.PixAIError as e:
+            return (_train_refusal(e) if isinstance(e, core.PixAIRestError)
+                    else (jsonify({"error": str(e)}), 400))
+        except Exception as e:                          # noqa: BLE001
+            return _train_refusal(e)
+        _runs_dirty()
+        return jsonify({"id": d["id"]})
+
+    @app.route("/api/train/advanced/<task_id>/media", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_advanced_media(task_id):
+        """Replace the draft's image set (PUT media; free). The per-side image rule runs over
+        this library's sizes first and refuses a failing image by name, as Basic does."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid = str(task_id or "").strip()
+        ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else None
+        if not tid.isdigit() or ids is None:
+            return jsonify({"error": "which run, and which images?"}), 400
+        ids = [str(m) for m in ids if str(m).strip()]
+        cfg = core.training_config()
+        rejected, _unchecked = core.check_training_images(
+            ids, media_dims(db_path, ids), cfg["image_constraints"])
+        if rejected:
+            return jsonify({"error": core.describe_rejected_training_images(rejected),
+                            "rejected_ids": [r["media_id"] for r in rejected]}), 400
+        refused = _read_only_refusal(core, "change a LoRA training set")
+        if refused:
+            return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(timeout=15):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            core_, session = _gen_session()
+            saved = core.replace_training_media(session, tid, ids)
+        except Exception as e:                          # noqa: BLE001
+            return _train_refusal(e)
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"media_ids": saved})
+
+    @app.route("/api/train/advanced/<task_id>/captions/<media_id>", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_advanced_caption_save(task_id, media_id):
+        """Save the owner's own description for one image (PUT; free; 1 to 1,000 characters;
+        only once PixAI has described it)."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid, mid = str(task_id or "").strip(), str(media_id or "").strip()
+        text = str(body.get("text") or "").strip()
+        if not tid.isdigit() or not mid.isdigit():
+            return jsonify({"error": "which image?"}), 400
+        if not text or len(text) > core.TRAIN_CAPTION_MAX:
+            return jsonify({"error": "A description is 1 to %s characters."
+                                     % "{:,}".format(core.TRAIN_CAPTION_MAX)}), 400
+        refused = _read_only_refusal(core, "edit a LoRA training description")
+        if refused:
+            return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(timeout=15):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            core_, session = _gen_session()
+            saved = core.save_training_caption(session, tid, mid, text)
+        except Exception as e:                          # noqa: BLE001
+            return _train_refusal(e)
+        finally:
+            lk.release()
+        return jsonify({"text": saved})
+
+    @app.route("/api/train/advanced/<task_id>/caption", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_advanced_caption(task_id):
+        """PAID: PixAI describes the set's undescribed images (Session J 3c, corrected by the
+        2026-09-28 capture: this is the only way in -- PixAI has no write-your-own path before
+        it). Preview-first: without `confirm` it only quotes (GET caption-price: the count
+        and the total, PixAI's own number, never the config's stale unit price). The confirm:
+        CSRF -> READ_ONLY -> this run's lock (refuses when held) -> pause switch -> the run
+        re-read (a draft or in review, at least 10 images) -> a FRESH quote -> nothing left
+        to describe refuses -> `accept_credit_cost` must be the fresh total, as a number ->
+        one POST caption."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not a training task"}), 400
+        confirming = bool(body.get("confirm"))
+        if confirming:
+            refused = _read_only_refusal(core, "describe LoRA training images")
+            if refused:
+                return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(blocking=False):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            if confirming:
+                refused = _pause_refusal(core)
+                if refused:
+                    return refused
+            try:
+                core_, session = _gen_session()
+                t = core.training_task(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            st = str(t.get("status") or "")
+            n = len((t.get("parameters") or {}).get("mediaIds") or [])
+            if confirming and train_guard.paid_blocked("caption", tid, st):
+                return jsonify({"error": _PAID_MAYBE_REFUSAL % "describing these images",
+                                "maybe_started": True}), 409
+            if t.get("trainingMode") != "advanced" or st not in ("draft", "captionReady"):
+                return jsonify({"error": "PixAI is %s this run, so it can't be described "
+                                         "now. Nothing was sent." %
+                                         ("already describing" if st == "captioning"
+                                          else "past that step on")}), 409
+            if n < core.TRAIN_MIN_IMAGES:
+                return jsonify({"error": "Add at least %d more image%s first. Nothing was sent."
+                                         % (core.TRAIN_MIN_IMAGES - n,
+                                            "" if core.TRAIN_MIN_IMAGES - n == 1 else "s")}), 400
+            try:
+                q = core.training_caption_quote(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            per = (q["total_price"] // q["image_count"]) if q["image_count"] else None
+            if not confirming:
+                return jsonify({"preview": True, "image_count": q["image_count"],
+                                "total_price": q["total_price"], "per_image": per})
+            if q["image_count"] <= 0:
+                return jsonify({"error": "Every image is described already. Nothing was "
+                                         "sent."}), 409
+            accepted = body.get("accept_credit_cost")
+            if not _exact_amount(accepted, q["total_price"]):
+                return _amount_refusal(accepted, q["total_price"], "Describing these images")
+            train_guard.paid_arm("caption", tid, st)
+            try:
+                status = core.start_training_captions(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                if core.definite_refusal(e):
+                    train_guard.paid_resolve("caption", tid, "refused")
+                    return _train_refusal(e)
+                train_guard.paid_resolve("caption", tid, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so describing these "
+                                         "images may have started. Check Runs before "
+                                         "describing again.",
+                                "maybe_started": True}), 502
+            train_guard.paid_resolve("caption", tid, "done")
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"started": True, "status": status or "captioning",
+                        "charged": q["total_price"], "image_count": q["image_count"]})
+
+    @app.route("/api/train/advanced/<task_id>/submit", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_advanced_submit(task_id):
+        """PAID: start an advanced run (Session J 3c, Parameters -> Start). PixAI's own default
+        options are sent verbatim (core.TRAIN_DEFAULT_OPTIONS) -- its page locks them, and its
+        quote takes no length, so this route takes no parameters from the client (spend review,
+        finding 3). No free card rides it, as on PixAI's page. Preview quotes GET price; the
+        confirm: CSRF -> READ_ONLY -> the run's lock (refuses when held) -> pause switch ->
+        the run re-read (in review, every image described) -> a FRESH quote ->
+        `accept_credit_cost` equal to it (a quote of 0 needs none) -> one POST submit. The
+        member quota is read before and after, so the answer can say if PixAI used one of the
+        member's free trainings (whether it does for an advanced run is not known)."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not a training task"}), 400
+        confirming = bool(body.get("confirm"))
+        if confirming:
+            refused = _read_only_refusal(core, "start a LoRA training run")
+            if refused:
+                return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(blocking=False):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            if confirming:
+                refused = _pause_refusal(core)
+                if refused:
+                    return refused
+            try:
+                core_, session = _gen_session()
+                t = core.training_task(session, tid)
+                if confirming and train_guard.paid_blocked("submit", tid,
+                                                           str(t.get("status") or "")):
+                    return jsonify({"error": _PAID_MAYBE_REFUSAL % "this run",
+                                    "maybe_started": True}), 409
+                if t.get("trainingMode") != "advanced" or t.get("status") != "captionReady":
+                    return jsonify({"error": "This run isn't waiting to start (PixAI says: %s). "
+                                             "Nothing was sent." % (t.get("status") or "?")}), 409
+                ids = [str(x) for x in ((t.get("parameters") or {}).get("mediaIds") or [])]
+                described = {c["media_id"] for c in core.training_captions(session, tid)}
+                left = [m for m in ids if m not in described]
+                if left:
+                    return jsonify({"error": "Describe the %d remaining image%s first. Nothing "
+                                             "was sent." % (len(left),
+                                                            "" if len(left) == 1 else "s"),
+                                    "undescribed": left}), 409
+                price = core.training_quote(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            eta = core.training_eta(core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])
+            if not confirming:
+                return jsonify({"preview": True, "price": price, "eta": eta,
+                                "image_count": len(ids), "is_free": price == 0})
+            accepted = body.get("accept_credit_cost")
+            if price > 0 and not _exact_amount(accepted, price):
+                return _amount_refusal(accepted, price, "This training")
+            before = core.training_free_quota(session)
+            train_guard.paid_arm("submit", tid, t.get("status"))
+            try:
+                status = core.submit_advanced_training(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                if core.definite_refusal(e):
+                    train_guard.paid_resolve("submit", tid, "refused")
+                    return _train_refusal(e)
+                train_guard.paid_resolve("submit", tid, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so this run may have "
+                                         "started. Check Runs before starting it again.",
+                                "maybe_started": True}), 502
+            train_guard.paid_resolve("submit", tid, "done")
+            after = core.training_free_quota(session)
+            try:
+                telem_bump("loras_trained", out_dir=out_dir)
+            except Exception:                           # noqa: BLE001
+                pass
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"submitted": True, "status": status or "waiting", "price": price,
+                        "used_free_training": bool(before > after)})
+
+    @app.route("/api/train/runs/<task_id>/retry", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_retry(task_id):
+        """PAID, A NEW RUN: retry a failed advanced run (same set, same descriptions; charged
+        again at PixAI's current price, its GET price quote). PixAI leaves the failed run as
+        it is and would take a second retry, so the retry guard (on disk) is checked first and
+        armed right before the POST; only a definite refusal disarms it. No free card rides
+        it, as on PixAI's page."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not a training task"}), 400
+        confirming = bool(body.get("confirm"))
+        if confirming:
+            refused = _read_only_refusal(core, "retry a LoRA training run")
+            if refused:
+                return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(blocking=False):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            g = train_guard.retry_state(tid)
+            if g:
+                return jsonify({"error": ("This run was retried already -- the new run is in "
+                                          "Runs. Nothing was sent." if g["state"] == "done" else
+                                          "A retry of this run may have started: PixAI didn't "
+                                          "answer clearly. Check Runs. Nothing was sent."),
+                                "retry": g}), 409
+            if confirming:
+                refused = _pause_refusal(core)
+                if refused:
+                    return refused
+            try:
+                core_, session = _gen_session()
+                t = core.training_task(session, tid)
+                if t.get("trainingMode") != "advanced" or t.get("status") != "failed":
+                    return jsonify({"error": "Only a failed advanced run can be retried. "
+                                             "Nothing was sent."}), 409
+                price = core.training_quote(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            if not confirming:
+                return jsonify({"preview": True, "price": price, "is_free": price == 0,
+                                "eta": core.training_eta(
+                                    core.TRAIN_DEFAULT_OPTIONS["trainingSteps"])})
+            accepted = body.get("accept_credit_cost")
+            if price > 0 and not _exact_amount(accepted, price):
+                return _amount_refusal(accepted, price, "Retrying this run")
+            train_guard.retry_arm(tid)
+            try:
+                res = core.retry_training(session, tid)
+            except Exception as e:                      # noqa: BLE001
+                if core.definite_refusal(e):
+                    train_guard.retry_resolve(tid, "refused")
+                    return _train_refusal(e)
+                train_guard.retry_resolve(tid, "ambiguous")
+                _runs_dirty()
+                return jsonify({"error": "PixAI didn't answer clearly, so the retry may have "
+                                         "started. Check Runs before trying again.",
+                                "maybe_started": True}), 502
+            train_guard.retry_resolve(tid, "done", res.get("id") or "")
+            try:
+                telem_bump("loras_trained", out_dir=out_dir)
+            except Exception:                           # noqa: BLE001
+                pass
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"retried": True, "id": res.get("id") or "", "price": price})
+
+    _PUBLISH_TICKS = {"private": ["no_delete"], "public": ["no_delete", "no_private"]}
+
+    @app.route("/api/train/runs/<task_id>/publish", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_publish(task_id):
+        """IRREVERSIBLE: publish a finished advanced run as a LoRA (Session J 4a). The request
+        must carry every consequence the sheet ticked, exactly: private ["no_delete"], public
+        ["no_delete", "no_private"]; rebates only when public. CSRF -> READ_ONLY -> the run's
+        lock -> the finished list re-read (finished, not yet published) -> one POST publish."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        tid = str(task_id or "").strip()
+        vis = str(body.get("visibility") or "")
+        rebate = "join" if body.get("rebate") in (True, "join") else "decline"
+        acks = body.get("acknowledged") if isinstance(body.get("acknowledged"), list) else []
+        if not tid.isdigit() or vis not in _PUBLISH_TICKS:
+            return jsonify({"error": "publish it private or public"}), 400
+        if rebate == "join" and vis != "public":
+            return jsonify({"error": "Only a public LoRA can join rebates. Nothing was "
+                                     "sent."}), 400
+        if sorted(str(a) for a in acks) != sorted(_PUBLISH_TICKS[vis]):
+            return jsonify({"error": "Tick every line under \"This can't be undone\" to "
+                                     "publish. Nothing was sent."}), 400
+        refused = _read_only_refusal(core, "publish a trained LoRA")
+        if refused:
+            return refused
+        lk = _train_lock("task:" + tid)
+        if not lk.acquire(blocking=False):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            try:
+                core_, session = _gen_session()
+                done = {str(t.get("id")): t for t in core.list_training_completed(session, 100)}
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            t = done.get(tid)
+            if not t:
+                return jsonify({"error": "That run hasn't finished training. Nothing was "
+                                         "sent."}), 409
+            if t.get("modelId"):
+                return jsonify({"error": "That run is published already. Nothing was "
+                                         "sent."}), 409
+            try:
+                res = core.publish_training(session, tid, vis, rebate)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"published": True, "visibility": vis, "rebate": rebate == "join",
+                        **res})
+
+    @app.route("/api/train/models/<model_id>/rebates")
+    @tier(LOGIN)
+    def api_train_model_rebates(model_id):
+        """Whether one of your LoRAs can join rebates (PixAI's check). Read-only."""
+        mid = str(model_id or "").strip()
+        if not mid.isdigit():
+            return jsonify({"offered": False, "joined": False, "can_join": False}), 400
+        try:
+            core, session = _gen_session()
+            return jsonify(core.lora_rebate_eligibility(session, mid))
+        except Exception:                               # noqa: BLE001
+            return jsonify({"offered": False, "joined": False, "can_join": False})
+
+    @app.route("/api/train/models/<model_id>/make-public", methods=["POST"])
+    @tier(LOGIN)
+    def api_train_make_public(model_id):
+        """IRREVERSIBLE: a private LoRA of yours goes public (Session J 4a, "Private -> public
+        later": the same sheet, Public fixed, one tick), optionally joining rebates. Exactly
+        PixAI's own two calls. CSRF -> the one tick -> READ_ONLY -> the model's lock -> the
+        model re-read (yours, private) -> upsertGenerationModel {isPrivate: false} -> only
+        when asked and PixAI offers it, the rebate PATCH."""
+        body, ok = _train_csrf_body()
+        if not ok:
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_backup as core
+        mid = str(model_id or "").strip()
+        acks = body.get("acknowledged") if isinstance(body.get("acknowledged"), list) else []
+        join = body.get("rebate") in (True, "join")
+        if not mid.isdigit():
+            return jsonify({"error": "which LoRA?"}), 400
+        if [str(a) for a in acks] != ["no_private"]:
+            return jsonify({"error": "Tick \"It can't go back to private\" to go on. Nothing "
+                                     "was sent."}), 400
+        refused = _read_only_refusal(core, "make a LoRA public")
+        if refused:
+            return refused
+        lk = _train_lock("model:" + mid)
+        if not lk.acquire(blocking=False):
+            return jsonify({"error": _BUSY}), 409
+        try:
+            try:
+                core_, session = _gen_session()
+                m = core.generation_model_brief(session, mid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            me = str(getattr(session, "user_id", "") or core.USER_ID or "")
+            if me and m["author_id"] and m["author_id"] != me:
+                return jsonify({"error": "That LoRA isn't yours. Nothing was sent."}), 403
+            if not m["is_private"]:
+                return jsonify({"error": "That LoRA is public already. Nothing was sent."}), 409
+            try:
+                core.make_model_public(session, mid)
+            except Exception as e:                      # noqa: BLE001
+                return _train_refusal(e)
+            joined, note = False, ""
+            if join:
+                try:
+                    el = core.lora_rebate_eligibility(session, mid)
+                    if el["can_join"]:
+                        core.join_lora_rebates(session, mid)
+                        joined = True
+                    else:
+                        note = "PixAI isn't offering rebates for it right now."
+                except Exception:                       # noqa: BLE001
+                    note = ("It is public, but joining rebates didn't go through; you can "
+                            "try again from its run.")
+        finally:
+            lk.release()
+        _runs_dirty()
+        return jsonify({"public": True, "rebate": joined, "note": note})
 
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
@@ -17235,13 +21033,14 @@ def create_app(out_dir: Path):
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
         unleashed = any(a["id"] == "triggered" and a["earned"]
                         for a in result["achievements"])
-        # Masked feats COLLAPSE to a single placeholder (2026-08-13): the old
-        # scheme kept one "hidden-feat-N" entry per undiscovered feat, so the
-        # array length -- and any earned/total arithmetic a client renders --
-        # counted exactly how many secrets were left. One placeholder says only
-        # what the placeholder itself already publicizes, and nothing more.
+        # Hidden feats never appear in the array until they are earned. They used to
+        # collapse to ONE "???" placeholder entry (2026-08-13); Session G replaced that with
+        # `feats.masked` below -- a riddle and a silhouette for one feat, and no entry at
+        # all, so neither the array's length nor any entry in it says anything about how
+        # many secrets remain.
         masked_metrics, n_masked, visible = set(), 0, []
         sealed_by_id = {r["id"]: r for r in _roster() if isinstance(r, dict)}
+        earned_ids = {a["id"] for a in result["achievements"] if a["earned"]}
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
                 n_masked += 1
@@ -17254,20 +21053,30 @@ def create_app(out_dir: Path):
                 a["roast_nsfw"] = ""
             if a["earned"]:                   # the roster flags go out only once earned
                 a.update(_earned_roster_flags(sealed_by_id.get(a["id"])))
+            else:                             # "N to go": never a feat, never an unmeasured metric
+                prog = achievement_progress(a, metrics)
+                if prog is not None:
+                    a["progress"] = prog
             visible.append(a)
-        if n_masked:
-            visible.append({
-                "id": "hidden-feat", "name": "???", "icon": "❓",
-                "desc": "A hidden feat of the Athenaeum.",
-                "tier": "feat", "bucket": "feat", "metric": "", "threshold": 1,
-                "current": 0, "earned": False, "skin": "", "hidden": True,
-                "banner_reward": False, "points": 0, "roast": "", "roast_nsfw": "",
-            })
+        result["feats"] = _feats_payload(earned_ids, n_masked, feats_revealed, unleashed,
+                                         app.secret_key)
+        # The Folio's Marks row (relics by kind): earned, awarded marks only.
+        try:
+            result["relics"] = {"marks": earned_relic_marks(out_dir, earned_ids)}
+        except Exception:
+            result["relics"] = {"marks": []}
         result["achievements"] = visible
         # a masked feat's metric name/value must not leak through the metrics echo
         still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
         for k in masked_metrics - still_visible:
             metrics.pop(k, None)
+        # The Vigil chip (O5): the run of days with a generation, and the best run ever. From the
+        # same ledger Seven Candles reads; a fresh install with no days answers day 1, best 1.
+        try:
+            _gd = (telem.get("day_lists") or {}).get("gen_days")
+            result["vigil"] = vigil_status(_gd if isinstance(_gd, list) else [])
+        except Exception:
+            result["vigil"] = {"day": 1, "best": 1}
         result["feats_revealed"] = feats_revealed
         result["unleash_available"] = unleashed
         result["skin"] = state.get("skin", "moonglade")
@@ -17365,9 +21174,12 @@ def create_app(out_dir: Path):
     @app.route("/api/ach-event", methods=["POST"])
     @tier(LOGIN)
     def api_ach_event():
-        """Feat-event beacon from the front-end: the Starfall konami egg, the
-        in-app manual, and narrator pokes. Whitelisted event names only; each is
-        a cosmetic local counter (no spend).
+        """Feat-event beacon from the front-end: the Starfall konami egg and the
+        in-app manual. Whitelisted event names only; each is a cosmetic local counter
+        (no spend). Narrator pokes used to ride this beacon; they have their own route
+        (/api/narrator/poke) since the ladder, which keeps its count and clocks per
+        account on the server, and an event named "narrator" is refused here so no
+        second road can move that count.
 
         LOGIN again since 2026-09-07, on the owner's ruling ("I feel like
         triggered should be obtainable easily on a phone just like desktop. For
@@ -17396,16 +21208,14 @@ def create_app(out_dir: Path):
         of MG_BOOT and curl it -- but it is the same class of witness CSRF gives
         us everywhere else, and it costs a phone nothing.
 
-        Also here, so five real pokes stay five real pokes: a 150ms debounce per
+        Also here, so a real gesture stays one event: a 150ms debounce per
         (session, event), and 30 beacon calls per session per rolling minute,
         beyond which the answer is 429 and no counter moves. The debounce is a
         wall-clock gap, so its width IS its meaning: 150ms is under a hand and
         over a double-fired DOM event, which is the only thing it should fold
         together. It shipped at 400ms earlier the same day and swallowed every
         second tap of an ordinary phone tap-rate -- see _ach_debounced(). A
-        debounced reply is accepted, hands back a nonce, counts nothing, and
-        carries the current counter so the client holds its line rather than
-        rewinding its toast.
+        debounced reply is accepted, hands back a nonce and counts nothing.
 
         The other half of one double-fired click is one nonce sent twice: the
         twin that loses is refused 403 as consumed. The clients do NOT refresh
@@ -17413,9 +21223,8 @@ def create_app(out_dir: Path):
         same gesture twice from the other side.
 
         The clients still treat a refusal as a no-op by design: api.js never
-        throws (a 403 comes back as an {error} body), App.jsx's konami handler is
-        explicitly fail-soft (the stars and toast still play), useFolio.js's
-        pokeNarrator() early-returns on res.error before any Toast. What is new
+        throws (a 403 comes back as an {error} body) and App.jsx's konami handler
+        is explicitly fail-soft (the stars and toast still play). What is new
         is that every caller now goes through notify/achNonce.js, which adopts
         the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
         once on a stale-page 403 before giving up quietly."""
@@ -17424,7 +21233,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
-        if ev not in ("konami", "docs", "narrator"):
+        if ev not in ("konami", "docs"):
             return jsonify({"error": "unknown event"}), 400
         # One refusal wording for missing, unknown, expired and foreign alike: which
         # check failed is exactly the thing a replay probe would want to learn, and
@@ -17435,28 +21244,77 @@ def create_app(out_dir: Path):
         # second half of a double-fire leaves the page with no nonce at all.
         nxt = _ach_mint(sid)
         if _ach_debounced(sid, ev):
-            # ...and it carries the CURRENT counter, READ not bumped (2026-09-07, refining
-            # the same day's debounce ruling). A debounced reply used to be the three keys
-            # above and nothing else, so useFolio.js's `res.pokes || 1` fell back to 1 and
-            # re-showed POKES[0] -- the escalating toast visibly REWOUND on the swallowed
-            # half of a double-fire. The client holds its line on `debounced` now; sending
-            # the true count as well means a client that does read it cannot be misled.
-            held = {"ok": True, "debounced": True, "next_nonce": nxt}
-            if ev == "narrator":
-                pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-                held["pokes"] = pokes
-                held["snapped"] = pokes >= 5
-            return jsonify(held)
+            return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
         if ev == "konami":
             telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
-        if ev == "docs":
-            telem_bump("docs_opened", out_dir=out_dir)
-            return jsonify({"ok": True, "next_nonce": nxt})
-        telem_bump("narrator_pokes", out_dir=out_dir)
-        pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-        return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5,
-                        "next_nonce": nxt})
+        telem_bump("docs_opened", out_dir=out_dir)
+        return jsonify({"ok": True, "next_nonce": nxt})
+
+    @app.route("/api/narrator/poke", methods=["POST"])
+    @tier(LOGIN)
+    def api_narrator_poke():
+        """One poke at the narrator. Body: {"csrf": "..."} and nothing else. Answer:
+        {"ok": true, "line": "..."} -- and, on the one poke that ends the ladder, a `final`
+        object carrying the two lines that poke is answered with.
+
+        THE SERVER DECIDES, THE CLIENT PAINTS. The count, the clocks and the choice of line
+        are this route's and moonglade_narrator.poke()'s (a pure core that takes the time as
+        a parameter); the page is told a line and nothing else, so it can learn neither how
+        far along it is, nor which stage, nor whether a poke counted. A poke that does not
+        count answers exactly like one that does.
+
+        WHICH ACCOUNT: the session's, never the body's. The state is per account and is
+        kept where the account cannot write it (account_state_*, not the prefs store).
+
+        WHAT IT WRITES: that account's own ladder state, and -- only on a poke that counted
+        -- the install's `narrator_pokes` metric raised to that account's count (a maximum,
+        not a sum, so two accounts never pool their pokes). Triggered is then earned the way
+        every feat is: the metric meets the sealed roster's threshold, and the next
+        achievements read stamps it. Nothing here spends, reaches PixAI or retries.
+
+        LINES come only from the sealed pack (`poke_lines`); a pack with none for what is
+        being said answers a bare ellipsis, never copy invented here. LOGIN tier, CSRF by
+        the explicit token (_check_csrf), like the other per-account writes."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "authentication required"}), 401
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        import moonglade_narrator as _nar
+        pools = _nar.clean_pools(_poke_lines())
+        now, today = _narrator_clock()
+        try:
+            with account_state_locked(out_dir, user) as p:
+                doc = account_state_read(p)
+                st, res = _nar.poke(doc.get("ladder"), now, today, pools)
+                account_state_write(p, dict(doc, ladder=st))
+        except AccountPrefsBusy as e:
+            return jsonify({"error": str(e)}), 503
+        except OSError:
+            return jsonify({"error": "Could not save that."}), 500
+        # The metric follows the count: only ever up, and re-asserted once the ladder is
+        # done so a write that was lost once is repaired by the next poke.
+        if res["counted"] or res["count"] >= _nar.FINAL:
+            telem_max("narrator_pokes", res["count"], out_dir=out_dir)
+        out = {"ok": True, "line": res["line"]}
+        if res["final"]:
+            final = {}
+            out["line"] = _nar.NEUTRAL
+            feat = next((a for a in _roster() if a.get("metric") == "narrator_pokes"), None)
+            if feat and feat["id"] in _earned_achievement_ids(out_dir, db_path, need=feat["id"]):
+                final = {"id": feat["id"],
+                         "clean": feat.get("roast") or feat.get("desc") or "",
+                         "unleashed": feat.get("roast_nsfw") or ""}
+                out["line"] = final["clean"] or _nar.NEUTRAL
+                choice = _nar.clean_choice(_poke_lines().get("choice"))
+                if choice:
+                    final["choice"] = choice
+            out["final"] = final
+        return jsonify(out)
 
     @app.route("/api/mirror/status")
     @tier(LOGIN)
@@ -17910,6 +21768,10 @@ def create_app(out_dir: Path):
         if not files:
             return jsonify({"error": "no files"}), 400
         collection = (request.form.get("collection") or "").strip()
+        if collection and _is_smart_name(db_path, collection.replace(",", " ").strip()):
+            # a smart collection is a saved search: refuse BEFORE any file is imported (N1)
+            return jsonify({"error": "“{}” is a smart collection, a saved search; "
+                                     "pictures can't be imported into it.".format(collection)}), 400
         tmp = tempfile.mkdtemp(prefix="mg_import_")
         try:
             saved = 0
@@ -17960,7 +21822,8 @@ def create_app(out_dir: Path):
             preset=lambda u, name: _load_presets(u).get(name),
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession))
+            unlimited=core.unlimited_resolver(gsession),
+            features=core.features_resolver(gsession))
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -17974,7 +21837,8 @@ def create_app(out_dir: Path):
             media_id=lambda v: _input_media_id(core, gsession, v),
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession))
+            unlimited=core.unlimited_resolver(gsession),
+            features=core.features_resolver(gsession))
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not
@@ -18205,6 +22069,139 @@ def create_app(out_dir: Path):
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
+    # The one body shape POST /api/account/prefs accepts; anything else is refused.
+    _ACCOUNT_PREFS_BODY_KEYS = frozenset(("set", "unset", "csrf"))
+
+    @app.route("/api/account/prefs", methods=["GET", "POST"])
+    @tier(LOGIN)
+    def api_account_prefs():
+        """The signed-in account's own preferences document -- the store is
+        account_prefs_get/account_prefs_update above (see their section header for the
+        file, the key rules, the caps and the corrupt-file contract).
+
+        GET  -> {"prefs": {...}, "csrf": "..."}. The token rides along the way
+                /api/myart/items hands its own out, so the client hook needs no boot
+                plumbing to make its first write.
+        POST {"csrf": "...", "set": {key: value}, "unset": [key]} -> {"prefs": {...}},
+                the whole updated document. Either of set/unset may be omitted, not
+                both; any other top-level field is refused. One bad key or value refuses
+                the whole change (400, plain message) and writes nothing.
+
+        LOGIN tier -- per-account state, the same tier as /api/view-presets,
+        /api/snippets and the Loom's store. CSRF: the explicit-token class
+        (_check_csrf(), the helper /api/duplicates/resolve and the user-admin routes
+        use), because this is a state-changing POST a single forged request could
+        otherwise drive.
+
+        The account comes from the SESSION, never the body -- same contract as every
+        per-account store here: a client that could name the account could read and
+        overwrite anyone's."""
+        user = str(session.get("user") or "")
+        if not user:
+            # Unreachable through the front door; fails closed if that ever changes,
+            # and never falls back to ACCOUNT_LOCAL or a shared file.
+            return jsonify({"error": "authentication required"}), 401
+        if request.method == "GET":
+            session.setdefault("csrf", secrets.token_hex(16))
+            return jsonify({"prefs": account_prefs_get(out_dir, user),
+                            "csrf": session["csrf"]})
+        if (request.content_length or 0) > 2 * ACCOUNT_PREFS_DOC_MAX:
+            return jsonify({"error": "That change is too large to save."}), 400
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object: "
+                                     "{\"set\": {...}, \"unset\": [...]}."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        extra = sorted(str(k) for k in body if k not in _ACCOUNT_PREFS_BODY_KEYS)
+        if extra:
+            return jsonify({"error": "Unknown field(s): {}. Send only 'set' and "
+                                     "'unset'.".format(", ".join(extra)[:120])}), 400
+        if "set" not in body and "unset" not in body:
+            return jsonify({"error": "Nothing to change: send 'set' and/or 'unset'."}), 400
+        if "set" in body and not isinstance(body["set"], dict):
+            return jsonify({"error": "'set' must be an object of {key: value}."}), 400
+        if "unset" in body and not isinstance(body["unset"], list):
+            return jsonify({"error": "'unset' must be a list of keys."}), 400
+        try:
+            prefs = account_prefs_update(out_dir, user, set_=body.get("set"),
+                                         unset=body.get("unset"))
+        except AccountPrefsError as e:
+            return jsonify({"error": str(e)}), 400
+        except AccountPrefsBusy as e:
+            return jsonify({"error": str(e)}), 503
+        except OSError as e:
+            return jsonify({"error": "Could not save preferences: "
+                                     + _redact_host_paths(str(e))[:160]}), 500
+        return jsonify({"prefs": prefs})
+
+    # ---- the in-app guide (Session I) -- see the module-level section "THE IN-APP GUIDE
+    # AND THE ABOUT CARD" for what each piece reads. All four are read-only and LOGIN tier:
+    # the guide is for anyone who can sign in, LAN sessions included, and none of them
+    # writes, spends or reaches PixAI. ------------------------------------------------------
+    @app.route("/api/help/index")
+    @tier(LOGIN)
+    def api_help_index():
+        """The guide's page list (sidebar order, with each page's headings for the search),
+        the Glossary's terms, and the version stamp the overlay prints."""
+        import moonglade_backup as core
+        return jsonify({
+            "version": core.__version__,
+            "display_version": display_version(core.__version__),
+            "pages": wiki_index(),
+            "glossary": wiki_glossary(),
+            "wiki_url": WIKI_WEB_URL,
+        })
+
+    def _help_page_file(slug):
+        """The page file for `slug`, looked up in the listing -- never a path built from
+        the request. None for anything the listing did not find."""
+        if not _WIKI_SLUG_RE.match(str(slug or "")):
+            return None
+        return _wiki_pages_on_disk(wiki_dir()).get(slug)
+
+    @app.route("/api/help/page/<slug>")
+    @tier(LOGIN)
+    def api_help_page(slug):
+        """One page's markdown, as text. The client parses it into plain data and renders
+        it through React, so nothing here is ever HTML."""
+        p = _help_page_file(slug)
+        if p is None:
+            return jsonify({"error": "That page is not in this install's guide."}), 404
+        try:
+            md = p.read_text(encoding="utf-8")
+        except OSError as e:
+            return jsonify({"error": "Could not read that page: "
+                                     + _redact_host_paths(str(e))[:160]}), 500
+        return jsonify({"slug": slug, "markdown": md, "url": wiki_web_url(slug)})
+
+    @app.route("/api/help/online/<slug>")
+    @tier(LOGIN)
+    def api_help_online(slug):
+        """Does the online wiki carry a newer copy of this page? Asked after the page has
+        rendered, so a slow or absent network never holds the reader up. Only consults
+        GitHub when the updater's own cached answer says a newer release is out -- see
+        wiki_online_differs -- so an up-to-date install never asks at all."""
+        p = _help_page_file(slug)
+        if p is None:
+            return jsonify({"error": "That page is not in this install's guide."}), 404
+        try:
+            md = p.read_text(encoding="utf-8")
+        except OSError:
+            return jsonify({"differs": False, "url": wiki_web_url(slug)})
+        behind = bool((_update_cache.get("payload") or {}).get("behind"))
+        return jsonify({"differs": wiki_online_differs(slug, md, behind),
+                        "url": wiki_web_url(slug)})
+
+    @app.route("/api/help/about")
+    @tier(LOGIN)
+    def api_help_about():
+        """The About card: this version's CHANGELOG entry, the release's size (which decides
+        between the what's-new sheet and About after an update), the art pack, the earlier
+        entries. Whether a newer release is out is /api/update/check's to say, not this."""
+        import moonglade_backup as core
+        return jsonify(about_payload(core.__version__, _container_path()))
+
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
         caller can both log and return it in one line.
@@ -18316,6 +22313,17 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
+            # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
+            # generation goes through the confirm (/api/generate/plan -> /run), so a count
+            # other than 1 is refused here -- never clamped -- whoever sent it (a stale
+            # bundle, a hand-rolled POST). And a prompt in the template syntax is refused
+            # too: sent from here its braces would reach PixAI literally, a different prompt
+            # from the one the dock's expander sends for the same text. Both local, before
+            # any network call. The Upscale road is exempt from the template check only: it
+            # re-sends the source picture's own stored prompt, which is never a template.
+            refusal = _single_send_refusal(body)
+            if refusal:
+                return jsonify({"error": refusal}), 400
             # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode §8.6/§8.9): READ_ONLY refuses
             # FIRST, before the entitlement read and the gate's reads below, as run_generate
             # does -- then one lane task at a time, off the app's own job log.
@@ -18366,6 +22374,11 @@ def create_app(out_dir: Path):
                 # client's own registration, so the one-at-a-time rule above can read it.
                 _log_job(task_id, status="running", type="generate", lane=core.UNLIMITED_LANE,
                          source="web")
+            # Session M (NOTES 3/7): the single send's request as built and card-attached (the
+            # card step writes kaisuukenId into req.parameters), so Inspect can show it. The
+            # submit itself is called exactly as before. Fail-soft -- a record that cannot be
+            # written never affects the spend.
+            _record_single_send(body, task_id, req.parameters, req)
             try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
                 lvids = req.lora_version_ids
                 if lvids:
@@ -18388,8 +22401,657 @@ def create_app(out_dir: Path):
                 out["adjusted"] = req.adjusted
             return jsonify(out)
         except Exception as e:
-            return jsonify({"error": _log_gen_failure(
-                "/api/generate", e, locals().get("params"))[:300]}), 200
+            msg = _log_gen_failure("/api/generate", e, locals().get("params"))[:300]
+            # Lane w2-recipes: PixAI's RECIPE_UNAVAILABLE / RECIPE_INCOMPATIBLE, structured
+            # (which recipes, why, in plain words) so the dock can mark the chip. Nothing
+            # was created; the raw text is in the log above.
+            import moonglade_recipes as _recipes
+            refusal = _recipes.refusal_from(e)
+            if refusal:
+                return jsonify({"error": refusal["copy"], "recipe_error": refusal}), 200
+            return jsonify({"error": msg}), 200
+
+    # ---- Session M: runs -- every send of more than one generation -----------------------
+    # The design, its guard order and the adversarial review it answers:
+    # moonglade-internal/design/notes/generate-power-tools/BUILD-w5-m.md. The dock expands a
+    # template only to draw it; the server re-parses, re-expands, re-counts, re-caps,
+    # re-builds and re-quotes everything here and checks the confirm's acknowledgement
+    # against that fresh plan. Sends go one at a time through core.send_run (the spend choke).
+    _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+    _run_lock = threading.Lock()
+    # ONE run in flight for the whole install (review F10): every gallery login spends the
+    # same PixAI wallet, free cards and Unlimited lane, so this is keyed on the install, not on
+    # session["user"]. {run_id, account, done, total} while a run is planned or sent.
+    _run_inflight = {}
+    _SINGLE_COUNT_WORDS = "Send more than one through the confirm — nothing was sent."
+    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b} or __list__) — "
+                       "send it from the Generate dock, which expands it first. Nothing was "
+                       "sent.")
+    _RUN_PAYLOAD_DROP = ("csrf", "run_id", "ack", "var_mode", "run_seed")
+
+    def _single_send_refusal(body):
+        """Why /api/generate refuses this body (review F2), or None. Local, no network."""
+        import moonglade_runs as runs
+        raw = body.get("count")
+        if runs.strict_int(1 if raw is None else raw, 1, 1) is None:
+            return _SINGLE_COUNT_WORDS
+        upscale_road = bool(str(body.get("ref_media_id") or "").strip()) and any(
+            body.get(k) not in (None, "", 0) for k in ("enlarge", "upscale"))
+        if not upscale_road and runs.has_syntax(body.get("prompt") or ""):
+            return _TEMPLATE_WORDS
+        return None
+
+    def _strip_request(params):
+        import moonglade_runs as runs
+        if params is None:
+            return None
+        return runs.strip_secrets(params, redact=_redact_host_paths)
+
+    def _record_single_send(body, task_id, sent, req):
+        """A single send's record in the Runs store (NOTES 3/7): its exact request, for
+        Inspect. Fail-soft: nothing here can touch the spend that already happened."""
+        try:
+            import uuid
+            import moonglade_runs as runs
+            user = str(session.get("user") or "")
+            if not user or not task_id:
+                return
+            store = runs.RunsStore(out_dir)
+            rid = uuid.uuid4().hex
+            prompt = str(body.get("prompt") or "")
+            payload = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
+            if not store.reserve(rid, user, status="sent", mode="single", template=prompt,
+                                 count=1, jobs_n=1, payload=payload,
+                                 dock_seed=str(body.get("seed") or "")):
+                return
+            store.put_jobs(rid, [{
+                "cell": 0, "task_id": str(task_id), "prompt": prompt, "vars": [],
+                "seed": (sent or {}).get("seed"), "batch": 1,
+                "no_card": int(bool(req.no_card)),
+                "card": int(bool((sent or {}).get("kaisuukenId"))),
+                "state": "sent", "request": _strip_request(sent)}])
+        except Exception:                                    # noqa: BLE001
+            pass
+
+    class _RunRefused(Exception):
+        """A run refused before anything was sent; str() is the plain sentence."""
+
+        def __init__(self, msg, **extra):
+            super().__init__(msg)
+            self.extra = extra
+
+    def _prompt_limit(model_type):
+        """The prompt budget a model gives -- recipesCore.promptLimit's rule (the site's jr())."""
+        return 10000 if re.fullmatch(r"(USER_)?(MM)?DIT26[AB]_MODEL",
+                                     str(model_type or "")) else 4096
+
+    def _cell_label(plan, job):
+        if plan["mode"] not in ("random", "matrix"):
+            return ""
+        vals = " · ".join(v["value"] for v in job["vars"])
+        return "Cell {} ({}): ".format(job["cell"] + 1, vals) if vals else \
+            "Cell {}: ".format(job["cell"] + 1)
+
+    def _card_session(core, gsession):
+        """The identity the free-card check must read under: the one the create will use
+        (review F14, _apply_kaisuuken's rule). Under READ_ONLY nothing can be sent, so the
+        mirror session (whose read may refresh a token) is not reached for a quote."""
+        if core.READ_ONLY or core._read_only_now():
+            return gsession
+        return core._session_for_create(gsession)
+
+    def _recipe_budget_check(core, gsession, built, plan):
+        """Review F7: with recipes, a prompt a cell's value made too long would only be
+        refused by PixAI at SEND, partway through a run. Every resolved prompt is checked
+        against the recipes' own prompt length before anything goes out (the dock's rule,
+        recipesCore.recipeFit, on the longest prompt). One read-only recipe lookup."""
+        ids = (built[0]["req"].parameters or {}).get("recipeIds")
+        if not ids:
+            return
+        import moonglade_recipes as rec
+        try:
+            cards = rec.batch(gsession, ids)
+        except Exception:                                    # noqa: BLE001
+            raise _RunRefused("Couldn't read the recipes' prompt length from PixAI, so "
+                              "nothing was sent — try again in a moment.")
+        add = sum(int(c.get("prompt_len") or 0) for c in cards)
+        if not add:
+            return
+        try:
+            feats = core.features_resolver(gsession)(built[0]["req"].model_version_id)
+        except Exception:                                    # noqa: BLE001
+            feats = None
+        limit = _prompt_limit((feats or {}).get("model_type"))
+        for b in built:
+            n = len(str((b["req"].parameters or {}).get("prompts") or "")) + add
+            if n > limit:
+                raise _RunRefused(_cell_label(plan, b["job"]) + "a recipe would make the "
+                                  "prompt too long ({:,} / {:,}) — shorten the prompt."
+                                  .format(n, limit))
+
+    def _run_expand(body, user):
+        """Step 5, local and without a network call: var_mode, count, the run seed, and the
+        template expanded against the account's own lists (never lists from the request).
+        Returns (plan, run_seed, dock_seed); raises _RunRefused."""
+        import moonglade_runs as runs
+        vm = body.get("var_mode")
+        if vm not in ("random", "matrix"):
+            raise _RunRefused("Pick Random or Matrix for this run.")
+        raw = body.get("count")
+        count = runs.strict_int(1 if raw is None else raw, 1,
+                                1 if vm == "matrix" else runs.MAX_COUNT)
+        if count is None:
+            raise _RunRefused("A matrix sends one image per cell." if vm == "matrix"
+                              else "Pick 1 to 4 images.")
+        # The run seed (review F13f): the dock's seed field when it holds digits, else the
+        # dock's roll; a run seed that disagrees with a set seed field is refused.
+        seed_raw = str(body.get("seed") if body.get("seed") is not None else "").strip()
+        dock_seed = seed_raw if re.fullmatch(r"-?\d{1,12}", seed_raw) else ""
+        rs_raw = body.get("run_seed")
+        client_rs = None
+        if rs_raw not in (None, ""):
+            client_rs = runs.strict_int(rs_raw, 0, runs.RUN_SEED_MAX)
+            if client_rs is None:
+                raise _RunRefused("That run seed isn't one this app makes — reload the "
+                                  "page and try again.")
+        run_seed = None
+        if dock_seed:
+            n = int(dock_seed)
+            if 0 <= n <= runs.RUN_SEED_MAX:
+                run_seed = n
+            if client_rs is not None and client_rs != run_seed:
+                raise _RunRefused("The run seed doesn't match the seed field — nothing "
+                                  "was sent.")
+        else:
+            run_seed = client_rs
+        lists = runs.lists_from_prefs(account_prefs_get(out_dir, user))
+        plan = runs.plan_jobs(body.get("prompt") or "", lists, vm, count, run_seed)
+        if plan.get("error"):
+            raise _RunRefused(plan["error"])
+        # Review N4: with the seed field set, every matrix cell carries that one seed, so two
+        # cells that resolve to the same prompt are the same picture paid for twice.
+        same = runs.same_prompt_cells(plan) if dock_seed else None
+        if same:
+            raise _RunRefused("Cells {} and {} would send the same prompt with the same seed "
+                              "— that pays twice for one picture. Clear the seed or change a "
+                              "value.".format(*same))
+        if plan["mode"] == "random" and run_seed is None:
+            if dock_seed:
+                raise _RunRefused("A Random run's seed must be between 0 and "
+                                  "{:,} — or leave the seed blank.".format(
+                                      runs.RUN_SEED_MAX))
+            raise _RunRefused("This run has no seed to draw from — reload the page and "
+                              "try again.")
+        return plan, run_seed, dock_seed
+
+    def _run_plan(core, gsession, body, user, *, resolver, quote):
+        """Steps 5-10's work, shared by /plan and /run: the expansion (above), the mode
+        rules, entitlements, one build per job through THE ONE road, the per-route checks,
+        the recipes' prompt budget, and -- with `quote` -- the price and the free cards.
+        Raises _RunRefused; writes nothing."""
+        import moonglade_runs as runs
+        import moonglade_recipes as rec
+        plan, run_seed, dock_seed = _run_expand(body, user)
+        # Settled 2: never a card on a queued matrix cell -- a matrix of 2+ cells. A one-cell
+        # matrix is an ordinary single send and its card applies as for any single send
+        # (review B1: forcing it there charged a send the dock's badge showed as free).
+        no_card = runs.forces_no_card(plan)
+        ent = _entitlements(core, gsession)
+        rs = resolver(core, gsession)
+        base = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
+        built = []
+        for job in plan["jobs"]:
+            jp = dict(base, prompt=job["prompt"], count=job["batch"])
+            if job["seed"] is not None:
+                jp["seed"] = job["seed"]
+            if no_card:
+                jp["no_card"] = True
+            label = _cell_label(plan, job)
+            try:
+                req = core.build_request(jp, mode="image", is_member=ent["is_member"],
+                                         resolve=rs)
+            except core.PixAIError as e:
+                refusal = rec.refusal_from(e)
+                raise _RunRefused(label + (refusal["copy"] if refusal
+                                           else _redact_host_paths(str(e))[:200]),
+                                  **({"recipe_error": refusal} if refusal else {}))
+            if not req.model_version_id:
+                raise _RunRefused("pick a model first")
+            if req.parameters is None:
+                raise _RunRefused(label + (req.note or "nothing to send"))
+            cap = ent["lora_cap"]
+            if cap is not None and len(req.lora_version_ids) > cap:
+                raise _RunRefused("Your account allows {} LoRA{} per generation — "
+                                  "remove {} to continue.".format(
+                                      cap, "" if cap == 1 else "s",
+                                      len(req.lora_version_ids) - cap))
+            # Review N1: the Turbo -> Low downgrade (priority_for_submit, once PixAI has said
+            # this account can't use Turbo) is applied HERE, at build, so it is quoted and
+            # digested; a run job's submit (exact=True) never applies it again, so what is
+            # sent is what was quoted.
+            req.parameters = core.priority_for_submit(req.parameters)
+            built.append({"cell": job["cell"], "job": job, "req": req,
+                          "no_card": True if no_card else None})
+        if any(b["req"].unlimited for b in built) and len(built) > 1:
+            raise _RunRefused("Unlimited Mode makes one picture at a time — switch it "
+                              "off to send a run.")
+        _recipe_budget_check(core, gsession, built, plan)
+        out = {"mode": plan["mode"], "count": plan["images"], "jobs": len(built),
+               "built": built, "plan": plan, "run_seed": run_seed, "dock_seed": dock_seed}
+        adjusted = list(built[0]["req"].adjusted or [])
+        if adjusted:
+            out["adjusted"] = adjusted
+        if not quote:
+            return out
+        # --- the quote (step 9): one price group, a read price, the free cards ---
+        queries = []
+        for b in built:
+            q = core._task_price_query(gsession, b["req"].parameters)
+            if not q:
+                raise _RunRefused(_cell_label(plan, b["job"]) + "this request can't be "
+                                  "priced, so nothing was sent.")
+            queries.append(runs.canonical(q))
+        if len(set(queries)) > 1:
+            raise _RunRefused("These cells don't all cost the same, so one confirm can't "
+                              "describe them — nothing was sent.")
+        first = built[0]["req"]
+        card, card_note = None, None
+        if first.unlimited:
+            each, covered = 0, len(built)
+            out["unlimited"] = True
+        else:
+            cost = core.price_task(gsession, first.parameters)
+            if cost is None:
+                if first.parameters.get("recipeIds"):
+                    v = rec.price_verdict(gsession, first.parameters, None) or {}
+                    raise _RunRefused(v.get("note") or "couldn't verify the price with "
+                                      "these recipes",
+                                      **({"recipe_error": v["recipe_error"]}
+                                         if v.get("recipe_error") else {}))
+                raise _RunRefused("Couldn't read the price from PixAI, so nothing was sent "
+                                  "— try again in a moment.")
+            each = int(cost)
+            covered = 0
+            if no_card:
+                card_note = "Free cards don’t cover queued matrix runs."
+            elif not first.no_card:
+                try:
+                    best = core.match_kaisuuken(_card_session(core, gsession),
+                                                first.parameters, enrich=True,
+                                                raise_on_error=True)
+                except Exception:                            # noqa: BLE001
+                    raise _RunRefused("The free-card check didn't answer, so nothing was "
+                                      "sent — try again in a moment.")
+                if best:
+                    need = max(1, int(best.get("consumeAmount") or 1))
+                    held = best.get("total")
+                    if core.card_covers(best):
+                        if len(built) == 1 or held is None:
+                            covered = 1
+                        else:
+                            covered = min(len(built), int(held) // need)
+                    card = {"name": best.get("name") or "", "held": held, "needed": need,
+                            "left_after": (int(held) - covered * need) if held is not None
+                            else None,
+                            "short": not core.card_covers(best)}
+                    if covered and first.parameters.get("recipeIds"):
+                        card_note = rec.CARD_NOTE
+        out.update(each=each, covered=covered, total=each * (len(built) - covered),
+                   card=card,
+                   digest=runs.run_digest([(b["req"].parameters, b["no_card"]) for b in built],
+                                          queries[0]))
+        if card_note:
+            out["card_note"] = card_note
+        return out
+
+    def _plan_public(core, planned, cells=False):
+        """The plan as the dock reads it (no GenerationRequest objects)."""
+        import moonglade_runs as runs
+        keys = ("mode", "count", "jobs", "each", "covered", "total", "card", "card_note",
+                "unlimited", "digest", "adjusted")
+        out = {k: planned[k] for k in keys if k in planned}
+        out["read_only"] = bool(core.READ_ONLY or core._read_only_now())
+        plan = planned["plan"]
+        if plan.get("axes"):
+            out["axes"] = plan["axes"]
+        if planned.get("run_seed") is not None:
+            out["run_seed"] = planned["run_seed"]
+        if cells:
+            out["cells"] = []
+            for b in planned["built"]:
+                req = _strip_request(b["req"].parameters)
+                out["cells"].append({
+                    "cell": b["cell"], "prompt": b["job"]["prompt"], "vars": b["job"]["vars"],
+                    "seed": b["req"].parameters.get("seed"), "count": b["job"]["batch"],
+                    "no_card": bool(b["no_card"]),
+                    "request": {"operation": "createGenerationTask",
+                                "variables": {"parameters": req}},
+                    "cli": runs.cli_command(core, req, no_card=bool(b["no_card"]))})
+        return out
+
+    @app.route("/api/generate/plan", methods=["POST"])
+    @tier(LOGIN)
+    def api_generate_plan():
+        """The confirm's numbers (BUILD-w5-m s3.1): count, total credits, the free cards that
+        cover it, each job's request and command line. READ-ONLY: it writes nothing -- no
+        Runs store row, no job event, no prefs -- and its only PixAI calls are the reads
+        /api/price already makes (plus a recipe lookup when recipes ride along). No READ_ONLY
+        refusal (a quote spends nothing); the answer says `read_only` so the confirm can."""
+        user = str(session.get("user") or "")
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        try:
+            core, gsession = _gen_session()
+            planned = _run_plan(core, gsession, body, user, resolver=_price_resolver,
+                                quote=True)
+            return jsonify(_plan_public(core, planned, cells=True))
+        except _RunRefused as e:
+            return jsonify(dict({"error": str(e)}, **e.extra)), 200
+        except Exception as e:                               # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    def _run_refused(store, run_id, msg, **extra):
+        try:
+            store.update_run(run_id, status="refused", reason=str(msg)[:300])
+        except Exception:                                    # noqa: BLE001
+            pass
+        return jsonify(dict({"error": str(msg), "run_id": run_id, "status": "refused"},
+                            **extra)), 200
+
+    @app.route("/api/generate/run", methods=["POST"])
+    @tier(LOGIN)
+    def api_generate_run():
+        """Send a run (BUILD-w5-m s3.2-s4). The guard order, exactly: LOGIN -> CSRF ->
+        READ_ONLY (before ANY PixAI read) -> local refusals and the reservation of run_id
+        under one lock (a run_id already seen answers with that run, never a second send;
+        another run in flight anywhere on this install is refused) -> parse, expand, count,
+        cap -> the mode rules -> entitlements -> one build per job -> the quote -> the
+        acknowledgement against that fresh quote -> every job row written -> the sends, one
+        at a time, the first failure stopping the rest. A count of 1 needs no
+        acknowledgement: it is a single send (no quote, the card auto-applies, review F11)."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        import moonglade_backup as core
+        try:
+            core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+        except core.PixAIError as e:
+            return jsonify({"error": str(e), "read_only": True}), 200
+        run_id = str(body.get("run_id") or "")
+        if not _RUN_ID_RE.match(run_id):
+            return jsonify({"error": "This run has no id — reload the page and try "
+                                     "again. Nothing was sent."}), 400
+        store = runs.RunsStore(out_dir)
+        with _run_lock:
+            try:
+                existing = store.get(run_id)
+            except Exception:                                # noqa: BLE001
+                # Review N7: a store that can't be read is not "no such run" -- the run id
+                # might be one already sent, so nothing goes out.
+                return jsonify({"error": "Couldn't read the run store, so nothing was "
+                                         "sent."}), 200
+            if existing is not None:
+                if existing.get("account") != user:
+                    return jsonify({"error": "That run id is taken — nothing was "
+                                             "sent."}), 200
+                live = _run_inflight.get("run_id") == run_id
+                return jsonify(dict(runs.run_view(existing, live=live), replay=True)), 200
+            if _run_inflight:
+                return jsonify({"error": "A run is still being sent ({} of {}) — wait "
+                                         "for it to finish.".format(
+                                             _run_inflight.get("done", 0),
+                                             _run_inflight.get("total") or "?")}), 200
+            try:
+                ok = store.reserve(run_id, user, status="planning",
+                                   template=str(body.get("prompt") or ""),
+                                   var_mode=str(body.get("var_mode") or ""),
+                                   dock_seed=str(body.get("seed") or ""),
+                                   payload={k: v for k, v in body.items()
+                                            if k not in _RUN_PAYLOAD_DROP})
+            except Exception:                                # noqa: BLE001
+                ok = None
+            if ok is None:
+                return jsonify({"error": "Couldn't record the run, so nothing was sent."}), 200
+            if not ok:
+                return jsonify({"error": "That run id is taken — nothing was sent."}), 200
+            _run_inflight.update(run_id=run_id, account=user, done=0, total=0)
+        try:
+            return _run_send(core, store, run_id, body, user)
+        finally:
+            with _run_lock:
+                _run_inflight.clear()
+
+    def _run_send(core, store, run_id, body, user):
+        import moonglade_runs as runs
+        try:
+            # Step 5, local: expand and count before any network call.
+            plan, _rs, _ds = _run_expand(body, user)
+            multi = plan["images"] > 1
+            ack = body.get("ack")
+            if multi and not isinstance(ack, dict):
+                raise _RunRefused("Confirm the {} generations first — nothing was sent."
+                                  .format(plan["images"]))
+            # Review N6: the acknowledgement's count and jobs against this local expansion,
+            # right here -- before the entitlement read, the builds and the quote (all checked
+            # again, with every other field, at step 10).
+            bad = runs.ack_count_problem(ack, plan) if multi else None
+            if bad:
+                raise _RunRefused("What would be sent changed since you confirmed — nothing "
+                                  "was sent.", changed=bad)
+            # Step 6, the lane rule read off the app's own job log: one lane task at a time.
+            if core.asks_unlimited(body) and _lane_job_running(core):
+                raise _RunRefused(core.UNLIMITED_BUSY)
+            # Steps 7-9: entitlements, one build per job, the quote (a single send has none).
+            gcore, gsession = _gen_session()
+            planned = _run_plan(gcore, gsession, body, user, resolver=_submit_resolver,
+                                quote=multi)
+            if multi:
+                # Step 10: the acknowledgement against the FRESH plan, field by field.
+                bad = runs.ack_problem(ack, planned)
+                if bad:
+                    words = ("The price moved since you confirmed — nothing was sent."
+                             if bad in ("each", "covered", "total") else
+                             "What would be sent changed since you confirmed — nothing "
+                             "was sent.")
+                    raise _RunRefused(words, plan=_plan_public(core, planned),
+                                      changed=bad)
+        except _RunRefused as e:
+            return _run_refused(store, run_id, str(e), **e.extra)
+        except Exception as e:                               # noqa: BLE001
+            return _run_refused(store, run_id, _redact_host_paths(str(e))[:200])
+        built = planned["built"]
+        mode = planned["mode"]
+        each = planned.get("each")
+        covered = planned.get("covered") or 0
+        jobs_rows = []
+        for i, b in enumerate(built):
+            if not multi:
+                expected = None
+            elif b["no_card"]:
+                expected = each
+            else:
+                expected = 0 if i < covered else each
+            b["expected"] = expected
+            jobs_rows.append({"cell": b["cell"], "prompt": b["job"]["prompt"],
+                              "vars": b["job"]["vars"],
+                              "seed": b["req"].parameters.get("seed"),
+                              "batch": b["job"]["batch"], "no_card": int(bool(b["no_card"])),
+                              "expected": expected, "state": "pending"})
+        try:
+            store.put_jobs(run_id, jobs_rows)
+            store.update_run(run_id, status="sending", mode=mode, count=planned["count"],
+                             jobs_n=len(built), run_seed=planned.get("run_seed"),
+                             axes=planned["plan"].get("axes"), each_cost=each,
+                             covered=covered, ack_total=planned.get("total"))
+        except Exception:                                    # noqa: BLE001
+            return _run_refused(store, run_id, "Couldn't record the run's jobs, so nothing "
+                                               "was sent.")
+        with _run_lock:
+            _run_inflight["total"] = len(built)
+        by_cell = {b["cell"]: b for b in built}
+        label_kind = {"matrix": "Matrix", "random": "Random", "batch": "Batch",
+                      "single": "Run"}.get(mode, "Run")
+
+        class _Hooks(object):
+            def sending(self, cell):
+                store.set_job(run_id, cell, state="sending")
+
+            def sent(self, cell, task_id, request_, card):
+                b = by_cell[cell]
+                with _run_lock:
+                    _run_inflight["done"] = _run_inflight.get("done", 0) + 1
+                # The job event first: the Activity tray and the reel see every task even if
+                # the store write below fails or the tab closed (review F5).
+                _log_job(task_id, status="running", type="generate",
+                         label="{} {}/{}".format(label_kind, cell + 1, len(built))
+                         if len(built) > 1 else "Generated",
+                         count=b["job"]["batch"], run=run_id, cell=cell, run_mode=mode,
+                         lane=core.UNLIMITED_LANE if b["req"].unlimited else None,
+                         source="web")
+                store.set_job(run_id, cell, state="sent", task_id=task_id,
+                              request=_strip_request(request_), card=int(bool(card)))
+
+            def failed(self, cell, state, error, request_):
+                store.set_job(run_id, cell, state=state, error=error,
+                              request=_strip_request(request_))
+
+        budget = {"each": each, "total": planned["total"]} if multi else None
+        res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
+                                        "no_card": b["no_card"]} for b in built],
+                            hooks=_Hooks(), budget=budget)
+        for j in res["jobs"]:
+            if j["state"] == "not_sent":
+                try:
+                    store.set_job(run_id, j["cell"], state="not_sent")
+                except Exception:                            # noqa: BLE001
+                    pass
+        try:
+            store.update_run(run_id, status=res["status"], reason=res.get("reason"))
+        except Exception:                                    # noqa: BLE001
+            pass
+        try:                       # LoRA telemetry, per generation sent (as /api/generate)
+            for j in res["jobs"]:
+                if j["state"] == "sent":
+                    lvids = by_cell[j["cell"]]["req"].lora_version_ids
+                    if lvids:
+                        telem_bump("lora_used", out_dir=out_dir)
+                        telem_max("lora_stacked", len(lvids), out_dir=out_dir)
+                        for v in lvids:
+                            telem_set_add("loras", v, out_dir=out_dir)
+        except Exception:                                    # noqa: BLE001
+            pass
+        for j in res["jobs"]:
+            b = by_cell.get(j["cell"])
+            if b is not None:
+                j["prompt"] = b["job"]["prompt"]
+                j["vars"] = b["job"]["vars"]
+                if b.get("expected") is not None:
+                    j["expected"] = b["expected"]
+        out = {"run_id": run_id, "status": res["status"], "mode": mode,
+               "count": planned["count"], "jobs": res["jobs"],
+               "sent": sum(1 for j in res["jobs"] if j["state"] == "sent"),
+               "not_sent": sum(1 for j in res["jobs"] if j["state"] == "not_sent")}
+        if res.get("reason"):
+            out["reason"] = res["reason"]
+        if planned["plan"].get("axes"):
+            out["axes"] = planned["plan"]["axes"]
+        if planned.get("adjusted"):
+            out["adjusted"] = planned["adjusted"]
+        return jsonify(out), 200
+
+    @app.route("/api/generate/runs/<run_id>")
+    @tier(LOGIN)
+    def api_generate_run_get(run_id):
+        """A run's recorded state, for the dock whose POST answer was lost (review F4): 404
+        while this server has not received it (or it is another account's), else the run --
+        'planning' / 'sending' while it goes, then sent / stopped / refused."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        rid = str(run_id or "")
+        if not _RUN_ID_RE.match(rid):
+            return jsonify({"error": "not found"}), 404
+        try:
+            run = runs.RunsStore(out_dir).get(rid)
+        except runs.RunsUnreadable:
+            # Review N7: unreadable is not "not found" -- the dock's read-back counts this
+            # toward its lost window, never as "not received yet".
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
+        if run is None or run.get("account") != user:
+            return jsonify({"error": "not found"}), 404
+        live = _run_inflight.get("run_id") == rid
+        return jsonify(runs.run_view(run, live=live))
+
+    @app.route("/api/generate/request/<task_id>")
+    @tier(LOGIN)
+    def api_generate_request(task_id):
+        """Inspect (NOTES 7): the exact request a task was sent with, secrets stripped, with
+        its template, its drawn values and its command line. The Runs store's record when the
+        caller's own account made it; for a task this library holds with no record anywhere,
+        PixAI's stored task (source "pixai"). Another account's record is never served, and
+        never falls back to PixAI either (review F9). Writes nothing."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not found"}), 404
+        try:
+            found = runs.RunsStore(out_dir).find_task(tid)
+        except runs.RunsUnreadable:
+            # Review N7: the record may be another account's; with the store unreadable,
+            # nothing is served and PixAI is not asked (review F9).
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
+        import moonglade_backup as core
+        if found is not None:
+            run, job = found
+            if run.get("account") != user:
+                return jsonify({"error": "not found"}), 404
+            params = job.get("request")
+            out = {"source": "local", "task_id": tid, "run_id": run.get("run_id"),
+                   "mode": run.get("mode"), "cell": job.get("cell"),
+                   "template": run.get("template") or "", "vars": job.get("vars") or [],
+                   "prompt": job.get("prompt") or "", "state": job.get("state")}
+            if isinstance(params, dict):
+                out["request"] = {"operation": "createGenerationTask",
+                                  "variables": {"parameters": params}}
+                out["cli"] = runs.cli_command(core, params, no_card=bool(job.get("no_card")))
+            return jsonify(out)
+        if not get_row_by_task(db_path, tid):
+            return jsonify({"error": "not found"}), 404
+        try:
+            core, gsession = _gen_session()
+            task = core.task_detail_gql(gsession, tid, retries=1)
+        except Exception as e:                               # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+        if not task:
+            return jsonify({"error": "couldn't read the task from PixAI"}), 200
+        params = _strip_request(task.get("parameters") or {})
+        return jsonify({"source": "pixai", "task_id": tid,
+                        "request": {"operation": "createGenerationTask",
+                                    "variables": {"parameters": params}},
+                        "cli": runs.cli_command(core, params)})
+
+    def _run_note_paid(tid, paid):
+        """Review F14: a run job's charged credits beside what the confirm expected. Returns
+        the expected figure (None when it is not a run job with one). Fail-soft."""
+        try:
+            import moonglade_runs as runs
+            store = runs.RunsStore(out_dir)
+            found = store.find_task(tid)
+            if not found:
+                return None
+            run, job = found
+            if paid is not None:
+                store.set_job(run["run_id"], job["cell"], paid=int(paid))
+            return job.get("expected")
+        except Exception:                                    # noqa: BLE001
+            return None
 
     @app.route("/api/edit", methods=["POST"])
     @tier(LOGIN)
@@ -18422,6 +23084,42 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/edit", e, locals().get("params"))[:300]}), 200
+
+    # PixAI's official colour palettes change rarely (26 on 2026-09-26); one read an hour is
+    # plenty, and a failed read is not cached so the next open tries again.
+    _pal_presets_cache = {"at": 0.0, "palettes": None}
+    _PAL_PRESETS_TTL = 3600.0
+
+    @app.route("/api/palettes/presets")
+    @tier(LOGIN)
+    def api_palette_presets():
+        """The Generate drawer's colour palette Library tab: PixAI's official palettes
+        (core.color_palette_presets -> GET /v2/color-palettes/presets), READ-ONLY, spends
+        nothing. LOGIN tier like every other drawer read. Each cover goes through this app's
+        own CDN proxy (/api/pixai-cdn/thumb, SSRF-guarded to images-ng.pixai.art), because the
+        browser cannot load PixAI's CDN cross-origin from here; any other host gets no cover.
+        Fails soft: {"palettes": [], "error"} on a failed read, and the Library says so."""
+        import urllib.parse as _up
+        now = time.time()
+        cached = _pal_presets_cache["palettes"]
+        if cached is not None and (now - _pal_presets_cache["at"]) < _PAL_PRESETS_TTL:
+            return jsonify({"palettes": cached})
+        try:
+            core, gsession = _gen_session()
+            rows = core.color_palette_presets(gsession)
+        except Exception as e:
+            return jsonify({"palettes": [], "error": _redact_host_paths(str(e))[:200]})
+        for r in rows:
+            cover = r.get("cover_url") or ""
+            try:
+                ok = _up.urlparse(cover).scheme == "https" and \
+                    _up.urlparse(cover).netloc == "images-ng.pixai.art"
+            except ValueError:
+                ok = False
+            r["cover_url"] = ("/api/pixai-cdn/thumb?u=" + _up.quote(cover, safe="")) if ok else ""
+        _pal_presets_cache["palettes"] = rows
+        _pal_presets_cache["at"] = now
+        return jsonify({"palettes": rows})
 
     # Process cache for the Bridge preset prices: they are flat per workflow and account-
     # stable (source- AND priority-independent, verified live 2026-08-18), so a slab mount
@@ -18802,6 +23500,269 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
+    # ---- Board revisions (Session P, BUILD-w5-p §3.5, review N5) ------------------------
+    # rev = sha1 of the stored JSON text, resolved EXACTLY as _loom_kv_read resolves the value:
+    # the account's own file, else (not tombstoned) the legacy shared file, else missing. A
+    # board inherited from the legacy layer therefore has a real rev on its first save, and a
+    # missing key has one fixed sentinel. Unreadable (a file that exists but will not read or
+    # parse, in EITHER layer) is its own answer, never "missing": the client must not seed a
+    # blank board over a key it merely failed to read (review F15b).
+    _LOOM_REV_MISSING = "missing"
+
+    class _LoomUnreadable(Exception):
+        pass
+
+    def _loom_kv_text(user, key):
+        """(text, layer) for this account's view of `key`: layer "own" | "legacy" | None.
+        Raises _LoomUnreadable when the file that decides the answer exists but cannot be
+        read. Parse errors are checked here too, so a corrupt file is never served."""
+        own = _loom_kv_path(user, key)
+        if own.exists():
+            try:
+                t = own.read_text(encoding="utf-8")
+                json.loads(t)
+                return t, "own"
+            except (ValueError, OSError):
+                raise _LoomUnreadable(key)
+        if _loom_tomb_path(user, key).exists():
+            return None, None
+        leg = _legacy_loom_kv_path(key)
+        if not leg.exists():
+            return None, None
+        try:
+            t = leg.read_text(encoding="utf-8")
+            json.loads(t)
+            return t, "legacy"
+        except (ValueError, OSError):
+            raise _LoomUnreadable(key)
+
+    def _loom_rev_of(text):
+        return _LOOM_REV_MISSING if text is None else hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+    # ---- The Loom submit journal (Session P, BUILD-w5-p §3.2, review F2/F3/F8) ------------
+    # One append-only JSONL per account: out_dir/loom/_submits/<account key>.jsonl. Every state
+    # change of one Loom render is a line: sending -> submitted | refused | not_sent |
+    # may_have_started, then finished (reported by /api/task-status) or abandoned (the owner
+    # released an unclear send). It is what makes a double POST, a second tab, a lost answer
+    # and a server restart unable to send one shot twice. Local only, never PixAI.
+    _loom_journal_lock = threading.Lock()
+    _loom_journal = {}          # account key -> {"subs": {submit_id: entry}, "tasks": {task_id: submit_id}}
+    _LOOM_JOURNAL_KEEP_S = 14 * 24 * 3600
+    _LOOM_BLOCK_S = 6 * 3600    # the poll ceiling: one render per shot for this long
+    _LOOM_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+    # (account key, submit_id) of every render whose loom_generate request is still running
+    # in THIS process (spend review B1). Added when "sending" is journalled, removed in the
+    # handler's finally; guarded by _loom_journal_lock. It is what tells a live send from a
+    # crashed one: the journal alone says "sending" for both. submit-abandon refuses a live
+    # one, so a slow PixAI answer can never be released and rendered a second time while the
+    # first request is still inside core.submit. After a restart the set is empty, so a send
+    # that truly died with the old process can still be released (review F8).
+    _loom_sending_now = set()
+
+    def _loom_journal_path(user):
+        d = out_dir / "loom" / "_submits"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / (_account_key(user) + ".jsonl")
+
+    def _loom_journal_load(user):
+        """The account's index, read once (callers hold _loom_journal_lock). Entries older
+        than 14 days are dropped and the file rewritten, on this first read only."""
+        k = _account_key(user)
+        if k in _loom_journal:
+            return _loom_journal[k]
+        idx = {"subs": {}, "tasks": {}}
+        path = _loom_journal_path(user)
+        now = time.time()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for ln in lines:
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            sid = str(rec.get("submit_id") or "")
+            if not sid:
+                continue
+            cur = idx["subs"].setdefault(sid, {})
+            cur.update({k2: v for k2, v in rec.items() if v is not None})
+        for sid in list(idx["subs"]):
+            e = idx["subs"][sid]
+            if now - float(e.get("first_at") or e.get("at") or now) > _LOOM_JOURNAL_KEEP_S:
+                del idx["subs"][sid]
+        for sid, e in idx["subs"].items():
+            if e.get("task_id"):
+                idx["tasks"][str(e["task_id"])] = sid
+        if lines:
+            try:
+                tmp = path.with_name(path.name + ".tmp-%d" % os.getpid())
+                tmp.write_text("".join(json.dumps(e) + "\n" for e in idx["subs"].values()),
+                               encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError:
+                pass
+        _loom_journal[k] = idx
+        return idx
+
+    def _loom_journal_note(user, submit_id, **fields):
+        """Append one state line and fold it into the index (callers hold the lock)."""
+        idx = _loom_journal_load(user)
+        e = idx["subs"].setdefault(submit_id, {"submit_id": submit_id, "first_at": time.time()})
+        rec = {"submit_id": submit_id, "at": time.time(), "first_at": e["first_at"]}
+        rec.update({k2: v for k2, v in fields.items() if v is not None})
+        e.update(rec)
+        if e.get("task_id"):
+            idx["tasks"][str(e["task_id"])] = submit_id
+        try:
+            with open(_loom_journal_path(user), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec) + "\n")
+        except OSError:
+            pass
+        return e
+
+    def _loom_journal_live_for(user, board, card):
+        """The entry that still owns (board, card): sent or maybe sent, not finished, not
+        released, younger than the poll ceiling."""
+        idx = _loom_journal_load(user)
+        now = time.time()
+        for e in idx["subs"].values():
+            if e.get("board") != board or e.get("card") != card:
+                continue
+            if e.get("finished") or e.get("state") not in ("sending", "submitted", "may_have_started"):
+                continue
+            if now - float(e.get("first_at") or e.get("at") or 0) > _LOOM_BLOCK_S:
+                continue
+            return e
+        return None
+
+    # ---- The music bed's store (Session P, P3; rulings 8 and 15; review F18/F19) -------------
+    # out_dir/loom/_beds/<account key>/<sha1>.<ext>. Every read and write resolves a name that
+    # has already matched LOOM_BED_FILE_RE and then checks _is_under the CALLER's own folder, so
+    # neither a crafted name nor another account's bed can be reached.
+    def _loom_beds_dir(user):
+        return out_dir / "loom" / "_beds" / _account_key(user)
+
+    # Spend review N5: an upload or a bundle import killed mid-write leaves its temp file in the
+    # account's bed folder, invisible to the unused list and the sweep (they match finished
+    # names only). Swept here, at start, once an hour old -- as the EDL exports are. Only files
+    # of exactly the two temp shapes, directly inside _beds/<account>/, are ever touched.
+    _LOOM_BED_TEMP_RE = re.compile(r"^\.(upload|import)-[^/\\]*\.part$")
+    try:
+        _beds_root = out_dir / "loom" / "_beds"
+        for _acct in (_beds_root.iterdir() if _beds_root.is_dir() else []):
+            if not _acct.is_dir():
+                continue
+            for _tmp in _acct.iterdir():
+                try:
+                    if (_LOOM_BED_TEMP_RE.match(_tmp.name) and _tmp.is_file()
+                            and time.time() - _tmp.stat().st_mtime > LOOM_BED_TEMP_SWEEP_AGE_S):
+                        _tmp.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+    def _loom_bed_path(user, name):
+        """The caller's bed file for `name`, or None (bad name, outside the folder, absent)."""
+        name = str(name or "")
+        if not LOOM_BED_FILE_RE.match(name):
+            return None
+        d = _loom_beds_dir(user)
+        p = d / name
+        try:
+            if not _is_under(p.resolve(), d.resolve()) or not p.is_file():
+                return None
+        except OSError:
+            return None
+        return p
+
+    def _loom_store_bed(user, src_path, ext):
+        """Move a finished temp file into the caller's bed folder under the sha1 of its bytes.
+        An identical bed already there is not rewritten (the temp file is dropped). -> name."""
+        h = hashlib.sha1()
+        with open(src_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+        name = h.hexdigest() + "." + ext
+        d = _loom_beds_dir(user)
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / name
+        if dest.is_file():
+            try:
+                os.unlink(src_path)
+            except OSError:
+                pass
+        else:
+            os.replace(src_path, dest)
+        return name
+
+    def _loom_account_projects(user):
+        """Every board this account can open (its own keys and the legacy keys it has not
+        buried -- loom_list's set), parsed. Read-only. Raises _LoomUnreadable when any board's
+        file exists but does not read: an unreadable board is not a missing one, so a caller
+        deciding what is UNUSED must refuse rather than treat that board's bed as free (red
+        team 2026-10-01: the sweep deleted the bed of a truncated board)."""
+        from urllib.parse import unquote
+        with _loom_lock:
+            own = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
+            legacy = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
+            buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
+            keys = sorted((own | legacy) - buried)
+            out = []
+            for k in keys:
+                if not (k.startswith("storyboard:v2:proj:") or k == "storyboard:v2:project"):
+                    continue
+                text, _layer = _loom_kv_text(user, k)
+                if text is None:
+                    continue
+                v = json.loads(text)
+                if isinstance(v, str):
+                    try:
+                        v = json.loads(v)
+                    except ValueError:
+                        raise _LoomUnreadable(k)
+                if isinstance(v, dict):
+                    out.append(v)
+        return out
+
+    def _loom_unused_beds(user):
+        """[(name, bytes)] of the caller's beds no board of the account references, oldest
+        first, leaving out any bed added in the last LOOM_BED_UNUSED_GRACE_S (its board's save
+        may not have landed). Read-only."""
+        d = _loom_beds_dir(user)
+        if not d.is_dir():
+            return []
+        used = loom_board_beds(_loom_account_projects(user))
+        now = time.time()
+        out = []
+        for f in d.iterdir():
+            if not LOOM_BED_FILE_RE.match(f.name) or f.name in used:
+                continue
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if now - st.st_mtime < LOOM_BED_UNUSED_GRACE_S:
+                continue
+            out.append((st.st_mtime, f.name, st.st_size))
+        return [(n, b) for (_m, n, b) in sorted(out)]
+
+    def _loom_journal_finish_task(task_id):
+        """/api/task-status reported a journalled task done or failed: mark it finished, so
+        its shot may render again at once. A dict lookup; nothing for other tasks."""
+        tid = str(task_id or "")
+        user = str(session.get("user") or "")
+        if not tid or not user:
+            return
+        with _loom_journal_lock:
+            idx = _loom_journal_load(user)
+            sid = idx["tasks"].get(tid)
+            if sid and not idx["subs"].get(sid, {}).get("finished"):
+                _loom_journal_note(user, sid, finished=True)
+
     # ==== THE GALLERY -- the React front door ================================
     # "/" serves gallery/dist (Vite build: `npm run build` inside gallery/).
     # This is the FIRST-CLASS frontend the gallery UI migrated to -- real
@@ -18952,6 +23913,8 @@ __DESIGN_TOKENS__
             "needs_assets": needs_assets,
             "catalog_empty": catalog_empty,
             "collections": unique_collections(db_path),
+            # Smart collections (N1): saved searches, listed beside the hand-picked ones.
+            "smart_collections": list_smart_collections(db_path),
             "user": session.get("user") or "",
             "is_local": True,
             "is_true_local": _is_local_request(),
@@ -19053,13 +24016,20 @@ __DESIGN_TOKENS__
             batch=(request.args.get("batch") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
 
+        _pers = {}     # media_id -> personal layer, filled once per page (Session N3)
+
         def _card(r):
             """One grid card dict for a catalog row -- the SINGLE definition both the
             plain row listing and a grouped unit's cover build, so a series cover is
             byte-identical to that same media as an ordinary card (only the extra
             `series` key ever differs)."""
             mid = r.get("media_id")
+            pl = _pers.get(str(mid)) or {}
             return {
+                # The owner's own layer (N3): the keeper|reject mark the card wears, and the
+                # tags. Local catalog only.
+                "mark": pl.get("mark", ""),
+                "tags": pl.get("tags", []),
                 "media_id": str(mid),
                 "thumb": "/thumbs/{}.jpg".format(mid),
                 "is_video": str(r.get("is_video") or "") == "1",
@@ -19082,6 +24052,10 @@ __DESIGN_TOKENS__
                 "title": str(r.get("title") or "").strip(),
                 "batch_index": str(r.get("batch_index") or ""),   # #33: PixAI's own output number
                 "batch_size": str(r.get("batch_size") or ""),
+                # Session H T3a: the Lightbox edit bar is offered on the same pictures as the
+                # "Edit with Tsubaki" menu item -- every still, whatever model made it (owner
+                # ruling, 2026-09-28). Never on a video.
+                "tsubaki_edit": str(r.get("is_video") or "") != "1",
             }
 
         if group == "series":
@@ -19100,6 +24074,7 @@ __DESIGN_TOKENS__
                          for k in page_keys]
             full = {str(r.get("media_id")): r
                     for r in rows_for_media_ids(db_path, cover_ids)}
+            _pers.update(personal_get(db_path, cover_ids))
             items = []
             for k, mid in zip(page_keys, cover_ids):
                 r = full.get(mid)
@@ -19131,6 +24106,7 @@ __DESIGN_TOKENS__
         else:
             rows, total = query_catalog(
                 db_path, page=page, page_size=page_size, series=series, **filters)
+            _pers.update(personal_get(db_path, [r.get("media_id") for r in rows]))
             items = [_card(r) for r in rows if r.get("media_id")]
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
@@ -19175,15 +24151,43 @@ __DESIGN_TOKENS__
             idx = -1
         prev_id = nav_ids[idx - 1] if idx > 0 else None
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
-        return jsonify({
+        pl = personal_get(db_path, [media_id]).get(str(media_id)) or {}
+        out = {
             "row": row,
+            # The owner's own layer over this picture (N3): tags, keeper|reject, a note.
+            "personal": {"tags": pl.get("tags", []), "mark": pl.get("mark", ""),
+                         "note": pl.get("note", "")},
             "prev_id": prev_id, "next_id": next_id,
             # Same value the gallery's own "Delete from PixAI" is gated on. A LAN
             # session can browse and spend, but not destroy on the owner's real
             # cloud account.
             "can_delete_cloud": _is_local_request(),
             "siblings": _batch_sibling_count(row.get("task_id")),
-        })
+        }
+        # Session M (NOTES 3): the run this picture came from, when the caller's own account
+        # sent it through the dock -- History reuse restores the TEMPLATE from it, not the
+        # resolved prompt. A read of the Runs store; absent for everything else.
+        run = _run_for_task(row.get("task_id"))
+        if run is not None:
+            out["run"] = run
+        return jsonify(out)
+
+    def _run_for_task(task_id):
+        try:
+            import moonglade_runs as runs
+            found = runs.RunsStore(out_dir).find_task(task_id)
+        except Exception:                                    # noqa: BLE001
+            return None
+        if not found:
+            return None
+        run, job = found
+        if run.get("account") != str(session.get("user") or ""):
+            return None
+        return {"run_id": run.get("run_id"), "mode": run.get("mode"),
+                "template": run.get("template") or "", "var_mode": run.get("var_mode") or "",
+                "count": run.get("count"), "run_seed": run.get("run_seed"),
+                "dock_seed": run.get("dock_seed") or "", "cell": job.get("cell"),
+                "vars": job.get("vars") or []}
 
     def _history_ts(created_at):
         """Epoch seconds for a stored created_at, or None. Tolerant of the three forms
@@ -19461,9 +24465,18 @@ __DESIGN_TOKENS__
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
+        key = request.args.get("key") or ""
         with _loom_lock:
             _loom_migrate()
-            return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
+            try:
+                text, _layer = _loom_kv_text(user, key)
+            except _LoomUnreadable:
+                # Session P (review F15): a board that exists but will not read is NOT a
+                # missing board -- the Loom would seed a blank one over it.
+                return jsonify({"error": "unreadable", "value": None}), 500
+            if text is None:
+                return jsonify({"value": None, "missing": True, "rev": _LOOM_REV_MISSING})
+            return jsonify({"value": json.loads(text), "rev": _loom_rev_of(text)})
 
     @app.route("/api/loom/set", methods=["POST"])
     @tier(LOGIN)
@@ -19475,13 +24488,28 @@ __DESIGN_TOKENS__
         k = p.get("key")
         if not k:
             return jsonify({"ok": False}), 400
+        base_rev = p.get("base_rev")
         with _loom_lock:
             _loom_migrate()
+            # Compare-and-swap (Session P, BUILD-w5-p §3.5): with a base_rev, the write lands
+            # only if the board is still the one the tab last read or wrote -- the check and
+            # the write are one step under this lock. Without one, today's last-writer-wins
+            # (ACTIVE_KEY, thumbs, every other caller).
+            if base_rev is not None:
+                try:
+                    cur_text, _layer = _loom_kv_text(user, k)
+                    cur_rev = _loom_rev_of(cur_text)
+                except _LoomUnreadable:
+                    cur_text, cur_rev = None, "unreadable"
+                if str(base_rev) != cur_rev:
+                    return jsonify({"conflict": True, "rev": cur_rev,
+                                    "value": json.loads(cur_text) if cur_text is not None else None}), 409
             try:
                 _loom_kv_write(user, k, p.get("value"))
             except OSError as e:
                 return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:120]}), 500
-        return jsonify({"ok": True})
+            rev = _loom_rev_of(json.dumps(p.get("value")))
+        return jsonify({"ok": True, "rev": rev})
 
     @app.route("/api/loom/list")
     @tier(LOGIN)
@@ -19577,7 +24605,17 @@ __DESIGN_TOKENS__
         upload it, and return the new frame media_id -- which the storyboard sets as the
         next shot's opening frame, chaining clips into one continuous scene. The clip must
         already be downloaded locally (it is, right after Generate-shot cataloged it).
-        Login required; the upload is free."""
+        Login required; the upload is free.
+
+        The frame is THUMBNAILED as well as uploaded, as /api/loom/import-frames does: the
+        new media id is in no catalog, and /thumbs/<id>.jpg serves from disk with no
+        fetch-on-miss, so every surface that draws the open frame by its id -- the Video
+        drawer's frame box, the board card, Deep Focus -- drew a broken picture (owner walk
+        2026-09-30). The thumbnail is written from the very PNG that was uploaded; a failed
+        thumbnail never fails the handoff (the frame is still PixAI's).
+
+        The answer also says where the frame came from: `at` (seconds) and `at_end` (it was
+        the clip's last frame), so the splice and Re-anchor record the true source time."""
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -19590,6 +24628,14 @@ __DESIGN_TOKENS__
             trim_out = float(trim_out) if trim_out is not None else None
         except (TypeError, ValueError):
             trim_out = None
+        # Spend review N2 (the verdict on open call 3): the upload below is free but it is a
+        # WRITE to the PixAI account, so READ_ONLY refuses it -- first, before the session's
+        # USER_ID lookup, so a READ_ONLY install talks to nobody (as /api/loom/generate does).
+        import moonglade_backup as _core
+        try:
+            _core._check_read_only("upload a hand-off frame to your PixAI account")
+        except _core.PixAIError as e:
+            return jsonify({"error": str(e)[:300]}), 200
         try:
             core, session = _gen_session()
             vid = _find_local_video_file(mid)
@@ -19601,11 +24647,21 @@ __DESIGN_TOKENS__
             if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
+            make_thumbnail(png, thumb_dir / (str(frame_mid) + ".jpg"))
             # media_tools.duration answers at full precision; 2dp is this route's own
             # display choice for the Edit Bay's reel, made where it is visible.
             _dur = core.duration(str(vid))
             dur = round(_dur, 2) if _dur is not None else None
-            return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
+            # WHERE the frame came from, by the primitive's own rule (frame_seek_point): the
+            # trim point it seeked to, or -- the clip's last frame -- the clip's length (None
+            # when it could not be measured). The Loom's anchor records this (owner walk
+            # 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s", because the
+            # card did not know its clip's length).
+            seek = core.frame_seek_point(trim_out, _dur)
+            at_end = seek is None
+            at = dur if at_end else round(seek, 2)
+            return jsonify({"frame_media_id": str(frame_mid), "duration": dur,
+                            "at": at, "at_end": at_end})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -19684,6 +24740,112 @@ __DESIGN_TOKENS__
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
+
+    # ---- THE CONTINUITY RIBBON'S FRAMES (Session P, NOTES P9; BUILD-w5-p §5.2; review F18) ----
+    # One small still from a LOCAL clip, for the ribbon's close-frame / next-open-frame pairs:
+    # ffmpeg on this machine through the app's one frame primitive (core.frame_at), scaled to
+    # LOOM_FRAME_WIDTH, cached as out_dir/loom/_frames/<mid>_<frame>.png. Unlike
+    # /api/loom/handoff there is NO upload and no PixAI session at all -- it cannot spend and it
+    # never talks to PixAI. The time is quantised to a 24 fps frame (at most 24 files per second
+    # of clip, whatever the trims do), and the cache is LRU-capped by count and bytes on every
+    # write, touching only files of exactly the ribbon's name shape.
+    _loom_frame_lock = threading.Lock()
+
+    def _loom_frame_sweep(fdir):
+        """Keep the newest-used ribbon frames within LOOM_FRAME_CACHE_MAX_FILES files and
+        LOOM_FRAME_CACHE_MAX_BYTES bytes; remove the rest. Other files in _frames are never
+        counted or touched. Returns the names removed."""
+        found = []
+        try:
+            for f in fdir.iterdir():
+                if not LOOM_FRAME_FILE_RE.match(f.name):
+                    continue
+                try:
+                    st = f.stat()
+                except OSError:
+                    continue
+                found.append((st.st_mtime, f.name, st.st_size, f))
+        except OSError:
+            return []
+        found.sort(key=lambda x: (x[0], x[1]), reverse=True)   # most recently used first
+        removed, count, total = [], 0, 0
+        for _mtime, name, size, f in found:
+            count += 1
+            total += size
+            if count <= LOOM_FRAME_CACHE_MAX_FILES and total <= LOOM_FRAME_CACHE_MAX_BYTES:
+                continue
+            try:
+                f.unlink()
+                removed.append(name)
+            except OSError:
+                pass
+        return removed
+
+    @app.route("/api/loom/frame")
+    @tier(LOGIN)
+    def loom_frame():
+        """GET ?mid=<media id>&at=<seconds> -> a PNG of that clip's frame at `at`, ~160 px wide.
+        400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
+        could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
+        placeholder tint. Login required; local only."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        mid = (request.args.get("mid") or "").strip()
+        if not LOOM_MEDIA_ID_RE.match(mid):
+            return jsonify({"error": "mid must be a media id"}), 400
+        try:
+            at = float(request.args.get("at", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "at must be a number of seconds"}), 400
+        if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
+            return jsonify({"error": "at is out of range"}), 400
+        frame = int(round(at * LOOM_FRAME_FPS))
+        fdir = out_dir / "loom" / "_frames"
+        png = fdir / "{}_{}.png".format(mid, frame)
+        if png.is_file():
+            try:
+                os.utime(png, None)            # used now: the LRU keeps it
+            except OSError:
+                pass
+            return send_file(str(png), mimetype="image/png", max_age=3600)
+        # A COMPLETE library file only (Invariant 3): a .part download or a zero-byte file is
+        # never read -- the same resolver the EDL zip uses.
+        vid = _loom_complete_clip(mid)
+        if vid is None:
+            return jsonify({"error": "that clip is not on this machine"}), 404
+        import moonglade_backup as core
+        fdir.mkdir(parents=True, exist_ok=True)
+        tag = secrets.token_hex(6)
+        raw = fdir / ".raw-{}-{}.png".format(tag, frame)
+        small = fdir / ".small-{}-{}.png".format(tag, frame)
+        try:
+            if not core.frame_at(str(vid), frame / float(LOOM_FRAME_FPS), str(raw)):
+                return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
+            src = raw
+            if Image is not None:
+                try:
+                    with Image.open(str(raw)) as im:
+                        w, h = im.size
+                        rgb = im.convert("RGB")
+                    if w > LOOM_FRAME_WIDTH:
+                        rgb = rgb.resize((LOOM_FRAME_WIDTH, max(1, int(round(h * LOOM_FRAME_WIDTH / float(w))))))
+                    rgb.save(str(small), "PNG")
+                    src = small
+                except Exception:                              # noqa: BLE001
+                    return jsonify({"error": "that frame could not be read"}), 404
+            os.replace(str(src), str(png))
+        finally:
+            for t in (raw, small):
+                try:
+                    t.unlink()
+                except OSError:
+                    pass
+        with _loom_frame_lock:
+            _loom_frame_sweep(fdir)
+        if not png.is_file():
+            return jsonify({"error": "the frame cache is full"}), 404
+        return send_file(str(png), mimetype="image/png", max_age=3600)
 
     # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
     # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
@@ -19766,12 +24928,130 @@ __DESIGN_TOKENS__
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
         video provider adapter -> card auto-apply (V4.0 = free) -> async submit. Login required
-        (any session, local or LAN)."""
+        (any session, local or LAN).
+
+        Session P (BUILD-w5-p §3.2; review F2, F3, F13, F16, N3) -- the guard order:
+          1. front door (LOGIN);
+          2. the Loom's own keys are POPPED so they never reach build_request, /api/price or
+             PixAI: loom_target {board_id, card_id}, submit_id, expect_free;
+          3. READ_ONLY, before the PixAI session is even made (no USER_ID lookup, no upload,
+             no card check) -- a READ_ONLY install talks to nobody before refusing;
+          4-6. ONE critical section under the journal lock: a replayed submit_id answers its
+             recorded outcome, a shot that already has a render out answers 409, a picture
+             that cannot be sent (an imported local_ id) is refused, and only then is
+             "sending" appended -- two POSTs racing each other cannot both pass;
+          7. the existing road: resolve_img -> build_request -> core.submit (READ_ONLY
+             again -> free card -> before_send -> ONE gql_mutate);
+          8. the outcome is journalled as submitted | refused | not_sent | may_have_started
+             from whether the mutation was reached (on_send) and whether PixAI's answer was
+             a definite refusal. A lost answer is NEVER recorded as a refusal: that would free
+             the shot for a second paid render while the first may exist.
+        A body with none of the keys (the gallery's own Video tab) skips 4-6 and 8 and is
+        today's request."""
+        import moonglade_backup as _core
+        p = request.get_json(silent=True) or {}
+        target = p.pop("loom_target", None)
+        submit_id = p.pop("submit_id", None)
+        expect_free = bool(p.pop("expect_free", False))
+        user = str(session.get("user") or "")
+        journalled = submit_id is not None or target is not None
+        board_id = card_id = None
+        if journalled:
+            if not isinstance(submit_id, str) or not _LOOM_ID_RE.match(submit_id):
+                return jsonify({"error": "This render has no valid submit id, so nothing was sent."}), 400
+            if target is not None:
+                t = target if isinstance(target, dict) else {}
+                board_id, card_id = str(t.get("board_id") or ""), str(t.get("card_id") or "")
+                if not _LOOM_ID_RE.match(board_id) or not _LOOM_ID_RE.match(card_id):
+                    return jsonify({"error": "This render names no valid shot, so nothing was sent."}), 400
+        sending_key = (_account_key(user), submit_id) if journalled else None
+        try:
+            _core._check_read_only(_core._SUBMIT_ACTION_DEFAULT)
+        except _core.PixAIError as e:
+            return jsonify({"error": str(e)[:300]}), 200
+
+        # Pictures the road cannot send (review F16). resolve_img below turns anything that is
+        # not a catalog id or a data: thumbnail into "", and the render then went out WITHOUT
+        # that frame -- paid for, and wrong. Refusing is not a new spend.
+        unsendable = [str(x) for x in (p.get("images") or [])
+                      if str(x or "").strip() and not str(x).strip().isdigit()
+                      and not str(x).strip().startswith("data:")]
+        # Spend review S6: the same for the reference VIDEOS and AUDIO. Only catalog ids are
+        # sent for those (see video_ids / audio_ids below); anything else -- an imported local_
+        # video above all -- was silently dropped, and the render went out, priced and charged,
+        # without the reference the card showed.
+        unsendable_av = [str(x) for k in ("video_refs", "audio_refs") for x in (p.get(k) or [])
+                         if str(x or "").strip() and not str(x).strip().isdigit()]
+        if unsendable:
+            unsendable_msg = ("One of this shot's pictures can't be sent to PixAI (an imported "
+                              "picture). Nothing was sent.")
+        elif unsendable_av:
+            unsendable = unsendable_av
+            unsendable_msg = ("One of this shot's reference videos or audio can't be sent to PixAI "
+                              "(an imported file). Nothing was sent.")
+        else:
+            unsendable_msg = ""
+        if journalled:
+            with _loom_journal_lock:
+                idx = _loom_journal_load(user)
+                prev = idx["subs"].get(submit_id)
+                if prev:
+                    st = prev.get("state")
+                    if st == "submitted" and prev.get("task_id"):
+                        return jsonify({"task_id": prev["task_id"], "replay": True})
+                    if st == "sending":
+                        return jsonify({"state": "sending", "unclear": True,
+                                        "error": "This render is still being sent."}), 409
+                    if st == "may_have_started":
+                        return jsonify({"state": "may_have_started", "unclear": True,
+                                        "error": prev.get("error") or "No clear answer from PixAI."})
+                    if st == "abandoned":
+                        return jsonify({"state": "abandoned",
+                                        "error": "This render was released; press Render again."})
+                    return jsonify({"state": st or "refused", "replay": True,
+                                    "error": prev.get("error") or "This render was not sent."})
+                if board_id:
+                    live = _loom_journal_live_for(user, board_id, card_id)
+                    if live:
+                        tid = str(live.get("task_id") or "")
+                        return jsonify({
+                            "error": "This shot is already rendering"
+                                     + (" (task …%s)." % tid[-6:] if tid else "."),
+                            "busy_task_id": tid or None}), 409
+                if unsendable:
+                    msg = unsendable_msg
+                    _loom_journal_note(user, submit_id, board=board_id, card=card_id,
+                                       state="not_sent", error=msg)
+                    return jsonify({"error": msg})
+                _loom_journal_note(user, submit_id, board=board_id, card=card_id, state="sending")
+                _loom_sending_now.add(sending_key)
+        elif unsendable:
+            return jsonify({"error": unsendable_msg})
+
+        attempt = {"sent": False}
+
+        def _on_send(_params):
+            attempt["sent"] = True
+
+        def _before_send(params):
+            # Review F13: the confirm skipped because the shot priced FREE; if the card that
+            # quote found is gone by now, sending would charge credits nobody confirmed.
+            if expect_free and not params.get("kaisuukenId"):
+                raise _core.LocalRefusal(
+                    "The free card this render was priced with was used elsewhere, so it would "
+                    "spend credits. Nothing was sent. Press Render again to see the new price.")
+
+        hooks = {"before_send": _before_send, "on_send": _on_send} if journalled else {}
+
+        def _journal(**fields):
+            if journalled:
+                with _loom_journal_lock:
+                    _loom_journal_note(user, submit_id, **fields)
+
         try:
             import base64
             import hashlib
-            core, session = _gen_session()
-            p = request.get_json(silent=True) or {}
+            core, session_ = _gen_session()
             updir = out_dir / "loom" / "_uploads"
             updir.mkdir(parents=True, exist_ok=True)
 
@@ -19822,7 +25102,7 @@ __DESIGN_TOKENS__
                     fp = updir / (hashlib.sha1(raw).hexdigest()[:16] + ext)
                     if not fp.exists():
                         fp.write_bytes(raw)
-                    return core.upload_media(session, str(fp))
+                    return core.upload_media(session_, str(fp))
                 return ""                             # a bare filename/URL we can't fetch
 
             resolved = [(str(x or "").strip(), resolve_img(x)) for x in (p.get("images") or [])]
@@ -19848,7 +25128,8 @@ __DESIGN_TOKENS__
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()
             try:
-                task_id = core.submit(session, req)["task_id"]
+                attempt["sent"] = False
+                task_id = core.submit(session_, req, **hooks)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -19870,9 +25151,9 @@ __DESIGN_TOKENS__
                 # content scanner then refuses it (403 NSFW_DETECTED, no task) while the very
                 # same frames pass on the website. The upload was manufacturing the rejection.
                 #
-                # Safe by submit_generation's own argument for its inferenceProfile retry: a
-                # PixAIError means PixAI answered with a GraphQL error and REJECTED the task, so
-                # there is nothing created and nothing charged to duplicate.
+                # Safe ONLY when PixAI answered with a GraphQL error and REJECTED the task (a
+                # definite refusal, checked below), so there is nothing created and nothing
+                # charged to duplicate. A partial success is not that (spend review S1).
                 # Both error names: `invalid_media_id` (i2vPro) and
                 # `invalid_reference_image_media_id` (R2V's own field). The passthrough now
                 # applies to every mode (probe 2026-08-22), so the fallback does too.
@@ -19887,19 +25168,39 @@ __DESIGN_TOKENS__
                 err = str(e)
                 if "invalid_media_id" not in err and "invalid_reference_image_media_id" not in err:
                     raise
+                # Spend review S1: the error TEXT is not enough. A GraphQL answer can carry
+                # `errors` AND a resolved `data` at once -- a partial success, where the task
+                # was created and charged -- and it can name invalid_media_id all the same.
+                # Only a definite refusal created nothing; anything else goes to the classifier
+                # below and is journalled may_have_started, never submitted a second time.
+                if not _core.definite_refusal(e):
+                    raise
+                # Spend review N1: the refused first attempt sent nothing that exists, so from
+                # here "sent" describes the fallback alone. A re-upload that fails below is
+                # then journalled not_sent, not may_have_started (which held the shot for 6 h
+                # over a render that was never created).
+                attempt["sent"] = False
                 _logging_ = __import__("logging")
                 _logging_.getLogger(__name__).info(
                     "passthrough refused (%s); uploading frames and retrying", err[:80])
+                # Session P (BUILD-w5-p open call 5, owner-confirmed 2026-09-29): KEPT, and
+                # journalled. A GraphQL refusal creates nothing, so this second core.submit is
+                # not a re-send of a render that may exist -- but it IS a second attempt, and
+                # the journal says so, so the owner's spend review can see every one.
+                _journal(fallback=("invalid_reference_image_media_id"
+                                   if "invalid_reference_image_media_id" in err
+                                   else "invalid_media_id"))
                 # Re-resolve ONLY the catalog (digit) ids through the upload path. Anything
                 # else -- a Loom data: thumbnail already uploaded on the first pass, a bare
                 # filename that resolved to "" -- keeps its first-pass result. Re-running
                 # the raw payload here threw the thumbnail's upload away and sent the
                 # base64 blob as a media id (adversarial review, 2026-08-22).
-                image_ids = [m for m in ((_input_media_id(core, session, raw) if raw.isdigit() else rid)
+                image_ids = [m for m in ((_input_media_id(core, session_, raw) if raw.isdigit() else rid)
                                          for raw, rid in resolved) if m]
                 req = _request_for(image_ids)
                 params = req.parameters   # rebound for the failure log below
-                task_id = core.submit(session, req)["task_id"]
+                attempt["sent"] = False
+                task_id = core.submit(session_, req, **hooks)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
@@ -19908,10 +25209,80 @@ __DESIGN_TOKENS__
                     telem_bump("storyboards", out_dir=out_dir)
             except Exception:
                 pass
+            _journal(state="submitted", task_id=str(task_id))
             return jsonify({"task_id": task_id, "uploaded": len(image_ids)})
         except Exception as e:
-            return jsonify({"error": _log_gen_failure(
-                "/api/loom/generate", e, locals().get("params"))[:300]}), 200
+            msg = _log_gen_failure("/api/loom/generate", e, locals().get("params"))[:300]
+            if not journalled:
+                return jsonify({"error": msg}), 200
+            if not attempt["sent"]:
+                state = "not_sent"
+            elif getattr(e, "refused", False) or _core.definite_refusal(e):
+                state = "refused"
+            else:
+                state = "may_have_started"
+            _journal(state=state, error=msg)
+            if state == "may_have_started":
+                return jsonify({"error": msg, "unclear": True, "state": state}), 200
+            return jsonify({"error": msg, "state": state}), 200
+        finally:
+            # Spend review B1: this request is no longer sending, whatever became of it. The
+            # outcome was journalled above first, so there is no moment when the id is out of
+            # the set while the journal still says "sending" for a live request.
+            if sending_key is not None:
+                with _loom_journal_lock:
+                    _loom_sending_now.discard(sending_key)
+
+    @app.route("/api/loom/submit-status")
+    @tier(LOGIN)
+    def loom_submit_status():
+        """What the journal knows about one Loom render (Session P, BUILD-w5-p §3.3): the
+        client asks this -- never re-POSTs -- when its own POST got no answer. Local only.
+        {state: sending | submitted | refused | not_sent | may_have_started | abandoned |
+        unknown, task_id?, error?, finished?}"""
+        user = str(session.get("user") or "")
+        sid = str(request.args.get("submit_id") or "")
+        if not _LOOM_ID_RE.match(sid):
+            return jsonify({"state": "unknown"})
+        with _loom_journal_lock:
+            e = dict(_loom_journal_load(user)["subs"].get(sid) or {})
+        if not e:
+            return jsonify({"state": "unknown"})
+        out = {"state": e.get("state") or "unknown"}
+        for k in ("task_id", "error", "finished"):
+            if e.get(k):
+                out[k] = e[k]
+        return jsonify(out)
+
+    @app.route("/api/loom/submit-abandon", methods=["POST"])
+    @tier(LOGIN)
+    def loom_submit_abandon():
+        """The owner checked Activity and releases a shot whose render was never confirmed
+        (Session P, review F8): records `abandoned`, so the one-render-per-shot check stops
+        blocking it. Never re-sends, never calls PixAI. A render the journal knows was SENT
+        (it has a task id) cannot be released -- the client adopts that task instead."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "bad csrf"}), 403
+        user = str(session.get("user") or "")
+        sid = str(body.get("submit_id") or "")
+        if not _LOOM_ID_RE.match(sid):
+            return jsonify({"error": "submit_id required"}), 400
+        with _loom_journal_lock:
+            e = _loom_journal_load(user)["subs"].get(sid) or {}
+            # Spend review B1: a render whose request is still running in this process is not
+            # unclear, it is slow. Releasing it would free the shot for a second paid render
+            # while this one is still inside core.submit. (A send that died with an earlier
+            # process is not in the set, so it can still be released.)
+            if (_account_key(user), sid) in _loom_sending_now:
+                return jsonify({"error": "This render is still being sent. Wait for PixAI's answer, "
+                                         "then check again.", "sending": True}), 409
+            if e.get("state") == "submitted" and e.get("task_id"):
+                return jsonify({"error": "That render was sent (task …%s), so it can't be released."
+                                         % str(e["task_id"])[-6:], "task_id": e["task_id"]}), 409
+            _loom_journal_note(user, sid, state="abandoned")
+        return jsonify({"ok": True})
+
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
@@ -19923,17 +25294,23 @@ __DESIGN_TOKENS__
         progress on a job that takes minutes. It still takes its BINARY and its no-window
         FLAG from media_tools (cmd[0] is core.ffmpeg_path(), set by the caller), so the
         two things that drifted between call sites are still decided in one place."""
-        import subprocess, re as _re
+        import subprocess, collections, re as _re
         import moonglade_backup as core
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE,
                                     text=True, bufsize=1, encoding="utf-8", errors="replace",
                                     creationflags=core.NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
+            # ffmpeg's last few non-progress lines are its whole explanation on a refusal;
+            # keep them so a failed export says why instead of only "ffmpeg exited N".
+            tail = collections.deque(maxlen=4)
             for line in iter(proc.stderr.readline, ""):
                 m = tpat.search(line)
+                if not m and line.strip():
+                    tail.append(line.strip())
                 if m:
                     el = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
                     with _export_lock:
@@ -19947,10 +25324,293 @@ __DESIGN_TOKENS__
                 elif rc == 0 and out_path.exists():
                     _export_job.update(status="done", progress=100, out=out_path.name)
                 else:
-                    _export_job.update(status="failed", error="ffmpeg exited %d" % rc)
+                    why = _redact_host_paths(" | ".join(tail))[-300:]
+                    _export_job.update(status="failed",
+                                       error=("ffmpeg exited %d: %s" % (rc, why)) if why
+                                       else "ffmpeg exited %d" % rc)
         except Exception as e:
             with _export_lock:
                 _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
+
+    # ==== THE MUSIC BED (Session P, P3) ======================================================
+    # One local audio file per storyboard, never uploaded and never sent to PixAI. These routes
+    # store, stream and (only on the owner's confirmed ask) sweep bed files; putting a bed on a
+    # board, levelling it and removing it are board edits the Loom saves through /api/loom/set.
+    # None of them can reach a render: tests/test_loom_p_routes.py runs every one with the
+    # spend functions booby-trapped and walks their source for the names.
+    @app.route("/api/loom/bed", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_bed_upload():
+        """multipart {csrf, board, file} -> {file, name, dur, bytes}. The 50 MB cap is enforced
+        BEFORE the body is read (the declared length) and while it is read (a hard stream
+        limit); the type is sniffed from the bytes, never the file name; the file is stored
+        under the sha1 of its bytes, atomically, and an identical bed is not rewritten."""
+        import tempfile
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        cap_msg = "A music bed can be up to %d MB." % (LOOM_BED_MAX_BYTES // (1024 * 1024))
+        length = request.content_length
+        if length is None:
+            return jsonify({"error": "The upload did not say how big it is."}), 411
+        if length > LOOM_BED_MAX_BYTES + LOOM_BED_FORM_SLACK:
+            return jsonify({"error": cap_msg}), 413
+        # A hard limit on what the form parser may read, whatever the declared length claims.
+        request.max_content_length = LOOM_BED_MAX_BYTES + LOOM_BED_FORM_SLACK
+        try:
+            form, files = request.form, request.files
+        except Exception:                                   # RequestEntityTooLarge, a torn body
+            return jsonify({"error": cap_msg}), 413
+        if not _check_csrf(form):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        board = str(form.get("board") or "")
+        if board and not _LOOM_ID_RE.match(board):
+            return jsonify({"error": "bad board id"}), 400
+        f = files.get("file")
+        if f is None:
+            return jsonify({"error": "no file"}), 400
+        tmp_dir = _loom_beds_dir(user)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".upload-", suffix=".part", dir=str(tmp_dir))
+        total, head = 0, b""
+        try:
+            with os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = f.stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > LOOM_BED_MAX_BYTES:
+                        raise ValueError("too big")
+                    if len(head) < 64:
+                        head = (head + chunk)[:64]
+                    out.write(chunk)
+            ext = sniff_audio_ext(head)
+            if total == 0 or ext is None:
+                raise TypeError("not audio")
+            name = _loom_store_bed(user, tmp, ext)
+        except ValueError:
+            _unlink_quiet(tmp)
+            return jsonify({"error": cap_msg}), 413
+        except TypeError:
+            _unlink_quiet(tmp)
+            return jsonify({"error": "That isn't an audio file the Loom can use (mp3, wav, m4a, aac, ogg or flac)."}), 415
+        except OSError as e:
+            _unlink_quiet(tmp)
+            return jsonify({"error": _redact_host_paths(str(e))[:120]}), 500
+        dur = None
+        try:
+            import moonglade_backup as core
+            d = core.duration(str(_loom_beds_dir(user) / name))
+            dur = round(d, 3) if d else None
+        except Exception:
+            dur = None
+        display = re.sub(r"[\x00-\x1f\x7f]", "", os.path.basename(str(f.filename or "")))[:120] or "music bed"
+        return jsonify({"file": name, "name": display, "dur": dur, "bytes": total})
+
+    @app.route("/api/loom/bed", methods=["GET"])
+    @tier(LOGIN)
+    def api_loom_bed_get():
+        """?file=<sha1>.<ext> -> the caller's own bed, streamed (HTTP Range for seeking).
+        The name must match the pattern AND resolve inside the caller's own bed folder."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        name = request.args.get("file") or ""
+        p = _loom_bed_path(user, name)
+        if p is None:
+            return jsonify({"error": "no such music bed"}), 404
+        return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
+                         conditional=True, max_age=3600)
+
+    _LOOM_BEDS_UNREADABLE = ("One of your storyboards didn't read, so no music bed can be called "
+                             "unused. Nothing was swept.")
+
+    @app.route("/api/loom/beds/unused")
+    @tier(LOGIN)
+    def api_loom_beds_unused():
+        """The caller's bed files no board of the account references (ruling 15: they are
+        never deleted automatically; this is what the owner's explicit sweep offers).
+        {files: [{file, bytes}], count, bytes, h}. Read-only."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        try:
+            rows = _loom_unused_beds(user)
+        except _LoomUnreadable:
+            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        total = sum(b for (_n, b) in rows)
+        return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
+                        "count": len(rows), "bytes": total, "h": _fmt_size(total)})
+
+    @app.route("/api/loom/beds/sweep", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_beds_sweep():
+        """{csrf, files: [...]} -> deletes ONLY the named beds that are still unused when it
+        looks again (a board saved in between keeps its bed). {removed, kept}."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        want = body.get("files")
+        if not isinstance(want, list) or len(want) > 500:
+            return jsonify({"error": "files must be a list"}), 400
+        want = [str(x) for x in want]
+        if any(not LOOM_BED_FILE_RE.match(x) for x in want):
+            return jsonify({"error": "bad bed file name"}), 400
+        try:
+            unused = {n for (n, _b) in _loom_unused_beds(user)}
+        except _LoomUnreadable:
+            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        removed, kept = [], []
+        for n in want:
+            p = _loom_bed_path(user, n)
+            if p is None or n not in unused:
+                kept.append(n)
+                continue
+            try:
+                p.unlink()
+                removed.append(n)
+            except OSError:
+                kept.append(n)
+        return jsonify({"ok": True, "removed": removed, "kept": kept})
+
+    # ==== THE EDITOR HANDOFF EXPORT (Session P, P4) ============================================
+    # One zip: the .edl and .csv the Loom planned (loom/src/loom-edl-core.js), every selected
+    # take's clip under its {code}_t{take}.mp4 name, the bed when there is one (ruling 8), and
+    # MISSING.txt for any clip that is not a complete file here. Local files only; never PixAI.
+    _loom_exports_dir = out_dir / "loom" / "_exports"
+    # A leftover from an export whose download never closed (a client abort, a Windows file
+    # handle) is swept on the next start once it is an hour old (review F18).
+    try:
+        for _old in (_loom_exports_dir.glob("*.zip") if _loom_exports_dir.is_dir() else []):
+            try:
+                if time.time() - _old.stat().st_mtime > LOOM_EXPORT_SWEEP_AGE_S:
+                    _old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    def _loom_complete_clip(mid):
+        """The library file for a clip id, only when it is a COMPLETE file (Invariant 3: a
+        .part download and a zero-byte file are not there) inside the library. Or None."""
+        p = _find_local_video_file(mid)
+        if p is None:
+            return None
+        try:
+            if (p.name.endswith(".part") or not p.is_file() or p.stat().st_size <= 0
+                    or not _is_under(p.resolve(), out_dir.resolve())):
+                return None
+        except OSError:
+            return None
+        return p
+
+    @app.route("/api/loom/export-edl", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_export_edl():
+        """{csrf, name, edl, csv, clips: [{mid, file}], bed_file?, bed_name?} -> a zip download.
+        Every name is validated against the pattern the planner uses, every mid against the
+        media-id grammar, the bed against the caller's own folder (F19); the zip is written to
+        out_dir/loom/_exports/<uuid>.zip, streamed, and deleted when the response closes."""
+        import uuid
+        import zipfile
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        edl, csv_text = body.get("edl"), body.get("csv")
+        if not isinstance(edl, str) or not isinstance(csv_text, str) or not edl.strip():
+            return jsonify({"error": "edl and csv are required"}), 400
+        if len(edl) > LOOM_EDL_MAX_EDL_CHARS or len(csv_text) > LOOM_EDL_MAX_CSV_CHARS:
+            return jsonify({"error": "That edit decision list is too large."}), 413
+        clips = body.get("clips")
+        if not isinstance(clips, list) or len(clips) > LOOM_EDL_MAX_CLIPS:
+            return jsonify({"error": "clips must be a list"}), 400
+        seen, plan = set(), []
+        for c in clips:
+            if not isinstance(c, dict):
+                return jsonify({"error": "bad clip"}), 400
+            mid, fname = str(c.get("mid") or ""), str(c.get("file") or "")
+            if not LOOM_MEDIA_ID_RE.match(mid) or not LOOM_EDL_CLIP_RE.match(fname):
+                return jsonify({"error": "bad clip name or id: %s" % re.sub(r"[^A-Za-z0-9_.-]", "", fname)[:40]}), 400
+            if fname.lower() in seen:
+                return jsonify({"error": "two clips share the name %s" % fname}), 400
+            seen.add(fname.lower())
+            plan.append((mid, fname))
+        stem = loom_edl_zip_stem(body.get("name"))
+        bed_path, bed_name = None, ""
+        if body.get("bed_file"):
+            bed_path = _loom_bed_path(user, body.get("bed_file"))
+            if bed_path is None:
+                return jsonify({"error": "That music bed isn't in your beds folder."}), 400
+            bed_name = str(body.get("bed_name") or "")
+            ext = bed_path.suffix.lstrip(".")
+            if not LOOM_EDL_BED_NAME_RE.match(bed_name) or not bed_name.endswith("." + ext):
+                bed_name = "music_bed." + ext
+        _loom_exports_dir.mkdir(parents=True, exist_ok=True)
+        zpath = _loom_exports_dir / (uuid.uuid4().hex + ".zip")
+        missing = []
+        try:
+            with zipfile.ZipFile(str(zpath), "w", zipfile.ZIP_STORED) as z:
+                z.writestr(stem + ".edl", edl)
+                z.writestr(stem + ".csv", csv_text)
+                for mid, fname in plan:
+                    p = _loom_complete_clip(mid)
+                    if p is None:
+                        missing.append("%s  %s  (no complete file for this clip in the library)" % (fname, mid))
+                    elif p.suffix.lower() != ".mp4":
+                        missing.append("%s  %s  (the library file is %s, not .mp4)" % (fname, mid, p.suffix.lower()))
+                    else:
+                        z.write(str(p), arcname=fname)
+                if bed_path is not None:
+                    z.write(str(bed_path), arcname=bed_name)
+                if missing:
+                    z.writestr("MISSING.txt", "These clips are named in the edit decision list but are "
+                               "not in this zip:\r\n\r\n" + "\r\n".join(missing) + "\r\n")
+        except OSError as e:
+            _unlink_quiet(zpath)
+            return jsonify({"error": _redact_host_paths(str(e))[:160]}), 500
+        # Streamed from the temp file by a plain generator rather than send_file: a send_file
+        # response is "direct passthrough", and Werkzeug then never runs call_on_close -- the
+        # zip would outlive every download. Here the response's close() (the download ended,
+        # or the client went away) deletes it; the start-up sweep takes any a crash left.
+        from flask import Response
+
+        def _stream():
+            with open(str(zpath), "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    yield chunk
+        resp = Response(_stream(), mimetype="application/zip")
+        resp.headers["Content-Disposition"] = 'attachment; filename="%s.zip"' % stem
+        resp.headers["Content-Length"] = str(zpath.stat().st_size)
+        resp.headers["X-Edl-Missing-Count"] = str(len(missing))
+        resp.call_on_close(lambda: _unlink_quiet(zpath))
+        return resp
+
+    # ==== "AS SHOTS, IN ORDER" (Session P, P5) ===================================================
+    @app.route("/api/loom/prompts")
+    @tier(LOGIN)
+    def api_loom_prompts():
+        """?ids=a,b,c -> {pictures: [{media_id, prompt, created_at, is_video}]} in the order
+        asked, unknown ids left out. A READ-ONLY lookup of those ids' local catalog rows: the
+        Loom titles a collection's shots from it, the gallery orders a plain selection by it.
+        Never PixAI."""
+        raw = [x.strip() for x in (request.args.get("ids") or "").split(",") if x.strip()]
+        if len(raw) > 200:
+            return jsonify({"error": "at most 200 ids at once"}), 400
+        ids = [x for x in raw if LOOM_MEDIA_ID_RE.match(x)]
+        pics = []
+        for r in rows_for_media_ids(db_path, ids):
+            pics.append({"media_id": str(r.get("media_id") or ""),
+                         "prompt": str(r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
+                         "created_at": str(r.get("created_at") or ""),
+                         "is_video": str(r.get("is_video") or "") == "1"})
+        return jsonify({"pictures": pics})
 
     @app.route("/api/loom/export", methods=["POST"])
     @tier(LOGIN)
@@ -19993,6 +25653,10 @@ __DESIGN_TOKENS__
         except (TypeError, ValueError):
             total_sec = 1.0
         segs = []
+        # Session P (P3): per segment, whether the shot has its own audio (the Loom's one
+        # definition, loom-bed-core.js hasOwnAudio -- the bed ducks under it) and the span the
+        # Loom computed for it (the bed's timing falls back to it when a length can't be read).
+        seg_meta = []
         for c in (body.get("clips") or []):
             mid = str(c.get("mid") or "")
             if not mid:
@@ -20031,8 +25695,20 @@ __DESIGN_TOKENS__
             # mid rides along purely so a per-segment failure below can name the shot the
             # owner has to go fix -- the on-disk path is a host path we don't hand back.
             segs.append((path, ci, co, probe_has_audio(path), crop, mid))
+            try:
+                cspan = float(c.get("span")) if c.get("span") not in (None, "") else None
+            except (TypeError, ValueError):
+                cspan = None
+            seg_meta.append((bool(c.get("own_audio")), cspan))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
+        # THE MUSIC BED (Session P, P3): mixed under the cut by the page's rules, from the
+        # caller's own bed folder (never a path the client names). A bed that is not there is
+        # left out and the owner is told, rather than failing the whole cut.
+        bed_req = body.get("bed") if isinstance(body.get("bed"), dict) else None
+        bed_path = _loom_bed_path(str(session.get("user") or ""), bed_req.get("file")) if bed_req else None
+        bed_warning = ("The music bed's file isn't in your beds folder, so the cut was rendered "
+                       "without it.") if (bed_req and bed_req.get("file") and bed_path is None) else ""
         _export_dir.mkdir(parents=True, exist_ok=True)
         out_path = _export_dir / "loom_cut.mp4"
         W, H = 1280, 720
@@ -20117,6 +25793,7 @@ __DESIGN_TOKENS__
                 pass
         need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
         silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
+        bed_idx = len(segs) + (1 if need_silence else 0)   # the bed's input, after the silence
         for i, (path, ci, co, has_audio, crop, _mid) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
             # A per-shot crop happens in SOURCE pixels (iw/ih), before the scale-to-canvas, so
@@ -20138,8 +25815,36 @@ __DESIGN_TOKENS__
             # the pad order doesn't match n*(v+a) in that exact per-segment sequence.
             labels += ("[v%d][a%d]" % (i, i)) if audio_track else ("[v%d]" % i)
         fc = ";".join(parts) + ";" + labels + (
-            "concat=n=%d:v=1:a=1[vout][aout]" if audio_track else "concat=n=%d:v=1:a=0[vout]"
-        ) % len(segs)
+            "concat=n=%d:v=1:a=1[vout][%s]" % (len(segs), "acut" if bed_path is not None else "aout")
+            if audio_track else "concat=n=%d:v=1:a=0[vout]" % len(segs))
+        if bed_path is not None:
+            # Each segment's length in the cut: the trim's own out point, else the measured
+            # file, else the span the Loom computed -- the same order the silence pass uses.
+            bed_spans = []
+            for i, (path, ci, co, _ha, _cr, _m) in enumerate(segs):
+                if co is not None:
+                    sp = co - ci
+                else:
+                    d = spans.get(i)
+                    if d is None:
+                        pd = probe_duration(path)
+                        d = (pd - ci) if pd is not None else seg_meta[i][1]
+                    sp = d
+                bed_spans.append(max(0.1, float(sp if sp is not None else 0.1)))
+            cut_len = sum(bed_spans)
+            try:
+                bed_dur = float(bed_req.get("dur")) if bed_req.get("dur") not in (None, "") else None
+            except (TypeError, ValueError):
+                bed_dur = None
+            measured = probe_duration(str(bed_path))
+            if measured:
+                bed_dur = measured
+            bed_len = min(bed_dur, cut_len) if bed_dur else cut_len
+            fc += ";" + loom_bed_audio_graph(
+                bed_idx, bed_req.get("db", -8), cut_len, bed_dur,
+                loom_bed_windows(bed_spans, [m[0] for m in seg_meta], bed_len),
+                cut_label="acut" if audio_track else None, out_label="aout")
+            audio_track = True           # the bed alone is an audio track when the shots had none
         # The binary comes from media_tools, not a bare name on PATH -- the one
         # resolution, shared with every other ffmpeg call in the app.
         cmd = [core.ffmpeg_path(), "-y"]
@@ -20147,6 +25852,8 @@ __DESIGN_TOKENS__
             cmd += ["-i", path]
         if need_silence:
             cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        if bed_path is not None:
+            cmd += ["-i", str(bed_path)]
         cmd += ["-filter_complex", fc, "-map", "[vout]"]
         if audio_track:
             cmd += ["-map", "[aout]"]
@@ -20154,6 +25861,7 @@ __DESIGN_TOKENS__
         if audio_track:
             cmd += ["-c:a", "aac", "-b:a", "192k"]
         cmd += [str(out_path)]
+        export_warning = " ".join(x for x in (export_warning, bed_warning) if x)
         with _export_lock:
             _export_job.update(status="running", progress=0, elapsed=0.0, out="",
                                error="", warning=export_warning, proc=None, cancelled=False)
@@ -20211,6 +25919,28 @@ __DESIGN_TOKENS__
     # LIBRARY SCAN section (it is the `"video"` kind), which is what backup.py now
     # imports -- so the reason for the copy is gone along with the copy.
 
+    _LOOM_PENDING_KEYS = ("pendingTaskId", "pendingSubmitId", "pendingSettings", "pendingAnchor",
+                          "pendingBoard", "pendingQuote", "genStartedAt", "supersededTasks")
+
+    def _loom_strip_in_flight(project):
+        """Python twin of loom-takes-core.js's stripInFlight: a copied board carries no render
+        in flight. A shot that was rendering is settled -- done with a selected take, error
+        without one."""
+        if not isinstance(project, dict):
+            return project
+        for act in (project.get("acts") or []):
+            for c in ((act or {}).get("cards") or []):
+                if not isinstance(c, dict):
+                    continue
+                busy = any(c.get(k) for k in _LOOM_PENDING_KEYS) or c.get("status") == "wip"
+                if not busy:
+                    continue
+                for k in _LOOM_PENDING_KEYS:
+                    c.pop(k, None)
+                if c.get("status") == "wip":
+                    c["status"] = "done" if c.get("resultMid") else "error"
+        return project
+
     def _loom_collect_media_ids(project):
         """Every real (catalog) media_id a project references -- resultMid, both frame
         slots, and every cast/asset entry -- mapped to WHERE each one was referenced from.
@@ -20242,6 +25972,13 @@ __DESIGN_TOKENS__
                 code = "%s %s" % (code, title) if title else code
                 if c.get("resultMid"):
                     _note(c["resultMid"], "%s (shot result)" % code)
+                # Session P (review F17): every take's clip travels, not only the selected
+                # one -- a restored board must be able to ★ any of them. Mirrors takesOf():
+                # the stored takes; resultMid above covers the derived/legacy take.
+                for t in (c.get("takes") if isinstance(c.get("takes"), list) else []):
+                    tm = str((t or {}).get("mid") or "")
+                    if tm and tm != str(c.get("resultMid") or ""):
+                        _note(tm, "%s (take %s)" % (code, (t or {}).get("n")))
                 for slot in ("openFrame", "closeFrame"):
                     f = c.get(slot) or {}
                     if f.get("mediaId"):
@@ -20322,12 +26059,23 @@ __DESIGN_TOKENS__
                 resolved.append((mid, p))
             else:
                 missing.append({"media_id": mid, "referenced_by": mids[mid]})
+        # Session P (P3, ruling 8): the board's music bed travels as beds/<sha1>.<ext>, read
+        # from the caller's own bed folder only (a name that does not resolve there is simply
+        # reported missing -- never a path the client chose).
+        bed = project.get("bed") if isinstance(project.get("bed"), dict) else None
+        bed_path = None
+        if bed and bed.get("file"):
+            bed_path = _loom_bed_path(str(session.get("user") or ""), bed.get("file"))
+            if bed_path is None:
+                missing.append({"media_id": str(bed.get("file"))[:64], "referenced_by": ["music bed"]})
         mem = io.BytesIO()
         with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
             z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs,
                                                    "missing_media": missing}))
             for mid, p in resolved:
                 z.write(p, arcname="media/{}{}".format(mid, p.suffix.lower()))
+            if bed_path is not None:
+                z.write(str(bed_path), arcname="beds/" + bed_path.name)
         mem.seek(0)
         name = "{}_bundle.zip".format((project.get("name") or "loom_project").replace(" ", "_"))
         resp = send_file(mem, mimetype="application/zip", as_attachment=True, download_name=name)
@@ -20389,20 +26137,83 @@ __DESIGN_TOKENS__
         # of those columns through save_catalog's full-row upsert -- exactly the 2026-09-03
         # data loss. The file is still written (the bytes really are missing here); the row
         # keeps what the user owns.
-        known = core.known_catalog_rows(db_path, [
-            Path(n).stem for n in z.namelist()
-            if n.startswith("media/") and not n.endswith("/")])
+        media_entries = [m for m in (LOOM_BUNDLE_MEDIA_RE.match(n) for n in z.namelist()) if m]
+        known = core.known_catalog_rows(db_path, [m.group(1) for m in media_entries])
         rows = []
-        for name in z.namelist():
-            if not name.startswith("media/") or name.endswith("/"):
+        # Session P (P3, review F19): a bundle's music bed is RE-HASHED on arrival and stored
+        # under the name its own bytes give it, in the caller's bed folder -- never under the
+        # name inside the zip, which could point anywhere or claim another bed's hash. The
+        # board is then pointed at the computed name. Not audio, or over the cap: skipped.
+        # Spend review S5: ONLY the bed the imported board names is read and stored -- a board
+        # has one bed, so a bundle stores at most one file of at most LOOM_BED_MAX_BYTES. Every
+        # other beds/ entry is skipped unread: before, each one was stored, so a small bundle
+        # of highly compressible "audio" could fill the disk with files nothing referenced.
+        import tempfile
+        user = str(session.get("user") or "")
+        bed_names = {}
+        pbed0 = project.get("bed") if isinstance(project, dict) else None
+        wanted = str((pbed0 or {}).get("file") or "") if isinstance(pbed0, dict) else ""
+        wanted_entries = (["beds/" + wanted] if LOOM_BED_FILE_RE.match(wanted) else [])[:LOOM_BUNDLE_MAX_BEDS]
+        present = set(z.namelist())
+        for name in wanted_entries:
+            if name not in present:
                 continue
-            mid = Path(name).stem
+            try:
+                info = z.getinfo(name)
+                if info.file_size > LOOM_BED_MAX_BYTES or not user:
+                    continue
+                d = _loom_beds_dir(user)
+                d.mkdir(parents=True, exist_ok=True)
+                fd, tmp = tempfile.mkstemp(prefix=".import-", suffix=".part", dir=str(d))
+                total, head = 0, b""
+                with os.fdopen(fd, "wb") as out, z.open(info) as src:
+                    for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                        total += len(chunk)
+                        if total > LOOM_BED_MAX_BYTES:
+                            break
+                        if len(head) < 64:
+                            head = (head + chunk)[:64]
+                        out.write(chunk)
+                ext = sniff_audio_ext(head)
+                if total == 0 or total > LOOM_BED_MAX_BYTES or ext is None:
+                    _unlink_quiet(tmp)
+                    continue
+                bed_names[name[len("beds/"):]] = _loom_store_bed(user, tmp, ext)
+            except (OSError, KeyError, zipfile.BadZipFile, RuntimeError):
+                continue
+        pbed = project.get("bed") if isinstance(project, dict) else None
+        if isinstance(pbed, dict):
+            got = bed_names.get(str(pbed.get("file") or ""))
+            if got:
+                project["bed"] = dict(pbed, file=got)
+            elif not LOOM_BED_FILE_RE.match(str(pbed.get("file") or "")):
+                project.pop("bed", None)          # a bed naming no storable file is no bed
+        for m in media_entries:
+            name, mid, ext = m.group(0), m.group(1), "." + m.group(2)
             if _loom_resolve_media(mid):
                 continue  # already have it -- both sides share this media, nothing to do
-            ext = Path(name).suffix.lower()
             imported_dir.mkdir(parents=True, exist_ok=True)
             dest = imported_dir / "{}{}".format(mid, ext)
-            dest.write_bytes(z.read(name))
+            if not _is_under(dest.resolve(), imported_dir.resolve()):
+                continue
+            # Streamed under a cap into a temp file, then moved into place: a huge or
+            # truncated entry never leaves a partial picture behind (Invariant 3).
+            part = dest.with_name(dest.name + ".part")
+            try:
+                total = 0
+                with open(part, "wb") as out, z.open(name) as src:
+                    for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                        total += len(chunk)
+                        if total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
+                            break
+                        out.write(chunk)
+                if total == 0 or total > LOOM_BUNDLE_MEDIA_MAX_BYTES:
+                    _unlink_quiet(part)
+                    continue
+                os.replace(part, dest)
+            except (OSError, KeyError, zipfile.BadZipFile, RuntimeError):
+                _unlink_quiet(part)
+                continue
             is_vid = ext in _BUNDLE_VIDEO_EXTS
             thumb_path = thumb_dir / "{}.jpg".format(mid)
             if is_vid:
@@ -20423,6 +26234,10 @@ __DESIGN_TOKENS__
                 prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
             save_catalog(db_path, rows)
+        # Session P (review F4/F17): a board exported mid-render never imports with that
+        # render's markers -- the render belongs to the original. The client strips too
+        # (stripInFlight); this makes the bundle's own answer honest on its way out.
+        project = _loom_strip_in_flight(project)
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
                         "media_added": len(rows)})
 
@@ -20610,10 +26425,17 @@ __DESIGN_TOKENS__
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
                 _fire_enhance_telemetry(tid)
                 _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
-                return jsonify({"phase": "done", "media_ids": got["media_ids"],
-                                "is_video": got.get("is_video", False),
-                                "duration": got.get("duration"),
-                                "paid_credit": st["paid_credit"]})
+                _loom_journal_finish_task(tid)   # Session P: the shot may render again
+                done = {"phase": "done", "media_ids": got["media_ids"],
+                        "is_video": got.get("is_video", False),
+                        "duration": got.get("duration"),
+                        "paid_credit": st["paid_credit"]}
+                # Session M (review F14): a run job's charge beside what its confirm expected,
+                # so the dock can mark a mismatch peach. Absent for everything else.
+                expected = _run_note_paid(tid, st.get("paid_credit"))
+                if expected is not None:
+                    done["expected_credit"] = expected
+                return jsonify(done)
             if st["phase"] == "failed":
                 _forget_gen_phase(tid)
                 _drop_enhance_pending(tid)   # a reaped/cancelled enhance must NOT count
@@ -20627,6 +26449,7 @@ __DESIGN_TOKENS__
                 detail = core.describe_failure(st.get("status"), reason,
                                                started=bool(st.get("started")))
                 _log_job(tid, status="failed", error=detail)
+                _loom_journal_finish_task(tid)
                 return jsonify({"phase": "failed", "status": st["status"],
                                 "reason": reason, "error": detail})
             # `started` distinguishes "queued, no worker has taken it" from real work --
@@ -20648,6 +26471,7 @@ __DESIGN_TOKENS__
             _drop_enhance_pending(tid)   # done-but-empty is a failure: it must NOT count
             _drop_scene_pending(tid)     # nor a done-but-empty scene
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
+            _loom_journal_finish_task(tid)
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:
             # A defect in THIS code, not a PixAI blip. The broad handler below deliberately
@@ -20740,9 +26564,21 @@ __DESIGN_TOKENS__
                 _count = None
         except (TypeError, ValueError):
             _count = None
+        # Session M: the run a job belongs to and its cell (the reel's matrix grid), passed
+        # through only when well-formed. The server writes both itself when it sends a run;
+        # this keeps a client registration from ever carrying anything else.
+        _run = str(body.get("run") or "")
+        _run = _run if re.fullmatch(r"[0-9a-f]{1,36}", _run) else None
+        try:
+            _cell = int(body.get("cell")) if not isinstance(body.get("cell"), bool) else None
+            if _cell is not None and not (0 <= _cell <= 23):
+                _cell = None
+        except (TypeError, ValueError):
+            _cell = None
         _log_job(jid, status=(body.get("status") or "running"),
                  type=body.get("type"), label=body.get("label"),
                  done=body.get("done"), total=body.get("total"), count=_count,
+                 run=_run, cell=_cell if _run else None,
                  source=body.get("source") or "web")
         return jsonify({"ok": True})
 
@@ -20780,6 +26616,354 @@ __DESIGN_TOKENS__
             return jsonify({"workflows": core.workflow_catalog(session)})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "workflows": []}), 200
+
+    # --- Recipes (Session K + H3/H8/H10; lane w2-recipes) --------------------------------
+    # PixAI's recipe market, a recipe's page, Mine, Sets and the creator's writes, over
+    # moonglade_recipes (its module docstring has the whole contract). Reads are LOGIN, like
+    # every other catalog-of-PixAI read here. Every write is a deliberate click: LOGIN,
+    # explicit-token CSRF (_check_csrf), READ_ONLY refused inside moonglade_recipes before
+    # its first network call, one attempt. Nothing here writes when a surface opens, and
+    # GET /v2/recipes/draft (which CREATES a draft) is never called -- the creator's drafts
+    # are the account's own prefs until the user publishes.
+
+    def _recipes():
+        import moonglade_recipes
+        return moonglade_recipes
+
+    def _recipe_fail(e, **extra):
+        """A read or write that failed, as the house's {error} answer (HTTP 200: the body
+        is the answer, api.js's one rule)."""
+        out = {"error": _redact_host_paths(str(e))[:240]}
+        out.update(extra)
+        return jsonify(out), 200
+
+    def _recipe_user_id(core, gsession):
+        uid = str(core._client_of(gsession).user_id or "")
+        if not uid:
+            uid = core.resolve_user_id(gsession)
+        return uid
+
+    @app.route("/api/recipes/meta")
+    @tier(LOGIN)
+    def api_recipes_meta():
+        """What every recipe surface needs once: the live category and model-type lists,
+        the CSRF token for its writes, and the account's PixAI id (Mine and Sets)."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        rec = _recipes()
+        try:
+            core, gsession = _gen_session()
+        except Exception as e:                                   # noqa: BLE001
+            return jsonify({"categories": list(rec.CATEGORIES),
+                            "model_types": list(rec.MODEL_TYPES),
+                            "csrf": session["csrf"], "user_id": "",
+                            "max_recipes": rec.MAX_RECIPES,
+                            "error": _redact_host_paths(str(e))[:200]})
+        try:
+            uid = _recipe_user_id(core, gsession)
+        except Exception:                                        # noqa: BLE001
+            uid = ""
+        return jsonify({"categories": rec.categories(gsession),
+                        "model_types": rec.model_types(gsession),
+                        "csrf": session["csrf"], "user_id": uid,
+                        "max_recipes": rec.MAX_RECIPES})
+
+    @app.route("/api/recipes/market")
+    @tier(LOGIN)
+    def api_recipes_market():
+        """One page of the market: ?sort=trending|most-liked|most-used|latest, page,
+        page_size, category, model_type, model_id, q (search; newest first)."""
+        a = request.args
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().market(
+                gsession, sort=a.get("sort", "trending"), page=a.get("page", 1),
+                page_size=a.get("page_size", 24), category=a.get("category", ""),
+                model_type=a.get("model_type", ""), model_id=a.get("model_id", ""),
+                query=a.get("q", "")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/capability")
+    @tier(LOGIN)
+    def api_recipes_capability():
+        """Which ingredient kinds a model takes, and how many of each (?model_type= or
+        ?model_id=). Read live; the creator never guesses."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().capability(
+                gsession, request.args.get("model_type", ""),
+                request.args.get("model_id", "")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, slots=[])
+
+    @app.route("/api/recipes/batch")
+    @tier(LOGIN)
+    def api_recipes_batch():
+        """Recipe cards by id (?ids=a,b,c, up to 20) -- the dock's chips after a reload."""
+        ids = [i for i in (request.args.get("ids") or "").split(",") if i.strip()]
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"items": _recipes().batch(gsession, ids)})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/recent")
+    @tier(LOGIN)
+    def api_recipes_recent():
+        """The picker's History tab: recipes this account used most recently."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"items": _recipes().recently_used(
+                gsession, request.args.get("limit", 30), request.args.get("model_type", ""))})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/mine")
+    @tier(LOGIN)
+    def api_recipes_mine():
+        """Mine: this account's recipes, archived and in-review ones included (PixAI never
+        lists drafts; the app's own drafts live in the account prefs)."""
+        a = request.args
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().user_recipes(
+                gsession, _recipe_user_id(core, gsession), sort=a.get("sort", "latest"),
+                cursor=a.get("cursor", ""), limit=a.get("limit", 30),
+                model_type=a.get("model_type", "")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/style-code")
+    @tier(LOGIN)
+    def api_recipes_style_code():
+        """A legacy style code -> the recipe that replaced it (?code=&version_id=), or
+        {recipe: null} for "No recipe replaces this code"."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"recipe": _recipes().by_style_code(
+                gsession, request.args.get("code", ""), request.args.get("version_id", ""))})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, recipe=None)
+
+    @app.route("/api/recipes/from-image")
+    @tier(LOGIN)
+    def api_recipes_from_image():
+        """⁂ Make a recipe (K decision 4). ?media_id=X&check=1 answers only whether the
+        picture's model takes recipes (one cached /features read per model version); without
+        `check`, the creator's step-2 prefill: the model, the task's LoRAs (version, weight,
+        trigger words), the prompt, and the picture itself. The category is never guessed.
+        A picture this library has no row for is refused (the route runs on the owner's
+        credentials; the /api/task-params rule)."""
+        mid = str(request.args.get("media_id") or "").strip()
+        row = get_row(db_path, mid) if mid else None
+        if not row:
+            return jsonify({"error": "no such picture in this library", "capable": False}), 404
+        if str(row.get("is_video") or "") == "1":
+            return jsonify({"capable": False, "why": "a video"})
+        vid = str(row.get("model_id") or "").strip()
+        if not vid:
+            return jsonify({"capable": False, "why": "this picture's model isn't recorded"})
+        rec = _recipes()
+        try:
+            core, gsession = _gen_session()
+            feats = core._model_features(gsession, vid)
+            mtype = (feats or {}).get("model_type") or ""
+            capable = bool(mtype) and mtype in rec.model_types(gsession)
+            out = {"capable": capable, "model_type": mtype, "version_id": vid,
+                   "model_title": str(row.get("model_name") or "")}
+            if request.args.get("check") or not capable:
+                return jsonify(out)
+            base = core.resolve_model_base_id(gsession, vid)
+            prompt = str(row.get("prompt_full") or row.get("prompt_preview") or "")
+            loras, unresolved = [], 0
+            tid = str(row.get("task_id") or "").strip()
+            task = core.task_detail_gql(gsession, tid, retries=1) if tid else None
+            params = (task or {}).get("parameters") or {}
+            if isinstance(params.get("prompts"), str) and params.get("prompts").strip():
+                prompt = params["prompts"]
+            lmap = params.get("lora") if isinstance(params.get("lora"), dict) else {}
+            for lvid, weight in lmap.items():
+                try:
+                    w = float(weight)
+                except (TypeError, ValueError):
+                    unresolved += 1
+                    continue
+                lbase = core.resolve_model_base_id(gsession, str(lvid))
+                rows = core.list_model_versions(gsession, lbase) if lbase else []
+                vrow = next((r for r in rows if r.get("version_id") == str(lvid)), None) or {}
+                loras.append({"version_id": str(lvid), "model_id": lbase, "weight": w,
+                              "title": str(core.model_name_gql(gsession, str(lvid)) or "")
+                              or str(lvid),
+                              "trigger_words": str(vrow.get("trigger_words") or "")})
+            out.update({"model_id": base, "prompt": prompt, "loras": loras,
+                        "unresolved": unresolved + (0 if task or not tid else 1),
+                        "media_id": mid, "thumb": "/thumbs/{}.jpg".format(mid)})
+            return jsonify(out)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, capable=False)
+
+    @app.route("/api/recipes/sets")
+    @tier(LOGIN)
+    def api_recipes_sets():
+        """The Sets tab: this account's recipe sets (PixAI's collections of recipes)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().sets_list(gsession, _recipe_user_id(core, gsession),
+                                                cursor=request.args.get("cursor", "")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, sets=[])
+
+    @app.route("/api/recipes/sets/for/<recipe_id>")
+    @tier(LOGIN)
+    def api_recipes_sets_for(recipe_id):
+        """"Save to a recipe set": every set, each with whether it holds this recipe."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"sets": _recipes().sets_for(gsession, recipe_id)})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, sets=[])
+
+    @app.route("/api/recipes/sets/<set_id>/items")
+    @tier(LOGIN)
+    def api_recipes_set_items(set_id):
+        """One set's recipes."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().set_items(gsession, set_id,
+                                                request.args.get("cursor", "")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/<recipe_id>")
+    @tier(LOGIN)
+    def api_recipes_detail(recipe_id):
+        """One recipe (the owner's view carries its slots; everyone else's, kinds only)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"recipe": _recipes().detail(gsession, recipe_id)})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, recipe=None)
+
+    @app.route("/api/recipes/<recipe_id>/artworks")
+    @tier(LOGIN)
+    def api_recipes_artworks(recipe_id):
+        """"Made with it" on a recipe's page (?sort=latest|most-liked, page)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().artworks(
+                gsession, recipe_id, request.args.get("sort", "latest"),
+                request.args.get("page", 1), request.args.get("page_size", 12)))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/recipes/<recipe_id>/tasks")
+    @tier(LOGIN)
+    def api_recipes_tasks(recipe_id):
+        """This account's generations with a recipe (?usage=test|normal)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().tasks(
+                gsession, recipe_id, request.args.get("usage", ""),
+                request.args.get("page", 1), request.args.get("page_size", 12)))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    def _recipe_write_body():
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return None, (jsonify({"error": "Expected a JSON object."}), 400)
+        if not _check_csrf(body):
+            return None, (jsonify({"error": "Your session expired. Reload the page and "
+                                            "try again."}), 400)
+        return body, None
+
+    @app.route("/api/recipes/publish", methods=["POST"])
+    @tier(LOGIN)
+    def api_recipes_publish():
+        """Publish the creator's draft (K decision 5): {csrf, draft, recipe_id?}. Creates
+        the recipe on PixAI when there is no id yet (PixAI keeps ONE unfinished recipe per
+        account and discards any other -- step 3 says so before this click), saves the full
+        body, and moves it draft -> test -> published. Answers {recipe} or {error,
+        recipe_id} -- the id of a recipe the create made before a later step failed, which
+        the client keeps so the next attempt updates it rather than making another."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        rec = _recipes()
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"recipe": rec.publish(gsession, body.get("draft"),
+                                                  body.get("recipe_id") or "")})
+        except rec.RecipeWriteError as e:
+            return _recipe_fail(e, code=e.code, recipe_id=e.recipe_id)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/recipes/update", methods=["POST"])
+    @tier(LOGIN)
+    def api_recipes_update():
+        """Save an edit to an existing recipe (full replace): {csrf, recipe_id, draft,
+        version}. `version` is the recipe's version when the creator opened it; a recipe
+        changed on PixAI since is refused, not overwritten. Answers the recipe as PixAI
+        reads it afterwards -- status `test` is "in review"."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        rec = _recipes()
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"recipe": rec.update(gsession, body.get("recipe_id"),
+                                                 body.get("draft"), body.get("version"))})
+        except rec.RecipeWriteError as e:
+            return _recipe_fail(e, code=e.code)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/recipes/transition", methods=["POST"])
+    @tier(LOGIN)
+    def api_recipes_transition():
+        """Archive or unarchive (Mine): {csrf, recipe_id, to: archived|published}."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        rec = _recipes()
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"recipe": rec.transition(gsession, body.get("recipe_id"),
+                                                     str(body.get("to") or ""))})
+        except rec.RecipeWriteError as e:
+            return _recipe_fail(e, code=e.code)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/recipes/sets/create", methods=["POST"])
+    @tier(LOGIN)
+    def api_recipes_set_create():
+        """+ New set: {csrf, title}. A private collection of recipes on PixAI."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            return jsonify({"set": _recipes().set_create(gsession, body.get("title"))})
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/recipes/sets/toggle", methods=["POST"])
+    @tier(LOGIN)
+    def api_recipes_set_toggle():
+        """A tick in "Save to a recipe set": {csrf, set_id, recipe_id, on, item_id?}.
+        Applies at once (K decision 7: no Save button)."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().set_toggle(gsession, body.get("set_id"),
+                                                 body.get("recipe_id"), bool(body.get("on")),
+                                                 body.get("item_id") or ""))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
 
     @app.after_request
     def _gzip_html(resp):

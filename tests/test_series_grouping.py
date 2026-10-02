@@ -266,6 +266,12 @@ def test_without_group_the_payload_is_unchanged(tmp_path):
         "created_at": "2026-08-20T10:00:00Z", "rating": 4, "w": "512", "h": "768",
         "prompt": "a b c", "source": "online", "filename": "pic_900.png",
         "task_id": "T", "title": "My Title", "batch_index": "1", "batch_size": "2",
+        # Session H T3a: the Lightbox edit bar's flag -- every still, whatever model made it
+        # (owner ruling, 2026-09-28)
+        "tsubaki_edit": True,
+        # Session N3: the owner's own layer (a keeper|reject mark, tags) -- empty for a picture
+        # nobody has curated, and local to the catalog
+        "mark": "", "tags": [],
     }
 
 

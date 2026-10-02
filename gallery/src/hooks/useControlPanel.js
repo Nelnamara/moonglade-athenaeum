@@ -72,7 +72,7 @@ export const DEDUP_STAGES = [
 // in the suite's CSS reads off that attribute, and the pre-paint inline script on next
 // load reads localStorage first. Missing this meant picking a skin here changed nothing
 // visible anywhere outside the clicked card's own checkmark.
-async function applySkin(id, achievements, setAchievements) {
+export async function applySkin(id, achievements, setAchievements) {
   const d = await apiPost("/api/skin", { skin: id });
   if (d.error) return d;
   const next = { ...achievements, skin: id };

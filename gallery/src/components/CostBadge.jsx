@@ -60,8 +60,15 @@ import "../styles/cost-badge.css";
                   says the job makes more than one (`count`), '· <balance> credits' when the
                   host passes `balance`. Hosts still never hand-write cost text.
      count      — (stack) how many images this job makes; >1 is named on the sub line.
+     sends      — how many times the priced request goes out (a Matrix sends it once per cell;
+                  templateCore.quoteSends). >1 multiplies a settled price into the TOTAL on the
+                  main line and names "N images · ≈ X each" on the sub line (owner walk
+                  2026-09-29: a Matrix of 3 quoted the price of 1). The host's price response
+                  is untouched -- `cost` and the gate still read the one request.
      balance    — (stack) the account's credit balance, named last on the sub line.
      cardLabel  — fallback name for the covering card when the server didn't send one.
+     laneHeld   — (Session H) Unlimited Mode is offered on this model but not sent with this
+                  request (the Context side): the context-image note adds "not Unlimited".
      onCost     — called on every state push with the old mg-cost detail
                   {state, settled, cost, free, cards, card_name, card_expires, text, raw}
                   plus card_short (true only on the paid-because-short case above) and
@@ -156,6 +163,8 @@ function build(view, props) {
   // tickets this job COSTS (absent = 1, the one-job-one-ticket case every image is).
   const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
   const needN = cardCount(d.cards_needed);
+  // How many times this one quote is sent (a Matrix's cells) -- 1 unless the host says more.
+  const sendsN = Math.max(1, cardCount(props.sends) || 1);
   if (lane) {
     main = "Free";
     title = "Unlimited Mode — this generation spends nothing and uses no card.";
@@ -184,6 +193,9 @@ function build(view, props) {
     if (sub) { tip += " Card " + sub.text + " — " + sub.title + "."; dot = sub.days <= 7; }
   } else if (state === "paid") {
     const n = Number(d.cost);
+    // The main line is what the whole send costs: the one request's price times the times it
+    // goes out (a Matrix's cells). The per-request figure is named "each" on the sub line.
+    const total = n * sendsN;
     // Short (issue #15): a card matched but held < needed. Rendered as PAID at the full
     // price with the amber warn treatment — nothing is attached, so no partial-application
     // wording, ever. The note is derived HERE from the counts (hosts never hand-write it), and
@@ -197,14 +209,15 @@ function build(view, props) {
     // A settled ZERO is real (nothing to spend) but is NOT the free-card state — it must not
     // borrow its wording or its emerald.
     main = (n === 0) ? "0 credits — this spends nothing"
-      : (warn ? "⚠ " + warn + " · " : (short ? "⚠ " : "")) + "≈ " + fmt(n) + " credits";
+      : (warn ? "⚠ " + warn + " · " : (short ? "⚠ " : "")) + "≈ " + fmt(total) + " credits";
     title = (n === 0) ? "Priced at zero credits. No free card was involved."
       : short ? shortNote
-        : "No free card covers this — generating spends credits.";
+        : "No free card covers this — generating spends credits."
+          + (sendsN > 1 ? " ≈ " + fmt(n) + " each × " + fmt(sendsN) + "." : "");
     // The short sentence takes the note line under the price (block form); the chip has no
     // room for it, so there it rides in the label + billing tooltip instead.
     if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
-    val = (n === 0) ? "0" : (warn || short ? "⚠ " : "") + "≈ " + fmt(n);
+    val = (n === 0) ? "0" : (warn || short ? "⚠ " : "") + "≈ " + fmt(total);
     lab = (n === 0) ? "credits — spends nothing" : short ? "credits · card short" : "credits";
     tip = (n !== 0 && warn) ? "⚠ " + warn + ". " + title : title;
   } else if (state === "error") {
@@ -221,7 +234,23 @@ function build(view, props) {
   // field the model does not take. Said on the settled states, in the note line, BEFORE the
   // spend, in the same words the submit's result line uses (genCore.adjustedText).
   const adjTxt = (state === "free" || state === "paid") ? adjustedText(d.adjusted) : "";
-  const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+  const adj0 = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+  // Session H (Tsubaki3 Generate Handoff, frame A + T1a): the server's price breakdown for a
+  // PAID image quote -- "N context images +X · not Unlimited" and "profile Ultra +X" -- in the
+  // SAME one note line as the receipt, never a line of its own. The figures are the server's
+  // (/api/price context_charge / profile_extra); the badge only words them. `laneHeld` is the
+  // host's fact that Unlimited Mode is offered but not sent here (the Context side).
+  const brk = [];
+  if (state === "paid" && Number(d.context_images) > 0) {
+    const n = Number(d.context_images);
+    brk.push(fmt(n) + (n === 1 ? " context image" : " context images")
+      + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt(d.context_charge) : "")
+      + (props.laneHeld ? " · not Unlimited" : ""));
+  }
+  if (state === "paid" && d.profile && Number(d.profile_extra) > 0) {
+    brk.push("profile " + d.profile + " +" + fmt(d.profile_extra));
+  }
+  const adj = [brk.join(" · "), adj0].filter(Boolean).join(" · ");
   if (adj) tip = (tip ? tip + " " : "") + adj + ".";
   // ONE note line, never a line of its own ("copy in an existing line"): the receipt joins
   // the block form's existing note -- after a free card's expiry or the card-short sentence,
@@ -249,6 +278,9 @@ function build(view, props) {
       parts.push(/\bcard\b/i.test(card) ? card : card + " card");
       if (countN != null && countN > 1) parts.push(fmt(countN) + " images");
       if (sub) parts.push(sub.text);           // the expiry stays visible, on this line
+    } else if (state === "paid" && sendsN > 1) {
+      // a Matrix: the total is on the line above, what one cell costs is said here
+      parts.push(fmt(sendsN) + " images", "≈ " + fmt(Number(d.cost)) + " each");
     } else if (state === "paid" && countN != null && countN > 1) {
       parts.push(fmt(countN) + " images");
     }
@@ -281,7 +313,7 @@ function detailOf(m) {
 const IDLE = { state: "idle", note: "", msg: "", raw: null };
 
 const CostBadge = forwardRef(function CostBadge(props, ref) {
-  const { hint, warn, compact, stack, count, balance, cardLabel, onCost, id, className, style } = props;
+  const { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
   const [view, setView] = useState(IDLE);
 
   // Latest view/props/text for the imperative getters and the onCost effect (which fire
@@ -319,7 +351,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     }
   }, [view]);
 
-  const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel });
+  const m = build(view, { hint, warn, compact, stack, count, sends, balance, cardLabel, laneHeld });
   mRef.current = m;
   // Short borrows the amber warn treatment (settled paid, flagged) and adds its own attribute so
   // a host or test can tell "card short" from "host warned" without parsing the sentence.

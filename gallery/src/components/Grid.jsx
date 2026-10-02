@@ -4,7 +4,9 @@ import { buildUrl } from "../gen/urlState.js";
 import { fetchSiblings, fetchSeriesBatch } from "../api.js";
 import { seriesSuffix } from "../gen/seriesName.js";
 import Stars from "./Stars.jsx";
+import { ratioLabel } from "../curation/aspectCore.js";
 import "../styles/grid.css";
+import "../styles/curation.css";
 
 /* The grid, refit to the Frontend Gallery DC (drift §9) and to LOOM MASONRY v1
    (design-side spec, grid-algorithm-spec.md / drift §18): SIZE-slider cell
@@ -686,7 +688,11 @@ function Grid({
           (it.is_nsfw ? " nsfw" : "") +
           (isSel ? " sel" : "") +
           (cell.feat ? " feat" : "") +
-          (stack ? " mgg-stack" : "")
+          (stack ? " mgg-stack" : "") +
+          // the owner's own mark (Session N3): a keeper wears an emerald check, a reject
+          // dims -- rejects stay in the grid, hiding them is the search's job (-reject)
+          (!stack && it.mark ? " has-verdict" : "") +
+          (!stack && it.mark === "reject" ? " rej" : "")
         }
         /* shift held at press = range coming: stop the native text
            selection before it starts */
@@ -727,6 +733,11 @@ function Grid({
             top-of-frame (grid-algorithm-spec §1; drift §46 crop v1). */}
         <img className="mgg-art" loading="lazy" draggable={false} src={it.thumb} alt=""
           style={cell.crop ? { objectPosition: "50% 12%" } : undefined} />
+        {!stack && it.mark ? (
+          <span className={"mgg-verdict " + it.mark} title={it.mark === "keeper" ? "Keeper" : "Reject"}>
+            {it.mark === "keeper" ? "✓" : "✕"}
+          </span>
+        ) : null}
         {stack ? (
           /* A stack's badge takes the top-left slot -- always on (identity). No
              checkbox (not a selectable unit, review item 5) and no source pill. */
@@ -784,6 +795,10 @@ function Grid({
           {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
+            {/* the picture's own shape (Session N7), the name the ar: operator searches by */}
+            {!stack && ratioLabel(it.w, it.h) ? (
+              <span className="mgg-ar" title={"Shape " + it.w + "×" + it.h + " · search it with ar:"}>{ratioLabel(it.w, it.h)}</span>
+            ) : null}
             <button
               type="button" className="mgg-chip open"
               title={stack ? "Open this session" : "Open the lightbox"}

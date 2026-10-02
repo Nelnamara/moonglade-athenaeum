@@ -15,6 +15,10 @@ import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
 import { panelTabLabel } from "../lib/panelTabs.js";
+import useBrandingBeat from "../hooks/useBrandingBeat.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
+import { openAbout } from "../help/helpStore.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -275,7 +279,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   // Opened ON a tab when the shell asks for one (App.jsx's `mg-open-control-panel` claim --
   // the key-turn moment's button asks for Branding); otherwise Maintenance, as always.
-  const [tab, setTab] = useState(() => (tabRequest && tabRequest.tab) || "maint");
+  // `tabState` is the tab the panel was asked for or the person picked; `tab` (below, once the
+  // Branding beat is known) is the one it DRAWS -- the two differ only while the beat holds a
+  // panel opened on Branding on Maintenance.
+  const [tabState, setTab] = useState(() => (tabRequest && tabRequest.tab) || "maint");
   // A requested tab is HELD until the panel's own achievements read answers (see the gate
   // below): the roster it paints from first can be a cache from before the earn.
   const [tabHeld, setTabHeld] = useState(() => !!(tabRequest && tabRequest.tab));
@@ -336,6 +343,13 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
     update, updTarget, updOpen, setUpdOpen, updPhase, updRefusal, updSteps,
     applyUpdate, closeUpdate,
   } = useControlPanel();
+  // THE BRANDING BEAT (Session L, decision 5): the first open after the unlock cross-fades the
+  // Maintenance tile and slides the ✦ Branding tab in. Opened ON Branding (the celebration's button),
+  // the panel waits on Maintenance for the 1.2 s and then goes. It starts once the tile and the
+  // tabs are DRAWN -- the summary has answered (the two early returns below draw neither) -- not
+  // while the panel still reads "opening the panel…" (owner walk 2026-09-30).
+  const beat = useBrandingBeat(brandingUnlocked, !!summary && !summaryErr);
+  const tab = beat.holds && tabState === "brand" ? "maint" : tabState;
   // Console heart: pipelines (the run buttons) vs ledger (the run history) --
   // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented
   // control ControlMobile.jsx already ships for the identical choice.
@@ -491,9 +505,16 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 <b>{credits}</b> credits
                 {cards != null ? <><br />{cards} free card{cards !== 1 ? "s" : ""}</> : null}
               </div>
+              <HelpButton surface={tab === "brand" ? "branding" : "panel"} className="mgv-help" />
               <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
             </div>
           </div>
+          {/* The Panel's first-run guide, and Branding's own while its tab is showing (Session I
+              decision 1: Branding's guide exists only where its tab does). Held while one of
+              the Panel's own layers covers it. */}
+          <GuideHost key={tab === "brand" ? "branding" : "panel"}
+            surface={tab === "brand" ? "branding" : "panel"}
+            paused={!!subOverlay || !!power || updOpen || tabHeld} />
 
           <div className="mgcp-body">
             <div className="mgcp-side">
@@ -566,16 +587,25 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                   2026-09-01, Variant A): no new chrome, the stamp that was always here
                   just becomes the notice. Up to date, it is byte-identical to what it
                   has always rendered -- the whole point of the variant. */}
+              {/* ...and since Session I (decision 3a) the stamp is also About's door: up to
+                  date it opens the About card; with a release out it keeps its "vX available
+                  — view" wording and About LEADS with the update card, whose button opens the
+                  same update modal this stamp used to open directly. Mid-apply it still goes
+                  straight to the modal that is reporting the apply. */}
               <div className="mgcp-ver">
                 {update?.behind ? (
                   <button type="button" className="mgcp-verup"
                     title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
-                    onClick={() => setUpdOpen(true)}>
+                    onClick={() => (updPhase === "applying" || updPhase === "done"
+                      ? setUpdOpen(true) : openAbout("update"))}>
                     <span className="dot" aria-hidden="true">●</span>
                     {updPhase === "applying" || updPhase === "done" ? "updating…"
                       : update.latest + " available — view"}
                   </button>
-                ) : (boot?.build_stamp || "—")}
+                ) : (
+                  <button type="button" className="mgcp-verbtn" title="About Moonglade Athenaeum"
+                    onClick={() => openAbout("")}>{boot?.build_stamp || "—"}</button>
+                )}
                 {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
               </div>
             </div>
@@ -585,7 +615,9 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                 <button type="button" className={"mgv-x-off"} style={tabStyle(tab === "maint")}
                   onClick={() => setTab("maint")}>{panelTabLabel("maint")}</button>
                 {brandingUnlocked && (
-                  <button type="button" style={tabStyle(tab === "brand")}
+                  <button type="button" className={beat.tabArriving ? "mgcp-tab-arrive" : undefined}
+                    style={beat.tabVisible ? tabStyle(tab === "brand") : { ...tabStyle(false), visibility: "hidden" }}
+                    tabIndex={beat.tabVisible ? undefined : -1}
                     onClick={() => setTab("brand")}>{panelTabLabel("brand")}</button>
                 )}
               </div>
@@ -1046,16 +1078,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                         them ("moved out on unlock"). Pre-unlock, the inline pickers are
                         the only home those controls have. */}
                     {brandingUnlocked ? (
-                      <div className="mgcp-tile mgcp-tile5">
-                        <div className="mgcp-mkick">Branding &amp; skins</div>
-                        <div className="mgcp-tilesmall">
-                          Marks, animation, launcher icon, skins and banners now live in
-                          their own <b style={{ color: "var(--text)" }}>✦ Branding</b> tab.
-                        </div>
-                        <button type="button" className="mgcp-openbrandbtn" onClick={() => setTab("brand")}>
-                          Open Branding ▸
-                        </button>
-                      </div>
+                      <BrandingPointerTile state={beat.tile} onOpen={() => setTab("brand")} />
                     ) : (
                       <div className="mgcp-tile mgcp-tile7" style={{ gridColumn: "span 12" }}>
                         <IdentityStrip summary={summary} onSaved={fetchSummary}
@@ -1093,6 +1116,31 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
           steps={updSteps} onApply={applyUpdate} onClose={closeUpdate} />
       )}
     </>
+  );
+}
+
+/* Maintenance's post-unlock pointer tile (Control Panel.dc.html:284) and the Branding beat's
+   first half: while the beat plays, the old tile's contents ("ghost", drawn as the handoff
+   draws them) cross-fade out over this one fading in, 0.4 s. `state`: "hold" (drawn, invisible,
+   until the account has answered), "in" (the cross-fade), "rest" (as it ships). */
+function BrandingPointerTile({ state, onOpen }) {
+  return (
+    <div className={"mgcp-tile mgcp-tile5" + (state === "hold" ? " mgcp-tile-hold" : state === "in" ? " mgcp-tile-in" : "")}>
+      <div className="mgcp-mkick">Branding &amp; skins</div>
+      <div className="mgcp-tilesmall">
+        Marks, animation, launcher icon, skins and banners now live in
+        their own <b style={{ color: "var(--text)" }}>✦ Branding</b> tab.
+      </div>
+      <button type="button" className="mgcp-openbrandbtn" onClick={onOpen}>
+        Open Branding ▸
+      </button>
+      {state === "in" ? (
+        <div className="mgcp-tileghost" aria-hidden="true">
+          <div className="mgcp-mkick">Branding</div>
+          <div className="mgcp-tilesmall">mark · animation ▾ · launcher icon</div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

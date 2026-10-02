@@ -20,7 +20,7 @@
 @keyframes idmInscribe { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes idmRule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-.idm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+.idm-root { position: fixed; inset: 0; z-index: 315; display: flex; flex-direction: column;
   background: radial-gradient(120% 70% at 30% -10%, color-mix(in oklab, var(--accent) 20%, #17123a) 0%,
     var(--base) 46%, #05040d 100%);
   color: var(--text); animation: idmIn .22s cubic-bezier(.2,.9,.24,1) both; }
@@ -45,14 +45,17 @@
    and a flick that runs past the end of the record must stop there rather than chain into
    the tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
    contest detail took on 2026-09-05; this surface and the Folio were the two it missed. */
+/* The bottom pad is drift 122's formula (16px plus the home indicator). The record-action
+   row below is what actually sits on it -- see .idm-recrow. */
 .idm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 14px 14px max(26px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+  padding: 14px 14px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
 
 .idm-frame { position: relative; flex: none; width: 100%; border-radius: 14px; overflow: hidden;
   border: 1px solid rgba(255,255,255,.12); box-shadow: 0 24px 60px rgba(0,0,0,.5); background: var(--surface0);
   animation: idmFrame .5s cubic-bezier(.2,.9,.24,1) both; }
-.idm-frame img, .idm-frame video { display: block; width: 100%; height: auto; max-height: 60vh;
+.idm-frame img, .idm-frame video { display: block; width: 100%; height: auto;
+  max-height: 60vh; max-height: 60dvh;
   object-fit: contain; background: var(--surface0); margin: 0 auto; }
 .idm-frame .gd-note { padding: 40px 16px; text-align: center; }
 
@@ -127,8 +130,32 @@
 .idm-simgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
 .idm-simgrid button.idm-simtile { width: 100%; height: auto; aspect-ratio: 1; }
 
-/* ---- record-action chips row ---- */
-.idm-recrow { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 2px 4px; }
+/* ---- record-action chips row -- THE SHEET'S FOOT, PINNED (drift 122) ----
+   This is the row the owner could not reach on his phone and tablet ("the lowest button row
+   ... sits just below the scroll end"), and the row Q2's Remix / Send to Video land in. It
+   is sticky to the bottom of .idm-body, so it is on screen whatever the scroll position and
+   whatever a browser does with a flex scroller's end padding (WebKit has left it out of
+   the scroll range): stuck at bottom:0, the row is pulled back into view regardless. It
+   wears the phone's pinned-bar idiom -- mantle face, a surface1 hairline on top, bled to
+   the body's side edges -- the same bar myart-mobile.css's .myam-bulkbar and
+   contest-mobile.css's .cmb-enterbar already are, so the record scrolls under one bar
+   the app already has rather than a new one. Its own bottom pad keeps the chips off the
+   home indicator; as the body's last child it also takes over the body's bottom pad, so
+   the resting and the stuck positions coincide. When the prompt editor or the suggestions
+   open BELOW it, it is no longer the last child and simply rides the scroll above them.
+   Its sticky offset is minus the body's pad because a sticky box is held inside its
+   scroller's content edge, not its foot (gallery-mobile.css, .glm-sheet-actions).
+   `will-change: transform` is a measured fix, not a habit: in chromium (the render
+   harness's engine, at 1x and 2x) this bar -- alone of the four pinned rows -- painted a
+   ~6px sliver of the record's text through its bottom edge while hit-testing already
+   reported the bar there; the same bar at `bottom: 0` with no pad arithmetic did the same,
+   `isolation` on the body did not help, and giving the bar its own layer paints it whole. */
+.idm-recrow { display: flex; flex-wrap: wrap; gap: 7px; flex: none;
+  position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 1;
+  will-change: transform;
+  margin: 0 -14px; padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.idm-recrow:last-child { margin-bottom: calc(-16px - env(safe-area-inset-bottom)); }
 
 /* ---- prompt editor + suggestions (reuse desktop's #prompt-editor/#suggest-box
    shape at mobile widths -- same fields, own compact layout) ---- */
@@ -155,15 +182,24 @@
    The "see all similar" sheet below has no such constraint (plain React
    content, nothing persistent to protect) and uses the real, shared
    MobileSheet.jsx component instead -- see ImageDetailsMobile.jsx. */
-.idm-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(4,3,10,.66);
+.idm-sheet-scrim { position: fixed; inset: 0; z-index: 318; background: rgba(4,3,10,.66);
   opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .idm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
-.idm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; max-height: 84vh;
+/* Drift 122's sheet contract, the same one .glm-sheet carries (gallery-mobile.css): capped
+   by the VISIBLE viewport, its bottom pad clear of the home indicator, and its action -- the
+   Upscale button -- pinned where the scroll ends, so a panel taller than the cap (the
+   upscaler options add rows) never parks it below the fold. `bottom: 0` pins it at the
+   slab's content edge -- a sticky box is held inside its scroller's padding -- which is
+   exactly where it rests at the end of the scroll, one bottom pad above the slab's foot. */
+.idm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 319;
+  max-height: 84vh; max-height: min(84dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
-  padding: 12px 15px max(22px, env(safe-area-inset-bottom));
+  padding: 12px 15px calc(16px + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
   transform: translateY(100%); pointer-events: none;
   transition: transform .28s cubic-bezier(.4,0,.2,1); }
+.idm-sheet-slab .mgu-go { position: sticky; bottom: 0; z-index: 1; }
 .idm-sheet-slab.open { transform: translateY(0); pointer-events: auto;
   transition: transform .28s cubic-bezier(.2,.9,.24,1); }
 .idm-sheet-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }

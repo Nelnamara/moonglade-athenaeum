@@ -11,6 +11,16 @@
        thumb: image URL, rendered as a background-image span (never a raw <img src> -- the
               design-spec toast-icon rule, so the preload scanner can't fetch it)
        sticky: stays until the × / remove(); else auto-dismisses after ttl (default 5200ms)
+       avatar: image URL drawn as a round portrait in place of the glyph (the post-update
+               toast's Nel, Session I 3b) -- a background-image span, same rule as thumb
+       action: {label, run} -- one button on the toast; pressing it runs `run` and
+               dismisses the toast (the post-update toast's "What's new")
+       actions: [{label, run, tone}] -- up to two buttons in a row under the text, for a
+               toast that asks a question (the narrator's choice). Pressing one runs it and
+               dismisses the toast; `tone: "ruby"` draws it in the destructive/spicy red.
+               Ignored when `action` is given.
+       foot: a small line under the buttons (the choice's "you can change this later")
+       code: a short mono tail on the title ("Updated to" + "3.14")
    The two-phase exit (add .out, unmount 340ms later) matches the exit-animation duration. */
 
 let seq = 0;
@@ -49,6 +59,15 @@ export function show(o) {
     title: o.title || "",
     msg: o.msg || "",
     thumb: o.thumb || "",
+    avatar: o.avatar || "",
+    code: o.code || "",
+    action: o.action && typeof o.action.run === "function"
+      ? { label: String(o.action.label || ""), run: o.action.run } : null,
+    actions: !o.action && Array.isArray(o.actions)
+      ? o.actions.filter((a) => a && typeof a.run === "function").slice(0, 2)
+        .map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" }))
+      : [],
+    foot: o.foot ? String(o.foot) : "",
     sticky: !!o.sticky,
     out: false,
   }]);

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { thumbSrc } from "../lib/phoneCore.js";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { qualifies } from "../hooks/useContests.js";
@@ -7,8 +9,8 @@ import { show as toast } from "../notify/toastStore.js";
 import "../styles/contest-mobile.css";
 
 /* THE ENTRY SCREEN — pixel source `Contest Mobile Handoff.dc.html` frame D3 ("ENTRY —
-   full-screen picker"), Session D pick 1f. A fixed, full-viewport surface (z 70, above
-   LightboxMobile's own sheet at 66), because all three entry points the handoff keeps can
+   full-screen picker"), Session D pick 1f. A fixed, full-viewport surface (z 324, above
+   LightboxMobile's own sheet at 321), because all three entry points the handoff keeps can
    reach it: the board's Enter bar, the lightbox's action row, and Image Details' chip.
 
    ALWAYS-A-CONFIRM, unchanged (owner ruling F4, 2026-08-31). Nothing enters on one tap:
@@ -53,6 +55,7 @@ import "../styles/contest-mobile.css";
    what this is. */
 
 export default function ContestEntryMobile({ contest, preselectMediaId, onClose, onEntered }) {
+  const saver = useDataSaver().active;          // Q7: 256 px thumbnails while the saver acts
   const [items, setItems] = useState(null);
   const [csrf, setCsrf] = useState("");
   const [picked, setPicked] = useState([]);          // media_ids, in tap order
@@ -196,7 +199,7 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
               disabled={busy || (!on && atCap)}
               aria-pressed={on}
               onClick={() => toggle(it.media_id)}>
-              <img src={it.thumb} alt="" loading="lazy" decoding="async" />
+              <img src={thumbSrc(it.thumb, saver)} alt="" loading="lazy" decoding="async" />
               {on ? <span className="cmb-tick" aria-hidden="true">✓</span> : null}
             </button>
           );

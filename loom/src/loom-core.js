@@ -19,6 +19,11 @@
         import.meta, no imports of anything but this file itself.
    ========================================================================= */
 
+// The per-card take walk the spend ledger uses (Session P). The one import this file makes:
+// loom-takes-core.js imports nothing, so there is no cycle, and the Loom is bundle-only
+// (the in-browser Babel inline path this header describes was retired 2026-08-08).
+import { spendMidsOf } from "./loom-takes-core.js";
+
 // ---------- continuity / connection-method metadata ----------
 
 export const CONNECT = {
@@ -112,6 +117,33 @@ export const continuityLinked = (entries, entryId) => {
 // now goes through this instead, falling back to "new scene" (the safest,
 // most neutral default) rather than crashing shotText/export/render.
 export const connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
+
+// ---------- a new shot's shape ----------
+
+// Every default field a shot card carries, in ONE place (Session P, Stage B1: moved here from
+// master-storyboard.jsx's newCard(), which now calls this with uid(), so the pure
+// collection -> shots builder (loom-shots-core.js) makes cards of exactly the same shape).
+// The id is an ARGUMENT: generating it is a side effect that stays in the caller.
+export const emptyFrameShape = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+export const newCardShape = (id, extra = {}) => ({
+  id, title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
+  prompt: "", openFrame: emptyFrameShape(), closeFrame: emptyFrameShape(),
+  cast: [], refs: [], camera: "", lighting: "", audioCue: "",
+  // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
+  // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
+  // ("ambient room tone") that only ever influences wording, never the real generateAudio/
+  // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
+  // had it reverse-engineered but never wired to a control): the server already accepts
+  // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
+  audioGen: false, audioLanguage: "english",
+  transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null,
+  // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
+  // prompt box, durable across shot reselect/reload. When set, shotText() returns
+  // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
+  // see shotText() and effectivePrompt() below.
+  promptOverride: false, promptOverrideText: "",
+  ...extra,
+});
 
 // ---------- board flattening + shot-text assembly ----------
 
@@ -531,6 +563,20 @@ export const shotPayload = (entry, project, imgSrc) => {
            hasInput: (imgs.length + vids.length) > 0 };
 };
 
+// ---------- the card's render body: THE priced payload, as sent (spend review S3) ----------
+// The card's Render used to re-list the payload's fields one by one and dropped is_private:
+// a Private shot was priced and snapshotted as Private and sent on the Normal channel. The
+// body is now the priced payload object itself -- every key but the client-only `hasInput` --
+// plus the Loom's own keys, which the server pops before anything is priced or sent. A field
+// added to shotPayload later reaches the POST without anyone remembering to list it.
+export const shotSendBody = (payload, ids) => {
+  const { hasInput, ...sent } = payload || {};   // eslint-disable-line no-unused-vars
+  const x = ids || {};
+  return { ...sent, origin: "loom-shot",
+    loom_target: { board_id: x.boardId, card_id: x.cardId }, submit_id: x.submitId,
+    ...(x.expectFree ? { expect_free: true } : {}) };
+};
+
 // ---------- cost-to-finish pricing (shared by the toolbar's standing estimate and
 // batchGenerate's own price-confirm dialog) ----------
 
@@ -686,6 +732,37 @@ export const costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pend
   `Cost to finish: ${free} free-card, ${paid} paid (≈${credits.toLocaleString()} credits), ` +
   `${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
 
+/* ---------- the Generate panel's balance line (desktop and phone) ----------
+   Owner walk 2026-09-30: after two paid renders the panel still read "2151263 credits · 9
+   cards" -- the balance from when the Loom opened, unformatted -- while the gallery header read
+   2,079,763. Two causes, two helpers. */
+
+/** The line's three pieces, grouped the way the gallery header groups its credits
+ *  (SeparatorBar: Number(credits).toLocaleString()). `claim` is "" when nothing is claimable. */
+export const balanceLine = (acct) => {
+  const a = acct || {};
+  const n = Number(a.cards) || 0;
+  return {
+    credits: a.credits == null ? "—" : Number(a.credits).toLocaleString(),
+    cards: n.toLocaleString() + " card" + (n === 1 ? "" : "s"),
+    claim: a.claim_credits ? "+" + Number(a.claim_credits).toLocaleString() + " claimable" : "",
+  };
+};
+
+/** WHEN THE LINE RE-READS THE ACCOUNT: a key over the board's generation states (genState,
+ *  genImgState, ...) that changes exactly when a spend lands -- a render or generation is out
+ *  (accepted: PixAI has charged it) or has finished (done, with its picture). A task moving
+ *  between its waiting tiers (running / slow / stale / paused) and every message change leave
+ *  it alone, so an hour-long render is one read when it goes out and one when it lands. */
+const SPEND_OUT = { running: 1, slow: 1, stale: 1, paused: 1 };
+export const spendLandedKey = (...maps) => maps.map((m, i) => Object.keys(m || {}).sort()
+  .map((id) => {
+    const s = m[id] || {};
+    if (s.phase === "done") return i + ":" + id + ":done:" + (s.mid == null ? "" : String(s.mid));
+    return SPEND_OUT[s.phase] ? i + ":" + id + ":out" : "";
+  })
+  .filter(Boolean).join(",")).join("|");
+
 /* ---------- per-project spend ledger: what this project ALREADY spent ----------
    The historical sibling of the cost-to-finish pill above. That one is a QUOTE -- it asks
    /api/price what the unrendered shots would cost. This one is a RECORD: every finished
@@ -733,11 +810,12 @@ export const collectSpendMids = (project) => {
     const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
     ((act || {}).cards || []).forEach((c) => {
       if (!c) return;
-      if (c.imported) { if (c.resultMid) imported++; return; }
-      const own = [];
-      if (c.resultMid) own.push(String(c.resultMid));
-      (c.attempts || []).forEach((a) => { if (a && a.media_id) own.push(String(a.media_id)); });
-      own.forEach((m) => { if (!seen[m]) { seen[m] = true; bucket.mids.push(m); } });
+      // Session P: every take is a paid render unless it is borrowed footage, so the walk is
+      // per TAKE now (spendMidsOf, loom-takes-core.js). An old board derives one take from
+      // resultMid, so it counts exactly as it always did.
+      const own = spendMidsOf(c);
+      imported += own.imported;
+      own.mids.forEach((m) => { if (!seen[m]) { seen[m] = true; bucket.mids.push(m); } });
     });
     byAct.push(bucket);
   });
@@ -903,12 +981,51 @@ export const spendTooltip = (s = {}) => {
 // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
 export const durOf = (c) => Number(c.actualDur || c.duration) || 0;
 
+// The reel spans the cut (The Loom.dc.html:1009, each segment `flex: dur`): `scale` is the cut's
+// own length, so the shots always fill the strip however short the cut is. It used to be
+// max(total, project.target) -- a 480 s default target drew a single 6 s shot as a 1% sliver on
+// an empty strip, with no control anywhere to change the target. `over` still reads the target
+// for anything that wants it.
 export const reelStats = (entries, target) => {
   const total = entries.reduce((s, x) => s + durOf(x.c), 0);
-  const scale = Math.max(total, target) || 1;
+  const scale = total || 1;
   const over = total - target;
   return { total, scale, over };
 };
+
+// ---------- the timeline drawer's heights (The Loom.dc.html:1001, Loom Handoff P3/P9) ----------
+//
+// Three states, cycled by a click on the grip: hidden 0, slim 86 (the reel and its label line),
+// full. The design's full view is 372 px (a 300 px preview over the slim strip); Session P adds
+// the music bed zone and the continuity ribbon under the reel, and no page draws all of that
+// together. The fit rule: the full drawer is min(designFull, room - boardMin), where `room` is
+// the window height below the drawer's top edge, so the board always keeps boardMin px in view.
+// The preview shrinks first (300 down to 150); past that the drawer's own body scrolls, never the
+// page. A tiny window floors the drawer at the slim strip plus one more reel's height.
+export const TL_SLIM = 86;
+export const TL_PREVIEW_MAX = 300;
+export const TL_PREVIEW_MIN = 150;
+export const TL_BOARD_MIN = 240;
+export const TL_REEL = 44;
+
+export const timelineFit = (room, designFull) => {
+  const floor = TL_SLIM + TL_REEL;
+  const under = designFull - TL_PREVIEW_MAX;          // everything drawn under the preview
+  const r = Number(room);
+  const full = Number.isFinite(r) && r > 0
+    ? Math.max(floor, Math.min(designFull, Math.floor(r - TL_BOARD_MIN)))
+    : designFull;
+  const preview = Math.max(TL_PREVIEW_MIN, Math.min(TL_PREVIEW_MAX, full - under));
+  return { full, preview, scrolls: preview + under > full };
+};
+
+// The drawer's height for a state.
+export const timelineHeight = (state, fit) =>
+  state === "hidden" ? 0 : state === "full" ? fit.full : TL_SLIM;
+
+// The grip's click: hidden -> slim -> full -> hidden (The Loom.dc.html:1002).
+export const nextTimelineState = (state) =>
+  state === "hidden" ? "slim" : state === "slim" ? "full" : "hidden";
 
 // ---------- full-bundle export: naming what did NOT travel (M24) ----------
 //
@@ -938,6 +1055,11 @@ export const mediaRefIndex = (project) => {
       const title = (c.title || "").trim();
       const code = `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
       if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+      // Session P: every take's clip travels in the bundle (the server walks the same list).
+      (Array.isArray(c.takes) ? c.takes : []).forEach((t) => {
+        const m = t && t.mid ? String(t.mid) : "";
+        if (m && m !== String(c.resultMid || "")) note(m, `${code} (take ${t.n})`);
+      });
       ["openFrame", "closeFrame"].forEach((slot) => {
         const f = c[slot] || {};
         if (f.mediaId) note(f.mediaId, `${code} (${slot})`);
@@ -947,6 +1069,10 @@ export const mediaRefIndex = (project) => {
   ((project || {}).assets || []).forEach((a) => {
     if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
   });
+  // Session P (P3): the music bed travels too (beds/<file> in the zip); the server names a
+  // missing one "music bed", and so does this.
+  const bed = (project || {}).bed;
+  if (bed && bed.file) note(bed.file, "music bed");
   return ids;
 };
 

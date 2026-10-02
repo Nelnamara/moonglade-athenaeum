@@ -89,7 +89,7 @@ def test_the_live_config_drives_list_price_default_and_image_rule(monkeypatch):
     assert core.training_price_for_version("900") == 90000
     assert core.training_price_for_version("800") == 30000
     assert core.training_price_for_version(T3) is None          # not on the live list
-    assert core.default_training_base() == "800"                # the first SDXL row
+    assert core.default_training_base() == "900"                # the Recommended DiT.3 row
     groups = core.list_trainable_base_models()
     assert [g["label"] for g in groups] == ["DiT.3", "SDXL"]    # unlabelled arch left out
     assert cfg["image_constraints"]["minWidth"] == 256.0
@@ -121,25 +121,52 @@ def test_the_config_reader_is_the_one_blocked_helper():
 
 # ------------------------------------------------------------ the default base
 
-def test_the_default_base_is_the_first_sdxl_row_never_the_first_groups_first():
-    assert core.default_training_base() == ILLUSTRIOUS
+def test_the_default_base_is_the_recommended_tsubaki3():
+    """Session J decision 6a (DECISIONS 2026-09-28) and PixAI's own basic page since
+    2026-09-27: the DiT.3 tab is Recommended, first and selected. This replaces the
+    SCOPE_2026-09-26 E7 rule (the first SDXL row) that avoided Tsubaki.3 for its price; the
+    price now sits on the review footer before Start, and a paid start still needs its amount
+    ticked (test_the_acknowledged_amount_must_be_this_runs_price)."""
+    assert core.default_training_base() == T3
     groups = core.list_trainable_base_models()
-    assert groups[0]["models"][0]["version_id"] == T3       # what the old rule would pick
+    assert groups[0]["label"] == "DiT.3" and groups[0]["recommended"] is True
+    assert [g["recommended"] for g in groups[1:]] == [False] * (len(groups) - 1)
 
 
-def test_with_no_sdxl_row_the_default_is_the_first_row(monkeypatch):
-    live = {"models": [m for m in _LIVE["models"] if m["modelType"] != "SDXL_MODEL"]}
+def test_with_no_dit3_row_the_default_falls_back_to_sdxl_then_the_first(monkeypatch):
+    live = {"models": [m for m in _LIVE["models"] if m["modelType"] != "MMDIT26B_MODEL"]}
     _live_config(monkeypatch, {"trainLoraModels": live})
-    assert core.default_training_base() == "900"
+    assert core.default_training_base() == "800"                 # the first SDXL row
+    core._config_cache.clear()
+    live2 = {"models": [
+        {"versionId": "600", "modelId": "601", "modelName": "Old DiT", "modelType": "DIT7_MODEL"},
+        {"versionId": "700", "modelType": "SOMETHING_NEW_MODEL", "modelName": "Unlabelled"}]}
+    _live_config(monkeypatch, {"trainLoraModels": live2})
+    assert core.default_training_base() == "600"                 # the first offered row
+
+
+# Session J moved the desktop panel's state and calls out of TrainOverlay.jsx into
+# components/train/useTraining.js (the hook both new screens share); the phone keeps its own.
+_DESKTOP_TRAIN = ("train", "useTraining.js")
+
+
+def _panel_src(name):
+    parts = name if isinstance(name, tuple) else (name,)
+    return (ROOT / "gallery" / "src" / "components").joinpath(*parts).read_text(encoding="utf-8")
 
 
 def test_the_train_panels_take_the_servers_default_base():
-    """Source guard: TrainOverlay and TrainMobile pre-select the server's
+    """Source guard: the desktop Basic wizard and TrainMobile pre-select the server's
     default_version_id and no longer the first group's first model -- with Tsubaki.3 sorting
-    first, that rule would pre-select the 100,000-credit base."""
-    for name in ("TrainOverlay.jsx", "TrainMobile.jsx"):
-        src = (ROOT / "gallery" / "src" / "components" / name).read_text(encoding="utf-8")
-        assert "defaultBase(gs, d.default_version_id" in src, name
+    first, that rule would pre-select the 100,000-credit base. Since Session J the phone draws
+    the SAME Basic state as the desktop (useBasicTraining in train/useTraining.js), so the
+    guard follows it there and pins that the phone takes it rather than a copy of its own."""
+    desk = _panel_src(_DESKTOP_TRAIN)
+    assert "defaultBase(setup.cfg.groups || [], setup.cfg.default_version_id" in desk
+    phone = _panel_src("TrainMobile.jsx")
+    assert "useBasicTraining(setup, csrf)" in phone
+    assert "function defaultBase" not in phone and "defaultBase(" not in phone
+    for name, src in (("desktop", desk), ("TrainMobile.jsx", phone)):
         assert "setBaseModel(gs[0].models[0].version_id)" not in src, name
         assert "CANNOT quote" not in src and "check the price on PixAI" not in src, name
 
@@ -148,7 +175,7 @@ def test_the_models_route_names_the_default_and_offers_tsubaki3(tmp_path, monkey
     save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.png")])
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     d = login_test_client(create_app(tmp_path)).get("/api/train/models").get_json()
-    assert d["default_version_id"] == ILLUSTRIOUS
+    assert d["default_version_id"] == T3
     dit3 = next(g for g in d["groups"] if g["label"] == "DiT.3")
     assert dit3["models"][0]["version_id"] == T3 and dit3["price"] == 100000
     assert d["pricing"]["MMDIT26B_MODEL"]["price"] == 100000
@@ -474,24 +501,29 @@ def test_the_acknowledged_amount_must_be_this_runs_price(tmp_path, monkeypatch):
     assert r.status_code == 409 and "nothing was spent" in r.get_json()["error"].lower()
     assert "25,000" in r.get_json()["error"] and "100,000" in r.get_json()["error"]
     assert not [c for c in calls if c[0] == "submit"]
-    # the amount that IS the price goes through; so does a bare true (no amount to name)
+    # the amount that IS the price goes through
     assert post(dict(_BODY, confirm=True, accept_credit_cost=25000)).get_json()["submitted"]
-    assert post(dict(_BODY, confirm=True, accept_credit_cost=True)).get_json()["submitted"]
-    # a bool is never read as an amount (True == 1 in Python)
-    assert len([c for c in calls if c[0] == "submit"]) == 2
+    # a bare true is refused while there IS a number to name (spend review 2026-09-28,
+    # finding 6: it would skip exactly this check); a bool is never read as an amount either
+    r = post(dict(_BODY, title="Another run", confirm=True, accept_credit_cost=True))
+    assert r.status_code == 409 and "submitted" not in r.get_json()
+    assert len([c for c in calls if c[0] == "submit"]) == 1
 
 
 def test_the_panels_send_the_amount_and_drop_a_stale_quote():
-    """Source guard: both panels send acceptCostField (the amount), and the desktop panel --
-    whose base chips stay live under the confirm -- clears the quote on any form change."""
-    for name in ("TrainOverlay.jsx", "TrainMobile.jsx"):
-        src = (ROOT / "gallery" / "src" / "components" / name).read_text(encoding="utf-8")
-        assert "...acceptCostField(ask, acceptCost)" in src, name
-        assert "accept_credit_cost: acceptCost" not in src, name
-    overlay = (ROOT / "gallery" / "src" / "components" / "TrainOverlay.jsx").read_text(
-        encoding="utf-8")
-    assert re.search(r"useEffect\(\(\) => \{ setAsk\(null\); setAcceptCost\(false\); \},\s*"
-                     r"\[baseModel, archIdx, picked, trigger, name, category\]\);", overlay)
+    """Source guard: both panels send acceptCostField (the amount), and the Basic state --
+    whose base chips stay live under the confirm -- clears the quote on any form change. The
+    phone confirms through the same useBasicTraining().confirm as the desktop (Session J), so
+    it can send nothing of its own: no submit call and no acknowledgement in its file."""
+    phone = _panel_src("TrainMobile.jsx")
+    assert "onClick={b.confirm}" in phone
+    assert "/api/train/submit" not in phone and "accept_credit_cost" not in phone
+    desk = _panel_src(_DESKTOP_TRAIN)
+    assert "...acceptCostField(ask, accepted)" in desk
+    # never the tick itself as the acknowledgement (the retry sends `accepted ? price : false`)
+    assert not re.search(r"accept_credit_cost: accepted\b(?!\s*\?)", desk)
+    assert re.search(r"useEffect\(\(\) => \{ setAsk\(null\); setAccepted\(false\); \},\s*"
+                     r"\[base, tab, items, trigger, name, goal\]\);", desk)
 
 
 def test_a_card_of_unknown_balance_is_not_free(tmp_path, monkeypatch):

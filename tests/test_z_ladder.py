@@ -64,6 +64,16 @@ def z():
         "ks_host":       _z("styles/command-palette.css", ".mgks-host"),
         "ct_sub":        _z("styles/myart-contests.css", ".mgct-subscrim"),
         "ct_sub_host":   _z("styles/myart-contests.css", ".mgct-subhost"),
+        "pal_c_scrim":   _z("styles/color-palette.css", ".cpal-scrim"),
+        "pal_c_host":    _z("styles/color-palette.css", ".cpal-host"),
+        "recipes_scrim": _z("styles/recipes.css", ".rcp-scrim"),
+        "recipes_host":  _z("styles/recipes.css", ".rcp-host"),
+        "recipes_phone": _z("styles/recipes.css", ".rcp-m "),
+        "gallery_picker": _z("styles/gallery-picker.css", ".mg-gallery-picker"),
+        # Session N (wave 5): the collections manager and the curation undo toast
+        "cu_scrim":      _z("styles/curation.css", ".mgcu-scrim"),
+        "cu_mgr":        _z("styles/curation.css", ".mgcu-mgr "),
+        "cu_toast":      _z("styles/curation.css", ".mgcu-toast "),
     }
 
 
@@ -100,6 +110,30 @@ def test_each_scrim_sits_under_its_own_content(z):
     # ...and the contest picker/confirm pair, which joined the same class of hazard the
     # day it was built: both open ON TOP of the Contests (or My Art) slab.
     assert z["ct_sub_host"] > z["ct_sub"]
+    # ...and the Generate drawer's colour palette (lane w2-small, 2026-09-28): it opens over the
+    # dock (7) and the phone's Advanced screen (308), above the phone's model sheet (345).
+    assert z["pal_c_host"] > z["pal_c_scrim"] > 345
+
+
+def test_the_collections_manager_and_its_undo_toast_keep_their_rungs(z):
+    """Session N: the manager takes the free 418/419 between the recipe picker and the upscale
+    panel (it opens over the gallery, never from inside a layer, so it needs no more than the
+    band's floor above the lightbox); its scrim sits under its own slab. The undo toast is a
+    rating pressed INSIDE any layer's answer -- the lightbox, the record -- so it must clear
+    every sub-overlay a rating can be pressed under, and stay below the power modal."""
+    assert z["cu_mgr"] > z["cu_scrim"], "the manager's scrim would eat clicks meant for its own rows"
+    assert z["cu_scrim"] > z["lbx"] and z["cu_scrim"] > z["recipes_host"]
+    assert z["cu_mgr"] < z["upscale"]
+    assert z["cu_toast"] > z["ct_sub_host"] > z["cp_sub_host"], "a rating's Undo hid under a sub-overlay"
+    assert z["cu_toast"] > z["cu_mgr"] and z["cu_toast"] < z["cp_pwr"]
+
+
+def test_the_colour_palette_stays_under_the_picker_it_opens():
+    """"Extract from image" -> "From the gallery" opens the shared picker ON TOP of the palette
+    window; flip that pair and the picker paints behind the window that asked for it."""
+    zz = {"host": _z("styles/color-palette.css", ".cpal-host"),
+          "picker": _z("styles/gallery-picker.css", ".mg-gallery-picker")}
+    assert zz["picker"] > zz["host"], zz
 
 
 def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
@@ -128,6 +162,19 @@ def test_command_palette_band_clears_every_layer_it_opens_over(z):
     assert z["ks_scrim"] > z["pal_host"], "the cheat-sheet opens behind the palette"
 
 
+def test_the_recipes_overlay_clears_the_lightbox_and_sits_under_its_own_pickers(z):
+    """The recipe picker, market and creator (lane w2-recipes). ⁂ Make a recipe opens the
+    creator FROM the Lightbox (desktop and phone), so the whole band must clear .lbx and
+    the shared slab it can also open over; the creator asks the gallery picker for
+    pictures, and the palette opens from any layer, so both stay above it. The scrim/host
+    pair moves together."""
+    assert z["recipes_scrim"] > z["lbx"] and z["recipes_scrim"] > z["mgv_host"]
+    assert z["recipes_host"] > z["recipes_scrim"]
+    assert z["recipes_phone"] == z["recipes_host"]
+    assert z["gallery_picker"] > z["recipes_host"], "the creator's picture picker opens behind it"
+    assert z["pal_scrim"] > z["recipes_host"], "the palette opens under the recipes overlay"
+
+
 def test_actions_menu_can_never_outgrow_the_viewport():
     """#40's belt half: .mgl-menu carries a viewport-bounded max-height + its own scroll,
     so the useLayoutEffect clamp in ActionsMenu.jsx always has a menu that FITS to place.
@@ -137,3 +184,45 @@ def test_actions_menu_can_never_outgrow_the_viewport():
     assert m, "no .mgl-menu rule"
     assert "max-height" in m.group(1), ".mgl-menu lost its viewport max-height (issue #40)"
     assert re.search(r"overflow-y:\s*auto", m.group(1)), ".mgl-menu lost its internal scroll"
+
+
+def test_the_guide_and_help_sit_over_every_surface_and_under_the_palette(z):
+    """Session I (lane w3-help, help.css's THE RUNGS): the first-run guide's blocker, ring and
+    cards stand over every surface they point at -- the Control Panel and its subs top out at
+    the claim modal -- Help stands over the guide it can replay, About opens from Help's own
+    page and the what's-new sheet opens About; the command palette, which closes before
+    anything it opens, stays above all of them."""
+    h = {
+        "block": _z("styles/help.css", ".mgguide-block"),
+        "ring": _z("styles/help.css", ".mgguide-ring"),
+        "mark": _z("styles/help.css", ".mgguide-mark"),
+        "welcome": _z("styles/help.css", ".mgguide-welcome"),
+        "help_scrim": _z("styles/help.css", ".mghelp-scrim"),
+        "help_host": _z("styles/help.css", ".mghelp-host"),
+        "ab_scrim": _z("styles/help.css", ".mgab-scrim"),
+        "ab_host": _z("styles/help.css", ".mgab-host"),
+        "wn_scrim": _z("styles/help.css", ".mgwn-scrim"),
+        "wn_host": _z("styles/help.css", ".mgwn-host"),
+    }
+    assert h["block"] > z["claim_host"] and h["block"] > z["cp_pwr_host"], h
+    assert h["block"] > z["recipes_host"] and h["block"] > z["mgv_host"], h
+    assert h["ring"] > h["block"] and h["mark"] > h["ring"] and h["welcome"] == h["mark"], h
+    assert h["help_scrim"] > h["mark"] and h["help_host"] > h["help_scrim"], h
+    assert h["ab_scrim"] > h["help_host"] and h["ab_host"] > h["ab_scrim"], h
+    assert h["wn_scrim"] > h["ab_host"] and h["wn_host"] > h["wn_scrim"], h
+    assert z["pal_scrim"] > h["wn_host"], "the palette opens under Help's layers"
+    assert all(300 <= v <= 500 for v in h.values()), "a Help layer left the overlay band"
+
+
+def test_train_a_lora_phone_sheets_open_over_their_screen(z):
+    """Session J (lane w3-train, train-mobile.css): Train a LoRA's phone sheets are portalled to
+    .glm-stage, so they need a rung above the pushed screen they open from (.glm-screen 308),
+    scrim under slab, and stay under the full-screen viewers (315) and the Create tab's model
+    sheet (345)."""
+    screen = _z("styles/gallery-mobile.css", ".glm-screen ")
+    scrim = _z("styles/train-mobile.css", ".glm-scrim.trm-sheet")
+    sheet = _z("styles/train-mobile.css", ".glm-sheet.trm-sheet")
+    viewer = _z("styles/image-details-mobile.css", ".idm-root")
+    assert sheet > scrim > screen, (screen, scrim, sheet)
+    assert sheet < viewer, "a Train sheet would cover the full-screen viewer"
+    assert all(300 <= v <= 500 for v in (screen, scrim, sheet)), "a phone layer left the band"

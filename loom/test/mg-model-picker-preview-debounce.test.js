@@ -30,3 +30,22 @@ test("ModelPicker card hover is debounced, not instant", () => {
   assert.match(src, /onMouseLeave=\{hidePreview\}/,
     "leaving a card must cancel any pending preview, so a fast scan can't fire a stale popup");
 });
+
+// Owner walk 2026-09-29 (screenshot 09): hovering a model card 3 s+ on the desktop showed
+// nothing. The preview is position:fixed, but the dock's model palette is transformed
+// (.mgx-dock-host .mfly { transform: translateX(-50%); overflow: hidden }), which makes the
+// palette the containing block for fixed descendants -- the card was placed against the
+// palette and clipped by it. Portaled to <body> it draws at viewport coordinates, above the
+// palette (z 500 over 335).
+test("the hover preview is portaled to <body>, out of the transformed, clipping dock palette", () => {
+  assert.match(src, /import \{ createPortal \} from "react-dom";/);
+  assert.match(src, /createPortal\(\s*<div className="model-picker" style=\{\{ display: "contents" \}\}>\s*<div className=\{"mg-preview"/,
+    "the preview renders through a portal, inside a box-less .model-picker wrapper its CSS still matches");
+  assert.match(src, /<\/div>, document\.body\) : null\}/, "the portal target is document.body");
+  const dockCss = readFileSync(path.join(__dirname, "../../gallery/src/styles/dock.css"), "utf8");
+  assert.match(dockCss, /\.mgx-dock-host \.mfly \{[^}]*transform: translateX\(-50%\)/,
+    "the palette really is transformed -- the reason the preview cannot live inside it");
+  const pickerCss = readFileSync(path.join(__dirname, "../../gallery/src/styles/model-picker.css"), "utf8");
+  assert.match(pickerCss, /\.model-picker \.mg-preview\{position:fixed;z-index:500;/,
+    "the preview stays fixed and above the palette (335)");
+});

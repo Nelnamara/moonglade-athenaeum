@@ -268,3 +268,58 @@ def test_an_unpinned_rebuild_is_new_bytes_and_fails_closed_without_a_url(monkeyp
     assert "no --url was given" in str(e.value)
     assert "--built-at" in str(e.value)              # the message names the way out
     assert ma.read_manifest() == first              # prior manifest untouched
+
+
+# ---------------------------------------------------------------------------
+# The carried login set (Session I decision 4b): the pack build writes the app's own copy
+# of the login mascot and banner, so the sign-in page looks finished before a pack exists.
+# ---------------------------------------------------------------------------
+def _png_bytes(size, rgba=(120, 90, 180, 255)):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGBA", size, rgba).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _decode_uri(uri):
+    import base64
+    import io
+    from PIL import Image
+    assert uri.startswith("data:image/webp;base64,")
+    return Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
+
+
+def _exports(js):
+    return dict(re.findall(r'export const (\w+) = "([^"]+)";', js))
+
+
+def test_the_build_writes_the_carried_login_set_beside_the_container(monkeypatch, tmp_path):
+    _seed_branding({"banner.png": PNG_1PX,
+                    g._role_rel("system", "login_nel.png"): _png_bytes((488, 480)),
+                    g._flat_default_rel("banner_login"): _png_bytes((1920, 480))})
+    out_js = tmp_path / "carried" / "loginArt.js"
+    _run(monkeypatch, "--carry-to", str(out_js))
+    ex = _exports(out_js.read_text(encoding="utf-8"))
+    nel, ban = _decode_uri(ex["LOGIN_NEL"]), _decode_uri(ex["LOGIN_BANNER"])
+    assert (nel.format, nel.size[0]) == ("WEBP", bc.CARRIED_NEL_W)
+    assert (ban.format, ban.size) == ("WEBP", (bc.CARRIED_BANNER_W, bc.CARRIED_BANNER_H))
+
+
+def test_a_tree_without_login_art_leaves_the_carried_set_alone(monkeypatch, tmp_path):
+    _seed_branding({"banner.png": PNG_1PX})
+    out_js = tmp_path / "loginArt.js"
+    _run(monkeypatch, "--carry-to", str(out_js))
+    assert not out_js.exists()
+    assert bc.write_carried_login_art(g.branding_root(), out_js) is None
+
+
+def test_the_committed_carried_set_is_small_and_decodes():
+    """The handoff's budget is about 120 KB for the two together, in the app bundle."""
+    js = bc.carried_login_js_path().read_text(encoding="utf-8")
+    ex = _exports(js)
+    assert set(ex) == {"LOGIN_NEL", "LOGIN_BANNER"}
+    raw = sum(len(v.split(",", 1)[1]) * 3 // 4 for v in ex.values())
+    assert raw <= 130 * 1024, "carried login set is %d bytes" % raw
+    assert _decode_uri(ex["LOGIN_NEL"]).size[0] == bc.CARRIED_NEL_W
+    assert _decode_uri(ex["LOGIN_BANNER"]).size == (bc.CARRIED_BANNER_W, bc.CARRIED_BANNER_H)

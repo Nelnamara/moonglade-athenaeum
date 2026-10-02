@@ -16,13 +16,35 @@ export default function ToastHost() {
     <div id="mg-toasts" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={"mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "")}>
-          <span className="mt-ic">{t.icon}</span>
+          {t.avatar ? (
+            <span className="mt-avatar" aria-hidden="true"
+              style={{ backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }} />
+          ) : (
+            <span className="mt-ic">{t.icon}</span>
+          )}
           <div className="mt-main">
-            <div className="mt-title">{t.title}</div>
+            <div className="mt-title">{t.title}{t.code ? <> <b className="mt-code">{t.code}</b></> : null}</div>
             {t.msg ? <div className="mt-msg">{t.msg}</div> : null}
+            {t.actions && t.actions.length ? (
+              <div className="mt-acts">
+                {t.actions.map((a, i) => (
+                  <button key={i} type="button" className={"mt-act" + (a.tone ? " " + a.tone : "")}
+                    onClick={() => { dismiss(t.id); try { a.run(); } catch { /* its own */ } }}>
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {t.foot ? <div className="mt-foot">{t.foot}</div> : null}
           </div>
           {t.thumb ? (
             <span className="mt-thumb" style={{ backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" }} />
+          ) : null}
+          {t.action ? (
+            <button type="button" className="mt-act"
+              onClick={() => { dismiss(t.id); try { t.action.run(); } catch { /* its own */ } }}>
+              {t.action.label}
+            </button>
           ) : null}
           <button className="mt-x" aria-label="Dismiss" onClick={() => dismiss(t.id)}>×</button>
         </div>

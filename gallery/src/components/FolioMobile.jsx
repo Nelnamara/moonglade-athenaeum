@@ -3,9 +3,20 @@ import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } f
 import Icon from "../icons/Icons.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
+import { VeilBanner, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
+import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
+import MoonGauge from "./MoonGauge.jsx";
+import { GAUGE_SIZES, fractionOf } from "../lib/moonGaugeCore.js";
+import { SORTS, progressOf, jumpOf, toGoText, meterLine } from "../folio/completionistCore.js";
+import { canPin } from "../folio/goalCore.js";
+import { VigilChip } from "./GoalChips.jsx";
+import HonorsCardPanel from "../folio/HonorsCardPanel.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
 import "../styles/folio-mobile.css";
+import "../styles/folio-completionist.css";
 
 /* The Folio of Honors -- MOBILE full-page destination. Data/narrator/
    glitch-reveal/replay engine is useFolio.js (gallery/src/hooks/), the
@@ -49,7 +60,7 @@ import "../styles/folio-mobile.css";
       replayToast(), the identical call desktop's AchCard makes -- verified
       live, see build notes) in addition to opening the mock's own static
       detail sheet; the header avatar AND the Nel-strip quote both call the
-      REAL, server-persisted pokeNarrator() (POST /api/ach-event -- the SAME
+      REAL, server-counted pokeNarrator() (POST /api/narrator/poke -- the SAME
       function desktop's header avatar uses, not the mock's decorative tap);
       and a small "Unleash the AI" pill (real, once `triggered`) sits under
       the hero stat line -- the one place in this layout with room for it.
@@ -128,12 +139,23 @@ function subFor(a, earnedAt) {
   return "not yet";
 }
 
+// A bucket's count chip/cell. The Feats bucket says what has been FOUND and never out of what: a
+// total would tell the reader how many secrets are left (Session G, 2a).
+function bucketCt(b, revealed) {
+  if (b.key === "feat") return revealed ? featCountText(b.earned) : "???";
+  return fmt(b.earned) + "/" + fmt(b.total);
+}
+
 /* One achievement/tier row -- shared by the ladder list, Milestones,
-   Masteries and Feats. Locked FEATS render as a separate, non-interactive
-   branch (server already sanitizes a hidden feat's id/name/desc/icon before
-   this ever sees it) -- everything else stays clickable whether earned or
-   locked, matching mkTierRow/mkFlatRow's own onClick (fires either way). */
-function Row({ a, ladderName, onOpen }) {
+   Masteries and Feats. A locked FEAT that is listed at all (a visible one; the
+   hidden ones are never sent -- the phone shows their veil as a banner above the
+   Feats list, not as a row) renders as a separate, non-interactive branch --
+   everything else stays clickable whether earned or locked, matching
+   mkTierRow/mkFlatRow's own onClick (fires either way). An earned feat may be
+   mid-glitch-reveal: `frame` is the reveal's frame for this row's 46 px thumb
+   (folio/maskedFeatsCore.revealFrame), null when it is not revealing, and a
+   "NEW" chip stands until the Folio closes. */
+function Row({ a, ladderName, onOpen, frame }) {
   const isFeat = displayBucket(a) === "feat";   // meta folds into feats; streak into masteries
   if (isFeat && !a.earned) {
     return (
@@ -158,19 +180,24 @@ function Row({ a, ladderName, onOpen }) {
     : a.bucket === "milestone" ? "milestone" : "mastery";
   return (
     <button type="button" className={"fm-row " + tierClass + (a.earned ? " earned" : " locked")}
+      data-feat-id={isFeat && a.earned ? a.id : undefined}
       onClick={() => onOpen(a)}>
       <span className="fm-row-gem" />
       <div className="fm-row-thumbwrap">
         <img src={badgeSrc(a.id)} alt="" loading="lazy" draggable={false}
           onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
         {!a.earned && <div className="fm-row-lock">🔒</div>}
+        <RevealLayers id={a.id} frame={frame} />
       </div>
       <div className="fm-row-textcol">
         <div className="fm-row-name">{a.name}</div>
         <div className="fm-row-meta">{meta}</div>
       </div>
       {isFeat ? (
-        <div className="fm-row-rightcol center"><span className="fm-row-glyph">✓</span></div>
+        <div className="fm-row-rightcol center">
+          {frame && frame.ribbon && <span className="mgfm-new">NEW</span>}
+          <span className="fm-row-glyph">✓</span>
+        </div>
       ) : (
         <div className="fm-row-rightcol">
           <span className="fm-row-pill">{a.tier}</span>
@@ -181,10 +208,55 @@ function Row({ a, ladderName, onOpen }) {
   );
 }
 
-export default function FolioMobile({ onClose }) {
+/* "N to go" on the phone (Session O, O1): the moon on the true fraction and the count, with a 44 px
+   jump chip and a 44 px pin. Only for an honor progressOf answers for -- never a feat, never an
+   earned honor, never an unmeasured metric -- so the line is simply absent for those. */
+function ToGo({ a, onJump, pin, onPin, sheet = false }) {
+  const prog = progressOf(a);
+  if (!prog) return null;
+  const jump = jumpOf(a);
+  const pinned = pin === a.id;
+  return (
+    <div className={"fm-togo" + (sheet ? " in-sheet" : "")}>
+      <MoonGauge fraction={prog.fraction} size={GAUGE_SIZES.phone} bar={false} label={a.name + ": " + toGoText(prog)} />
+      <span className="fm-togo-n">{toGoText(prog)}</span>
+      <i className="fm-togo-fill" />
+      {canPin(a) && (
+        <button type="button" className={"fm-togo-btn pin" + (pinned ? " on" : "")} aria-pressed={pinned}
+          aria-label={(pinned ? "Unpin " : "Pin ") + a.name}
+          onClick={() => onPin(a)}>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9.5 1.8l4.7 4.7-2 .6-2.3 2.3.4 3-1 1-3-3-3.6 3.6M6.8 5.7l-.6-1.9 1.6-1.6" />
+          </svg>
+        </button>
+      )}
+      {jump && onJump && (
+        <button type="button" className="fm-togo-btn jump" aria-label={"Open " + jump.label}
+          onClick={() => onJump(jump.to)}>{"\u2192"} {jump.label}</button>
+      )}
+    </div>
+  );
+}
+
+/* A row with its "N to go" line under it. The line sits OUTSIDE the row's own button (a button
+   cannot hold buttons), and the wrapper carries the ring the pinned-goal chip asks for. */
+function HonorRow({ a, ladderName, onOpen, onJump, pin, onPin, ringId }) {
+  const prog = progressOf(a);
+  return (
+    <div className={"fm-rowwrap" + (ringId === a.id ? " ringed" : "")}
+      data-honor-id={prog ? a.id : undefined}>
+      <Row a={a} ladderName={ladderName} onOpen={onOpen} />
+      {prog && <ToGo a={a} onJump={onJump} pin={pin} onPin={onPin} />}
+    </div>
+  );
+}
+
+export default function FolioMobile({ onClose, onJump }) {
   const folio = useFolio();
   const {
     data, err, vm, earnedAt,
+    veil, frameFor, veilWaiting, foundCount,
     tab, setTab,
     bucketFilter, toggleBucket,
     activeLadder, setActiveLadderId,
@@ -192,7 +264,18 @@ export default function FolioMobile({ onClose }) {
     triggered, unleashed, toggleUnleash,
     reveal,
     pokeNarrator, replayToast,
+    relics,
+    meter, sortKey, chooseSort, sortedHonors,
+    vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
   } = folio;
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortClosing, setSortClosing] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
+  const [cardClosing, setCardClosing] = useState(false);
+  const sorted = sortKey !== "default";
+  const sortLabel = (SORTS.find((x) => x.key === sortKey) || SORTS[0]).label;
+  const closeSort = () => { setSortClosing(true); setTimeout(() => { setSortOpen(false); setSortClosing(false); }, 280); };
+  const closeCard = () => { setCardClosing(true); setTimeout(() => { setCardOpen(false); setCardClosing(false); }, 280); };
 
   const [closing, setClosing] = useState(false);
   const [tierIdx, setTierIdx] = useState(0);
@@ -201,11 +284,7 @@ export default function FolioMobile({ onClose }) {
   const [sheetClosing, setSheetClosing] = useState(false);
   const sheetTimer = useRef(null);
 
-  const [relicsOpen, setRelicsOpen] = useState(false);
-  const [relicsClosing, setRelicsClosing] = useState(false);
-  const relicsTimer = useRef(null);
-
-  useEffect(() => () => { clearTimeout(sheetTimer.current); clearTimeout(relicsTimer.current); }, []);
+  useEffect(() => () => { clearTimeout(sheetTimer.current); }, []);
 
   // Tap an earned/locked (non-feat-locked) row or a Recently-entered card:
   // open the static detail sheet (design's own interaction) AND, for earned
@@ -220,12 +299,6 @@ export default function FolioMobile({ onClose }) {
     clearTimeout(sheetTimer.current);
     sheetTimer.current = setTimeout(() => { setSheetId(null); setSheetClosing(false); }, 280);
   }
-  function openRelics() { setRelicsOpen(true); }
-  function closeRelics() {
-    setRelicsClosing(true);
-    clearTimeout(relicsTimer.current);
-    relicsTimer.current = setTimeout(() => { setRelicsOpen(false); setRelicsClosing(false); }, 280);
-  }
 
   // Plays the exit fade before the real unmount, same overlay law every big
   // surface in this codebase follows (ImageDetailsMobile.jsx's own close()).
@@ -238,6 +311,10 @@ export default function FolioMobile({ onClose }) {
     setTimeout(onClose, 200);
   }
 
+  const ladderNameOf = (a) => {
+    const l = vm && a.bucket === "ladder" ? vm.ladders.find((x) => x.id === a.track) : null;
+    return l ? l.name : "";
+  };
   const sheetAch = sheetId && vm ? vm.achievements.find((x) => x.id === sheetId) : null;
   const sheetIsFeat = sheetAch ? displayBucket(sheetAch) === "feat" : false;
   const sheetPts = sheetAch ? (sheetAch.points ? "+" + sheetAch.points + " pts" : (sheetIsFeat ? "for the glory" : "")) : "";
@@ -250,9 +327,9 @@ export default function FolioMobile({ onClose }) {
   const nextTier = () => setTierIdx(tiersLen ? (tierIdxSafe + 1) % tiersLen : 0);
   const selectLadder = (id) => { setActiveLadderId(id); setTierIdx(0); };
 
-  // Honors-total denominator: only folds the real feat count in once
-  // feats_revealed, matching every other feats-masking spot -- point 5 above.
-  const grandTotal = vm ? vm.totalNonFeat + (data.feats_revealed ? vm.totalFeats : 0) : 0;
+  // The honors total is ladders + milestones + masteries and nothing else (Session O, O2; drift
+  // 110): a feat is never part of a denominator, only "N found" beside it.
+  const grandTotal = vm ? vm.totalNonFeat : 0;
 
   return (
     <div className={"fm-root" + (closing ? " closing" : "")} role="dialog" aria-modal="true" aria-label="The Folio of Honors">
@@ -265,14 +342,18 @@ export default function FolioMobile({ onClose }) {
             platform's. */}
         <div className="fm-titlechip"><Icon name="folio" /> Folio</div>
         <div className="fm-fill" />
-        {/* Poke until it snaps -- 5 real, server-persisted pokes (the SAME
-            /api/ach-event narrator_pokes counter the classic Trophy Hall's
-            Ach.poke() and desktop's own header avatar use) earns "Triggered"
-            and reveals the Unleash pill below, permanently, for good. */}
+        {/* The guide's "?" (Session I decision 2): Help on the Folio's page. */}
+        <HelpButton surface="folio" className="fm-help" />
+        {/* The server counts the pokes (the SAME route desktop's header avatar
+            uses) and answers with a line; the Unleash pill below appears once
+            the feat behind it is earned, and stays. */}
         <button type="button" className="fm-avatar" title="…" onClick={pokeNarrator} aria-label="Poke the narrator">
           <span className="fm-avatar-dot" />
         </button>
       </div>
+
+      {/* The Folio's first-run guide (Session I decision 1), phone layout. */}
+      <GuideHost surface="folio" phone />
 
       {!data && !err && <div className="fm-loading">opening the record…</div>}
       {err && <div className="fm-loading">couldn't load the Folio — {err}</div>}
@@ -287,6 +368,35 @@ export default function FolioMobile({ onClose }) {
               {fmt(data.earned_points)} pts · {fmt(vm.earnedNonFeat)}/{fmt(grandTotal)} honors ·{" "}
               {data.feats_revealed ? fmt(vm.earnedFeats) : "???"} feats
             </div>
+            {/* O2: the completion meter's line, under the header points, with a 14 px moon. Ladders,
+                milestones and masteries only; feats are "N found" beside it, never in a total. */}
+            {meter && (
+              <div className="fm-meter" title="Ladders, milestones and masteries. Feats are never counted in it.">
+                <MoonGauge fraction={fractionOf(meter.earned, meter.total)} size={GAUGE_SIZES.phone} bar={false}
+                  label="Completion" />
+                <span className="fm-meter-pct">{meter.pct}%</span>
+                <span className="fm-meter-line">{meterLine(meter)}</span>
+              </div>
+            )}
+            {/* O5: the Vigil in the Folio header, with the best run; the switch adds it to the row
+                above the tab bar. O6: the Honors card, through the system share sheet. */}
+            {(vigil || cardModel) && (
+              <div className="fm-vigilrow">
+                {vigil && <VigilChip vigil={vigil} />}
+                {vigil && <span className="fm-vigil-best">{vigil.bestText}</span>}
+                <i className="fm-togo-fill" />
+                {cardModel && (
+                  <button type="button" className="fm-cardbtn" onClick={() => setCardOpen(true)}>Honors card</button>
+                )}
+              </div>
+            )}
+            {vigil && (
+              <button type="button" className="fm-switch" role="switch" aria-checked={vigilOn}
+                onClick={() => setVigilOn(!vigilOn)}>
+                Show the Vigil above the tab bar
+                <span className="fm-switch-track"><i /></span>
+              </button>
+            )}
             {triggered && (
               <div className="fm-unleash" onClick={toggleUnleash} title="Toggle the narrator's unfiltered commentary">
                 <span className={"fm-unleash-dot" + (unleashed ? " on" : "")} />
@@ -322,12 +432,12 @@ export default function FolioMobile({ onClose }) {
                 <div className="fm-ledgerbox">
                   {vm.buckets.map((b) => {
                     const masked = b.key === "feat" && !data.feats_revealed;
-                    const pct = b.total ? (b.earned / b.total) * 100 : 0;
+                    const pct = b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0);   // feats have no total to fill toward
                     return (
                       <div className="fm-progrow" key={b.key}>
                         <div className="fm-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
                         <div className="fm-bartrack"><i style={{ width: (masked ? 0 : pct) + "%" }} /></div>
-                        <div className="fm-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                        <div className={"fm-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                       </div>
                     );
                   })}
@@ -343,23 +453,36 @@ export default function FolioMobile({ onClose }) {
                       <span style={{ flex: 1 }} />
                       <span className="fm-reachpts">+{a.points} pts</span>
                     </div>
-                    <div className="fm-bartrack"><i className="reach" style={{ width: (a._ratio * 100) + "%" }} /></div>
+                    <MoonGauge fraction={a._ratio} size={GAUGE_SIZES.phone} className="fm-reach-gauge"
+                      label={a.name + " progress"} />
                   </div>
                 ))}
 
-                <div className="fm-sech"><b>Relics</b><span>from the Control Panel</span></div>
-                <div className="fm-relicnote">tap to see the full list</div>
-                <div className="fm-hscroll" onClick={openRelics} role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") openRelics(); }}>
-                  {vm.relics.map((r) => (
-                    <div className={"fm-relicchip" + (r.earned ? "" : " dim")} key={r.id}>
-                      <div className="fm-relicsw">
-                        {(SKIN_SW[r.id] || []).map((c, i) => <i key={i} style={{ background: c }} />)}
-                      </div>
-                      <div className="fm-relicchip-name">{r.name}</div>
+                <div className="fm-sech"><b>Relics</b><span>earned rewards</span></div>
+                {relics.length === 0
+                  ? <div className="fm-empty">No relics yet — honors award them.</div>
+                  : (
+                    <div className="fm-kinds">
+                      {relics.map((row) => (
+                        <div className="fm-kindrow" key={row.kind} data-kind={row.kind}>
+                          <div className="fm-kind-lab">{row.label} <b>{row.items.length}</b></div>
+                          <div className="fm-kind-tiles">
+                            {row.items.map((it) => (
+                              <div key={it.id} role="img" aria-label={it.name + (it.active ? " (active)" : "")}
+                                className={"fm-tile " + row.kind + (it.active ? " active" : "")}
+                                style={row.kind === "skins"
+                                  ? { background: (SKIN_SW[it.id] || SKIN_SW.moonglade)[0],
+                                    borderColor: (SKIN_SW[it.id] || SKIN_SW.moonglade)[1] } : undefined}>
+                                {row.kind === "marks" && it.png && <img src={it.png} alt="" draggable={false}
+                                  onError={(e) => e.currentTarget.remove()} />}
+                                <span className="fm-tile-nm">{it.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
 
                 <div className="fm-nelstrip">
                   <div className="fm-nelimg" />
@@ -375,18 +498,34 @@ export default function FolioMobile({ onClose }) {
                 <div className="fm-chipsrow">
                   {vm.buckets.map((b) => {
                     const active = bucketFilter === b.key;
-                    const masked = b.key === "feat" && !data.feats_revealed;
                     const label = b.key === "feat" ? "Feats" : b.label.replace(" Ladders", "");
                     return (
                       <button type="button" key={b.key} className={"fm-chip" + (active ? " on" : "")}
                         onClick={() => toggleBucket(b.key)}>
-                        {label} <span className="fm-chip-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</span>
+                        {label} <span className="fm-chip-ct">{bucketCt(b, data.feats_revealed)}</span>
                       </button>
                     );
                   })}
+                  {/* O3: the Sort chip, at the end of the row; it opens a sheet. */}
+                  <button type="button" className={"fm-chip fm-sortchip" + (sorted ? " on" : "")}
+                    onClick={() => setSortOpen(true)} aria-haspopup="dialog">
+                    Sort <span className="fm-chip-ct">{"▾"}</span>
+                  </button>
                 </div>
 
-                {folio.showLadders && vm.ladders.length > 0 && (
+                {sorted && sortedHonors.length > 0 && (
+                  <>
+                    <div className="fm-sech"><b>All honors</b><span>{sortLabel}</span></div>
+                    <div className="fm-listcol">
+                      {sortedHonors.map((a) => (
+                        <HonorRow key={a.id} a={a} ladderName={ladderNameOf(a)} onOpen={openDetail}
+                          onJump={onJump} pin={pin} onPin={pinToggle} ringId={ringId} />
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {!sorted && folio.showLadders && vm.ladders.length > 0 && (
                   <>
                     <div className="fm-hscroll">
                       {/* The FACE, same rule the desktop row now follows (2026-09-04
@@ -449,41 +588,52 @@ export default function FolioMobile({ onClose }) {
                     </div>
                     <div className="fm-listcol">
                       {folio.filteredActiveTiers.map((t) => (
-                        <Row key={t.id} a={t} ladderName={activeLadder ? activeLadder.name : ""} onOpen={openDetail} />
+                        <HonorRow key={t.id} a={t} ladderName={activeLadder ? activeLadder.name : ""} onOpen={openDetail}
+                          onJump={onJump} pin={pin} onPin={pinToggle} ringId={ringId} />
                       ))}
                     </div>
                   </>
                 )}
 
-                {folio.showMilestones && folio.filteredMilestones.length > 0 && (
+                {!sorted && folio.showMilestones && folio.filteredMilestones.length > 0 && (
                   <>
                     <div className="fm-sech"><b>Milestones</b>
                       <span>{vm.buckets.find((b) => b.key === "milestone").earned}/{vm.buckets.find((b) => b.key === "milestone").total}</span>
                     </div>
                     <div className="fm-listcol">
-                      {folio.filteredMilestones.map((a) => <Row key={a.id} a={a} onOpen={openDetail} />)}
+                      {folio.filteredMilestones.map((a) => (
+                        <HonorRow key={a.id} a={a} onOpen={openDetail} onJump={onJump} pin={pin} onPin={pinToggle} ringId={ringId} />
+                      ))}
                     </div>
                   </>
                 )}
 
-                {folio.showMasteries && folio.filteredMasteries.length > 0 && (
+                {!sorted && folio.showMasteries && folio.filteredMasteries.length > 0 && (
                   <>
                     <div className="fm-sech"><b>Masteries</b>
                       <span>{vm.buckets.find((b) => b.key === "mastery").earned}/{vm.buckets.find((b) => b.key === "mastery").total}</span>
                     </div>
                     <div className="fm-listcol">
-                      {folio.filteredMasteries.map((a) => <Row key={a.id} a={a} onOpen={openDetail} />)}
+                      {folio.filteredMasteries.map((a) => (
+                        <HonorRow key={a.id} a={a} onOpen={openDetail} onJump={onJump} pin={pin} onPin={pinToggle} ringId={ringId} />
+                      ))}
                     </div>
                   </>
                 )}
 
                 {folio.showFeats && (
                   <>
+                    {/* The phone's Feats (Masked Feats Handoff, C): the veil banner heads the list --
+                        it IS the veil card, so there is no veil row -- then the earned feats, each
+                        with a 46 px thumb the reveal plays on. All found: the gold line replaces the
+                        banner. The header counts what is found and never out of anything. */}
                     <div className="fm-sech feat"><b>Feats</b>
-                      <span className="fm-count feat">{vm.earnedFeats}/{vm.totalFeats}</span>
+                      <span className="fm-count feat">{foundText(foundCount, veil.allFound)}</span>
                     </div>
+                    {veil.show && <VeilBanner maskUrl={veil.maskUrl} riddle={veil.riddle} waiting={veilWaiting} />}
+                    {veil.allFound && <AllFound phone waiting={veilWaiting} />}
                     <div className="fm-listcol">
-                      {folio.filteredFeats.map((a) => <Row key={a.id} a={a} onOpen={openDetail} />)}
+                      {folio.filteredFeats.map((a) => <Row key={a.id} a={a} onOpen={openDetail} frame={frameFor(a.id)} />)}
                     </div>
                   </>
                 )}
@@ -510,8 +660,8 @@ export default function FolioMobile({ onClose }) {
                     return (
                       <div className="fm-progrow" key={b.key}>
                         <div className="fm-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
-                        <div className="fm-bartrack"><i style={{ width: (masked ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)) + "%" }} /></div>
-                        <div className="fm-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                        <div className="fm-bartrack"><i style={{ width: (masked || b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)) + "%" }} /></div>
+                        <div className={"fm-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                       </div>
                     );
                   })}
@@ -559,31 +709,35 @@ export default function FolioMobile({ onClose }) {
             </div>
             <div className={"fm-sheet-desc" + revealMod(sheetAch, reveal)}>{commentary(sheetAch, reveal)}</div>
             <div className="fm-sheet-sub">{subFor(sheetAch, earnedAt)}</div>
+            <ToGo a={sheetAch} sheet pin={pin} onPin={pinToggle}
+              onJump={onJump ? (to) => { closeSheet(); onJump(to); } : null} />
             <button type="button" className="fm-sheet-closebtn" onClick={closeSheet}>Close</button>
           </div>
         )}
       </MobileSheet>
 
-      {/* Relics sheet -- the FULL list (Summary's carousel only fits what
-          scrolls into view); real skin data throughout (name/desc/active/
-          earned), swatches from the byte-for-byte SKIN_SW table above. */}
-      <MobileSheet open={relicsOpen} closing={relicsClosing} onClose={closeRelics} title="Relics — earned rewards">
-        {vm && vm.relics.map((r) => (
-          <div className="fm-relicrow" key={r.id}>
-            <div className="fm-relicrow-sw">
-              {(SKIN_SW[r.id] || []).map((c, i) => <i key={i} style={{ background: c }} />)}
-            </div>
-            <div className="fm-relicrow-textcol">
-              <div className={"fm-relicrow-name" + (r.active ? " active" : "")}>{r.name}</div>
-              <div className="fm-relicrow-desc">{r.desc}</div>
-            </div>
-            <div className={"fm-relicrow-sub" + (r.active ? " active" : "")}>
-              {r.active ? "active" : r.earned ? "unlocked" : "🔒 locked"}
-            </div>
-          </div>
-        ))}
-        <button type="button" className="fm-sheet-closebtn" onClick={closeRelics}>Close</button>
+      {/* O3: the Sort sheet. The choice is remembered on this device and written only by a tap. */}
+      <MobileSheet open={sortOpen} closing={sortClosing} onClose={closeSort} title="Sort the All tab">
+        <div className="fm-sortsheet">
+          {SORTS.map((c) => (
+            <button type="button" key={c.key} className={"fm-sortopt" + (sortKey === c.key ? " on" : "")}
+              aria-pressed={sortKey === c.key}
+              onClick={() => { chooseSort(c.key); closeSort(); }}>
+              <b>{c.label}</b><span>{c.note}</span>
+            </button>
+          ))}
+          <div className="fm-sortfoot">Feats are in none of the orders.</div>
+        </div>
       </MobileSheet>
+
+      {/* O6: the Honors card, drawn on this device; Share opens the system share sheet. */}
+      <MobileSheet open={cardOpen} closing={cardClosing} onClose={closeCard} title="Honors card">
+        {cardModel && (
+          <HonorsCardPanel phone model={cardModel}
+            markUrl={(window.MG_BOOT && window.MG_BOOT.mark_url) || "/branding/logo.png"} />
+        )}
+      </MobileSheet>
+
     </div>
   );
 }

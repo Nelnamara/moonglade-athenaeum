@@ -35,6 +35,24 @@
   background: var(--base); color: var(--text); overflow: hidden;
   font-family: var(--font-system); }
 
+/* ---- DRIFT 122: EVERY PHONE SHELL IS THE VISIBLE VIEWPORT, NOT THE SCREEN (design
+   handoff 2026-09-04 drift-report §122, owner device pass 2026-09-28: "the lowest button
+   row sits just below the scroll end, where it can't be tapped"). The app shell and the
+   five full-screen layers that sit on it are one class of box -- position:fixed, the whole
+   viewport, a flex column whose last row is the thing a thumb needs -- so they are sized in
+   ONE place, here, by the dynamic viewport: `dvh` is the part of the screen the browser's
+   own toolbars leave, which is what `vh` is not (`vh` is the screen with them hidden).
+   The fallback is the `inset: 0` each rule already declares, NOT a `100vh` line: a fixed
+   box's inset:0 is the visible viewport even in a browser without `dvh`, and a 100vh
+   fallback would re-create the very bug this fixes. (A browser without dvh finds this
+   declaration invalid at computed-value time -- it holds a var() -- so height falls back
+   to `auto`, which inset:0 already resolves.) The update strip's height comes off the
+   top because notify.css moves each of these down by it (`top: var(--mg-updbanner-h)`);
+   without the subtraction a shell pushed down by the strip would run off the bottom by
+   exactly the strip, taking its action row with it. */
+.glm-stage, .idm-root, .lbm-root, .fm-root, .csm-root, .cmb-entry {
+  height: calc(100dvh - var(--mg-updbanner-h, 0px)); }
+
 /* ---- hero (persistent chrome above every tab, DC lines 45-62) ----
    THE TOP EDGE IS GUARDED TOO (phone audit, 2026-09-06). This file has read
    env(safe-area-inset-bottom) since it was written -- the tab bar's gutter, the sheets'
@@ -140,8 +158,10 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   vertical-align: -2px; background: url(/branding/rewards/claim.png) center/contain no-repeat; }
 
 /* ---- body / tab content ---- */
+/* overscroll-behavior-y: contain (Session Q, Q6) keeps the BROWSER's own pull-to-reload out of the
+   way at the top of the tab, so the moon's pull (components/PullToRefresh.jsx) is the only one. */
 .glm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  position: relative; }
+  position: relative; overscroll-behavior-y: contain; }
 .glm-tab { min-height: 100%; }
 
 /* ---- tab bar (DC navStyle/navTabs, lines 275-283 & 1080-1086) ---- */
@@ -226,7 +246,6 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)),
     color-mix(in srgb, var(--lavender) 32%, var(--surface0));
   border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
-.glm-pill-auto { margin-left: auto; }
 .glm-selcount { font-size: 10.5px; color: var(--subtext); margin-left: auto; white-space: nowrap; }
 .glm-selcount b { color: var(--text); }
 
@@ -262,16 +281,51 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-pager-info { font-size: 10px; color: var(--overlay0); text-align: center; }
 
 /* ---- sheets (DC sheetScrimStyle/sheetBoxStyle, lines 285-331 & 1088-1102) ---- */
-.glm-scrim { position: fixed; inset: 0; z-index: 30; background: rgba(4,3,10,.66);
+.glm-scrim { position: fixed; inset: 0; z-index: 306; background: rgba(4,3,10,.66);
   animation: glmFade .24s ease both; }
 .glm-scrim.closing { animation: glmFadeOut .28s ease both; }
-.glm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; max-height: 82vh;
+/* DRIFT 122 on the shared sheet (every MobileSheet caller gets it from here). The DC draws
+   this slab at `max-height: 82%` of its device frame -- the VISIBLE screen -- so its real
+   unit is 82dvh, never 82vh (vh is the screen with the toolbars hidden, and a sheet sized by
+   it is taller than the space it has whenever they are up: its head slides under the
+   address bar). The drift's own cap, calc(100dvh - 24px), is folded in with min() so
+   neither can be exceeded; the 82vh line is only for a browser without dvh. The bottom pad
+   is the drift's formula: 16px of breathing room plus whatever the home indicator claims. */
+.glm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 307;
+  max-height: 82vh; max-height: min(82dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
-  padding: 12px 13px max(22px, env(safe-area-inset-bottom));
+  padding: 12px 13px calc(16px + env(safe-area-inset-bottom));
   overscroll-behavior: contain;
   animation: glmSheetUp .28s cubic-bezier(.2,.9,.24,1) both; }
 .glm-sheet.closing { animation: glmSheetDown .28s cubic-bezier(.4,0,.2,1) both; }
+/* THE SHEET'S ACTION ROW IS PINNED TO ITS FOOT (drift 122: "the sheet's content scrolls
+   inside a height-capped container, with its action row position: sticky; bottom: 0 so it's
+   always visible"). Named rows only -- the shared .glm-sheet-actions and the duplicate
+   review's confirm pair -- so a sheet that is a plain list is untouched. The row bleeds to
+   the slab's side edges on the slab's own colour, so a long sheet scrolls UNDER it rather
+   than showing through between the buttons; at rest, when nothing overflows, it is
+   mantle-on-mantle and reads exactly as it did. Its own bottom pad keeps the buttons off
+   the home indicator while it is stuck. When it is the sheet's last child it also takes
+   over the slab's bottom pad (the negative margin cancels it, the padding restores it
+   inside the row), so resting at the scroll end and stuck to the foot are the same place --
+   the Moonglade Mobile bulk-bar idiom (myart-mobile.css .myam-bulkbar). Stuck, it also
+   cannot be lost to a browser that leaves a scroller's end padding out of the scroll range:
+   sticky pulls the row back into view whatever the range says.
+   THE OFFSET IS MINUS THE SLAB'S PAD, NOT 0. A sticky box is held inside its scroller's
+   CONTENT edge -- the padding is inset from the sticky rectangle -- so `bottom: 0` parks the
+   row a whole pad above the slab's real foot, and at rest that shoves it up over whatever
+   sits above it (measured: 16px over the filmstrip in the lightbox's twin of this rule).
+   The negative offset moves the edge back out to the slab's foot; the row's own pad is
+   what keeps the buttons off the home indicator there. */
+.glm-sheet .glm-sheet-actions, .glm-sheet .mgdrm-confirm-actions {
+  position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 1;
+  background: var(--mantle); margin-left: -13px; margin-right: -13px;
+  padding: 8px 13px calc(16px + env(safe-area-inset-bottom)); }
+.glm-sheet .glm-sheet-actions { margin-top: 2px; }
+.glm-sheet .mgdrm-confirm-actions { margin-top: 6px; }
+.glm-sheet .glm-sheet-actions:last-child, .glm-sheet .mgdrm-confirm-actions:last-child {
+  margin-bottom: calc(-16px - env(safe-area-inset-bottom)); }
 /* A SHEET IS NOT PART OF THE TAB'S SCROLL EITHER (phone audit, 2026-09-06). The same two
    latches the screens above took on 2026-09-05, applied one layer shallower to the sheets:
    the tab's scroller is locked while a sheet is up, and the sheet's own list contains its
@@ -361,11 +415,11 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
    mobile.css) -- covering the Create tab's own content area, not the DC's
    literal whole-844px-frame assumption (the hero/credits chip and the bottom
    tab bar stay visible/reachable underneath, matching this file's own "real
-   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 32 sits
-   above .glm-sheet/.glm-scrim (30/31) and below .cm-modelwrap .mfly (331, so
+   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 308 sits
+   above .glm-sheet/.glm-scrim (306/307) and below .cm-modelwrap .mfly (345, so
    the model/LoRA flyout -- reachable from the main composer, not duplicated
    inside Advanced -- still layers correctly if opened while a screen is up). */
-.glm-screen { position: absolute; inset: 0; z-index: 32; background: var(--base);
+.glm-screen { position: absolute; inset: 0; z-index: 308; background: var(--base);
   display: flex; flex-direction: column;
   animation: glmScreenIn .22s ease both; }
 .glm-screen.closing { animation: glmScreenOut .22s ease both; }

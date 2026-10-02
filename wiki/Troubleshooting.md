@@ -12,8 +12,9 @@ A built-in identifier went stale after a PixAI frontend update. These ship with 
 app and are shared by everyone, so when one breaks it breaks for all users.
 
 - **First, update to the latest release** — open the **Control Panel** and click the gold
-  version stamp in its sidebar footer if one is offered (`git pull` by hand otherwise).
-  Refreshed defaults usually land there quickly.
+  version stamp in its sidebar footer if one is offered, then **View the update ›** in the
+  About card that opens (`git pull` by hand otherwise). Refreshed defaults usually land there
+  quickly.
 - If it's still broken on the latest version, **open an issue** so the default can be
   updated for everyone.
 
@@ -31,8 +32,10 @@ You used a **model** id where a **version** id is required. Don't paste from a
 `--list-models` (they resolve the version id). See [Generating](Generating).
 
 ## "unknown inferenceProfile …"
-The chosen **Mode** isn't supported by that model type. This is harmless everywhere now
-(since 2026-07-24): the **CLI** (`--generate`) and the **web app's Generate tab** both
+The chosen **Mode** isn't supported by that model type. When the app can read the model's own
+profile list, a mode it doesn't list is refused before anything is sent, and a listed one PixAI
+refuses (Ultra without a membership) is reported, never resubmitted on another profile. Where
+the list can't be read, the **CLI** (`--generate`) and the **web app's Generate tab** both
 auto-fall-back to the model's default and generate anyway — a rejected submit costs no
 credits either way, so the retry is free. You shouldn't see this raw message at all
 anymore; if you do, it's a friendlier "That quality setting isn't available for this

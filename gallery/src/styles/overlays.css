@@ -17,15 +17,53 @@
    Publish "doing nothing"; Similar and Upscale had the same trap).
    Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .mgss 414/415
-     < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < .mgcp-pwr 430/431
+     < .rcp-scrim/.rcp-host (and the phone's .rcp-m) 416/417 < the collections manager .mgcu-scrim/.mgcu-mgr 418/419
+     < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < the curation undo toast .mgcu-toast 427 < .mgcp-pwr 430/431
      < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441
+     < the first-run guide's .mgguide-block/-ring 442/443 and its cards 444 (help.css)
+     < Help .mghelp-scrim/-host 450/451 < About .mgab 452/453 < what's new .mgwn 454/455
      < .mgpal-scrim/.mgpal-host 460/461 < .mgpal-gchip 462
-     < .mgks-scrim/.mgks-host 470/471 < .model-picker .mg-preview 600
+     < .mgks-scrim/.mgks-host 470/471 < .mg-gallery-picker 490
+     < the two hover previews, .mgd-preview / .model-picker .mg-preview, 500
+
+   THE THREE BANDS (design handoff 2026-09-04 drift §3, normalized 2026-09-28). Every
+   z-index in the app sits in exactly one: components 0-7 · overlays/modals 300-500 ·
+   ambient/celebration 510-520. Nothing between them. The normalization was ONE monotonic
+   renumbering of every value that sat outside a band, so every relative order in every
+   stacking context is the one it was:
+     - the old 8-299 layers took 301-324, in their old order: the phone Loom's pages and
+       sheets 301-308 (.lm-*), the phone's own sheet/screen 306/307/308 (.glm-scrim/-sheet
+       /-screen), the desktop details takeover .detail-wrap and the Loom's drawers 310/311,
+       its filter-compare 312/313, the phone's full-screen viewers 315/316 (.idm-root and
+       its siblings / .lbm-root), the Loom's project menu 317/318, the context menu, the
+       library's Advanced flyout and the Activity panel 318, the viewers' own upscale
+       sheets 318-321, the contest chooser and entry 322-324 (contest-mobile.css holds the
+       phone's ladder);
+     - so the four low rungs above them moved up past 324, same order: the dock's run
+       tooltip 300->330, the model flyout .mfly 305->335, the Darkroom .mgdk 306->336,
+       the cloud-delete ground .lb 315->340, and the phone's model sheet 331->345;
+     - the hover previews (600) came down to the top of THIS band, 500, and the picker and
+       the Loom's two 500 dialogs stepped to 490 so the previews still clear them. That is
+       the one deliberate order change: a preview no longer paints over a celebration --
+       the celebration band is above every overlay by definition (drift §3);
+     - the ambient band: the update strip 509->510, the toasts 510->511, the clip moments
+       515/516, the parade counter 519->518, the achievement moment .ach-m2 520->519, and
+       its skip control 521->520 -- the control has to be in FRONT of the moment it skips,
+       and 520 is the band's ceiling. (notify.css states that band.)
+   Local numbers inside a stacking context still count: the rule is "every value", so a
+   reader never has to work out which contexts a number escapes. The one exception is not
+   a layer: gen-drawer.css's `.gen-drawer::before { z-index: -1 }` paints the dock's glass
+   BEHIND its own content inside an `isolation: isolate` box, and any value 0 or above
+   would paint it over that content instead.
    .mgss (414/415, series-modal.css) is B3's series stack modal, which took the rung the
    Similar modal used to hold: Similar is no longer a layer at all since B2 (2026-09-04) —
    it renders in the grid's own place under a token in the library bar, so it has no z-index
    to place and nothing to paint behind.
    .mgct-sub (424/425) is the contest picker/confirm, opening over the Contests/My Art slab.
+   .rcp-* (416/417, recipes.css) is the recipe picker, market and creator: the Recipes
+   handoffs drew "z 300", the band's floor before this ladder put the Lightbox at 400, and
+   ⁂ Make a recipe opens the creator FROM the Lightbox, so it takes a rung above it. The
+   creator asks the gallery picker (490) for pictures, which clears it.
    The command palette, its two-stroke G… chip and its cheat-sheet (command-palette.css) sit
    at the top: the palette opens from ANY of the layers above it — that is what a Ctrl/⌘ K
    layer is for — so it clears all of them, and the cheat-sheet clears the palette in turn.
@@ -78,11 +116,17 @@ html.mg-noblur .mgv-scrim {
 .mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
-  width: min(980px, calc(100vw - 48px)); max-height: 90vh; overflow-y: auto;
+  width: min(980px, calc(100vw - 48px)); max-height: 90vh; max-height: 90dvh; overflow-y: auto;
   border-radius: 18px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;
   animation: mgvSlab .3s cubic-bezier(.2,.9,.24,1) both; }
+/* A STEADY slab holds the full height whatever is inside it (owner walk 2026-09-29). Sized by
+   its content, the Contests slab opened small on "loading live contests…" and grew when the
+   board landed, and changed size again between its tabs -- so a click aimed at "My entries"
+   landed on a contest that had just moved under it. A slab whose innards swap in place (tabs,
+   a loading line, a detail) opts in, and stays the size its fullest state already was. */
+.mgv-slab.mgv-steady { height: 90vh; height: 90dvh; }
 .mgv-titlerow { display: flex; align-items: center; gap: 10px; }
 .mgv-title { font-size: 19px; font-weight: 800; }
 .mgv-x { margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center;

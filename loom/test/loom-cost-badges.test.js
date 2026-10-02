@@ -102,9 +102,10 @@ test("confirmSpend and generateShot branch short-vs-unmatched, and still fail cl
   // confirmSpend: `${label}\n\n${line}` where line is short OR the original not-matched sentence
   assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\);/,
     "confirmSpend must word the short case honestly and keep the not-matched sentence otherwise");
-  // generateShot (video): names the shot's duration in the short sentence
+  // askShotSpend (video; generateShot's ask and the Loom Video tab's Go's): names the shot's
+  // duration in the short sentence
   assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, `this \$\{p\.duration \? `\$\{p\.duration\}s ` : ""\}shot`\)\s*\n\s*: `No free card covers this shot — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;/,
-    "generateShot must word the short case honestly and keep the not-matched sentence otherwise");
+    "the shot ask must word the short case honestly and keep the not-matched sentence otherwise");
   // fail-closed shape untouched: both gates still ask on a null/unverified price
   assert.match(src, /return window\.confirm\(`\$\{label\}\\n\\nCouldn't verify the cost or free-card coverage — it may spend credits\./);
   assert.match(src, /\} else if \(!pr \|\| !pr\.free\) \{\s*\n\s*if \(!window\.confirm\("Couldn't verify this shot's cost or free-card coverage/);
@@ -126,7 +127,11 @@ test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) 
     "the confirm must map overflowIndexes to shot codes");
   assert.match(src, /Up to \$\{overflow\} of those priced free on their own may spend credits/,
     "overflow must be worded as an upper bound, not a certainty");
-  // No refusal was added: the confirm is still the only gate and submission order is unchanged.
+  // The confirm is still the only thing that lets the batch spend, and submission order is
+  // unchanged (todo order). Session P (review F12/F13) CHANGED ON PURPOSE what each shot is sent
+  // with: the fingerprint of the payload the confirm priced (a shot changed since is skipped,
+  // never sent unconfirmed) and whether the pool tally counted it covered (expect_free). Those
+  // only ever send LESS than the confirm allowed.
   assert.match(src, /if \(!window\.confirm\(msg\)\) \{ setBatching\(false\); return; \}/);
-  assert.match(src, /for \(const e of todo\) \{[\s\S]*?try \{ r = await generateShot\(e, \{ skipConfirm: true \}\); \}/);
+  assert.match(src, /for \(const \[i, e\] of todo\.entries\(\)\) \{[\s\S]*?r = await generateShot\(e, \{ skipConfirm: true, onlyIfNeeded: true, confirmedFp: fps\[i\], expectFree: covered\[i\],/);
 });

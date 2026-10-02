@@ -120,8 +120,10 @@ test("short renders as PAID with the amber warn treatment + data-short, and the 
     "short must ride the paid+warn (amber) attribute -- never invent a red settled state");
   assert.match(src, /const dataShort = \(m\.state === "paid" && m\.short\) \? "1" : undefined;/);
   assert.match(src, /data-short=\{dataShort\}/, "the root carries data-short so hosts/tests can tell short from a host warn");
-  // The host's single-slot `warn` keeps its prefix; short does not overwrite it.
-  assert.match(src, /\(warn \? "⚠ " \+ warn \+ " · " : \(short \? "⚠ " : ""\)\) \+ "≈ " \+ fmt\(n\) \+ " credits"/,
+  // The host's single-slot `warn` keeps its prefix; short does not overwrite it. (The figure is
+  // `total` since the owner walk 2026-09-29 -- the request's price times the host's `sends`, 1
+  // unless a Matrix sends it once per cell; loom/test/template-core.test.js pins that.)
+  assert.match(src, /\(warn \? "⚠ " \+ warn \+ " · " : \(short \? "⚠ " : ""\)\) \+ "≈ " \+ fmt\(total\) \+ " credits"/,
     "warn keeps its slot in the main line; the short note rides the sub/note line");
   assert.match(src, /if \(short && !compact\) sub = \{ text: shortNote, title: shortNote, days: null \};/);
   // onCost detail exposes it, so a listener (separator chip) can react without parsing text.

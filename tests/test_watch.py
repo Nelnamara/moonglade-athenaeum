@@ -211,6 +211,91 @@ def test_watch_pings_reset_the_staleness_clock(monkeypatch):
     assert any(m.get("type") == "pong" for m in ws.sent)   # still answered every ping
 
 
+# --- Our own keepalive (2026-09-29) ------------------------------------------------
+# PixAI sends nothing on an idle subscription: the logs since 2026-09-04 show every quiet
+# stretch ending exactly 240s after "connected and subscribed" in "socket went silent", with
+# the catch-up sweep then finding nothing missed, and the Control Panel read "Reconnecting ...
+# treating the connection as dead" on a healthy connection. So the client pings after a
+# heartbeat of quiet, and the server's pong resets the stale clock.
+
+class _IdleServerWS(_FakeWS):
+    """A healthy but idle server: after the handshake it sends nothing at all on its own,
+    and answers each client ping with a pong (graphql-transport-ws requires the receiver of a
+    ping to pong). After `pongs` of them it completes the subscription."""
+    def __init__(self, pongs):
+        super().__init__([json.dumps({"type": "connection_ack"})])
+        self.pongs_left = pongs
+        self._pinged = None
+
+    async def send(self, m):
+        await super().send(m)
+        if json.loads(m).get("type") == "ping" and self._pinged is not None:
+            self._pinged.set()
+
+    async def recv(self):
+        if self._i < len(self.script):
+            return await super().recv()
+        if self.pongs_left == 0:
+            return json.dumps({"type": "complete"})
+        if self._pinged is None:
+            self._pinged = asyncio.Event()
+        await self._pinged.wait()          # silent until the client pings
+        self._pinged.clear()
+        self.pongs_left -= 1
+        return json.dumps({"type": "pong"})
+
+
+def test_an_idle_connection_pings_and_the_pong_keeps_it_alive(monkeypatch):
+    """The fail-first case for the owner's walk: an idle account on a healthy connection must
+    NOT be declared dead. Same shape of numbers as the ping-reset test above: every heartbeat
+    is far inside the stale window (25x) while the whole run outlasts it, so the pong has to
+    RESET the clock for this to pass. Before the heartbeat this server's silence raised
+    WatchStaleError at 0.5s."""
+    HEARTBEAT, TIMEOUT, PONGS = 0.02, 0.5, 40
+    assert HEARTBEAT * PONGS > TIMEOUT, "script must outlast the timeout or this proves nothing"
+    monkeypatch.setattr(core, "_WS_HEARTBEAT", HEARTBEAT)
+    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", TIMEOUT)
+    ws = _IdleServerWS(PONGS)
+    monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
+    got = []
+    asyncio.run(core._watch_events_async("Bearer x", got.append, None))   # must not raise
+    assert sum(1 for m in ws.sent if m.get("type") == "ping") == PONGS
+    assert got and got[0].get("__meta__") == "subscribed"
+
+
+def test_a_server_that_answers_not_even_our_ping_still_goes_stale(monkeypatch):
+    """The watchdog keeps its teeth: pinging does not paper over a dead connection."""
+    monkeypatch.setattr(core, "_WS_HEARTBEAT", 0.02)
+    monkeypatch.setattr(core, "_WS_STALE_TIMEOUT", 0.1)
+    ws = _SilentAfterAckWS([json.dumps({"type": "connection_ack"})])
+    monkeypatch.setattr(websockets, "connect", lambda *a, **k: ws)
+    try:
+        asyncio.run(core._watch_events_async("Bearer x", lambda e: None, None))
+        assert False, "expected WatchStaleError when nothing answers"
+    except core.WatchStaleError as e:
+        assert "no frame" in str(e).lower() and str(core._WS_STALE_TIMEOUT) in str(e)
+    assert sum(1 for m in ws.sent if m.get("type") == "ping") >= 2    # it did ask
+
+
+def test_a_quiet_heartbeat_is_not_the_stale_timeout():
+    """The keepalive fires well inside the stale window, or it could never reset it."""
+    assert 0 < core._WS_HEARTBEAT < core._WS_STALE_TIMEOUT / 2
+
+
+def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
+    """A stale connection had subscribed and lived a whole stale window, so the reconnect after
+    it starts at the shortest backoff step rather than the 60s the step had climbed to (the
+    Panel read "Reconnecting" for that whole minute). Source pin: _watch_loop runs only in a
+    background thread the suite never starts (MOONGLADE_DISABLE_WATCH)."""
+    import pathlib as _p
+    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
+    text = src.read_text(encoding="utf-8")
+    i = text.index("def _watch_loop():")
+    loop = text[i:text.index("def _contest_sync_startup():", i)]
+    stale = loop[loop.index("except core.WatchStaleError as e:"):loop.index("except Exception as e:")]
+    assert "backoff = 5" in stale
+
+
 def test_mirror_and_reconcile_agree_on_what_done_means():
     """The live mirror's COLLECT branch and its RECONCILE branch read the same event, so they
     must agree on which statuses mean finished.

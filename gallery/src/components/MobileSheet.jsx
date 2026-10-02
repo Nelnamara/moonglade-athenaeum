@@ -16,7 +16,7 @@ import React from "react";
    and it exists for exactly one job: re-rung a single sheet's z-index without
    moving the shared one. Nearly every caller mounts this INSIDE its own
    full-screen root (.idm-root, .fm-root, .mgdrm-*), whose stacking context
-   already carries the pair over everything behind it, so 30/31 is right for
+   already carries the pair over everything behind it, so 306/307 is right for
    them. AppMobile's sheets are the exception -- they mount at the app root, as
    SIBLINGS of those full-screen viewers -- and one of them (the contest chooser)
    opens FROM a viewer, so it alone has to clear it. Raising `.glm-sheet` itself

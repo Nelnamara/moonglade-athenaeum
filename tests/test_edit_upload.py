@@ -237,7 +237,8 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
 
 
 def _js_edit_caps():
-    """editCore.js's EDIT_CAPS, read off the source text: {key: (aspects, default)}."""
+    """editCore.js's EDIT_CAPS, read off the source text: {key: (aspects, default, extra)},
+    `extra` holding max_refs, resolutions and qualities."""
     import re
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "gen" / "editCore.js"
@@ -254,20 +255,31 @@ def _js_edit_caps():
         aspects = [_val(t) for t in
                    re.search(r"aspects: \[([^\]]*)\]", block).group(1).split(",") if t.strip()]
         d = re.search(r"def: \{([^}]*)\}", block).group(1)
-        out[key] = (aspects, {k: _val(v) for k, v in re.findall(r"(\w+): ([^,]+)", d)})
+
+        def _list(name):
+            return [_val(t) for t in
+                    re.search(name + r": \[([^\]]*)\]", block).group(1).split(",") if t.strip()]
+        extra = {"max_refs": int(re.search(r"max_refs: (\d+)", block).group(1)),
+                 "resolutions": _list("resolutions"), "qualities": _list("qualities")}
+        out[key] = (aspects, {k: _val(v) for k, v in re.findall(r"(\w+): ([^,]+)", d)}, extra)
     return out
 
 
 def test_edit_caps_and_edit_models_agree():
     """The two hand-kept tables (core.EDIT_MODELS and editCore.js EDIT_CAPS) must list the
     same aspects, in the same order, and the same defaults -- otherwise the drawer offers or
-    pre-selects an aspect the server then snaps away (SCOPE_2026-09-26 E2)."""
+    pre-selects an aspect the server then snaps away (SCOPE_2026-09-26 E2). And the same
+    reference cap, resolutions and qualities (w2-small spend review S1, 2026-09-28): the edit
+    road returns no receipt, so a drift there would show 4K or ten references on the card while
+    clamp_edit_config and the max_refs slice quietly quote and charge something else."""
     js = _js_edit_caps()
     assert set(js) == set(core.EDIT_MODELS)
     for key, spec in core.EDIT_MODELS.items():
-        aspects, dflt = js[key]
+        aspects, dflt, extra = js[key]
         assert aspects == spec["aspects"], key
         assert dflt == spec["default"], key
+        assert extra == {"max_refs": spec["max_refs"], "resolutions": spec["resolutions"],
+                         "qualities": spec["qualities"]}, key
 
 
 # ---- a model OUTSIDE the table (review fix, SCOPE_2026-09-26 E1) ----
@@ -302,3 +314,64 @@ def test_a_preset_on_an_off_table_model_from_an_auto_card_sends_3_4():
     assert p["chat"]["modelId"] == EDIT_V3
     assert p["chat"]["modelConfig"]["aspectRatio"] == "3:4"
     assert p["sceneId"] == "character-card"
+
+
+# ---- PixAI Edit v4.0 (Session L decision 6, lane w2-small 2026-09-28) ----
+
+EDIT_V4 = "1983993578828959744"      # its version row's extra.chatEditing, read 2026-09-28
+
+
+def test_edit_v4_is_first_with_its_own_record():
+    assert list(core.EDIT_MODELS)[0] == "edit-v4"
+    spec = core.EDIT_MODELS["edit-v4"]
+    assert core.edit_model_id("edit-v4") == EDIT_V4
+    assert spec["max_refs"] == 10 and spec["resolutions"] == ["1K", "2K", "4K"]
+    assert spec["qualities"] == [] and spec["default"] == {"resolution": "1K", "quality": "",
+                                                          "aspect": "auto"}
+    assert spec["aspects"][0] == "auto" and spec["aspects"][-4:] == ["1:4", "4:1", "1:8", "8:1"]
+    assert core.DEFAULT_EDIT_MODEL == "edit-pro"          # the card's default is unchanged
+
+
+def test_edit_v4_clamps_to_what_it_takes():
+    assert core.clamp_edit_config(EDIT_V4, "4K", "medium", "8:1") == ("4K", "", "8:1")
+    assert core.clamp_edit_config(EDIT_V4, "8K", "high", "3:5") == ("1K", "", "auto")
+    # Edit Pro still has no 4K; Reference Pro no 1:8
+    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "medium", "3:5")[0] == "1K"
+    assert core.clamp_edit_config("1948514378441961474", "2K", "", "1:8")[2] == "auto"
+
+
+def test_edit_v4_sends_ten_inputs_no_quality_and_no_aspect_on_auto():
+    rs = core.RequestResolver()
+    p = core._edit_parameters_from_payload(
+        {"source": "1", "sources": [str(i) for i in range(1, 13)], "instruction": "x",
+         "edit_model": "edit-v4", "resolution": "4K", "quality": "", "aspect": "auto"}, "", rs)
+    chat = p["chat"]
+    assert chat["modelId"] == EDIT_V4
+    assert chat["mediaIds"] == [str(i) for i in range(1, 11)] and chat["mediaId"] == "1"
+    assert chat["modelConfig"] == {"resolution": "4K"}
+    p = core._edit_parameters_from_payload(
+        {"source": "1", "instruction": "x", "edit_model": "edit-v4", "resolution": "2K",
+         "quality": "medium", "aspect": "1:8"}, "", rs)
+    assert p["chat"]["modelConfig"] == {"resolution": "2K", "aspectRatio": "1:8"}
+
+
+def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
+                                                media_id="1", filename="a_1.png")])
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 9000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit",
+                        lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
+    cli = login_test_client(create_app(tmp_path))
+    body = {"mode": "edit", "edit_model": "edit-v4", "source": "55",
+            "sources": ["55", "56", "57"], "instruction": "make it night",
+            "resolution": "4K", "quality": "", "aspect": "21:9"}
+    cli.post("/api/price", json=body)
+    assert cli.post("/api/edit", json=body).get_json().get("task_id") == "t1"
+    assert seen["priced"]["chat"] == seen["sent"]["chat"]
+    assert seen["sent"]["chat"]["modelId"] == EDIT_V4
+    assert seen["sent"]["chat"]["modelConfig"] == {"resolution": "4K", "aspectRatio": "21:9"}

@@ -16,16 +16,19 @@ pip install -r requirements.txt
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
 | `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
-| `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export and last-frame extract |
+| `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
 | `pytest`, `pytest-mock`, `pytest-cov` | dev only — running the test suite |
 
 ## 2. Configure — one value
 
 **In the browser (recommended):** once you've signed in (below), a fresh install with no
-key yet walks you through pasting one and running the first sync right there — an intro,
-a spot to paste the key (validated for real before it's saved), then a live sync progress
-screen. Nothing to edit by hand. Skip to [3. First run](#3-first-run) if you're doing it
-this way.
+key yet walks you through pasting one and running the first sync right there. If the art
+pack (the app's own artwork) hasn't arrived yet it is fetched first — a one-time download with
+a progress bar (**↻ Try again** if it is interrupted, or **Continue without the default
+artwork** to let it finish later). Then a short intro, a spot to paste the key (validated for
+real before it's saved), a live sync progress screen, and a **Welcome home.** screen with what
+your library holds. Nothing to edit by hand. Skip to [3. First run](#3-first-run) if you're
+doing it this way.
 
 **By hand (headless / scripting):** copy `config.example.json` to `config.json`
 (git-ignored) and set **one** value:
@@ -120,3 +123,8 @@ python moonglade_backup.py           # download everything
 ```
 
 Everything lands in `pixai_backup/` (git-ignored). Next: **[Backing Up](Backing-Up)**.
+
+**Finding your way around.** The first time you open the gallery, the Generate dock, The Loom,
+the Folio and the Control Panel, a small welcome card offers a short tour (or **Got it** to skip
+it), and a round **?** — or the **?** key — opens this wiki inside the app. See
+[Help inside the app](Home#help-inside-the-app).

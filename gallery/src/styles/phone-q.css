@@ -1,0 +1,129 @@
+/* ============================================================================
+   Session Q, "The phone" -- Phone Handoff.dc.html (Q1, Q2, Q3, Q5, Q6, Q7).
+   ADDITIVE to Moonglade Mobile and Lightbox Mobile, which stay as built: every rule here is a new
+   class (ptr-, glm-layout, glm-feed, glm-newrule, glm-newest, glm-saverchip, lbm-placard, lbm-tapfull,
+   idm-remixrow, ctm-saver) or a modifier on an existing one. Sizes are the page's own; every colour is
+   an app token (never a hex -- the page's literals stand in for the same tokens). The z-index law
+   holds: components 0-7 (nothing here is above 6), overlays 300-500, ambient 510-520.
+   ============================================================================ */
+
+/* ---- Q6 pull to refresh ------------------------------------------------------------------- */
+@keyframes ptrSpin { to { transform: rotate(360deg); } }
+.ptr { position: relative; min-height: 100%; }
+.ptr-body { min-height: 100%; }
+/* The indicator sits in the empty band the page leaves as it follows the finger: the page's own
+   geometry (top 6px, the moon over a 9.5px label, centred). Drawn UNDER the content (z 0). */
+.ptr-ind { position: absolute; left: 0; right: 0; top: 6px; z-index: 0; display: flex; flex-direction: column;
+  align-items: center; gap: 4px; pointer-events: none; transition: opacity .2s ease; }
+.ptr-txt { font-size: 9.5px; color: var(--overlay0); min-height: 12px; }
+.ptr.syncing .ptr-moon { animation: ptrSpin 1s linear infinite; }
+
+/* ---- Q3 the Grid | Feed toggle (the page's seg control) ---------------------------------- */
+.glm-layout { display: flex; flex: none; gap: 2px; padding: 2px; border-radius: 9px; border: 1px solid var(--surface1); }
+.glm-layout button { font: inherit; font-size: 10.5px; font-weight: 600; padding: 4px 9px; min-height: 26px;
+  border-radius: 7px; border: 0; cursor: pointer; background: none; color: var(--subtext); white-space: nowrap; }
+.glm-layout button.on { background: var(--lavender); color: var(--base); }
+
+/* The pill row is one line (gallery-mobile.css: nowrap, scrolls sideways as a last resort). The toggle
+   makes it four controls wide, so on the narrow phones the pills tighten a little, and below 380 px the
+   toggle keeps its two marks and drops the words (each button is still named for a screen reader). */
+@media (max-width: 400px) {
+  .glm-bar2 { gap: 5px; }
+  .glm-bar2 .glm-metal { padding-left: 10px; padding-right: 10px; }
+  .glm-layout button { padding-left: 7px; padding-right: 7px; }
+}
+@media (max-width: 380px) {
+  .glm-layout button .lbl { display: none; }
+  .glm-layout button { min-width: 32px; }
+}
+
+/* ---- Q3 the reading feed: one picture per row, edge to edge, true aspect -------------------- */
+.glm-grid.glm-feed { display: flex; flex-direction: column; gap: 10px; padding: 0; align-items: stretch; }
+.glm-tile.glm-tile-feed { border-radius: 0; width: 100%; }
+.glm-tile.glm-tile-feed .glm-tile-cap { padding: 18px 10px 7px; font-size: 10px; color: rgba(236,232,248,.9);
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,.7)); display: flex; flex-direction: row;
+  align-items: baseline; gap: 5px; line-height: 1.35; }
+/* The page draws "prompt · ★★★" on one line: the prompt gives way (ellipsis), the stars never do. */
+.glm-tile.glm-tile-feed .glm-tile-prompt { flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.glm-tile-sep, .glm-tile-stars { flex: none; }
+.glm-tile-stars { color: var(--gold); letter-spacing: .04em; }
+
+/* ---- Q5 "N new since HH:MM" -- the lavender rule where the new ones end ------------------ */
+.glm-newrule { display: flex; align-items: center; gap: 8px; padding: 8px 11px; }
+.glm-newrule i { flex: 1; height: 1px; background: var(--lavender); }
+.glm-newrule span { font-size: 9.5px; color: var(--lavender); white-space: nowrap; }
+
+/* ---- Q5 "↑ Newest": rides the scroller after one screen, above the tab bar ---------------- */
+.glm-newest-wrap { position: sticky; bottom: 12px; z-index: 6; height: 0; display: flex; justify-content: center;
+  pointer-events: none; overflow: visible; }
+.glm-newest { pointer-events: auto; align-self: flex-end; font: inherit; font-size: 11px; font-weight: 700;
+  padding: 11px 16px; min-height: 44px; border-radius: 999px; border: 0; cursor: pointer; white-space: nowrap;
+  background: var(--lavender); color: var(--base); box-shadow: 0 8px 20px rgba(0,0,0,.55); }
+
+/* ---- Q7 the header's Saver chip and the "256 px" / "paused" tile tag ---------------------- */
+.glm-saverchip { display: inline-flex; align-items: center; font-size: 10px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap;
+  background: color-mix(in srgb, var(--base) 60%, transparent); text-shadow: none; }
+.glm-tile-tag { position: absolute; left: 5px; top: 5px; font-size: 8.5px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(0,0,0,.55); color: rgba(236,232,248,.85); pointer-events: none; }
+
+/* ---- Q7 the Control row -------------------------------------------------------------------- */
+.ctm-saver { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 13px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 6%, transparent); }
+.ctm-saver-head { display: flex; align-items: center; gap: 10px; }
+.ctm-saver-title { flex: 1; min-width: 0; }
+.ctm-saver-title b { display: block; font-size: 12.5px; font-weight: 600; }
+.ctm-saver-title span { display: block; font-size: 10px; color: var(--overlay0); line-height: 1.4; }
+.ctm-saver-switch { flex: none; width: 42px; height: 24px; border-radius: 999px; position: relative; cursor: pointer;
+  border: 0; padding: 0; background: var(--surface1); transition: background .2s; }
+.ctm-saver-switch.on { background: var(--lavender); }
+.ctm-saver-switch i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--base); transition: left .2s; }
+.ctm-saver-switch.on i { left: 21px; }
+.ctm-saver-modes { display: flex; gap: 4px; }
+.ctm-saver-modes button { flex: 1; text-align: center; font: inherit; font-size: 10.5px; font-weight: 600;
+  padding: 8px 4px; min-height: 36px; border-radius: 7px; cursor: pointer; color: var(--subtext);
+  background: none; border: 1px solid var(--surface1); }
+.ctm-saver-modes button.on { background: var(--lavender); color: var(--base); }
+.ctm-saver-note { font-size: 10px; line-height: 1.5; color: var(--subtext); }
+
+/* ---- Q7 "Tap to load full size" on the Lightbox / Details picture -------------------------- */
+.lbm-hero.gated img, .idm-frame.gated img { filter: blur(3px) saturate(.7); }
+.lbm-tapfull { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2;
+  font: inherit; font-size: 10.5px; font-weight: 700; padding: 12px 16px; min-height: 44px; border-radius: 999px;
+  border: 0; cursor: pointer; background: rgba(0,0,0,.6); color: #fff; white-space: nowrap; }
+
+/* ---- Q1 the placard: accession stamp + sibling strip, between the picture and the action row */
+.lbm-placard { margin: 0 12px; padding: 8px 10px; border-radius: 11px; display: flex; flex-direction: column; gap: 5px;
+  border: 1px solid var(--surface1); background: var(--mantle); }
+.lbm-placard-stamp { font-size: 8.5px; letter-spacing: .12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--mauve); }
+.lbm-placard-strip { display: flex; gap: 5px; overflow-x: auto; padding: 3px 2px; }
+.lbm-sib { flex: none; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 6px; overflow: hidden;
+  cursor: pointer; background: var(--surface0); position: relative; }
+.lbm-sib img { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; }
+.lbm-sib.on { outline: 2px solid var(--lavender); outline-offset: 1px; }
+.lbm-sib.away { opacity: .4; cursor: default; }
+.lbm-sib.vid::after { content: "\25B6"; position: absolute; right: 2px; bottom: 2px; font-size: 7px; color: #fff;
+  background: rgba(0,0,0,.55); border-radius: 3px; padding: 0 2px; }
+.lbm-placard-line { font-size: 8.5px; color: var(--overlay0); }
+
+/* ---- Q2 the record's foot: Remix and Send to Video, two 44 px+ buttons -------------------- */
+.idm-remixrow { display: flex; gap: 8px; width: 100%; flex: none; }
+.idm-remixbtn { flex: 1; text-align: center; font: inherit; font-size: 12px; font-weight: 700; min-height: 44px;
+  padding: 13px 0; border-radius: 12px; border: 0; cursor: pointer; }
+.idm-remixbtn.remix { background: var(--lavender); color: var(--base); }
+.idm-remixbtn.video { background: var(--loomc);
+  color: color-mix(in oklab, var(--loomc) 30%, #04100f); }
+
+/* ---- Q2 the "Sent from Details" line over the Video form (the shared power-note look) ------- */
+.cm-handoffnote { display: flex; align-items: center; gap: 8px; }
+.cm-handoffnote span { flex: 1; min-width: 0; }
+.cm-handoffx { flex: none; width: 28px; height: 28px; border: 0; border-radius: 7px; cursor: pointer; font: inherit;
+  font-size: 14px; line-height: 1; color: var(--subtext); background: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ptr.syncing .ptr-moon { animation: none; }
+  .ptr-body, .ptr-ind, .ctm-saver-switch, .ctm-saver-switch i { transition: none; }
+}

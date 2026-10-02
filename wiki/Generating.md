@@ -10,19 +10,24 @@ appears in the gallery alongside your history.
 
 ## In the web gallery (the Generate drawer)
 
-Open the gallery and click **✦ Generate** to slide out the **Generate drawer** — the
-creation surface, with the live credit cost and free-card check up front (covered
-generations cost 0). Its controls map onto the same PixAI parameters:
+Open the gallery and click **✦ Generate** to open the **Generate dock** (also called the Generate
+drawer) — the creation surface, docked at the bottom of the screen, with the live credit cost and
+free-card check up front (covered generations cost 0). Its **Image**, **Edit** and **Video** tabs
+each keep their own settings. You pick a **model** first (**Browse** opens the full picker, with the
+LoRAs beside it), describe the picture in the **prompt**, and press **Generate** — the price shows
+above it before you spend. **▲** opens the settings (frame, size, count and tuning), **History**
+shows your last seven days of runs, **Snippets** keeps prompt pieces you reuse, and **×** closes the
+dock; runs keep going. Its controls map onto the same PixAI parameters:
 
 | Control | Maps to | Notes |
 |---|---|---|
 | **Prompt** / **Negative** | `prompts` / `negativePrompts` | natural language is fine |
 | **Model** picker | `modelId` | search resolves the correct *version* id automatically |
 | **LoRAs** → Add | `lora` + `loraParameters` | search → pick → weight; stack several |
-| **Aspect** / dimensions | `width`/`height` | presets at SDXL-friendly dims |
-| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range; the "→ W × H px" line is the size that is sent |
-| **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
-| **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
+| **Frame** | `width`/`height` | a **Portrait \| Landscape** switch over eleven ratios (1:1 · 5:4 · 9:7 · 4:3 · 3:2 · 5:3 · 16:9 · 2:1 · 21:9 · 3:1 · 4:1). On a model with PixAI's own size tiers (Tsubaki.3: **XL · L · M**) each tier reads PixAI's live sizes; elsewhere the long-edge stops stay. A custom W × H is held to your account's limit. The size line under it is exactly the size that is sent |
+| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range |
+| **Profile** / **Mode** | `inferenceProfile` | on a model with profiles, the rows under the model read PixAI's live list with each one's price over the default (Tsubaki.3: **Pro**, **Ultra +500**); a members-only row reads *Members* for a non-member and can't be picked. Other models keep the Auto · Lite · Standard · Pro · Ultra bars |
+| **Creativity** / **Prompt helper** | `promptHelper` | on Tsubaki.3, three stops: **As written** (off) · **Light touch** (low) · **Embellished** (medium, the default). Elsewhere the prompt helper is on or off |
 | **High priority** | `priority` | off = Turbo (500) if your membership covers it, otherwise standard (0) — both free; on = High (1000), faster and **costs extra credits** |
 
 A control the picked model does not take reads **disabled** and is not sent: Face Fix and
@@ -34,17 +39,217 @@ Details and the negative box can stay live and the size line keeps the /8 rule. 
 still drops or moves what that version does not take, and the cost badge names it before you
 spend.
 
-On Tsubaki.3 and Flash a **reference** image goes out as a context image (their
-Character/Style Reference): strength does not apply, and it cannot be combined with LoRAs — the
-cost badge says so instead of a price. Whenever the server adjusts a request (a size moved onto
-the model's grid, a field the model ignores, a reference's strength), the cost badge names the
-change **before** you spend.
+Whenever the server adjusts a request (a size moved onto the model's grid, a field the model
+ignores), the cost badge names the change **before** you spend.
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
 generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
 Fix, and the Video tab all work this way) and each one tracks and reports its own result
 independently.
+
+### Tsubaki.3: context images and @image prompts
+
+On Tsubaki.3 and Tsubaki.3 Flash the settings' first panel is **MODEL & INPUTS**, and a
+**LoRAs | Context images** switch takes the place of the single reference slot (other models
+keep the reference slot and its strength slider). Each side keeps its own picks; switching
+never deletes anything.
+
+- **Context images:** up to 3 (PixAI's live limit), from your history, the gallery or an
+  upload. Name them in the prompt as **@image1**, **@image2**, **@image3** — type **@** and pick
+  one from the menu (on a phone the choices sit as a row of chips under the prompt). A chip is
+  one token: backspace removes it whole, and it is sent as the plain text `@image1`.
+- Remove a picture and the chips **renumber**; a chip that pointed at the removed picture turns
+  peach and reads *no image*, and Generate waits until you fix or delete it.
+- With context images, **LoRAs, recipes, the colour palette and the negative prompt are held**:
+  dimmed, marked *Held · not sent with context images*, and restored the moment you switch back.
+  The first switch while any of them is set asks first. **Unlimited Mode** doesn't run with
+  context images, and **creativity** is set to Embellished by them.
+- The frame starts on **Auto**: the size follows @image1's own shape ("✦ Output size W × H ·
+  from @image1"). Picking a ratio or an orientation leaves Auto.
+- The cost badge names what the pictures add: "2 context images +1,800 · not Unlimited". When
+  you pick Ultra it adds "profile Ultra +500". Both are PixAI's own prices for this request.
+
+**Edit with Tsubaki.** Right-click a picture (or open its Details on a phone) and choose
+**Edit with Tsubaki**: the Image tab opens on Tsubaki.3 with that picture as @image1 and the
+prompt started as "Use @image1 …". Nothing is spent until you press Generate. The Edit card is
+unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
+
+**The Lightbox edit bar.** Every still picture shows **Describe your edits…**
+over the foot of the Lightbox (on a phone, a bar under the picture). Type the change and press
+↵: it sends a Tsubaki.3 run with that picture as @image1, your words as the prompt, the dock's
+profile and an Auto size — no LoRAs, recipes, palette or negative. The price shows in the bar
+before you send, and the run joins the dock's reel and the Activity tray while the Lightbox stays
+open. **E** jumps to the bar; **Esc** leaves it (a second Esc closes the Lightbox).
+
+### Colour palette
+
+Tsubaki.3 and Flash can steer a picture's colours with a **colour palette** — up to three groups
+(overall · background · character), each 1 to 12 colours with a share of the whole. The drawer's
+**Palette** row (the dock's Tuning column; the phone's Advanced screen) shows the palette in use
+and opens the palette window:
+
+- **Library** — PixAI's own palettes, each a cover picture with its colour strip. Pick one and
+  **Use palette**, or **Customise** it into your own.
+- **Custom** — your saved palettes, kept with your Moonglade account (they are not saved to
+  PixAI). **+ New colour palette** opens the editor.
+- **The editor** — turn each group on or off (overall or background must stay on; turning one on
+  starts it with six even colours), drag the dividers between colours to trade their shares,
+  change a colour, its share, its order or the number of colours in the list below, replace the
+  colours with a Library palette, or **Extract from image** (a gallery picture or an upload — read
+  in your browser, nothing is uploaded) to fill the group you are on. The preview card repaints
+  as you go. **Save & apply** saves it to Custom and uses it.
+
+A palette is sent only to a model that takes one, and never with a context image: in either case
+the row says **Held** and the palette stays picked for when it applies again. It does not change
+the price.
+
+### Recipes
+
+A **recipe** is PixAI's saved bundle of generation inputs (prompt words, LoRAs, pictures) made
+for one kind of model. The **RECIPES** row sits in the settings' first panel under the LoRAs |
+Context images switch (on a phone, under the LoRAs on the Create screen). **+ Browse** (or
+**browse ›**) opens the recipe picker — the market, your Sets, Mine and History, plus a
+**Style code** lookup that finds the recipe an old style code became — and **+ Add** puts a
+recipe in the row. The command palette's **Browse recipes** opens the full-size market, and
+**⁂ Make a recipe** in the Lightbox starts the recipe creator from that picture.
+
+- Up to **10** recipes, applied in the row's order; **×** removes one. The row is remembered with
+  your Moonglade account.
+- A recipe beside a LoRA warns (*A recipe beside a LoRA can fight it*) but still sends.
+- A recipe that doesn't fit the request — made for another model, no longer available, for the
+  author's followers only, a prompt that would run too long, or refused by PixAI when the price
+  was checked — turns **peach with "!"**, its reason on hover, and Generate waits until you fix
+  or remove it.
+- With context images the row is **held**: dimmed, *Held · not sent with context images*, and
+  sent again when you switch back to LoRAs.
+- On Tsubaki.3, recipes run **creativity one step lower**, as PixAI's own site does: Embellished
+  runs as Light touch and Light touch as As written. The cost badge names the change.
+- The cost badge prices the request **with** its recipes. If PixAI can't price it, the badge
+  says why (or *couldn't verify the price with these recipes*) and never reads FREE.
+
+**The recipe picker** opens small, from the row. **⤢ Market** makes it full-size (**⤡** shrinks it
+again); your tab, search and filters carry across, and the last size is remembered with your
+account. Its tabs are **Market** (sort by Trending, Most liked, Most used or Latest; **Filters** by
+category and model type; a search lists newest first), **Sets** (PixAI's collections of recipes),
+**Mine** and **History** (what you used lately). **Open page** shows one recipe on its own page;
+**+ Use in dock** (or **+ Add**) puts it in the row; **⊕ Save to…** files it in one of your recipe
+sets — a tick applies at once, and **+ New set** makes a private one. Nothing in the picker spends
+credits: the price and any refusal are always the dock's.
+
+**Mine** lists your own recipes, each with its status — **Published**, **In review**, **Archived** or
+**Draft** — and one action (**Edit**, **View** or **Unarchive**); **⋯** has **Archive** and **Open page**.
+Recipes you started and did not finish wait above them under **UNFINISHED**, with **Continue** and
+**Delete**.
+
+**Making a recipe.** **+ Create** in the picker (it starts from the dock's model and prompt), or
+**⁂ Make a recipe** on a still picture in the Lightbox whose model takes recipes (it reads that
+picture's model, LoRAs with their weights and trigger words, and prompt), opens the creator in
+three steps:
+
+1. **Model & category** — the model, and one of Character, Style, Pose & Framing, Manga Panel,
+   Effect, Outfit or Scene.
+2. **Ingredients & test** — the ingredients PixAI's recipes can hold (prompt, LoRAs with weight and
+   trigger words, a base image, reference images, context images, a style code, reference videos);
+   any the chosen model doesn't take is dimmed with the reason. Pick three to eight showcase
+   pictures; the first is the cover. **✦ Test** shows its price and stops: test runs aren't
+   available from here yet, and it says so.
+3. **Name & cover** — title, description, cover, and who can use it (**Public**, **Followers** or
+   **Private**), then **Publish**.
+
+Your draft is saved with your Moonglade account as you go, and **nothing reaches PixAI while you
+build it** — only **Publish** (or **Save changes** on an edit) does, after one confirm that says
+what others will see: the cover, title, description and showcase, not your prompt text or LoRA
+weights. PixAI reviews public recipes before listing them, so a new one reads **In review** in Mine
+until it is listed; you can make it private later. Publishing, editing, archiving and saving to a set
+change your PixAI account, so `READ_ONLY` refuses all of them.
+
+### Several at once: variables, Random and Matrix — and the one confirm
+
+**Anything that sends more than one generation asks first, once.** A batch of 2–4, a Random
+run and every Matrix run open one confirm card under the prompt: how many, the total credits
+(PixAI's own price for what will actually be sent, checked on the server) and how many free
+cards cover it. **Cancel · nothing is sent** is exactly that. There is no "don't ask again".
+A single picture sends as it always has, with no confirm.
+
+**Variables in the prompt.** `{silver|cobalt|ember}` is a variable: each option is one value.
+Only braces with a `|` inside make a variable — ordinary braces like `{masterpiece}` or
+`{{best quality}}` are plain prompt text and are sent exactly as you typed them, and so is a
+backslash (a kaomoji's `\_` stays). `__poses__` reads one of your **saved lists** (the
+**Lists ▾** button in the composer's header beside **Presets**: a name, one item per line,
+saved with your Moonglade account so the phone sees them too).
+Variables work in the prompt only; the negative is sent as typed. They are tinted lavender in the
+prompt box itself, and anything that can't be read — a `{` with a `|` after it that never
+closes, a variable inside other braces, an empty `{ | }`, a list you don't have — is tinted
+peach and blocks Send until you fix it. To send a `{a|b}` or a `__name__` as plain text, put a
+backslash before it: `\{a|b}`, `\__name__`.
+
+- **Random** draws one value per picture, ×1–4, from the run seed (the Seed field when it holds
+  a number, otherwise a draw of its own that **⚄ Reroll** changes), so the same prompt, settings
+  and seed give the same run again. Each picture is its own task and its own run.
+- **Matrix** sends every combination, one picture each, queued one after another — at most 24;
+  over that, Send says *narrow an axis* and nothing goes. The reel shows a matrix as a grid:
+  the last variable across, the rest down. **Free cards never cover matrix cells** — a card
+  belongs to a model and a function — and the cost line under **Generate** shows the total for
+  every cell, the same figure the confirm shows.
+
+The dock previews what each picture will get before you send. After Go, the pictures go out
+one at a time; if PixAI refuses one (moderation, a recipe that doesn't fit that cell's
+prompt) the rest are **not** sent and the result line says which cell and why. A cell whose
+answer never came back reads *may have started — check the Activity tray*; nothing is ever
+re-sent on its own. If the price, your free cards or anything about the request changed
+between the confirm and Go, nothing is sent and the confirm comes back with the new numbers.
+
+Reusing a run from the reel or History puts back its **template** (the variables, Random or
+Matrix, the count and the seed), not just one resolved prompt. An older picture's prompt comes
+back with any `{a|b}` or `__name__` in it escaped, so sending it again sends exactly the same
+text.
+
+**Inspect `{ }`** (beside the snippets button, on each finished tile in the reel, and under **⋯**
+on a picture's record page) shows the
+exact request a picture was — or will be — sent with, after the variables were filled in, with
+the template and the drawn values beside it. The API key, cookies and session tokens are
+removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
+copies the matching `python moonglade_backup.py --generate …` command, quoted for the shell the
+server runs in — PowerShell on Windows, bash elsewhere, named beside the button (not the old
+Command Prompt, cmd.exe, where its quoting doesn't hold). It never includes `--confirm`, so pasting it previews
+first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
+copies as `--params-json`.
+
+### Your defaults, ↺ Last, Presets and quick picks
+
+These live with your Moonglade account, so the phone has the same ones. **Nothing is saved just
+by opening the dock** — each of them is written by a click of your own, or by a send that
+PixAI accepted.
+
+- **A default negative for each base family.** Type a negative, then press **☆ Set as default**
+  on the NEGATIVE row (the ▲ settings must be open); the button then reads **★ Default · DiT**
+  (or SDXL, Pony, Illustrious, Flux — whichever family the model belongs to), and pressing it
+  again clears that family's default. When you pick a model, the negative fills in with its
+  family's default **only if the box is empty or still holds the previous family's default** —
+  a negative you typed yourself is never replaced. A model whose author ships a preset still
+  applies it, and its note says the preset replaces your default. On the phone it is the same
+  row under Create → Advanced.
+- **↺ Last** refills the composer from your last **successful** send — model, LoRAs and their
+  weights, the prompt template, negative, frame, count, steps, CFG, toggles and the seed. It is
+  greyed until you have sent something, and it never sends.
+- **Presets ▾** saves the composer as a named preset: the same things as ↺ Last, **except the
+  seed**, up to thirty. Picking one fills everything in and says nothing was sent; if its model
+  is no longer available the rest is still filled and the note says so. ✕ deletes one. Presets
+  hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
+  presets open as a sheet.
+- **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
+  and LoRAs plus the ones you ★ (the ☆ in the corner of a card in the model and LoRA pickers),
+  six to a row, then **+ more** into the picker. A model chip switches the model the same way
+  the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
+  removes it; a LoRA for another model family is dimmed, with the reason in its tooltip. On the
+  phone they are one scrolling row of large chips, models then LoRAs.
+
+**On the phone** the prompt has a small toolbar: **{ }** puts a variable at the cursor for you
+to type over, and **Lists** opens your saved lists as a sheet. Variables are tinted the same
+way. Random works on the phone; **setting up a Matrix is done on a computer**, but a matrix's
+results open as a grid from **⋯ → View this matrix as a grid** on any of its pictures' records,
+and **⋯ → Inspect the request** shows the exact request with **Copy JSON**.
 
 ### Tsubaki.3 Unlimited Mode
 
@@ -81,17 +286,15 @@ URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 you the correct version id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer types. The Mode picker
-doesn't filter by model, so you can still pick an unsupported combination — pick
-**Auto** if you're not sure which your model takes. You don't have to get it right by
-hand, though: since 2026-07-24, an unsupported Mode no longer errors out. The shared
-submit path every generate/edit route goes through (the web Generate tab, and anything
-else submitting through it, including the Loom's own reference-image generation) now
-auto-falls-back to the model's default and resubmits once instead of failing — a
-rejected submit costs no credits either way, so the retry is free — matching the CLI's
-own long-standing behavior (see `--mode` below). If you ever see the raw error text
-itself instead of a friendly message, see
-[Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. A model that lists its own
+profiles shows only those (the rows under the model), and a mode it doesn't offer is **refused
+before sending** rather than quoted and swapped. If PixAI refuses a profile the model *does*
+list — Ultra on an account without the membership — the app says so and **does not** resubmit
+it on Pro: that would be a different picture at a different price than the one you saw. Where
+the app can't read a model's profile list, the older behaviour still holds: an unsupported Mode
+falls back to the model's default and resubmits once (a rejected submit costs no credits), as
+the CLI always has (see `--mode` below). If you ever see the raw error text itself instead of a
+friendly message, see [Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
@@ -147,36 +350,120 @@ shown. Clear the base model to see all of them.
 
 ### Training your own LoRA
 
-**Train** in the side rail (on the phone: **Train a LoRA**) sends a basic LoRA training run to
-PixAI. It spends, so it previews first and only starts when you confirm.
+**Train** in the row of destinations under the banner (on the phone: **☰ Menu → Train a LoRA**)
+trains a LoRA on PixAI. Opening it
+only reads: nothing is sent to PixAI until you press a button that says what it does.
 
-- **Base models** are PixAI's own training list — DiT.3 (Tsubaki.3), DiT.2 (Tsubaki.2), DiT.1,
-  SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
-  PixAI can't be reached. The panel starts on the first SDXL base, the same one PixAI's own
-  page starts on.
-- **What it costs** is shown before you start, with the base's normal price beside a free
-  run. A run is free when your membership still has
-  free trainings left (they only count while you are a member), or when you hold a training
-  free card for that base — the card is used up by the run. If your free cards can't be
-  checked at that moment, the run is quoted as paid and starts only if you tick the amount. If you have both, this app uses one
-  of your free trainings and keeps the card (PixAI's own page would use the card). Otherwise
-  the panel quotes PixAI's own price for that base and asks you to tick that you will spend
-  that amount. Change the base, the images or any field after the quote and the quote closes —
-  press **Train it** (on the phone: **Preview & start training**) again for a fresh one; a run
-  is never started at a price you did not tick.
+It opens on a chooser: **Basic training** (about 30 minutes, good for your first LoRA),
+**Advanced training** (about 1 to 2 hours: you check the description PixAI writes for every
+image) and **Runs**. While something is training, a strip on top shows the newest run with
+its progress, and **View ›** opens Runs. Each wizard has **‹ Back** to the chooser and a link
+across to the other one.
+
+The phone has the same flows, one step per screen: the step you are on shows at the top
+right, and the **‹** at the top goes back one step (from the chooser it closes the screen).
+Image sources open as one sheet from the bottom (Upload, From history, Import a dataset), the
+set is a three-column grid, and a long press takes a picture out. Starting a run on the phone
+still asks in the **Queue training run** sheet, whose button names the price.
+
+**Basic training** is PixAI's own three steps:
+
+1. **Choose a goal** — Character, Art style, Outfit or Something else.
+2. **Add images** — from **Upload** (your device), **From history** (your library, Grouped by
+   generation or All pictures, with the library's search; it keeps loading as you scroll) or
+   **Import a dataset** (the image sets of your earlier Basic runs, with their counts; a set
+   that won't fit what's left of 100 is dimmed, and importing one fills in its old name,
+   trigger words and goal where those are still empty). Everything lands in one grid, each
+   picture once, with a mark for where it came from.
+3. **Review and start** — the LoRA's name, its trigger words and the base model, then a
+   summary with the price, the time it takes, and **Start training**.
+
+- **Base models** are PixAI's own training list, one tab per architecture — DiT.3 (Tsubaki.3,
+  marked Recommended and selected first), DiT.2 (Tsubaki.2), DiT.1, SDXL and SD 1.5 — read from
+  PixAI when the panel opens, with a built-in copy of that list if PixAI can't be reached.
+- **What it costs** is on the summary before you press Start, with the base's normal price
+  struck through when the run is free. A run is free when your membership still has free
+  trainings left (they only count while you are a member), or when you hold a training free
+  card for that base — the card is used up by the run. If your free cards can't be checked at
+  that moment, the run is quoted as paid. If you have both, this app uses one of your free
+  trainings and keeps the card (PixAI's own page would use the card). Reusing a whole earlier
+  set exactly as it was (imported, nothing added or taken out) is priced at PixAI's lower rate
+  for reusing a dataset, and the summary says so.
+- **Start training asks once.** It first gets PixAI's price for exactly this run (nothing is
+  spent), then shows one confirm whose button names that amount — for a paid run you also tick
+  that you will spend it. Change the base, the images or any field and the confirm closes;
+  a run is never started at a price you did not see and tick. If PixAI doesn't answer clearly
+  after you confirm, the panel says the run **may have started**: check Runs before starting
+  it again (starting the same run again is refused for a while, so a double click can't charge
+  twice).
 - **Trigger words** are tidied the way PixAI tidies them before they are sent: line breaks
   become commas, extra spaces and repeated commas are removed, and everything is lowercased.
-  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. On the desktop panel the
-  counter beside the box shows the tidied length, counted the way PixAI counts it (an emoji
-  counts as 2).
-- **Images**: between 10 and 100, each at least 512 pixels on both sides and no longer than
-  3:1. If an image fails that rule the run is refused and the image is named — PixAI's own
-  page quietly drops such images and trains on the rest, and this app would rather not train
-  on a different set than the one you picked. An image whose size your library doesn't know
-  is listed as not checked.
+  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. The line under the box shows
+  the tidied length when it is too short or too long, counted the way PixAI counts it (an
+  emoji counts as 2).
+- **Images**: between 10 and 100, PNG, JPG or WebP, each at least 512 pixels on both sides and
+  no longer than 3:1. An upload that fails the rule never leaves your computer and is listed
+  with its reason. A picture from your library that fails it is marked in the grid with its
+  reason in peach and is not counted or sent — take it out or add others. An image whose size
+  your library doesn't know is listed as not checked.
 - **If PixAI has paused new training runs**, starting one is refused (nothing is spent) and,
   when PixAI says, the message names when it expects to be back. Runs already training carry
   on.
+
+**Advanced training** is PixAI's own advanced steps:
+
+1. **Set up** — the LoRA's name, its trigger words (at least 30 characters and up to 256 once
+   tidied; the line under the box counts them, and warns about double spaces or a space at the
+   start or end, which are taken out before sending), what you are training, and the base:
+   **Tsubaki.3** (Recommended) or **Tsubaki.2**. **Next · creates a draft** is the one button
+   that creates the draft on PixAI (free), and the base can't be changed after that.
+2. **Descriptions** — add the images here (**Upload** or **From history**, 10 to 100, the same
+   picture rule as Basic; adding or taking out a picture changes the draft on PixAI, free).
+   PixAI then describes every image: **Describe automatically (N images)** shows PixAI's own
+   price for describing this set (it is charged per image, when it runs) and is the only way
+   in — PixAI has no way to write the descriptions yourself before it has described them. Pressing it
+   opens a confirm card with PixAI's quote and nothing is sent until you press the card's own
+   **Describe · price** button (on the phone the button opens a sheet that asks once); if
+   PixAI's price moved in the meantime, nothing is charged and the new price is shown. If the
+   answer to a paid step is ever unclear (a dropped connection, say), the app never lets a
+   second one go: it tells you to check **Runs** instead. Once they are described:
+   - the grid shows every image with the start of its description, with filters for **All**,
+     **Auto**, **Edited** and **Not described yet**, and an edited one has a small lavender dot;
+   - **⌕ find** with **replace with…** and **Replace**, or a tag with **+ tag** and **− tag**,
+     change every described image (or only the ones you ticked), and **Restore automatic
+     (selected)** puts PixAI's own words back;
+   - a tile (or **⤢ Focus**) opens one image with its whole description, up to 1,000
+     characters, with **Restore automatic**; **← →** or **J / K** move between images and
+     **Esc** goes back to the grid.
+   Edits save by themselves a moment after you stop typing, one at a time, and the buttons
+   below wait for them. **Next: parameters** stays off until every image is described.
+3. **Parameters → start** — the length, learning rate and detail capacity are shown at PixAI's
+   own defaults (325 steps, learning rate 6e-4, rank 64, and gradient accumulation 2) and are
+   locked for now, as they are on PixAI's own page. PixAI's price for the run and the time it
+   takes are shown, and **Start training** names that price; one press sends exactly it.
+
+A draft keeps its place on PixAI: **Continue** in Runs opens it at its descriptions. Opening
+a draft only reads it.
+
+**Runs** lists your training runs, newest first, with filters for All, Drafts, Done and
+Failed. Each row shows the run's status — a draft and the step it stopped at, Queued,
+Training with PixAI's percentage (and a moon that fills as it goes), Done or Failed (PixAI's
+reason on hover) — and one thing you can do with it:
+
+- **Continue** opens an Advanced draft at the step it stopped at.
+- **View** opens a queued or training run's progress.
+- **Publish** (a finished Advanced run) opens a sheet: Private or Public, and for a public
+  LoRA whether it joins LoRA rebates. Under **This can't be undone** each permanent
+  consequence is its own line to tick — you can no longer delete the LoRA, and a public one
+  can't go back to private — and Publish stays off until every line is ticked. Joining
+  rebates can't be undone either. A private LoRA's **Private** label opens the same sheet to
+  make it public later.
+- **Retry** (a failed Advanced run) starts a new run on the same set: it asks PixAI's price
+  first and the confirm's button names it; nothing is spent until you tick and confirm.
+- **Use** adds a trained LoRA to the Generate dock (on the phone, to the Create tab), trigger
+  words and all. If the dock was on **Context images**, it switches back to **LoRAs** so the
+  LoRA is sent; your context images stay in their slots, held, for when you switch back.
+  Nothing is generated until you press Generate.
 
 ## On the CLI
 
@@ -302,8 +589,10 @@ Notes:
   camera move** (both controls read disabled — anything you typed stays in the box but is not
   sent); **no video references** in Multi-Reference (images and audio only — video references
   you already picked are held, dimmed and not sent, never deleted); and a reference video can
-  set an **output aspect ratio** (CLI `--video-ratio`; the drawer has no ratio picker yet, so a
-  Remix names the source's ratio and lets PixAI infer it). Multi-Reference jobs on these
+  set an **output aspect ratio** — Auto (PixAI works it out from the references), 1:1, 2:3,
+  3:2, 3:4, 4:3, 9:16, 16:9 or 21:9. In the drawer it is the ratio chip on the prompt bar (the
+  phone shows the choices in Multi-Reference itself); on the CLI it is `--video-ratio`. A Remix
+  of a Tsubaki Multi-Reference clip brings its ratio back with it. Multi-Reference jobs on these
   engines have run on PixAI's own site, but Moonglade sends them a different way, and that has
   not run yet; First Frame and First & Last follow PixAI's own site and price quotes. The first
   real run of each mode from Moonglade is the proof it goes through.
@@ -334,7 +623,9 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
-type the change, set resolution/aspect/quality, then submit.
+type the change, set resolution/aspect/quality, then submit. Three edit models: **Edit v4.0**
+(new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
+setting), **Edit Pro** and **Reference Pro**.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
@@ -355,7 +646,7 @@ Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values 
 corrected (and shown in the preview) rather than rejected.
 
 **Edits made with a model Moonglade doesn't know locally still get a real name.** It
-recognizes PixAI's two edit models by name without asking anyone; anything else — a newer
+recognizes PixAI's three edit models by name without asking anyone; anything else — a newer
 `modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
 PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
 than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
@@ -367,7 +658,7 @@ the raw id — the two states `--fix-model-names` is built to pick up on a later
 ## Upscale — on the picture, not in the drawer
 
 PixAI upscales an image you already have, so that is where Moonglade puts it. Open any image
-and use **↱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
+(a still — a video has no Upscale) and use **⇱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
 flyout so you can still see the picture while you choose.
 
 Two methods, and they are genuinely different jobs:
@@ -603,7 +894,20 @@ breakdown** tier by tier — how much each rank pays, how many people place ther
 that adds up to — and the **requirements**: the tag an entry must carry, whether the contest
 restricts you to particular models or LoRAs, a link to its rules document if it published
 one, and how the winners get decided. Below that sit both dates, a preview of the entries,
-and the winners once results land.
+and the winners once results land. Each winner shows the **tier** it won — PixAI pays by tier
+(a tier can hold many winners), so the list never numbers its places — and what that tier paid.
+
+**Wins are verified, never taken on trust.** For every contest you entered, the app checks
+PixAI's own winners list at the contest's result date, then once a day for two weeks (it stops
+early once the prizes have been paid out and your entries are settled). A win is recorded only
+when your entry is on that list with a tier and the piece is yours; a list that hasn't been
+published yet counts as "not yet", never as a loss. Under **My entries** a verified row turns
+gold and reads its tier and prize ("Tier 2, 200,000 credits"). If one won but isn't shown,
+use **It won but isn't shown…** at the foot of the list (on a phone, the same link at the foot
+of My entries): choose the contest, paste the link to your entry from pixai.art and press
+**Check**. The app reads that contest's winners once and records the win only if it matches;
+the link is kept as the receipt. Only pixai.art pages count, and a check that doesn't verify
+says what didn't match. All of this only reads from PixAI — it never writes to your account.
 
 From there you can **enter** a published piece — also from **My Art**, or by picking a
 contest while you publish. Entering is an account write, not a browse: the artwork goes into a public contest
@@ -649,7 +953,7 @@ the button comes back — the app will tell you it doesn't know rather than leav
   live: gradient overlays applied right in your browser, so they cost nothing, make no request,
   and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
   tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
-  The two edit models take different numbers of reference images (Edit Pro up to 4,
+  The edit models take different numbers of reference images (Edit Pro up to 4, Edit v4.0 and
   Reference Pro up to 10, and the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
@@ -722,8 +1026,11 @@ the button comes back — the app will tell you it doesn't know rather than leav
 drawer is login-tier, the sliders and number boxes in your browser are the only limit a
 well-behaved client honours — and anything POSTing to `/api/generate` by hand honours none,
 so a width of 999,999,999 or 999,999 steps used to go straight through to PixAI and be
-priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150,
-CFG to 1–30 and count to 1–4, the same bounds the drawer's own controls carry. When a clamp
+priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150
+and CFG to 1–30, the same bounds the drawer's own controls carry. The count is not clamped
+at all: `/api/generate` sends exactly one generation and refuses any other count, and a
+prompt written with variables, because more than one — and every template — goes through the
+confirm above, where the server itself expands, counts, caps and prices the run. When a clamp
 actually fires the response says so and the drawer raises it — "Settings were adjusted
 before submitting … steps 200 → 150 — this generation used the adjusted values." — because
 that submit is already made and already charged, and quietly billing you for a different
@@ -732,9 +1039,10 @@ can meet this from the drawer itself, not only from a hand-rolled request: a mod
 publishes wider limits of its own widens the browser field to match.
 
 **The Loom** (`/loom`) is the storyboard for multi-clip video — acts, shots, cast,
-frame handoff, and per-shot **Generate** on the same engine. It's a fixed 4-region shell
-(Cast & Assets / Footage on the left, the Acts & Shots board center, the Generate drawer
-right, a Timeline drawer across the top) with a "draft generation" mode for exploring a
-look before assigning it to a shot, multiple independently-saved storyboards, project-wide
-Draft-quality rendering, and a two-tier project export. Full manual: [The Loom](The-Loom) (or
-the ? button on the page).
+frame handoff, and per-shot **Render** on the same engine, every render kept as a take. It's a
+fixed 4-region shell (Cast & Assets / Footage / Library on the left, the Acts & Shots board
+center, the Generate drawer right, a Timeline drawer across the top) with a "draft generation"
+mode for exploring a look before assigning it to a shot, multiple independently-saved
+storyboards sharing one cast library, project-wide Draft-quality rendering, a music bed, find,
+a continuity ribbon, and a project export with an edit decision list for your editor. Full
+manual: [The Loom](The-Loom) (or the ? button on the page).

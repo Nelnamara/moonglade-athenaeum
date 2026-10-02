@@ -1,0 +1,47 @@
+/* The moon gauge (MoonGauge.jsx; Small Calls handoff L4). The art's URLs and the frame's
+   geometry arrive as --mgm-* custom properties injected once on :root by the component; the
+   size is --mgm-s on each gauge (14 / 16 / 18 px). No z-index: it paints in its row's place. */
+
+.mgm { display: inline-flex; align-items: center; gap: calc(var(--mgm-s) * .4);
+  height: var(--mgm-s); line-height: 0; vertical-align: middle; min-width: 0; }
+
+/* The moon: the nearest frame of the 17-frame phase strip. */
+.mgm-moon { flex: none; width: var(--mgm-s); height: var(--mgm-s); border-radius: 50%;
+  background-image: var(--mgm-phases); background-repeat: no-repeat;
+  background-size: calc(var(--mgm-s) * var(--mgm-frames)) var(--mgm-s);
+  background-position: calc(var(--mgm-s) * var(--mgm-frame) * -1) 0; }
+/* 0 %: a new-moon outline over the dark disc. */
+.mgm[data-phase="new"] .mgm-moon {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lavender) 55%, transparent); }
+/* 100 %: the full moon glows lavender, breathing slowly. */
+.mgm[data-phase="full"] .mgm-moon {
+  box-shadow: 0 0 calc(var(--mgm-s) * .45) color-mix(in srgb, var(--lavender) 70%, transparent);
+  animation: mgmGlow 2.6s ease-in-out infinite alternate; }
+@keyframes mgmGlow {
+  from { box-shadow: 0 0 calc(var(--mgm-s) * .3) color-mix(in srgb, var(--lavender) 45%, transparent); }
+  to   { box-shadow: 0 0 calc(var(--mgm-s) * .7) color-mix(in srgb, var(--lavender) 80%, transparent); }
+}
+
+/* The bar: BAR9's shield cap, a stretched rail, the crescent cap. The fill runs in the rail's
+   channel, between the painted rails. */
+.mgm-bar { flex: 1 1 auto; display: flex; align-items: flex-start; height: var(--mgm-s);
+  min-width: calc(var(--mgm-s) * 5); }
+.mgm-cap { flex: none; height: var(--mgm-s); background-repeat: no-repeat; background-size: 100% 100%; }
+.mgm-cap.l { width: calc(var(--mgm-s) * var(--mgm-left-ar)); background-image: var(--mgm-left);
+  margin-right: calc(var(--mgm-s) * -.08); position: relative; z-index: 1; }
+.mgm-cap.r { width: calc(var(--mgm-s) * var(--mgm-right-ar)); background-image: var(--mgm-right);
+  margin-left: calc(var(--mgm-s) * -.08); position: relative; z-index: 1; }
+.mgm-rail { flex: 1 1 auto; position: relative; min-width: 0;
+  margin-top: calc(var(--mgm-s) * var(--mgm-rail-top));
+  height: calc(var(--mgm-s) * var(--mgm-rail-h));
+  background-image: var(--mgm-rail); background-repeat: no-repeat; background-size: 100% 100%; }
+.mgm-fill { position: absolute; left: 0; top: var(--mgm-chan-top); height: var(--mgm-chan-h);
+  max-width: 100%; border-radius: 1px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--lavender) 55%, transparent), var(--lavender));
+  box-shadow: 0 0 calc(var(--mgm-s) * .25) color-mix(in srgb, var(--lavender) 55%, transparent);
+  transition: width .4s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgm[data-phase="full"] .mgm-moon { animation: none; }
+  .mgm-fill { transition: none; }
+}

@@ -90,6 +90,8 @@ async function request(path, init) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+  // A HEAD has no body to read: its whole answer is the header (apiHeadSize below).
+  if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
   let d = null;
   try { d = await r.json(); } catch { d = null; }   // an HTML error page, a 204, a cut stream
   // rule 1: the body wins, HTTP 200 included. `http_status` rides along on any non-2xx,
@@ -116,6 +118,17 @@ export function apiPost(path, body, opts) {
     body: JSON.stringify(body || {}),
     ...(opts || {}),
   });
+}
+
+/* The size in bytes of a served file, from a HEAD -- headers only, no body. The phone's Data saver reads
+   it for the "Tap to load full size · 2.4 MB" line (Session Q, Q7). It rides request() like every other
+   call (a HEAD answers {size} there, before any body is looked for), so this module still has one fetch
+   and one place that reads a body. Fail-soft by design: 0 means "not known" (a 404, a server that sends
+   no Content-Length, offline) and the caller simply draws the line without a size. Never throws, never
+   retries. */
+export async function apiHeadSize(path) {
+  const d = await request(path, { method: "HEAD" });
+  return d && d.size > 0 ? d.size : 0;
 }
 
 /* Multipart POST -- the browser sets its own Content-Type boundary, so there are no headers
@@ -301,6 +314,47 @@ export async function rateImage(mediaId, rating) {
   const d = await apiPost("/api/rate/" + mediaId, { rating });
   if (d.error) throw new Error("rate failed");   // both callers roll the star back on a throw
   return d;
+}
+
+/* CURATION (Session N). Local catalog only -- none of these reaches PixAI. Every write carries
+   the session's CSRF token (boot.csrf) in its body, the house rule for the wave 5 routes.
+   `curate` answers {changed, prev, after, skipped, refused}: what REALLY changed, and each
+   changed picture's previous state, which is exactly what `curateRestore` takes back. */
+export function curate(csrf, mediaIds, op) {
+  return apiPost("/api/curate", { csrf, media_ids: mediaIds, op });
+}
+export function curateRestore(csrf, prev) {
+  return apiPost("/api/curate/restore", { csrf, prev });
+}
+/* Every collection with its count and cover, hand-picked and smart. */
+export async function fetchCollectionDetail() {
+  const d = await apiGet("/api/collections/detail");
+  return d && d.collections ? d.collections : null;
+}
+/* rename {name,new_name} - merge {names} - delete {name} - smart {query,name?,replace?} */
+export function manageCollections(csrf, body) {
+  return apiPost("/api/collections/manage", { ...body, csrf });
+}
+
+/* MANUAL ORDER (Session P, P6). A collection's members in its order -- {name, kind, media_ids,
+   manual} -- and the order's one write (hand-picked only; local catalog, never PixAI). */
+export function fetchCollectionOrder(name) {
+  return apiGet("/api/collections/order", { name });
+}
+export function saveCollectionOrder(csrf, name, mediaIds) {
+  return apiPost("/api/collections/order", { csrf, name, media_ids: mediaIds });
+}
+/* Some pictures' facts from the local catalog -- {id: {prompt, created_at, is_video}}, 200 at a
+   time (GET /api/loom/prompts): the order editor's row names, and what the Loom's "as shots"
+   hand-off needs to know. */
+export async function fetchPictureFacts(ids) {
+  const out = {};
+  const list = Array.from(ids || []).map(String);
+  for (let i = 0; i < list.length; i += 200) {
+    const d = await apiGet("/api/loom/prompts", { ids: list.slice(i, i + 200).join(",") });
+    ((d && d.pictures) || []).forEach((p) => { out[String(p.media_id)] = p; });
+  }
+  return out;
 }
 
 /* Saved views are server-side and account-scoped; each stores the CLASSIC

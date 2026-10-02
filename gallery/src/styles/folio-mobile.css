@@ -23,7 +23,7 @@
 @keyframes fmPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.5); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
 @keyframes fmGlint { 0% { transform: translateX(-60px); opacity: 0; } 12% { opacity: 1; } 45% { transform: translateX(220px); opacity: 0; } 100% { transform: translateX(220px); opacity: 0; } }
 
-.fm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+.fm-root { position: fixed; inset: 0; z-index: 315; display: flex; flex-direction: column;
   background: var(--mantle); color: var(--text);
   animation: fmIn .22s cubic-bezier(.2,.9,.24,1) both; }
 .fm-root.closing { animation: fmOut .18s ease both; }
@@ -49,8 +49,10 @@
    tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
    contest detail took on 2026-09-05; this surface and the picture screen were the two the
    sweep missed. */
+/* Drift 122: the Folio's scroller ends at the bottom of the screen, so it carries the
+   drift's bottom pad -- 16px plus the home indicator -- and its last row clears the bar. */
 .fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain; }
+  overscroll-behavior: contain; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 .fm-loading { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
 
 /* ---- hero header ---- */
@@ -131,16 +133,6 @@
 .fm-reachnote { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
 .fm-reachpts { font-size: 10px; color: var(--gold); }
 .fm-reachcard .fm-bartrack { margin-top: 7px; height: 3px; }
-
-/* ---- Relics (Summary carousel + full sheet) ---- */
-.fm-relicnote { font-size: 10px; color: var(--overlay0); margin-bottom: 2px; }
-.fm-relicchip { flex: none; width: 72px; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
-.fm-relicchip.dim { opacity: .55; }
-.fm-relicsw { display: flex; gap: 2px; }
-.fm-relicsw i { width: 9px; height: 9px; border-radius: 3px; border: 1px solid rgba(255,255,255,.14); }
-.fm-relicchip-name { font-size: 9.5px; text-align: center; color: var(--subtext); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; width: 100%; }
 
 /* ---- Nel strip ---- */
 .fm-nelstrip { display: flex; align-items: center; gap: 10px; margin: 20px 0 6px; padding: 11px 13px;
@@ -278,17 +270,6 @@
 .fm-sheet-closebtn { display: block; width: 100%; box-sizing: border-box; margin-top: 14px; text-align: center;
   padding: 11px; border-radius: 11px; border: 1px solid var(--surface1); background: none; font-size: 12.5px;
   font-weight: 700; color: var(--subtext); cursor: pointer; font-family: inherit; }
-
-/* ---- Relics sheet (full list) ---- */
-.fm-relicrow { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px dashed var(--surface0); }
-.fm-relicrow-sw { display: flex; gap: 3px; flex: none; }
-.fm-relicrow-sw i { width: 9px; height: 9px; border-radius: 3px; border: 1px solid rgba(255,255,255,.14); }
-.fm-relicrow-textcol { flex: 1 1 auto; min-width: 0; }
-.fm-relicrow-name { font-size: 12.5px; color: var(--subtext); }
-.fm-relicrow-name.active { color: var(--text); font-weight: 600; }
-.fm-relicrow-desc { font-size: 10.5px; font-style: italic; color: var(--overlay0); margin-top: 1px; }
-.fm-relicrow-sub { flex: none; font-size: 9.5px; color: var(--overlay0); }
-.fm-relicrow-sub.active { color: var(--emerald); }
 
 .fm-empty { color: var(--overlay0); font-size: 11.5px; font-style: italic; padding: 8px 2px; }
 

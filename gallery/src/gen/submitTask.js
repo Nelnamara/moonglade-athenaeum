@@ -34,23 +34,33 @@ import { adjustedText, friendlyGenErr } from "./genCore.js";
    surface says about a phase remains the surface's own business.
 
    `count` overrides payload.count for the Runs-reel placeholder; callers that keep it on the
-   payload (all of them today) need not pass it. */
-export async function submitTask(route, payload, { label, emit, count, onPhase }) {
-  let d;
+   payload (all of them today) need not pass it.
+
+   `onAnswer(answer)` (optional; only the Loom's video drawer passes it, Session P) is told what
+   the POST itself answered, before anything else happens: {threw: true} when there was no
+   answer or it could not be read, else {threw: false, status, body}. The Loom needs to tell
+   "no answer" (the render MAY exist: keep the shot locked, ask the server's journal) apart from
+   a refusal (nothing was sent), and the return value (a task id, or null for both) cannot say
+   which. It changes nothing about what this function does or returns. */
+export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer }) {
+  let d, status = 0;
   try {
     const r = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    status = r.status;
     d = await r.json();
   } catch {
+    if (onAnswer) onAnswer({ threw: true });
     emit({
       kind: "err",
       text: "No answer from the server — the task MAY still have been submitted. Check the Activity tray before trying again.",
     });
     return null;
   }
+  if (onAnswer) onAnswer({ threw: false, status, body: d });
   if (d.error || !d.task_id) {
     emit({ kind: "err", text: friendlyGenErr(d.error || "Submit failed.") });
     return null;
@@ -106,6 +116,34 @@ export async function submitTask(route, payload, { label, emit, count, onPhase }
     if (onPhase) onPhase(phase, data);
   }, count == null ? payload.count : count);
   return d.task_id;
+}
+
+/* THE RUN'S ONE POST (Session M, BUILD-w5-m s4.3). A run -- a batch x2-4, a Random run, a
+   Matrix run, or one generation whose prompt uses the template syntax -- is sent by POST
+   /api/generate/run exactly once per run_id, from this function only (pinned by
+   loom/test/template-core.test.js), behind the caller's latch. It keeps its own fetch for the
+   reason submitTask does: a transport failure is "the run MAY have reached the server", a
+   different fact from a body error, and the caller reads the run back by its id instead of
+   ever posting it again.
+
+   Returns {data} (the server's JSON answer -- a refusal is data.error, HTTP 200 or not) or
+   {lost: true} (no answer, or one that could not be read). Never throws, never retries. */
+export async function submitRun(body) {
+  let r;
+  try {
+    r = await fetch("/api/generate/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { lost: true };
+  }
+  try {
+    return { data: await r.json() };
+  } catch {
+    return { lost: true };
+  }
 }
 
 /* The result-line list every tab keeps: one line per submission, so concurrent

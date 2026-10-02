@@ -212,8 +212,10 @@ test("F: the phone viewer's Similar is a DOOR, not a toast, and wears ◈", () =
   assert.doesNotMatch(lbMobile, /toast\("Similar"/);          // the stub is gone
   assert.match(lbMobile, /onOpenDetails, onSimilar,/);        // a real prop, not a global
   assert.match(src("styles/lightbox-mobile.css"), /\.lbm-similar \{[^}]*var\(--lavender/);
-  // Edit / To Video are still honest toasts -- this pass fixed Similar, not those
-  assert.match(lbMobile, /toast\("Send to Video"/);
+  // Edit is still an honest toast -- this pass fixed Similar, not that. (To Video was one too until
+  // Session Q, Q2: it is the real Send to Video route now, and loom/test/phone-handoff.test.js holds it.)
+  assert.match(lbMobile, /toast\("Edit"/);
+  assert.doesNotMatch(lbMobile, /toast\("Send to Video"/);
 });
 
 test("F: AppMobile owns one verb and one data path, exactly like App.jsx does", () => {

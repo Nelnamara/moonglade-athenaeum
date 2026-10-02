@@ -30,17 +30,8 @@ why this section exists.
 
 ## Next — scoped, not started
 
-- **Tsubaki.3 feature controls.** *(2026-09-26)* PixAI's Tsubaki.3 release added controls the
-  app cannot express yet: up to three context images in place of the single reference, style keys
-  and custom styles, colour palettes, the prompt helper's creativity level, Tsubaki.3 in the Edit
-  card, and an advanced LoRA trainer with a runs list. Most need a design session first (the brief
-  is written); the palette Library and the aspect-ratio picker for Tsubaki video Multi-Reference
-  follow PixAI's own pattern and can be built without one.
-- **A first-run guide for a customization surface.** *(2026-09-10)* A design session for the
-  guidance a user meets the first time they open a customization surface they have not used before
-  — the orientation, not the controls. The asset-folder rules it waited on shipped in 3.12.0, so it
-  can be designed against the rules now in force. It may become one instance of the in-app
-  first-run guide below rather than a design of its own.
+- **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
+  keys and custom styles, which the app cannot express yet. Needs a design session first.
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
@@ -176,25 +167,6 @@ why this section exists.
 
 ## Backlog — needs scoping
 
-- **Help, About and first-run guidance — one family.** *(owner, 2026-09-27)* Three related ideas,
-  best designed together:
-  - **An in-app first-run guide.** The setup wizard gets the app installed; a guide would orient a
-    user the first time they reach each main surface (the gallery, the Generate dock, the Loom, the
-    Folio, the Control Panel) — what it is for and where things are, not every control.
-  - **The wiki inside the app.** Render the repo's own `wiki/*.md` in a Help overlay, bundled with
-    the app: it works offline and always describes the installed version (the GitHub wiki follows
-    `master`). Links between pages stay in the app; the Glossary could supply hover definitions.
-  - **An About panel.** The app and art-pack versions, what's new in the installed version (its
-    `CHANGELOG.md` entry, and a natural place to show it once after an update), and links to the
-    wiki, issues and releases.
-- **First run, before the pack: the sign-in page is bare.** Until the setup wizard has downloaded
-  the art pack, every branding image 404s by design, so a fresh install's sign-in page shows no
-  banner and no mascot; the only art the code carries is the wizard's own downloader mascot
-  (`gallery/src/art/nelWizard.js`). Owner, 2026-09-07, walking a fresh install: look at embedding the
-  login banner (and the login mascot) the same way, since the pack's default login banner is small
-  enough to carry in the bundle. A scoping question, not a defect: which art, at what size, and
-  whether the sign-in page should say the pack is still to come.
-
 - **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
   internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
   contest verbs, the `/v2` REST growth, the React front door). Scope: audit `--help` + the wiki
@@ -205,45 +177,21 @@ why this section exists.
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
 
-- **Loom:** takes / per-shot generation history · draft-quality blocking pass · project "Look" block ·
-  re-anchor warnings on the reel · music bed under Play · editor handoff export (per-shot trims + CSV/EDL).
-- **Curator:** smart collections (saved queries as live collections) · search operators
-  (`seed:` `aes:>` `ar:`) · collections manager (rename/merge/delete) · archive-integrity job.
-- **Power user:** prompt-matrix queue runs · metadata recovery for hand-made folders.
-- **Mobile:** the card placard (accession stamp + sibling strip) — the phone grid is a separate
-  component and has none of it yet; and the mobile details sheet's View-batch chip still gates on the
-  legacy `batch` column (re-point at `task_id` like desktop did in #30) · Remix and Send to Video on the mobile details sheet — both need their own
-  wiring into CreateMobile's composer (the sheet has no dock hand-off; Send to Video is
-  already a disclosed stub there, Remix now ships desktop-only the same way).
+- **Loom:** draft-quality blocking pass · project "Look" block.
+- **Curator:** archive-integrity job.
+- **Power user:** metadata recovery for hand-made folders.
+- **Mobile:** the mobile details sheet's View-batch chip still gates on the legacy `batch` column
+  (re-point at `task_id` like desktop did in #30).
 
 From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationale in
 `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
 above, tagged "Scope":
 
-- **Power / workflow:** wildcards / prompt-variable expansion (`{a|b|c}`, `__lists__`) · a saved
-  **default negative prompt** · composer-recipe persistence (restore-last + named "Styles" presets) ·
-  a quick-pick chip row for recent/favourite models & LoRAs · an in-UI raw-recipe inspector (copy
-  JSON / copy-as-CLI). **Spend constraint (from the red-team):** any fan-out submit — matrix,
-  wildcard, bulk re-gen — MUST show an aggregate credit + free-card confirm before it fires; never
-  spend a batch on the strength of a per-image badge.
-- **Curator:** a personal metadata layer (user tags / keeper-reject flags / notes, searchable) · a
-  full per-file archive-integrity pass (zero-byte / truncated / missing-thumb + a "last verified"
-  stamp, beyond today's missing/orphan tiles) · bulk rate + bulk tag from a selection · keyboard
-  rating hotkeys (1–5) · storage breakdown (space by collection / model / type) · a round-trippable
-  curation-only sidecar export.
-- **Completionist:** quantified Folio progress ("N to go" on every visible ladder/milestone, sorted
-  fewest-remaining, each with a jump to the surface that advances it) · a spoiler-safe grand
-  completion meter · a "closest to earning" unearned-sort · a pinnable single-goal tracker chip · a
-  persistent Vigil day-streak chip · an exportable Honors card (PNG). *(Roster-growth and new-rung
-  specifics are internal — `../moonglade-internal/ROADMAP-internal.md`.)*
-- **Loom:** cast a collection as an ordered shot-sequence scaffold · manual ordering within a
-  collection · a cross-storyboard (series) cast library · find-in-storyboard search · a continuity
-  ribbon (each shot's close frame beside the next shot's open frame).
-- **Mobile:** pull-to-refresh +
-  optional infinite scroll · a single-column full-bleed reading feed · a data-saver mode
-  (medium-first, full-res on tap) · proper landscape handling · a "new since last visit" marker +
-  jump-to-newest · an opt-in "remember this device" longer LAN session (still authenticated) ·
-  QR-connect onboarding (URL only, login gate unchanged).
+- **Curator:** a full per-file archive-integrity pass (zero-byte / truncated / missing-thumb + a
+  "last verified" stamp, beyond today's missing/orphan tiles) · a round-trippable curation-only
+  sidecar export.
+- **Mobile:** optional infinite scroll · an opt-in "remember this device" longer LAN session (still
+  authenticated) · QR-connect onboarding (URL only, login gate unchanged).
 
 Small integrity fixes the sweep surfaced (issue-candidates, not features): the mobile Details
 "k of N" index counts one loaded page, not the true result total; Contact Sheet Mobile renders

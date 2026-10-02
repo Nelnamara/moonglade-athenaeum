@@ -6,8 +6,8 @@
    (window.MG_BOOT.ach_nonce), accepts it for exactly ONE event inside 60 seconds, refuses
    it from any other session, and hands back a `next_nonce` with each acceptance. So the
    page has to CARRY a value between events, which is the whole reason this module exists
-   rather than each caller posting on its own: Triggered needs five pokes in a row, and a
-   caller that forgot to adopt next_nonce would earn exactly one of them.
+   rather than each caller posting on its own: a caller that forgot to adopt next_nonce
+   would get exactly one event accepted and every later one refused.
 
    Every /api/ach-event caller under gallery/src goes through sendAchEvent(). That is a
    structural rule, pinned by loom/test/ach-nonce-callers.test.js, not a convention.
@@ -31,7 +31,7 @@
    own twin, and there is nothing to recover: give up silently, exactly like a 429.
 
    These feats ANNOUNCE; they never gate capability, and every one of them is still earnable
-   on the next gesture. A user who just poked a narrator avatar does not need to be told
+   on the next gesture. A user who just did the thing does not need to be told
    about a nonce, so a give-up here is silent by design -- the same fail-soft contract the
    callers already had against the 2026-08-26 LOCALHOST 403. */
 import { apiGet, apiPost } from "../api.js";
@@ -53,10 +53,14 @@ function now() {
   return (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
 }
 
+/* The boot nonce: MG_BOOT.ach_nonce on the gallery's own shells; on the Loom's shell,
+   which has no MG_BOOT, the same per-render mint it writes as window.MG_ACH_NONCE
+   (moonglade_gallery.py's _LOOM_SHELL). Since Session I the Loom posts its one beacon -- the
+   guide's docs event -- through this module too, so both shells keep one set of rules. */
 function seed() {
   if (current === null) {
-    current = (typeof window !== "undefined" && window.MG_BOOT
-               && window.MG_BOOT.ach_nonce) || "";
+    const w = typeof window !== "undefined" ? window : null;
+    current = (w && ((w.MG_BOOT && w.MG_BOOT.ach_nonce) || w.MG_ACH_NONCE)) || "";
     adoptedAt = BOOT_AT;
   }
   return current;
@@ -94,8 +98,8 @@ export async function refresh() {
   return "";
 }
 
-/* Post one feat event. Answers the server's body exactly as api.js hands it over -- the
-   narrator caller reads .pokes/.snapped off it, and every caller branches on .error once. */
+/* Post one feat event. Answers the server's body exactly as api.js hands it over -- every
+   caller branches on .error once. */
 export async function sendAchEvent(event) {
   // Read the age BEFORE the await: by the time the 403 lands, the twin that beat us may
   // already have adopted its own next_nonce and reset the clock this decision reads.

@@ -12,8 +12,8 @@
    the dock-only keyframes (mgEclipse/mgPop/mgSettle/mgSlab/mgFade/mgSharpen/
    mgNelHalo/mgShimmer) live here.
 
-   Z: component band only — dock 7, expanded scrim 6, model flyout / filters
-   panel keep their existing 305/306 (the 300-band the overlays already own).
+   Z: component band only — dock 7, expanded scrim 6; the model flyout / Darkroom
+   are 335/336 and the run tooltip 330, in the overlays band (overlays.css's ladder).
    ========================================================================== */
 
 @keyframes mgEclipse { 0% { transform: translateX(-118%); } 50% { transform: translateX(0); } 100% { transform: translateX(118%); } }
@@ -117,8 +117,11 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-x:hover { border-color: var(--accent); color: var(--text); }
 
 /* =============================== BODY ======================================= */
-/* safety valve for short windows only — slabs may scroll, the composer never */
-.mgdock-body { position: relative; flex: 0 1 auto; min-height: 0;
+/* safety valve — the reel and slabs may scroll, the composer never. It GROWS too (owner walk
+   2026-09-29): the dock is a fixed height in both states (gen/dockLayout.js collapsedHeight /
+   dockBox), so the room a shorter tab or mode leaves is the body's -- the composer stays at the
+   dock's foot and the tabs at its top -- and a taller one scrolls the body, never the dock. */
+.mgdock-body { position: relative; flex: 1 1 auto; min-height: 0;
   overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 
 /* ============================== RUNS REEL =================================== */
@@ -233,10 +236,10 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-older:disabled { cursor: default; border-color: var(--surface1); }
 
 /* the run TOOLTIP (DC runTipStyle 3530 + 1594-1605): fixed, anchored at the tile's
-   top-centre and popped UP by its own height + 8px, opaque #0a0818, lavender rim, z 300.
+   top-centre and popped UP by its own height + 8px, opaque #0a0818, lavender rim, z 330.
    Rendered as a SIBLING of the .mgdock aside (the dock's transform would otherwise be
    the containing block for position: fixed) -- see GenerateDrawer.jsx. */
-.mgdock-runtip { position: fixed; z-index: 300;
+.mgdock-runtip { position: fixed; z-index: 330;
   transform: translate(-50%, calc(-100% - 8px)); display: flex; flex-direction: column;
   gap: 3px; padding: 8px 10px; border-radius: 8px;
   background: #0a0818; border: 1px solid rgba(182, 146, 230, .4);
@@ -440,7 +443,8 @@ html.mg-noblur .mgdock-scrim {
    dashed on rgba(12,10,28,.7) with the 9.5px subtext caption (DC 1457); filled = solid
    rim over the real thumbnail (the DC's tint is a demo stand-in for the picture),
    pointer on both because a click on a filled slot removes it (DC 2868) */
-.mgdock-srcslots { display: flex; flex-wrap: wrap; gap: 6px; }
+/* ...in rows of five: Edit v4.0 and Reference Pro take ten (Session L 6, "Inputs") */
+.mgdock-srcslots { display: grid; grid-template-columns: repeat(5, 54px); gap: 6px; }
 .mgdock-srcslot { position: relative; width: 54px; height: 54px; border-radius: 9px;
   display: grid; place-items: center; overflow: hidden; cursor: pointer; padding: 0;
   font-family: inherit; border: 1px dashed var(--surface1); background: rgba(12, 10, 28, .7); }
@@ -492,6 +496,23 @@ html.mg-noblur .mgdock-scrim {
   background: rgba(12, 10, 28, .6); border: 1px solid var(--surface1); }
 /* the no-quality-knob help line (DC 1532: 10px / 1.45 subtext) */
 .mgdock-editcopy { font-size: 10px; line-height: 1.45; color: var(--subtext); }
+
+/* ---- Session L decision 6 (Small Calls Handoff, L6): Edit v4.0 and the chip rows ---- */
+/* the model select with its emerald "new" tag beside it (L6: 8.5px bold, radius 4) */
+.mgdock-editmodelrow { display: flex; align-items: center; gap: 8px; }
+.mgdock-editmodelrow .mgdock-editmodel { flex: 1 1 auto; min-width: 0; }
+.mgdock-newtag { flex: none; font-size: 8.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+  background: rgba(79, 201, 154, .16); color: var(--emerald); }
+/* RESOLUTION and ASPECT as chips (L6: 10.5px pills, the pick lavender); More ▾ opens the
+   extremes as a second row */
+.mgdock-editchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.mgdock-editchip { padding: 4px 10px; border-radius: 999px; font-size: 10.5px; cursor: pointer;
+  font-family: inherit; border: 1px solid var(--surface1); background: transparent;
+  color: var(--subtext); transition: border-color .2s, color .2s, background .2s; }
+.mgdock-editchip:hover { color: var(--text); }
+.mgdock-editchip.on { border-color: var(--lavender); color: var(--text);
+  background: rgba(182, 146, 230, .12); }
+.mgdock-editmore { animation: mgSlab .42s cubic-bezier(.22, 1, .36, 1) both; }
 
 /* ---- slab 2 under the FIXER sub-tab: REGION (DC 1499-1508) ---- */
 /* the DC's column (1500): flex col, gap 8 */
@@ -828,6 +849,27 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300; padding: 0;
   transition: height .28s cubic-bezier(.2, .9, .24, 1); }
 .mgdock-prompt::placeholder { color: var(--overlay0); }
+/* The prompt's variables, tinted IN the box (owner walk 2026-09-29; Power Tools Handoff M1).
+   GenerateDrawer's TintedPrompt: a layer UNDER the (transparent) textarea holds the same text in
+   transparent ink and paints only the grounds -- lavender for a variable, peach for a refusal,
+   the token line's own two tints (runs.css .mgrun-tok). Its text metrics are the textarea's
+   exactly (font, size, line-height, weight, wrapping, no padding), so each ground lands under
+   its own characters; its width and scroll are copied from the textarea at every change. The
+   box-shadow widens a ground past its letters without moving them. No z-index: the layer comes
+   first in the DOM and the positioned textarea after it, so the textarea paints on top. */
+.mgdock-promptwrap { position: relative; }
+.mgdock-promptwrap > .mgdock-prompt { position: relative; }
+.mgdock-prompt-tint { position: absolute; top: 0; left: 0; overflow: hidden;
+  pointer-events: none; box-sizing: border-box; margin: 0; padding: 0; border: 0;
+  font-family: inherit; font-size: 16px; line-height: 1.5; font-weight: 300;
+  letter-spacing: normal; word-spacing: normal; text-indent: 0; text-transform: none;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 8;
+  color: transparent; }
+.mgdock-prompt-tint mark { color: transparent; border-radius: 4px; }
+.mgdock-prompt-tint mark.var { background: color-mix(in srgb, var(--lavender) 24%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lavender) 24%, transparent); }
+.mgdock-prompt-tint mark.bad { background: color-mix(in srgb, var(--peach) 24%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--peach) 24%, transparent); }
 /* The composer's border IS the focus ring (.mgdock-composer.focus, DC). The global
    :focus-visible ring in styles.css is emitted AFTER this sheet (main.jsx imports
    App.jsx before styles.css) and ties .mgdock-prompt on specificity, so on focus it
@@ -912,9 +954,10 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
    then (a min(1100px) panel centred in a scrim, DC 591-658) and the drawer strip that
    opened it. Values are the comp's own inline styles; every colour is a token, and the
    room's ground is the comp's radial expressed through the app's surface ladder.
-   z stays at 306 -- the rung the compare panel held in the dock's overlay band; toasts
+   z 336 -- the rung the compare panel held in the dock's overlay band (306 until the
+   2026-09-28 band normalization moved it up past the renumbered layers under it); toasts
    and the celebration layer (510+) still paint above it. */
-.mgdk { position: fixed; inset: 0; z-index: 306; display: flex; flex-direction: column;
+.mgdk { position: fixed; inset: 0; z-index: 336; display: flex; flex-direction: column;
   background: radial-gradient(130% 90% at 20% -10%,
     color-mix(in oklab, var(--surface0) 42%, var(--mantle)) 0%,
     var(--mantle) 55%, rgba(5, 4, 13, 1) 100%);
@@ -1143,7 +1186,7 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 @media (prefers-reduced-motion: reduce) {
   .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
   .mgdock-expand, .mgdock-gen, .mgdock-eclipse > span,
-  .mgdock-tileimg, .mgdock-reusefrom,
+  .mgdock-tileimg, .mgdock-reusefrom, .mgdock-editmore,
   .mgdock-runhalo, .mgdock-shim > i { animation: none; }
   .mgdock-runhalo { opacity: .55; }
   .mgdock-shim > i { left: 30%; }
@@ -1156,3 +1199,27 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 }
 /* (The compare overlay's narrow-viewport rules moved into the Darkroom block above with
    the 2026-09-04 rebuild -- the room owns its own @media now, beside the rules it bends.) */
+
+/* ============================ SESSION H (Tsubaki3 Generate Handoff, frame A) ============== */
+/* slab 1's head: MODEL & INPUTS on the left, the count ("1 / 15 LoRAs" · "2 / 3 context") */
+.mgdock-slabhead { display: flex; align-items: center; gap: 8px; }
+.mgdock-slabhead .sp { flex: 1 1 auto; }
+.mgdock-slabcount { font-size: 9.5px; color: var(--overlay0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* the model row, frame A's compact form: a 30 px thumb, the name over "DiT.3 · profile Pro" */
+.mgdock-slabs .mgdock-modelrow { gap: 9px; padding: 6px 8px; border-radius: 10px;
+  background: rgba(12, 10, 28, .7); }
+.mgdock-slabs .mgdock-modelthumb { width: 30px; height: 30px; border-radius: 8px; }
+.mgdock-modeltext { display: flex; flex-direction: column; min-width: 0; }
+.mgdock-slabs .mgdock-modelname { font-size: 12px; }
+.mgdock-modelsub { font-size: 9.5px; color: var(--overlay0); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+/* SIZE · <model> <tier> */
+.mgdock-sizehead { display: flex; align-items: baseline; gap: 7px; padding-top: 2px; }
+.mgdock-tiername { font-size: 11px; font-weight: 600; color: var(--mauve); }
+/* the composer's @image prompt: the image textarea's skin, the video prompt's resting floor */
+.mgdock-composer .mgat-ce { width: 100%; box-sizing: border-box; color: var(--text);
+  font-size: 16px; line-height: 1.9; font-weight: 300; min-height: 6em;
+  max-height: calc(max(var(--mg-prompt-max, 8), 6) * 1.5em); overflow-y: auto; }
+.mgdock-heldtag { font-size: 9.5px; color: var(--overlay0); padding-top: 4px; flex: none; }
+.mgdock-negrow .mgts-held { opacity: .38; }

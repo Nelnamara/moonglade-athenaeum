@@ -355,7 +355,7 @@ export default function ClipMoment({ moment }) {
                 onError={onVideoError} />
             ) : null}
             {flare ? (
-              <div data-part={kind === "starfall" ? "castflare" : "doorflare"} className="mgm-fill">
+              <div data-part={kind === "starfall" ? "castflare" : "doorflare"} className="mgm-flare">
                 <div style={flare.wash} />
                 <div style={flare.bloom} />
               </div>

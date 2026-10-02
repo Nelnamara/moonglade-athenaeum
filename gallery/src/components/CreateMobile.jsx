@@ -1,19 +1,37 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
+  SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
   dims, goGate, laneRefusesFrame, loraIncompat, loraRange, loraStep, modeOffered,
-  qualityTagTitle, refIsContext,
+  qualityTagTitle, unlimitedOffered,
 } from "../gen/genCore.js";
-import { EDIT_CAPS, editAspectLabel, editCaps, refTag } from "../gen/editCore.js";
+import {
+  autoActive, contextMax, contextModel, creativityModel, onContextSide, profileRows, sizeTiers,
+} from "../gen/tsubakiCore.js";
+import {
+  ContextSlots, CreativityStops, InputsSwitch, OrientSwitch, ProfileRows, RatioRow, SizeLine,
+  SwitchConfirm, TierRow, UnlimitedHeldLine,
+} from "./TsubakiControls.jsx";
+import AtPrompt from "./AtPrompt.jsx";
+import MobileSheet from "./MobileSheet.jsx";
+import RecipeRow from "../recipes/RecipeRow.jsx";
+import { pickContextImage } from "../gen/contextPick.js";
+import {
+  EDIT_CAPS, editAspectExtreme, editAspectGroups, editAspectLabel, editCaps, editModelIsNew, refTag,
+} from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import useSheet from "../hooks/useSheet.js";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
+import { PaletteRow } from "./ColorPalette.jsx";
+import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./RunControls.jsx";
+import { NegDefaultButton, PowerNote } from "./PowerControls.jsx";
+import { PhoneChips, PhoneQuickRow, PresetsSheetBody, PromptTools } from "./PowerMobile.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -244,7 +262,8 @@ export const MODES = [
 export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
-  canSubmit: priceOk,
+  addContext, removeContext, sizeContext,
+  canSubmit: priceOk, priceAnswer, run, power,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   // The model/LoRA sheet and its scrim are PORTALED out of the scrolling body (owner's 5059
@@ -266,9 +285,31 @@ export default function CreateMobile({
   // ownership contract is deliberately identical to MobileSheet.jsx's).
   const [advOpen, setAdvOpen] = useState(false);
   const [advClosing, setAdvClosing] = useState(false);
+  // Session H decision 1, phone: the first switch to context images confirms in a bottom
+  // sheet (280 ms exit, MobileSheet's own timing). A sheet, not a layer (AppMobile's "SHEETS
+  // ARE NOT LAYERS" rule): its scrim's tap-outside is the way out besides "Stay on LoRAs".
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmClosing, setConfirmClosing] = useState(false);
+  const closeConfirm = () => {
+    setConfirmClosing(true);
+    setTimeout(() => { setConfirmOpen(false); setConfirmClosing(false); }, 280);
+  };
+
+  // Session L 6, phone: "the same select as a sheet" -- the edit model's chooser.
+  const modelSheet = useSheet();
+  // Session M, phone: the Presets sheet (M3) and the Lists sheet (M1), each a bottom sheet
+  const powerSheet = useSheet();
+  const promptRef = useRef(null);
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
-  const gate = goGate(s, loraCap);
+  // Session M: the dock's template gate on the phone too (a prompt typed with the syntax is
+  // expanded the same way; setting up a Matrix is desktop-only -- Stage B's phone work).
+  const gate = goGate(s, loraCap, priceAnswer, run ? run.longest : null)
+    || (run ? run.templateGate : null)
+    // Phone: setting up a Matrix is desktop-only (NOTES, Phone); a matrix left in the shared
+    // dock state is never sent from here.
+    || (s.varMode === "matrix" && run && run.parsed && run.parsed.syntax
+      ? "Setting up a Matrix is desktop-only — switch to Random, or use the dock on a computer" : null);
   const m = s.model;
 
   /* Prime the Image cost chip when Image mode is (re)entered. <CostBadge>'s ref
@@ -314,6 +355,18 @@ export default function CreateMobile({
     if (picked) set({ ref: { media_id: picked.media_id, thumb: picked.thumb } });
   };
 
+  /* + on a context slot: history · gallery · upload through the one picker; an upload is
+     measured for Auto. Resolves to the new slot's number (the @ chip row inserts it). */
+  const addContextPick = async () => {
+    const img = await pickContextImage();
+    if (!img) return 0;
+    addContext(img);
+    if (!(img.w > 0 && img.h > 0) && img.measure) {
+      img.measure.then((wh) => { if (wh) sizeContext(img.media_id, wh.w, wh.h); });
+    }
+    return Math.min((s.ctx || []).length + 1, contextMax(s.model));
+  };
+
   const pickEditSource = async () => {
     const picked = await askPicker({ type: "image" });
     if (picked) edit.set({ source: picked.media_id });
@@ -338,6 +391,8 @@ export default function CreateMobile({
   useLayerHistory(advOpen, closeAdv);
 
   const d = dims(s);
+  const ctxOn = onContextSide(s);
+  const autoOn = autoActive(s);
   const editCapsNow = editCaps(edit.s.model);
   const editUsed = (edit.s.source ? 1 : 0) + edit.s.refs.length;
   const modelName = m ? (m.resolving ? "Resolving…" : m.failed ? "Lookup failed" : m.title) : "Pick a model";
@@ -378,13 +433,12 @@ export default function CreateMobile({
                   onChange={(e) => edit.set({ instruction: e.target.value })} />
 
                 <div className="cm-lbl">Model</div>
-                <div className="cm-chiprow">
-                  {Object.entries(EDIT_CAPS).map(([k, cap]) => (
-                    <button key={k} type="button"
-                      className={"glm-metal cm-chip" + (edit.s.model === k ? " on" : "")}
-                      onClick={() => edit.chooseModel(k)}>{cap.label}</button>
-                  ))}
-                </div>
+                <button type="button" className="cm-editmodel" aria-haspopup="dialog"
+                  onClick={() => modelSheet.open("model")}>
+                  <span>{editCapsNow.label}</span>
+                  {editModelIsNew(edit.s.model) ? <span className="cm-newtag">new</span> : null}
+                  <span className="cm-editmodel-caret">▾</span>
+                </button>
                 <div className="cm-hint">
                   {editCapsNow.label} takes up to {editCapsNow.max_refs} reference{editCapsNow.max_refs === 1 ? "" : "s"}.
                 </div>
@@ -407,7 +461,7 @@ export default function CreateMobile({
                 </div>
 
                 {(edit.s.refs.length > 0 || editUsed < editCapsNow.max_refs) && (
-                  <div className="cm-chiprow cm-refgrid">
+                  <div className="cm-refgrid">
                     {edit.s.refs.map((r, i) => (
                       <span className="cm-refthumbwrap" key={r.media_id + i}>
                         <img src={r.thumb} alt="" />
@@ -427,6 +481,23 @@ export default function CreateMobile({
                 <button type="button" className="cm-advrow" onClick={openAdv}>
                   ⚙ Advanced — resolution, quality, aspect
                 </button>
+
+                {sheetHost ? createPortal(
+                  <MobileSheet open={modelSheet.sheet === "model"} closing={modelSheet.closing}
+                    onClose={modelSheet.close} title="EDIT MODEL" className="cm-sheetover">
+                    {Object.entries(EDIT_CAPS).map(([k, cap]) => (
+                      <button key={k} type="button" role="radio" aria-checked={edit.s.model === k}
+                        className={"cm-sheetrow" + (edit.s.model === k ? " on" : "")}
+                        onClick={() => { edit.chooseModel(k); modelSheet.close(); }}>
+                        <span className="cm-sheetrow-main">
+                          <b>{cap.label}</b>
+                          <span>{cap.max_refs} images · {cap.resolutions.join(" / ")}</span>
+                        </span>
+                        {editModelIsNew(k) ? <span className="cm-newtag">new</span> : null}
+                        {edit.s.model === k ? <span className="cm-sheetrow-tick">✓</span> : null}
+                      </button>
+                    ))}
+                  </MobileSheet>, sheetHost) : null}
 
                 <span className="gd-cost cm-cost">
                   <CostBadge ref={editCostRef} hint="Pick an image to edit to see the cost." />
@@ -473,15 +544,35 @@ export default function CreateMobile({
 
         {cmode === "image" && (
           <>
+            {/* Session M (NOTES 5, 6; Phone): ↺ Last and Presets as two chips above the prompt,
+                the quick picks as one 36 px scrolling row, models then LoRAs. */}
+            {power && <PhoneChips power={power} onPresets={() => powerSheet.open("presets")} />}
+            {power && <PowerNote note={s.note} phone />}
+            {power && <PhoneQuickRow power={power} ctxOn={ctxOn} onMore={() => openModelSheet("base")} />}
             <div className="cm-lbl">Prompt</div>
             {/* Tsubaki.3 Unlimited Mode's band over the prompt (SCOPE_2026-09-26_unlimited-mode
                 C4), as on the desktop dock */}
             <UnlimitedStrip s={s} set={set} phone />
-            <textarea className="cm-ta" rows={4} value={s.prompt}
-              placeholder="Describe the image…"
-              onChange={(e) => set({ prompt: e.target.value })} />
+            {ctxOn ? (
+              /* Session H decision 2, phone: @image chips, the suggestions as a chip row */
+              <AtPrompt value={s.prompt} onChange={(v) => set({ prompt: v })} ctx={s.ctx}
+                onAddImage={addContextPick} phone className="cm-ta cm-at"
+                placeholder="Use @ to reference your images, e.g. @image1 holding flowers" />
+            ) : (
+              <textarea className="cm-ta" rows={4} value={s.prompt} ref={promptRef}
+                placeholder="Describe the image…"
+                onChange={(e) => set({ prompt: e.target.value, note: "" })} />
+            )}
+            {/* Session M (M1, Phone): the { } key and Lists on the prompt toolbar, then the same
+                tint under it as the dock's (variables lavender, refusals peach) */}
+            {run && !ctxOn && (
+              <PromptTools taRef={promptRef} prompt={s.prompt} set={set} onLists={() => powerSheet.open("lists")} />
+            )}
+            {run && <TokenLine parsed={run.parsed} />}
+            {run && <RunModeRow s={s} set={set} parsed={run.parsed} plan={run.plan} phone />}
+            {run && <RunPreview s={{ ...s, varMode: "random" }} parsed={run.parsed} plan={run.plan} />}
 
-            <div className="cm-lbl">Model &amp; LoRAs</div>
+            <div className="cm-lbl">Model &amp; {contextModel(m) ? "inputs" : "LoRAs"}</div>
             <button type="button" className={"cm-modelrow" + (m ? "" : " empty")}
               onClick={() => openModelSheet("base")} title="Browse the model catalog">
               {m && m.thumb ? <img className="cm-modelthumb" src={m.thumb} alt="" /> : <span className="cm-modelthumb ph" />}
@@ -499,93 +590,117 @@ export default function CreateMobile({
                 ))}
               </select>
             )}
-            {/* ...and its toggle row, in the model section (C2) */}
-            <UnlimitedRow s={s} set={set} phone />
+            {/* T1a, phone: the same Pro / Ultra rows, 44 px each */}
+            <ProfileRows s={s} set={set} phone />
 
-            {s.loras.length > 0 && (
-              <div className="cm-chiprow">
-                {s.loras.map((l) => {
-                  const bad = loraIncompat(l, m);
-                  const status = l.failed ? "failed"
-                    : !l.version_id ? "resolving…"
-                    : bad ? "wrong architecture"
-                    : Number(l.weight).toFixed(2);
-                  return (
-                    <span key={l.model_id}
-                      className={"glm-metal on cm-chip cm-lorachip" + ((bad || l.failed) ? " bad" : "")}>
-                      {l.title} · {status}
-                      {/* Mobile's half of issue #45. The words are inserted automatically on
-                          pick (the shared useGenerate.addLora), exactly as on desktop; this
-                          is the same re-insert affordance the drawer's "+words" button is,
-                          in the chip row's own idiom, because until now this surface had no
-                          trigger-word control of any kind. Dedupe makes a stray tap a
-                          no-op rather than a duplicator. */}
-                      {l.trigger_words ? (
-                        <button type="button" className="cm-chipwords"
-                          title={"Re-insert this LoRA's trigger words if you deleted them: "
-                                 + l.trigger_words}
-                          onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
-                          +words
-                        </button>
-                      ) : null}
-                      <button type="button" className="cm-chipx" title="Remove this LoRA"
-                        onClick={() => removeLoraChip(l.model_id)}>&times;</button>
-                    </span>
-                  );
-                })}
-              </div>
+            {/* decision 1: the inputs switch, then the side's own picks */}
+            <InputsSwitch s={s} set={set} phone onAskConfirm={() => setConfirmOpen(true)} />
+            {ctxOn ? (
+              <>
+                <ContextSlots s={s} onAdd={addContextPick} onRemove={removeContext} phone />
+                <label className="cm-autorow">
+                  <span>Auto size from image 1</span>
+                  <input type="checkbox" checked={s.auto !== false}
+                    onChange={(e) => set({ auto: e.target.checked, customW: "", customH: "" })} />
+                  <span className="cm-autotrack"><i /></span>
+                </label>
+                <UnlimitedHeldLine s={s} phone />
+              </>
+            ) : (
+              <>
+                {/* ...and its toggle row, in the model section (C2) */}
+                <UnlimitedRow s={s} set={set} phone />
+                {s.loras.length > 0 && (
+                  <div className="cm-chiprow">
+                    {s.loras.map((l) => {
+                      const bad = loraIncompat(l, m);
+                      const status = l.failed ? "failed"
+                        : !l.version_id ? "resolving…"
+                        : bad ? "wrong architecture"
+                        : Number(l.weight).toFixed(2);
+                      return (
+                        <span key={l.model_id}
+                          className={"glm-metal on cm-chip cm-lorachip" + ((bad || l.failed) ? " bad" : "")}>
+                          {l.title} · {status}
+                          {/* Mobile's half of issue #45. The words are inserted automatically on
+                              pick (the shared useGenerate.addLora), exactly as on desktop; this
+                              is the same re-insert affordance the drawer's "+words" button is,
+                              in the chip row's own idiom, because until now this surface had no
+                              trigger-word control of any kind. Dedupe makes a stray tap a
+                              no-op rather than a duplicator. */}
+                          {l.trigger_words ? (
+                            <button type="button" className="cm-chipwords"
+                              title={"Re-insert this LoRA's trigger words if you deleted them: "
+                                     + l.trigger_words}
+                              onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
+                              +words
+                            </button>
+                          ) : null}
+                          <button type="button" className="cm-chipx" title="Remove this LoRA"
+                            onClick={() => removeLoraChip(l.model_id)}>&times;</button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <button type="button" className="cm-addlora" onClick={() => openModelSheet("lora")}>
+                  + Add LoRA{loraCap != null ? ` ${s.loras.length} / ${loraCap}` : s.loras.length ? " " + s.loras.length : ""}
+                </button>
+              </>
             )}
-            <button type="button" className="cm-addlora" onClick={() => openModelSheet("lora")}>
-              + Add LoRA{loraCap != null ? ` ${s.loras.length} / ${loraCap}` : s.loras.length ? " " + s.loras.length : ""}
-            </button>
 
-            <div className="cm-lbl">Aspect</div>
-            <div className="cm-chiprow">
-              {ASPECTS.map(([label, r]) => {
-                const on = !s.customW && !s.customH && Math.abs(s.aspect - r) < 0.001;
-                // Unlimited Mode on: a frame the lane would refuse reads disabled (C3, §8.5)
-                const laneOff = laneRefusesFrame(s, { aspect: r });
-                return (
-                  <button key={label} type="button"
-                    className={"glm-metal cm-chip" + (on ? " on" : "")}
-                    disabled={laneOff}
-                    title={laneOff ? "Too large for Unlimited Mode at this size" : undefined}
-                    onClick={() => set({ aspect: r, customW: "", customH: "" })}>{label}</button>
-                );
-              })}
-            </div>
-            <div className="cm-hint">{d.width} × {d.height} px</div>
+            {/* Recipes (lane w2-recipes' row), held on the Context side */}
+            <RecipeRow recipes={s.recipes} onChange={(recipes) => set({ recipes })}
+              held={ctxOn} loraCount={s.loras.length} modelType={m ? m.model_type : ""} />
 
-            <div className="cm-lbl">Reference (optional) — guides the result</div>
-            <div className="cm-refrow">
-              <button type="button" className={"cm-refslot" + (s.ref ? " filled" : "")}
-                onClick={pickRef} title="Pick from your gallery">
-                {s.ref ? <img src={s.ref.thumb} alt="" /> : "+ ref"}
-              </button>
-              {s.ref && (
-                <>
-                  {/* SCOPE_2026-09-26 G3, as the desktop dock: a context-image reference
-                      carries no strength, so the slider reads disabled. */}
-                  <input type="range" min="0.1" max="0.9" step="0.05" value={s.refStrength}
-                    className="cm-range"
-                    disabled={refIsContext(s)}
-                    title={refIsContext(s)
-                      ? "This model uses the reference as a context image — strength doesn't apply"
-                      : "Reference strength"}
-                    onChange={(e) => set({ refStrength: e.target.value })} />
-                  <b className="cm-refval">{Number(s.refStrength).toFixed(2)}</b>
-                  <button type="button" className="cm-chipx cm-refx" title="Clear reference"
-                    onClick={() => set({ ref: null })}>&times;</button>
-                </>
-              )}
+            {/* decision 5, phone: the three stops (12 px) on a creativity model */}
+            {creativityModel(m) && <CreativityStops s={s} set={set} phone />}
+
+            {/* decisions 6 + 7, phone: Portrait | Landscape, the eleven ratios in a two-row
+                strip, the model's own tiers (48 px) with the members notice on tap */}
+            <div className="cm-lbl">Frame</div>
+            <OrientSwitch s={s} set={set} phone dim={autoOn} />
+            <div style={autoOn ? { opacity: 0.38 } : undefined}>
+              <RatioRow s={s} set={set} phone />
             </div>
+            {sizeTiers(m) && (
+              <>
+                <div className="cm-lbl">Size</div>
+                <TierRow s={s} set={set} phone />
+              </>
+            )}
+            <SizeLine s={s} className="cm-hint cm-sizeline" />
+
+            {/* The single reference (img2img + strength) on a model WITHOUT context images; on
+                one with them the inputs switch above replaces it. */}
+            {!contextModel(m) && (
+              <>
+                <div className="cm-lbl">Reference (optional) — guides the result</div>
+                <div className="cm-refrow">
+                  <button type="button" className={"cm-refslot" + (s.ref ? " filled" : "")}
+                    onClick={pickRef} title="Pick from your gallery">
+                    {s.ref ? <img src={s.ref.thumb} alt="" /> : "+ ref"}
+                  </button>
+                  {s.ref && (
+                    <>
+                      <input type="range" min="0.1" max="0.9" step="0.05" value={s.refStrength}
+                        className="cm-range" title="Reference strength"
+                        onChange={(e) => set({ refStrength: e.target.value })} />
+                      <b className="cm-refval">{Number(s.refStrength).toFixed(2)}</b>
+                      <button type="button" className="cm-chipx cm-refx" title="Clear reference"
+                        onClick={() => set({ ref: null })}>&times;</button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
 
             <button type="button" className="cm-advrow" onClick={openAdv}>
-              ⚙ Advanced — LoRA, size, tuning, negative
+              ⚙ Advanced — LoRA, size, tuning, palette, negative
             </button>
 
             <span className="gd-cost cm-cost">
-              <CostBadge ref={costRef} />
+              <CostBadge ref={costRef} laneHeld={ctxOn && unlimitedOffered(m)} />
             </span>
 
             {gate && <div className="cm-gatenote">{gate}</div>}
@@ -594,7 +709,7 @@ export default function CreateMobile({
               <div className="gd-results cm-results">
                 {results.map((r) => (
                   <div key={r.id} className={"gd-res " + r.kind}>
-                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
+                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
                     {r.media && r.media.map((mid) => (
                       <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                         <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -605,15 +720,20 @@ export default function CreateMobile({
               </div>
             )}
 
+            {/* Session M (NOTES 2): THE ONE confirm for a send of more than one generation, the
+                same component as the dock's -- the server's own count, total and cards. */}
+            {run && <RunConfirm confirm={run.confirm} busy={run.busy} onGo={run.go} onCancel={run.cancel} />}
+
             {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
                 badge must have been priced off the payload this click submits. generate()
                 refuses the same way (gen/priceProbeCore.js). */}
             <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
               disabled={!!gate || busy || !priceOk}
               title={gate || (s.unlimited ? "Submit in Unlimited Mode"
-                : "Submit — this spends credits or a card")}
+                : run && run.images > 1 ? "Send " + run.images + " — a confirm shows the total first"
+                  : "Submit — this spends credits or a card")}
               onClick={() => generate(loraCap)}>
-              {busy ? "◌ Queued…" : "✦ Generate"}
+              {busy ? "◌ Queued…" : "✦ Generate" + (run && run.images > 1 ? " " + run.images : "")}
             </button>
           </>
         )}
@@ -627,9 +747,29 @@ export default function CreateMobile({
         title={(cmode === "edit" ? "Edit" : "Image") + " — Advanced"}>
         {cmode === "edit"
           ? <EditAdvanced edit={edit} />
-          : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} />}
+          : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} power={power} />}
       </MobileScreen>
 
+      {sheetHost && confirmOpen && createPortal(
+        <MobileSheet open={confirmOpen} closing={confirmClosing} onClose={closeConfirm}
+          title="Context images">
+          <SwitchConfirm s={s} sheet
+            onSwitch={() => { set({ inputs: "context", ctxWarned: true }); closeConfirm(); }}
+            onStay={closeConfirm} />
+        </MobileSheet>,
+        sheetHost)}
+      {sheetHost && power && powerSheet.sheet === "presets" && createPortal(
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="PRESETS"
+          className="cm-sheetover">
+          <PresetsSheetBody power={power} onDone={powerSheet.close} />
+        </MobileSheet>, sheetHost)}
+      {sheetHost && run && powerSheet.sheet === "lists" && createPortal(
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="LISTS"
+          className="cm-sheetover">
+          <div className="pm-sheetbody">
+            <ListsSheet bare lists={run.lists} onSave={run.saveLists} onClose={powerSheet.close} />
+          </div>
+        </MobileSheet>, sheetHost)}
       {sheetHost && createPortal(
         <>
           {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
@@ -643,6 +783,8 @@ export default function CreateMobile({
               baseType={m ? m.model_type : ""}
               value={m} selected={s.loras}
               onBasePick={onBasePick} onLoraPick={onLoraPick}
+              favs={power ? { base: power.favModels, lora: power.favLoras } : null}
+              onFav={power ? power.toggleQuickFav : null}
               onClose={() => setFlyOpen(false)}
             />
           </div>
@@ -657,8 +799,12 @@ export default function CreateMobile({
    deviations from the design mock's literal Count/Priority numbers. Reads
    and writes the SAME `s`/`set`/`setLora` the Image composer above uses --
    no parallel state. ---- */
-function ImageAdvanced({ s, set, setLora, m }) {
+function ImageAdvanced({ s, set, setLora, m, power }) {
   const d = dims(s);
+  const tiers = sizeTiers(m);
+  const rows = profileRows(m);
+  const creative = creativityModel(m);
+  const ctxOn = onContextSide(s);
   const custom = !!(parseInt(s.customW, 10) > 0 && parseInt(s.customH, 10) > 0);
   const [loraLo, loraHi] = loraRange(m ? m.model_type : "");
   const restr = (m && m.restrictions) || {};
@@ -687,8 +833,8 @@ function ImageAdvanced({ s, set, setLora, m }) {
       )}
 
       <div className="cm-subhead">Frame</div>
-      <div className="cm-lbl">Size</div>
-      <div className="cm-chiprow">
+      {!tiers && <div className="cm-lbl">Size</div>}
+      {!tiers && <div className="cm-chiprow">
         {SIZES.map((n, i) => {
           // Unlimited Mode on: a size the lane would refuse reads disabled (C3, §8.5)
           const laneOff = laneRefusesFrame(s, { size: n });
@@ -702,7 +848,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
             </button>
           );
         })}
-      </div>
+      </div>}
       <div className="cm-customrow">
         <input className={"cm-custominput" + (custom ? " on" : "")} placeholder="W" value={s.customW}
           onChange={(e) => set({ customW: e.target.value.replace(/\D/g, "") })} />
@@ -711,7 +857,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
           onChange={(e) => set({ customH: e.target.value.replace(/\D/g, "") })} />
       </div>
       <div className="cm-hint">
-        {d.width} × {d.height} px — custom overrides above{custom ? " (in effect)" : ""}
+        {d.width} × {d.height} px — custom {tiers ? "is clamped to your limit" : "overrides above"}{custom ? " (in effect)" : ""}
       </div>
 
       <div className="cm-lbl">Count</div>
@@ -725,7 +871,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
       </div>
 
       <div className="cm-subhead">Tuning</div>
-      <div className="cm-lbl">Mode</div>
+      {!rows && <div className="cm-lbl">Mode</div>}
       {/* Same profile gate the dock's mode bars carry (SCOPE 2026-08-17 §4b), through the
           SAME genCore.modeOffered -- a chip for a mode this model does not offer is DIMMED,
           never removed, so the row keeps its shape, and it says why. The phone was left out
@@ -733,7 +879,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
           upscale/negative off the same `m` two rows down. The reset half lives in
           useGenerate (modeAfterApply), which AppMobile shares with the dock, so a model
           switch clears a stale pick here too with no second copy of the rule. */}
-      <div className="cm-chiprow">
+      {!rows && <div className="cm-chiprow">
         {GEN_MODES.map(([v, l]) => {
           // Unlimited Mode on: fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3)
           const lanePinned = s.unlimited && v !== "pro";
@@ -745,7 +891,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
               onClick={() => set({ mode: v })}>{l}</button>
           );
         })}
-      </div>
+      </div>}
 
       <div className="cm-adv-sliderrow">
         <span className="cm-lbl">Steps</span>
@@ -799,11 +945,14 @@ function ImageAdvanced({ s, set, setLora, m }) {
       </div>
 
       <div className="cm-chiprow">
-        <button type="button" className={"glm-metal cm-chip" + (s.promptHelper ? " on" : "")}
-          title="PixAI's prompt helper (on by default, like the classic drawer)"
-          onClick={() => set({ promptHelper: !s.promptHelper })}>
-          Prompt helper · {s.promptHelper ? "on" : "off"}
-        </button>
+        {/* on a creativity model the main screen's three stops replace this switch */}
+        {!creative && (
+          <button type="button" className={"glm-metal cm-chip" + (s.promptHelper ? " on" : "")}
+            title="PixAI's prompt helper (on by default, like the classic drawer)"
+            onClick={() => set({ promptHelper: !s.promptHelper })}>
+            Prompt helper · {s.promptHelper ? "on" : "off"}
+          </button>
+        )}
         <button type="button" className={"glm-metal cm-chip" + (s.highPriority ? " on" : "")}
           disabled={s.unlimited}
           title={s.unlimited ? "Unlimited Mode runs without High priority" : "Faster queue · costs extra"}
@@ -812,11 +961,25 @@ function ImageAdvanced({ s, set, setLora, m }) {
         </button>
       </div>
 
+      {/* Session H 4 / frame E: "Palette and negative stay in the shipped Advanced group, with
+          the same held treatment" -- the row and its sheet are ColorPalette.jsx's own. */}
+      <div className="cm-subhead">Palette</div>
+      <PaletteRow s={s} set={set} ctx={onContextSide(s)} phone />
+
       <div className="cm-subhead">Negative prompt</div>
-      <textarea className="cm-ta" rows={2} value={s.negative}
+      <textarea className={"cm-ta" + (ctxOn ? " mgts-held" : "")} rows={2} value={s.negative}
         placeholder="lowres, bad hands, watermark"
-        disabled={(m && m.compat_neg === false) || refIsContext(s)}
+        disabled={(m && m.compat_neg === false) || ctxOn}
         onChange={(e) => set({ negative: e.target.value })} />
+      {/* Session M (NOTES 4, Phone): the saved default negative for this base family, the same
+          row as the dock's, here in Create -> Advanced */}
+      {power && !ctxOn && (
+        <div className="pm-tools">
+          <NegDefaultButton power={power} negative={s.negative} />
+          <span className="cm-hint" style={{ margin: 0 }}>Default for {power.family || "the base family"} models</span>
+        </div>
+      )}
+      {ctxOn ? <div className="cm-hint">Held · not sent with context images</div> : null}
     </>
   );
 }
@@ -827,6 +990,11 @@ function ImageAdvanced({ s, set, setLora, m }) {
    above uses -- no parallel state. ---- */
 function EditAdvanced({ edit }) {
   const caps = editCaps(edit.s.model);
+  const groups = editAspectGroups(edit.s.model);
+  const onExtreme = editAspectExtreme(edit.s.aspect);
+  const ratioSheet = useSheet();
+  const [host, setHost] = useState(null);
+  useEffect(() => { setHost(document.querySelector(".glm-stage") || document.body); }, []);
   return (
     <>
       <div className="cm-subhead">Resolution</div>
@@ -854,10 +1022,31 @@ function EditAdvanced({ edit }) {
       )}
 
       <div className="cm-subhead">Aspect</div>
-      <select className="cm-select" value={edit.s.aspect}
-        onChange={(e) => edit.set({ aspect: e.target.value })}>
-        {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
-      </select>
+      {/* Session L 6: the common ratios as chips; More ▾ opens the ratio sheet with the
+          extremes (21:9, 1:3, 1:4, 1:8 and their flips), only for a model that has one. */}
+      <div className="cm-chiprow">
+        {groups.common.map((a) => (
+          <button key={a} type="button"
+            className={"glm-metal cm-chip cm-chip44" + (edit.s.aspect === a ? " on" : "")}
+            onClick={() => edit.set({ aspect: a })}>{editAspectLabel(a)}</button>
+        ))}
+        {groups.extreme.length ? (
+          <button type="button" aria-haspopup="dialog"
+            className={"glm-metal cm-chip cm-chip44" + (onExtreme ? " on" : "")}
+            onClick={() => ratioSheet.open("ratios")}>{onExtreme ? edit.s.aspect + " ▾" : "More ▾"}</button>
+        ) : null}
+      </div>
+      {host ? createPortal(
+        <MobileSheet open={ratioSheet.sheet === "ratios"} closing={ratioSheet.closing}
+          onClose={ratioSheet.close} title="MORE RATIOS" className="cm-sheetover">
+          <div className="cm-chiprow cm-sheetchips">
+            {groups.extreme.map((a) => (
+              <button key={a} type="button"
+                className={"glm-metal cm-chip cm-chip44" + (edit.s.aspect === a ? " on" : "")}
+                onClick={() => { edit.set({ aspect: a }); ratioSheet.close(); }}>{a}</button>
+            ))}
+          </div>
+        </MobileSheet>, host) : null}
     </>
   );
 }

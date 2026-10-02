@@ -15,6 +15,7 @@ the seam that replaced them, on three axes:
   * that the two duration probes this section replaced AGREE on one fixture, which is the
     drift the section exists to end.
 """
+import shutil
 import subprocess
 from types import SimpleNamespace
 
@@ -141,6 +142,20 @@ def test_run_ffmpeg_passes_stdin_through(have_tools, monkeypatch):
     rec = _Rec(monkeypatch)
     core.run_ffmpeg(["-f", "concat", "-i", "-", "out.mp4"], timeout=5, input="file 'a.mp4'\n")
     assert rec.kwargs["input"] == "file 'a.mp4'\n"
+    assert "stdin" not in rec.kwargs, "input= and stdin= together make subprocess.run raise"
+
+
+def test_with_no_input_the_child_never_inherits_our_stdin(have_tools, monkeypatch):
+    """A server launched detached on Windows has no valid stdin handle; a child that
+    inherits it fails with WinError 6, which _run_tool swallows by contract -- so a
+    frame grab answered None and an export lost its audio with no word said."""
+    rec = _Rec(monkeypatch)
+    core.run_ffmpeg(["-i", "a.mp4", "b.png"], timeout=5)
+    assert rec.kwargs["stdin"] is subprocess.DEVNULL
+    assert "input" not in rec.kwargs
+    rec2 = _Rec(monkeypatch)
+    core.run_ffprobe(["clip.mp4"], timeout=5)
+    assert rec2.kwargs["stdin"] is subprocess.DEVNULL
 
 
 def test_a_nonzero_exit_is_an_answer_not_an_exception(have_tools, monkeypatch):
@@ -242,8 +257,10 @@ def test_frame_at_eof_argv(have_tools, monkeypatch, tmp_path):
     out = tmp_path / "f.png"
     rec = _Rec(monkeypatch, writes=b"PNG")
     assert core.frame_at("clip.mp4", None, out) == str(out)
-    assert rec.argv == ["/opt/bin/ffmpeg", "-y", "-sseof", "-0.15", "-i", "clip.mp4",
-                        "-update", "1", "-frames:v", "1", "-q:v", "2", str(out)]
+    # No -frames:v cap on the EOF path: -update 1 overwrites the png per decoded frame, so
+    # the file left behind is the LAST frame even when the clip is shorter than the seek.
+    assert rec.argv == ["/opt/bin/ffmpeg", "-y", "-sseof", "-0.5", "-i", "clip.mp4",
+                        "-update", "1", "-q:v", "2", str(out)]
     assert rec.kwargs["timeout"] == core.FRAME_TIMEOUT
 
 
@@ -406,3 +423,33 @@ def test_every_media_spawn_in_the_app_goes_through_the_seam():
     assert offenders == [], (
         "these lines build an ffmpeg/ffprobe command from a bare binary name instead of "
         "going through media_tools: {}".format(offenders))
+
+
+# ---------------------------------------------------------------------------
+# The real binary (skips where ffmpeg is not installed)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                    reason="needs the real ffmpeg and ffprobe")
+@pytest.mark.parametrize("seconds", [0.1, 3.0])
+def test_the_eof_frame_is_the_last_frame_even_on_a_clip_shorter_than_the_seek(
+        tmp_path, monkeypatch, seconds):
+    """A clip that is black and turns white for its final 0.04 s: the EOF frame must be
+    white. The old "-sseof -0.15 -frames:v 1" clamped to the start of a 0.1 s clip and
+    handed back the FIRST (black) frame."""
+    from PIL import Image
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: shutil.which("ffmpeg"))
+    monkeypatch.setattr(core, "ffprobe_path", lambda: shutil.which("ffprobe"))
+    clip = tmp_path / "clip.mp4"
+    dark = max(0.0, seconds - 0.04)
+    made = subprocess.run(
+        [shutil.which("ffmpeg"), "-v", "error", "-y",
+         "-f", "lavfi", "-i", "color=c=black:s=64x64:r=25:d={}".format(seconds),
+         "-vf", "drawbox=c=white:t=fill:enable='gte(t,{})'".format(dark),
+         "-pix_fmt", "yuv420p", str(clip)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    assert made.returncode == 0, made.stderr
+    out = tmp_path / "last.png"
+    assert core.frame_at(str(clip), None, out) == str(out)
+    px = Image.open(out).convert("L").getpixel((32, 32))
+    assert px > 200, "the EOF frame is the clip's last (white) frame, got luma {}".format(px)
