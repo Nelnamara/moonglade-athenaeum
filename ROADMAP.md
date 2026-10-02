@@ -26,10 +26,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **`feat/wave5`** *(2026-09-29/10-01)* — waves 1-5 of the design run stacked (Tsubaki.3 dock, recipes,
-  training, Help, the Folio, Generate power tools, curation, the phone, contest wins, the Loom's
-  Session P and its rebuild to the design handoff) plus the walk fixes; see `CHANGELOG.md`
-  `[Unreleased]`. Waiting on the owner's re-walk and the art pack v6 before it merges.
+- Nothing in review.
 
 ## Next — scoped, not started
 
