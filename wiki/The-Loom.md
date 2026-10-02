@@ -71,32 +71,48 @@ which act a shot is in and where it falls.
 
 ## The layout
 
+The **top bar** is one row: the open storyboard's **name** with its **▾** (see
+[Storyboards](#storyboards)), the **find in storyboard** field and its chips, **⚡ Draft**, then
+**▶ Generate all** with its cost estimate, **▶▶ Play**, **⇩ Render** and **Export ▾**, and at the far
+end the **spent** figure, a goal you have pinned in the Folio, **Activity** and **← Gallery**. On a
+narrow window the bar wraps, but **← Gallery** never sits alone on a row. A banner sits above it;
+**⌄ Hide banner** folds it away and **🖼 Banner** brings it back.
+
 Four fixed regions:
 
-- **Left** — **Cast & assets** / **Footage** / **Library**, with a Simple/Detailed density toggle.
+- **Left** — **Cast & assets** / **Footage** / **Library**, with a Simple/Detailed density toggle
+  (Cast opens in Simple).
 - **Center** — the **Acts & Shots** board. Click a shot to select it; the whole workspace
   binds to it.
-- **Right** — the **Generate drawer** (Image / Edit / Reference / Video tabs).
-- **Top** — the **Timeline drawer** (hidden / slim / full — click the grip to step through
-  them). Full always leaves part of the board in view; when its rows do not fit, the drawer
-  scrolls on its own.
+- **Right** — the **Generate drawer**. Its header names the selected shot (**✕ unbind** lets go of
+  it, **›** folds the drawer), **Image / Edit / Reference / Video** is one row of tabs, and the
+  fields sit in rounded panels with the prompt outlined.
+- **Top** — the **Timeline drawer** (hidden / slim / full). The grip under the reel is a button:
+  **click it** and it steps hidden → slim → full → hidden (there is no dragging). Full always
+  leaves part of the board in view; inside it the preview shrinks first, and when its rows still
+  do not fit the drawer scrolls on its own.
 
 Both side rails collapse to an icon strip, and the Loom opens with both collapsed so the board
-is what you see first; clicking an icon opens the rail on that tab.
+is what you see first; clicking an icon opens the rail on that tab, floating over the board,
+which dims behind it.
 
 ## Acts & shots
 
-**+ New act** adds a chapter; **+ Add shot to \<act\>** adds a card to it. Each card carries
+**+ New act** adds a chapter; the dashed **+ Add shot to \<act\>** tile at the end of an act's
+cards adds a card to it. An act's header has its name (edit it in place), **↑ ↓** to move it,
+**⌃** to fold its cards away (**⌄** brings them back — the act stays folded when you come back
+to the board) and **✕** to delete it. Each card carries
 its code, title, mode, duration and a status badge, its [takes](#takes) with **Render** /
 **Re-render**, plus small controls to move it up/down,
 duplicate it, delete it (it asks first — a card carries its prompt, cast, frames and any
 rendered result, and there is no undo), or move it to another act. **Double-click a card** to open
 [Deep Focus](#deep-focus).
 
-The **reel bar** in the Timeline drawer draws one colored segment per shot, sized by
-duration, with a tick marking the 8-minute target — a glance-level pacing cue rather than a
-number. Once a shot has rendered, its segment uses the clip's real length instead of the
-planned one. A peach underline on a segment means that shot's [anchor changed](#re-anchor).
+The **reel bar** in the Timeline drawer draws one colored segment per shot, each sized by its
+share of the whole cut, so the shots always span the bar; a segment names its shot code and
+length, and a thin bar under it shows the shot's status. Once a shot has rendered, its segment
+uses the clip's real length instead of the planned one. A peach underline on a segment means
+that shot's [anchor changed](#re-anchor).
 
 ## Find in storyboard
 
@@ -159,7 +175,8 @@ thumbnail beside it, so the frame draws in the drawer and on the next shot's car
 
 That's how a run of independent 5–15s clips reads as one continuous scene. The very first
 shot of the project has no previous frame, and neither does draft mode — you get a hint
-instead of a button.
+instead of a button. The splice uploads the still to your PixAI account — free, but it is a
+write, so `READ_ONLY` in `config.json` refuses it (and Re-anchor, below, which does the same).
 
 ### Re-anchor
 
@@ -405,8 +422,8 @@ Double-click any card for a maximized single-shot editor: status (click to cycle
 mode, duration, a **blur previews** toggle for discreet shots, a **Prompt** field for the
 shot's base prompt (Camera/Lighting/cast are still woven in on top when it generates), both
 frame slots, **Other references & @tags** (add image/video/audio refs with roles), the audio
-cue, notes, **Copy shot**, and **Select in Generate →** to jump the shot into the drawer.
-`Esc` closes it.
+cue, notes, **Copy shot**, and **Select in Generate →** to jump the shot into the drawer (it opens
+on the **Video** tab). `Esc` closes it.
 
 Frame handoff isn't available inside Deep Focus — chain frames from the board plus the
 Generate drawer.
@@ -422,10 +439,11 @@ picking"** checkbox — useful for carrying source-image context along while you
 
 ## Storyboards
 
-The top bar's **▾** opens the storyboard switcher, listing every saved board with its shot
-count. From there: **open** one, **+ New** a blank one, **⎘ Duplicate** the open one, or
-delete one with ✕. Boards are fully independent — their own acts, cast, look and Draft
-setting — so you can keep several pieces in flight.
+Click the storyboard's name in the top bar (or its **▾**) and the **Storyboards** list opens,
+with every saved board and its shot count. From there: **open** one, **+ New** a blank one,
+**⎘ Duplicate** the open one, or delete one with ✕; **📱 Mobile view** is the last row. Boards
+are fully independent — their own acts, cast, look and Draft setting — so you can keep several
+pieces in flight.
 
 ## Saving & export
 
@@ -539,8 +557,8 @@ The phone layout carries the same work, sized for a finger:
 
 ## A workflow that works
 
-1. Block the whole piece first (acts, shots, durations) until the reel bar reaches the
-   target tick.
+1. Block the whole piece first (acts, shots, durations) and read the reel bar as the shape
+   of the cut.
 2. Cast your characters/scenes once in Cast & Assets; cite them with `@refs`.
 3. Chain frames (**↳ inherit … close**) across acts for continuity.
 4. Generate the anchor shots first (act openers, hero moments); review; then batch the rest

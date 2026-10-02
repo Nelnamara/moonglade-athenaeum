@@ -25,6 +25,11 @@ auto-sync schedule — still lives in that console's **Ledger** view. (The old s
 
 Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
+The round **?** in the Panel's header opens the app's [guide](Home#help-inside-the-app) on this
+page. The first time you open the Panel, a welcome card offers a short tour of the console, **Runs
+itself**, **Sync now** and the version stamp (see
+[The first-run guide](Home#the-first-run-guide)).
+
 ## Library at a glance
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
@@ -331,28 +336,52 @@ Things worth knowing:
 Both are available to any signed-in session. A reconnect overlay waits for the server to
 come back after a restart.
 
-## Updates
+## Updates and About
 
 Moonglade watches for new releases **while it is running** — it asks about once an hour, so
 you find out that a version is out without having to come and look. When one turns up it
 says so in three places at once: the **version stamp** at the foot of this sidebar turns
 gold and reads *"v3.7.3 available — view"*, a single notice appears in the corner of
-whatever screen you are on, and the stamp opens the update window when you click it.
+whatever screen you are on, and the stamp opens **About** when you click it.
 
 **It never installs anything by itself.** The check tells you a release exists and stops
 there; the update is pulled, applied and restarted only when you press **Update now** in
-that window and confirm it. There is no silent update and no automatic one — see
-[FAQ](FAQ) for what pressing it actually does.
+the update window and confirm it. There is no silent update and no automatic one — see
+[FAQ](FAQ) for what pressing it actually does. To reach that window, click the gold stamp:
+About opens leading with a card that reads *"v3.7.3 is out"* (with the release's title) and a
+**View the update ›** button, and that button opens the update window. While an update is
+running the stamp reads *updating…* and opens the window that is reporting it.
+
+**About** is the app's own "what am I running" card. It shows Nel, the name, and a line such
+as *app 3.14.0 · art pack v5 · 2026-09-26*, then **this version's changelog** — the headline
+changes of the release you are running, and a short *Under the hood* line for the rest.
+**Earlier versions ›** lists the older entries in this install's changelog; click one to read
+it and **‹ This version** to come back. Along the bottom, **Guide** opens the
+[in-app guide](Home#help-inside-the-app), **Report an issue ↗** opens the project's issue
+page and **Releases ↗** its release notes. Up to date, the stamp shows the build (for
+example `v3.14.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
+Moonglade**, under the update row, and the guide's last page is About too.
 
 **An update that worked says so when the app comes back.** Pressing **Update now** ends in
 the page reloading into the new version, and a small note appears in the corner on the way
 back in — *"Updated to v3.8.1"* — and waits there until you close it. It is checked, not
-assumed: the note appears only when the version the app is really running is the one you
-were promised. An update that failed or was rolled back says nothing at all, and cannot say
+assumed: the note appears only when the version the app is really running is the one you were
+promised. An update that failed or was rolled back says nothing at all, and cannot say
 it later against some future release that happens to match. It appears once, for the update
 that earned it; reloading the page again does not bring it back.
 
-The corner notice appears **once per version** — not once an hour, and not again the next
+**What's new.** The first time each account signs in after an update, that note is replaced
+by one that also carries the release's title and a **What's new** button (there it writes a
+version as `3.8` for a `.0` release and `3.8.1` for a patch). For a new feature release the
+button opens a one-time sheet,
+**New in 3.8**: up to four of the release's headline changes, each with **Show me ›** where it
+belongs to a screen (it opens that screen), then **Full changelog in About ›** and
+**Continue**. For a patch release the button opens About instead. Closing the note skips the
+sheet — About keeps the changelog a click away — and it is shown once per version per account,
+after any achievement notices from the same sign-in. A brand-new account is never told it was
+"updated": it was just made.
+
+The corner notice that a release is *available* appears **once per version** — not once an hour, and not again the next
 time you load the page. Opening this Panel asks GitHub for a fresh answer rather than
 showing you one that could be half an hour old; opening and closing it repeatedly costs
 nothing, and neither does the hourly check (roughly two dozen requests a day against an

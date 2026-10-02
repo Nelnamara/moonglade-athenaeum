@@ -4,10 +4,18 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 
 ## What it can do
 
-- **Spend credits** — generating an image, video, edit, or reference-video, or running a
-  hand/face fix. Every one of these is gated: on the CLI you must pass `--confirm`; in the web
-  app, the button click you press *is* the confirmation (there's no extra network step hiding
-  behind it). Nothing spends silently in the background. (The **art filters** in the Darkroom
+- **Spend credits** — generating an image, video, edit, or reference-video, running a
+  hand/face fix, or training a LoRA. Every one of these is gated: on the CLI you must pass
+  `--confirm`; in the web app, the button click you press *is* the confirmation (there's no
+  extra network step hiding behind it). Nothing spends silently in the background. Where more
+  is at stake, the app asks first: a batch of two or more pictures, a **Random** run or a
+  **Matrix** run shows **one confirm** with the count and the total credits, and sends nothing
+  until you press its button; **Start training** first gets PixAI's price for exactly
+  that run and asks once, with a tick for a paid one, and Advanced training's **Describe
+  automatically** names its price on the button and sends exactly that amount; and **The Loom
+  never renders on its own** — every render is your own click on **Render**, **Re-render**, the
+  drawer's **Generate video** or **Generate all**, and a paid one is priced and asked about
+  before it goes. (The **art filters** in the Darkroom
   (Edit → Enhance → Open the Darkroom) are not in this list: they are gradient composites
   applied in your own browser, and they make no network request and cost nothing.)
 
@@ -56,7 +64,11 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   erroring after the fact), a retry would quietly buy a second one. Now it can't: submits,
   edits, videos, uploads and cloud deletes all go out through a path that has no retry to
   give. If the network eats one, you get an error and decide for yourself whether to try
-  again.
+  again. The same holds for the bigger sends: a Matrix stops at the first picture PixAI
+  refuses and sends no more, a cell whose answer never came back is reported as *may have
+  started* and is never re-sent, a training run that may have started can't be started again
+  for a while, and a Loom render that the page lost touch with stays held until you check
+  Activity yourself.
 - **Be reached by anyone who hasn't signed in.** As of **v2.0.0** the gallery is default-deny:
   every route except the login page itself requires an account, and that applies on the
   machine running the server exactly as it does over the network. Nothing is browsable
@@ -151,9 +163,11 @@ for handing the tool to someone else — add this to your `config.json`:
 ```
 
 With it set, every path that can actually mutate your account — submitting a generation
-(image, video, reference video, or an edit), submitting a hand/face fix, deleting a task,
-claiming a reward, publishing an artwork, or **entering a contest** — refuses itself with a
-clear error, **regardless of `--confirm`,
+(image, video, reference video, or an edit, including each picture of a Random or Matrix run
+and each Loom render), submitting a hand/face fix, starting, describing, publishing or retrying
+a LoRA training run, deleting a task, claiming a reward, publishing an artwork, publishing or
+changing a recipe or a recipe set, uploading a frame from The Loom (splice and Re-anchor), or
+**entering a contest** — refuses itself with a clear error, **regardless of `--confirm`,
 `--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
 trust yet, so it overrides them rather than just changing their default. Browsing, backing up,

@@ -12,8 +12,9 @@ A built-in identifier went stale after a PixAI frontend update. These ship with 
 app and are shared by everyone, so when one breaks it breaks for all users.
 
 - **First, update to the latest release** — open the **Control Panel** and click the gold
-  version stamp in its sidebar footer if one is offered (`git pull` by hand otherwise).
-  Refreshed defaults usually land there quickly.
+  version stamp in its sidebar footer if one is offered, then **View the update ›** in the
+  About card that opens (`git pull` by hand otherwise). Refreshed defaults usually land there
+  quickly.
 - If it's still broken on the latest version, **open an issue** so the default can be
   updated for everyone.
 

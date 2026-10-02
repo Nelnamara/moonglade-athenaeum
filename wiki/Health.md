@@ -1,9 +1,12 @@
 # Collection Health
 
-The **Health** overlay (the ♡ Health pill in the gallery header) is your analytics dashboard over `catalog.db`:
+The **Health** overlay is your analytics dashboard over `catalog.db`:
 
-- **Full-meta %** and **Model known %**, missing files, uncataloged files, total likes.
+- **The tiles**: **Images on disk**, **Catalog rows**, **Full-meta**, **Model known**, **Rated**,
+  **Published**, **Total likes**, **Duplicates**, **Reclaimable**, **Missing files** and
+  **Uncataloged**.
 - **Storage used**, drawn as stacked bars (below).
+- Images by month, **Top models**, **Top tags & contests**, **Top LoRAs**, and a **Prompt word cloud**.
 
 > **Two coverage numbers, not one.** *Full-meta* counts rows that have a prompt. *Model
 > known* counts rows that have a model id — which only ever comes from a per-task detail
@@ -12,12 +15,9 @@ The **Health** overlay (the ♡ Health pill in the gallery header) is your analy
 > and a seed can arrive without the rest. If the second number is low, run
 > `--backfill-full-meta`. Locally imported files are left out of *Model known* — they have
 > no PixAI task behind them, so they can never carry a model.
-- Images-by-month.
-- Top models, top LoRAs, top tags.
-- A prompt word-cloud.
 
-Reach it from the gallery header (**♡ Health**) or
-the ♡ Health pill in the gallery header.
+Reach it from **Health** in the row of destinations under the gallery's banner (on a phone,
+**☰ Menu → Health**).
 
 ## Storage used
 

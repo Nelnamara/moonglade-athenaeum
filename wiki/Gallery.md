@@ -16,16 +16,31 @@ python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regene
 
 ## The header
 
-A row of frosted glow-pill buttons, one hue per destination:
+The banner across the top carries the big buttons at its right, and a row of smaller destinations
+sits under it. On a narrow window — an iPad, say — the rows wrap onto a second line rather than
+overlapping, and the four layout marks stay visible. Along the banner:
 
+- **?** — opens the [guide](Home#help-inside-the-app) on this page (the **?** key does the same from
+  anywhere outside a text field). The first time you open the gallery, a **Welcome to the stacks**
+  card offers a short tour.
 - **✦ Generate** — the dockable Generate / Edit / Video drawer, right over the grid. See
   [Generating](Generating).
 - **▰ The Loom** — the storyboard for multi-clip video (acts, shots, cast, frame handoff),
   at `/loom`. Also [Generating](Generating); full manual on [The Loom](The-Loom).
-- **🏆** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
+- **🏆 Folio** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
-  closes it).
-- **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
+  closes it). A goal you pin there, and your **Vigil**, can sit beside your credits as small chips.
+
+The row under the banner holds the other destinations — **My Art**, **Publish**, **Train**,
+**Import**, **Contests**, **Health**, **Panel** and **Log Out** — plus **✦ AI Tools** at the start
+of it once **Mirror to PixAI** is armed, and **Activity** at one end. **Import** is drawn only
+on the machine running the gallery (see below). **Publish** publishes a picture of yours on PixAI,
+**Train** is [training your own LoRA](Generating#training-your-own-lora), and **Log Out** signs
+you out everywhere.
+
+- **Contests** — live PixAI contests, your entries and their verified results (see
+  [Generating → Contests](Generating#contests---contests)).
+- **My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
   flagged it, so a moderated work is no longer shown as a plain "Public". Every card carries
   its **♥ likes** and **💬 comments**, and every published one its **view count** with a small
@@ -53,8 +68,8 @@ A row of frosted glow-pill buttons, one hue per destination:
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows, likes or comments on your behalf.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
-  the `Runs itself` job list, server Stop/Restart, branding.
-- **♡ Health** — the [collection health](Health) dashboard.
+  the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
+- **Health** — the [collection health](Health) dashboard, with the storage bars.
 - **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
   card led by its own artwork, with a colour-coded chip on the art saying how much work the
   tool wants of you before you open it: **1-Click**, **Select**, **Text**, **Language** or
@@ -104,24 +119,24 @@ the current shell does not.)
 
 ## Help, About and the first-run guide
 
-A **?** sits in the header of every surface (the library, the Generate dock, the Folio, the
-Control Panel, the Loom; on the phone, the hero and the Folio), and the **?** key opens it too.
-**Help** is these wiki pages, carried inside the app: it works offline, always describes the
-version you are running, searches titles and headings, and keeps links between pages in place.
-Terms from the [Glossary](Glossary) are underlined once per page, and a page says so when a
-newer copy of it is online. The Loom's **?** opens Help on [The Loom](The-Loom).
+The round **?** in the header (or the **?** key) opens the Guide: these pages, inside the app.
+How it works, **About** and the first-run guide are described on
+[Help inside the app](Home#help-inside-the-app).
 
-**About** is the last page in Help and is also what the Control Panel's version stamp opens
-(on the phone, an **About Moonglade** row on the Control tab): the app and art-pack versions and
-what changed in this release. The first time you open the gallery after an update, a note says so;
-for a minor or major release it opens a short **What's new** sheet with a **Show me** for each
-highlight, and a small patch opens About instead. A brand-new account is simply noted, never shown
-a what's-new.
+## The command palette
 
-The **first-run guide** meets you once per surface, per account: a welcome card, a tour if you
-ask for one, then short notes one at a time. **Got it** or **Skip tour** ends it, any note can hide
-the notes, and a note never sits over a header or navigation control. Help can replay the tour,
-hide the notes, or reset the guides. None of it spends or changes anything on PixAI.
+**Ctrl K** (**⌘ K** on a Mac) opens the command palette over any screen of the gallery: type a few
+letters and press **Enter** on the row you want. It lists **Go to** (the Library, the Loom, the
+Control Panel, Contests, My Art, Health, the Folio, and every collection — smart ones marked **⟳**),
+**Layout** (masonry, grid, hero, timeline, and **Toggle Stack sessions**), **Do** (**New generation**,
+**Jump to Search**, **Sync now**, **Manage collections**, **Rate 1–5**, **Browse recipes**, and **Claim**
+while credits are waiting), **On this image** while a picture is open or focused (**Again — new seed**,
+Remix, Send to Video, Find similar, Edit, Edit with Tsubaki, Open details, Copy id, Publish) and **Help**
+(**Open the guide**, **Show keyboard shortcuts**, and — as you type — any page or heading of the
+[guide](Home#help-inside-the-app)). A few rows show their own keys: **N** starts a generation, **/**
+jumps to the search field, **R** re-runs the open picture with a new seed, and **G** then **L**, **S** or
+**C** goes to the Library, the Loom or the Control Panel. The keys work with the palette closed, but not while you
+are typing in a field.
 
 ## Browsing & filtering
 
@@ -313,7 +328,7 @@ media pills back on screen. And while a sheet is up — **Sort**, **Advanced Sea
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
-### The phone's reading feed, what's new, and pull to refresh
+### The phone's reading feed, the new-since line, and pull to refresh
 
 **▦ Grid | ▭ Feed.** The toggle sits in the pill row, beside **Sort**. **Feed** shows one picture per
 row, edge to edge, at its own shape, with its prompt and stars over the bottom edge; tapping a

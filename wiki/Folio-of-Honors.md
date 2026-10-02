@@ -1,6 +1,6 @@
 # The Folio of Honors
 
-Click **🏆** in the gallery header and **The Folio of Honors** opens as a maximized
+Click **🏆 Folio** in the gallery header and **The Folio of Honors** opens as a maximized
 overlay over the grid — not a separate page. `Esc` or ✕ closes it and you're back exactly
 where you were. (Renamed from "Trophy Hall" 2026-07-22, alongside a full visual redesign.)
 
@@ -69,41 +69,43 @@ Ladder rungs add **+5 per step up the track**, so a crown is worth more than the
 tier sitting on its own. Feats score 0.
 
 The header keeps a running total: how many of the ladder rungs, milestones and masteries
-you've earned, your points out of the possible total, and a **completion** meter (see
-*For completionists* below). Feats are never part of any total; they are shown only as how
-many you have found.
+you've earned (**Earned**), your **Points** out of the possible total, and a **Completion**
+meter (see *For completionists* below). Feats are never part of any total; they are shown
+only as how many you have found.
 
 ## Getting around the Folio
 
 Three tabs across the top:
 
-- **Summary** — your six most recent unlocks with the date you earned them, plus a
-  progress bar for the overall roster and for each category.
+- **Summary** — **Recently Earned**: your four newest unlocks with the date you earned each;
+  **The ledger**, a progress bar for each category; **Within reach**, the three locked honors you
+  are closest to finishing, each with a moon that fills as you close in; and **Relics** (below).
 - **All** — an auto-rotating showcase of your active ladder's rungs up top, then a badge
-  row to switch between all 10 ladders, then every ladder in turn under its own divider,
-  then Milestones/Masteries/Feats the same way. Earned cards light up and carry a one-line
-  commentary from the narrator; locked ones show a progress bar and `current / threshold`.
+  row to switch between the ladders, then every ladder in turn under its own divider
+  (each headed with what it is measured in, in plain words), then Milestones, Masteries and
+  Feats the same way. Earned cards light up and carry a one-line commentary from the
+  narrator; locked ones show a progress bar and `current / threshold`.
   Each ladder's badge in that row wears **the art of the highest rung you have earned on
   it**, ringed in that rung's rarity colour and marked with its number — so the row reads
   as how far up each track you are, and a badge upgrades itself the moment a higher rung
   lands. A track you have not started shows its first rung, dimmed. Every rung appears
   exactly once on this tab, in *Every rung, every ladder*; the ladder you have selected is
   detailed by the showcase at the top rather than repeated as a second grid.
-- **Statistics** — achieved/points/feats at a glance, plus breakdowns by category, by
-  rarity, and by ladder completion, and underneath all the raw numbers behind the
-  thresholds: images archived, videos, collections, models used, published works, tagged
-  pieces, local generations, best day, distinct keywords, edits, uploads,
-  culled, days visited, LoRA uses, distinct LoRAs, Loom shots, more-like-this uses,
-  rewards claimed, free cards used.
+- **Statistics** — breakdowns **By rarity**, **The buckets** (each category) and **Ladder
+  completion**; then the library behind them: **Images on disk**, **Storage used** (the same figure
+  the [storage bars](Health#storage-used) add up to) and **Catalog rows**; **Coverage**
+  (**Full-meta**, **Model known**, **Uncataloged**); and your **Top models** and **Monthly
+  activity**.
 
 The **search box** in the header filters by name, description or tier and jumps you to
 the **All** tab as you type. The right-hand rail's **Categories** list filters
-in place — click one to show only that category, click again to clear it — alongside
-**Within Reach** (the three locked achievements you're closest to finishing, each with a
-moon that fills as you close in) and **Relics**: the rewards your honors have handed you,
-in up to three rows — **Skins**, **Banners** and **Marks**, newest first. A row with
-nothing in it simply isn't there, and nothing you haven't earned is shown as a locked
-tile. They are a record only: the Folio never switches a skin or a mark; you do that from the Control Panel.
+in place — click one to show only that category, click again to clear it.
+
+**Relics** are the rewards your honors have handed you, on the Summary tab in up to three
+rows — **Skins**, **Banners** and **Marks**, newest first. A row with nothing in it simply
+isn't there, and nothing you haven't earned is shown as a locked tile. They are a record
+only: the Folio never switches a skin or a mark, and nothing in it opens the Control Panel —
+you apply them there, from the Identity strip.
 
 Unlocks announce themselves with a mid-screen moment — badge, chime, and flair that
 scales with rarity. If a whole stack lands at once (a first run over an existing
@@ -129,9 +131,9 @@ The Folio also helps you finish the record, without ever counting the feats.
 - **Sort.** The **All** tab can sort by **Default**, **Closest to earning** (what's nearest
   first, then what's earned), **Rarest** or **Newest earned**. Feats are in none of the
   orders. The choice is remembered on the device you made it on.
-- **Pin a goal.** The pin beside a row's **→** puts that honor in the app header, beside
-  your credits on the gallery, the Generate dock and The Loom: the moon, its name and how
-  many to go. One pin at a time — pinning another replaces it. Click the chip to open the
+- **Pin a goal.** The pin beside a row's **→** puts that honor in the app header — beside
+  your credits on the gallery and the Generate dock, at the right end of The Loom's top bar: the
+  moon, its name and how many to go. One pin at a time — pinning another replaces it. Click the chip to open the
   Folio on that row, ✕ to let it go. It clears itself when you earn the honor, as the
   earn moment plays, and steps aside whenever a celebration is on screen. Your pin is
   saved to your account, so it follows you between devices. On a phone it's a slim chip
@@ -145,8 +147,8 @@ The Folio also helps you finish the record, without ever counting the feats.
   your name and mark, your points, the completion percentage, your Vigil, and the three
   rarest honors you've earned as their badge art, in the colours of the skin you're
   wearing. Feats appear only as "N found" — never named or pictured. **Save** it or
-  **Copy** it; on a phone, **Share** opens the phone's own share sheet. Nothing is
-  uploaded anywhere.
+  **Copy** it; on a phone, **Share** opens the phone's own share sheet.
+  Nothing is uploaded anywhere.
 
 None of this writes anything when you merely look: your pin, the Vigil switch and your
 sort are saved only when you click them.
@@ -161,14 +163,14 @@ five earns **Skin-Changer**.
 
 Skins are applied from the **Control Panel**, in its **Identity** strip — all the
 cosmetics live together, and the strip pairs the skins with the mark that sits beside the
-title so you can judge the two together. The Folio's **Relics** only show what you have; they
-never wear a skin or open Branding. Your choice is saved server-side,
+title so you can judge the two together. (The Folio's **Relics** only show what you've earned; a
+tap there changes nothing.) Your choice is saved server-side,
 so it follows you to every device and every page of the suite. Picking a locked skin is
 refused by the server, so there's nothing to cheat.
 
 ## Where progress comes from
 
-Most metrics are counted live off `catalog.db` every time you open the Hall — images,
+Most metrics are counted live off `catalog.db` every time you open the Folio — images,
 videos, collections, models, published, tagged, local generations, keywords. The rest
 are **persisted counters** kept in `telemetry.json` beside your catalog, bumped as you
 work: edits, uploads, culls, days visited, LoRA uses, Loom shots, claims and

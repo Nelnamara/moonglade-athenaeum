@@ -10,9 +10,14 @@ appears in the gallery alongside your history.
 
 ## In the web gallery (the Generate drawer)
 
-Open the gallery and click **✦ Generate** to slide out the **Generate drawer** — the
-creation surface, with the live credit cost and free-card check up front (covered
-generations cost 0). Its controls map onto the same PixAI parameters:
+Open the gallery and click **✦ Generate** to open the **Generate dock** (also called the Generate
+drawer) — the creation surface, docked at the bottom of the screen, with the live credit cost and
+free-card check up front (covered generations cost 0). Its **Image**, **Edit** and **Video** tabs
+each keep their own settings. You pick a **model** first (**Browse** opens the full picker, with the
+LoRAs beside it), describe the picture in the **prompt**, and press **Generate** — the price shows
+above it before you spend. **▲** opens the settings (frame, size, count and tuning), **History**
+shows your last seven days of runs, **Snippets** keeps prompt pieces you reuse, and **×** closes the
+dock; runs keep going. Its controls map onto the same PixAI parameters:
 
 | Control | Maps to | Notes |
 |---|---|---|
@@ -36,6 +41,12 @@ spend.
 
 Whenever the server adjusts a request (a size moved onto the model's grid, a field the model
 ignores), the cost badge names the change **before** you spend.
+
+Submit and the result drops straight into your catalog, tagged `source='api'`, and
+appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
+generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
+Fix, and the Video tab all work this way) and each one tracks and reports its own result
+independently.
 
 ### Tsubaki.3: context images and @image prompts
 
@@ -117,11 +128,41 @@ recipe in the row. The command palette's **Browse recipes** opens the full-size 
 - The cost badge prices the request **with** its recipes. If PixAI can't price it, the badge
   says why (or *couldn't verify the price with these recipes*) and never reads FREE.
 
-Submit and the result drops straight into your catalog, tagged `source='api'`, and
-appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
-generations in parallel, so you can queue up several in a row (Generate, Edit, Enhance,
-Fix, and the Video tab all work this way) and each one tracks and reports its own result
-independently.
+**The recipe picker** opens small, from the row. **⤢ Market** makes it full-size (**⤡** shrinks it
+again); your tab, search and filters carry across, and the last size is remembered with your
+account. Its tabs are **Market** (sort by Trending, Most liked, Most used or Latest; **Filters** by
+category and model type; a search lists newest first), **Sets** (PixAI's collections of recipes),
+**Mine** and **History** (what you used lately). **Open page** shows one recipe on its own page;
+**+ Use in dock** (or **+ Add**) puts it in the row; **⊕ Save to…** files it in one of your recipe
+sets — a tick applies at once, and **+ New set** makes a private one. Nothing in the picker spends
+credits: the price and any refusal are always the dock's.
+
+**Mine** lists your own recipes, each with its status — **Published**, **In review**, **Archived** or
+**Draft** — and one action (**Edit**, **View** or **Unarchive**); **⋯** has **Archive** and **Open page**.
+Recipes you started and did not finish wait above them under **UNFINISHED**, with **Continue** and
+**Delete**.
+
+**Making a recipe.** **+ Create** in the picker (it starts from the dock's model and prompt), or
+**⁂ Make a recipe** on a still picture in the Lightbox whose model takes recipes (it reads that
+picture's model, LoRAs with their weights and trigger words, and prompt), opens the creator in
+three steps:
+
+1. **Model & category** — the model, and one of Character, Style, Pose & Framing, Manga Panel,
+   Effect, Outfit or Scene.
+2. **Ingredients & test** — the ingredients PixAI's recipes can hold (prompt, LoRAs with weight and
+   trigger words, a base image, reference images, context images, a style code, reference videos);
+   any the chosen model doesn't take is dimmed with the reason. Pick three to eight showcase
+   pictures; the first is the cover. **✦ Test** shows its price and stops: test runs aren't
+   available from here yet, and it says so.
+3. **Name & cover** — title, description, cover, and who can use it (**Public**, **Followers** or
+   **Private**), then **Publish**.
+
+Your draft is saved with your Moonglade account as you go, and **nothing reaches PixAI while you
+build it** — only **Publish** (or **Save changes** on an edit) does, after one confirm that says
+what others will see: the cover, title, description and showcase, not your prompt text or LoRA
+weights. PixAI reviews public recipes before listing them, so a new one reads **In review** in Mine
+until it is listed; you can make it private later. Publishing, editing, archiving and saving to a set
+change your PixAI account, so `READ_ONLY` refuses all of them.
 
 ### Several at once: variables, Random and Matrix — and the one confirm
 
@@ -137,8 +178,8 @@ Only braces with a `|` inside make a variable — ordinary braces like `{masterp
 backslash (a kaomoji's `\_` stays). `__poses__` reads one of your **saved lists** (the
 **Lists ▾** button in the composer's header beside **Presets**: a name, one item per line,
 saved with your Moonglade account so the phone sees them too).
-Variables work in the prompt only; the negative is sent as typed. They are tinted in the line
-under the prompt, and anything that can't be read — a `{` with a `|` after it that never
+Variables work in the prompt only; the negative is sent as typed. They are tinted lavender in the
+prompt box itself, and anything that can't be read — a `{` with a `|` after it that never
 closes, a variable inside other braces, an empty `{ | }`, a list you don't have — is tinted
 peach and blocks Send until you fix it. To send a `{a|b}` or a `__name__` as plain text, put a
 backslash before it: `\{a|b}`, `\__name__`.
@@ -149,7 +190,8 @@ backslash before it: `\{a|b}`, `\__name__`.
 - **Matrix** sends every combination, one picture each, queued one after another — at most 24;
   over that, Send says *narrow an axis* and nothing goes. The reel shows a matrix as a grid:
   the last variable across, the rest down. **Free cards never cover matrix cells** — a card
-  belongs to a model and a function.
+  belongs to a model and a function — and the cost line under **Generate** shows the total for
+  every cell, the same figure the confirm shows.
 
 The dock previews what each picture will get before you send. After Go, the pictures go out
 one at a time; if PixAI refuses one (moderation, a recipe that doesn't fit that cell's
@@ -308,7 +350,8 @@ shown. Clear the base model to see all of them.
 
 ### Training your own LoRA
 
-**Train** in the side rail (on the phone: **Train a LoRA**) trains a LoRA on PixAI. Opening it
+**Train** in the row of destinations under the banner (on the phone: **☰ Menu → Train a LoRA**)
+trains a LoRA on PixAI. Opening it
 only reads: nothing is sent to PixAI until you press a button that says what it does.
 
 It opens on a chooser: **Basic training** (about 30 minutes, good for your first LoRA),
@@ -615,7 +658,7 @@ the raw id — the two states `--fix-model-names` is built to pick up on a later
 ## Upscale — on the picture, not in the drawer
 
 PixAI upscales an image you already have, so that is where Moonglade puts it. Open any image
-and use **↱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
+(a still — a video has no Upscale) and use **⇱ Upscale** — from the **Details** page, or from the lightbox, where it opens as a
 flyout so you can still see the picture while you choose.
 
 Two methods, and they are genuinely different jobs:
