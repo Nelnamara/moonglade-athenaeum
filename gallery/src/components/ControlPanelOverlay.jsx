@@ -345,8 +345,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   } = useControlPanel();
   // THE BRANDING BEAT (Session L, decision 5): the first open after the unlock cross-fades the
   // Maintenance tile and slides the ✦ Branding tab in. Opened ON Branding (the celebration's button),
-  // the panel waits on Maintenance for the 1.2 s and then goes.
-  const beat = useBrandingBeat(brandingUnlocked);
+  // the panel waits on Maintenance for the 1.2 s and then goes. It starts once the tile and the
+  // tabs are DRAWN -- the summary has answered (the two early returns below draw neither) -- not
+  // while the panel still reads "opening the panel…" (owner walk 2026-09-30).
+  const beat = useBrandingBeat(brandingUnlocked, !!summary && !summaryErr);
   const tab = beat.holds && tabState === "brand" ? "maint" : tabState;
   // Console heart: pipelines (the run buttons) vs ledger (the run history) --
   // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented

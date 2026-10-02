@@ -19,7 +19,7 @@ const SRC = path.join(here, "..", "..", "gallery", "src");
 const src = (rel) => readFileSync(path.join(SRC, rel), "utf8").replace(/\r\n/g, "\n");
 
 describe("whether the beat plays", () => {
-  const P = (o) => beatPlan({ unlocked: true, status: "ready", seen: false, reduced: false, ...o });
+  const P = (o) => beatPlan({ unlocked: true, status: "ready", seen: false, reduced: false, ready: true, ...o });
 
   test("its key is one the account store accepts and is not a per-browser thing", () => {
     assert.equal(prefKeyProblem(BEAT_KEY), "");
@@ -51,6 +51,21 @@ describe("whether the beat plays", () => {
 
   test("only a real true is 'seen'", () => {
     for (const seen of [1, "true", null, undefined, {}]) assert.equal(P({ seen }), "play");
+  });
+
+  test("it waits until the panel has drawn its tile and tabs (owner walk 2026-09-30)", () => {
+    // The beat used to start while the panel still read "opening the panel…" (~0.9 s): the
+    // tile's cross-fade never mounted and the tab's 0.8 s arrival was on screen for 0.56 s.
+    for (const ready of [false, undefined, null, 1, "true"]) {
+      assert.equal(P({ ready }), "wait", "not drawn (" + String(ready) + "): nothing starts");
+      assert.equal(P({ ready, reduced: true }), "wait", "reduced motion: the flag waits for the drawn panel too");
+    }
+    assert.equal(P({ ready: true }), "play");
+    assert.equal(P({ ready: false, seen: true }), "seen", "an account that has seen it waits for nothing");
+    assert.equal(P({ ready: false, unlocked: false }), "off");
+    assert.equal(holdsOnMaintenance(P({ ready: false }), "tile"), true, "opened on Branding, it holds while the panel draws");
+    assert.equal(tileState(P({ ready: false }), "tile"), "hold");
+    assert.equal(tabVisible(P({ ready: false }), "tile"), false);
   });
 });
 
@@ -133,6 +148,22 @@ describe("the wiring", () => {
     assert.match(hook, /setTimeout\(\(\) => setPhase\("tab"\), BEAT\.TILE_MS\)/);
     assert.match(hook, /return \(\) => \{ clearTimeout\(t1\); clearTimeout\(t2\); \}/,
       "a panel closed halfway has not shown the beat: no flag");
+  });
+
+  test("the beat is told when the panel's tile and tabs are on screen, and its timers start then", () => {
+    assert.match(hook, /export default function useBrandingBeat\(unlocked, ready\) \{/);
+    assert.match(hook, /beatPlan\(\{ unlocked, status: prefs\.status, seen, reduced: reducedMotion\(\), ready: ready === true \}\)/);
+    assert.match(hook, /\}, \[plan\]\);/, "the timers start on the wait -> play change, i.e. once drawn");
+    // The panel's body (the tile, the tabs) is drawn only past these two early returns, so
+    // "drawn" is exactly: the summary has answered, without an error.
+    assert.match(cp, /const beat = useBrandingBeat\(brandingUnlocked, !!summary && !summaryErr\);/);
+    const at = cp.indexOf("const beat = useBrandingBeat(");
+    const errRet = cp.indexOf("if (summaryErr) {", at);
+    const loadRet = cp.indexOf("if (!summary) {", at);
+    const tabs = cp.indexOf('<div className="mgcp-tabs">', at);
+    assert.ok(at >= 0 && errRet > at && loadRet > errRet && tabs > loadRet,
+      "the tabs are drawn only after both early returns");
+    assert.match(cp.slice(loadRet, tabs), /opening the panel…/);
   });
 
   test("the panel draws a held tab, and the shipped guards still read the same words", () => {

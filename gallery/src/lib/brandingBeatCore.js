@@ -22,17 +22,24 @@ export const BEAT = { TILE_MS: 400, TAB_MS: 800, TOTAL_MS: 1200 };
 
 /* What the panel does about the beat right now.
      off    nothing to do: the tab is not unlocked
-     wait   unlocked, but the account's document has not arrived: hold the new pieces back
-            for a moment rather than flash them and take them away
+     wait   unlocked, but the account's document has not arrived -- or the panel has not drawn
+            its tile and tabs yet (`ready` is not true): hold the new pieces back for a moment
+            rather than flash them and take them away
      seen   nothing to play -- the account has seen it, or has no store to ask (the beat is
             skipped, never allowed to hold the tab hostage): the tile and the tab are there
-     play   first open, motion allowed: the cross-fade, then the tab
-     rest   first open, reduced motion: both present at once; the flag is still set  */
-export function beatPlan({ unlocked, status, seen, reduced }) {
+     play   first open, motion allowed, the panel drawn: the cross-fade, then the tab
+     rest   first open, reduced motion, the panel drawn: both present at once; the flag is set
+
+   `ready` (owner walk 2026-09-30): the beat's timers used to start as soon as the account
+   answered, while the panel itself still read "opening the panel…" -- the tile's cross-fade
+   played on nothing and the tab's 0.8 s arrival was half over before it was drawn. The beat
+   (and under reduced motion, the flag) now waits until the tile and the tabs are on screen. */
+export function beatPlan({ unlocked, status, seen, reduced, ready }) {
   if (!unlocked) return "off";
   if (status === "error") return "seen";
   if (status !== "ready") return "wait";
   if (seen === true) return "seen";
+  if (ready !== true) return "wait";
   return reduced ? "rest" : "play";
 }
 

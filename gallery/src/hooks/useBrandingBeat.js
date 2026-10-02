@@ -8,7 +8,9 @@ import {
    decision 5). lib/brandingBeatCore.js decides whether and when; this is only the wiring:
    the account's own "seen" flag, the reduced-motion preference, and the two timers.
 
-     const beat = useBrandingBeat(brandingUnlocked);
+     const beat = useBrandingBeat(brandingUnlocked, panelDrawn);
+     (panelDrawn: the panel's tile and tabs are on screen -- the beat's timers start then, not
+      while the panel still reads "opening the panel…")
      beat.holds        -> the panel should stay on Maintenance (it was opened on Branding)
      beat.tabVisible   -> draw the ✦ Branding tab now
      beat.tabArriving  -> the tab is in its slide-and-shimmer half
@@ -22,10 +24,10 @@ function reducedMotion() {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 }
 
-export default function useBrandingBeat(unlocked) {
+export default function useBrandingBeat(unlocked, ready) {
   const prefs = useAccountPrefs();
   const seen = prefs.get(BEAT_KEY, false) === true;
-  const plan = beatPlan({ unlocked, status: prefs.status, seen, reduced: reducedMotion() });
+  const plan = beatPlan({ unlocked, status: prefs.status, seen, reduced: reducedMotion(), ready: ready === true });
   const [phase, setPhase] = useState("tile");
 
   useEffect(() => {
