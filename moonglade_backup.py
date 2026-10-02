@@ -7440,6 +7440,19 @@ def has_audio(path, *, timeout=None):
     return bool(r.stdout.strip())
 
 
+def frame_seek_point(at_seconds, dur):
+    """Where a trim-aware frame grab lands on a clip `dur` seconds long: `at_seconds` itself
+    when it is inside the clip, else None -- the clip's LAST frame (no time asked, a time
+    at/after the real end, or a length that could not be measured). The one rule, read by
+    extract_last_frame and by /api/loom/handoff, which reports back where the frame it
+    uploaded came from (the Loom's anchor records that time; owner walk 2026-09-30)."""
+    if at_seconds is None:
+        return None
+    if not (dur and at_seconds < dur - 0.05):
+        return None
+    return at_seconds
+
+
 def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True):
     """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
     one shot's last frame becomes the next shot's opening frame, so a sequence reads as
@@ -7462,10 +7475,8 @@ def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True)
     -- for a caller that already knows its timestamp is inside the clip."""
     import os
     if at_seconds is not None and trim_aware:
-        dur = duration(video_path)
         # a trimOut at/after the real end is just "the last frame" -> use the EOF path
-        if not (dur and at_seconds < dur - 0.05):
-            at_seconds = None
+        at_seconds = frame_seek_point(at_seconds, duration(video_path))
     try:
         if at_seconds is None:
             seek = ["-sseof", "-0.5", "-i", str(video_path)]

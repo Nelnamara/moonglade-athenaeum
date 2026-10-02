@@ -614,20 +614,51 @@ export const stripInFlight = (project) => {
 
 /* ---------- RE-ANCHOR (P2) ---------- */
 
-// Where the source's selected take is cut: the frame a handoff takes (trim-aware).
+// Where the source's selected take is cut: the frame a handoff takes (trim-aware). Its trimOut,
+// else its end -- the clip's length when the card knows it, null when it does not (the handoff
+// then takes the clip's true last frame; it is never asked for the frame at 0, which a Re-anchor
+// of a shot with no recorded length used to do).
 export const cutPointOf = (card) => {
   if (!card) return null;
-  if (card.trimOut != null) return Number(card.trimOut);
-  const d = num(card.actualDur);
-  return d != null ? d : null;
+  const t = known(card.trimOut);
+  return t != null ? t : known(card.actualDur);
 };
 const sameAt = (a, b) => (a == null || b == null) ? true : Math.abs(Number(a) - Number(b)) < 0.05;
 
-/** The anchor a splice or a Re-anchor records: the source card's ID (never its code),
- *  its ★ take, the cut point the frame came from, and the frame's own media id. */
-export const makeAnchor = (src, frameMid, via) => ({
-  shot: str(src && src.id), take: selectedTakeOf(src), at: cutPointOf(src), frame: str(frameMid), via: via || "splice",
-});
+/** The anchor a splice or a Re-anchor records: the source card's ID (never its code), its ★
+ *  take, WHERE THE FRAME CAME FROM, and the frame's own media id. `took` is the handoff
+ *  route's own answer ({at, end}: the time it really cut at, and whether that was the clip's
+ *  last frame) -- the server is the one that knows, since a card may not know its clip's
+ *  length (owner walk 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s").
+ *  Without it (an older server), the source's cut point as the card records it. */
+export const makeAnchor = (src, frameMid, via, took) => {
+  const tk = took || {};
+  const at = known(tk.at);
+  const a = { shot: str(src && src.id), take: selectedTakeOf(src), at: at != null ? at : cutPointOf(src),
+    frame: str(frameMid), via: via || "splice" };
+  if (typeof tk.end === "boolean") a.end = tk.end;
+  return a;
+};
+
+// Is the source still cut where the anchored frame came from?
+//   end   the frame was the clip's LAST (a splice of an untrimmed shot): still the same while
+//         the source plays to its end, or is cut at that very point.
+//   else  the same when the source's cut -- its trimOut, else its length (known, else the
+//         length it was asked for) -- is the frame's time.
+// An older build's splice recorded 0 for "the end, length unknown" (Number(null) is 0), never a
+// real time -- a splice of an untrimmed shot always took its last frame -- so a splice anchor
+// with no `end` at 0 reads as an end.
+const anchorEnd = (a) => a.end === true || (a.end === undefined && a.via === "splice" && known(a.at) === 0);
+const sourceCut = (src) => { const c = cutPointOf(src); return c != null ? c : known(src.duration); };
+const sameCutAs = (a, src) => {
+  if (anchorEnd(a)) {
+    const t = known(src.trimOut);
+    if (t == null) return true;
+    const at = known(a.at);
+    return at != null && at > 0 && Math.abs(at - t) < 0.05;
+  }
+  return sameAt(a.at, sourceCut(src));
+};
 
 /**
  * anchorInfo(card, byId) -> {state, src?, from?, to?, reason?}
@@ -648,11 +679,14 @@ export const anchorInfo = (card, byId) => {
   if (to == null) return { state: "none" };
   const at = cutPointOf(src);
   const sameTake = to === a.take;
-  const sameCut = sameAt(a.at, at);
+  const sameCut = sameCutAs(a, src);
   if (sameTake && sameCut) return { state: "ok", src, from: a.take, to };
   const k = card.anchorKept;
   if (k && k.from === a.take && k.to === to && sameAt(k.at, at)) return { state: "kept", src, from: a.take, to };
-  return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at, was: a.at };
+  // `was`: where the frame came from (null: the clip's end, length unknown); `at`: where the
+  // source is cut now (null: it plays to an end of unknown length).
+  const was = anchorEnd(a) && known(a.at) === 0 ? null : known(a.at);
+  return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at: sourceCut(src), was };
 };
 export const anchorState = (card, byId) => anchorInfo(card, byId).state;
 
@@ -661,7 +695,9 @@ export const staleText = (info, codeOf) => {
   if (!info || info.state !== "stale") return "";
   const code = codeOf ? codeOf(info.src.id) : "the source shot";
   if (info.reason === "cut") {
-    return `its open frame came from ${code} take ${info.from} at ${Number(info.was).toFixed(1)} s; ${code} is now cut at ${Number(info.at).toFixed(1)} s.`;
+    const was = info.was != null ? `at ${Number(info.was).toFixed(1)} s` : "at its end";
+    const now = info.at != null ? `is now cut at ${Number(info.at).toFixed(1)} s` : "now plays to its end";
+    return `its open frame came from ${code} take ${info.from} ${was}; ${code} ${now}.`;
   }
   return `its open frame came from ${code} take ${info.from}; ${code} now uses take ${info.to}.`;
 };
@@ -679,17 +715,18 @@ export const needsNewTake = (card) => {
 };
 
 /**
- * reanchorPatch(card, {frameMid, src, srcCode, expect}) -> card
+ * reanchorPatch(card, {frameMid, src, srcCode, expect, took}) -> card
  * Swaps the open frame to the source's current cut frame and records the new anchor.
  * Touches openFrame / anchor / anchorKept ONLY: status, takes and every pending marker are
  * left alone, so no render can follow from it. `expect` is the anchor the click saw; if the
- * card's anchor has moved since (a second click, a Keep), nothing is patched.
+ * card's anchor has moved since (a second click, a Keep), nothing is patched. `took` is the
+ * handoff's own {at, end} (makeAnchor).
  */
 export const reanchorPatch = (card, m) => {
   const x = m || {};
   if (!card || !x.frameMid || !x.src) return card;
   if (JSON.stringify(card.anchor || null) !== JSON.stringify(x.expect === undefined ? (card.anchor || null) : (x.expect || null))) return card;
-  const anchor = makeAnchor(x.src, x.frameMid, "reanchor");
+  const anchor = makeAnchor(x.src, x.frameMid, "reanchor", x.took);
   const of = card.openFrame || {};
   return { ...card,
     openFrame: { ...of, mediaId: str(x.frameMid), thumbId: "", source: "",
@@ -697,7 +734,8 @@ export const reanchorPatch = (card, m) => {
     anchor, anchorKept: null };
 };
 
-/** The splice button ("✂ splice A·01's last frame"): the same frame patch plus the anchor. */
+/** The splice button ("✂ splice A·01's last frame"): the same frame patch plus the anchor,
+ *  recording where the handoff really took the frame (`took`, its {at, end}). */
 export const splicePatch = (card, m) => {
   const x = m || {};
   if (!card || !x.frameMid) return card;
@@ -705,7 +743,7 @@ export const splicePatch = (card, m) => {
   return { ...card,
     openFrame: { ...of, mediaId: str(x.frameMid), thumbId: "", source: "",
       desc: "handed off from " + str(x.srcCode || "prev shot") },
-    anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice") : null,
+    anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice", x.took) : null,
     anchorKept: null };
 };
 

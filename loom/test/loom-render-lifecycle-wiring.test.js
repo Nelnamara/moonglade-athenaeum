@@ -393,8 +393,15 @@ describe("batchGenerate sends only what was confirmed (F12, F13, F14, §3.4)", (
 
 describe("the ✂ splice records its anchor; Split waits for a render in flight (§2.1, F11)", () => {
   test("both splice buttons patch through splicePatch with the source captured at the click", () => {
-    const n = (CODE.match(/splicePatch\(c{1,2}, \{ frameMid: d\.frame_media_id, src: src\.c, srcCode: src\.code \}\)/g) || []).length;
+    // `took` is the handoff's own answer -- where it really cut (owner walk 2026-09-30: a frame
+    // taken from E·01's end was recorded "at 0.0 s").
+    const n = (CODE.match(/splicePatch\(c{1,2}, \{ frameMid: d\.frame_media_id, src: src\.c, srcCode: src\.code, took: \{ at: d\.at, end: d\.at_end \} \}\)/g) || []).length;
     assert.equal(n, 2, "desktop inheritPrev and the phone's dfInheritPrev");
+    assert.match(hookFn(CODE, "reanchorShot"),
+      /reanchorPatch\(c, \{ frameMid: String\(d\.frame_media_id\), src: src\.c, srcCode: src\.code, expect, took: \{ at: d\.at, end: d\.at_end \} \}\)/,
+      "Re-anchor records where its frame came from too");
+    assert.match(hookFn(CODE, "reanchorShot"), /trim_out: cutPointOf\(src\.c\)/,
+      "the re-anchor asks for the source's cut (null, not 0, when its length is unknown: the last frame)");
     assert.equal((CODE.match(/trim_out: src\.c\.trimOut/g) || []).length, 2, "the frame is cut where the source's ★ take is cut");
   });
   test("splitShot refuses while splitBlocked, with a plain message", () => {

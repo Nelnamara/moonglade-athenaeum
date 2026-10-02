@@ -2984,7 +2984,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // ★ take and the cut point the frame came from -- through splicePatch, so a later change of
     // that take can flag this shot. The shot and its source are captured AT THE CLICK: the
     // frame lands on the shot that asked for it, and the anchor names the take it came from.
-    // The frame is cut where the previous shot's ★ take is cut (trim_out; none -> its end).
+    // The frame is cut where the previous shot's ★ take is cut (trim_out; none -> its end), and
+    // the anchor records the time the handoff ANSWERS it cut at (`took`: its at / at_end) -- the
+    // card may not know its clip's length (owner walk 2026-09-30: an end frame read "at 0.0 s").
     const inheritPrev = () => {
       if (!prevEntry || !sel) return;
       const target = sel, src = prevEntry;
@@ -2996,7 +2998,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
-            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
           }).catch(() => setHandoff("err"));
       } else {
         patchFrame("openFrame", { ...src.c.closeFrame });
@@ -5334,7 +5336,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
           setDfHandoff("");
-          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
         }).catch(() => setDfHandoff("err"));
     } else {
       dfPatchFrame("openFrame", { ...src.c.closeFrame });
@@ -8169,7 +8171,7 @@ function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
     }
     setAnchorWork((s) => { const n = { ...s }; delete n[cardId]; return n; });
     setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) =>
-      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect })) : p));
+      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p));
   };
 
   // Keep: accept this pair of takes (and this cut) only; a later change of the source warns again.

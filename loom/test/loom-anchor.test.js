@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   anchorInfo, anchorState, staleText, needsNewTake, reanchorPatch, splicePatch, keepAnchor,
-  makeAnchor, landTake, selectTake,
+  makeAnchor, landTake, selectTake, cutPointOf,
 } from "../src/loom-takes-core.js";
 
 // Session P, P2 (BUILD-w5-p §2, review N1). The page: a shot whose open frame came from
@@ -118,5 +118,69 @@ describe("Re-anchor swaps the frame and never renders", () => {
     assert.equal(d.openFrame.desc, "handed off from A·01");
     const e = splicePatch({ id: "A2", openFrame: {} }, { frameMid: "F1", src: { id: "A1", resultMid: "" } });
     assert.equal(e.anchor, null);
+  });
+});
+
+/* Owner walk 2026-09-30: E·02's open frame was spliced from E·01's END (5.0 s); after E·01 was
+   trimmed to 3.2 s the card said "its open frame came from E·01 take 1 at 0.0 s". E·01's take
+   had no recorded clip length (actualDur null), and Number(null) is 0, so the anchor recorded
+   0 -- and a Re-anchor of such a shot asked the handoff for the frame at 0, the FIRST frame.
+   The anchor now records where the handoff really cut ({at, end}, the route's own answer), and
+   an unknown length stays unknown. */
+describe("the anchor records where the frame really came from", () => {
+  const e01 = (extra) => src({ id: "E1", resultMid: "ME1", actualDur: null, duration: 5, ...(extra || {}) });
+  const spliced = (s, took) => ({ id: "E2", status: "done", resultMid: "ME2",
+    ...splicePatch({ id: "E2", openFrame: {} }, { frameMid: "FE", src: s, srcCode: "E·01", took }) });
+  test("an unknown clip length is unknown, never 0 (and never asks the handoff for the first frame)", () => {
+    assert.equal(cutPointOf(e01()), null);
+    assert.equal(cutPointOf(e01({ actualDur: "" })), null);
+    assert.equal(cutPointOf(e01({ trimOut: 3.2 })), 3.2);
+    assert.equal(cutPointOf(src()), 8, "a known length is the cut point of an untrimmed take");
+  });
+  test("the walk: spliced from the end, then the source is trimmed to 3.2 s", () => {
+    const s = e01();
+    const d = spliced(s, { at: 5.04, end: true });
+    assert.deepEqual(d.anchor, { shot: "E1", take: 1, at: 5.04, frame: "FE", via: "splice", end: true });
+    assert.equal(anchorState(d, byId(s)), "ok", "a true handoff reads as the same cut");
+    const info = anchorInfo(d, byId({ ...s, trimOut: 3.2 }));
+    assert.equal(info.state, "stale");
+    assert.equal(staleText(info, () => "E·01"),
+      "its open frame came from E·01 take 1 at 5.0 s; E·01 is now cut at 3.2 s.");
+  });
+  test("an end frame stays the same cut while the source plays to its end, whatever its length", () => {
+    const s = e01();
+    const d = spliced(s, { at: 5.04, end: true });
+    assert.equal(anchorState(d, byId({ ...s, actualDur: 5.04 })), "ok");
+    assert.equal(anchorState(d, byId({ ...s, trimOut: 5.02 })), "ok", "cut at that very point");
+    assert.equal(anchorState(spliced(s, { at: null, end: true }), byId({ ...s, trimOut: 3.2 })), "stale");
+  });
+  test("a frame from a trim point: the same cut until the source is cut elsewhere, or not at all", () => {
+    const s = e01({ trimOut: 3.2 });
+    const d = spliced(s, { at: 3.2, end: false });
+    assert.equal(d.anchor.at, 3.2);
+    assert.equal(anchorState(d, byId(s)), "ok");
+    const info = anchorInfo(d, byId({ ...s, trimOut: null }));
+    assert.equal(info.state, "stale");
+    assert.equal(staleText(info, () => "E·01"), "its open frame came from E·01 take 1 at 3.2 s; E·01 is now cut at 5.0 s.",
+      "untrimmed, of unknown length: its planned length");
+  });
+  test("Re-anchor records the handoff's own answer too", () => {
+    const s0 = e01();
+    const d = spliced(s0, { at: 5.04, end: true });
+    const s1 = { ...s0, trimOut: 3.2 };
+    const out = reanchorPatch(d, { frameMid: "FE2", src: s1, srcCode: "E·01", expect: d.anchor, took: { at: 3.2, end: false } });
+    assert.deepEqual(out.anchor, { shot: "E1", take: 1, at: 3.2, frame: "FE2", via: "reanchor", end: false });
+    assert.equal(anchorState(out, byId(s1)), "ok");
+  });
+  test("an older build's splice anchor (0 for 'the end, length unknown') reads as the end", () => {
+    const s = e01();
+    const d = { id: "E2", status: "done", resultMid: "ME2", openFrame: { mediaId: "FE" },
+      anchor: { shot: "E1", take: 1, at: 0, frame: "FE", via: "splice" } };
+    assert.equal(anchorState(d, byId(s)), "ok");
+    const info = anchorInfo(d, byId({ ...s, trimOut: 3.2 }));
+    assert.equal(staleText(info, () => "E·01"), "its open frame came from E·01 take 1 at its end; E·01 is now cut at 3.2 s.");
+  });
+  test("with no answer from the handoff (an older server) the anchor falls back to the card, as before", () => {
+    assert.deepEqual(makeAnchor(src(), "F1", "splice"), { shot: "A1", take: 1, at: 8, frame: "F1", via: "splice" });
   });
 });

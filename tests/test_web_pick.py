@@ -819,7 +819,9 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch, pixai):
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9"}).get_json()
-    assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
+    # at / at_end: where the frame came from -- the clip's end, at its real length (owner walk
+    # 2026-09-30: the anchor had recorded "at 0.0 s" for a frame taken from the end)
+    assert d == {"frame_media_id": "FRAME123", "duration": 5.0, "at": 5.0, "at_end": True}
     assert seen["video"].endswith("shot_V9.mp4")
     assert seen["at"] is None            # no trim_out -> take the clip's true last frame
 
@@ -847,8 +849,43 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
-    assert d == {"frame_media_id": "FRAME123", "duration": 5.0}
+    assert d == {"frame_media_id": "FRAME123", "duration": 5.0, "at": 3.2, "at_end": False}
     assert seen["at"] == 3.2             # the trimOut reached ffmpeg
+    # a trim at (or past) the clip's end is its last frame, and says so -- the primitive's rule
+    for past in (5.0, 4.98, 9):
+        d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": past}).get_json()
+        assert (d["at"], d["at_end"]) == (5.0, True), past
+
+
+def test_loom_handoff_reports_no_time_for_an_unmeasured_clip(tmp_path, monkeypatch, pixai):
+    """ffprobe could not measure the clip: the frame is its last (the primitive's EOF path),
+    and the answer says so without inventing a time -- the Loom then reads "at its end"."""
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
+
+    def fake_extract(vp, out, at_seconds=None):
+        with open(out, "wb") as fh:
+            fh.write(b"png")
+        return out
+    monkeypatch.setattr(core, "extract_last_frame", fake_extract)
+    monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
+    monkeypatch.setattr(core, "duration", lambda p: None)
+    cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
+                                  is_video="1", created_at="2025-01-01T00:00:00")])
+    d = cli.post("/api/loom/handoff", json={"video_media_id": "V9", "trim_out": 3.2}).get_json()
+    assert d == {"frame_media_id": "FRAME123", "duration": None, "at": None, "at_end": True}
+
+
+def test_frame_seek_point_is_the_primitives_rule():
+    """The handoff route reports where its frame came from through the same rule
+    extract_last_frame seeks by: inside the clip -> that time; no time, at/after the end
+    (within 0.05 s), or an unmeasured length -> None (the last frame)."""
+    assert core.frame_seek_point(3.2, 5.0) == 3.2
+    assert core.frame_seek_point(None, 5.0) is None
+    assert core.frame_seek_point(4.96, 5.0) is None
+    assert core.frame_seek_point(7, 5.0) is None
+    assert core.frame_seek_point(2.0, None) is None
+    assert core.frame_seek_point(0.0, 5.0) == 0.0
 
 
 def test_loom_handoff_thumbnails_the_frame_it_uploads(tmp_path, monkeypatch, pixai):

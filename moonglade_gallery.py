@@ -24612,7 +24612,10 @@ __DESIGN_TOKENS__
         fetch-on-miss, so every surface that draws the open frame by its id -- the Video
         drawer's frame box, the board card, Deep Focus -- drew a broken picture (owner walk
         2026-09-30). The thumbnail is written from the very PNG that was uploaded; a failed
-        thumbnail never fails the handoff (the frame is still PixAI's)."""
+        thumbnail never fails the handoff (the frame is still PixAI's).
+
+        The answer also says where the frame came from: `at` (seconds) and `at_end` (it was
+        the clip's last frame), so the splice and Re-anchor record the true source time."""
         body = request.get_json(silent=True) or {}
         mid = str(body.get("video_media_id") or "").strip()
         if not mid:
@@ -24649,7 +24652,16 @@ __DESIGN_TOKENS__
             # display choice for the Edit Bay's reel, made where it is visible.
             _dur = core.duration(str(vid))
             dur = round(_dur, 2) if _dur is not None else None
-            return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
+            # WHERE the frame came from, by the primitive's own rule (frame_seek_point): the
+            # trim point it seeked to, or -- the clip's last frame -- the clip's length (None
+            # when it could not be measured). The Loom's anchor records this (owner walk
+            # 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s", because the
+            # card did not know its clip's length).
+            seek = core.frame_seek_point(trim_out, _dur)
+            at_end = seek is None
+            at = dur if at_end else round(seek, 2)
+            return jsonify({"frame_media_id": str(frame_mid), "duration": dur,
+                            "at": at, "at_end": at_end})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
