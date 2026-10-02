@@ -86,6 +86,18 @@ why this section exists.
   fan-out each), and **Phase C**, triage + re-verify of B's findings. Scope and severity scale:
   `../moonglade-internal/scopes/SCOPE_2026-08-26_surface-audit.md`. Not dropped; run when scheduled.
 
+- **Retire the `/next` name from the app's data routes and asset paths.** *(owner, 2026-09-29)*
+  The React app shipped under the `/next` pilot codename. #51 (2026-09-04) removed the page route and
+  deliberately left two prefixes: the `/api/next/*` JSON routes the app reads (library, details, history)
+  and the `/next/assets/` static prefix baked into the build, the page templates and the installed-app
+  manifest. Rename the API routes to plain names (`/api/library`, `/api/detail/<id>`, `/api/history`) on
+  one shared handler with the old paths kept as aliases for a release, send every client call through one
+  constants module (54 scattered call sites today), and leave payloads untouched. The assets prefix is
+  decided separately and never simply dropped: installed phone apps read their icons from it. Built after
+  the open work is merged and walked, not alongside it (the details route keeps gaining fields). Scope,
+  measured blast radius, phases, tests and risks:
+  `../moonglade-internal/scopes/SCOPE_2026-09-29_retire-the-next-namespace.md`.
+
 ## Design-pass reworks — rescope, don't just build
 
 - **PixAI inbox and comment replies.** Likes, bookmarks and follows are dropped (owner,
@@ -108,6 +120,12 @@ why this section exists.
   as a deliberate sweep — the job is to hunt what's *left* (deprecated-in-place flags, orphaned
   classic-era code), not to bank the refactor's incidental cleanup as the sweep.
 
+- **Model bookmarks → PixAI's collections.** *(deferred, 2026-08-17)* PixAI turned bookmarks into
+  named public/private collections. The model picker's Bookmarked tab still works on the older
+  call, so nothing is broken; a check in the build warns when that call leaves PixAI's site.
+  Adopting collections needs one read-only capture of their shapes and a design step for the
+  picker's source tabs.
+
 ## Open questions — need a call before they can be scoped
 
 - **App security review** *(owner, 2026-09-06: "I wonder if there is a better way to secure the
@@ -126,8 +144,6 @@ why this section exists.
   NORTH_STAR (locked 2026-08-25) the seam comes *before* the second provider — it is how the core
   proves itself provider-agnostic — and it follows the Loom-unify decision in that sequence. Low
   priority until that decision is taken.
-- **Themed progress bar art.** A moon-phase gauge (near-finished art already banked) for
-  generation/render/job progress. Decided in principle, unbuilt.
 - **UPnP / SSDP (or WS-Discovery) LAN presence — show up in Windows Explorer's "Network".**
   Bonjour/mDNS (shipped) makes the server discoverable to phones/tablets and resolvable at
   `moonglade.local`, but Windows Explorer's Network folder browses UPnP/SSDP + WS-Discovery, NOT
@@ -164,6 +180,10 @@ why this section exists.
   `videoDrawerCore.js`) can ride a structural pass instead; these two are banked as their own effort.
 
 ---
+
+- **Remake the AI Tools thumbnails.** *(owner plan, 2026-09-08)* The Enhance preset thumbnails
+  shipped; the owner intends to redo the AI Tools thumbnails himself. Nothing to build until the
+  art lands.
 
 ## Backlog — needs scoping
 
