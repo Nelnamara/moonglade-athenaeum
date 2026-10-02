@@ -33,6 +33,21 @@ why this section exists.
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.
 
+- **Edit Pro V2.0 in the Edit card.** *(2026-10-02 probe)* PixAI's new Edit Pro version takes up
+  to 10 reference images at v1.0's price. The Edit card still sends v1.0 with a 4-image cap from
+  two hand-kept tables. Add a V2.0 row beside v1.0, which stays because the AI Tools scenes still
+  run on it. A data change plus a test:
+  [#67](https://github.com/Nelnamara/moonglade-athenaeum/issues/67).
+
+- **Free cards: say when they expire, and open PixAI's current event.** *(owner, 2026-10-02)*
+  Event cards have been expiring unused. Add a plain warning before held cards run out, and a
+  link to whatever event PixAI is running, read from its public home-banner list. No per-event
+  check-in: PixAI has no read-only check-in status, and each event's routes differ. The
+  placement needs a short design session first:
+  [#69](https://github.com/Nelnamara/moonglade-athenaeum/issues/69). Related: expired cards read
+  as "consumed" on the Account screen,
+  [#68](https://github.com/Nelnamara/moonglade-athenaeum/issues/68).
+
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
   the Loom become part of the same app?" is **not answered**; it has a scope order. The owner's
