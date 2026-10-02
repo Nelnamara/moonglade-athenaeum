@@ -30,6 +30,7 @@ var LoomBundle = (() => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
+  var known = (v) => v == null || v === "" ? null : num(v);
   var storedTakes = (card) => card && Array.isArray(card.takes) ? card.takes : null;
   var maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || {}).n) || 0), 0);
   var mirrorTake = (card, n) => {
@@ -39,7 +40,7 @@ var LoomBundle = (() => {
       mid: str(card.resultMid),
       taskId: "",
       at: "",
-      dur: num(card.actualDur),
+      dur: known(card.actualDur),
       trimIn: Number(card.trimIn) || 0,
       trimOut: card.trimOut == null ? null : Number(card.trimOut),
       settings: null,
@@ -80,7 +81,7 @@ var LoomBundle = (() => {
     const v = {
       ...t,
       mid: str(card.resultMid),
-      dur: num(card.actualDur) != null ? num(card.actualDur) : t.dur,
+      dur: known(card.actualDur) != null ? known(card.actualDur) : t.dur,
       trimIn: Number(card.trimIn) || 0,
       trimOut: card.trimOut == null ? null : Number(card.trimOut),
       imported: !!card.imported
@@ -528,18 +529,37 @@ var LoomBundle = (() => {
   };
   var cutPointOf = (card) => {
     if (!card) return null;
-    if (card.trimOut != null) return Number(card.trimOut);
-    const d = num(card.actualDur);
-    return d != null ? d : null;
+    const t = known(card.trimOut);
+    return t != null ? t : known(card.actualDur);
   };
   var sameAt = (a, b) => a == null || b == null ? true : Math.abs(Number(a) - Number(b)) < 0.05;
-  var makeAnchor = (src, frameMid, via) => ({
-    shot: str(src && src.id),
-    take: selectedTakeOf(src),
-    at: cutPointOf(src),
-    frame: str(frameMid),
-    via: via || "splice"
-  });
+  var makeAnchor = (src, frameMid, via, took) => {
+    const tk = took || {};
+    const at = known(tk.at);
+    const a = {
+      shot: str(src && src.id),
+      take: selectedTakeOf(src),
+      at: at != null ? at : cutPointOf(src),
+      frame: str(frameMid),
+      via: via || "splice"
+    };
+    if (typeof tk.end === "boolean") a.end = tk.end;
+    return a;
+  };
+  var anchorEnd = (a) => a.end === true || a.end === void 0 && a.via === "splice" && known(a.at) === 0;
+  var sourceCut = (src) => {
+    const c = cutPointOf(src);
+    return c != null ? c : known(src.duration);
+  };
+  var sameCutAs = (a, src) => {
+    if (anchorEnd(a)) {
+      const t = known(src.trimOut);
+      if (t == null) return true;
+      const at = known(a.at);
+      return at != null && at > 0 && Math.abs(at - t) < 0.05;
+    }
+    return sameAt(a.at, sourceCut(src));
+  };
   var anchorInfo = (card, byId) => {
     const a = card && card.anchor;
     if (!a || !a.shot) return { state: "none" };
@@ -550,18 +570,21 @@ var LoomBundle = (() => {
     if (to == null) return { state: "none" };
     const at = cutPointOf(src);
     const sameTake = to === a.take;
-    const sameCut = sameAt(a.at, at);
+    const sameCut = sameCutAs(a, src);
     if (sameTake && sameCut) return { state: "ok", src, from: a.take, to };
     const k = card.anchorKept;
     if (k && k.from === a.take && k.to === to && sameAt(k.at, at)) return { state: "kept", src, from: a.take, to };
-    return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at, was: a.at };
+    const was = anchorEnd(a) && known(a.at) === 0 ? null : known(a.at);
+    return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at: sourceCut(src), was };
   };
   var anchorState = (card, byId) => anchorInfo(card, byId).state;
   var staleText = (info, codeOf) => {
     if (!info || info.state !== "stale") return "";
     const code = codeOf ? codeOf(info.src.id) : "the source shot";
     if (info.reason === "cut") {
-      return `its open frame came from ${code} take ${info.from} at ${Number(info.was).toFixed(1)} s; ${code} is now cut at ${Number(info.at).toFixed(1)} s.`;
+      const was = info.was != null ? `at ${Number(info.was).toFixed(1)} s` : "at its end";
+      const now2 = info.at != null ? `is now cut at ${Number(info.at).toFixed(1)} s` : "now plays to its end";
+      return `its open frame came from ${code} take ${info.from} ${was}; ${code} ${now2}.`;
     }
     return `its open frame came from ${code} take ${info.from}; ${code} now uses take ${info.to}.`;
   };
@@ -578,7 +601,7 @@ var LoomBundle = (() => {
     const x = m || {};
     if (!card || !x.frameMid || !x.src) return card;
     if (JSON.stringify(card.anchor || null) !== JSON.stringify(x.expect === void 0 ? card.anchor || null : x.expect || null)) return card;
-    const anchor = makeAnchor(x.src, x.frameMid, "reanchor");
+    const anchor = makeAnchor(x.src, x.frameMid, "reanchor", x.took);
     const of = card.openFrame || {};
     return {
       ...card,
@@ -606,7 +629,7 @@ var LoomBundle = (() => {
         source: "",
         desc: "handed off from " + str(x.srcCode || "prev shot")
       },
-      anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice") : null,
+      anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice", x.took) : null,
       anchorKept: null
     };
   };
@@ -1025,6 +1048,21 @@ var LoomBundle = (() => {
     return "\u2026" + trail;
   };
   var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending2 ? `, ${pending2} still estimating` : ""}.`;
+  var balanceLine = (acct) => {
+    const a = acct || {};
+    const n = Number(a.cards) || 0;
+    return {
+      credits: a.credits == null ? "\u2014" : Number(a.credits).toLocaleString(),
+      cards: n.toLocaleString() + " card" + (n === 1 ? "" : "s"),
+      claim: a.claim_credits ? "+" + Number(a.claim_credits).toLocaleString() + " claimable" : ""
+    };
+  };
+  var SPEND_OUT = { running: 1, slow: 1, stale: 1, paused: 1 };
+  var spendLandedKey = (...maps) => maps.map((m, i) => Object.keys(m || {}).sort().map((id) => {
+    const s = m[id] || {};
+    if (s.phase === "done") return i + ":" + id + ":done:" + (s.mid == null ? "" : String(s.mid));
+    return SPEND_OUT[s.phase] ? i + ":" + id + ":out" : "";
+  }).filter(Boolean).join(",")).join("|");
   var collectSpendMids = (project) => {
     const seen2 = /* @__PURE__ */ Object.create(null);
     const byAct = [];
@@ -4685,6 +4723,12 @@ ${"=".repeat(48)}
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
+  function linesShown(results, { dock, loom, shot } = {}) {
+    const rs = Array.isArray(results) ? results : [];
+    if (dock) return rs.filter((l) => l && l.kind === "error");
+    if (loom) return rs.filter((l) => l && (l.shot || "") === (shot || ""));
+    return rs;
+  }
   function friendlyGenErr3(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
@@ -5315,9 +5359,11 @@ ${"=".repeat(48)}
     }, []);
     const probe = usePriceProbe({ build: build2, costRef });
     const reprice = probe.refresh;
+    const boundShot = () => loomCtx && st.current.loomTarget && st.current.loomTarget.card_id || "";
     const pushLine = (line) => {
       const id = ++lineSeq;
-      setResults((rs) => rs.concat([{ id, ...line }]));
+      const shot = loomCtx ? line.shot != null ? String(line.shot) : boundShot() : void 0;
+      setResults((rs) => rs.concat([{ id, ...line, ...loomCtx ? { shot } : {} }]));
       return id;
     };
     const updateLine = (id, patch) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch } : l));
@@ -5348,7 +5394,7 @@ ${"=".repeat(48)}
       const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
       const quoted = probe.response || null;
       let expectFree = !!(quoted && quoted.free);
-      const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
+      const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026", ...loomCtx ? { shot: target.card_id } : {} });
       setReuseChip(null);
       st.current.rendering = true;
       rerender();
@@ -5481,7 +5527,9 @@ ${"=".repeat(48)}
     };
     const setReuse = (info) => setReuseChip(info || null);
     const setLoomTarget = (t) => {
+      const was = boundShot();
       st.current.loomTarget = t && t.board_id && t.card_id ? { board_id: String(t.board_id), card_id: String(t.card_id), draft: !!t.draft } : null;
+      if (boundShot() !== was) rerender();
     };
     const setHost = (h) => {
       hostRef.current = h || null;
@@ -5786,7 +5834,7 @@ ${"=".repeat(48)}
         d
       );
     }))))), inDock ? dock.promptEl ? createPortal(promptField, dock.promptEl) : null : promptField, inDock ? dock.negativeEl ? createPortal(negativeField, dock.negativeEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-lbl" }, "Negative prompt"), negativeField), inDock && dock.topEl ? createPortal(topRow, dock.topEl) : null, inDock ? dock.goEl ? createPortal(/* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), dock.goEl) : null : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, costLine, goButton), (() => {
-      const shown = inDock ? results.filter((l) => l.kind === "error") : results;
+      const shown = linesShown(results, { dock: inDock, loom: !!loomCtx, shot: boundShot() });
       return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-result" + (shown.length ? " has" : "") }, shown.map((l) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: l.id, className: "mgd-result-line" }, l.kind === "result" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: { color: "var(--emerald,#4fc99a)", fontSize: 12, marginBottom: 6 } }, "\u2713 Rendered \u2014 ", l.cost === 0 ? "free (card used)" : Number(l.cost || 0).toLocaleString() + " credits", ". Added to your gallery."), (l.mediaIds || []).map((mid) => /* @__PURE__ */ react_global_shim_default.createElement(
         "a",
         {
@@ -12969,6 +13017,20 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       )
     )));
   }
+  function useAccountLine(landedKey, bind) {
+    const [acct, setAcct] = useState2(null);
+    useEffect2(() => {
+      let live = true;
+      fetch("/api/account").then((r) => r.json()).then((d) => {
+        if (live) setAcct(d);
+      }).catch(() => {
+      });
+      return () => {
+        live = false;
+      };
+    }, [landedKey, bind]);
+    return acct;
+  }
   function LoomV2({
     project,
     setCard,
@@ -13119,7 +13181,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         openEdl
       }
     );
-    const [acct, setAcct] = useState2(null);
+    const acct = useAccountLine(spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState), String(selShot || ""));
     const [handoff, setHandoff] = useState2("");
     const [deepFocus, setDeepFocus] = useState2(null);
     const [dfPalFor, setDfPalFor] = useState2(null);
@@ -13176,10 +13238,6 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       return () => {
         document.body.style.overflow = prevOverflow;
       };
-    }, []);
-    useEffect2(() => {
-      fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
-      });
     }, []);
     useEffect2(() => {
       if (!deepFocus) return;
@@ -14113,7 +14171,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
               return;
             }
             setHandoff("");
-            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
           }).catch(() => setHandoff("err"));
         } else {
           patchFrame("openFrame", { ...src.c.closeFrame });
@@ -14507,7 +14565,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           onClick: () => setTab(t)
         },
         t
-      ))), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), tab !== "Edit" ? frameHandoff : null, acct && /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 +", acct.claim_credits, " claimable") : null), tabBody, tab === "Edit" ? frameHandoff : null, /* @__PURE__ */ React.createElement(VideoDrawer_default, { ref: bindGenDrawer, loomCtx: true, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
+      ))), !sel && /* @__PURE__ */ React.createElement("div", { className: "lv-drafttarget" }, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Route results into a shot ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(cast doesn't need one)")), /* @__PURE__ */ React.createElement("select", { className: "lv-sel", value: draftTarget, onChange: (ev) => setDraftTarget(ev.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 choose a shot \u2014"), entries.map((e) => /* @__PURE__ */ React.createElement("option", { key: e.c.id, value: e.c.id }, e.code, " \xB7 ", e.c.title || "untitled")))), tab !== "Edit" ? frameHandoff : null, acct && (() => {
+        const bal = balanceLine(acct);
+        return /* @__PURE__ */ React.createElement("div", { className: "lv-bal" }, "\u26A1 ", bal.credits, " credits \xB7 ", bal.cards, bal.claim ? /* @__PURE__ */ React.createElement("span", { className: "lv-balclaim" }, " \xB7 ", bal.claim) : null);
+      })(), tabBody, tab === "Edit" ? frameHandoff : null, /* @__PURE__ */ React.createElement(VideoDrawer_default, { ref: bindGenDrawer, loomCtx: true, style: { display: tab === "Video" ? "" : "none" } }), videoTrailer, /* @__PURE__ */ React.createElement(
         "div",
         {
           className: "lv-mpick-veil" + (pickerOpen ? " open" : ""),
@@ -15849,11 +15910,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const [genSubmitting, setGenSubmitting] = useState2(false);
     const [genPrice, setGenPrice] = useState2({});
     const [genTab, setGenTab] = useState2("Video");
-    const [acct, setAcct] = useState2(null);
-    useEffect2(() => {
-      fetch("/api/account").then((r) => r.json()).then(setAcct).catch(() => {
-      });
-    }, []);
+    const acct = useAccountLine(
+      spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState),
+      (genOpen ? "gen:" : "") + String(selShot || "")
+    );
     const [pickerOpen, setPickerOpen] = useState2(false);
     const [pickerKind, setPickerKind] = useState2("base");
     const [pickerMounted, setPickerMounted] = useState2(false);
@@ -16050,7 +16110,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             return;
           }
           setDfHandoff("");
-          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
         }).catch(() => setDfHandoff("err"));
       } else {
         dfPatchFrame("openFrame", { ...src.c.closeFrame });
@@ -16991,7 +17051,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           onClick: () => setGenTab(t)
         },
         t
-      ))), acct && /* @__PURE__ */ React.createElement("div", { className: "lm-bal", style: { margin: "0 16px 8px" } }, "\u26A1 ", acct.credits == null ? "\u2014" : acct.credits, " credits \xB7 ", acct.cards || 0, " card", acct.cards === 1 ? "" : "s", acct.claim_credits ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--gold)" } }, " \xB7 +", acct.claim_credits, " claimable") : null), /* @__PURE__ */ React.createElement("div", { className: "lm-gen-body" }, genTab === "Image" && (() => {
+      ))), acct && (() => {
+        const bal = balanceLine(acct);
+        return /* @__PURE__ */ React.createElement("div", { className: "lm-bal", style: { margin: "0 16px 8px" } }, "\u26A1 ", bal.credits, " credits \xB7 ", bal.cards, bal.claim ? /* @__PURE__ */ React.createElement("span", { style: { color: "var(--gold)" } }, " \xB7 ", bal.claim) : null);
+      })(), /* @__PURE__ */ React.createElement("div", { className: "lm-gen-body" }, genTab === "Image" && (() => {
         const gi = genImgState[c.id] || {};
         const busyI = gi.phase === "submitting" || gi.phase === "running";
         const compat = imgModel && imgModel.compatibility || {};
@@ -18596,7 +18659,7 @@ Your currently-open board is left untouched.`)) return;
         delete n[cardId];
         return n;
       });
-      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect })) : p);
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p);
     };
     const keepAnchor2 = (cardId) => {
       setProject((p) => {
