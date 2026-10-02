@@ -57,6 +57,34 @@ describe("ribbonPairs: one pair per cut between rendered shots, through the ★ 
     assert.equal(pairTitle(pairs[0], 0, "ok"), "A·02: anchor changed");
     assert.equal(pairFlagged(pairs[0], null), true, "a stale anchor flags even with no frames to compare");
   });
+  test("a take whose clip length was never recorded closes at its planned end, never its first frame", () => {
+    // Owner walk 2026-09-30: E·02 opens on exactly E·01's last frame (E·01 at 4.99 s == E·02 at
+    // 0 s), yet the E·01 -> E·02 join was flagged "Strong colour jump · mean Lab ΔE 34.9". E·01's
+    // take had no recorded length (landTake stores dur null when the task reported none) and
+    // Number(null) is 0, so the ribbon compared E·01's FIRST frame with E·02's open. An unknown
+    // length now falls through to the planned one; the frame route takes a time at or past the
+    // clip's real end as its last frame.
+    const p = legacy();
+    const [a1, a2] = p.acts[0].cards;
+    Object.assign(a1, { actualDur: null, duration: 5, trimOut: null, trimIn: 0 });
+    delete a1.takes; delete a1.selectedTake;
+    const [first] = ribbonPairs(flat(p));
+    assert.equal(first.a.cardId, a1.id);
+    assert.equal(first.a.at, 5, "the close is the clip's end, not 0");
+    assert.equal(frameUrl(first.a.mid, first.a.at), "/api/loom/frame?mid=" + a1.resultMid + "&at=5.0000");
+    for (const blank of [undefined, ""]) {
+      a1.actualDur = blank;
+      assert.equal(ribbonPairs(flat(p))[0].a.at, 5, "unrecorded (" + JSON.stringify(blank) + ") is unknown too");
+    }
+    a1.actualDur = null;
+    assert.equal(a1.actualDur, null, "reading the board wrote no length onto it");
+    // What the ribbon compares: both sides are the shots' RENDERED clips (GET /api/loom/frame), the
+    // incoming one at its trimIn -- never the incoming shot's open-frame picture, so a spliced frame
+    // with no thumbnail cannot stand in a different picture here.
+    assert.equal(first.b.mid, String(a2.resultMid));
+    assert.notEqual(first.b.mid, String(a2.openFrame.mediaId));
+    assert.equal(frameUrl(first.b.mid, first.b.at), "/api/loom/frame?mid=" + a2.resultMid + "&at=0.0000");
+  });
   test("the frame's address quantises the time to a 24 fps frame", () => {
     assert.equal(frameUrl("123", 1.01), "/api/loom/frame?mid=123&at=1.0000");
     assert.equal(frameUrl("123", 1.03), "/api/loom/frame?mid=123&at=1.0417");

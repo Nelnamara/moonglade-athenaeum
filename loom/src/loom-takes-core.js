@@ -40,6 +40,12 @@
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 const str = (v) => (v == null ? "" : String(v));
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+// A length or a time that was never recorded is UNKNOWN (null), never 0: Number(null) and
+// Number("") are both 0. A take whose clip length was not recorded (landTake stores dur null
+// when the task reported none) read as a 0 s clip, so the continuity ribbon compared the
+// outgoing shot's FIRST frame with the next shot's open -- a false "strong colour jump" on a
+// true handoff (owner walk 2026-09-30).
+const known = (v) => (v == null || v === "" ? null : num(v));
 
 /* ---------- views: never write ---------- */
 
@@ -51,7 +57,7 @@ const maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || 
 const mirrorTake = (card, n) => {
   const t = {
     id: "t" + n, n, mid: str(card.resultMid), taskId: "", at: "",
-    dur: num(card.actualDur), trimIn: Number(card.trimIn) || 0,
+    dur: known(card.actualDur), trimIn: Number(card.trimIn) || 0,
     trimOut: card.trimOut == null ? null : Number(card.trimOut),
     settings: null, anchor: null, imported: !!card.imported, source: "legacy",
   };
@@ -95,7 +101,7 @@ export const selectedTakeView = (card) => {
   const n = selectedTakeOf(card);
   if (n == null) return null;
   const t = takesOf(card).find((x) => x.n === n) || mirrorTake(card, n);
-  const v = { ...t, mid: str(card.resultMid), dur: num(card.actualDur) != null ? num(card.actualDur) : t.dur,
+  const v = { ...t, mid: str(card.resultMid), dur: known(card.actualDur) != null ? known(card.actualDur) : t.dur,
     trimIn: Number(card.trimIn) || 0, trimOut: card.trimOut == null ? null : Number(card.trimOut),
     imported: !!card.imported };
   if (card.crop) v.crop = card.crop; else delete v.crop;
