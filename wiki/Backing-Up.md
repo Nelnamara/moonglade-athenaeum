@@ -262,6 +262,21 @@ quarantined file whose keeper no longer exists back into `images/`.
 
 Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`; `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
 
+## Integrity check
+
+```bash
+python moonglade_backup.py --verify-library                 # missing, empty, thumbnails
+python moonglade_backup.py --verify-library --verify-deep   # + files cut short
+```
+
+`--verify-library` is read-only. It checks every catalogued file for a missing or zero-byte
+file, a missing or empty thumbnail (a video's poster), images on disk with no catalog row and
+thumbnails with no row, and writes `integrity_report.csv` (one line per problem) and
+`integrity_report.json` (counts and the time it ran) at the library root. `--verify-deep` also
+reads the end of each file — PNG, JPEG, WebP and GIF end markers, an MP4's index — and lists a
+file that stops short as *suspect*, without decoding it. Health's **Missing thumbs** and **Last
+verified** tiles read the JSON report; see [Health → Library integrity](Health).
+
 ## Catalog repair one-shots
 
 Each runs its pass and exits; all are idempotent and safe to re-run.

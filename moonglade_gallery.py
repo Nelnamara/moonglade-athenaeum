@@ -8426,6 +8426,16 @@ def rows_for_media_ids(db_path, ids):
         return [found[i] for i in ids if i in found]
 
 
+def integrity_rows(db_path):
+    """Every catalog row, narrowed to what the integrity pass (moonglade_integrity.py)
+    needs: the file it claims, whether it is a video, and the two archive-only flags.
+    Plain dicts, catalog order."""
+    with catalog(db_path) as con:
+        return [dict(r) for r in con.execute(
+            "SELECT media_id, filename, is_video, deleted_remote, cloud_deleted_at "
+            "FROM catalog WHERE COALESCE(media_id, '') != '' ORDER BY rowid").fetchall()]
+
+
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
                    media_type="", source="", collection=""):
@@ -8576,9 +8586,16 @@ def collection_health(out_dir, db_path):
     # anything if it watches exactly the roots this walk descends into.
     size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
     size_by_mid = {}          # (kind, media_id) -> bytes of its largest copy (the Storage bars)
+    # Empty files, images and videos (the "Zero-byte files" tile). Counted here for free; they
+    # still count in total_files and keep a row out of `missing`, exactly as before -- the
+    # tile says it plainly instead of moving a number the owner already knows (scope 2+3,
+    # owner question 1, option a).
+    zero_byte = 0
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
         _rel = str(e.rel).replace("\\", "/")
         on_disk_rels.add(_rel)
+        if e.size == 0:
+            zero_byte += 1
         if e.size is not None:
             size_by_rel[_rel] = e.size
             _k = (e.kind, e.media_id)
@@ -8687,6 +8704,16 @@ def collection_health(out_dir, db_path):
     # _duplicates/_deleted/branding already excluded from the disk walk).
     uncataloged = on_disk_ids - catalog_ids
 
+    # The last integrity pass (--verify-library / the Panel's "Verify library integrity"):
+    # a read of its integrity_report.json, never a walk of its own. None until one has run.
+    try:
+        import moonglade_integrity
+        _last = moonglade_integrity.read_summary(out_dir)
+    except Exception:                                    # noqa: BLE001 -- Health never fails on it
+        _last = None
+    integrity = ({k: _last.get(k) for k in ("verified_at", "deep", "rows", "counts", "lost")}
+                 if _last else None)
+
     return {
         "total_files": total_files,
         "total_bytes": total_bytes,
@@ -8704,6 +8731,8 @@ def collection_health(out_dir, db_path):
         "rated": rated,
         "missing": missing,
         "uncataloged": len(uncataloged),
+        "zero_byte": zero_byte,
+        "integrity": integrity,
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
         "published": published,
@@ -12907,6 +12936,11 @@ def create_app(out_dir: Path):
         "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
         "verify-dupes":  {"args": ["--verify-dupes"],
                           "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        # The integrity pass (moonglade_integrity.py): read-only, it writes only its own two
+        # report files. A deliberate click runs the quick tier AND the structural checks
+        # (scope 2+3, owner question 2's recommendation); Health's tiles read the result.
+        "verify-library": {"args": ["--verify-library", "--verify-deep"],
+                           "label": "Verify library integrity (read-only)", "destructive": False},
         # Listed BEFORE rebuild so the non-destructive, usually-correct action reads first.
         # "Rebuild" drops the table and re-embeds everything; this adds only what is missing and
         # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for

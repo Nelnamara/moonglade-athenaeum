@@ -832,6 +832,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                             <div className="mgcp-grp">Check — read-only</div>
                             {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
                               ["verify-dupes", "Verify _duplicates/"],
+                              ["verify-library", "Verify library integrity"],
                               ["sync-artworks", "Sync published-artwork metadata"],
                               ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
                               actionSpec(key) ? (

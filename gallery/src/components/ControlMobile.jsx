@@ -449,6 +449,7 @@ export default function ControlMobile({ account, brandRequest }) {
                 <div className="mgcp-grp" style={{ marginTop: 16 }}>Check — read-only</div>
                 {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
                   ["verify-dupes", "Verify _duplicates/"],
+                  ["verify-library", "Verify library integrity"],
                   ["sync-artworks", "Sync published-artwork metadata"],
                   ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
                   actionSpec(key) ? (

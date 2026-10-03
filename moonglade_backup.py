@@ -17966,6 +17966,15 @@ def main():
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
+    ap.add_argument("--verify-library", dest="verify_library", action="store_true",
+                    help="read-only integrity pass over every catalogued file: missing, zero-byte, "
+                         "missing or empty thumbnails, uncataloged files. Writes "
+                         "integrity_report.csv/.json at the library root and prints a summary, "
+                         "then exit. Changes nothing else.")
+    ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
+                    help="with --verify-library, also check each file's end structurally "
+                         "(PNG/JPEG/WebP/GIF end markers, MP4 moov); a torn file is reported as "
+                         "suspect. Reads two small ranges per file, decodes nothing.")
     ap.add_argument("--dedup", action="store_true",
                     help="act on the audit: move redundant copies to _duplicates/ (keeping the "
                          "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
@@ -18142,6 +18151,18 @@ def main():
             return
         if args.audit:
             cmd_audit(args, out)
+            return
+        if getattr(args, "verify_library", False):
+            # Read-only (moonglade_integrity.py): no _check_read_only, nothing to gate.
+            import moonglade_integrity
+            _job = _cli_job_start(out, "Verify library integrity")
+            try:
+                moonglade_integrity.run_cli(out, db_path, deep=getattr(args, "verify_deep", False),
+                                            progress=args.progress)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
             return
         if args.dedup:
             cmd_dedup(args, out, db_path)
