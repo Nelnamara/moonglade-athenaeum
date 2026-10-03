@@ -262,6 +262,19 @@ quarantined file whose keeper no longer exists back into `images/`.
 
 Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant copies outright instead of moving them to `_duplicates/`; `--no-content` (with `--audit`/`--dedup`) skips the slower content-hash pass and does only the fast same-`media_id` location dedup.
 
+## Curation backup
+
+```bash
+python moonglade_backup.py --export-curation [FILE]                 # ratings, collections, tags, marks, notes
+python moonglade_backup.py --import-curation FILE                   # dry run
+python moonglade_backup.py --import-curation FILE --apply           # fill-only
+python moonglade_backup.py --import-curation FILE --apply --curation-overwrite
+```
+
+Everything you made of the library, keyed by media id, so a catalog rebuilt from a fresh pull
+gets it back. Local only. The rules (fill-only, unknown pictures, the undo file) are in
+[Collections → Backing up your curation](Collections).
+
 ## Integrity check
 
 ```bash

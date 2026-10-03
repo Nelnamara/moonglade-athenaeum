@@ -1043,6 +1043,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <div className="mgcp-mkick">Catalog &amp; files</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+                        <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
+                          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation.">⬇ Download curation (JSON)</a>
                         {isLocal && (
                           <button type="button" className="mgcp-smallchip" onClick={openLibPicker}>library folder…</button>
                         )}

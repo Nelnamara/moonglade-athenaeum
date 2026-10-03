@@ -17979,7 +17979,20 @@ def main():
                     help="act on the audit: move redundant copies to _duplicates/ (keeping the "
                          "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
     ap.add_argument("--apply", action="store_true",
-                    help="with --dedup, actually perform the moves/deletes (default is dry-run)")
+                    help="with --dedup, actually perform the moves/deletes (default is dry-run); "
+                         "with --import-curation, actually write the curation")
+    ap.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
+                    default=None, metavar="FILE",
+                    help="write your curation (ratings, collections and their order, smart "
+                         "collections, tags, keeper/reject marks, notes) to a JSON file keyed by "
+                         "media id, then exit. Default file: curation_<stamp>.json in the library")
+    ap.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
+                    help="read a curation file back into this catalog. Dry run unless --apply; "
+                         "fill-only (keeps any rating, mark or note already there) unless "
+                         "--curation-overwrite. Saves the current state first.")
+    ap.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
+                    help="with --import-curation, the file wins for the pictures it lists: "
+                         "rating, mark, note, tags, collections and manual orders")
     ap.add_argument("--dedup-delete", action="store_true",
                     help="with --dedup --apply, delete redundant copies instead of quarantining them")
     ap.add_argument("--no-content", action="store_true",
@@ -18163,6 +18176,21 @@ def main():
                 _cli_job_finish(out, _job, error=e)
                 raise
             _cli_job_finish(out, _job)
+            return
+        if getattr(args, "export_curation", None) is not None:
+            # Local catalog only (moonglade_curation_io.py); no PixAI call.
+            import moonglade_curation_io
+            moonglade_curation_io.run_export_cli(out, db_path, args.export_curation)
+            return
+        if getattr(args, "import_curation", ""):
+            import moonglade_curation_io
+            try:
+                moonglade_curation_io.run_import_cli(
+                    out, db_path, args.import_curation, apply=args.apply,
+                    overwrite=getattr(args, "curation_overwrite", False))
+            except moonglade_curation_io.CurationIOError as e:
+                print("Nothing imported: {}".format(e))
+                sys.exit(1)
             return
         if args.dedup:
             cmd_dedup(args, out, db_path)

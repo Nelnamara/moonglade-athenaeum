@@ -2064,6 +2064,27 @@ def curate_apply(db_path, media_ids, op):
             "skipped": skipped, "refused": refused}
 
 
+def curation_rows(db_path):
+    """The owner's whole curation layer as plain rows, for the curation sidecar export
+    (moonglade_curation_io.py): {catalog: rows carrying a rating or a collection label,
+    personal: every personal_meta row, smart: every smart collection, order: every manual
+    position by name then position}. Read-only."""
+    with catalog(db_path) as con:
+        return {
+            "catalog": [dict(r) for r in con.execute(
+                "SELECT media_id, rating, collections FROM catalog "
+                "WHERE COALESCE(media_id,'') != '' AND (COALESCE(NULLIF(rating,''),'0') != '0' "
+                "OR COALESCE(collections,'') != '') ORDER BY media_id")],
+            "personal": [dict(r) for r in con.execute(
+                "SELECT media_id, tags, mark, note FROM personal_meta ORDER BY media_id")],
+            "smart": [dict(r) for r in con.execute(
+                "SELECT name, query FROM smart_collections ORDER BY name")],
+            "order": [dict(r) for r in con.execute(
+                "SELECT name, media_id, position FROM collection_order "
+                "ORDER BY name, position")],
+        }
+
+
 def curate_restore(db_path, prev):
     """Undo for curate_apply: put each picture back to the state `prev` holds for it. Every
     entry is validated before anything is written, so a bad request changes nothing. Returns
@@ -15385,6 +15406,23 @@ def create_app(out_dir: Path):
         mem.seek(0)
         return send_file(mem, mimetype="text/csv", as_attachment=True,
                          download_name="moonglade-catalog-{}.csv".format(
+                             datetime.date.today().isoformat()))
+
+    @app.route("/export-curation")
+    @tier(LOGIN)
+    def export_curation_download():
+        """Download the curation sidecar -- ratings, hand-picked collections and their manual
+        order, smart collections, and the personal layer (tags, keeper/reject, notes) -- as
+        one JSON file keyed by media id (moonglade_curation_io.py). The same browser
+        download as /export-csv beside it, built in memory, never written into the library.
+        It goes back in with `--import-curation` (dry run by default)."""
+        import io
+        import datetime
+        import moonglade_curation_io as cio
+        mem = io.BytesIO(cio.dumps(cio.export_curation(db_path)).encode("utf-8"))
+        mem.seek(0)
+        return send_file(mem, mimetype="application/json", as_attachment=True,
+                         download_name="moonglade-curation-{}.json".format(
                              datetime.date.today().isoformat()))
 
     @app.route("/api/panel/run", methods=["POST"])

@@ -34,7 +34,10 @@ itself**, **Sync now** and the version stamp (see
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
 free-card count. **⬇ Download catalog (CSV)** saves the whole catalog to your browser's
-Downloads — it does *not* write a file into your backup folder.
+Downloads — it does *not* write a file into your backup folder. **⬇ Download curation (JSON)**
+beside it saves just what you made of the library — ratings, collections and their order,
+smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
+`--import-curation` (see [Collections → Backing up your curation](Collections)).
 
 ## Running a maintenance job
 

@@ -328,6 +328,7 @@ TIER_SNAPSHOT = [
     "/branding/<path:fname> [GET] PUBLIC",
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",
+    "/export-curation [GET] LOGIN",
     "/export-zip [POST] LOGIN",
     "/feat-mask/<token>.png [GET] LOGIN",
     "/full/<media_id> [GET] LOGIN",
