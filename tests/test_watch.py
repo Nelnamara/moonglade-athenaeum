@@ -284,16 +284,12 @@ def test_a_quiet_heartbeat_is_not_the_stale_timeout():
 
 def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
     """A stale connection had subscribed and lived a whole stale window, so the reconnect after
-    it starts at the shortest backoff step rather than the 60s the step had climbed to (the
-    Panel read "Reconnecting" for that whole minute). Source pin: _watch_loop runs only in a
-    background thread the suite never starts (MOONGLADE_DISABLE_WATCH)."""
-    import pathlib as _p
-    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
-    text = src.read_text(encoding="utf-8")
-    i = text.index("def _watch_loop():")
-    loop = text[i:text.index("def _contest_sync_startup():", i)]
-    stale = loop[loop.index("except core.WatchStaleError as e:"):loop.index("except Exception as e:")]
-    assert "backoff = 5" in stale
+    it does not wait out the 60s the step had climbed to (the Panel read "Reconnecting" for that
+    whole minute). Since #60 the wait is decided by one rule for every way a connection ends
+    (watch_reconnect_plan), so this pin moved from the stale branch's own `backoff = 5` to the
+    rule: a connection that lived a stale window is a healthy one, and reconnects at once."""
+    import moonglade_gallery as mg
+    assert mg.watch_reconnect_plan(60, core._WS_STALE_TIMEOUT) == (1, 5)
 
 
 def test_mirror_and_reconcile_agree_on_what_done_means():
@@ -348,7 +344,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     assert "def _watch_catchup(reason):" in text
 
     i = text.index("def _watch_catchup(reason):")
-    body = text[i:i + 4400]
+    body = text[i:text.index('app.extensions["mg_watch_catchup"] = _watch_catchup', i)]
 
     # Bounded: one page, never a history walk. WATCH_CATCHUP_TASKS is the page size passed to
     # page_variables; the account id now rides the client (USER_ID retired from page_variables),
@@ -357,8 +353,13 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     assert "core.page_variables(" in body
     assert "WATCH_CATCHUP_TASKS, core._client_of(session).user_id" in body
 
-    # Rate-limited: a reconnect storm must not become a request storm.
-    assert "WATCH_CATCHUP_MIN_GAP" in body and "_catchup_at" in body
+    # Rate-limited: a reconnect storm must not become a request storm. Since #60 the decision
+    # is the pure catchup_plan (driven as a table in test_catchup_plan_table), applied by the
+    # ONE sweep worker; the sweep body itself no longer gates, so a reconnect is never skipped.
+    worker = text[text.index("def _catchup_worker():"):]
+    worker = worker[:worker.index("\n    def ", 10)]
+    assert "catchup_plan(" in worker and "_watch_catchup(" in worker
+    assert "WATCH_CATCHUP_MIN_GAP" not in body
 
     # Only collects what is genuinely absent -- re-collecting present media is pure waste.
     # Asked of the ids the catalog is KEYED by, never of media_ids_for (which names a batch
@@ -380,9 +381,16 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     # Only finished tasks are candidates.
     assert "core._GEN_DONE" in body
 
-    # And it is invoked OFF the WebSocket event loop, at both trigger points.
-    assert 'threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()' in text
-    assert 'threading.Thread(target=_watch_catchup, args=("reconnect",),' in text
+    # And it is invoked OFF the WebSocket event loop: the subscribe and the periodic backstop
+    # only ASK (_request_catchup takes a flag lock and may start the one worker thread). The
+    # separate startup sweep thread is gone -- the first subscribe asks for it (#60).
+    assert 'args=("startup",)' not in text
+    on_event = text[text.index("def _watch_on_event(ev):"):]
+    on_event = on_event[:on_event.index('tu = ev.get("taskUpdated")')]
+    assert "_request_catchup(" in on_event and "_watch_catchup(" not in on_event
+    periodic = text[text.index("def _periodic_catchup():"):]
+    periodic = periodic[:periodic.index("\n    def ", 10)]
+    assert '_request_catchup("periodic")' in periodic
 
 
 def test_catchup_does_not_run_in_the_test_suite():
@@ -435,14 +443,22 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     collected = []
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
+    reads = []
+    monkeypatch.setattr(core, "find_connection",
+                        lambda *a, **k: reads.append(1) or {"edges": edges})
 
     catchup("startup")
     assert collected == ["T_absent"]     # ONLY the finished task whose media was missing
+    present.add("M_absent")              # ...which the real collect has now catalogued
 
-    # Rate limit: a second sweep inside WATCH_CATCHUP_MIN_GAP does nothing — the gap still
-    # "exists" (get_row still reports M_absent absent), but the floor suppresses the sweep.
+    # REVERSED by #60. This used to assert the reconnect sweep was suppressed for five minutes
+    # after the startup one -- which is exactly how a task finishing during a drop waited for
+    # the next periodic sweep. A reconnect's gap is new, so its sweep always reads (the storm
+    # bound is catchup_plan's 60 s floor, a deferral, never a skip). It reads, and finds the
+    # task already in the catalog, so nothing is collected twice.
     catchup("reconnect")
-    assert collected == ["T_absent"]     # no second collection
+    assert len(reads) == 2
+    assert collected == ["T_absent"]
 
 
 # ---------------------------------------------------------------------------------------
@@ -812,3 +828,310 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
     assert "T_batch_gone" not in warnings[0]
     assert "3 finished task(s) are missing media from the catalog" in warnings[0]
     assert "never mirrored" not in warnings[0]
+
+
+# ---------------------------------------------------------------------------------------
+# #60: PixAI drops live connections in batches (PROBE_2026-10-02_bridge-live-inbox-studio,
+# task 2). A keep-alive cannot prevent that, so the fix is on our side of every drop:
+# reconnect at once after a connection that was healthy, and always catch up the gap.
+# ---------------------------------------------------------------------------------------
+
+def test_reconnect_plan_table():
+    """One rule for every way a connection ends. A connection that subscribed and lived at
+    least a heartbeat (WATCH_HEALTHY_S) reconnects after 1 s and resets the ladder; anything
+    faster -- a refused handshake, a drop seconds after subscribing -- climbs 5/15/45/60, so a
+    reconnect storm is bounded at about one connect a minute."""
+    import moonglade_gallery as mg
+    plan = mg.watch_reconnect_plan
+    assert plan(5, 900) == (1, 5)            # healthy drop: at once
+    assert plan(60, 900) == (1, 5)           # ...even after the ladder had climbed to 60
+    assert plan(5, 60) == (1, 5)             # lived exactly one heartbeat
+    assert plan(5, 59.9) == (5, 15)          # did not
+    assert plan(5, 10) == (5, 15)            # subscribed, then dropped at once
+    assert plan(5, None) == (5, 15)          # never subscribed
+    assert plan(15, None) == (15, 45)
+    assert plan(45, None) == (45, 60)
+    assert plan(60, None) == (60, 60)
+
+
+def test_catchup_plan_table():
+    """The sweep decision, pure. A connect (first subscribe or reconnect) is NEVER skipped: it
+    waits ~2 s after the subscribe was sent (PixAI acknowledges nothing, so the subscription's
+    start is unobservable) and at least 60 s after the previous sweep started, then reads. The
+    periodic backstop keeps its 300 s rule against the last SUCCESSFUL sweep, and never stacks
+    on a fresh attempt."""
+    import moonglade_gallery as mg
+    P = mg.catchup_plan
+    # a reconnect waits out the settle delay after its subscribe...
+    assert P("reconnect", 100.0, None, None, 102.0) == ("wait", 2.0)
+    assert P("reconnect", 102.0, None, None, 102.0) == ("run", 0)
+    # ...and the 60 s floor after any sweep -- a deferral, never a skip
+    assert P("reconnect", 1000.0, 980.0, 980.0, 1002.0) == ("wait", 40.0)
+    # the OLD bug: a periodic sweep 100 s ago used to suppress this reconnect for 300 s
+    assert P("reconnect", 1000.0, 900.0, 900.0, 998.0) == ("run", 0)
+    assert P("startup", 50.0, None, None, 52.0) == ("wait", 2.0)
+    # periodic: skip within 300 s of a successful sweep...
+    assert P("periodic", 1000.0, 900.0, 900.0, 0.0) == ("skip", 0)
+    # ...but a FAILED sweep does not count as coverage
+    assert P("periodic", 1000.0, 900.0, 600.0, 0.0) == ("run", 0)
+    assert P("periodic", 1000.0, 900.0, None, 0.0) == ("run", 0)
+    # and it never stacks on an attempt under a minute old
+    assert P("periodic", 1000.0, 970.0, 500.0, 0.0) == ("skip", 0)
+
+
+def _cycle_rig(app, monkeypatch, clock):
+    """Inline everything a watch cycle touches: the sweep worker runs on this thread, its
+    sleeps and the cycle's sleeps advance the fake clock, and the sweep's network is stubbed.
+    The clock is passed in, never patched over time.monotonic (asyncio.run reads that)."""
+    import time
+
+    def _sleep(s):
+        clock["t"] += s
+
+    env = app.extensions["mg_watch_catchup_env"]
+    env.update(clock=lambda: clock["t"], sleep=_sleep, spawn=lambda fn: fn())
+    reads = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
+    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(core, "find_connection",
+                        lambda *a, **k: reads.append(clock["t"]) or {"edges": []})
+    monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
+    slept = []
+
+    def _cycle_sleep(s):
+        slept.append(s)
+        clock["t"] += s
+    state = {"backoff": 5, "clock": lambda: clock["t"], "sleep": _cycle_sleep}
+    return state, reads, slept
+
+
+def test_a_drop_after_a_healthy_connection_reconnects_at_once_and_catches_up(tmp_path, monkeypatch):
+    """THE ISSUE'S TEST. A connection lives 15 minutes, a periodic sweep runs, and 100 s later
+    PixAI drops the socket with no close frame. The reconnect must come after 1 s, not the 60 s
+    the old ladder had climbed to, and the catch-up read must fire on the reconnect -- the old
+    300 s window skipped it because the periodic sweep was so recent."""
+    import websockets.exceptions as wse
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    ask = app.extensions["mg_watch_request_catchup"]
+    calls = {"n": 0}
+
+    async def fake_watch(auth, on_event, seconds):
+        calls["n"] += 1
+        on_event({"__meta__": "subscribed"})
+        if calls["n"] == 1:
+            clock["t"] += 800
+            ask("periodic")                      # the backstop sweeps mid-connection
+            clock["t"] += 100
+            raise wse.ConnectionClosedError(None, None)
+
+    monkeypatch.setattr(core, "_watch_events_async", fake_watch)
+    cycle = app.extensions["mg_watch_cycle"]
+    cycle(state)
+    assert slept == [1] and state["backoff"] == 5
+    assert len(reads) == 2                       # the first subscribe's sweep + the periodic one
+    status = app.extensions["mg_watch_status"]
+    assert status["last_close"] == {"kind": "abrupt", "code": None, "reason": ""}
+    assert status["last_connection_s"] == 902    # 2 s settle + 800 + 100
+    assert status["connected"] is False
+
+    drop_at = clock["t"]
+    cycle(state)                                 # the reconnect subscribes...
+    assert len(reads) == 3                       # ...and its catch-up read FIRES
+    assert reads[-1] >= drop_at                  # after the subscribe, not before it
+
+
+def test_a_fast_failing_connection_climbs_the_ladder(tmp_path, monkeypatch):
+    """The storm bound. A connect refused before subscribing, or a subscription dropped within
+    seconds, never gets the 1 s reconnect."""
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    app.extensions["mg_watch_catchup_env"]["spawn"] = lambda fn: None   # no sweeps here
+
+    async def refused(auth, on_event, seconds):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(core, "_watch_events_async", refused)
+    cycle = app.extensions["mg_watch_cycle"]
+    for _ in range(5):
+        cycle(state)
+    assert slept == [5, 15, 45, 60, 60]
+
+    async def flaps(auth, on_event, seconds):
+        on_event({"__meta__": "subscribed"})
+        clock["t"] += 10
+        raise OSError("dropped")
+
+    monkeypatch.setattr(core, "_watch_events_async", flaps)
+    slept.clear()
+    state["backoff"] = 5
+    for _ in range(4):
+        cycle(state)
+    assert slept == [5, 15, 45, 60]
+
+
+def test_a_clean_end_logs_the_wait_it_really_takes(tmp_path, monkeypatch, caplog):
+    """The old line printed the climbed backoff ("reconnecting in 45s") and then waited 5 s.
+    The line now names the wait the loop actually takes."""
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    app.extensions["mg_watch_catchup_env"]["spawn"] = lambda fn: None
+    state["backoff"] = 45
+
+    async def completes(auth, on_event, seconds):
+        on_event({"__meta__": "subscribed"})
+        clock["t"] += 400
+
+    monkeypatch.setattr(core, "_watch_events_async", completes)
+    with caplog.at_level("INFO"):
+        app.extensions["mg_watch_cycle"](state)
+    assert slept == [1] and state["backoff"] == 5
+    lines = [r.getMessage() for r in caplog.records if "disconnected cleanly" in r.getMessage()]
+    assert lines and "reconnecting in 1s" in lines[-1] and "after 400s" in lines[-1]
+    assert app.extensions["mg_watch_status"]["last_close"] == {"kind": "clean"}
+
+
+def test_the_sweep_worker_coalesces_and_reruns(tmp_path, monkeypatch):
+    """One worker: idle -> pending -> running. A subscribe while a sweep is pending is absorbed
+    (the pending sweep reads after it); a subscribe while one is running sets `rerun`, so the
+    gap it opened is read once more. Nothing is ever dropped, nothing runs twice at once."""
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    env = app.extensions["mg_watch_catchup_env"]
+    spawned = []
+    env["spawn"] = spawned.append
+    ask = app.extensions["mg_watch_request_catchup"]
+    cs = app.extensions["mg_watch_catchup_state"]
+
+    ask("reconnect")
+    ask("reconnect")
+    ask("periodic")
+    assert len(spawned) == 1 and cs["phase"] == "pending"
+
+    def _read_with_a_subscribe_mid_sweep(*a, **k):
+        reads.append(clock["t"])
+        if len(reads) == 1:
+            ask("reconnect")                     # a drop + resubscribe while this sweep reads
+        return {"edges": []}
+
+    monkeypatch.setattr(core, "find_connection", _read_with_a_subscribe_mid_sweep)
+    spawned[0]()                                 # run the one worker
+    assert len(reads) == 2 and len(spawned) == 1
+    assert reads[1] - reads[0] >= 60             # the rerun respected the floor
+    assert cs["phase"] == "idle" and cs["rerun"] is False
+
+
+def test_a_failed_read_is_not_coverage(tmp_path, monkeypatch):
+    """A sweep whose read fails must not mark the gap covered: the periodic backstop still
+    runs on its next tick instead of waiting out a 300 s window it never earned."""
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    ask = app.extensions["mg_watch_request_catchup"]
+    cs = app.extensions["mg_watch_catchup_state"]
+
+    def _down(*a, **k):
+        reads.append(clock["t"])
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr(core, "find_connection", _down)
+    ask("reconnect")
+    assert len(reads) == 1 and cs["ok"] is None
+    clock["t"] += 120
+    ask("periodic")
+    assert len(reads) == 2                       # not skipped: nothing was covered
+
+
+def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkeypatch):
+    """A task whose collect fails is left alone for 300 s (WATCH_COLLECT_RETRY_S), so a broken
+    task cannot turn every reconnect into a re-download attempt; afterwards it is retried."""
+    import moonglade_gallery as mg
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    _cycle_rig(app, monkeypatch, clock)
+    edges = [{"node": {"id": "T_bad", "status": "completed", "mediaId": "M_bad",
+                       "batchMediaIds": None}}]
+    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    tries = []
+
+    def _boom(s, tid, out, **k):
+        tries.append(tid)
+        raise core.PixAIError("PixAI said no")
+
+    monkeypatch.setattr(core, "collect_generation", _boom)
+    sweep = app.extensions["mg_watch_catchup"]
+    sweep("reconnect")
+    sweep("reconnect")
+    assert tries == ["T_bad"]                    # skipped inside 300 s
+    assert "T_bad" not in app.extensions["mg_watch_backed"]
+    clock["t"] += mg.WATCH_COLLECT_RETRY_S
+    sweep("reconnect")
+    assert tries == ["T_bad", "T_bad"]           # and retried after
+
+
+def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_path, monkeypatch):
+    """Test 6 of the #60 design. The collect itself was already single-flight before #60
+    (_collect_single_flight: a catalog pre-check plus a per-task lock), so "collected twice" was
+    never possible; that half is covered by the existing collect tests. What is NEW is only the
+    `_watch_backed` half: a task the sweep collected joins _watch_backed (only after a
+    SUCCESSFUL collect), so a late `completed` frame for it does not start a mirror thread."""
+    import threading
+    import moonglade_gallery as mg
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    _cycle_rig(app, monkeypatch, clock)
+    edges = [{"node": {"id": "T_late", "status": "completed", "mediaId": "M_late",
+                       "batchMediaIds": None}}]
+    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
+    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: {"media_ids": ["M_late"], "saved": 1,
+                                                  "is_video": False})
+    app.extensions["mg_watch_catchup"]("reconnect")
+    assert "T_late" in app.extensions["mg_watch_backed"]
+
+    started = []
+    real_thread = threading.Thread
+
+    def _spy(*a, target=None, args=(), **k):
+        if target is not None and getattr(target, "__name__", "") == "_watch_mirror":
+            started.append(args)
+        return real_thread(*a, target=lambda *x: None, args=(), **k)
+
+    monkeypatch.setattr(threading, "Thread", _spy)
+    app.extensions["mg_watch_on_event"](_frame("T_late", "completed", mediaId="M_late"))
+    assert started == []
+
+
+def test_watch_status_reports_how_the_last_connection_ended(tmp_path, monkeypatch):
+    """The fields that turn the next drop investigation into a status read: when it connected,
+    how and when it ended (close code and reason), how long it lived, how many reconnects.
+    The Panel does not draw them (no visual change); /api/watch/status returns them."""
+    from websockets.frames import Close
+    import websockets.exceptions as wse
+    from tests.conftest import login_test_client
+    app = _watch_app(tmp_path)
+    clock = {"t": 1000.0}
+    state, reads, slept = _cycle_rig(app, monkeypatch, clock)
+    app.extensions["mg_watch_catchup_env"]["spawn"] = lambda fn: None
+
+    async def going_away(auth, on_event, seconds):
+        on_event({"__meta__": "subscribed"})
+        clock["t"] += 3600
+        raise wse.ConnectionClosedOK(Close(1001, "CloudFlare WebSocket proxy restarting"), None)
+
+    monkeypatch.setattr(core, "_watch_events_async", going_away)
+    app.extensions["mg_watch_cycle"](state)
+    d = login_test_client(app).get("/api/watch/status").get_json()
+    assert d["last_close"] == {"kind": "closed", "code": 1001,
+                               "reason": "CloudFlare WebSocket proxy restarting"}
+    assert d["last_connection_s"] == 3600 and d["reconnects"] == 1
+    assert d["connected_at"] and d["last_close_at"] and d["connected"] is False

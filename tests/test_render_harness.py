@@ -4826,6 +4826,55 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
         "assertion above is about nothing")
 
 
+def _mirror_ring_with_status(logged_in_page, status):
+    """Open the Panel with /api/mirror/status answered by `status` (route-fulfilled in the
+    page; the server's real status is never consulted) and read the rendered ring back."""
+    page = logged_in_page(**DESKTOP)
+    page.route("**/*pixai.art/**", lambda route: route.abort())
+    page.route("**/api/mirror/status", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(status)))
+    _visit(page, "/")
+    page.wait_for_selector("header")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-bridge .mgbr-tile.armed")
+    _settle(page)
+    ring = page.evaluate(_READ_MIRROR_RING_JS)
+    ring["peach"] = page.evaluate("""() => { const d = document.createElement('div');
+        d.style.color = 'var(--peach)'; document.body.appendChild(d);
+        const c = getComputedStyle(d).color; d.remove(); return c; }""")
+    ring["sub"] = page.locator(".mgbr-session-sub").inner_text()
+    return ring
+
+
+def test_the_mirror_ring_reads_a_fresh_seven_day_token_as_full_and_healthy(logged_in_page):
+    """#71, rendered. A token renewed a moment ago has 6.9 of its 7 days left: the ring is
+    nearly full and emerald. Before #71 the same token drew 6/40 of the ring, in peach,
+    "Expires soon", for its whole healthy life (PROBE 2026-10-02, task 1)."""
+    ring = _mirror_ring_with_status(logged_in_page, {
+        "enabled": True, "connected": True, "days_left": 6,
+        "left_s": int(6.9 * 86400), "span_s": 7 * 86400,
+        "renewal": {"state": "ok", "reason": "", "last_ok_at": None, "next_try_at": None}})
+    assert "healthy" in ring["ringClass"].split(), ring["ringClass"]
+    assert ring["stroke"] == ring["emerald"]
+    full, offset = float(ring["dasharray"]), float(ring["dashoffset"])
+    assert offset < full * 0.05, (
+        "a fresh token must draw a nearly full ring ({} of {} left undrawn)".format(offset, full))
+    assert "renews itself" in ring["sub"]
+
+
+def test_the_mirror_ring_turns_peach_only_when_a_renewal_failed(logged_in_page):
+    """The peach rung moved from "7 days or fewer" to "a renewal failed or cannot run": the
+    same days, with the renewal reported failed, paint peach and say so."""
+    ring = _mirror_ring_with_status(logged_in_page, {
+        "enabled": True, "connected": True, "days_left": 2,
+        "left_s": 2 * 86400 + 600, "span_s": 7 * 86400,
+        "renewal": {"state": "failed", "reason": "network", "last_ok_at": None,
+                    "next_try_at": 1}})
+    assert "low" in ring["ringClass"].split(), ring["ringClass"]
+    assert ring["stroke"] == ring["peach"] and ring["stroke"] != ring["emerald"]
+    assert "Couldn't renew" in ring["sub"] and "2 days left" in ring["sub"]
+
+
 # --- The pickers page past 24 (owner, 2026-09-07, twice: "still do not scroll past a set
 # selection of models and lora in all tabs and sorts", desktop and phone). Two fixes were
 # claimed from code reads before this test existed; this is the browser proof, on both shells,

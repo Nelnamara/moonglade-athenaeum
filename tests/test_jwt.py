@@ -47,8 +47,14 @@ def test_jwt_expiry_and_days_left():
 
 
 def test_needs_refresh_cushion():
+    """#71: a renewal mints a 7-day token (PROBE 2026-10-02), so the cushion is 3 days, and it
+    is measured on the token's real seconds left, not on floored whole days (the old 5-day rule
+    on floored days renewed with up to 6 days left, i.e. on nearly every submitting day)."""
+    assert mj.MIRROR_REFRESH_WHEN_DAYS_LEFT == 3
     assert mj.mirror_needs_refresh(_jwt(NOW + 20 * 86400), now=NOW) is False   # plenty
-    assert mj.mirror_needs_refresh(_jwt(NOW + 5 * 86400), now=NOW) is True     # at cushion
+    assert mj.mirror_needs_refresh(_jwt(NOW + 5 * 86400), now=NOW) is False    # a fresh-ish one
+    assert mj.mirror_needs_refresh(_jwt(NOW + 3 * 86400 + 60), now=NOW) is False
+    assert mj.mirror_needs_refresh(_jwt(NOW + 3 * 86400), now=NOW) is True     # at cushion
     assert mj.mirror_needs_refresh(_jwt(NOW - 3600), now=NOW) is True          # expired
     assert mj.mirror_needs_refresh(None, now=NOW) is True                       # no token
     assert mj.mirror_needs_refresh("garbage", now=NOW) is True                  # unparseable
@@ -277,6 +283,7 @@ def test_save_mirror_state_atomic_under_concurrency(tmp_path, monkeypatch):
     assert got != {}                                             # never lost to corruption
     assert got.get("jwt") in {str(i) for i in range(16)}         # one complete write
     assert "cookies" not in got                                  # JWT-only
+    assert set(got) <= {"jwt", "minted_at"}                      # #71: and nothing else
     assert not list(tmp_path.glob("mirror_session.json.tmp*"))   # no stray temp left behind
 
 
@@ -632,3 +639,309 @@ def test_run_mirror_check_refused_under_read_only(monkeypatch):
         AssertionError("must not read the browser or refresh under READ_ONLY")))
     res = mj.run_mirror_check(SimpleNamespace())
     assert res["ok"] is False and res["source"] == "read_only"
+
+
+
+# ---- #71: background renewal, and the ring drawn against the token's own life ------------
+# PROBE 2026-10-02 (bridge-live-inbox-studio, task 1): every renewal mints a token that
+# expires 7 days later, `iat` never moves off the original sign-in, and nothing renewed the
+# token unless a generation or a Connect asked. All on a fixed clock (NOW) unless a test says
+# otherwise; refresh_jwt is always faked, so nothing here reaches PixAI.
+
+DAY = 86400
+
+
+def _armed(tmp_path, monkeypatch, *, jwt, minted_at=None, enabled=True, read_only=False):
+    p = tmp_path / "mirror_session.json"
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
+    monkeypatch.setattr(mj, "mirror_enabled", lambda: enabled)
+    monkeypatch.setattr(mj, "READ_ONLY", False)
+    monkeypatch.setattr(mj, "_read_only_now", lambda: read_only)
+    st = {"jwt": jwt}
+    if minted_at is not None:
+        st["minted_at"] = minted_at
+    mj.save_mirror_state(st)
+    return p
+
+
+def _refresh_spy(monkeypatch, result):
+    calls = []
+
+    def _fake(session, current_jwt=None):
+        calls.append(current_jwt)
+        return result(len(calls)) if callable(result) else result
+    monkeypatch.setattr(mj, "refresh_jwt", _fake)
+    return calls
+
+
+def test_the_renew_tick_matrix(tmp_path, monkeypatch):
+    """Off, READ_ONLY, no session, expired and fresh all return before any network; a due
+    token is renewed ONCE, stored, and stamped with the moment the app minted it."""
+    tick = mj.mirror_renew_tick
+    step = mj.MIRROR_RENEW_TICK_S
+    fresh = _jwt(NOW + 7 * DAY)
+    calls = _refresh_spy(monkeypatch, fresh)
+    due = _jwt(NOW + 2 * DAY)
+
+    _armed(tmp_path, monkeypatch, jwt=due, enabled=False)
+    assert tick(now=NOW) == "mirror_off"
+    _armed(tmp_path, monkeypatch, jwt=due, read_only=True)
+    assert tick(now=NOW + step) == "read_only"
+    _armed(tmp_path, monkeypatch, jwt="")
+    assert tick(now=NOW + 2 * step) == "no_session"
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW - 60))
+    assert tick(now=NOW + 3 * step) == "expired"
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 5 * DAY))
+    assert tick(now=NOW + 4 * step) == "fresh"
+    assert calls == []
+
+    _armed(tmp_path, monkeypatch, jwt=due)
+    assert tick(now=NOW + 5 * step) == "renewed"
+    assert calls == [due]
+    st = mj.load_mirror_state()
+    assert st["jwt"] == fresh and st["minted_at"] == NOW + 5 * step
+
+
+def test_the_tick_keeps_its_own_fifteen_minute_cadence(tmp_path, monkeypatch):
+    """The scheduler's heartbeat is every minute; the tick looks at the token every fifteen."""
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 5 * DAY))
+    reads = []
+    real = mj.load_mirror_state
+    monkeypatch.setattr(mj, "load_mirror_state", lambda: reads.append(1) or real())
+    assert mj.mirror_renew_tick(now=NOW) == "fresh"
+    n = len(reads)
+    assert mj.mirror_renew_tick(now=NOW + 60) == "cadence" and len(reads) == n
+    assert mj.mirror_renew_tick(now=NOW + mj.MIRROR_RENEW_TICK_S) == "fresh"
+
+
+def test_a_failing_renewal_backs_off_and_a_connect_still_tries(tmp_path, monkeypatch):
+    """10, 20, 40, 80 min, then every 2 h (the tick's own 15-minute cadence rounds the first
+    steps up); a tick inside the backoff makes no call; a press of Connect (user-initiated)
+    tries once anyway; a success resets everything."""
+    due = _jwt(NOW + 2 * DAY)
+    _armed(tmp_path, monkeypatch, jwt=due)
+    calls = _refresh_spy(monkeypatch, None)
+    r = mj._mirror_renewal
+    t = NOW
+    gaps = []
+    for _ in range(6):
+        assert mj._mirror_try_renew(now=t)[1] == "failed"
+        gaps.append(r["next_try"] - t)
+        t = r["next_try"]
+    assert gaps == [600, 1200, 2400, 4800, 7200, 7200]
+    assert len(calls) == 6
+    assert mj.mirror_renew_tick(now=t - 1) == "backoff" and len(calls) == 6
+    assert mj._mirror_try_renew(user_initiated=True, now=t - 1)[1] == "failed"
+    assert len(calls) == 7                                  # the press tried, inside backoff
+    fresh = _jwt(NOW + 9 * DAY)
+    _refresh_spy(monkeypatch, fresh)
+    jwt, outcome = mj._mirror_try_renew(user_initiated=True, now=t)
+    assert outcome == "renewed" and jwt == fresh
+    assert r["fails"] == 0 and r["next_try"] == 0 and r["failed_exp"] is None
+
+
+def test_a_renewal_never_loops_on_a_short_token(tmp_path, monkeypatch):
+    """If PixAI ever mints a token already inside the cushion, the 6 h success floor stops the
+    tick renewing it every fifteen minutes; after the floor it renews again."""
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY))
+    calls = _refresh_spy(monkeypatch, lambda n: _jwt(NOW + DAY + n))
+    assert mj.mirror_renew_tick(now=NOW) == "renewed"
+    t = NOW
+    for _ in range(int(mj.MIRROR_RENEW_FLOOR_S // mj.MIRROR_RENEW_TICK_S) - 1):
+        t += mj.MIRROR_RENEW_TICK_S
+        assert mj.mirror_renew_tick(now=t) == "floor"
+    assert len(calls) == 1
+    assert mj.mirror_renew_tick(now=NOW + mj.MIRROR_RENEW_FLOOR_S) == "renewed"
+    assert len(calls) == 2
+
+
+def test_read_only_turning_on_between_the_check_and_the_lock_stops_the_post(tmp_path, monkeypatch):
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY))
+    answers = iter([False, True, True, True])
+    monkeypatch.setattr(mj, "_read_only_now", lambda: next(answers))
+    calls = _refresh_spy(monkeypatch, _jwt(NOW + 7 * DAY))
+    assert mj.mirror_renew_tick(now=NOW) == "read_only"
+    assert calls == []
+
+
+def test_the_tick_and_a_connect_renew_once_between_them(tmp_path, monkeypatch):
+    """Both go through _mirror_try_renew under _mirror_lock and re-read the stored token
+    inside it, so whichever comes second sees the fresh token and makes no call. Real clock
+    here, because make_mirror_session (what Connect calls) reads it."""
+    import threading
+    import time as _t
+    stale, fresh = _jwt_in(2), _jwt_in(7)
+    _armed(tmp_path, monkeypatch, jwt=stale)
+    entered, release, b_reading = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+
+    def _slow_refresh(session, current_jwt=None):
+        calls.append(current_jwt)
+        entered.set()
+        release.wait(5)
+        return fresh
+    monkeypatch.setattr(mj, "refresh_jwt", _slow_refresh)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: b_reading.set() or "")
+    out = {}
+    a = threading.Thread(target=lambda: out.update(tick=mj.mirror_renew_tick()))
+    b = threading.Thread(target=lambda: out.update(s=mj.make_mirror_session(
+        bootstrap_from_browser=True, user_initiated=True)))
+    a.start()
+    assert entered.wait(5)
+    b.start()
+    assert b_reading.wait(5)
+    _t.sleep(0.2)                               # let Connect reach the lock
+    release.set()
+    a.join(5)
+    b.join(5)
+    assert calls == [stale]                     # ONE refreshToken between them
+    assert out["tick"] == "renewed"
+    assert mj.load_mirror_state()["jwt"] == fresh
+    assert out["s"].headers["Authorization"] == "Bearer " + fresh
+
+
+def test_a_renewal_while_offline_fails_quietly_and_says_why(tmp_path, monkeypatch):
+    """No network: refresh_jwt swallows the exception, the tick records a `network` failure,
+    nothing escapes, and the token stays as it was."""
+    import requests
+    due = _jwt(NOW + 2 * DAY)
+    _armed(tmp_path, monkeypatch, jwt=due)
+
+    class _Offline:
+        def post(self, *a, **k):
+            raise requests.ConnectionError("no route to host")
+    monkeypatch.setattr(mj, "_mirror_session_from", lambda jwt: _Offline())
+    assert mj.mirror_renew_tick(now=NOW) == "failed"
+    assert mj.load_mirror_state()["jwt"] == due
+    st = mj.mirror_renewal_status(now=NOW)
+    assert st["state"] == "failed" and st["reason"] == "network"
+    assert st["next_try_at"] == NOW + 600
+
+
+def test_the_span_is_the_tokens_own_life_never_iat(tmp_path, monkeypatch):
+    """`iat` stays at the original sign-in through every renewal, so exp - iat grows without
+    bound. The span is exp - minted_at for a token the app renewed itself, and
+    max(left, 7 days) for one read from the browser (or stored before #71)."""
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 7 * DAY), minted_at=NOW)
+    left, span = mj.mirror_token_span(mj.load_mirror_state(), now=NOW + DAY)
+    assert (left, span) == (6 * DAY, 7 * DAY)
+    browser = _jwt(NOW + 4 * DAY)
+    mj.save_mirror_state({"jwt": browser})          # a different token, no minted_at: dropped
+    assert "minted_at" not in mj.load_mirror_state()
+    assert mj.mirror_token_span(mj.load_mirror_state(), now=NOW) == (4 * DAY, 7 * DAY)
+    legacy = _jwt(NOW + 20 * DAY)
+    mj.save_mirror_state({"jwt": legacy})
+    assert mj.mirror_token_span(mj.load_mirror_state(), now=NOW) == (20 * DAY, 20 * DAY)
+    # run_mirror_check's failure path re-saves the SAME token: its minted_at survives
+    mj.save_mirror_state({"jwt": legacy, "minted_at": NOW - DAY})
+    mj.save_mirror_state({"jwt": legacy})
+    assert mj.load_mirror_state()["minted_at"] == NOW - DAY
+    assert mj.mirror_token_span({}, now=NOW) == (None, None)
+
+
+def test_failed_is_reported_only_for_the_token_that_failed(tmp_path, monkeypatch):
+    """`failed` must not go stale: it is reported only while the CURRENT stored token is due
+    and the last failure was against that same token (its exp). A Connect that saves a fresh
+    token clears it."""
+    due = _jwt(NOW + 2 * DAY)
+    _armed(tmp_path, monkeypatch, jwt=due)
+    _refresh_spy(monkeypatch, None)
+    assert mj.mirror_renew_tick(now=NOW) == "failed"
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "failed"
+    mj.save_mirror_state({"jwt": _jwt(NOW + 6 * DAY)})     # what Connect saves
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "ok"
+    mj.save_mirror_state({"jwt": _jwt(NOW + 2 * DAY + 5)})  # another due token, never tried
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "ok"
+
+
+def test_status_states_paused_off_and_expired_from_seconds(tmp_path, monkeypatch):
+    """`expired` comes from the token's real seconds left, not the floored day count: ten hours
+    left floors to 0 days and is NOT expired."""
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 10 * 3600))
+    assert mj.jwt_days_left(mj.load_mirror_state()["jwt"], now=NOW) == 0
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "ok"
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW - 1))
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "expired"
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY), read_only=True)
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "paused"
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 6 * DAY), read_only=True)
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "ok"   # READ_ONLY, but nothing due
+    _armed(tmp_path, monkeypatch, jwt=_jwt(NOW + 2 * DAY), enabled=False)
+    assert mj.mirror_renewal_status(now=NOW)["state"] == "off"
+
+
+def test_a_connect_reads_the_browser_and_keeps_the_later_expiring_token(tmp_path, monkeypatch):
+    """A press of Connect reads the browser even when the stored token is still usable (PixAI
+    can revoke a token before its exp), and keeps whichever of the two expires later."""
+    stored = _jwt_in(5)
+    _armed(tmp_path, monkeypatch, jwt=stored)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("nothing here is due")))
+    later = _jwt_in(6)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: later)
+    s = mj.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
+    assert s.headers["Authorization"] == "Bearer " + later
+    assert mj.load_mirror_state()["jwt"] == later
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: _jwt_in(4))
+    s = mj.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
+    assert mj.load_mirror_state()["jwt"] == later                 # the earlier one is not kept
+    # and an ordinary (not user-initiated) call never reads the browser for a usable token
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("only a press of Connect re-reads a usable token's browser")))
+    mj.make_mirror_session(bootstrap_from_browser=True)
+
+
+def test_api_mirror_status_carries_the_span_and_the_renewal_state(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    import json as _json
+    _armed(tmp_path, monkeypatch, jwt=_jwt_in(6.5))
+    d = login_client(tmp_path).get("/api/mirror/status").get_json()
+    assert d["enabled"] is True and d["days_left"] == 6
+    assert 6 * DAY < d["left_s"] <= 6.5 * DAY and d["span_s"] == 7 * DAY
+    assert d["renewal"]["state"] == "ok"
+    text = _json.dumps(d)
+    assert "eyJ" not in text and "iat" not in text                 # never the token or a claim
+
+
+def test_connect_is_user_initiated(tmp_path, monkeypatch):
+    from tests.conftest import login_client
+    seen = {}
+    monkeypatch.setattr(mj, "make_mirror_session", lambda **k: seen.update(k) or None)
+    login_client(tmp_path).post("/api/mirror/connect", json={})
+    assert seen == {"bootstrap_from_browser": True, "user_initiated": True}
+
+
+def test_the_price_probe_never_touches_the_mirror_while_it_is_off(tmp_path, monkeypatch):
+    """The Bridge price probe used the mirror session whether or not the Mirror was on, so it
+    could renew the token as a side effect while the owner had it switched off."""
+    from tests.conftest import login_client
+    monkeypatch.setattr(mj, "mirror_enabled", lambda: False)
+    monkeypatch.setattr(mj, "make_mirror_session", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("the price probe must not reach the mirror while it is off")))
+    d = login_client(tmp_path).get("/api/enhance/presets").get_json()
+    assert d["presets"] and all(r["price"] is None for r in d["presets"])
+
+
+def test_the_renew_tick_does_nothing_without_the_background_gate(tmp_path, monkeypatch):
+    """The suite's conftest turns the background gate off (MOONGLADE_DISABLE_WATCH), exactly as
+    for the release check and the contest sweep: the tick must then never reach the core."""
+    import moonglade_gallery as g
+    monkeypatch.setattr(mj, "mirror_renew_tick", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("the renew tick ran with the background gate off")))
+    app = g.create_app(tmp_path)
+    app.extensions["mg_mirror_renew_tick"]()
+
+
+def test_the_renew_tick_rides_the_scheduler_heartbeat_and_adds_no_thread():
+    """No timer thread of its own: it joins the one sixty-second heartbeat, outside the
+    standing order's try/continue chain, gated like _update_check_tick and _contest_win_tick."""
+    import inspect
+    import moonglade_gallery as g
+    src = inspect.getsource(g.create_app)
+    loop = src[src.index("def _scheduler_loop():"):]
+    body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
+    assert "\n            _mirror_renew_tick()" in body
+    assert body.index("_mirror_renew_tick()") < body.index("            try:")
+    tick = src[src.index("def _mirror_renew_tick():"):]
+    tick = tick[:tick.index("\n    def ", 10)]
+    assert "if not _bg_release_check:" in tick and "mirror_renew_tick(" in tick

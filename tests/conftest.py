@@ -454,6 +454,17 @@ def _fresh_perf_memos():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_mirror_renewal():
+    """#71: the Mirror token's renewal record (core._mirror_renewal -- the failure backoff, the
+    6 h success floor, the 15-minute tick, the failed token's exp) is module state that outlives
+    a test. Without this, one test's successful renewal would hold the next test's renewal
+    behind the 6 h floor, and a failure would leave the next one in backoff."""
+    core._mirror_renewal_reset()
+    yield
+    core._mirror_renewal_reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_watch(monkeypatch):
     """create_app() is called by ~every test in this suite. Without this, its
     live-mirror watcher thread would call _make_session(None), which re-reads THIS

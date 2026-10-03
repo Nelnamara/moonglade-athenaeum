@@ -266,6 +266,23 @@ def test_list_kaisuuken_logs_fails_soft(pixai):
         "logs": [], "has_next": False, "end_cursor": None}
 
 
+def test_list_kaisuuken_logs_keeps_an_expired_row_as_expired(pixai):
+    """#68: PixAI's card log carries `expired` rows (the first 2026-09-18; PROBE_2026-10-02_site
+    CHANGED). A card that ran out has no task and no credit cost, and must come through as what
+    it is -- never read as a use."""
+    pixai.on("/kaisuuken/logs", {"data": [
+            {"id": "rec-9", "kaisuukenId": "k-9", "templateCode": "common-tsubaki-3",
+             "categoryCode": "Model Card", "templateName": "Tsubaki.3 Only",
+             "taskType": "image-gen", "action": "expired",
+             "createdAt": "2026-10-02T00:10:00.000Z"},
+    ], "pageInfo": {"hasNextPage": False}})
+    row, = core.list_kaisuuken_logs(pixai)["logs"]
+    assert row["action"] == "expired"
+    assert row["task_id"] == "" and row["credit_cost"] is None
+    for action in ("consumed", "refunded", "revoked", "expired"):   # the contract's enum
+        assert action in core.list_kaisuuken_logs.__doc__, action
+
+
 # ---- kaisuuken_type_catalog: page all the way back for the lifetime card-type roster --
 # ("dig the entire crop" -- current holdings alone can't show a type that's fully cycled
 # out, e.g. Reference Pro Only / Edit Pro Only both did exactly that between 2026-07-06
@@ -302,6 +319,26 @@ def test_kaisuuken_type_catalog_pages_until_exhausted(pixai):
     assert edit_pro["consumed"] == 1 and edit_pro["refunded"] == 1     # both events counted
     assert edit_pro["last_seen"] == "2026-07-10T00:00:00Z"             # newer of its 2 rows
     assert edit_pro["first_seen"] == "2026-07-06T00:00:00Z"            # older of its 2 rows
+
+
+def test_kaisuuken_type_catalog_counts_expired_and_revoked(pixai):
+    """#68: an expiry or a revocation is counted under its own name, not dropped and never
+    folded into `consumed`; a card type that only ever ran out still gets its row."""
+    def row(name, action, ts):
+        return {"templateName": name, "categoryCode": "Model Card", "taskType": "image-gen",
+                "action": action, "createdAt": ts}
+    pixai.on("/kaisuuken/logs", {"data": [
+        row("Tsubaki.3 Only", "expired", "2026-10-02T00:10:00Z"),
+        row("Tsubaki.3 Only", "expired", "2026-10-02T00:10:00Z"),
+        row("Tsubaki.3 Only", "consumed", "2026-09-26T00:00:00Z"),
+        row("Tsubaki.3 Only", "revoked", "2026-09-20T00:00:00Z"),
+        row("Event Recipe Card", "expired", "2026-09-18T15:00:00Z"),
+    ], "pageInfo": {"hasNextPage": False}})
+    t = core.kaisuuken_type_catalog(pixai)["templates"]
+    ts3 = t["Tsubaki.3 Only"]
+    assert (ts3["consumed"], ts3["refunded"], ts3["expired"], ts3["revoked"]) == (1, 0, 2, 1)
+    ev = t["Event Recipe Card"]
+    assert (ev["consumed"], ev["refunded"], ev["expired"], ev["revoked"]) == (0, 0, 1, 0)
 
 
 def test_kaisuuken_type_catalog_respects_page_cap(pixai):

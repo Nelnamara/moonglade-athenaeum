@@ -628,7 +628,9 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
 type the change, set resolution/aspect/quality, then submit. The edit models are **Edit v4.0**
 (new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
-setting), **Edit Pro** and **Reference Pro**.
+setting), **Edit Pro**, **Edit Pro (v2.0)** (new — PixAI's newer version of Edit Pro: up to 10
+images, 1K/2K, low/medium/high, the same price as Edit Pro, without Edit Pro's 1:3 and 3:1) and
+**Reference Pro**. Edit Pro stays the default; PixAI still offers both versions.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
@@ -649,7 +651,7 @@ Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values 
 corrected (and shown in the preview) rather than rejected.
 
 **Edits made with a model Moonglade doesn't know locally still get a real name.** It
-recognizes PixAI's edit models by name without asking anyone; anything else — a newer
+recognizes the edit models in its own Edit list by name without asking anyone; anything else — a newer
 `modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
 PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
 than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
@@ -956,8 +958,8 @@ the button comes back — the app will tell you it doesn't know rather than leav
   live: gradient overlays applied right in your browser, so they cost nothing, make no request,
   and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
   tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
-  The edit models take different numbers of reference images (Edit Pro up to 4, Edit v4.0 and
-  Reference Pro up to 10, and the picture being edited counts as one of them), so switching
+  The edit models take different numbers of reference images (Edit Pro up to 4; Edit Pro (v2.0),
+  Edit v4.0 and Reference Pro up to 10; the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
   out" — instead of thinning the strip in silence and letting you submit a paid edit

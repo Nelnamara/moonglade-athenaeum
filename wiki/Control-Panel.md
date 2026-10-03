@@ -17,7 +17,9 @@ page — click it again or `Esc` to close. Its tab is **Maintenance**; **Account
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
 **PixAI account** opens on a strip of figures — credits, how much of that is paid and how
 much free, free cards on hand, coupons, and your **followers** and **following** — above
-tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+tabs for the card roster, coupons and the credit ledger. The card history says what happened
+to each card — consumed, refunded, expired or revoked — and names a task only beside a card
+that was attached to one. Every figure on it is a reading:
 the window never spends, redeems, purchases, follows or unfollows anything.
 The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
 auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
@@ -302,6 +304,12 @@ finishes: connected or reconnecting, when the last event arrived, and how many i
 mirrored this session. It's read-only, free, and always on while the server runs — which is
 why `--update` is a fallback rather than the only way new work lands locally.
 
+PixAI closes these connections from its side now and then, several at once. When a connection
+that had been up for a while drops, Live Mirror reconnects within a second or two and then
+reads back your most recent generations, collecting anything that finished while it was
+away. A connection that keeps failing straight away waits a little longer each time, up to a
+minute, so a PixAI outage never turns into a flood of retries.
+
 > Not to be confused with **Mirror to PixAI website** (Maintenance tab, below), which goes the
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
 > Mirror to PixAI website files what you make *in Moonglade* out to your PixAI web library.
@@ -320,8 +328,15 @@ It works by riding your own logged-in browser session:
    never leaves that machine — the tile shows *Connected · N days left*, never the token.
 2. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
    you so.
-3. From then on it renews itself; you'll only need **Refresh session** if you sign out of
-   PixAI in the browser or the tile drops back to *Not connected*.
+3. From then on it renews itself while the app is running. PixAI's session lasts a week from
+   each renewal, and Moonglade renews it in the background every few days, so you'll only need
+   **Refresh session** if you sign out of PixAI in the browser, or if the app was closed for
+   more than a week and the session lapsed in the meantime.
+
+The ring on the tile shows how much of the current session is left, out of its own week. It
+stays green through the normal renewal; it turns peach only if a renewal actually failed (it
+keeps retrying, and says so) or if `READ_ONLY` is stopping it, and red once the session has
+expired. Renewal never runs while the mirror is switched off or while `READ_ONLY` is set.
 
 Things worth knowing:
 
