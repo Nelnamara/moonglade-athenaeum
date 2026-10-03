@@ -96,16 +96,13 @@ why this section exists.
   fan-out each), and **Phase C**, triage + re-verify of B's findings. Scope and severity scale:
   `../moonglade-internal/scopes/SCOPE_2026-08-26_surface-audit.md`. Not dropped; run when scheduled.
 
-- **Retire the `/next` name from the app's data routes and asset paths.** *(owner, 2026-09-29)*
-  The React app shipped under the `/next` pilot codename. #51 (2026-09-04) removed the page route and
-  deliberately left two prefixes: the `/api/next/*` JSON routes the app reads (library, details, history)
-  and the `/next/assets/` static prefix baked into the build, the page templates and the installed-app
-  manifest. Rename the API routes to plain names (`/api/library`, `/api/detail/<id>`, `/api/history`) on
-  one shared handler with the old paths kept as aliases for a release, send every client call through one
-  constants module (the call sites are scattered today), and leave payloads untouched. The assets prefix is
-  decided separately and never simply dropped: installed phone apps read their icons from it. Built after
-  the open work is merged and walked, not alongside it (the details route keeps gaining fields). Scope,
-  measured blast radius, phases, tests and risks:
+- **Retire the `/next` name: remove the old `/api/next/*` aliases (Phase 2).** *(owner, 2026-09-29)*
+  Phase 1 renamed the app's data routes to `/api/library`, `/api/detail/<id>` and `/api/history` and
+  kept the old `/api/next/*` paths as aliases on the same views, so a page still running an older cached
+  bundle keeps working. One release after that ships, remove the aliases, with a test that the old paths
+  404 for a real logged-in session (anonymously every unrouted path redirects to `/login`, so an anonymous
+  probe proves nothing). The `/next/assets/` static prefix stays for good: installed phone apps read their
+  icons from it. Scope and tests:
   `../moonglade-internal/scopes/SCOPE_2026-09-29_retire-the-next-namespace.md`.
 
 ## Design-pass reworks — rescope, don't just build
