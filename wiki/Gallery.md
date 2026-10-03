@@ -51,7 +51,7 @@ The row under the banner holds the other destinations — **My Art**, **Publish*
 of it once **Mirror to PixAI** is armed, and **Activity** at one end. **Import** is drawn only
 on the machine running the gallery (see below). **Publish** publishes a picture of yours on PixAI,
 **Train** is [training your own LoRA](Generating#training-your-own-lora), and **Log Out** signs
-you out everywhere.
+out this device only (to sign out every device, see [Trust & Safety](Trust-and-Safety)).
 
 - **Contests** — live PixAI contests, your entries and their verified results (see
   [Generating → Contests](Generating#contests---contests)).

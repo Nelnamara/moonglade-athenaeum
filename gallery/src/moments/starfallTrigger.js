@@ -98,8 +98,9 @@ export function installStarfallTrigger() {
     // and doing it twice would consume `newly` before the toast is built.
     // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
     // adopts the next one (notify/achNonce.js), which is what let the route go back to
-    // LOGIN so a phone can reach this too.
-    sendAchEvent("konami")
+    // LOGIN so a phone can reach this too. The event name is public (served JS), so it
+    // names the moment, never the gesture.
+    sendAchEvent("starfall")
       .then(() => apiGet("/api/achievements"))
       .then((data) => {
       // Answered after the ceiling expired: the arm is long gone, the engine has been

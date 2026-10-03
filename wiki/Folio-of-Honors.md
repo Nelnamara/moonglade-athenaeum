@@ -120,6 +120,13 @@ celebration.**
 
 The Folio also helps you finish the record, without ever counting the feats.
 
+- **What counts.** An honor counts what you actually made or did, never a button pressed:
+  an edit counts once its picture is in your library, the LoRA honors count the LoRAs on
+  pictures you made in the app, a trained LoRA counts once PixAI reports its run finished
+  (seen when **Train → Runs** is open), a deleted picture counts once however often it comes
+  back from the Trash, and jobs at once counts only generations PixAI reported running.
+  Because these are recounted from your library, the first load after an update that
+  changes how something counts can unlock honors you had already reached.
 - **N to go.** Every locked ladder rung, milestone and mastery that the app can measure
   shows how many are left ("12 to go") beside a small moon that fills as you close in, and
   a **→** that jumps to the place that advances it: Generate for images and videos, The

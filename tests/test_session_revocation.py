@@ -20,12 +20,18 @@ all three. See moonglade_backup._next_sess_epoch()'s docstring for the design.
       read-modify-write outside _accounts_lock -- a lost update in both directions.
 
 Since the classic cut (2026-08-08) the ONLY sign-out surface is POST /api/logout
-(JSON {csrf}, default GLOBAL revoke, scope:"this-device" opts down to a local
-sign-out); the classic /logout route -- GET page and form POST both -- is gone,
+(JSON {csrf}); the classic /logout route -- GET page and form POST both -- is gone,
 and sign-in is POST /api/login. Every test here runs against those surviving
 routes; the D4 tests that pinned the classic GET's behavior are ported to pin
 the equivalent invariants (a GET writes nothing; a refused logout signals no
 success) on /api/logout itself.
+
+WHICH DEVICES A SIGN-OUT REACHES (#70, owner 2026-10-02: "We should not be logging out
+all sessions. This is a LAN app, not internet."). Log Out signs out the device it was
+pressed on and nothing else: no epoch bump. Signing out EVERY device is its own explicit
+request, scope:"everywhere", and that is the path the revocation tests below drive -- the
+mechanism they pin is unchanged, only which request reaches it. (Changing your password
+in Panel -> Users bumps the epoch too, keeping the device you changed it from.)
 
 THE REPLAY TRAP, which bit an earlier proof-of-concept and is worth reading before
 touching anything here: _is_authorized_request() calls session.clear() on the stale
@@ -73,8 +79,8 @@ def _replay(app, stolen, path="/api/jobs"):
 
 def _logout(cli, **extra):
     """Sign out the way the React header does: POST /api/logout carrying this
-    session's csrf token as JSON. No scope field means GLOBAL revoke; pass
-    scope="this-device" for the local-only sign-out. The token comes from the
+    session's csrf token as JSON. No scope field signs out this device only; pass
+    scope="everywhere" to revoke every session for the account. The token comes from the
     live session rather than a scraped page because _establish_session mints a
     FRESH one at login -- the token on the login page is already stale by the
     time the client is authenticated."""
@@ -83,7 +89,7 @@ def _logout(cli, **extra):
     return cli.post("/api/logout", json=dict({"csrf": token}, **extra))
 
 
-def _replay_logout(app, stolen, token):
+def _replay_logout(app, stolen, token, scope="everywhere"):
     """Replay a stolen cookie at /api/logout the way an attacker actually would: a
     POST carrying the csrf token that was baked into that same cookie. Flask's
     session cookie is signed but NOT encrypted, so a thief holding the cookie also
@@ -92,7 +98,7 @@ def _replay_logout(app, stolen, token):
     (defect D2 above)."""
     cli = app.test_client()                 # FRESH client -- see the trap above
     cli.set_cookie("session", stolen)       # raw saved value, not a live cookie
-    return cli.post("/api/logout", json={"csrf": token},
+    return cli.post("/api/logout", json={"csrf": token, "scope": scope},
                     environ_overrides={"REMOTE_ADDR": LAN})
 
 
@@ -105,7 +111,7 @@ def test_recreated_account_does_not_resurrect_an_old_cookie(tmp_path):
     victim = _login(app)
     stolen = _steal(victim)
     assert _replay(app, stolen).status_code == 200          # live
-    _logout(victim)
+    _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401          # revoked
     core.remove_web_user("alice")                            # the exact owner
     core.add_or_update_web_user("alice", "hunter2")          # recovery action
@@ -126,7 +132,7 @@ def test_recreated_account_via_panel_api_does_not_resurrect(tmp_path):
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
-    _logout(victim)
+    _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401
     core.remove_web_user("alice")
     assert core.add_web_user_if_new("alice", "hunter2") is True
@@ -203,7 +209,7 @@ def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
     stolen = _steal(victim)
     with victim.session_transaction() as sess:
         token = sess["csrf"]                # the token baked INTO the stolen cookie
-    _logout(victim)
+    _logout(victim, scope="everywhere")
     assert _replay(app, stolen).status_code == 401
 
     frozen = core.get_web_user_session_epoch("alice")
@@ -219,19 +225,53 @@ def test_dead_cookie_cannot_bump_epoch_via_logout(tmp_path):
         "the victim must stay signed in while a dead cookie is replayed"
 
 
-def test_logout_still_revokes_every_outstanding_cookie(tmp_path):
-    """The behaviour the auth check must NOT regress: signing out revokes every
-    outstanding cookie for that identity, not just the browser that clicked --
+def test_signing_out_everywhere_still_revokes_every_outstanding_cookie(tmp_path):
+    """The behaviour the auth check must NOT regress: signing out EVERYWHERE revokes
+    every outstanding cookie for that identity, not just the browser that clicked --
     e.g. one captured off plain-HTTP LAN traffic beforehand. This is the entire
-    point of the mechanism."""
+    point of the mechanism, and it stays available as its own explicit request (#70)."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     stolen = _steal(victim)
     other = _login(app)                       # a second, independent live session
     assert _replay(app, stolen).status_code == 200
-    _logout(other)                            # signing out from ANOTHER browser
+    _logout(other, scope="everywhere")        # signing out from ANOTHER browser
     assert _replay(app, stolen).status_code == 401
+    assert victim.get("/api/jobs").status_code == 401, (
+        "device B is still signed in after a sign-out everywhere on device A")
+
+
+def test_log_out_signs_out_only_this_device(tmp_path):
+    """#70: Log Out on device A signs out A and leaves device B signed in -- the
+    plain POST every Log Out button sends (no scope field) no longer bumps the
+    account's session epoch."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    device_a = _login(app)
+    device_b = _login(app)
+    before_epoch = core.get_web_user_session_epoch("alice")
+
+    r = _logout(device_a)
+    assert r.status_code == 200 and r.get_json() == {"ok": True}
+    assert device_a.get("/api/jobs").status_code == 401, "Log Out left device A signed in"
+    assert device_b.get("/api/jobs").status_code == 200, (
+        "Log Out on device A signed out device B too")
+    assert core.get_web_user_session_epoch("alice") == before_epoch
+
+
+def test_an_unknown_scope_signs_out_only_this_device(tmp_path):
+    """Only the exact word reaches every device: a misspelt or hand-built scope is an
+    ordinary Log Out, never a revoke nobody asked for."""
+    core.add_or_update_web_user("alice", "hunter2")
+    app = _client(tmp_path)
+    device_a = _login(app)
+    device_b = _login(app)
+    before_epoch = core.get_web_user_session_epoch("alice")
+    _logout(device_a, scope="Everywhere ")
+    assert device_a.get("/api/jobs").status_code == 401
+    assert device_b.get("/api/jobs").status_code == 200
+    assert core.get_web_user_session_epoch("alice") == before_epoch
 
 
 def test_anonymous_logout_is_still_a_noop(tmp_path):
@@ -304,31 +344,31 @@ def test_refused_logout_does_not_signal_success(tmp_path):
 def test_post_logout_without_a_valid_csrf_token_revokes_nothing(tmp_path):
     """The POST carries the same session-bound token /api/login's flow and the
     Panel's Users API carry. A bad one is a loud 400 that leaves the session
-    INTACT -- not a quiet downgrade to a local sign-out, which is how the global
-    revoke would silently disappear if the header's logout handler ever stopped
-    sending the field."""
+    INTACT -- not a quiet downgrade to a local sign-out, which is how a sign-out
+    everywhere would silently become a local one if a caller ever stopped sending
+    the field."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)
     other = _login(app)
     before_epoch = core.get_web_user_session_epoch("alice")
 
-    r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session"})
+    r = victim.post("/api/logout", json={"csrf": "forged-token-not-in-session",
+                                         "scope": "everywhere"})
     assert r.status_code == 400
     assert core.get_web_user_session_epoch("alice") == before_epoch
     assert victim.get("/api/jobs").status_code == 200, \
         "a refused logout must leave the user signed in, not half-signed-out"
 
-    # ... and the real, token-carrying POST still revokes globally.
-    _logout(victim)
+    # ... and the real, token-carrying POST still revokes everywhere when asked to.
+    _logout(victim, scope="everywhere")
     assert core.get_web_user_session_epoch("alice") != before_epoch
     assert other.get("/api/jobs").status_code == 401
 
 
 def test_post_logout_scope_this_device_leaves_other_sessions_alone(tmp_path):
-    """The split the fix introduces: an explicit scope=this-device POST signs out
-    here only. Its ABSENCE means global -- a truncated or hand-built POST has to fail
-    toward MORE revocation, never less."""
+    """The older explicit opt-down, scope=this-device, is still accepted and still
+    signs out here only -- the same as no scope at all since #70."""
     core.add_or_update_web_user("alice", "hunter2")
     app = _client(tmp_path)
     victim = _login(app)

@@ -14,23 +14,14 @@ URL; the serve route translates once at the boundary.
 
 All hermetic: conftest's _isolated_branding redirects branding_root() to
 tmp_path, so every fake asset below lives and dies with its test."""
-import datetime as _dt
 import json
-from unittest import mock
 
 import pytest
 
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import ach_event, login_client
-
-
-class _FixedNoon(_dt.datetime):
-    """Same freeze as test_telemetry's: never trip Night Owl mid-test."""
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2025, 6, 15, 12, 0, 0)
+from tests.conftest import STARFALL_EVENT, ach_event, login_client
 
 
 def _row(**kw):
@@ -120,7 +111,7 @@ def test_sealed_paths_serve_once_earned(tmp_path, sealed_donor_present):
     _seed(tmp_path, g._role_rel("starfall", "ee_starfall_cast.ogg"))
     _seed(tmp_path, g._role_rel("starfall", "ee_starfall_loop.ogg"))
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 404
-    assert ach_event(cli, "konami").status_code == 200
+    assert ach_event(cli, STARFALL_EVENT).status_code == 200
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 200
     assert cli.get("/branding/ee_starfall_cast.ogg").status_code == 200
     assert cli.get("/branding/ee_starfall_loop.ogg").status_code == 200
@@ -144,7 +135,7 @@ def test_earned_banner_gated_and_void_banner_never_serves(tmp_path, sealed_donor
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id=str(i), filename="a_%d.png" % i,
                        created_at="2025-01-01T00:00:00") for i in range(1, 50001)])
-    ach_event(cli, "konami")   # pile on more earns
+    ach_event(cli, STARFALL_EVENT)   # pile on more earns
     assert cli.get("/branding/earned_banners/great_library.png").status_code == 200
     assert cli.get("/branding/earned_banners/void_banner.png").status_code == 404
 
@@ -184,7 +175,7 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     assert cli.get("/badge-thumb/" + sf + ".png").status_code == 404
     assert cli.get("/badge-thumb/loremaster.png").status_code == 200
-    ach_event(cli, "konami")
+    ach_event(cli, STARFALL_EVENT)
     assert cli.get("/badge-thumb/" + sf + ".png").status_code == 200
 
 
@@ -224,8 +215,7 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
 
 def test_branding_slots_are_banners_only(tmp_path):
     cli = _client(tmp_path)
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/branding").get_json()
+    d = cli.get("/api/branding").get_json()
     assert set(d["slots"]) == {"banner_main", "banner_login", "banner_loom"}
 
 

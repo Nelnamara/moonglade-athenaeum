@@ -6327,16 +6327,42 @@ def achievement_metrics(db_path, use_cache=True):
                 "SELECT COUNT(*) FROM catalog "
                 "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
             # The Atelier (loras_distinct): distinct LoRA NAME-keys across the per-row `loras`
-            # CSV (drop ':weight'), parsed exactly like collection_health's top-LoRAs block.
-            # DISTINCT from telemetry's `lora_distinct` (Polyglot, a runtime set) -> a count only.
-            lk = set()
-            for (loras,) in con.execute(
-                    "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''"):
-                for part in (loras or "").split(","):
-                    name = part.strip().rsplit(":", 1)[0].strip()   # drop ":weight"
-                    if name:
-                        lk.add(name)
+            # CSV (drop ':weight'), parsed exactly like collection_health's top-LoRAs block,
+            # over the WHOLE library.
+            # The same pass counts the IN-APP rows (source api/local, the Moonforge's set) for
+            # the three LoRA honors that used to be bumped on an accepted submit (owner
+            # 2026-10-02: evidence-based counts): lora_used = distinct in-app generations that
+            # used one, lora_stacked = the most on one generation, lora_distinct = distinct
+            # names across them. A submit that never produced a picture counts nothing now.
+            lk, in_app_names, lora_tasks, stacked = set(), set(), set(), 0
+            for (loras, src, tid, mid) in con.execute(
+                    "SELECT loras, source, task_id, media_id FROM catalog "
+                    "WHERE COALESCE(loras,'') != ''"):
+                names = [part.strip().rsplit(":", 1)[0].strip()   # drop ":weight"
+                         for part in (loras or "").split(",")]
+                names = [n for n in names if n]
+                lk.update(names)
+                if names and src in ("api", "local"):
+                    in_app_names.update(names)
+                    lora_tasks.add(tid or ("media:" + str(mid)))
+                    stacked = max(stacked, len(names))
             m["loras_distinct"] = len(lk)
+            m["lora_used"] = len(lora_tasks)
+            m["lora_stacked"] = stacked
+            m["lora_distinct"] = len(in_app_names)
+            # The Restoration Wing (edits): in-app generations that ARE edits by their own
+            # lineage (derive_kind, read off the task PixAI stored), one per task -- not a
+            # count of accepted submits (owner 2026-10-02).
+            m["edits"] = _scalar(
+                "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE derive_kind = 'edit' "
+                "AND source IN ('api','local') AND COALESCE(task_id,'') != ''")
+            # Seven Candles (gen_streak): the best run of consecutive LOCAL days with an in-app
+            # generation, from PixAI's own timestamps on the rows rather than a day ledger.
+            m["gen_streak"] = _best_day_streak([
+                d for (d,) in con.execute(
+                    "SELECT DISTINCT date(created_at, 'localtime') FROM catalog "
+                    "WHERE source IN ('api','local') AND COALESCE(created_at,'') != ''")
+                if d])
             # Mirror Seed (palindrome_seeds): distinct numeric-palindrome seeds of >=5 digits.
             # COUNT ONLY -- no seed value is ever emitted.
             pal = set()
@@ -6355,7 +6381,8 @@ def achievement_metrics(db_path, use_cache=True):
         except sqlite3.Error:
             for k in ("models", "published", "tagged", "local_gens",
                       "gens_in_a_day", "distinct_keywords",
-                      "rated", "loras_distinct", "palindrome_seeds", "top_word_uses"):
+                      "rated", "loras_distinct", "palindrome_seeds", "top_word_uses",
+                      "lora_used", "lora_stacked", "lora_distinct", "edits", "gen_streak"):
                 m.setdefault(k, 0)
     return m
 
@@ -6571,11 +6598,14 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
 # non-feat metric in the sealed roster is either in the bundle or here, so a new honor added
 # without its metric being declared fails a test instead of silently losing its count.
 _MEASURED_METRICS = frozenset({
-    "claims", "culled", "edits", "enhances", "free_cards_applied", "jobs_concurrent",
-    "lora_stacked", "lora_used", "loras_trained", "organize_runs", "similar_uses",
+    "claims", "enhances", "free_cards_applied", "jobs_concurrent",
+    "organize_runs", "similar_uses",
     "skin_changed_runs", "storyboards", "uploads",
     "skins_unlocked",
 })
+# (edits, culled, the LoRA counts and loras_trained left this list on 2026-10-02: they are
+# counted from evidence now -- the catalog, or a set telemetry_metrics always measures -- so
+# every bundle carries them, a fresh install's as a true 0.)
 
 
 def achievement_progress(entry, metrics):
@@ -6956,6 +6986,37 @@ def telem_set_add(key, value, out_dir=None):
     _telem_mutate(out_dir, _add)
 
 
+def telem_set_add_many(key, values, out_dir=None):
+    """sets[key] |= set(values), in ONE write. Returns how many were new. A caller with a
+    batch (a Runs read, a bulk delete) must not rewrite the store once per member, and a
+    batch with nothing new does not write at all."""
+    vals = [str(v) for v in (values or []) if str(v)]
+    if not vals:
+        return 0
+    target = out_dir if out_dir is not None else _TELEM_OUT
+    if target is None:
+        return 0
+    have = load_telemetry(target)["sets"].get(key)
+    have = set(have) if isinstance(have, list) else set()
+    if not (set(vals) - have):
+        return 0
+    added = {"n": 0}
+
+    def _add(d):
+        cur = d["sets"].get(key)
+        if not isinstance(cur, list):
+            cur = []
+        seen = set(cur)
+        for v in vals:
+            if v not in seen:
+                cur.append(v)
+                seen.add(v)
+                added["n"] += 1
+        d["sets"][key] = cur
+    _telem_mutate(out_dir, _add)
+    return added["n"]
+
+
 def telem_flag(key, out_dir=None):
     """flags[key] = 1, once (e.g. 'konami_triggered'). Idempotent."""
     _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
@@ -7018,8 +7079,9 @@ def _best_day_streak(days):
 def vigil_status(days, today=None):
     """The Vigil chip's numbers (Folio for completionists, O5): {"day": int, "best": int}.
 
-    `days` is the ISO-date list of days that had at least one generation collected (the same
-    `gen_days` ledger Seven Candles reads, marked by the server's LOCAL date, date.today()).
+    `days` is the ISO-date list of days that had at least one generation collected (the
+    `gen_days` ledger, marked by the server's LOCAL date, date.today(); Seven Candles read it
+    too until 2026-10-02 and counts the catalog's in-app rows now).
 
     `day` is the run of consecutive generation days that ends today -- or ends yesterday when
     today has none YET, because a day that has not finished is not a missed one. A run that
@@ -7070,6 +7132,11 @@ def telemetry_metrics(out_dir, telem=None):
                 m[k] = int(v or 0)
             except (TypeError, ValueError):
                 m[k] = 0
+    # Counted from the catalog now (achievement_metrics), and the merge everywhere is
+    # catalog-then-telemetry: an old or hand-edited counter of the same name would win it,
+    # so these names never come out of the store (owner 2026-10-02, evidence-based counts).
+    for k in CATALOG_EVIDENCE_METRICS:
+        m.pop(k, None)
     sets = d["sets"]
 
     def _card(key):                 # hostile-but-valid JSON must not len()-crash
@@ -7077,8 +7144,15 @@ def telemetry_metrics(out_dir, telem=None):
         return len(v) if isinstance(v, list) else 0
     m["video_modes_used"] = _card("video_modes")
     m["tools_used"] = _card("tools")
-    m["lora_distinct"] = _card("loras")
     m["enhance_workflows_distinct"] = _card("enhance_workflows")
+    # The Academy (loras_trained): training runs PIXAI reports as finished, recorded by id
+    # when Runs is listed (api_train_runs) -- not accepted submits, so a failed run, its
+    # retry and a replayed request add nothing. The old submit counter is not read.
+    m["loras_trained"] = _card("trained_runs")
+    # The Great Sweep (culled): the count kept before 2026-10-02 (no longer written) plus
+    # each picture removed since, ONCE -- keyed by what was removed, so deleting, restoring
+    # and deleting the same picture again is one.
+    m["culled"] = int(m.get("culled", 0) or 0) + _card("culled_keys")
     # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
     # names never leave the store).
     m["scenes_used"] = _card("scenes")                        # Doorwarden
@@ -7127,10 +7201,77 @@ def telemetry_metrics(out_dir, telem=None):
     def _days(key):
         v = dl.get(key)
         return v if isinstance(v, list) else []
-    m["gen_streak"] = _best_day_streak(_days("gen_days"))              # Seven Candles
+    # (gen_streak is the catalog's now -- achievement_metrics; the gen_days ledger still
+    # feeds the Vigil chip.)
     m["curation_streak"] = _best_day_streak(_days("curation_days"))    # Lamplighter
     m["distinct_active_days"] = len(set(_days("active_days")))         # Long Vigil / Unbroken Watch
     return m
+
+
+# Metrics achievement_metrics() counts from the catalog that used to be telemetry counters.
+# telemetry_metrics() drops these names, so an old counter cannot shadow the catalog's count.
+CATALOG_EVIDENCE_METRICS = ("edits", "lora_used", "lora_stacked", "lora_distinct", "gen_streak")
+
+
+# ---- the `session_hour` flag: a NEW generation made in its window ----------------------
+# Owner, 2026-10-02: the honor on this metric is earned by a NEW in-app generation actually
+# MADE in its local hour window -- never by opening a page then (what /api/achievements used
+# to check), and never retroactively by a generation made before this rule. So the flag is
+# stamped at the one moment a generation is new: when this server collects it into the
+# catalog (_collect_single_flight), and only when PixAI's own timestamp on the row
+# (created_at, UTC) is in the window AND recent. "Recent" is what makes it new: collecting or
+# importing an old task that dates from the window is not evidence of anything tonight.
+SESSION_HOUR_WINDOW = (2, 4)              # local hours, [start, end)
+SESSION_HOUR_FRESH_S = 6 * 3600           # older than this when collected is not new
+_SESSION_HOUR_SKEW_S = 300                # PixAI's clock may run a little ahead of ours
+
+
+def _utc_now():
+    """The real clock, aware, in UTC -- one seam so a test can stand at any hour."""
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def session_hour_generation(created_at, now=None):
+    """True when `created_at` -- a catalog row's PixAI timestamp, ISO UTC -- is a generation
+    made inside SESSION_HOUR_WINDOW local time AND new as of `now` (aware; default the real
+    clock). Unparseable or blank -> False, never raises."""
+    import datetime as _dt
+    raw = str(created_at or "").strip()
+    if not raw:
+        return False
+    try:
+        t = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=_dt.timezone.utc)        # the catalog stores UTC
+        age = ((now or _utc_now()) - t).total_seconds()
+        hour = t.astimezone().hour
+    except (ValueError, OverflowError, OSError, TypeError):
+        return False
+    if age < -_SESSION_HOUR_SKEW_S or age > SESSION_HOUR_FRESH_S:
+        return False
+    lo, hi = SESSION_HOUR_WINDOW
+    return lo <= hour < hi
+
+
+def stamp_session_hour(db_path, media_ids, out_dir, now=None):
+    """Set the `session_hour` flag when any of `media_ids` -- just collected -- is an in-app
+    row (source api/local) session_hour_generation() accepts. True when it stamped. Reads the
+    catalog only; fail-soft."""
+    ids = [str(x) for x in (media_ids or []) if str(x).strip()]
+    if not ids:
+        return False
+    try:
+        with catalog(db_path) as con:
+            rows = con.execute(
+                "SELECT created_at FROM catalog WHERE source IN ('api','local') "
+                "AND media_id IN (%s)" % ",".join("?" * len(ids)), ids).fetchall()
+    except sqlite3.Error:
+        return False
+    if any(session_hour_generation(r[0], now) for r in rows):
+        telem_flag("session_hour", out_dir=out_dir)
+        return True
+    return False
 
 
 def first_sync_complete(out_dir, db_path, telem=None):
@@ -12648,7 +12789,7 @@ def scene_row(sc):
 # ---- the feat-beacon nonce, debounce and rate limit (2026-09-07) ------------------------
 # What replaced the LOCALHOST gate on /api/ach-event. The gate's problem was that the
 # beacon is the ONLY witness a feat gesture happened, so any signed-in session could POST
-# {"event": "konami"} from a console and arm the feat. Loopback made the gesture witnessable
+# a feat event from a console and arm the feat. Loopback made the gesture witnessable
 # but cost every phone and LAN device the three feats outright. The owner's call
 # (2026-09-07): "triggered should be obtainable easily on a phone just like desktop. For
 # sure build the nonce."
@@ -13865,6 +14006,13 @@ def create_app(out_dir: Path):
                     telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
                 except Exception:
                     pass
+                # A NEW generation is collected only here (the early return above answers
+                # for one already in the catalog), so this is where `session_hour` is
+                # earned: by PixAI's own timestamp on what was just made, never a page load.
+                try:
+                    stamp_session_hour(db_path, (got or {}).get("media_ids"), out_dir)
+                except Exception:
+                    pass
                 # bridge_gen_tasks is NOT written here: owner ruling 2026-09-03 -- the metric
                 # counts the bridge's TOOLS only (enhance runs, AI-Tool scene runs), never an
                 # ordinary generation that merely routes through the mirror. The two writers
@@ -14642,16 +14790,26 @@ def create_app(out_dir: Path):
     @app.route("/api/logout", methods=["POST"])
     @tier(PUBLIC)
     def api_logout():
-        """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
-        logout()'s own POST branch; see that route's docstring for the full
-        CSRF/revoke-scope reasoning, identical here (same shared
-        bump_web_user_session_epoch, same scope="this-device" opt-out of the
-        global revoke). Public (@tier(PUBLIC)): an already-dead cookie
-        must still be able to shed itself locally with no valid session to
-        check a CSRF token against -- same "fail toward MORE cleanup, never
-        less" shape as the classic route, so this skips the CSRF check
-        entirely (not just downgrades it) whenever `authorized` is false,
-        exactly like logout() does.
+        """JSON sign-out for the React app (2026-08-02), POST only -- the one sign-out
+        surface since the classic cut removed /logout.
+
+        WHICH DEVICES IT REACHES (#70, owner 2026-10-02: "We should not be logging out
+        all sessions. This is a LAN app, not internet."). Log Out signs out the device
+        it was pressed on and nothing else: `session.clear()`, no epoch bump. Signing
+        out EVERY device -- the move for a lost phone or a session you think was
+        captured -- is its own explicit request, `scope: "everywhere"`, which bumps the
+        account's session epoch (core.bump_web_user_session_epoch) so every outstanding
+        cookie for it stops working. Only that exact word reaches the other devices; a
+        missing, older ("this-device") or unknown scope is an ordinary Log Out. No
+        screen sends "everywhere" today; changing your password in Panel -> Users bumps
+        the same epoch and keeps the device you changed it from.
+
+        A sign-out that would revoke checks the session's CSRF token first, and a bad
+        token is a loud 400 that leaves the session intact. Public (@tier(PUBLIC)): an
+        already-dead cookie must still be able to shed itself locally with no valid
+        session to check a CSRF token against -- "fail toward MORE cleanup, never less"
+        -- so this skips the CSRF check entirely (not just downgrades it) whenever
+        `authorized` is false, and a dead cookie can never revoke anything.
 
         No HTML page to run the Cache Storage purge from this time -- the
         caller (React) does that purge itself in JS on a successful response,
@@ -14666,7 +14824,7 @@ def create_app(out_dir: Path):
         if authorized:
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-            if body.get("scope") != "this-device":
+            if body.get("scope") == "everywhere":
                 core.bump_web_user_session_epoch(user)
         session.clear()
         return jsonify({"ok": True})
@@ -15120,9 +15278,9 @@ def create_app(out_dir: Path):
         # Written only AFTER the folder is known good -- never write first and hope, the
         # same order /api/setup/save-key follows for the API key.
         # Under _accounts_lock, which serializes every read-modify-write of config.json
-        # in this process. Without it this handler can read the file, a concurrent /logout
-        # can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back -- which
-        # un-revokes the session that just logged out. config.json holds auth state, not
+        # in this process. Without it this handler can read the file, a concurrent sign-out
+        # everywhere can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back --
+        # which un-revokes the sessions that were just signed out. config.json holds auth state, not
         # just settings, so any writer of it belongs inside this lock.
         try:
             with _core._accounts_lock:
@@ -16021,13 +16179,16 @@ def create_app(out_dir: Path):
                 # retry. The loop keeps going -- one file the OS will not release must not
                 # strand the rest of a whole-task purge.
                 failed.append(_redact_host_paths(str(e))[:160])
+        try:                                     # The Great Sweep: each removed picture once
+            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+        except Exception:                        # noqa: BLE001
+            pass
         if failed:
             return jsonify({"error": "Deleted on PixAI, but {} local file{} could not be "
                                      "moved to the trash folder: {}".format(
                                          len(failed), "" if len(failed) == 1 else "s",
                                          "; ".join(failed[:3])),
                             "plan": plan.plan, "local_rows": purged}), 200
-        telem_bump("culled", out_dir=out_dir)
         return jsonify({"ok": True, "media_id": mid, "task_id": tid, "plan": plan.plan,
                         "local_rows": purged})
 
@@ -16060,7 +16221,7 @@ def create_app(out_dir: Path):
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
         include_archive = body.get("include_archive_only") is True and len(media_ids) == 1
-        purged = failed = kept = 0
+        purged, failed, kept = [], 0, 0
         for mid in media_ids:
             row = get_row(db_path, mid)
             if not row:
@@ -16070,12 +16231,14 @@ def create_app(out_dir: Path):
                 continue
             try:
                 purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
-                purged += 1
+                purged.append(mid)
             except OSError:
                 failed += 1
-        if purged:
-            telem_bump("culled", purged, out_dir=out_dir)           # The Great Sweep
-        return jsonify({"ok": failed == 0, "count": purged, "failed": failed,
+        try:              # The Great Sweep: each removed picture once (a restore + re-delete is one)
+            telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
+        except Exception:                                    # noqa: BLE001
+            pass
+        return jsonify({"ok": failed == 0, "count": len(purged), "failed": failed,
                         "kept_archive_only": kept})
 
     def _purge_local(media_id, filename):
@@ -17199,7 +17362,8 @@ def create_app(out_dir: Path):
         session is a stateless, client-side signed cookie with nothing server-side
         to revoke, so without this re-check a cookie captured off plain-HTTP LAN
         traffic would keep working forever -- surviving both the real user
-        signing out (/logout bumps their sess_epoch) and the account being removed
+        signing out everywhere (/api/logout's scope "everywhere" bumps their
+        sess_epoch) and the account being removed
         (get_web_user_session_epoch returns None once it's gone). See that
         function's docstring for the fuller writeup."""
         user = session.get("user")
@@ -19055,6 +19219,10 @@ def create_app(out_dir: Path):
         with _snips_lock:
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
+                # The explicit token, like every other per-account write
+                # (tests/test_csrf_coverage.py): checked before anything is read or written.
+                if not _check_csrf(body):
+                    return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 snips = body.get("snippets")
                 if not isinstance(snips, list):
                     return jsonify({"error": "snippets must be a list"}), 400
@@ -20337,12 +20505,7 @@ def create_app(out_dir: Path):
         finally:
             _basic_start_lock.release()
         _runs_dirty()
-        # The Academy (loras_trained): a LoRA training this server actually submitted.
-        # Silent-soft -- a telemetry blip must not fail a submit that already happened.
-        try:
-            telem_bump("loras_trained", out_dir=out_dir)
-        except Exception:
-            pass
+        # (The Academy counts runs PixAI reports finished -- api_train_runs -- not submits.)
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
                         "used_card": free_by_card, "reuse": reuse,
                         "free_trainings_left": (max(0, free_left - 1) if free_by_quota
@@ -20577,9 +20740,18 @@ def create_app(out_dir: Path):
         except Exception as e:                          # noqa: BLE001
             errors.append("your LoRAs: " + _redact_host_paths(str(e))[:120])
         by_model = {m["model_id"]: m for m in loras}
+        # The Academy (loras_trained) counts runs PIXAI reports finished, by id: basic runs off
+        # the account's LoRA list (every read), advanced ones off the finished list (the full
+        # read). A failed run never lands here, so neither it nor its retry counts twice.
+        finished = [str((m.get("task") or {}).get("id")) for m in loras
+                    if (m.get("task") or {}).get("id")
+                    and (m.get("task") or {}).get("trainingMode") != "advanced"
+                    and str((m.get("task") or {}).get("status") or "") == "completed"]
         if not light:
             try:
                 for t in core.list_training_completed(session, 100):
+                    if t.get("id"):
+                        finished.append(str(t["id"]))
                     r = _run_row_advanced(t, names, done=True)
                     m = by_model.get(r["model_id"])
                     if m:
@@ -20635,6 +20807,10 @@ def create_app(out_dir: Path):
         running = [r for r in rows if r["status"] in ("running", "waiting")]
         payload = {"runs": rows if not light else running, "running": running,
                    "errors": errors}
+        try:
+            telem_set_add_many("trained_runs", finished, out_dir=out_dir)
+        except Exception:                               # noqa: BLE001
+            pass
         _runs_cache[key] = (time.time(), payload)
         return jsonify(payload)
 
@@ -20953,10 +21129,6 @@ def create_app(out_dir: Path):
                                 "maybe_started": True}), 502
             train_guard.paid_resolve("submit", tid, "done")
             after = core.training_free_quota(session)
-            try:
-                telem_bump("loras_trained", out_dir=out_dir)
-            except Exception:                           # noqa: BLE001
-                pass
         finally:
             lk.release()
         _runs_dirty()
@@ -21027,10 +21199,6 @@ def create_app(out_dir: Path):
                                          "started. Check Runs before trying again.",
                                 "maybe_started": True}), 502
             train_guard.retry_resolve(tid, "done", res.get("id") or "")
-            try:
-                telem_bump("loras_trained", out_dir=out_dir)
-            except Exception:                           # noqa: BLE001
-                pass
         finally:
             lk.release()
         _runs_dirty()
@@ -21172,8 +21340,9 @@ def create_app(out_dir: Path):
         over LAN still sees their trophies. ?mark=1 records the currently newly-earned
         achievements as 'seen' so the unlock toast fires exactly once.
 
-        Side effects (cheap, fail-soft): marks today in the Vigil day ledger, checks
-        the Night Owl window, and sweeps the state-derived feat flags. A feat the
+        Side effects (cheap, fail-soft): marks today in the Vigil day ledger and sweeps
+        the state-derived feat flags. (It no longer looks at the time of day: a page load
+        is not evidence of anything -- see stamp_session_hour.) A feat the
         roster marks hidden goes out MASKED until it is earned -- collapsed with
         every other still-masked one into a single ??? placeholder, so devtools
         can't spoil them or even count how many remain; the whole feat tab stays
@@ -21185,8 +21354,6 @@ def create_app(out_dir: Path):
                 _telem_day["day"] = today
                 telem_mark_day(out_dir=out_dir)
                 sweep_telemetry(out_dir)
-            if 2 <= _dt.datetime.now().hour < 4:
-                telem_flag("session_hour", out_dir=out_dir)
         except Exception:
             pass
         # ONE telemetry read for the whole request. This route wanted the store three
@@ -21286,7 +21453,7 @@ def create_app(out_dir: Path):
         for k in masked_metrics - still_visible:
             metrics.pop(k, None)
         # The Vigil chip (O5): the run of days with a generation, and the best run ever. From the
-        # same ledger Seven Candles reads; a fresh install with no days answers day 1, best 1.
+        # gen_days ledger; a fresh install with no days answers day 1, best 1.
         try:
             _gd = (telem.get("day_lists") or {}).get("gen_days")
             result["vigil"] = vigil_status(_gd if isinstance(_gd, list) else [])
@@ -21389,7 +21556,7 @@ def create_app(out_dir: Path):
     @app.route("/api/ach-event", methods=["POST"])
     @tier(LOGIN)
     def api_ach_event():
-        """Feat-event beacon from the front-end: the Starfall konami egg and the
+        """Feat-event beacon from the front-end: the Starfall key-sequence moment and the
         in-app manual. Whitelisted event names only; each is a cosmetic local counter
         (no spend). Narrator pokes used to ride this beacon; they have their own route
         (/api/narrator/poke) since the ladder, which keeps its count and clocks per
@@ -21406,7 +21573,7 @@ def create_app(out_dir: Path):
         2026-08-26 to 2026-09-07: the beacon is the ONLY thing standing between a
         feat and being earned -- there is no server-side re-check that the
         gesture actually happened, so any signed-in session could POST
-        {"event": "konami"} straight from a console and arm the feat without ever
+        a feat event straight from a console and arm the feat without ever
         entering the code. Narrowing to loopback meant a feat could only be armed
         at the server's own keyboard, the one place the gesture can be witnessed.
         The cost was that a phone or any other LAN device lost all three feats,
@@ -21438,17 +21605,23 @@ def create_app(out_dir: Path):
         same gesture twice from the other side.
 
         The clients still treat a refusal as a no-op by design: api.js never
-        throws (a 403 comes back as an {error} body) and App.jsx's konami handler
+        throws (a 403 comes back as an {error} body) and the key-sequence handler
         is explicitly fail-soft (the stars and toast still play). What is new
         is that every caller now goes through notify/achNonce.js, which adopts
         the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
-        once on a stale-page 403 before giving up quietly."""
+        once on a stale-page 403 before giving up quietly.
+
+        THE EVENT NAMES ARE PUBLIC -- they sit in served JS and in this whitelist -- so they
+        name the moment, never the gesture: the key sequence posts "starfall" (renamed
+        2026-10-02 from a word that gave the egg away). There is no alias for the old name:
+        a stale cached page's 400 is a silent no-op and the next press after a reload counts.
+        The telemetry flag it sets keeps its key, which is the sealed roster's metric."""
         sid = _ach_sid()
         if not _ach_rate_ok(sid):
             return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
-        if ev not in ("konami", "docs"):
+        if ev not in ("starfall", "docs"):
             return jsonify({"error": "unknown event"}), 400
         # One refusal wording for missing, unknown, expired and foreign alike: which
         # check failed is exactly the thing a replay probe would want to learn, and
@@ -21460,7 +21633,7 @@ def create_app(out_dir: Path):
         nxt = _ach_mint(sid)
         if _ach_debounced(sid, ev):
             return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
-        if ev == "konami":
+        if ev == "starfall":
             telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
         telem_bump("docs_opened", out_dir=out_dir)
@@ -21625,6 +21798,7 @@ def create_app(out_dir: Path):
                                 slots=branding_slots_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
+        _before = (cfg.get("mark"), cfg.get("anim"))
         _marks = list_marks(out_dir, _earned_achievement_ids(out_dir, db_path))
         have = {m["id"] for m in _marks}
         if "anim" in body:
@@ -21669,7 +21843,7 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "glow_color must be #rrggbb"}), 400
             cfg["glow_color"] = colour
         save_branding(out_dir, cfg)
-        if "mark" in body or "anim" in body:   # Interior Decorator: dressing the halls
+        if (cfg.get("mark"), cfg.get("anim")) != _before:   # Interior Decorator: a real change only
             telem_bump("skin_changed_runs", out_dir=out_dir)
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
@@ -22145,6 +22319,10 @@ def create_app(out_dir: Path):
                     k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
                     for k, v in presets.items()}})
             body = request.get_json(silent=True) or {}
+            # The explicit token, before the import reads the task from PixAI with the
+            # owner's key (tests/test_csrf_coverage.py).
+            if not _check_csrf(body):
+                return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
             tid = str(body.get("task_id") or "").strip()
             if not tid:
                 return jsonify({"error": "task_id required"}), 400
@@ -22264,6 +22442,10 @@ def create_app(out_dir: Path):
             presets = _load_view_presets(user)
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
+                # The explicit token, like every other per-account write
+                # (tests/test_csrf_coverage.py): checked before the set is changed.
+                if not _check_csrf(body):
+                    return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 if isinstance(body.get("merge"), dict):
                     for k, v in body["merge"].items():
                         k = str(k).strip()
@@ -22594,15 +22776,8 @@ def create_app(out_dir: Path):
             # submit itself is called exactly as before. Fail-soft -- a record that cannot be
             # written never affects the spend.
             _record_single_send(body, task_id, req.parameters, req)
-            try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
-                lvids = req.lora_version_ids
-                if lvids:
-                    telem_bump("lora_used", out_dir=out_dir)
-                    telem_max("lora_stacked", len(lvids), out_dir=out_dir)
-                    for v in lvids:
-                        telem_set_add("loras", v, out_dir=out_dir)
-            except Exception:
-                pass
+            # (No LoRA counters here since 2026-10-02: the three LoRA honors are counted from
+            # the catalog rows this generation produces -- achievement_metrics.)
             out = {"task_id": task_id}
             if req.adjusted:
                 # A clamp fired: this submit is NOT the one that was asked for, and the
@@ -23151,17 +23326,6 @@ def create_app(out_dir: Path):
             store.update_run(run_id, status=res["status"], reason=res.get("reason"))
         except Exception:                                    # noqa: BLE001
             pass
-        try:                       # LoRA telemetry, per generation sent (as /api/generate)
-            for j in res["jobs"]:
-                if j["state"] == "sent":
-                    lvids = by_cell[j["cell"]]["req"].lora_version_ids
-                    if lvids:
-                        telem_bump("lora_used", out_dir=out_dir)
-                        telem_max("lora_stacked", len(lvids), out_dir=out_dir)
-                        for v in lvids:
-                            telem_set_add("loras", v, out_dir=out_dir)
-        except Exception:                                    # noqa: BLE001
-            pass
         for j in res["jobs"]:
             b = by_cell.get(j["cell"])
             if b is not None:
@@ -23293,7 +23457,7 @@ def create_app(out_dir: Path):
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
             task_id = core.submit(gsession, req)["task_id"]
-            telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
+            # (edits is counted from the catalog's edit rows since 2026-10-02.)
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
         except Exception as e:
@@ -26685,9 +26849,15 @@ __DESIGN_TOKENS__
             # deletes and CLI runs, and counting those made the peak a measure of "rows in
             # the log" rather than of generating several things at once -- one sync beside
             # one import could satisfy a rung nobody had actually earned.
+            # ...and only jobs PIXAI has reported running to this server (the phase map this
+            # function keeps): POST /api/jobs lets any signed-in page register a running row,
+            # and fifty registered rows plus one real phase used to read as fifty-one.
+            with _gen_phase_lock:
+                _confirmed = set(_gen_phase_seen)
             _live = sum(1 for j in core.read_jobs(out_dir)
                         if j.get("status") not in core._JOBS_TERMINAL
-                        and (j.get("type") or "generate") == "generate")
+                        and (j.get("type") or "generate") == "generate"
+                        and str(j.get("job_id") or "") in _confirmed)
             telem_max("jobs_concurrent", _live, out_dir=out_dir)
         except Exception:
             pass

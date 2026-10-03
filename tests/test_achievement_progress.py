@@ -247,10 +247,11 @@ def test_every_non_feat_metric_in_the_sealed_roster_is_measured(tmp_path, sealed
     "N to go". Every non-feat entry must yield a count from a FRESH install's metric bundle,
     except the one self-referential metric (Completionist: its own pool, not a counter). The
     assertion is on metric NAMES of non-feat honors; it never prints a feat."""
-    fresh = dict(g.telemetry_metrics(tmp_path))
-    fresh.update({k: 0 for k in ("images", "videos", "collections", "models", "published",
-                                 "tagged", "local_gens", "gens_in_a_day", "distinct_keywords",
-                                 "rated", "loras_distinct", "palindrome_seeds", "top_word_uses")})
+    # The real recipe on an empty library: the catalog's metrics, then telemetry's -- the
+    # merge every gate uses -- rather than a hand list that drifts when a metric moves.
+    g.save_catalog(tmp_path / "catalog.db", [])
+    fresh = g.achievement_metrics(tmp_path / "catalog.db", use_cache=False)
+    fresh.update(g.telemetry_metrics(tmp_path))
     unmeasured = sorted({
         a["metric"] for a in g._roster()
         if a.get("tier") != "feat" and a.get("bucket") not in ("feat", "meta")

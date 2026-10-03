@@ -258,7 +258,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
   }, [snippetsOpen, snips]);
   const persistSnips = (list) => {
     setSnips(list); setSnipErr("");
-    apiPost("/api/snippets", { snippets: list })
+    // The page's CSRF token, read at call time: the snippets store refuses a write without it.
+    apiPost("/api/snippets", { snippets: list, csrf: (window.MG_BOOT && window.MG_BOOT.csrf) || "" })
       .then((d) => { if (!d || d.error) setSnipErr((d && d.error) || "The server rejected the save."); });
   };
   const snipTrunc = (t) => (String(t).length > 44 ? String(t).slice(0, 44) + "…" : t);

@@ -99,8 +99,8 @@ def _seed_assets():
 
 # The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any
 # daytime weekday reading would do -- what matters is that it never moves, and that it is
-# outside the narrow window moonglade_gallery.py's /api/achievements writes `session_hour`
-# in (2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
+# outside the narrow window in which a collected generation stamps `session_hour`
+# (moonglade_gallery.stamp_session_hour, 2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
 # the value a pinned clock produces is what the pin below reproduces, not the clock object.
 PINNED_INSTANT = "13:00, Wednesday 2025-06-11, local"
 
@@ -114,19 +114,21 @@ def pin_daytime_clock(mp):
     achievement metric can reach, for the lifetime of `mp` (the caller's own MonkeyPatch).
 
     THE SURVEY, re-run 2026-09-11 over both modules (`datetime.now()` / `date.today()` /
-    `.hour` / weekday arithmetic). Three reads can reach an achievement metric, all in
-    `/api/achievements`: `date.today()` into the distinct-days ledger (`days_used` and the
-    streak metrics), `datetime.now().hour` into the `session_hour` flag, and `date.today()`
-    again for the `earned_at` stamps, which no metric reads. Everything else is not a
+    `.hour` / weekday arithmetic) and amended 2026-10-02. Three reads can reach an
+    achievement metric: in `/api/achievements`, `date.today()` into the distinct-days ledger
+    (`days_used` and the streak metrics) and again for the `earned_at` stamps, which no metric
+    reads; and the collect path's clock (`stamp_session_hour`, via `_utc_now`), which sets the
+    `session_hour` flag for a generation made in its window. (Until 2026-10-02 a bare page
+    load read `datetime.now().hour` for that flag; it no longer does.) Everything else is not a
     metric input -- a printed date string in the collection-print payload, the timezone
     offset the activity chart is bucketed by, a search filter's date window -- and
     `moonglade_backup.py`'s one age comparison (`old_piece_backed_up`, 730 days) lives in
     the download loop, which no server runs. No metric reads a weekday at all.
 
     WHAT THE PIN DOES, read against those three:
-      * The hour. At 13:00 the route's window is closed, so the flag is never written. The
-        wrapper below drops exactly that key and passes every other flag through untouched,
-        which is the same answer the route itself gives at the pinned hour.
+      * The hour. At 13:00 the window is closed, so the flag is never written. The wrapper
+        below drops exactly that key and passes every other flag through untouched, which is
+        the same answer the collect path itself gives at the pinned hour.
       * The day. At a single instant the ledger records one day, once. Left alone, a run
         that crosses local midnight records a second, and `days_used` steps up mid-run. The
         wrapper marks each ledger once per install and drops the repeat. The date string it
@@ -669,6 +671,26 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     was removed."""
     from moonglade_gallery import create_app
     return login_test_client(create_app(tmp_path), username=username, password=password)
+
+
+def session_csrf(cli):
+    """The CSRF token `cli`'s signed-in session carries -- the one a real page reads out of
+    window.MG_BOOT.csrf. Read off the session rather than a scraped page, because the login
+    POST mints a fresh token (_establish_session): the login page's token is stale by the
+    time the client is authenticated."""
+    with cli.session_transaction() as sess:
+        return sess.get("csrf", "")
+
+
+def with_csrf(cli, body=None):
+    """`body` plus this session's CSRF token, the shape every token-checking POST expects."""
+    return dict(body or {}, csrf=session_csrf(cli))
+
+
+# The key-sequence moment's beacon event, as moments/starfallTrigger.js posts it to
+# /api/ach-event. Neutral on purpose: served JS and the server's whitelist are public, so
+# the event name must not describe the gesture.
+STARFALL_EVENT = "starfall"
 
 
 def ach_nonce(cli):

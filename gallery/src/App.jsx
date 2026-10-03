@@ -842,8 +842,9 @@ export default function App({ boot }) {
     // parsePresetQuery) or "export" (from_year/from_month, what _filters_from_args reads).
     buildViewQuery: (draftAdv, style) =>
       filterQueryString({ applied, media, shelf, adv: draftAdv || adv, perPage }, style),
-    saveView: (name, query) => apiPost("/api/view-presets", { name, query }),
-    deleteView: (name) => apiPost("/api/view-presets", { delete: name }),
+    // Both carry the page's CSRF token: the saved-views store refuses a write without it.
+    saveView: (name, query) => apiPost("/api/view-presets", { name, query, csrf: boot.csrf || "" }),
+    deleteView: (name) => apiPost("/api/view-presets", { delete: name, csrf: boot.csrf || "" }),
     downloadZip: () => downloadZipForm(selIds),
     replacePrompt: async () => {
       const find = window.prompt(

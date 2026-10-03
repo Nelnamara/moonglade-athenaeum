@@ -95,7 +95,7 @@ describe("one module owns the /api/ach-event beacon", () => {
 
   test("the known callers still go through it", () => {
     // Not a completeness claim -- a new caller is fine. This is the regression direction:
-    // the konami egg HAD its own bare post, and the docs beacon had a hand-rolled one in the
+    // the key-sequence egg HAD its own bare post, and the docs beacon had a hand-rolled one in the
     // Loom shell until the guide took it over (Session I). (The narrator's poke left this
     // beacon for its own route, whose ladder the server keeps: loom/test/poke-ladder-client.test.js.)
     for (const name of ["moments/starfallTrigger.js", "help/helpStore.js"]) {

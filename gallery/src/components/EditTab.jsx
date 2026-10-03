@@ -92,7 +92,8 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
     const id = importTask.trim();
     if (!id) return;
     try {
-      const d = await apiPost("/api/presets", { task_id: id });
+      // The page's CSRF token, read at call time: the import refuses a POST without it.
+      const d = await apiPost("/api/presets", { task_id: id, csrf: (window.MG_BOOT && window.MG_BOOT.csrf) || "" });
       if (d.error) {
         if (window.Toast) window.Toast.show({ kind: "err", title: "Not banked", msg: d.error });
         return;

@@ -1,7 +1,6 @@
 """Achievements & skins: milestone computation from local catalog stats + the
 persisted cosmetic state + the /api/achievements and /api/skin routes. All local,
 read-only catalog data (no network, no spend)."""
-import datetime as _dt
 from pathlib import Path
 from unittest import mock
 
@@ -18,18 +17,6 @@ from tests.conftest import login_client, _SEALED_DONOR
 # fail-soft regression merges behind a green-but-quietly-reduced check (finding #3).
 needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
                                  reason="sealed-definitions donor (private repo) not present")
-
-
-class _FixedNoon(_dt.datetime):
-    """Freeze the wall clock at noon around /api/achievements calls whose `newly`
-    is asserted exactly. The route has a real-time side effect -- between 02:00
-    and 03:59 local it sets the `session_hour` telemetry flag, which earns the
-    hidden Night Owl feat and puts 'night-owl' into `newly` (issue #16: the
-    first-sync-gate backfill test failed only when the suite ran in that window).
-    Same idiom as tests/test_telemetry.py / tests/test_unlock_split.py."""
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2025, 6, 15, 12, 0, 0)
 
 
 def _row(**kw):
@@ -293,8 +280,7 @@ def test_first_sync_gate_backfills_for_preexisting_install(tmp_path):
     st = g.load_ach_state(out)
     st["seen"] = ["first-light"]
     g.save_ach_state(out, st)
-    with mock.patch("datetime.datetime", _FixedNoon):   # never trip Night Owl mid-test (issue #16)
-        d = cli.get("/api/achievements").get_json()
+    d = cli.get("/api/achievements").get_json()
     assert d["newly"] == []                                      # already seen -> nothing new
     assert g.load_telemetry(out)["flags"].get("first_sync_done")  # gate backfilled to done
 
@@ -392,8 +378,8 @@ def test_skin_gate_reads_telemetry_metrics_like_every_other_gate(tmp_path):
     fake = [dict(a) for a in g._roster()]
     for a in fake:
         if a["id"] == "menagerie":
-            a["metric"], a["threshold"] = "edits", 1   # telemetry counter, not catalog
-    g.telem_bump("edits", out_dir=tmp_path)
+            a["metric"], a["threshold"] = "uploads", 1   # telemetry counter, not catalog
+    g.telem_bump("uploads", out_dir=tmp_path)
     with mock.patch.object(g, "_roster", return_value=fake):
         r = client.post("/api/skin", json={"skin": "verdant"})
     assert r.status_code == 200, r.get_json()
