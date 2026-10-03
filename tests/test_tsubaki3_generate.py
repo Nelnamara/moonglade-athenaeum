@@ -502,3 +502,15 @@ def test_nothing_else_changes_priority():
     assert core._gen_args_from_web_payload({"prompt": "p"}).priority == core.PRIORITY_TURBO
     assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == core.PRIORITY_TURBO
     assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == core.PRIORITY_HIGH
+
+
+def test_the_price_query_of_a_context_image_request_carries_control_nets(rest):
+    """The /v2/task-price query for the bar's request carries `controlNets` as the JSON string "[]"
+    beside its contextImages. A live read-only check (2026-10-03 review) found the quote identical
+    with and without it (3,900), and +1,000 at priority 1000 -- so the empty list is safe to quote,
+    and this pins the shape."""
+    req = road(bar_payload())
+    q = core._task_price_query(object(), req.parameters)
+    assert q["controlNets"] == "[]"
+    assert json.loads(q["contextImages"]) == ["701"]
+    assert "batchSize" not in q
