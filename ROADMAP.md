@@ -15,8 +15,16 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.15.0 — The Reading Room,
-  2026-10-01), per the rule at the top of this file.
+- **Wave 1 of the post-3.15 plan** *(started 2026-10-02)*: six lanes on `wave1/*` branches, then one
+  integration, a walk, and the boop.
+  - A: Loom fixes (#57, #59, #63)
+  - B: phone record (#64, #65, the Contact Sheet's real thumbnails)
+  - C: library safety (#58, #66, the integrity check, the curation export)
+  - D: security (the CSRF token on three routes, Log Out this device #70) and the pack builder
+  - E: PixAI drift (Edit Pro V2.0 #67, expired cards #68; #60 and #71 after a design review)
+  - F: the command reference
+
+  What shipped before it is in `CHANGELOG.md` (latest: 3.15.0 — The Reading Room, 2026-10-01).
 
 ---
 
