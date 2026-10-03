@@ -15,16 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- **Wave 1 of the post-3.15 plan** *(started 2026-10-02)*: six lanes on `wave1/*` branches, then one
-  integration, a walk, and the boop.
-  - A: Loom fixes (#57, #59, #63)
-  - B: phone record (#64, #65, the Contact Sheet's real thumbnails)
-  - C: library safety (#58, #66, the integrity check, the curation export)
-  - D: security (the CSRF token on three routes, Log Out this device #70) and the pack builder
-  - E: PixAI drift (Edit Pro V2.0 #67, expired cards #68; #60 and #71 after a design review)
-  - F: the command reference
-
-  What shipped before it is in `CHANGELOG.md` (latest: 3.15.0 — The Reading Room, 2026-10-01).
+- Nothing in flight beyond the review below. What shipped is in `CHANGELOG.md` (latest: 3.15.0 —
+  The Reading Room, 2026-10-01).
 
 ---
 
@@ -34,27 +26,21 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- Nothing in review.
+- **`wave1/integration`** *(built 2026-10-02/03)*: Wave 1 of the post-3.15 plan, six lanes stacked,
+  plus the post-3.15 docs tidy. Its `[Unreleased]` lines in `CHANGELOG.md` say what it changes.
+  Waits on the owner's walk sheet and the boop.
 
 ## Next — scoped, not started
 
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.
 
-- **Edit Pro V2.0 in the Edit card.** *(2026-10-02 probe)* PixAI's new Edit Pro version takes up
-  to 10 reference images at v1.0's price. The Edit card still sends v1.0 with a 4-image cap from
-  two hand-kept tables. Add a V2.0 row beside v1.0, which stays because the AI Tools scenes still
-  run on it. A data change plus a test:
-  [#67](https://github.com/Nelnamara/moonglade-athenaeum/issues/67).
-
 - **Free cards: say when they expire, and open PixAI's current event.** *(owner, 2026-10-02)*
   Event cards have been expiring unused. Add a plain warning before held cards run out, and a
   link to whatever event PixAI is running, read from its public home-banner list. No per-event
   check-in: PixAI has no read-only check-in status, and each event's routes differ. The
   placement needs a short design session first:
-  [#69](https://github.com/Nelnamara/moonglade-athenaeum/issues/69). Related: expired cards read
-  as "consumed" on the Account screen,
-  [#68](https://github.com/Nelnamara/moonglade-athenaeum/issues/68).
+  [#69](https://github.com/Nelnamara/moonglade-athenaeum/issues/69).
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
@@ -239,24 +225,24 @@ why this section exists.
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
 
-- **Curator:** archive-integrity job.
-- **Mobile:** the mobile details sheet's View-batch chip still gates on the legacy `batch` column
-  (re-point at `task_id` like desktop did in #30).
+- **Curator:** archive-integrity job, Phase B: the list of broken files and what to do about each
+  (the read-only check, its Health tiles and its Panel row are Phase A, built in Wave 1). Needs
+  design Session W first.
 
 From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationale in
 `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
 above, tagged "Scope":
 
-- **Curator:** a full per-file archive-integrity pass (zero-byte / truncated / missing-thumb + a
-  "last verified" stamp, beyond today's missing/orphan tiles) · a round-trippable curation-only
-  sidecar export.
+- **Curator:** an in-app screen for importing a curation backup (the export, and the command-line
+  import, are built in Wave 1; a screen needs a design step).
 - **Mobile:** optional infinite scroll, after the phone gallery itself is fixed
   ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73)) · an opt-in "remember this device" longer LAN session (still
   authenticated) · QR-connect onboarding (URL only, login gate unchanged).
 
-Small integrity fixes the sweep surfaced are filed as Issues: the phone record's "k of N" ([#64](https://github.com/Nelnamara/moonglade-athenaeum/issues/64)),
-the phone's View batch chip ([#65](https://github.com/Nelnamara/moonglade-athenaeum/issues/65)) and archive-only pieces
-([#66](https://github.com/Nelnamara/moonglade-athenaeum/issues/66)). The phone Contact Sheet shows real thumbnails
-instead of grey squares (owner, 2026-10-02: the 2026-08-03 placeholder call was a misreading); it rides
-Wave 1's phone lane. (The sweep's fourth item, Loom draft-vs-professional
-marking on rendered shots, was dropped by the owner on 2026-09-07.)
+(The sweep's Loom draft-vs-professional marking on rendered shots was dropped by the owner on
+2026-09-07.)
+
+- **The achievements' stats cache can miss an edit.** The memo that feeds the honors is keyed on the
+  catalog's row count and newest picture, so rating, tagging or publishing an existing picture may not
+  move the matching counts until a new picture arrives (found by the 2026-10-02 code-map pass). Design
+  work, not a defect: decide what invalidates the memo.
