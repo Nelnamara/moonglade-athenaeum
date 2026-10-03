@@ -14,6 +14,21 @@ python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + 
 python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
+Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
+disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's options:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting |
+| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `config.json` as `PORT`). Typing it always wins |
+| `--host` | `127.0.0.1` | the address to listen on — or the saved one (`HOST` in `config.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
+| `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |
+| `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
+| `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
+| `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
+| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Serve Gallery`** launcher waits until the server answers and opens the browser itself |
+| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `logs/` in your library always has them |
+
 ## The header
 
 The banner across the top carries the big buttons at its right, and a row of smaller destinations
