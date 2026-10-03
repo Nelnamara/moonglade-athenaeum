@@ -306,7 +306,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                           const isSuggested = m.path === suggestedPath;
                           const onlyCopy = stays.has(m.path);
                           return (
-                            <div className={"mgdr-tile" + (isKeeper ? " keep" : " remove")} key={m.path}>
+                            <div className={"mgdr-tile" + (isKeeper || onlyCopy ? " keep" : " remove")} key={m.path}>
                               <div className="mgdr-thumb">
                                 <img src={m.thumb} alt="" loading="lazy" draggable={false} />
                                 {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
@@ -327,7 +327,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                       : <span className="mgdr-restored">RESTORED</span>
                                 ) : (
                                   <button type="button"
-                                    className={"mgdr-toggle" + (isKeeper ? " on" : "")}
+                                    className={"mgdr-toggle" + (isKeeper || onlyCopy ? " on" : "")}
                                     disabled={busy || autoBusy}
                                     title={isKeeper
                                       ? "Click to deselect this as the keeper"
@@ -377,10 +377,10 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                 : removeCount <= 0 ? "Nothing to remove: the other picture is the only copy"
                                 : undefined}
                               onClick={() => resolveGroup(g)}>
-                              {busy ? "Resolving…" : (keepCount
-                                ? "Resolve — keep 1, remove " + removeCount +
-                                  (stays.size ? " · " + stays.size + " only cop" + (stays.size !== 1 ? "ies stay" : "y stays") : "")
-                                : "Resolve")}
+                              {busy ? "Resolving…" : (!keepCount ? "Resolve"
+                                : removeCount <= 0 ? "Nothing to remove — the only copy stays"
+                                : "Resolve — keep 1, remove " + removeCount +
+                                  (stays.size ? " · " + stays.size + " only cop" + (stays.size !== 1 ? "ies stay" : "y stays") : ""))}
                             </button>
                             {/* Skip leaves the group untouched, same as just not
                                 clicking Resolve -- an explicit "I looked, not now"

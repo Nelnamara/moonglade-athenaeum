@@ -263,7 +263,9 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                         : removeCount <= 0 ? "Nothing to remove: the other picture is the only copy"
                         : undefined}
                       onClick={() => askResolve(g)}>
-                      {keepCount ? "Resolve — quarantine " + removeCount : "Resolve"}
+                      {!keepCount ? "Resolve"
+                        : removeCount <= 0 ? "Nothing to remove — only copy"
+                        : "Resolve — quarantine " + removeCount}
                     </button>
                   </>
                 )}
