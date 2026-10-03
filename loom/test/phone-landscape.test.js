@@ -169,3 +169,21 @@ describe("Q4 the pieces stay put across a turn", () => {
     assert.match(note, /Desktop/);
   });
 });
+
+/* A TURN REBUILDS THE GRID (owner's walk, 2026-10-03, on his iPhone). Turned sideways and back upright,
+   the gallery dropped its sideways scroll but its columns still ran off the screen until a reload, while
+   desktop Chromium re-flowed correctly. Sideways the phone shell is a CSS grid (a 56 px rail and the
+   pictures' column); upright it is a plain column again. WebKit -- every iPhone browser -- can keep the
+   nested picture grid's sideways track widths across that switch. So the gallery grid is keyed on the
+   way up: a turn makes React throw the old grid away and build a fresh one upright, and there is
+   nothing stale left for WebKit to keep. */
+describe("Q4 a turn rebuilds the gallery grid", () => {
+  const src = rd("gallery/src/components/GalleryMobile.jsx");
+  test("GalleryGridMobile is keyed on the phone's orientation", () => {
+    const at = src.indexOf("<GalleryGridMobile");
+    assert.ok(at > 0, "GalleryMobile mounts GalleryGridMobile");
+    const tag = src.slice(at, src.indexOf("/>", at));
+    assert.match(tag, /key=\{[^}]*landscape[^}]*\}/,
+      "the grid's key follows `landscape` from usePhoneLandscape, so a turn remounts it");
+  });
+});

@@ -331,7 +331,11 @@ export default function GalleryMobile({
           onClear={onClearSimilar}
         />
       ) : (
+        /* Keyed on the way up (owner's walk, 2026-10-03, iPhone): a turn throws the old grid away and
+           builds a fresh one, because WebKit can keep the sideways track widths across the shell's
+           grid-to-column switch -- the columns ran off an upright screen until a reload. */
         <GalleryGridMobile
+          key={landscape ? "grid-landscape" : "grid-upright"}
           items={items} loading={loading} selectMode={selectMode} selected={selected}
           toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
           layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols}
