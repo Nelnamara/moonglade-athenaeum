@@ -19,6 +19,7 @@ git tags. Full prose notes for tagged versions live on
 ### The phone
 
 - **The phone's "14 of 3,240" is your real place in the library.** A picture's record and the full-screen viewer used to count only the page on screen ("14 of 100", however many pictures matched); they now count through everything your search and filters match, the same walk the ‹ and › buttons step through. (2026-10-02)
+- **View batch shows on the phone's picture record.** The chip only appeared for pictures filed in an old batch folder, so on a library that has been organized it never showed. It now shows for any picture that came from a generation, as it does on the desktop. (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 

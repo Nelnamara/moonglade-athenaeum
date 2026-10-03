@@ -363,6 +363,10 @@ picture sits among everything your search and filters match (*14 of 3,240*), not
 on screen, so the number agrees with how far **‹** and **›** will carry you. A picture your current
 filter does not contain shows no number on its record.
 
+**View batch** on a picture's record shows the other pictures made in the same generation. It
+appears for any picture that came from a generation, not only ones filed in an old batch folder.
+To get your whole library back, press **Clear** in **Advanced search**.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

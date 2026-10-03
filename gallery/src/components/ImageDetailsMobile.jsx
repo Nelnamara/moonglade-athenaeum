@@ -65,11 +65,13 @@ import "../styles/curation-mobile.css";
        POST /edit-prompt/<mid> as desktop's "Edit Prompt"), Filter by model
        (real -- wired to the same onFilterByModel desktop's kicker "find more"
        link uses; hidden when the model isn't known, matching desktop's own
-       row.batch-gated "View Batch" precedent; called "Find similar (model)"
+       gated "View batch" precedent; called "Find similar (model)"
        until 2026-09-05, when it took the same rename desktop's record took --
        it filters by the model that made the picture and never found lookalikes,
        so the borrowed word made two unrelated controls look like a pair),
-       View batch (real, same onFilterByBatch),
+       View batch (real, same onFilterByBatch -- gated on and filtered by the picture's
+       task id, exactly as desktop's is since #30: `--organize` blanks the old batch
+       column, so gating on it hid the chip on every organized library),
        Suggest prompt (real, same runSuggest). Send to Video was a DISCLOSED
        placeholder toast until 2026-09-29 (Session Q, Q2): the Video mode had no
        "load this image as the source frame" entry point. It has one now (the
@@ -443,8 +445,8 @@ export default function ImageDetailsMobile({
               Filter by model
             </button>
           ) : null}
-          {row.batch ? (
-            <button type="button" className="idm-chip" onClick={() => onFilterByBatch(row.batch)}>View batch</button>
+          {row.task_id ? (
+            <button type="button" className="idm-chip" onClick={() => onFilterByBatch(row.task_id)}>View batch</button>
           ) : null}
           <button type="button" className="idm-chip" disabled={suggestBusy} onClick={runSuggest}>
             {suggestBusy ? "Reading…" : "Suggest prompt"}
