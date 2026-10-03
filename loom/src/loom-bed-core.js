@@ -121,7 +121,7 @@ export const cutSegments = (entries, project) => {
   (entries || []).forEach((e) => {
     const c = e && e.c;
     if (!c || !c.resultMid) return;
-    const dur = num(c.actualDur) || num(c.duration) || 8;
+    const dur = (num(c.actualDur) > 0 ? num(c.actualDur) : 0) || num(c.duration) || 8;   // a length <= 0 is unknown
     const cin = num(c.trimIn) || 0;
     const cout = c.trimOut != null && num(c.trimOut) != null ? num(c.trimOut) : dur;
     const span = Math.max(0.1, cout - cin);

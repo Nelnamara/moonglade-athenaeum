@@ -979,7 +979,8 @@ export const spendTooltip = (s = {}) => {
 // ---------- duration / pricing math feeding the timeline reel ----------
 
 // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
-export const durOf = (c) => Number(c.actualDur || c.duration) || 0;
+// A recorded length of 0 or below is unknown (code review 2026-10-02): the planned one stands in.
+export const durOf = (c) => { const a = Number(c.actualDur); return a > 0 ? a : (Number(c.duration) || 0); };
 
 // The reel spans the cut (The Loom.dc.html:1009, each segment `flex: dur`): `scale` is the cut's
 // own length, so the shots always fill the strip however short the cut is. It used to be

@@ -46,6 +46,11 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; 
 // outgoing shot's FIRST frame with the next shot's open -- a false "strong colour jump" on a
 // true handoff (owner walk 2026-09-30).
 const known = (v) => (v == null || v === "" ? null : num(v));
+// A clip LENGTH is known only when it is above 0 (code review 2026-10-02): landTake already
+// stores null for a reported length of 0, but withTakes / writeBack copied a card's actualDur of
+// 0 into the stored take, and a 0 s length read as "the clip ends at its first frame". A time (a
+// trim, a cut point) of 0 is real and keeps using `known`.
+const knownDur = (v) => { const n = known(v); return n != null && n > 0 ? n : null; };
 
 /* ---------- views: never write ---------- */
 
@@ -57,7 +62,7 @@ const maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || 
 const mirrorTake = (card, n) => {
   const t = {
     id: "t" + n, n, mid: str(card.resultMid), taskId: "", at: "",
-    dur: known(card.actualDur), trimIn: Number(card.trimIn) || 0,
+    dur: knownDur(card.actualDur), trimIn: Number(card.trimIn) || 0,
     trimOut: card.trimOut == null ? null : Number(card.trimOut),
     settings: null, anchor: null, imported: !!card.imported, source: "legacy",
   };
@@ -72,11 +77,14 @@ export const takesOf = (card) => {
   const stored = storedTakes(card);
   const mid = str(card.resultMid);
   if (!stored) return mid ? [mirrorTake(card, 1)] : [];
-  if (mid && !stored.some((t) => t && str(t.mid) === mid)) {
-    const n = Math.max(maxN(stored), Number(card.takeSeq) || 0) + 1;
-    return stored.concat([mirrorTake(card, n)]);
+  // A stored length of 0 or below reads as unknown; the next reducer writes that null back.
+  const healed = stored.some((t) => t && t.dur != null && knownDur(t.dur) == null)
+    ? stored.map((t) => (t && t.dur != null && knownDur(t.dur) == null ? { ...t, dur: null } : t)) : stored;
+  if (mid && !healed.some((t) => t && str(t.mid) === mid)) {
+    const n = Math.max(maxN(healed), Number(card.takeSeq) || 0) + 1;
+    return healed.concat([mirrorTake(card, n)]);
   }
-  return stored;
+  return healed;
 };
 
 /** The ★ take's number, or null when the shot has no render. Read from the mirror. */
@@ -101,7 +109,7 @@ export const selectedTakeView = (card) => {
   const n = selectedTakeOf(card);
   if (n == null) return null;
   const t = takesOf(card).find((x) => x.n === n) || mirrorTake(card, n);
-  const v = { ...t, mid: str(card.resultMid), dur: known(card.actualDur) != null ? known(card.actualDur) : t.dur,
+  const v = { ...t, mid: str(card.resultMid), dur: knownDur(card.actualDur) != null ? knownDur(card.actualDur) : knownDur(t.dur),
     trimIn: Number(card.trimIn) || 0, trimOut: card.trimOut == null ? null : Number(card.trimOut),
     imported: !!card.imported };
   if (card.crop) v.crop = card.crop; else delete v.crop;
@@ -231,7 +239,7 @@ export const withTakes = (card) => {
 
 // Copy take `t` onto the card's mirror fields (it becomes the ★ one).
 const mirrorOnto = (card, t) => {
-  const next = { ...card, resultMid: str(t.mid), actualDur: t.dur == null ? null : t.dur,
+  const next = { ...card, resultMid: str(t.mid), actualDur: knownDur(t.dur),
     trimIn: Number(t.trimIn) || 0, trimOut: t.trimOut == null ? null : t.trimOut,
     imported: !!t.imported, selectedTake: t.n };
   if (t.crop) next.crop = t.crop; else delete next.crop;
@@ -621,7 +629,7 @@ export const stripInFlight = (project) => {
 export const cutPointOf = (card) => {
   if (!card) return null;
   const t = known(card.trimOut);
-  return t != null ? t : known(card.actualDur);
+  return t != null ? t : knownDur(card.actualDur);
 };
 const sameAt = (a, b) => (a == null || b == null) ? true : Math.abs(Number(a) - Number(b)) < 0.05;
 
