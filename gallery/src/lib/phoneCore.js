@@ -231,6 +231,42 @@ export function newSinceLabel(count, capped, atMs) {
   return count + (capped ? "+" : "") + " new" + (t ? " since " + t : "");
 }
 
+/* #64, "14 of 3,240": a picture's place in the WHOLE filtered walk (the detail route's `position` and
+   `nav_total`, which come from the same list Prev and Next step through), formatted the way the pager
+   prints its match count. "" when either number is missing, so the record draws nothing rather than a
+   guess; a picture the filter does not contain has no position. */
+export function positionLabel(position, total) {
+  const p = Number(position);
+  const t = Number(total);
+  if (!(p >= 1) || !(t >= 1)) return "";
+  return p.toLocaleString() + " of " + t.toLocaleString();
+}
+
+/* The library route clamps page_size to 1..200 (moonglade_gallery.py, api_next_library); the offset the
+   viewer adds to its place in the page has to use the size the server really cut the page with. */
+const MAX_PAGE_SIZE = 200;
+const DEFAULT_PAGE_SIZE = 100;
+
+/* How many pictures come before the loaded page in the walk. The phone grid is ungrouped, so this is
+   exact: (page - 1) full pages. */
+export function pageOffset(page, perPage) {
+  const p = Math.max(1, Math.floor(Number(page)) || 1);
+  const size = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number(perPage)) || DEFAULT_PAGE_SIZE));
+  return (p - 1) * size;
+}
+
+/* The viewer's big number and its "OF N" (#64), both formatted like the pager. `index` is the place in
+   the loaded page, `offset` the pictures before that page, `total` the walk's length, `loaded` the
+   page's length. With no total yet it falls back to the page it holds (what it always showed), and a
+   total the page has outgrown (pictures deleted since) never reads "k of fewer than k". */
+export function lightboxCount(index, offset, total, loaded) {
+  const fmt = (n) => Number(n).toLocaleString();
+  const t = Number(total);
+  if (!(t >= 1)) return { at: fmt(index + 1), of: fmt(loaded) };
+  const at = Math.max(0, Number(offset) || 0) + index + 1;
+  return { at: fmt(at), of: fmt(Math.max(t, at)) };
+}
+
 /* The rule only means something for the library's own front page: page 1, newest first, nothing
    filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone. */
 export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded }) {

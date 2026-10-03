@@ -358,6 +358,11 @@ the recorded prompt (or, for a picture made by a Generate run with variables, th
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
 Generate.
 
+**Where you are in the library.** A picture's record and the full-screen viewer both say where the
+picture sits among everything your search and filters match (*14 of 3,240*), not just among the page
+on screen, so the number agrees with how far **‹** and **›** will carry you. A picture your current
+filter does not contain shows no number on its record.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

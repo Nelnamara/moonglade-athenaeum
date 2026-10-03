@@ -24151,6 +24151,10 @@ __DESIGN_TOKENS__
             idx = -1
         prev_id = nav_ids[idx - 1] if idx > 0 else None
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
+        # Where this picture sits in the WHOLE filtered walk and how long the walk is --
+        # the same list prev/next came from, so no second query (#64). The phone prints
+        # them as "14 of 3,240"; a picture the filter does not contain has no position.
+        position = idx + 1 if idx >= 0 else None
         pl = personal_get(db_path, [media_id]).get(str(media_id)) or {}
         out = {
             "row": row,
@@ -24158,6 +24162,7 @@ __DESIGN_TOKENS__
             "personal": {"tags": pl.get("tags", []), "mark": pl.get("mark", ""),
                          "note": pl.get("note", "")},
             "prev_id": prev_id, "next_id": next_id,
+            "position": position, "nav_total": len(nav_ids),
             # Same value the gallery's own "Delete from PixAI" is gated on. A LAN
             # session can browse and spend, but not destroy on the owner's real
             # cloud account.

@@ -707,3 +707,43 @@ def test_edit_prompt_and_bulk_replace_routes(tmp_path):
     assert r2.get_json() == {"ok": True, "changed": 1}
     by_id = {x["media_id"]: x["prompt_full"] for x in load_catalog(db)}
     assert by_id["m1"] == "blue lion" and by_id["m2"] == "red dog"
+
+
+def test_detail_route_reports_the_true_position_and_total_of_the_filtered_walk(tmp_path):
+    """#64: the phone's record said "14 of 100" because it counted inside the ONE loaded
+    page. The detail route already builds the whole filtered, sorted walk to find
+    prev_id/next_id; it now also says where this picture sits in that walk and how long
+    the walk is, from the same list (no second query)."""
+    from tests.conftest import login_client
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="e%d" % n, filename="e%d.png" % n, created_at="2026-01-0%dT00:00:00" % n,
+             prompt_preview="elf" if n in (1, 3, 5) else "orc",
+             rating={1: "3", 2: "", 3: "4", 4: "1", 5: "5"}[n])
+        for n in range(1, 6)
+    ])
+    client = login_client(tmp_path)
+
+    # newest first: e5 e4 e3 e2 e1 -> e3 is third of five, and the neighbours agree
+    d = client.get("/api/next/detail/e3?sort=newest").get_json()
+    assert (d["position"], d["nav_total"]) == (3, 5)
+    assert (d["prev_id"], d["next_id"]) == ("e4", "e2")
+
+    # the sort decides the position: oldest first puts e5 last
+    d = client.get("/api/next/detail/e5?sort=oldest").get_json()
+    assert (d["position"], d["nav_total"]) == (5, 5)
+    assert d["next_id"] is None
+
+    # a narrowing filter shrinks the walk: rating 3+ keeps e5 e3 e1
+    d = client.get("/api/next/detail/e3?sort=newest&rating_min=3").get_json()
+    assert (d["position"], d["nav_total"]) == (2, 3)
+    assert (d["prev_id"], d["next_id"]) == ("e5", "e1")
+
+    # so does a search
+    d = client.get("/api/next/detail/e1?q=elf").get_json()
+    assert (d["position"], d["nav_total"]) == (3, 3)
+
+    # a picture the filter does not contain has no position (the client then shows none)
+    d = client.get("/api/next/detail/e4?rating_min=3").get_json()
+    assert d["position"] is None and d["nav_total"] == 3
+    assert d["prev_id"] is None and d["next_id"] is None

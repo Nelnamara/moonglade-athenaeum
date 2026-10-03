@@ -14,7 +14,7 @@ import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
 import { invalidate } from "../hooks/swrCache.js";
 import useDataSaver from "../hooks/usePhonePrefs.js";
-import { isFrontPage, makeMarker, syncOutcomeText } from "../lib/phoneCore.js";
+import { isFrontPage, makeMarker, pageOffset, syncOutcomeText } from "../lib/phoneCore.js";
 import { readMarker, writeMarker } from "../lib/phonePrefs.js";
 import { syncNow } from "../lib/syncNow.js";
 import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
@@ -1442,7 +1442,7 @@ export default function AppMobile({ boot }) {
           onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
           onDeleted={() => { closeDetails(); lib.load(1, true); }}
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
-          advParams={detailsAdvParams} items={lib.items}
+          advParams={detailsAdvParams}
           onOpenLightbox={openLightbox}
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
           onEnterContest={openContestFor}
@@ -1463,6 +1463,7 @@ export default function AppMobile({ boot }) {
           onClose={closeLightbox} onRate={rate}
           onCurate={(ids, op) => curate.apply(ids, op, false)}
           page={lib.page} pages={lib.pages} loadPage={userLoad}
+          offset={pageOffset(lib.page, lib.perPage)} total={lib.total}
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
           onEnterContest={openContestFor}

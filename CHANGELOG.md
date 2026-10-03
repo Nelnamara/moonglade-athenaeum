@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### The phone
+
+- **The phone's "14 of 3,240" is your real place in the library.** A picture's record and the full-screen viewer used to count only the page on screen ("14 of 100", however many pictures matched); they now count through everything your search and filters match, the same walk the ‹ and › buttons step through. (2026-10-02)
+
 ## [3.15.0] - 2026-10-01 — The Reading Room
 
 - **On a phone or tablet, the bottom row of buttons is always within reach.** In the Lightbox with a long prompt open, on the image details screen, and in the sheets that slide up from the bottom, the last row of buttons could sit just past the end of the scroll — under the browser's own toolbar — where no amount of scrolling reached it. Every full-screen phone view now sizes itself to the part of the screen you can actually see, the Lightbox's lower panel scrolls with its action row pinned to the bottom, sheets are capped to the visible height with their buttons pinned to their foot, and everything leaves room for the home bar. (2026-09-28)
