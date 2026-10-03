@@ -15,8 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight beyond the review below. What shipped is in `CHANGELOG.md` (latest: 3.15.0 —
-  The Reading Room, 2026-10-01).
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.16.0 — Keeping Watch,
+  2026-10-03), per the rule at the top of this file.
 
 ---
 
@@ -26,9 +26,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **`wave1/integration`** *(built 2026-10-02/03)*: Wave 1 of the post-3.15 plan, six lanes stacked,
-  plus the post-3.15 docs tidy. Its `[Unreleased]` lines in `CHANGELOG.md` say what it changes.
-  Waits on the owner's walk sheet and the boop.
+- Nothing in review.
 
 ## Next — scoped, not started
 

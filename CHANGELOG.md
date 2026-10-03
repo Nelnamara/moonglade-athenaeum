@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-10-03 — Keeping Watch
+
 ### From the owner's walk (2026-10-03)
 
 - **The Lightbox edit bar runs at High Priority.** PixAI's free Turbo lane was not starting picture edits, while the same edits at High Priority on PixAI's own site ran at once. The bar now always sends at High Priority; a free card covers it when you have one, otherwise the cost shows in the bar before you send, worked out from the same request. The Generate dock and the Loom keep their own High priority box, off by default. (2026-10-03)
