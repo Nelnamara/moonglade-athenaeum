@@ -14475,16 +14475,26 @@ def create_app(out_dir: Path):
     @app.route("/api/logout", methods=["POST"])
     @tier(PUBLIC)
     def api_logout():
-        """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
-        logout()'s own POST branch; see that route's docstring for the full
-        CSRF/revoke-scope reasoning, identical here (same shared
-        bump_web_user_session_epoch, same scope="this-device" opt-out of the
-        global revoke). Public (@tier(PUBLIC)): an already-dead cookie
-        must still be able to shed itself locally with no valid session to
-        check a CSRF token against -- same "fail toward MORE cleanup, never
-        less" shape as the classic route, so this skips the CSRF check
-        entirely (not just downgrades it) whenever `authorized` is false,
-        exactly like logout() does.
+        """JSON sign-out for the React app (2026-08-02), POST only -- the one sign-out
+        surface since the classic cut removed /logout.
+
+        WHICH DEVICES IT REACHES (#70, owner 2026-10-02: "We should not be logging out
+        all sessions. This is a LAN app, not internet."). Log Out signs out the device
+        it was pressed on and nothing else: `session.clear()`, no epoch bump. Signing
+        out EVERY device -- the move for a lost phone or a session you think was
+        captured -- is its own explicit request, `scope: "everywhere"`, which bumps the
+        account's session epoch (core.bump_web_user_session_epoch) so every outstanding
+        cookie for it stops working. Only that exact word reaches the other devices; a
+        missing, older ("this-device") or unknown scope is an ordinary Log Out. No
+        screen sends "everywhere" today; changing your password in Panel -> Users bumps
+        the same epoch and keeps the device you changed it from.
+
+        A sign-out that would revoke checks the session's CSRF token first, and a bad
+        token is a loud 400 that leaves the session intact. Public (@tier(PUBLIC)): an
+        already-dead cookie must still be able to shed itself locally with no valid
+        session to check a CSRF token against -- "fail toward MORE cleanup, never less"
+        -- so this skips the CSRF check entirely (not just downgrades it) whenever
+        `authorized` is false, and a dead cookie can never revoke anything.
 
         No HTML page to run the Cache Storage purge from this time -- the
         caller (React) does that purge itself in JS on a successful response,
@@ -14499,7 +14509,7 @@ def create_app(out_dir: Path):
         if authorized:
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-            if body.get("scope") != "this-device":
+            if body.get("scope") == "everywhere":
                 core.bump_web_user_session_epoch(user)
         session.clear()
         return jsonify({"ok": True})
@@ -14953,9 +14963,9 @@ def create_app(out_dir: Path):
         # Written only AFTER the folder is known good -- never write first and hope, the
         # same order /api/setup/save-key follows for the API key.
         # Under _accounts_lock, which serializes every read-modify-write of config.json
-        # in this process. Without it this handler can read the file, a concurrent /logout
-        # can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back -- which
-        # un-revokes the session that just logged out. config.json holds auth state, not
+        # in this process. Without it this handler can read the file, a concurrent sign-out
+        # everywhere can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back --
+        # which un-revokes the sessions that were just signed out. config.json holds auth state, not
         # just settings, so any writer of it belongs inside this lock.
         try:
             with _core._accounts_lock:
@@ -17003,7 +17013,8 @@ def create_app(out_dir: Path):
         session is a stateless, client-side signed cookie with nothing server-side
         to revoke, so without this re-check a cookie captured off plain-HTTP LAN
         traffic would keep working forever -- surviving both the real user
-        signing out (/logout bumps their sess_epoch) and the account being removed
+        signing out everywhere (/api/logout's scope "everywhere" bumps their
+        sess_epoch) and the account being removed
         (get_web_user_session_epoch returns None once it's gone). See that
         function's docstring for the fuller writeup."""
         user = session.get("user")

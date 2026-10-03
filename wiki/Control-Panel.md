@@ -410,7 +410,9 @@ The **Users** tab lists your gallery login accounts.
   take the count to zero and re-open the first-run bootstrap, use `--remove-web-user` on the
   server machine; that's the escape hatch, and it's CLI-only on purpose.
 - **Your password** — change your own from anywhere, including a tablet on the LAN. You have
-  to enter your current password to prove it's you.
+  to enter your current password to prove it's you. Changing it signs out every other device
+  on your account and keeps the one you're using — the way to sign out everywhere if a device
+  is lost (**Log Out** signs out only the device you press it on).
 - **Reset password** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.

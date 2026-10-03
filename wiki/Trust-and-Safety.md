@@ -77,14 +77,15 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   still be cleared locally), and the static pieces the login page needs to render: your
   branding art and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
-  rate-limited per address. **Sign out** signs you out *everywhere* — it revokes every
-  outstanding session for that account on every device, which is what makes it the right thing
-  to press if you think a session was captured. (Simply visiting the sign-out URL, rather than
-  pressing the button, only clears the browser you're sitting at; nothing that merely *links*
-  to it can knock your other devices offline.) **Sign out also clears anything your browser
+  rate-limited per address. **Log Out** signs out the device you pressed it on and nothing
+  else — your other devices stay signed in. If a device is lost, or you think a session was
+  captured, **change your password** in **Control Panel → Users**: that signs out every other
+  device on your account at once and keeps the one you changed it from. (Nothing that merely
+  *links* to the sign-out address can sign anyone out — it only answers the button's own
+  request.) **Log Out also clears anything your browser
   cached locally** — installing this as an app (see [FAQ](FAQ)) keeps a copy of images you've
   viewed so it can work offline, and signing out deletes that local copy too, so a shared or
-  borrowed device doesn't keep showing them after you sign out.
+  borrowed device doesn't keep showing them after you log out.
   Account creation is **closed after the first local bootstrap**: the login page mints the very
   first account (only from the server's own machine, only while none exist), then never offers
   signup again. New accounts come only from **Panel → Users** *on the machine running the

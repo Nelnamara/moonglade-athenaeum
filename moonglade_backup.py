@@ -282,7 +282,7 @@ def _save_config(cfg):
     catches ValueError on a corrupt file and returns {} -- which reads as an EMPTY
     AUTH_USERS, which drops /login into local-only bootstrap_mode (whoever is at the
     machine mints a fresh admin) and clears every live session. Revocation state
-    (AUTH_EPOCH_SEQ) now lives in this file too, and EVERY /logout writes it, so the
+    (AUTH_EPOCH_SEQ) now lives in this file too, and every sign-out everywhere writes it, so the
     old truncate-then-write was a steadily widening window on an auth wipe."""
     path = _config_path()
     data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
@@ -689,11 +689,12 @@ def get_web_user_session_epoch(username):
     re-checks it against this on every request, so:
       - removing the account invalidates any outstanding session for it immediately
         (this returns None -> no epoch can ever match again), and
-      - /logout can revoke every outstanding session for that identity (not just
-        the browser that clicked it) by calling bump_web_user_session_epoch()
-        before clearing its own session.
+      - a sign-out everywhere (/api/logout with scope "everywhere") revokes every
+        outstanding session for that identity (not just the browser that clicked it)
+        by calling bump_web_user_session_epoch() before clearing its own session.
+        A plain Log Out signs out only its own browser (#70).
     Without this, a stolen session cookie (plain-HTTP LAN, packet capture) would
-    keep working after the legitimate user signs out or the account is removed,
+    keep working after the legitimate user signs out everywhere or the account is removed,
     since the stock Flask session is a stateless, client-side signed cookie with
     nothing server-side to revoke -- see CHANGELOG.md for the fuller writeup."""
     cfg = _load_config()
@@ -705,7 +706,8 @@ def get_web_user_session_epoch(username):
 
 def bump_web_user_session_epoch(username):
     """Issue `username` a fresh session-epoch ticket, invalidating every outstanding
-    session cookie for that identity in one move (used by /logout). No-op (returns
+    session cookie for that identity in one move (used by /api/logout's sign-out
+    everywhere). No-op (returns
     False) if the account no longer exists.
 
     Runs the whole read-modify-write under `_accounts_lock`, like every OTHER
