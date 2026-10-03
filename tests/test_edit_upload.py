@@ -338,6 +338,17 @@ def test_edit_v4_is_first_with_its_own_record():
     assert core.DEFAULT_EDIT_MODEL == "edit-pro"          # the card's default is unchanged
 
 
+def test_edit_v4_is_labelled_as_pixai_labels_it():
+    """The owner's walk, 2026-10-03: it is PixAI's own "PixAI Edit (v4.0)", the latest version of
+    PixAI's general Edit model -- not Edit Pro, not Tsubaki.3 -- and it reads exactly that on the
+    card and on the picture it makes."""
+    assert core.EDIT_MODELS["edit-v4"]["label"] == "PixAI Edit (v4.0)"
+    meta = core.extract_full_meta({"parameters": {"chat": {
+        "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_V4,
+        "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
+    assert meta["model_id"] == EDIT_V4 and meta["model_name"] == "PixAI Edit (v4.0)"
+
+
 def test_edit_v4_clamps_to_what_it_takes():
     assert core.clamp_edit_config(EDIT_V4, "4K", "medium", "8:1") == ("4K", "", "8:1")
     assert core.clamp_edit_config(EDIT_V4, "8K", "high", "3:5") == ("1K", "", "auto")

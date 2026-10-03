@@ -28,10 +28,11 @@ export const EDIT_ASPECT_AUTO = "auto";
    1983993578828959744, extra.chatEditing) -- ten inputs, 1K/2K/4K, no quality knob, no
    published default aspect (so Auto, as on Reference Pro), fourteen aspects down to 1:8 / 8:1.
    Listed FIRST, with a "new" tag until `new_until` (30 days from the build); the card's
-   default model stays Edit Pro. */
+   default model stays Edit Pro. Labelled as PixAI labels it, "PixAI Edit (v4.0)" -- the latest version
+   of PixAI's general Edit model, not Edit Pro and not Tsubaki.3 (the owner's walk, 2026-10-03). */
 export const EDIT_CAPS = {
   "edit-v4": {
-    label: "Edit v4.0", max_refs: 10,
+    label: "PixAI Edit (v4.0)", max_refs: 10,
     resolutions: ["1K", "2K", "4K"],
     qualities: [],
     aspects: [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],

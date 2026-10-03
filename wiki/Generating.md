@@ -626,9 +626,9 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
-type the change, set resolution/aspect/quality, then submit. The edit models are **Edit v4.0**
-(new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
-setting), **Edit Pro**, **Edit Pro (v2.0)** (new — PixAI's newer version of Edit Pro: up to 10
+type the change, set resolution/aspect/quality, then submit. The edit models are **PixAI Edit
+(v4.0)** (new — the latest version of PixAI's general Edit model: up to 10 images, 1K/2K/4K,
+ratios down to 1:8 and 8:1 under **More**, no quality setting), **Edit Pro**, **Edit Pro (v2.0)** (new — PixAI's newer version of Edit Pro: up to 10
 images, 1K/2K, low/medium/high, the same price as Edit Pro, without Edit Pro's 1:3 and 3:1) and
 **Reference Pro**. Edit Pro stays the default; PixAI still offers both versions.
 
@@ -959,7 +959,7 @@ the button comes back — the app will tell you it doesn't know rather than leav
   and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
   tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
   The edit models take different numbers of reference images (Edit Pro up to 4; Edit Pro (v2.0),
-  Edit v4.0 and Reference Pro up to 10; the picture being edited counts as one of them), so switching
+  PixAI Edit (v4.0) and Reference Pro up to 10; the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
   out" — instead of thinning the strip in silence and letting you submit a paid edit

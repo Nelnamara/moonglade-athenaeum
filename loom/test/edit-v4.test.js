@@ -23,6 +23,10 @@ describe("Edit v4.0 (L6)", () => {
     assert.equal(EDIT_DEFAULTS.model, "edit-pro");
   });
 
+  test("labelled as PixAI labels it: PixAI Edit (v4.0) (owner's walk, 2026-10-03)", () => {
+    assert.equal(EDIT_CAPS["edit-v4"].label, "PixAI Edit (v4.0)");
+  });
+
   test("the extremes sit under More: long side at least twice the short", () => {
     assert.deepEqual(editAspectGroups("edit-v4").extreme, ["21:9", "1:4", "4:1", "1:8", "8:1"]);
     assert.ok(editAspectGroups("edit-v4").common.includes(EDIT_ASPECT_AUTO));

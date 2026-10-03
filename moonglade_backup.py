@@ -9395,6 +9395,8 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # record's own order. No published default aspect means PixAI's own client sends no
 # aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
 # Reference Pro. Listed first; the card's default model stays Edit Pro.
+# Labelled as PixAI labels it, "PixAI Edit (v4.0)": the latest version of PixAI's general Edit
+# model, not Edit Pro and not Tsubaki.3 (the owner's walk, 2026-10-03).
 #
 # PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new VERSION of the Edit Pro model
 # (2026-09-29), not a new model, copied from its own version row 2061589941358465024,
@@ -9407,7 +9409,7 @@ EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
     "edit-v4": {
         "model_id": "1983993578828959744",
-        "label": "Edit v4.0", "max_refs": 10,
+        "label": "PixAI Edit (v4.0)", "max_refs": 10,
         "resolutions": ["1K", "2K", "4K"],
         "qualities": [],
         "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",

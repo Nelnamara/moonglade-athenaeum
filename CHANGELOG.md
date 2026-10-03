@@ -18,6 +18,7 @@ git tags. Full prose notes for tagged versions live on
 
 ### From the owner's walk (2026-10-03)
 
+- **The Edit card's newest model is called by its PixAI name, PixAI Edit (v4.0)** — the latest version of PixAI's general Edit model (it is not Edit Pro, and not Tsubaki.3). It was "Edit v4.0"; nothing else about it changes, and the pictures it makes are filed under the new name. (2026-10-03)
 - **The search operators live in the search box now.** Click into the search field and its suggestion list shows an **Operators** group (`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`); picking one adds it to the search and runs it, picking it again takes it out. The row of operator chips at the end of the **⚲ Filters** tray is gone. (2026-10-03)
 
 ### Docs and help text
