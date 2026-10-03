@@ -31,6 +31,10 @@ var LoomBundle = (() => {
     return Number.isFinite(n) ? n : null;
   };
   var known = (v) => v == null || v === "" ? null : num(v);
+  var knownDur = (v) => {
+    const n = known(v);
+    return n != null && n > 0 ? n : null;
+  };
   var storedTakes = (card) => card && Array.isArray(card.takes) ? card.takes : null;
   var maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || {}).n) || 0), 0);
   var mirrorTake = (card, n) => {
@@ -40,7 +44,7 @@ var LoomBundle = (() => {
       mid: str(card.resultMid),
       taskId: "",
       at: "",
-      dur: known(card.actualDur),
+      dur: knownDur(card.actualDur),
       trimIn: Number(card.trimIn) || 0,
       trimOut: card.trimOut == null ? null : Number(card.trimOut),
       settings: null,
@@ -56,11 +60,12 @@ var LoomBundle = (() => {
     const stored = storedTakes(card);
     const mid = str(card.resultMid);
     if (!stored) return mid ? [mirrorTake(card, 1)] : [];
-    if (mid && !stored.some((t) => t && str(t.mid) === mid)) {
-      const n = Math.max(maxN(stored), Number(card.takeSeq) || 0) + 1;
-      return stored.concat([mirrorTake(card, n)]);
+    const healed = stored.some((t) => t && t.dur != null && knownDur(t.dur) == null) ? stored.map((t) => t && t.dur != null && knownDur(t.dur) == null ? { ...t, dur: null } : t) : stored;
+    if (mid && !healed.some((t) => t && str(t.mid) === mid)) {
+      const n = Math.max(maxN(healed), Number(card.takeSeq) || 0) + 1;
+      return healed.concat([mirrorTake(card, n)]);
     }
-    return stored;
+    return healed;
   };
   var selectedTakeOf = (card) => {
     const mid = str(card && card.resultMid);
@@ -81,7 +86,7 @@ var LoomBundle = (() => {
     const v = {
       ...t,
       mid: str(card.resultMid),
-      dur: known(card.actualDur) != null ? known(card.actualDur) : t.dur,
+      dur: knownDur(card.actualDur) != null ? knownDur(card.actualDur) : knownDur(t.dur),
       trimIn: Number(card.trimIn) || 0,
       trimOut: card.trimOut == null ? null : Number(card.trimOut),
       imported: !!card.imported
@@ -179,7 +184,7 @@ var LoomBundle = (() => {
     const next = {
       ...card,
       resultMid: str(t.mid),
-      actualDur: t.dur == null ? null : t.dur,
+      actualDur: knownDur(t.dur),
       trimIn: Number(t.trimIn) || 0,
       trimOut: t.trimOut == null ? null : t.trimOut,
       imported: !!t.imported,
@@ -530,9 +535,10 @@ var LoomBundle = (() => {
   var cutPointOf = (card) => {
     if (!card) return null;
     const t = known(card.trimOut);
-    return t != null ? t : known(card.actualDur);
+    return t != null ? t : knownDur(card.actualDur);
   };
   var sameAt = (a, b) => a == null || b == null ? true : Math.abs(Number(a) - Number(b)) < 0.05;
+  var tookOf = (d) => ({ at: (d || {}).at, end: (d || {}).at_end });
   var makeAnchor = (src, frameMid, via, took) => {
     const tk = took || {};
     const at = known(tk.at);
@@ -648,8 +654,8 @@ var LoomBundle = (() => {
     return m;
   };
   var mergeBoards = (local, remote, opts) => {
-    if (!remote) return { project: local, changed: [] };
-    if (!local) return { project: remote, changed: [] };
+    if (!remote) return { project: local, changed: [], kept: [], reverted: [] };
+    if (!local) return { project: remote, changed: [], kept: [], reverted: [] };
     const resolved = new Set(((opts || {}).resolvedSubmits || []).map(str));
     const loc = cardsById(local);
     const changed = [];
@@ -690,8 +696,8 @@ var LoomBundle = (() => {
       }
       if (dead.size && Array.isArray(out.takes)) {
         const sel = selectedTakeOf(out);
-        const kept = out.takes.filter((t) => t.n === sel || !dead.has(str(t.mid)));
-        if (kept.length !== out.takes.length) out = { ...out, takes: kept };
+        const kept2 = out.takes.filter((t) => t.n === sel || !dead.has(str(t.mid)));
+        if (kept2.length !== out.takes.length) out = { ...out, takes: kept2 };
       }
       if ((lc.deletedTakes || []).length || (out.deletedTakes || []).length) {
         const held = new Set(takesOf(out).map((t) => str(t.mid)));
@@ -735,18 +741,79 @@ var LoomBundle = (() => {
         return m && !remoteMids.has(m) && !before.has(m);
       });
     };
+    const remActs = new Set((remote.acts || []).map((x) => x && x.id));
+    const mergedById = cardsById(merged);
+    const trimOf = (c) => [Number(c.trimIn) || 0, c.trimOut == null ? null : Number(c.trimOut)].join("|");
+    const splitShot = (c) => {
+      const want = takesOf(c).map((t) => str(t.mid)).filter(Boolean);
+      let pick = "";
+      remIds.forEach(({ c: rc }) => {
+        const have = new Set(takesOf(rc).map((t) => str(t.mid)));
+        if (!want.every((m) => have.has(m))) return;
+        const lt = loc.get(rc.id), mt = mergedById.get(rc.id);
+        const overridden = !!(lt && mt && trimOf(lt.c) !== trimOf(mt.c));
+        if (!pick || overridden && !pick.overridden) pick = { id: rc.id, overridden };
+      });
+      return pick ? pick.id : "";
+    };
+    const reverted = [], kept = [];
     loc.forEach(({ c, a }) => {
-      if (remIds.has(c.id) || !takesOf(c).length || !landedHere(c)) return;
-      const act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
-      if (!act) {
-        merged.acts = [{ ...a, cards: [c] }];
-        changed.push({ id: c.id, kept: true });
+      if (remIds.has(c.id)) return;
+      const has = takesOf(c).length > 0;
+      if (has && landedHere(c)) {
+        const actGone = !remActs.has(a.id);
+        let act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
+        const restored = !act;
+        if (restored) {
+          act = { ...a, cards: [] };
+          merged.acts = [act];
+        }
+        act.cards = act.cards.concat([c]);
+        kept.push({ id: c.id, act: str(act.name), actGone, actRestored: restored });
         return;
       }
-      act.cards = act.cards.concat([c]);
-      changed.push({ id: c.id, kept: true });
+      if (baseCards && baseCards.has(c.id)) reverted.push({ id: c.id, kind: remActs.has(a.id) ? "removed" : "act-removed" });
+      else if (has) reverted.push({ id: c.id, kind: "split", shot: splitShot(c) });
     });
-    return { project: merged, changed };
+    return { project: merged, changed, kept, reverted };
+  };
+  var mergeNotice = (out, codes) => {
+    const o = out || {};
+    const lc = codes && codes.local || {}, mc = codes && codes.merged || {};
+    const names = (xs) => {
+      const n = xs.filter(Boolean);
+      if (n.length <= 1) return n.join("");
+      if (n.length <= 3) return n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
+      return n.slice(0, 3).join(", ") + " and " + (n.length - 3) + " more";
+    };
+    const say = (list, codeOf) => {
+      const n = list.map((x) => codeOf(x)).filter(Boolean);
+      return { n: n.length, text: names(n) };
+    };
+    const parts = ["Your takes were kept; other edits from this tab were replaced."];
+    const keptMoved = (o.kept || []).filter((x) => x && x.actGone && !x.actRestored);
+    const byAct = /* @__PURE__ */ new Map();
+    keptMoved.forEach((x) => {
+      if (!byAct.has(x.act)) byAct.set(x.act, []);
+      byAct.get(x.act).push(x);
+    });
+    byAct.forEach((list, act) => {
+      const k = say(list, (x) => lc[x.id] || mc[x.id]);
+      if (k.n) parts.push(k.text + " " + (k.n === 1 ? "was" : "were") + " kept in " + (act || "the first act") + " because " + (k.n === 1 ? "its" : "their") + " act was deleted in the other tab.");
+    });
+    const back = say((o.kept || []).filter((x) => x && x.actRestored), (x) => lc[x.id] || mc[x.id]);
+    if (back.n) parts.push(back.text + " " + (back.n === 1 ? "was" : "were") + " kept and " + (back.n === 1 ? "its" : "their") + " act is back: the other tab had deleted it.");
+    const rev = o.reverted || [];
+    const of = (kind) => rev.filter((x) => x && x.kind === kind);
+    const splits = say(of("split"), (x) => lc[x.shot] || mc[x.shot] || lc[x.id]);
+    if (splits.n) parts.push("Your split" + (splits.n === 1 ? "" : "s") + " of " + splits.text + " " + (splits.n === 1 ? "was" : "were") + " undone because the board changed in another tab.");
+    const gone = say(of("removed"), (x) => lc[x.id]);
+    if (gone.n) parts.push(gone.text + (gone.n === 1 ? " stays deleted: the other tab removed it." : " stay deleted: the other tab removed them."));
+    const actGone = say(of("act-removed"), (x) => lc[x.id]);
+    if (actGone.n) parts.push(actGone.text + (actGone.n === 1 ? " stays deleted: the other tab removed its act." : " stay deleted: the other tab removed their act."));
+    const moved = say(o.changed || [], (x) => mc[x.id]);
+    if (moved.n) parts.push("\u2605 or take numbers changed on " + moved.text + ".");
+    return parts.join(" ");
   };
 
   // src/loom-core.js
@@ -1057,6 +1124,30 @@ var LoomBundle = (() => {
       claim: a.claim_credits ? "+" + Number(a.claim_credits).toLocaleString() + " claimable" : ""
     };
   };
+  var ACCOUNT_BIND_DEBOUNCE_MS = 600;
+  var makeAccountRefresh = ({ read, setTimer, clearTimer, delay = ACCOUNT_BIND_DEBOUNCE_MS }) => {
+    let pending2 = null;
+    const stop = () => {
+      if (pending2 != null) {
+        clearTimer(pending2);
+        pending2 = null;
+      }
+    };
+    return {
+      now() {
+        stop();
+        read();
+      },
+      bind() {
+        stop();
+        pending2 = setTimer(() => {
+          pending2 = null;
+          read();
+        }, delay);
+      },
+      cancel: stop
+    };
+  };
   var SPEND_OUT = { running: 1, slow: 1, stale: 1, paused: 1 };
   var spendLandedKey = (...maps) => maps.map((m, i) => Object.keys(m || {}).sort().map((id) => {
     const s = m[id] || {};
@@ -1187,7 +1278,10 @@ var LoomBundle = (() => {
     const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
     return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
   };
-  var durOf = (c) => Number(c.actualDur || c.duration) || 0;
+  var durOf = (c) => {
+    const a = Number(c.actualDur);
+    return a > 0 ? a : Number(c.duration) || 0;
+  };
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
     const scale = total || 1;
@@ -1495,7 +1589,7 @@ ${"=".repeat(48)}
   }));
   function buildExportClips(entries) {
     const clips = entries.filter((e) => e.c.resultMid).map((e) => {
-      const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
+      const dur = (Number(e.c.actualDur) > 0 ? Number(e.c.actualDur) : 0) || e.c.duration || 8, cin = e.c.trimIn || 0;
       const cout = e.c.trimOut != null ? e.c.trimOut : dur;
       const clip2 = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
       const cr = e.c.crop;
@@ -1721,7 +1815,7 @@ ${"=".repeat(48)}
     (entries || []).forEach((e) => {
       const c = e && e.c;
       if (!c || !c.resultMid) return;
-      const dur = num2(c.actualDur) || num2(c.duration) || 8;
+      const dur = (num2(c.actualDur) > 0 ? num2(c.actualDur) : 0) || num2(c.duration) || 8;
       const cin = num2(c.trimIn) || 0;
       const cout = c.trimOut != null && num2(c.trimOut) != null ? num2(c.trimOut) : dur;
       const span = Math.max(0.1, cout - cin);
@@ -1818,6 +1912,23 @@ ${"=".repeat(48)}
     const skipped = all - segs.length;
     return "cut length " + len.toFixed(1) + " s" + (skipped > 0 ? " \xB7 " + skipped + " unrendered skipped" : "");
   };
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var savedDay = (iso) => {
+    if (!iso) return "";
+    const d = new Date(String(iso));
+    return Number.isNaN(d.getTime()) ? "" : MONTHS[d.getMonth()] + " " + d.getDate();
+  };
+  var andList = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
+  var unreadableBedsNote = (u) => {
+    const rows = (u && Array.isArray(u.unreadable) ? u.unreadable : []).filter((r) => r && typeof r === "object");
+    if (!rows.length) return "";
+    const named = rows.map((r) => {
+      const day = savedDay(r.saved);
+      return (r.name ? '"' + String(r.name) + '"' : "storyboard " + String(r.board || "")) + (day ? " (saved " + day + ")" : "");
+    });
+    const one = rows.length === 1;
+    return "Can't tell which music beds are unused: " + andList(named) + " didn't read. Nothing was removed. " + (one ? "Restore its file from a backup or delete it: " : "Restore their files from a backup or delete them: ") + rows.map((r) => String(r.where || "")).join(", ");
+  };
 
   // src/loom-edl-core.js
   var EDL_FPS = 24;
@@ -1888,7 +1999,7 @@ ${"=".repeat(48)}
         skipped.push(e.code);
         return;
       }
-      const dur = num3(v.dur) || num3(e.c.actualDur) || num3(e.c.duration) || 8;
+      const dur = num3(v.dur) || num3(e.c.duration) || 8;
       const tin = num3(v.trimIn) || 0;
       const tout = v.trimOut != null && num3(v.trimOut) != null ? num3(v.trimOut) : dur;
       const inF = framesOf(tin, fps);
@@ -2279,17 +2390,17 @@ ${"=".repeat(48)}
     const out = [];
     for (let i = 0; i + 1 < rendered.length; i++) {
       const A = rendered[i], B = rendered[i + 1];
-      const aAt = A.v.trimOut != null ? A.v.trimOut : A.v.dur != null ? A.v.dur : durOf(A.e.c);
+      const aAt = A.v.trimOut != null ? A.v.trimOut : A.v.dur != null ? A.v.dur : null;
       out.push({
         key: A.e.c.id + ">" + B.e.c.id,
-        a: { cardId: A.e.c.id, code: A.e.code, mid: String(A.v.mid), take: A.v.n, at: num4(aAt) || 0 },
+        a: { cardId: A.e.c.id, code: A.e.code, mid: String(A.v.mid), take: A.v.n, at: aAt == null ? null : num4(aAt) || 0 },
         b: { cardId: B.e.c.id, code: B.e.code, mid: String(B.v.mid), take: B.v.n, at: num4(B.v.trimIn) || 0 },
         stale: anchorState(B.e.c, map) === "stale"
       });
     }
     return out;
   };
-  var frameUrl = (mid, at) => "/api/loom/frame?mid=" + encodeURIComponent(String(mid || "")) + "&at=" + (Math.round(Math.max(0, num4(at) || 0) * RIBBON_FPS) / RIBBON_FPS).toFixed(4);
+  var frameUrl = (mid, at) => "/api/loom/frame?mid=" + encodeURIComponent(String(mid || "")) + (at == null ? "&end=1" : "&at=" + (Math.round(Math.max(0, num4(at) || 0) * RIBBON_FPS) / RIBBON_FPS).toFixed(4));
   var toLinear = (c) => {
     const v = c / 255;
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
@@ -2325,6 +2436,46 @@ ${"=".repeat(48)}
     return "Matches";
   };
   var pairFlagged = (pair, mean) => !!(pair && pair.stale) || colourJump(mean);
+
+  // src/loom-frames-core.js
+  var FRAME_THUMBS_MAX = 60;
+  var FRAME_GONE_TEXT = "Frame not on this machine. Splice again.";
+  var PIXAI_ID = /^\d{1,32}$/;
+  var collectFrameIds = (project) => {
+    const out = [];
+    const seen2 = /* @__PURE__ */ new Set();
+    const acts = project && Array.isArray(project.acts) ? project.acts : [];
+    acts.forEach((a) => (a && Array.isArray(a.cards) ? a.cards : []).forEach((c) => {
+      [c && c.openFrame, c && c.closeFrame].forEach((f) => {
+        if (!f || f.thumbId) return;
+        const id = String(f.mediaId == null ? "" : f.mediaId).trim();
+        if (!PIXAI_ID.test(id) || seen2.has(id)) return;
+        seen2.add(id);
+        out.push(id);
+      });
+    }));
+    return out;
+  };
+  var emptyFrameFix = () => ({ gone: /* @__PURE__ */ new Set(), bust: {} });
+  var applyFrameThumbs = (fix, ans, stamp) => {
+    const f = fix || emptyFrameFix();
+    const a = ans || {};
+    const gone = new Set(f.gone || []);
+    (a.gone || []).forEach((id) => gone.add(String(id)));
+    const bust = { ...f.bust || {} };
+    (a.fetched || []).forEach((id) => {
+      bust[String(id)] = stamp;
+    });
+    return { gone, bust };
+  };
+  var frameGone = (f, fix) => !!(f && !f.thumbId && f.mediaId && fix && fix.gone && fix.gone.has(String(f.mediaId)));
+  var frameThumbSrc = (f, thumbs, fix) => {
+    if (f && f.thumbId) return (thumbs || {})[f.thumbId];
+    if (!f || !f.mediaId) return null;
+    if (frameGone(f, fix)) return null;
+    const v = fix && fix.bust ? fix.bust[String(f.mediaId)] : void 0;
+    return "/thumbs/" + f.mediaId + ".jpg" + (v != null ? "?v=" + v : "");
+  };
 
   // src/loom-phone-core.js
   var SWIPE_MIN_PX = 40;
@@ -11083,7 +11234,7 @@ ${"=".repeat(48)}
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
-  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function pad2(n) {
     return (n < 10 ? "0" : "") + n;
   }
@@ -11091,7 +11242,7 @@ ${"=".repeat(48)}
     if (!ts) return "\u2014";
     const d = new Date(ts * 1e3);
     const h = d.getHours(), ap = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
-    return MONTHS[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
+    return MONTHS2[d.getMonth()] + " " + d.getDate() + ", " + h12 + ":" + pad2(d.getMinutes()) + " " + ap;
   }
   function fmtDuration(s) {
     s = Math.max(0, Math.floor(s || 0));
@@ -13019,16 +13170,36 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
   }
   function useAccountLine(landedKey, bind) {
     const [acct, setAcct] = useState2(null);
-    useEffect2(() => {
-      let live = true;
-      fetch("/api/account").then((r) => r.json()).then((d) => {
-        if (live) setAcct(d);
-      }).catch(() => {
-      });
-      return () => {
-        live = false;
+    const gate = useRef2(null);
+    if (!gate.current) gate.current = makeLatestOnly();
+    const refresh3 = useRef2(null);
+    if (!refresh3.current) {
+      const read = () => {
+        const tk = gate.current.begin();
+        fetch("/api/account").then((r) => r.json()).then((d) => {
+          if (gate.current.wins(tk)) setAcct(d);
+        }).catch(() => {
+        });
       };
-    }, [landedKey, bind]);
+      refresh3.current = makeAccountRefresh({ read, setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h) });
+    }
+    useEffect2(() => {
+      refresh3.current.now();
+    }, [landedKey]);
+    const firstBind = useRef2(true);
+    useEffect2(() => {
+      if (firstBind.current) {
+        firstBind.current = false;
+        return;
+      }
+      refresh3.current.bind();
+    }, [bind]);
+    useEffect2(() => {
+      return () => {
+        refresh3.current.cancel();
+        gate.current.cancel();
+      };
+    }, []);
     return acct;
   }
   function LoomV2({
@@ -13043,6 +13214,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     useExistingVideo,
     genState,
     thumbs,
+    frameFix,
     openPick,
     storeThumb,
     setAct,
@@ -13491,7 +13663,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       else setDraftCard(fn);
     };
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
-    const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
+    const frameSrc = (f) => frameThumbSrc(f, thumbs, frameFix);
     activeRef.current = active;
     loomTargetRef.current = projectApi.activeId ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
     drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
@@ -13937,7 +14109,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           },
           /* @__PURE__ */ React.createElement("div", { className: "lv-cframe" }, (() => {
             const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null);
-            return s ? /* @__PURE__ */ React.createElement("img", { src: s, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-cframeph" }, e.c.mode);
+            return s ? /* @__PURE__ */ React.createElement("img", { src: s, alt: "" }) : /* @__PURE__ */ React.createElement("span", { className: "lv-cframeph" }, frameGone(e.c.openFrame, frameFix) ? FRAME_GONE_TEXT : e.c.mode);
           })()),
           /* @__PURE__ */ React.createElement("div", { className: "lv-code" }, e.code),
           /* @__PURE__ */ React.createElement("div", { className: "lv-ctitle" }, e.c.title || "untitled"),
@@ -14171,7 +14343,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
               return;
             }
             setHandoff("");
-            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
           }).catch(() => setHandoff("err"));
         } else {
           patchFrame("openFrame", { ...src.c.closeFrame });
@@ -15745,6 +15917,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     project,
     entries,
     thumbs,
+    frameFix,
     genState,
     selShot,
     setSelShot,
@@ -15866,7 +16039,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       };
     }, []);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
-    const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
+    const frameSrc = (f) => frameThumbSrc(f, thumbs, frameFix);
     const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
     const AF = artFilters_default;
     const statusOf = (c) => {
@@ -16110,7 +16283,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             return;
           }
           setDfHandoff("");
-          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
         }).catch(() => setDfHandoff("err"));
       } else {
         dfPatchFrame("openFrame", { ...src.c.closeFrame });
@@ -17495,7 +17668,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           placeholder: "cut, dissolve",
           onChange: (ev) => dfPatch((cc) => ({ ...cc, transOut: ev.target.value }))
         }
-      ), genPalFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lm-genrefline" }, (c.cast || []).length, " cast \xB7 ", (c.refs || []).length, " refs", !modeSendsRefs(c.mode) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), modeSendsLine(c.mode))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, showClose ? "Start / end frame" : "Start frame"), /* @__PURE__ */ React.createElement("div", { className: "lm-genframerow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.openFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.openFrame), alt: "opening frame" }) : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "openFrame") || "\u2014"))), showClose && /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.closeFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.closeFrame), alt: "closing frame" }) : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "closeFrame") || "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "frames are attached on Shot Detail \u2014 this is a preview only"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "What will be sent"), /* @__PURE__ */ React.createElement("div", { className: "lm-genpreview" }, shotText(dfLive, project, imgSrc)), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Model"), /* @__PURE__ */ React.createElement("div", { className: "lm-genmodelrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-genmodelthumb" }), "PixAI Motion v2"), /* @__PURE__ */ React.createElement("div", { className: "lm-gencaps" }, ["15s", "multi-ref", "audio", "end-frame"].map((cap) => /* @__PURE__ */ React.createElement("span", { key: cap, className: "lm-gencap" }, cap))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Channel"), /* @__PURE__ */ React.createElement(
+      ), genPalFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lm-genrefline" }, (c.cast || []).length, " cast \xB7 ", (c.refs || []).length, " refs", !modeSendsRefs(c.mode) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), modeSendsLine(c.mode))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, showClose ? "Start / end frame" : "Start frame"), /* @__PURE__ */ React.createElement("div", { className: "lm-genframerow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.openFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.openFrame), alt: "opening frame" }) : frameGone(c.openFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "openFrame") || "\u2014"))), showClose && /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.closeFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.closeFrame), alt: "closing frame" }) : frameGone(c.closeFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "closeFrame") || "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "frames are attached on Shot Detail \u2014 this is a preview only"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "What will be sent"), /* @__PURE__ */ React.createElement("div", { className: "lm-genpreview" }, shotText(dfLive, project, imgSrc)), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Model"), /* @__PURE__ */ React.createElement("div", { className: "lm-genmodelrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-genmodelthumb" }), "PixAI Motion v2"), /* @__PURE__ */ React.createElement("div", { className: "lm-gencaps" }, ["15s", "multi-ref", "audio", "end-frame"].map((cap) => /* @__PURE__ */ React.createElement("span", { key: cap, className: "lm-gencap" }, cap))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Channel"), /* @__PURE__ */ React.createElement(
         "select",
         {
           className: "lm-gensel",
@@ -17924,12 +18097,12 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       if (sid) resolvedRef.current.add(String(sid));
     }, []);
     const mergesRef = useRef2(/* @__PURE__ */ new WeakMap());
-    const namesOf = (p, ids) => {
+    const codesOf = (p) => {
       const codes = {};
-      (p ? flat(p) : []).forEach((e) => {
+      (isBoard(p) ? flat(p) : []).forEach((e) => {
         codes[e.c.id] = e.code;
       });
-      return ids.map((id) => codes[id]).filter(Boolean);
+      return codes;
     };
     const mergeAfterConflict = async (id, res, depth2) => {
       const key = PPRE + id;
@@ -17955,18 +18128,18 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       } catch (e) {
         base = null;
       }
-      const { project: merged, changed } = mergeBoards(
+      const out = mergeBoards(
         local,
         remote,
         { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null }
       );
+      const merged = out.project;
       if (open2) setProject(merged);
       if (typeof window !== "undefined" && window.Toast) {
-        const codes = namesOf(merged, changed.map((x) => x.id));
         window.Toast.show({
           kind: "err",
           title: "This storyboard changed in another tab",
-          msg: "Your takes were kept; other edits from this tab were replaced." + (codes.length ? " \u2605 or take numbers changed on " + codes.join(", ") + "." : "")
+          msg: mergeNotice(out, { local: codesOf(local), merged: codesOf(merged) })
         });
       }
       const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
@@ -18659,7 +18832,7 @@ Your currently-open board is left untouched.`)) return;
         delete n[cardId];
         return n;
       });
-      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p);
+      setProject((p) => p ? patchCardByIdWith(p, cardId, (c) => reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: tookOf(d) })) : p);
     };
     const keepAnchor2 = (cardId) => {
       setProject((p) => {
@@ -18846,7 +19019,8 @@ Your currently-open board is left untouched.`)) return;
       try {
         const r = await fetch("/api/loom/beds/unused");
         const d = await r.json();
-        setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+        if (r.status === 409 && d && Array.isArray(d.unreadable)) setUnusedBeds({ files: [], count: 0, unreadable: d.unreadable });
+        else setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
       } catch (e) {
         setUnusedBeds(null);
       }
@@ -20169,6 +20343,38 @@ Generate anyway?`)) return { go: false };
       edlBusy
     };
   }
+  var FRAME_THUMBS_CHECKED = /* @__PURE__ */ new Set();
+  async function checkFrameThumbs(ids) {
+    const out = { fetched: [], gone: [] };
+    for (let i = 0; i < ids.length; i += FRAME_THUMBS_MAX) {
+      try {
+        const r = await fetch("/api/loom/frame-thumbs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csrf: await loomCsrf(), media_ids: ids.slice(i, i + FRAME_THUMBS_MAX) })
+        });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d) continue;
+        out.fetched.push(...d.fetched || []);
+        out.gone.push(...d.gone || []);
+      } catch (e) {
+      }
+    }
+    return out;
+  }
+  function useFrameThumbs(project, activeId) {
+    const [fix, setFix] = useState2(emptyFrameFix);
+    useEffect2(() => {
+      if (!activeId || !isBoard(project) || FRAME_THUMBS_CHECKED.has(activeId)) return;
+      FRAME_THUMBS_CHECKED.add(activeId);
+      const ids = collectFrameIds(project);
+      if (!ids.length) return;
+      checkFrameThumbs(ids).then((ans) => {
+        if (ans.fetched.length || ans.gone.length) setFix((f) => applyFrameThumbs(f, ans, Date.now()));
+      });
+    }, [activeId, project]);
+    return fix;
+  }
   function App() {
     const [selShot, setSelShot] = useState2(null);
     const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
@@ -20219,6 +20425,7 @@ Generate anyway?`)) return { go: false };
       castIo
     } = useProjectStore(setSelShot);
     const castApi = useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo });
+    const frameFix = useFrameThumbs(project, activeId);
     const draftCardRef = useRef2(draftCard);
     draftCardRef.current = draftCard;
     const {
@@ -20392,6 +20599,7 @@ Generate anyway?`)) return { go: false };
         project,
         entries,
         thumbs,
+        frameFix,
         genState,
         selShot,
         setSelShot,
@@ -20469,6 +20677,7 @@ Generate anyway?`)) return { go: false };
         useExistingVideo,
         genState,
         thumbs,
+        frameFix,
         openPick,
         storeThumb,
         setAct,
@@ -20912,6 +21121,7 @@ Generate anyway?`)) return { go: false };
     const busy = api.bedWork.phase === "wip";
     const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
     const u = api.unusedBeds;
+    const unreadable = unreadableBedsNote(u);
     const dur = bed ? bed.dur || peaks && peaks.dur || null : null;
     const picker = (label, cls, title) => /* @__PURE__ */ React.createElement("label", { className: cls + (busy ? " busy" : ""), title }, label, /* @__PURE__ */ React.createElement(
       "input",
@@ -20966,7 +21176,7 @@ Generate anyway?`)) return { go: false };
         "aria-label": "Music bed level",
         onChange: (ev) => api.setBedLevel(ev.target.value)
       }
-    ), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, dbLabel(bed.db))), /* @__PURE__ */ React.createElement("span", null, "fade 2 s in / 3 s out \xB7 ducks \u221212 dB under shots with their own audio (hatched)")), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, cutStatusLine(entries, segs))), api.bedWork.phase === "err" ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, api.bedWork.msg) : bed && peaks && peaks.failed ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, "The music bed's file couldn't be read on this machine, so Play and \u21E7 Render leave it out.") : u && u.count > 0 ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote" }, u.count, " unused music bed file", u.count === 1 ? "" : "s", " (", u.h, ") \xB7", " ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-bedlink", onClick: () => api.sweepUnusedBeds() }, "Remove\u2026")) : null);
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, dbLabel(bed.db))), /* @__PURE__ */ React.createElement("span", null, "fade 2 s in / 3 s out \xB7 ducks \u221212 dB under shots with their own audio (hatched)")), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, cutStatusLine(entries, segs))), api.bedWork.phase === "err" ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, api.bedWork.msg) : bed && peaks && peaks.failed ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, "The music bed's file couldn't be read on this machine, so Play and \u21E7 Render leave it out.") : unreadable ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, unreadable) : u && u.count > 0 ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote" }, u.count, " unused music bed file", u.count === 1 ? "" : "s", " (", u.h, ") \xB7", " ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-bedlink", onClick: () => api.sweepUnusedBeds() }, "Remove\u2026")) : null);
   }
   function RibbonFrame({ url, tint, label, onState }) {
     const [ok, setOk] = useState2(null);
@@ -21283,7 +21493,7 @@ Generate anyway?`)) return { go: false };
         onClick: () => openPick((mid) => onPatch({ mediaId: mid, thumbId: "", source: "" }))
       },
       "\u25A4"
-    ), /* @__PURE__ */ React.createElement("span", { className: "sb-tagin sb-mono", title: "This slot's live @imageN \u2014 computed from position, not editable" }, liveTag || "\u2014")), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("span", { className: "sb-tagin sb-mono", title: "This slot's live @imageN \u2014 computed from position, not editable" }, liveTag || "\u2014")), /* @__PURE__ */ React.createElement("label", { className: "sb-frameprev" + (discreet ? " discreet" : ""), title: "Attach image" }, img ? /* @__PURE__ */ React.createElement("img", { src: img, alt: which }) : frame && frame.mediaId && !frame.thumbId ? FRAME_GONE_TEXT : "\uFF0B attach frame", /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "file",
