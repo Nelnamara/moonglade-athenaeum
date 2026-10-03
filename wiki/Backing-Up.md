@@ -6,8 +6,7 @@
 python moonglade_backup.py --probe        # confirm connection
 python moonglade_backup.py --count        # how many images you have
 python moonglade_backup.py --max 40       # small test download
-python moonglade_backup.py                # download everything (parallel)
-python moonglade_backup.py               # full metadata is captured by default
+python moonglade_backup.py                # download everything (parallel; full metadata is captured by default)
 ```
 
 ### Where the library lives
@@ -20,17 +19,19 @@ takes effect when the server next starts, and it offers to restart for you.
 in the old one stays exactly where it is. If you want to bring an existing library along, move
 the folder yourself first, then point the setting at its new home.
 
-The order of precedence, if you use more than one of these:
+The gallery picks its folder in this order:
 
-1. `--out <folder>` on the command line — always wins, so a one-off run or a scheduled job
-   can point anywhere without disturbing the setting.
+1. `--out <folder>` on the command line — always wins, so a one-off launch or a second
+   install can point anywhere without disturbing the setting.
 2. `LIBRARY_DIR` in `config.json` — what the Control Panel writes.
 3. `pixai_backup` — the default.
 
-```bash
-```
+**A command you type yourself does not read that setting.** `python moonglade_backup.py …`
+uses `pixai_backup/` next to the app unless you add `--out <your library folder>`. Everything
+the Control Panel starts for you — its buttons and the jobs under **Runs itself** — already
+passes your folder along, so only terminal commands need the flag.
 
-Everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
+By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
 `raw_tasks.jsonl`, and — once organized — `YYYY-MM/` month folders.
 
 ## Fast downloads & incremental updates
@@ -54,7 +55,9 @@ python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 - `--workers N` (default 4) = how many images download at once. 6–8 saturates most
   connections; composes with every flag.
 - `--update` stops after `--update-grace` consecutive already-on-disk pages (default
-  2). To backfill items missing from the **middle** of your history, run **without**
+  2). It only starts stopping early once one full pass has reached the end of your history,
+  so an interrupted first backup resumes all the way instead of quitting at the first gap.
+  To backfill items missing from the **middle** of your history, run **without**
   `--update` (it only reaches the newest items).
 - The progress total comes from your catalog (instant). `--accurate-count` forces a
   full-history API count.
@@ -63,6 +66,8 @@ python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--page-size` | `250` | tasks per API page — bigger = fewer round-trips. Keep it under about 8,000; the server errors above that |
+| `--max` | `0` (all) | stop after N tasks — for a small test (`--max 40`). With `--backfill-phash` it caps how many rows that run processes instead |
 | `--delay` | `0.4` | seconds between API requests (politeness throttle). Always paces the page listing, the per-task metadata fetch, and single-worker downloads. The **multi-worker** download stage is paced only when you type `--delay` yourself — left alone, it downloads as fast as your connection, which is what the `--workers` guidance above assumes. Typing `--delay` throttles the whole pool to one image per that interval, so it slows a big backfill down a lot; that is the point of it. |
 | `--count-page-size` | `5000` | page size `--count` uses to tally — bigger = fewer requests, but the server errors above ~10,000 |
 | `--collect-only` | off | scan and catalog without downloading any files (also forces single-worker mode) |
@@ -144,6 +149,8 @@ python moonglade_backup.py --sync-artworks --no-views    # everything except the
 python moonglade_backup.py --sync-artworks --views-only  # ONLY the view counts, no re-walk
 ```
 
+`--sync-artworks --with-videos` also downloads your animated artworks' video files into `videos/`.
+
 `--sync-artworks` is what fills **📈 My Art** — until it has run once, that screen has nothing
 to list and tells you so. The Panel has the same job under Maintenance as **Sync
 published-artwork metadata**, if you would rather not use a terminal.
@@ -190,7 +197,7 @@ python moonglade_backup.py --convert-existing --dry-run   # preview first
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--convert` | — | `png` or `jpeg`; replaces each `.webp` after download |
+| `--convert` | — | `png` or `jpeg` (`jpg` works too); replaces each `.webp` after download |
 | `--convert-existing` | off | one-shot pass over already-downloaded `.webp` files (defaults to png if `--convert` isn't given) |
 | `--keep-webp` | off | keep the original `.webp` alongside the converted copy |
 | `--jpeg-quality` | `92` | JPEG quality 1–100 (with `--convert jpeg`) |
@@ -224,10 +231,13 @@ the **↑ Import** button is visible to everyone signed in, but the import itsel
 anyone connecting from another device on the LAN — only a session on the server's own machine
 can actually complete it. A LAN device can browse and generate, just not write files onto the host.
 
-Either way: files are copied into `imported/`, tagged `source='local'`, and given an ffmpeg
-poster if available (videos). They show under **Source → Imported** in the gallery. Nothing is
-uploaded to PixAI — this is your own library, separate from sending a file to PixAI as a
-generation reference.
+Where the files end up depends on where they came from. A folder from **outside** your backup
+is copied in — pictures into `imported/`, videos into `videos/`. Files already **inside** the
+backup (`--import-local` with no folder) are catalogued where they sit and not moved. Either
+way they are tagged `source='local'` and given an ffmpeg poster if available (videos), and they
+show under **Source → Imported** in the gallery. A file already in your library is skipped, so
+re-running is safe. Nothing is uploaded to PixAI — this is your own library, separate from
+sending a file to PixAI as a generation reference.
 
 ## Organizing files
 
@@ -285,6 +295,20 @@ a refusal is called out as it happens and listed again at the end as
 failure carries ffmpeg's own reason for refusing, which is the only thing that tells you
 whether the file is salvageable.
 
+### Thumbnails and the Similar index
+
+Two more one-shots keep what the gallery shows in step with your files. Each has a button in
+the Control Panel too (**Rebuild ALL thumbnails**, **Top up the Similar index**, **Rebuild the
+Similar index**).
+
+| Command | What it does |
+|---|---|
+| `--rebuild-thumbs` | regenerates **every** thumbnail at the current size and quality (cures quality drift between eras), makes posters for videos that have none (needs ffmpeg), and sweeps thumbnails whose picture is gone. It overwrites in place, so the gallery never goes blank. |
+| `--sync-similar` | tops up the **Similar** index — embeds only the images it doesn't have yet. This is the one you normally want: it can't lose existing rows, and after an interrupted build it resumes instead of starting over. |
+| `--rebuild-similar` | drops the Similar index and re-embeds every image from your files. Only for an index that is actually broken (wrong or duplicated results). No network. |
+
+Both Similar commands need the optional `torch` and `pixeltable` packages.
+
 ## Account: credits, coupons & cards (read-only)
 
 Quick CLI views of your PixAI account state. Each one prints and exits; none of them spend
@@ -307,6 +331,24 @@ python moonglade_backup.py --card-history    # recent benefit-card usage (redemp
 
 The same information is in the Control Panel's **PixAI account** view — see
 [Control Panel](Control-Panel).
+
+### More account commands
+
+```bash
+python moonglade_backup.py --account                   # credit balance, membership, subscription (read-only)
+python moonglade_backup.py --cards                     # your free-generation cards and how many tickets each holds (read-only)
+python moonglade_backup.py --claims                    # rewards ready to claim: daily credits, agent stamina (read-only)
+python moonglade_backup.py --claim all --confirm       # claim them (or --claim <id> for one)
+python moonglade_backup.py --mirror-check              # is the Mirror to PixAI session alive, and for how many more days?
+```
+
+`--claim` is the only one of these that grants anything: free credits or stamina, to your own
+account. It needs `--confirm`, and `READ_ONLY` in `config.json` refuses it. `--account`,
+`--cards` and `--claims` only read. `--mirror-check` checks (and, where it can, refreshes) the
+saved session; it spends nothing and never prints the credential, only the days left. For
+`--cards`, and how a matching card is applied to a generation, see
+[Generating → Free cards](Generating#free-cards---cards--auto-applied); for what `READ_ONLY` covers,
+[Trust & Safety](Trust-and-Safety#the-read_only-flag).
 
 ## Reclaiming disk space
 
