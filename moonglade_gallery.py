@@ -1097,6 +1097,12 @@ LOOM_FRAME_WIDTH = 160
 LOOM_FRAME_MAX_SECONDS = 6 * 3600
 LOOM_FRAME_CACHE_MAX_FILES = 600
 LOOM_FRAME_CACHE_MAX_BYTES = 64 * 1024 * 1024
+# GitHub #62: a frame spliced before 3.15.0 has no thumbs/<id>.jpg. /api/loom/frame-thumbs fills
+# one from PixAI once (a media read, then the picture from the image CDN), at most this many ids
+# a request, one at a time with this pause between PixAI calls.
+LOOM_FRAME_THUMBS_MAX = 60
+LOOM_FRAME_THUMBS_PAUSE_S = 0.3
+LOOM_FRAME_THUMB_ID_RE = re.compile(r"^\d{1,32}$")
 # <mid>_<frame>.png, or <mid>_end.png: the clip's true last frame, asked for when a take's
 # length was never recorded (GitHub #63). The splice's <mid>_last.png is NOT this shape.
 LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7}|end)\.png$")
@@ -12381,6 +12387,17 @@ _SCENE_LANG_KEYS = {
 _SCENE_CDN_HOST = "images-ng.pixai.art"
 
 
+def pixai_cdn_url_ok(url):
+    """THE host guard for fetching a PixAI picture server-side (api_train_cover's SSRF guard,
+    shared with the Loom's frame-thumbnail fill): https, on exactly the PixAI image CDN."""
+    import urllib.parse as _up
+    try:
+        p = _up.urlparse(str(url or ""))
+    except ValueError:
+        return False
+    return p.scheme == "https" and p.netloc == _SCENE_CDN_HOST
+
+
 def scene_catalog(core, session, force=False):
     """The WHOLE live scene catalog (listChatEditingScenes), memoized for SCENES_TTL.
 
@@ -19908,7 +19925,7 @@ def create_app(out_dir: Path):
             parsed = _up.urlparse(raw)
         except ValueError:
             return ("bad url", 400)
-        if parsed.scheme != "https" or parsed.netloc != "images-ng.pixai.art":
+        if not pixai_cdn_url_ok(raw):
             return ("forbidden host", 403)
         try:
             # PUBLIC CDN thumbnails -- no auth needed (verified). A PLAIN per-request
@@ -24952,6 +24969,92 @@ __DESIGN_TOKENS__
         if not png.is_file():
             return jsonify({"error": "the frame cache is full"}), 404
         return send_file(str(png), mimetype="image/png", max_age=3600)
+
+    # ---- FRAMES SPLICED BEFORE 3.15.0 (GitHub #62) -------------------------------------------
+    # 3.15.0 writes a thumbnail when a splice uploads a frame, but a frame spliced earlier is a
+    # PixAI media id in no catalog with no thumbs/<id>.jpg -- and /thumbs/<id>.jpg (the shared
+    # gallery route) never fetches on a miss -- so the board card, Deep Focus and the drawer's
+    # frame box drew a broken picture. The Loom posts a board's frame ids once per session on
+    # open; each missing one is filled ONCE from PixAI: a read of the media object
+    # (core.media_thumbnail_url, as /api/train/thumb does), then the picture from the PixAI image
+    # CDN only (pixai_cdn_url_ok, the proxy's own guard). Two reads, no write to PixAI, nothing
+    # that spends, so no _check_read_only. One at a time with a pause, under one lock across
+    # tabs. A frame PixAI cannot give back is remembered as gone until restart, so reopening a
+    # board never asks again; a missing PixAI session is not a verdict and is not remembered.
+    _loom_frame_thumbs_lock = threading.Lock()
+    _loom_frame_gone = set()
+
+    def _loom_fetch_frame_thumb(core, sess, mid):
+        """Fill thumbs/<mid>.jpg from PixAI. True when it is there afterwards."""
+        import requests as _req
+        url = core.media_thumbnail_url(sess, mid)
+        if not url or not pixai_cdn_url_ok(url):
+            return False
+        r = _req.get(url, timeout=20)
+        if r.status_code != 200 or not r.content:
+            return False
+        fdir = out_dir / "loom" / "_frames"
+        fdir.mkdir(parents=True, exist_ok=True)
+        src = fdir / (".frame-thumb-{}-{}".format(mid, secrets.token_hex(4)))
+        dest = thumb_dir / (mid + ".jpg")
+        try:
+            src.write_bytes(r.content)
+            return bool(make_thumbnail(src, dest)) and dest.is_file()
+        finally:
+            try:
+                src.unlink()
+            except OSError:
+                pass
+
+    @app.route("/api/loom/frame-thumbs", methods=["POST"])
+    @tier(LOGIN)
+    def loom_frame_thumbs():
+        """{csrf, media_ids: [up to LOOM_FRAME_THUMBS_MAX digit ids]} -> {have, fetched, gone}:
+        already on this machine / filled from PixAI now / PixAI could not give it back (the
+        Loom then says "Frame not on this machine. Splice again." instead of a broken picture)."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        ids = body.get("media_ids")
+        if not isinstance(ids, list) or len(ids) > LOOM_FRAME_THUMBS_MAX:
+            return jsonify({"error": "media_ids must be a list of at most %d ids" % LOOM_FRAME_THUMBS_MAX}), 400
+        ids = [str(x).strip() for x in ids]
+        if any(not LOOM_FRAME_THUMB_ID_RE.match(x) for x in ids):
+            return jsonify({"error": "media_ids must be PixAI media ids"}), 400
+        have, fetched, gone = [], [], []
+        with _loom_frame_thumbs_lock:
+            todo = []
+            for mid in dict.fromkeys(ids):
+                if (thumb_dir / (mid + ".jpg")).is_file():
+                    have.append(mid)
+                elif mid in _loom_frame_gone:
+                    gone.append(mid)
+                else:
+                    todo.append(mid)
+            if todo:
+                try:
+                    core, sess = _gen_session()
+                except Exception:                              # noqa: BLE001
+                    core = sess = None
+                for i, mid in enumerate(todo):
+                    if core is None:
+                        gone.append(mid)                       # no session: not a verdict, not remembered
+                        continue
+                    if i:
+                        time.sleep(LOOM_FRAME_THUMBS_PAUSE_S)
+                    try:
+                        ok = _loom_fetch_frame_thumb(core, sess, mid)
+                    except Exception:                          # noqa: BLE001
+                        ok = False
+                    if ok:
+                        fetched.append(mid)
+                    else:
+                        gone.append(mid)
+                        _loom_frame_gone.add(mid)
+        return jsonify({"have": have, "fetched": fetched, "gone": gone})
 
     # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
     # already chunks at 400 for SQLite's variable limit, so the number here only bounds how

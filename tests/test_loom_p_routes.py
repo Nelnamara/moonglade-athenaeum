@@ -1010,3 +1010,145 @@ def test_a_measurement_that_breaks_never_breaks_the_done_answer(poll):
     poll["mp"].setattr(core, "duration", boom)
     d = _status(poll["cli"])
     assert d["phase"] == "done" and d["media_ids"] == ["7001"] and d["duration"] is None
+
+
+# ---- GitHub #62: frames spliced before 3.15.0 ------------------------------------------------------
+# 3.15.0 thumbnails a frame when a splice uploads it, but a frame spliced earlier is a PixAI media id
+# in no catalog with no thumbs/<id>.jpg, so every surface drew a broken picture. POST
+# /api/loom/frame-thumbs fills a missing thumbnail ONCE from PixAI (a read of the media object, then
+# the picture from the PixAI image CDN only) and answers which frames it could not get, so the Loom
+# says so instead. Two reads, no write to PixAI, nothing that spends.
+
+def _png_bytes(size=(64, 36)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, (90, 60, 140)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+class _Resp:
+    def __init__(self, status, content=b""):
+        self.status_code, self.content = status, content
+        self.headers = {"content-type": "image/png"}
+
+
+@pytest.fixture
+def ft(tmp_path, monkeypatch):
+    import requests
+    hit, looked, got, slept = [], [], [], []
+
+    def _trap(name):
+        def f(*a, **k):
+            hit.append(name)
+            raise AssertionError("the frame-thumbs route reached " + name)
+        return f
+    for name in ("submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "upload_media",
+                 "submit_fixer"):
+        monkeypatch.setattr(core, name, _trap(name))
+    session = object()
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: session)
+    urls = {"222": "https://images-ng.pixai.art/images/thumb/two", "333": None,
+            "444": "https://evil.example/images/thumb/four", "555": "https://images-ng.pixai.art/images/thumb/five",
+            "666": "http://images-ng.pixai.art/images/thumb/six"}
+
+    def fake_url(sess, mid):
+        assert sess is session
+        looked.append(mid)
+        return urls.get(mid)
+    monkeypatch.setattr(core, "media_thumbnail_url", fake_url)
+    pic = _png_bytes()
+
+    def fake_get(url, *a, **k):
+        got.append(url)
+        return _Resp(200, pic) if url.endswith("/two") else _Resp(404)
+    monkeypatch.setattr(requests, "get", fake_get)
+    # Only the route's own pause is recorded (and skipped); every other sleep in the process is real.
+    pause, real_sleep = 0.000123, time.sleep
+    monkeypatch.setattr(g, "LOOM_FRAME_THUMBS_PAUSE_S", pause)
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s) if s == pause else real_sleep(s))
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+    cli.csrf = cli.get("/api/account/prefs").get_json()["csrf"]
+    thumbs = tmp_path / "gallery" / "thumbs"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    return {"cli": cli, "app": app, "tmp": tmp_path, "thumbs": thumbs, "hit": hit, "looked": looked, "got": got,
+            "slept": slept, "urls": urls, "mp": monkeypatch}
+
+
+def _thumbs_post(ft, ids, csrf=None):
+    return ft["cli"].post("/api/loom/frame-thumbs",
+                          json={"csrf": ft["cli"].csrf if csrf is None else csrf, "media_ids": ids})
+
+
+def test_frame_thumbs_have_fetched_gone(ft):
+    (ft["thumbs"] / "111.jpg").write_bytes(b"already here")
+    r = _thumbs_post(ft, ["111", "222", "333", "444", "555", "666", "222"])
+    assert r.status_code == 200, r.get_json()
+    d = r.get_json()
+    assert d == {"have": ["111"], "fetched": ["222"], "gone": ["333", "444", "555", "666"]}
+    assert (ft["thumbs"] / "111.jpg").read_bytes() == b"already here", "a thumbnail that exists is never touched"
+    assert ft["looked"] == ["222", "333", "444", "555", "666"], "PixAI is asked only for the missing ones, once each"
+    assert ft["got"] == ["https://images-ng.pixai.art/images/thumb/two", "https://images-ng.pixai.art/images/thumb/five"], \
+        "only the PixAI image CDN, over https, is ever fetched"
+    assert ft["cli"].get("/thumbs/222.jpg").status_code == 200, "the shared thumbnail route now serves it"
+    assert not (ft["thumbs"] / "333.jpg").exists() and not (ft["thumbs"] / "444.jpg").exists()
+    assert len(ft["slept"]) == 4 and all(s > 0 for s in ft["slept"]), "a short pause between PixAI calls"
+    assert ft["hit"] == [], "no submit, no gql, no upload"
+    leftovers = [p.name for p in ft["tmp"].rglob("*") if p.name.startswith(".frame-thumb")]
+    assert leftovers == [], "no temp file left behind"
+
+
+def test_a_gone_frame_is_never_asked_about_again_this_run(ft):
+    assert _thumbs_post(ft, ["333"]).get_json()["gone"] == ["333"]
+    ft["looked"].clear()
+    assert _thumbs_post(ft, ["333"]).get_json() == {"have": [], "fetched": [], "gone": ["333"]}
+    assert ft["looked"] == [] and ft["slept"] == []
+
+
+def test_no_pixai_session_is_not_a_verdict_on_the_frame(ft):
+    def no_session(*a, **k):
+        raise RuntimeError("PIXAI_API_KEY is not set")
+    ft["mp"].setattr(core, "_make_session", no_session)
+    assert _thumbs_post(ft, ["222"]).get_json() == {"have": [], "fetched": [], "gone": ["222"]}
+    ft["mp"].setattr(core, "_make_session", lambda *a, **k: object())
+    ft["mp"].setattr(core, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
+    assert _thumbs_post(ft, ["222"]).get_json()["fetched"] == ["222"], "the next open asks again"
+
+
+@pytest.mark.parametrize("body,code", [
+    ({"media_ids": ["1"]}, 403),
+    ({"media_ids": "1"}, 400),
+    ({"media_ids": [str(i) for i in range(61)]}, 400),
+    ({"media_ids": ["local_0123456789ab"]}, 400),
+    ({"media_ids": ["../1"]}, 400),
+    ({"media_ids": ["12a"]}, 400),
+    ({"media_ids": [""]}, 400),
+])
+def test_frame_thumbs_refuses_a_bad_body_before_anything_runs(ft, body, code):
+    if code != 403:
+        body = dict(body, csrf=ft["cli"].csrf)
+    r = ft["cli"].post("/api/loom/frame-thumbs", json=body)
+    assert r.status_code == code
+    assert ft["looked"] == [] and ft["got"] == []
+
+
+def test_frame_thumbs_is_login_tier(tmp_path):
+    anon = create_app(tmp_path).test_client()
+    assert anon.post("/api/loom/frame-thumbs", json={"media_ids": ["1"]}).status_code == 401
+
+
+_READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
+
+
+def test_the_frame_thumbs_route_names_nothing_that_spends_or_uploads():
+    """It needs a PixAI session (the media read), so it is not in _NEW_FUNCS' no-session list;
+    it must still name no submit, no gql and no upload."""
+    tree = ast.parse((REPO / "moonglade_gallery.py").read_text(encoding="utf-8"))
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in _READ_ONLY_FUNCS:
+            found[node.name] = {(s.func.attr if isinstance(s.func, ast.Attribute) else getattr(s.func, "id", ""))
+                                for s in ast.walk(node) if isinstance(s, ast.Call)}
+    assert set(found) == set(_READ_ONLY_FUNCS), "a function was renamed: " + repr(set(_READ_ONLY_FUNCS) - set(found))
+    for name, called in found.items():
+        assert not (called & (_SPEND - {"_gen_session", "_make_session"})), name + " calls " + repr(called & _SPEND)

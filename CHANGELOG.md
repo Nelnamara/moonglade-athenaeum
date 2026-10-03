@@ -23,6 +23,7 @@ git tags. Full prose notes for tagged versions live on
 - **The continuity ribbon closes on the real last frame.** When a take's clip length had never been recorded, the ribbon took the closing frame at the shot's planned length, which is not the last frame when the clip runs a little longer. It now asks for the clip's true last frame, read from the file. A new take also records its real length when the finished render's length came back blank (it is measured once from the downloaded clip). (2026-10-02)
 - A take whose clip length was saved as 0 now counts as unknown everywhere, as a length that was never reported already did: the continuity ribbon, a splice and Re-anchor no longer treat it as a clip that ends on its first frame, and the next change you make to that shot saves it as unknown. (2026-10-02)
 - Under the hood: the Loom's credit line reads your account once after a run of shot clicks instead of on every click (each read asks PixAI three questions); a render or generation that spends still updates it at once. (2026-10-02)
+- **Frames spliced before 3.15.0 draw again.** They had no thumbnail on this machine, so the shot card, Deep Focus and the drawer's frame box showed a broken picture. Opening a storyboard now fetches each missing one from PixAI once (a read only); a frame PixAI no longer has says "Frame not on this machine. Splice again." instead. (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 

@@ -171,7 +171,10 @@ inside one), a button appears under the open slot:
 
 Splice and Re-anchor upload the frame to your PixAI account (free, never a render) and save its
 thumbnail beside it, so the frame draws in the drawer and on the next shot's card. With
-`READ_ONLY` set they are refused like every other write to your account.
+`READ_ONLY` set they are refused like every other write to your account. A frame spliced before
+version 3.15.0 had no thumbnail saved: when you open its storyboard, the Loom fetches that picture
+from PixAI once (a read, never a write or a spend). If PixAI no longer has it, the frame's box says
+**Frame not on this machine. Splice again.** instead of showing a broken picture.
 
 That's how a run of independent 5–15s clips reads as one continuous scene. The very first
 shot of the project has no previous frame, and neither does draft mode — you get a hint
