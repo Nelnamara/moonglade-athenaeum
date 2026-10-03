@@ -293,7 +293,7 @@ or change anything.
 ```bash
 python moonglade_backup.py --credit-log      # full credit ledger: purchases, claims, gifts, spend, refunds
 python moonglade_backup.py --coupons         # Credit Boost coupons you currently hold
-python moonglade_backup.py --card-history    # recent benefit-card usage (redemptions + refunds)
+python moonglade_backup.py --card-history    # recent benefit-card history (uses, refunds, expiries)
 ```
 
 | Modifier | Applies to | Effect |

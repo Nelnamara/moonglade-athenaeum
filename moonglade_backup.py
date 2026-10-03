@@ -15040,12 +15040,17 @@ def list_kaisuuken_logs(session, first=50, after=None):
     actually spent). Verified live 2026-08-02 against the account's own history.
 
     Each row: {record_id, template_name, category, task_type, task_id, action, credit_cost,
-    created_at}. `action` is "consumed" or "refunded" -- PixAI hands a card back (a NEW record,
-    same kaisuukenId, action=refunded) when the task it was attached to failed or was refused;
-    a single card can cycle consumed->refunded->consumed again across different tasks, so
-    record_id is not 1:1 with "one use". `credit_cost` is what the redemption would have cost
-    in credits had no card covered it -- useful for a "cards have saved you N credits" total,
-    never an actual charge (the whole point of the card is that it wasn't charged).
+    created_at}. `action` is one of the four actions PixAI's contract allows: "consumed",
+    "refunded", "expired" or "revoked". PixAI hands a card back (a NEW record, same
+    kaisuukenId, action=refunded) when the task it was attached to failed or was refused; a
+    single card can cycle consumed->refunded->consumed again across different tasks, so
+    record_id is not 1:1 with "one use". "expired" is a card that ran out unused and "revoked"
+    one PixAI took back: neither was attached to a task, so those rows come with no task id
+    (task_id "") and no credit cost (None). The first expiry row on the owner's log is dated
+    2026-09-18 (PROBE_2026-10-02_site, #68); cards that ran out before then left no row.
+    `credit_cost` is what the redemption would have cost in credits had no card covered it --
+    useful for a "cards have saved you N credits" total, never an actual charge (the whole
+    point of the card is that it wasn't charged).
 
     Cursor-paginated (Relay style): pass a previous call's `end_cursor` as `after` to page
     forward; `has_next` says whether more exist. Read-only; fails soft on error (matching
@@ -15081,9 +15086,13 @@ def kaisuuken_type_catalog(session, max_pages=25):
     expires out of current holdings (verified 2026-08-02: Reference Pro Only and Edit Pro
     Only both fully cycled out of live holdings but still show up here going back ~a month).
 
-    Caveat: this only catches types actually USED (consumed or refunded) at least once -- a
-    card that expired untouched leaves no trace in this log, so it is a lower bound on
-    "every card type ever granted", not an exact one.
+    Each template counts all four actions the log carries -- consumed, refunded, expired and
+    revoked (#68) -- so a card type that only ever ran out still has its row, with its expiries
+    counted rather than dropped.
+
+    Caveat: the log's first expiry row is dated 2026-09-18, so a card type that expired
+    untouched before then left no trace here (verified 2026-08-02); the roster is a lower
+    bound on "every card type ever granted", not an exact one.
 
     Capped at `max_pages` pages of 100 rows each as a politeness/safety bound -- an old
     account could otherwise page indefinitely. Returns what it found plus whether the cap
@@ -15097,12 +15106,10 @@ def kaisuuken_type_catalog(session, max_pages=25):
             name = row["template_name"] or "(unknown)"
             entry = catalog.setdefault(name, {
                 "category": row["category"], "task_type": row["task_type"],
-                "consumed": 0, "refunded": 0,
+                "consumed": 0, "refunded": 0, "expired": 0, "revoked": 0,
                 "first_seen": row["created_at"], "last_seen": row["created_at"]})
-            if row["action"] == "consumed":
-                entry["consumed"] += 1
-            elif row["action"] == "refunded":
-                entry["refunded"] += 1
+            if row["action"] in ("consumed", "refunded", "expired", "revoked"):
+                entry[row["action"]] += 1
             ts = row["created_at"]
             if ts and (not entry["first_seen"] or ts < entry["first_seen"]):
                 entry["first_seen"] = ts

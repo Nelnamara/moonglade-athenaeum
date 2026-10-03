@@ -17,7 +17,9 @@ page — click it again or `Esc` to close. Its tab is **Maintenance**; **Account
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
 **PixAI account** opens on a strip of figures — credits, how much of that is paid and how
 much free, free cards on hand, coupons, and your **followers** and **following** — above
-tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+tabs for the card roster, coupons and the credit ledger. The card history says what happened
+to each card — consumed, refunded, expired or revoked — and names a task only beside a card
+that was attached to one. Every figure on it is a reading:
 the window never spends, redeems, purchases, follows or unfollows anything.
 The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
 auto-sync schedule — still lives in that console's **Ledger** view. (The old separate

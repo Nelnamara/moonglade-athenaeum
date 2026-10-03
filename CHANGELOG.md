@@ -19,6 +19,7 @@ git tags. Full prose notes for tagged versions live on
 ### PixAI drift (2026-10-02 probes)
 
 - **Edit Pro (v2.0) is in the Edit card**, right after Edit Pro: PixAI's newer version of Edit Pro, with up to ten images, 1K / 2K, low / medium / high, and the same price. Edit Pro stays the card's default. (#67) (2026-10-02)
+- **Expired free cards no longer read as used.** The card history on the PixAI account screen now says "expired" or "revoked" for a card that ran out or was taken back, with no task beside it, instead of "consumed"; the lifetime card roster counts expiries too. (#68) (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 
