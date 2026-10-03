@@ -608,7 +608,12 @@ function Grid({
     // While a marquee drags, the band IS the selection (live replace);
     // otherwise the App-owned Set paints.
     const isSel = marqueeHits ? marqueeHits.has(it.media_id) : selected.has(it.media_id);
-    const badge = it.is_video ? "VIDEO" : (it.source ? String(it.source).toUpperCase() : "");
+    // #66: a picture PixAI no longer has wears ARCHIVE (owner's word, 2026-10-02) in the
+    // same corner pill, ahead of VIDEO -- the ▶ glyph still marks a video -- in the
+    // default metal, no colour of its own.
+    const archive = !!it.archive_only;
+    const badge = archive ? "ARCHIVE"
+      : it.is_video ? "VIDEO" : (it.source ? String(it.source).toUpperCase() : "");
     // #34 direction B: is this a STACKED unit, and if so which kind + its badge.
     const stack = stackKind(it);                       // "series" | "batch" | null
     // The stamp prefers the SERIES title (the dial's name) when this is a series
@@ -653,8 +658,8 @@ function Grid({
         </span>
       );
     }
-    const pillClass = it.is_video
-      ? " video"
+    const pillClass = archive ? ""
+      : it.is_video ? " video"
       : String(it.source || "").toLowerCase() === "local" ? " local" : "";
     return (
       <figure
@@ -762,7 +767,9 @@ function Grid({
               {isSel ? "✓" : ""}
             </button>
             {badge ? (
-              <span className={"mgg-pill" + pillClass} title={"source: " + (it.is_video ? "video" : it.source)}>
+              <span className={"mgg-pill" + pillClass}
+                title={archive ? "Deleted on PixAI. This is the only copy."
+                  : "source: " + (it.is_video ? "video" : it.source)}>
                 {badge}
               </span>
             ) : null}

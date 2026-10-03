@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoards, landTake, attachTake, deleteTake, selectTake, takesOf, selectedTakeOf } from "../src/loom-takes-core.js";
+import { mergeBoards, mergeNotice, landTake, attachTake, deleteTake, selectTake, takesOf, selectedTakeOf } from "../src/loom-takes-core.js";
+import { flat } from "../src/loom-core.js";
 import { makeSaveQueue } from "../src/loom-store-core.js";
 
 // Session P, BUILD-w5-p §3.5 and review F5/F6: a stale save answers 409 and the tab merges.
@@ -204,5 +205,155 @@ describe("the per-key save queue (F5): a tab never conflicts with itself", () =>
     const r = await q.save("k", "1");
     assert.equal(r.failed, true);
     await q.idle("k");
+  });
+});
+
+/* GitHub #59 (option A): a conflict that undoes something made in this tab says so. The merge
+   still keeps the other tab's board (a stale split would double footage, a deleted shot must not
+   come back); it now also reports what it dropped -- `reverted` -- and keeps re-added shots
+   (`kept`) apart from the ★ / take-number changes, so the toast stops calling a kept shot a
+   take-number change. */
+describe("mergeBoards reports what it undid (#59)", () => {
+  const codes = (p) => { const m = {}; flat(p).forEach((e) => { m[e.c.id] = e.code; }); return m; };
+  const notice = (local, out) => mergeNotice(out, { local: codes(local), merged: codes(out.project) });
+  const twoActs = () => ({ name: "B", acts: [
+    { id: "a", name: "Act 1", cards: [{ id: "c", title: "one", status: "done", resultMid: "M1", actualDur: 5, trimIn: 0, trimOut: null }] },
+    { id: "b", name: "Act 2", cards: [
+      { id: "e", title: "two", status: "done", resultMid: "M5", actualDur: 5, trimIn: 0, trimOut: null },
+      { id: "f", title: "three", status: "todo" },
+    ] },
+  ] });
+  const mids = (p) => new Set(flat(p).flatMap((e) => takesOf(e.c).map((t) => String(t.mid))));
+  // THE INVARIANT: no take is ever lost. Every clip the other tab's board holds is on the merged
+  // board, and so is every clip that landed in THIS tab since the last sync.
+  const noTakeLost = (local, remote, synced, out) => {
+    const got = mids(out.project), before = mids(synced);
+    for (const m of mids(remote)) assert.ok(got.has(m), "the other tab's clip " + m + " was lost");
+    for (const m of mids(local)) if (!before.has(m)) assert.ok(got.has(m), "the clip " + m + " that landed here was lost");
+  };
+  const stripAct = (p, actId) => ({ ...p, acts: p.acts.filter((a) => a.id !== actId) });
+  const landOn = (c, mid, n) => landTake({ ...c, status: "wip", pendingSubmitId: "S" + n, pendingTaskId: "T" + n },
+    { mid, taskId: "T" + n }).card;
+  const ids = (p) => p.acts.flatMap((a) => a.cards.map((c) => c.id));
+
+  test("a stale split is reported as a split of the shot it was cut from, with that shot's code", () => {
+    const synced = base();
+    const split = base();
+    split.acts[0].cards[0] = { ...split.acts[0].cards[0], trimOut: 2 };
+    split.acts[0].cards.splice(1, 0, { id: "c2", title: "one (cont.)", status: "done", resultMid: "M1", actualDur: 5, trimIn: 2, trimOut: null });
+    const other = { ...base(), name: "renamed elsewhere" };
+    const out = mergeBoards(split, other, { base: synced });
+    assert.equal(card(out.project, "c2"), undefined);
+    assert.deepEqual(out.reverted, [{ id: "c2", kind: "split", shot: "c" }]);
+    assert.deepEqual(out.changed, [], "nothing about ★ or take numbers moved");
+    assert.equal(notice(split, out), "Your takes were kept; other edits from this tab were replaced."
+      + " Your split of A·01 was undone because the board changed in another tab.");
+    noTakeLost(split, other, synced, out);
+  });
+
+  test("a split while the other tab re-trimmed the same shot is reported too", () => {
+    const synced = base();
+    const split = base();
+    split.acts[0].cards[0] = { ...split.acts[0].cards[0], trimOut: 2 };
+    split.acts[0].cards.push({ id: "c2", title: "one (cont.)", status: "done", resultMid: "M1", actualDur: 5, trimIn: 2, trimOut: null });
+    const other = base();
+    other.acts[0].cards[0] = { ...other.acts[0].cards[0], trimOut: 3.5 };
+    const out = mergeBoards(split, other, { base: synced });
+    assert.equal(card(out.project, "c").trimOut, 3.5, "the other tab's trim wins");
+    assert.deepEqual(out.reverted, [{ id: "c2", kind: "split", shot: "c" }]);
+    assert.match(notice(split, out), / Your split of A·01 was undone because the board changed in another tab\.$/);
+    noTakeLost(split, other, synced, out);
+  });
+
+  test("a shot the other tab deleted is reported as removed", () => {
+    const synced = base();
+    const deleter = { ...base(), acts: [{ ...base().acts[0], cards: [base().acts[0].cards[1]] }] };
+    const stale = { ...base(), name: "retitled here" };
+    const out = mergeBoards(stale, deleter, { base: synced });
+    assert.deepEqual(out.reverted, [{ id: "c", kind: "removed" }]);
+    assert.match(notice(stale, out), / A·01 stays deleted: the other tab removed it\.$/);
+    noTakeLost(stale, deleter, synced, out);
+  });
+
+  describe("ACT DELETED in the other tab", () => {
+    test("(i) every card of the deleted act with no new footage stays gone and is reported act-removed", () => {
+      const synced = twoActs();
+      const remote = stripAct(twoActs(), "b");
+      const local = { ...twoActs(), name: "retitled here" };
+      const out = mergeBoards(local, remote, { base: synced });
+      assert.deepEqual(out.project.acts.map((a) => a.id), ["a"]);
+      assert.deepEqual(ids(out.project), ["c"]);
+      assert.deepEqual(out.reverted, [{ id: "e", kind: "act-removed" }, { id: "f", kind: "act-removed" }]);
+      assert.deepEqual(out.kept, []);
+      assert.match(notice(local, out), / B·01 and B·02 stay deleted: the other tab removed their act\.$/);
+      noTakeLost(local, remote, synced, out);
+    });
+    test("(ii) a fresh render on a card in the deleted act is kept, in the merged board's first act", () => {
+      const synced = twoActs();
+      const remote = stripAct(twoActs(), "b");
+      const local = twoActs();
+      local.acts[1].cards[0] = landOn(local.acts[1].cards[0], "MNEW", 7);
+      const out = mergeBoards(local, remote, { base: synced });
+      const first = out.project.acts[0];
+      assert.equal(first.id, "a");
+      assert.deepEqual(first.cards.map((c) => c.id), ["c", "e"], "kept at the end of the first act");
+      assert.ok(takesOf(first.cards[1]).some((t) => t.mid === "MNEW"));
+      assert.deepEqual(out.kept, [{ id: "e", act: "Act 1", actGone: true, actRestored: false }]);
+      assert.deepEqual(out.reverted, [{ id: "f", kind: "act-removed" }], "its unrendered neighbour stays gone");
+      assert.deepEqual(out.changed, [], "a kept shot is not a ★ / take-number change");
+      const msg = notice(local, out);
+      assert.match(msg, / B·01 was kept in Act 1 because its act was deleted in the other tab\./);
+      assert.match(msg, / B·02 stays deleted: the other tab removed its act\.$/);
+      assert.doesNotMatch(msg, /take numbers changed/);
+      noTakeLost(local, remote, synced, out);
+    });
+    test("(iii) the other tab deleted every act: the act is re-created holding the kept card", () => {
+      const synced = twoActs();
+      const remote = { ...twoActs(), acts: [] };
+      const local = twoActs();
+      local.acts[1].cards[0] = landOn(local.acts[1].cards[0], "MNEW", 8);
+      const out = mergeBoards(local, remote, { base: synced });
+      assert.deepEqual(out.project.acts.map((a) => [a.id, a.name, a.cards.map((c) => c.id)]), [["b", "Act 2", ["e"]]]);
+      assert.deepEqual(out.kept, [{ id: "e", act: "Act 2", actGone: true, actRestored: true }]);
+      assert.deepEqual(out.reverted.map((x) => [x.id, x.kind]), [["c", "act-removed"], ["f", "act-removed"]]);
+      assert.match(notice(local, out), / B·01 was kept and its act is back: the other tab had deleted it\./);
+      noTakeLost(local, remote, synced, out);
+    });
+    test("(iv) the other tab MOVED the card to another act: no duplicate, nothing reported", () => {
+      const synced = twoActs();
+      const remote = twoActs();
+      const moved = remote.acts[1].cards.shift();
+      remote.acts[0].cards.push(moved);
+      const local = twoActs();
+      local.acts[1].cards[0] = landOn(local.acts[1].cards[0], "MNEW", 9);
+      const out = mergeBoards(local, remote, { base: synced });
+      assert.deepEqual(ids(out.project), ["c", "e", "f"], "e once, where the other tab put it");
+      assert.ok(takesOf(out.project.acts[0].cards[1]).some((t) => t.mid === "MNEW"), "its new take rode along");
+      assert.deepEqual(out.reverted, []);
+      assert.deepEqual(out.kept, []);
+      noTakeLost(local, remote, synced, out);
+    });
+  });
+
+  test("a card that landed here and survives in its own act is kept without a word about acts", () => {
+    const local = base();
+    local.acts[0].cards.push({ id: "new", status: "done", resultMid: "MN" });
+    const out = mergeBoards(local, base(), { base: base() });
+    assert.deepEqual(out.kept, [{ id: "new", act: "Act", actGone: false, actRestored: false }]);
+    assert.deepEqual(out.changed, []);
+    assert.equal(notice(local, out), "Your takes were kept; other edits from this tab were replaced.");
+  });
+
+  test("the notice names three shots at most, then how many more; with nothing undone it is today's sentence", () => {
+    const local = { acts: [{ id: "a", cards: "pqrst".split("").map((id) => ({ id })) }] };
+    const out = { project: { acts: [] }, changed: [], kept: [],
+      reverted: "pqrst".split("").map((id) => ({ id, kind: "removed" })) };
+    assert.match(mergeNotice(out, { local: codes(local), merged: {} }),
+      / A·01, A·02, A·03 and 2 more stay deleted: the other tab removed them\.$/);
+    assert.equal(mergeNotice({ changed: [], kept: [], reverted: [] }, { local: {}, merged: {} }),
+      "Your takes were kept; other edits from this tab were replaced.");
+    assert.equal(mergeNotice({ changed: [{ id: "x", star: true }], kept: [], reverted: [] }, { local: {}, merged: { x: "C·04" } }),
+      "Your takes were kept; other edits from this tab were replaced. ★ or take numbers changed on C·04.");
+    assert.equal(mergeNotice(undefined, undefined), "Your takes were kept; other edits from this tab were replaced.");
   });
 });

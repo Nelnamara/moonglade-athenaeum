@@ -9,6 +9,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
 import { seriesSuffix } from "../gen/seriesName.js";
+import { positionLabel } from "../lib/phoneCore.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -203,7 +204,7 @@ function groupSeriesSteps(steps, currentTaskId) {
 export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onCurate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
-  items, onOpenLightbox, onPublish, onSimilar,
+  onOpenLightbox, onPublish, onSimilar,
   morph = true,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
@@ -240,6 +241,7 @@ export default function DetailsView({
     upEl,
     handleRate,
     personal,
+    archiveOnly,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   // ◈ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
@@ -317,10 +319,12 @@ export default function DetailsView({
   }, [row && row.media_id, focusMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Image Details.dc.html:39-43 -- the header's ⛶ Lightbox link + "N of M" index label.
-  // Same real computation ImageDetailsMobile.jsx's own indexLabel already uses --
-  // position within the currently-loaded grid `items`.
-  const detailIdx = row && items ? items.findIndex((it) => it.media_id === row.media_id) : -1;
-  const indexLabel = detailIdx >= 0 && items ? (detailIdx + 1) + " of " + items.length : "";
+  // The picture's TRUE place in the filtered walk (#64): the detail route builds the whole
+  // filtered, sorted list to find prev_id/next_id and says where this picture sits in it
+  // (position) and how long it is (nav_total), formatted like the pager ("14 of 3,240").
+  // It used to count inside the one loaded page, which read "14 of 100" however many
+  // pictures matched. Same helper, same numbers as ImageDetailsMobile.jsx's label.
+  const indexLabel = state.data ? positionLabel(state.data.position, state.data.nav_total) : "";
 
   const navHref = (mid) => "/?image=" + encodeURIComponent(mid || "");
   const navClick = (mid) => (e) => {
@@ -366,6 +370,10 @@ export default function DetailsView({
   // capture), and no disclosure at all when there is nothing to fold.
   const extra = [];
   const push = (label, value, opts) => { if (value != null && String(value).trim() !== "") extra.push({ label, value, ...(opts || {}) }); };
+  // #66: first, and only on a picture PixAI no longer has -- the ledger above stays the
+  // DC's eleven. Worded "as of the last check": the reconcile that sets it re-reads your
+  // PixAI history every run. The grid card says the same in its ARCHIVE pill.
+  if (archiveOnly) push("On PixAI", "Gone from your PixAI history as of the last check. This is the only copy.");
   push("Clip Skip", row.clip_skip);
   push("Mode", row.inference_profile);
   push("Quality Tag", row.quality_tag);

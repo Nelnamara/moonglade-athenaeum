@@ -161,7 +161,9 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 /* overscroll-behavior-y: contain (Session Q, Q6) keeps the BROWSER's own pull-to-reload out of the
    way at the top of the tab, so the moon's pull (components/PullToRefresh.jsx) is the only one. */
 .glm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  position: relative; overscroll-behavior-y: contain; }
+  position: relative; overscroll-behavior-y: contain;
+  /* the library scrolls up and down only, never sideways (owner's walk, 2026-10-03) */
+  overflow-x: hidden; }
 .glm-tab { min-height: 100%; }
 
 /* ---- tab bar (DC navStyle/navTabs, lines 275-283 & 1080-1086) ---- */
@@ -251,6 +253,13 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 
 /* ---- grid (DC gridStyle/colStyle/colOffStyle/capStyle, lines 89-106 & 930-934) ---- */
 .glm-grid { padding: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-items: start; }
+/* An upright phone draws two columns, whatever column count the script last read (owner's walk,
+   2026-10-03: the sideways count outlived a turn back upright). Outside the landscape condition
+   (lib/phoneCore.js LANDSCAPE_QUERY) the sideways grid is held to two tracks that can shrink, so a
+   late read can never push a column off the edge; hooks/usePhoneLandscape.js then catches up. */
+@media not all and (orientation: landscape) and (max-height: 520px) {
+  .glm-grid.glm-grid-rows { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
 .glm-grid.loading { opacity: .6; }
 .glm-col { display: flex; flex-direction: column; gap: 7px; }
 .glm-col-off { margin-top: 22px; }

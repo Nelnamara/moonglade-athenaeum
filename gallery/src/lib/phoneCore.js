@@ -231,6 +231,42 @@ export function newSinceLabel(count, capped, atMs) {
   return count + (capped ? "+" : "") + " new" + (t ? " since " + t : "");
 }
 
+/* #64, "14 of 3,240": a picture's place in the WHOLE filtered walk (the detail route's `position` and
+   `nav_total`, which come from the same list Prev and Next step through), formatted the way the pager
+   prints its match count. "" when either number is missing, so the record draws nothing rather than a
+   guess; a picture the filter does not contain has no position. */
+export function positionLabel(position, total) {
+  const p = Number(position);
+  const t = Number(total);
+  if (!(p >= 1) || !(t >= 1)) return "";
+  return p.toLocaleString() + " of " + t.toLocaleString();
+}
+
+/* The library route clamps page_size to 1..200 (moonglade_gallery.py, api_next_library); the offset the
+   viewer adds to its place in the page has to use the size the server really cut the page with. */
+const MAX_PAGE_SIZE = 200;
+const DEFAULT_PAGE_SIZE = 100;
+
+/* How many pictures come before the loaded page in the walk. The phone grid is ungrouped, so this is
+   exact: (page - 1) full pages. */
+export function pageOffset(page, perPage) {
+  const p = Math.max(1, Math.floor(Number(page)) || 1);
+  const size = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number(perPage)) || DEFAULT_PAGE_SIZE));
+  return (p - 1) * size;
+}
+
+/* The viewer's big number and its "OF N" (#64), both formatted like the pager. `index` is the place in
+   the loaded page, `offset` the pictures before that page, `total` the walk's length, `loaded` the
+   page's length. With no total yet it falls back to the page it holds (what it always showed), and a
+   total the page has outgrown (pictures deleted since) never reads "k of fewer than k". */
+export function lightboxCount(index, offset, total, loaded) {
+  const fmt = (n) => Number(n).toLocaleString();
+  const t = Number(total);
+  if (!(t >= 1)) return { at: fmt(index + 1), of: fmt(loaded) };
+  const at = Math.max(0, Number(offset) || 0) + index + 1;
+  return { at: fmt(at), of: fmt(Math.max(t, at)) };
+}
+
 /* The rule only means something for the library's own front page: page 1, newest first, nothing
    filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone. */
 export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded }) {
@@ -244,6 +280,15 @@ export function isFrontPage({ page, advCount, applied, media, shelf, similar, lo
 export function showNewest(scrollTop, viewportHeight) {
   const vh = Number(viewportHeight);
   return Number(scrollTop) > (Number.isFinite(vh) && vh > 0 ? vh : 560);
+}
+
+/* ...and steps aside while the pager row is on screen (owner's walk, 2026-10-03: it sat on top of
+   "‹ Prev · Page 1 of 380 · 37,917 matches · Next ›" and hid its middle). Where the pager shows, the
+   page is ending anyway. `pager` and `view` are the pager row's and the scroller's boxes ({top,
+   bottom}); a missing one is "not on screen". */
+export function pagerInView(pager, view) {
+  if (!pager || !view) return false;
+  return Number(pager.top) < Number(view.bottom) && Number(pager.bottom) > Number(view.top);
 }
 
 export function newestLabel(count) {
@@ -333,6 +378,14 @@ export function isPhoneViewport({ width, coarse, portrait, screenW, screenH, lan
 }
 
 /* How many columns the phone gallery draws: two upright; sideways four, or three under 700 px wide. */
+/* A TURN IS READ AGAIN ONCE IT HAS SETTLED (owner's walk, 2026-10-03). A phone's browser can deliver a
+   turn's resize and orientation events while the orientation query still answers for the old way up,
+   and fire nothing once it settles -- so a read made only on the events kept the sideways columns on
+   an upright phone (a column hung off the edge). hooks/usePhoneLandscape.js reads again on the next
+   frame and at each of these delays after any such event; a read that finds nothing changed changes
+   nothing. */
+export const TURN_SETTLE_MS = [120, 400, 1000];
+
 export function phoneColumns(width, landscape) {
   if (!landscape) return 2;
   const w = Number(width);

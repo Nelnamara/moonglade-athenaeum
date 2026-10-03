@@ -165,7 +165,7 @@ def test_members_shape_is_uniform_across_tiers(tmp_path):
     d = login_client(tmp_path).get("/api/duplicates").get_json()
     assert d["groups"], "expected at least the identical_file group"
     expected_keys = {"media_id", "thumb", "width", "height", "rating", "created_at",
-                     "is_video", "path", "bucket", "size", "is_keeper"}
+                     "is_video", "path", "bucket", "size", "is_keeper", "archive_only"}
     for g in d["groups"]:
         assert "id" in g and "matchType" in g and "reclaimable_bytes" in g
         for m in g["members"]:

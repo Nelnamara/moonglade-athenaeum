@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.15.0"
+__version__ = "3.16.0"
 
 import argparse
 import base64
@@ -282,7 +282,7 @@ def _save_config(cfg):
     catches ValueError on a corrupt file and returns {} -- which reads as an EMPTY
     AUTH_USERS, which drops /login into local-only bootstrap_mode (whoever is at the
     machine mints a fresh admin) and clears every live session. Revocation state
-    (AUTH_EPOCH_SEQ) now lives in this file too, and EVERY /logout writes it, so the
+    (AUTH_EPOCH_SEQ) now lives in this file too, and every sign-out everywhere writes it, so the
     old truncate-then-write was a steadily widening window on an auth wipe."""
     path = _config_path()
     data = json.dumps(cfg, indent=2)          # serialize BEFORE touching disk
@@ -689,11 +689,12 @@ def get_web_user_session_epoch(username):
     re-checks it against this on every request, so:
       - removing the account invalidates any outstanding session for it immediately
         (this returns None -> no epoch can ever match again), and
-      - /logout can revoke every outstanding session for that identity (not just
-        the browser that clicked it) by calling bump_web_user_session_epoch()
-        before clearing its own session.
+      - a sign-out everywhere (/api/logout with scope "everywhere") revokes every
+        outstanding session for that identity (not just the browser that clicked it)
+        by calling bump_web_user_session_epoch() before clearing its own session.
+        A plain Log Out signs out only its own browser (#70).
     Without this, a stolen session cookie (plain-HTTP LAN, packet capture) would
-    keep working after the legitimate user signs out or the account is removed,
+    keep working after the legitimate user signs out everywhere or the account is removed,
     since the stock Flask session is a stateless, client-side signed cookie with
     nothing server-side to revoke -- see CHANGELOG.md for the fuller writeup."""
     cfg = _load_config()
@@ -705,7 +706,8 @@ def get_web_user_session_epoch(username):
 
 def bump_web_user_session_epoch(username):
     """Issue `username` a fresh session-epoch ticket, invalidating every outstanding
-    session cookie for that identity in one move (used by /logout). No-op (returns
+    session cookie for that identity in one move (used by /api/logout's sign-out
+    everywhere). No-op (returns
     False) if the account no longer exists.
 
     Runs the whole read-modify-write under `_accounts_lock`, like every OTHER
@@ -882,9 +884,16 @@ DELETE_OPERATION = "deleteGenerationTask"
 REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
     "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
 PIXAI_COOKIE_DOMAIN = "pixai.art"
-# Roll the ~27-day JWT once it drops under this many days left (a box that runs even
-# weekly never lapses).
-MIRROR_REFRESH_WHEN_DAYS_LEFT = 5
+# A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
+# own renewal and the app's refreshToken alike; the ~27 days measured in August no longer
+# holds). Renew once fewer than this many days are left -- measured in the token's real
+# seconds, not floored whole days -- which leaves the background tick (mirror_renew_tick) three
+# days of retries before a failing renewal could let the token lapse (#71).
+MIRROR_REFRESH_WHEN_DAYS_LEFT = 3
+# What one renewal grants. Only the Control Panel's ring reads it: a token the app did not mint
+# itself (a browser read on Connect, or one stored before #71) has no known start, so its ring
+# is drawn out of max(seconds left, this) -- see mirror_token_span.
+MIRROR_TOKEN_LIFE_S = 7 * 86400
 # The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
 # logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
 # Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
@@ -5136,18 +5145,18 @@ def cmd_dedup(args, out, db_path):
     apply = getattr(args, "apply", False)  # default is dry-run unless --apply
 
     rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
-    losers = []  # (rel_path, abs_path)
+    losers = []  # (rel_path, abs_path, what it is a copy of -- the Great Sweep's key)
     for g in rep["class_a"]:
         for (p, rel, b, sz) in g["losers"]:
-            losers.append((rel, p))
+            losers.append((rel, p, "dup-media:%s" % g["media_id"]))
     for g in rep["class_b"]:
         for (p, rel, b, sz, mid) in g["losers"]:
-            losers.append((rel, p))
+            losers.append((rel, p, "dup-sha:%s" % g["sha"]))
 
     action = "DELETE" if delete else "quarantine to _duplicates/"
     print("\nDedup plan: {:,} redundant files to {} ({})".format(
         len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
-    for rel, _ in losers[:8]:
+    for rel, _, _ in losers[:8]:
         print("  {}".format(rel))
     if len(losers) > 8:
         print("  ... and {:,} more".format(len(losers) - 8))
@@ -5158,8 +5167,9 @@ def cmd_dedup(args, out, db_path):
 
     quarantine_root = out / "_duplicates"
     moved = removed = failed = 0
+    culled_keys = []
     _prog = getattr(args, "progress", None)
-    for i, (rel, p) in enumerate(losers):
+    for i, (rel, p, key) in enumerate(losers):
         try:
             if delete:
                 p.unlink()
@@ -5171,6 +5181,7 @@ def cmd_dedup(args, out, db_path):
                     dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
                 p.replace(dest)
                 moved += 1
+            culled_keys.append(key)
         except OSError as e:
             print("  failed {} ({})".format(rel, e))
             failed += 1
@@ -5184,10 +5195,11 @@ def cmd_dedup(args, out, db_path):
             moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
             failed))
 
-    if moved or removed:
-        try:      # The Great Sweep: cumulative pieces removed via --dedup
-            from moonglade_gallery import telem_bump
-            telem_bump("culled", moved + removed, out_dir=out)
+    if culled_keys:
+        try:      # The Great Sweep: each redundant copy once, keyed by what it duplicated --
+            # copying a file back and deduping it again is not a second piece swept
+            from moonglade_gallery import telem_set_add_many
+            telem_set_add_many("culled_keys", culled_keys, out_dir=out)
         except Exception:
             pass
 
@@ -5707,10 +5719,15 @@ def jwt_days_left(token, now=None):
 
 
 def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
-    """True when the JWT is missing, unparseable, expired, or within the cushion --
-    i.e. the renewal loop should call refreshToken. Pure; the scheduler's decision."""
-    left = jwt_days_left(token, now=now)
-    return left is None or left <= threshold_days
+    """True when the JWT is missing, unparseable, expired, or has `threshold_days` or fewer
+    left -- i.e. the renewal should call refreshToken. Measured on the token's real seconds
+    left (exp - now), not on jwt_days_left's floored whole days: the floor made the old 5-day
+    rule renew with up to 6 days left. Pure; the scheduler's decision."""
+    exp = jwt_expiry(token)
+    if exp is None:
+        return True
+    now = time.time() if now is None else now
+    return exp - now <= threshold_days * 86400
 
 
 def read_browser_session(browsers=("chrome", "edge", "brave")):
@@ -6214,7 +6231,13 @@ def refresh_jwt(session, current_jwt=None):
     `token` header on ordinary authenticated responses, and a GraphQL error (e.g.
     PersistedQueryNotFound after a hash rotation) still answers HTTP 200 carrying that echo.
     So a renewal requires status 200, NO `errors` array, and a token that DIFFERS from the
-    one we sent -- an unchanged token is not a renewal."""
+    one we sent -- an unchanged token is not a renewal.
+
+    Why it returned None lands in `_refresh_last["reason"]` (network | http_<code> |
+    graphql_error | unchanged) for the Control Panel's "couldn't renew" line (#71). The reason
+    is a fixed word, never a header, body or token. A side channel rather than a second return
+    value, so every caller and every test fake keeps the one-value contract."""
+    _refresh_last["reason"] = ""
     headers = {
         "Content-Type": "application/json",
         "apollo-require-preflight": "true",
@@ -6233,14 +6256,17 @@ def refresh_jwt(session, current_jwt=None):
     try:
         r = session.post(API_URL, json=body, headers=headers, timeout=30)
     except Exception:
+        _refresh_last["reason"] = "network"
         return None
     if r.status_code != 200:
+        _refresh_last["reason"] = "http_{}".format(r.status_code)
         return None
     try:
         payload = r.json() or {}
     except Exception:
         payload = {}
     if payload.get("errors"):
+        _refresh_last["reason"] = "graphql_error"
         return None                        # error response -> its echoed token is NOT fresh
     cur = current_jwt or ""
     tok = r.headers.get("token")
@@ -6249,7 +6275,11 @@ def refresh_jwt(session, current_jwt=None):
     val = (payload.get("data") or {}).get("refreshToken")
     if isinstance(val, str) and val != cur and jwt_expiry(val):
         return val
+    _refresh_last["reason"] = "unchanged"
     return None
+
+
+_refresh_last = {"reason": ""}
 
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
@@ -6259,10 +6289,32 @@ def refresh_jwt(session, current_jwt=None):
 # every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
 # (adversarial review 2026-08-15). The gallery serves threaded=True.
 _mirror_lock = threading.Lock()
-# Backoff so a persistently-failing refresh (rotated hash, expired session, PixAI 5xx) is not
-# re-fired on EVERY create while the JWT sits inside its refresh cushion (review). time-based.
-_mirror_refresh_next_try = 0.0
-_MIRROR_REFRESH_COOLDOWN = 600      # seconds to wait after a failed refresh before retrying
+# THE RENEWAL RECORD (#71) -- one home for everything about renewing, shared by the create
+# path (make_mirror_session), a press of Connect, and the background tick (mirror_renew_tick):
+#   fails / next_try   a failing renewal backs off _MIRROR_REFRESH_COOLDOWN, doubling, capped
+#                      at MIRROR_RENEW_BACKOFF_CAP_S -- for the token that failed (failed_exp);
+#                      a different token is not held behind another token's failures;
+#   failed_exp         the exp of the token the last failure was against: the Panel reports
+#                      "couldn't renew" only while THAT token is still the stored one and due;
+#   last_ok_at         the last successful renewal; none again within MIRROR_RENEW_FLOOR_S, so
+#                      a token PixAI mints already inside the cushion can never loop;
+#   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence.
+# Module state: tests/conftest.py resets it around every test (_mirror_renewal_reset).
+_MIRROR_REFRESH_COOLDOWN = 600      # the first backoff step after a failed renewal (seconds)
+MIRROR_RENEW_BACKOFF_CAP_S = 7200   # the longest step: a failing renewal retries every 2 h
+MIRROR_RENEW_FLOOR_S = 6 * 3600     # at most one successful renewal per 6 h, whatever is due
+MIRROR_RENEW_TICK_S = 900           # the background tick looks at the token every 15 minutes
+_mirror_renewal = {}
+
+
+def _mirror_renewal_reset():
+    """Back to "never tried": no failures, no backoff, no recent success, tick due now."""
+    _mirror_renewal.clear()
+    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=None,
+                           last_attempt_at=None, last_reason="", tick_at=None)
+
+
+_mirror_renewal_reset()
 
 
 def _mirror_state_path():
@@ -6274,8 +6326,8 @@ def _mirror_state_path():
 
 
 def load_mirror_state():
-    """The stored mirror session {jwt} or {} if none. (A legacy `cookies` key from older
-    builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
+    """The stored mirror session {jwt[, minted_at]} or {} if none. (A legacy `cookies` key from
+    older builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
     p = _mirror_state_path()
     if not p.exists():
         return {}
@@ -6288,11 +6340,26 @@ def load_mirror_state():
 
 
 def save_mirror_state(state):
-    """Atomically persist {jwt} to the git-ignored mirror file. Best-effort: True/False,
-    never raises, never logs a value. JWT-only: cookies are no longer stored -- the Bearer
-    JWT authenticates both the create and the refresh; the short session cookies died ~1 h
-    after issue (so they never survived to a day-22 refresh anyway), and pairing a
-    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review)."""
+    """Atomically persist {jwt[, minted_at]} to the git-ignored mirror file. Best-effort:
+    True/False, never raises, never logs a value. JWT-only: cookies are no longer stored -- the
+    Bearer JWT authenticates both the create and the refresh; the short session cookies died
+    ~1 h after issue (so they never survived to a day-22 refresh anyway), and pairing a
+    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review).
+
+    `minted_at` (#71) is a timestamp, not a credential: the moment the APP's own renewal minted
+    this token, set ONLY by a successful renewal. It is what the Control Panel's ring measures
+    the token's life from, because `iat` never moves off the original sign-in. Saving the SAME
+    token without one keeps the stored one (run_mirror_check re-saves an unchanged token on a
+    failed renewal); saving a DIFFERENT token without one -- a browser read -- drops it."""
+    jwt = state.get("jwt", "")
+    minted = state.get("minted_at")
+    if minted is None:
+        prev = load_mirror_state()
+        if jwt and prev.get("jwt") == jwt:
+            minted = prev.get("minted_at")
+    record = {"jwt": jwt}
+    if isinstance(minted, (int, float)) and not isinstance(minted, bool):
+        record["minted_at"] = minted
     p = _mirror_state_path()
     # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
     # per-pid temp name lets two concurrent savers interleave into one file then both
@@ -6301,7 +6368,7 @@ def save_mirror_state(state):
     tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"jwt": state.get("jwt", "")}, f, indent=2)
+            json.dump(record, f, indent=2)
         os.replace(tmp, p)
         return True
     except OSError:
@@ -6385,7 +6452,69 @@ def present_as_web(session):
     return session
 
 
-def make_mirror_session(bootstrap_from_browser=False):
+def mirror_token_span(state, now=None):
+    """(seconds left, seconds in the token's life) for the Control Panel's ring, or
+    (None, None) with no parseable token. Offline; neither number reveals the token.
+
+    The life is exp - minted_at for a token the app renewed itself. A token read from the
+    browser on Connect (or stored before #71) has no known start -- `iat` stays at the original
+    sign-in through every renewal (PROBE 2026-10-02), so exp - iat grows without bound -- and
+    is drawn out of max(left, MIRROR_TOKEN_LIFE_S). Never shorter than what is left, so the ring
+    never draws past full."""
+    exp = jwt_expiry((state or {}).get("jwt") or "")
+    if exp is None:
+        return None, None
+    now = time.time() if now is None else now
+    left = exp - now
+    minted = (state or {}).get("minted_at")
+    if isinstance(minted, (int, float)) and not isinstance(minted, bool) and minted < exp:
+        span = exp - minted
+    else:
+        span = max(left, MIRROR_TOKEN_LIFE_S)
+    return left, max(span, left)
+
+
+def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
+    """THE one renewal (#71): every path that renews -- a create (make_mirror_session), a press
+    of Connect, the background tick -- comes through here. Returns (jwt, outcome); outcome is
+    renewed | failed | not_due | read_only | backoff | floor | no_session.
+
+    Runs entirely inside _mirror_lock and re-reads the stored token there, so two renewals
+    racing (the tick and a Connect, or two creates) make ONE refreshToken call: the second sees
+    the fresh token and finds nothing due. READ_ONLY is re-checked here, immediately before the
+    POST, because it can flip between a caller's own check and this lock. A failure backs off
+    (see _mirror_renewal) unless this is a press of Connect, which always tries once; and no
+    renewal follows a successful one within MIRROR_RENEW_FLOOR_S."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    with _mirror_lock:
+        cur = load_mirror_state().get("jwt") or fallback or ""
+        if not cur:
+            return cur, "no_session"
+        if READ_ONLY or _read_only_now():
+            return cur, "read_only"
+        if not mirror_needs_refresh(cur, now=now):
+            return cur, "not_due"
+        exp = jwt_expiry(cur)
+        if not user_initiated and r["failed_exp"] == exp and now < r["next_try"]:
+            return cur, "backoff"
+        if r["last_ok_at"] is not None and now - r["last_ok_at"] < MIRROR_RENEW_FLOOR_S:
+            return cur, "floor"
+        r["last_attempt_at"] = now
+        fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
+        if fresh:
+            save_mirror_state({"jwt": fresh, "minted_at": now})
+            r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="")
+            return fresh, "renewed"
+        fails = (r["fails"] if r["failed_exp"] == exp else 0) + 1
+        r.update(fails=fails, failed_exp=exp,
+                 next_try=now + min(_MIRROR_REFRESH_COOLDOWN * 2 ** (fails - 1),
+                                    MIRROR_RENEW_BACKOFF_CAP_S),
+                 last_reason=_refresh_last.get("reason") or "failed")
+        return cur, "failed"
+
+
+def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
     """The mirror submit/refresh session: a requests.Session authed with the browser JWT
     (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
     no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
@@ -6394,39 +6523,92 @@ def make_mirror_session(bootstrap_from_browser=False):
     JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
     precondition/USER_ID-resolution must not run over the browser token (review).
 
-    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the refresh->persist
-    critical section takes the lock (single-flight), and a failed refresh backs off so it is
-    not re-fired on every create (review)."""
-    global _mirror_refresh_next_try
+    `user_initiated` is a press of Connect (#71): it re-reads the browser even when the stored
+    token is still usable -- PixAI can revoke a token before its exp -- and keeps whichever of
+    the two expires later; and its renewal tries once even inside a failure backoff.
+
+    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the keep-the-later choice
+    and the refresh->persist critical section (_mirror_try_renew) take the lock."""
     jwt = load_mirror_state().get("jwt") or ""
     # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
     # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
     # which left Connect and --mirror-check permanently dead until the file was hand-deleted
     # (review). The browser read is slow, so it happens before the lock.
-    if bootstrap_from_browser and not _jwt_usable(jwt):
+    if bootstrap_from_browser and (user_initiated or not _jwt_usable(jwt)):
         bj = read_browser_jwt()
         if bj:
-            jwt = bj
-            save_mirror_state({"jwt": jwt})
+            with _mirror_lock:
+                cur = load_mirror_state().get("jwt") or ""
+                if not _jwt_usable(cur) or (jwt_expiry(bj) or 0) > (jwt_expiry(cur) or 0):
+                    save_mirror_state({"jwt": bj})        # a browser token: no minted_at
+                    cur = bj
+                jwt = cur
     # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
-    # (refreshToken is account-mutating), and not more often than the cooldown after a failure.
+    # (refreshToken is account-mutating; _mirror_try_renew checks again inside its lock).
     if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
-        with _mirror_lock:
-            cur = load_mirror_state().get("jwt") or jwt      # a peer thread may have refreshed
-            if mirror_needs_refresh(cur):
-                now = time.time()
-                if now >= _mirror_refresh_next_try:
-                    fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
-                    if fresh:
-                        cur = fresh
-                        save_mirror_state({"jwt": cur})
-                        _mirror_refresh_next_try = 0.0
-                    else:
-                        _mirror_refresh_next_try = now + _MIRROR_REFRESH_COOLDOWN
-            jwt = cur
+        jwt, _outcome = _mirror_try_renew(user_initiated=user_initiated, fallback=jwt)
     if not _jwt_usable(jwt):
         return None                        # absent/expired -> refuse, never API-key (F5)
     return _mirror_session_from(jwt)
+
+
+def mirror_renew_tick(now=None):
+    """THE BACKGROUND RENEWAL (#71), asked every minute by the gallery's scheduler heartbeat
+    and deciding every MIRROR_RENEW_TICK_S. Without it the token was renewed only when a
+    generation or a Connect asked, so a week of not generating let it lapse.
+
+    Returns what it did: cadence | mirror_off | read_only | no_session | expired | fresh |
+    backoff | floor | not_due | renewed | failed. Everything before the renewal is offline (two
+    small file reads); the renewal itself is _mirror_try_renew, one refreshToken at most. An
+    expired token is left for Connect -- the tick does not try it. Never raises, never logs or
+    returns the token."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    if r["tick_at"] is not None and now - r["tick_at"] < MIRROR_RENEW_TICK_S:
+        return "cadence"
+    r["tick_at"] = now
+    try:
+        if not mirror_enabled():
+            return "mirror_off"
+        if READ_ONLY or _read_only_now():
+            return "read_only"
+        jwt = load_mirror_state().get("jwt") or ""
+        exp = jwt_expiry(jwt)
+        if exp is None:
+            return "no_session"
+        if exp - now <= 0:
+            return "expired"
+        if not mirror_needs_refresh(jwt, now=now):
+            return "fresh"
+        return _mirror_try_renew(now=now)[1]
+    except Exception:                                  # noqa: BLE001 -- a tick never raises
+        return "failed"
+
+
+def mirror_renewal_status(now=None):
+    """The Control Panel's renewal line (#71): {state, reason, last_ok_at, next_try_at}.
+
+    state: off (the Mirror is disarmed) | none (no parseable token) | expired (no seconds left)
+    | paused (due, but READ_ONLY forbids the renewal) | failed (due, and the last renewal failed
+    against THIS stored token -- a token saved since, by Connect or a renewal, clears it) | ok.
+    Offline, never the token or any of its claims."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    out = {"state": "ok", "reason": "", "last_ok_at": r["last_ok_at"], "next_try_at": None}
+    jwt = load_mirror_state().get("jwt") or ""
+    exp = jwt_expiry(jwt)
+    if not mirror_enabled():
+        out["state"] = "off"
+    elif exp is None:
+        out["state"] = "none"
+    elif exp - now <= 0:
+        out["state"] = "expired"
+    elif mirror_needs_refresh(jwt, now=now):
+        if READ_ONLY or _read_only_now():
+            out["state"] = "paused"
+        elif r["fails"] and r["failed_exp"] == exp:
+            out.update(state="failed", reason=r["last_reason"], next_try_at=r["next_try"])
+    return out
 
 
 def _session_for_create(api_session):
@@ -6490,7 +6672,12 @@ def run_mirror_check(args):
               "pixai.art logged-in, then retry.".format(src))
         return {"ok": False, "source": src, "renewed": False}
     after = jwt_days_left(fresh)
-    saved = save_mirror_state({"jwt": fresh})
+    # The app's own renewal: stamp when it minted the token (the ring's span, #71) and record
+    # the success, so the background tick's 6 h floor counts it.
+    minted = time.time()
+    saved = save_mirror_state({"jwt": fresh, "minted_at": minted})
+    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=minted,
+                           last_reason="")
     print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. {}".format(
         src, after, "" if before is None else " (was {})".format(before),
         "Stored." if saved else "WARNING: could not persist mirror_session.json."))
@@ -6505,7 +6692,8 @@ def run_mirror_check(args):
 #     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
 #  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
 #  3. READ_ONLY fires before any mirror network call: refreshToken (make_mirror_session,
-#     run_mirror_check, /api/mirror/connect) and the create (submit_generation/submit_fixer).
+#     run_mirror_check, /api/mirror/connect, mirror_renew_tick -- and again inside
+#     _mirror_try_renew's lock) and the create (submit_generation/submit_fixer).
 #  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
 #     only days-left + ok/None; the credential travels only in a POST body/Authorization.
 #  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
@@ -6554,7 +6742,7 @@ def run_probe(args):
 #: place with none of the reading, so it is deprecated -- still working this release, but no
 #: longer the answer.
 _DELETE_TASK_DEPRECATED = (
-    "NOTE: --delete-task is DEPRECATED and will be removed in a later release.\n"
+    "NOTE: --delete-task is DEPRECATED and will be removed in the next minor release.\n"
     "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
     "  with PixAI first and removes just that image when the rest of its batch is still\n"
     "  there. To delete whole generations, select them in the gallery and use Delete from\n"
@@ -9207,11 +9395,21 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # record's own order. No published default aspect means PixAI's own client sends no
 # aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
 # Reference Pro. Listed first; the card's default model stays Edit Pro.
+# Labelled as PixAI labels it, "PixAI Edit (v4.0)": the latest version of PixAI's general Edit
+# model, not Edit Pro and not Tsubaki.3 (the owner's walk, 2026-10-03).
+#
+# PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new VERSION of the Edit Pro model
+# (2026-09-29), not a new model, copied from its own version row 2061589941358465024,
+# extra.chatEditing: maxInputImageCount 10; 1K/2K; low/medium/high; eleven aspects (v1.0's
+# thirteen minus 1:3 and 3:1) in the record's order; defaults 1K/medium/3:5. Labelled as PixAI
+# labels it ("PixAI Edit Pro (v2.0)") and listed right after v1.0. v1.0 stays -- PixAI still
+# offers it, the Edit Pro AI Tools scenes run on it, and it stays the card's default
+# (EDIT_PRO_MODEL_ID). Same submit shape and price table as v1.0; only chat.modelId differs.
 EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
     "edit-v4": {
         "model_id": "1983993578828959744",
-        "label": "Edit v4.0", "max_refs": 10,
+        "label": "PixAI Edit (v4.0)", "max_refs": 10,
         "resolutions": ["1K", "2K", "4K"],
         "qualities": [],
         "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
@@ -9225,6 +9423,15 @@ EDIT_MODELS = {
         "qualities": ["low", "medium", "high"],
         "aspects": ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
                     "5:4", "1:3", "3:1"],
+        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
+    },
+    "edit-pro-v2": {
+        "model_id": "2061589941358465024",
+        "label": "Edit Pro (v2.0)", "max_refs": 10,
+        "resolutions": ["1K", "2K"],
+        "qualities": ["low", "medium", "high"],
+        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "3:5",
+                    "5:3"],
         "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
     },
     "reference-pro": {
@@ -9253,8 +9460,8 @@ FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
-    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'reference-pro'); '' if
-    unknown."""
+    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'edit-pro-v2'/
+    'reference-pro'); '' if unknown."""
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 
@@ -11822,7 +12029,8 @@ def _edit_parameters_from_payload(p, user, resolve):
     kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
                   model_id=model_id)
     # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
-    # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
+    # capped to the resolved row's OWN reference limit (Edit Pro v1.0 4; Edit Pro V2.0, Edit
+    # v4.0 and Reference Pro 10) -- two versions of one model can differ, so never a fixed cap.
     media = p.get("sources")
     media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
     if not media:
@@ -12114,6 +12322,15 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         if rs.unlimited is None or rs.gate is None:
             raise PixAIError(_UNLIMITED_UNWIRED)
         params = rs.unlimited(params, args.model)
+    # THE SMART REFERENCE SUBMIT, AS PIXAI'S OWN SITE SENDS IT (captured live 2026-10-03, the
+    # owner's walk): a context-image edit carries `controlNets: []` and, for one picture, no
+    # batchSize. The quote prices this same dict (req.parameters), so the two cannot differ.
+    # The source picture's own size is the drawer's (genCore.tsubakiEditState); the gate above
+    # already put it on the model's size rule.
+    if params.get("contextImages"):
+        params.setdefault("controlNets", [])
+        if params.get("batchSize") == 1:
+            params.pop("batchSize")
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card or lane, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)
@@ -15022,12 +15239,17 @@ def list_kaisuuken_logs(session, first=50, after=None):
     actually spent). Verified live 2026-08-02 against the account's own history.
 
     Each row: {record_id, template_name, category, task_type, task_id, action, credit_cost,
-    created_at}. `action` is "consumed" or "refunded" -- PixAI hands a card back (a NEW record,
-    same kaisuukenId, action=refunded) when the task it was attached to failed or was refused;
-    a single card can cycle consumed->refunded->consumed again across different tasks, so
-    record_id is not 1:1 with "one use". `credit_cost` is what the redemption would have cost
-    in credits had no card covered it -- useful for a "cards have saved you N credits" total,
-    never an actual charge (the whole point of the card is that it wasn't charged).
+    created_at}. `action` is one of the four actions PixAI's contract allows: "consumed",
+    "refunded", "expired" or "revoked". PixAI hands a card back (a NEW record, same
+    kaisuukenId, action=refunded) when the task it was attached to failed or was refused; a
+    single card can cycle consumed->refunded->consumed again across different tasks, so
+    record_id is not 1:1 with "one use". "expired" is a card that ran out unused and "revoked"
+    one PixAI took back: neither was attached to a task, so those rows come with no task id
+    (task_id "") and no credit cost (None). The first expiry row on the owner's log is dated
+    2026-09-18 (PROBE_2026-10-02_site, #68); cards that ran out before then left no row.
+    `credit_cost` is what the redemption would have cost in credits had no card covered it --
+    useful for a "cards have saved you N credits" total, never an actual charge (the whole
+    point of the card is that it wasn't charged).
 
     Cursor-paginated (Relay style): pass a previous call's `end_cursor` as `after` to page
     forward; `has_next` says whether more exist. Read-only; fails soft on error (matching
@@ -15063,9 +15285,13 @@ def kaisuuken_type_catalog(session, max_pages=25):
     expires out of current holdings (verified 2026-08-02: Reference Pro Only and Edit Pro
     Only both fully cycled out of live holdings but still show up here going back ~a month).
 
-    Caveat: this only catches types actually USED (consumed or refunded) at least once -- a
-    card that expired untouched leaves no trace in this log, so it is a lower bound on
-    "every card type ever granted", not an exact one.
+    Each template counts all four actions the log carries -- consumed, refunded, expired and
+    revoked (#68) -- so a card type that only ever ran out still has its row, with its expiries
+    counted rather than dropped.
+
+    Caveat: the log's first expiry row is dated 2026-09-18, so a card type that expired
+    untouched before then left no trace here (verified 2026-08-02); the roster is a lower
+    bound on "every card type ever granted", not an exact one.
 
     Capped at `max_pages` pages of 100 rows each as a politeness/safety bound -- an old
     account could otherwise page indefinitely. Returns what it found plus whether the cap
@@ -15079,12 +15305,10 @@ def kaisuuken_type_catalog(session, max_pages=25):
             name = row["template_name"] or "(unknown)"
             entry = catalog.setdefault(name, {
                 "category": row["category"], "task_type": row["task_type"],
-                "consumed": 0, "refunded": 0,
+                "consumed": 0, "refunded": 0, "expired": 0, "revoked": 0,
                 "first_seen": row["created_at"], "last_seen": row["created_at"]})
-            if row["action"] == "consumed":
-                entry["consumed"] += 1
-            elif row["action"] == "refunded":
-                entry["refunded"] += 1
+            if row["action"] in ("consumed", "refunded", "expired", "revoked"):
+                entry[row["action"]] += 1
             ts = row["created_at"]
             if ts and (not entry["first_seen"] or ts < entry["first_seen"]):
                 entry["first_seen"] = ts
@@ -17573,8 +17797,9 @@ def main():
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
     ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DEPRECATED (use the gallery's Delete from PixAI, on one image or "
-                         "on a selection). DELETE the given generation task id(s) from your "
+                    help="DEPRECATED, removed in the next minor release (use the gallery's "
+                         "Delete from PixAI, on one image or on a selection). DELETE the "
+                         "given generation task id(s) from your "
                          "PixAI account (irreversible). Dry-run unless --apply is also "
                          "given; then asks for typed confirmation unless --yes. Local "
                          "backups are untouched. (DELETE_TASK_HASH ships with a working "
@@ -17798,13 +18023,23 @@ def main():
     gen.add_argument("--prompt", default="", help="positive prompt for --generate")
     gen.add_argument("--negative", default="", help="negative prompt for --generate")
     gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
-    gen.add_argument("--width", type=int, default=512)
-    gen.add_argument("--height", type=int, default=512)
-    gen.add_argument("--steps", type=int, default=25)
-    gen.add_argument("--cfg", type=float, default=7.0)
+    gen.add_argument("--width", type=int, default=512,
+                     help="image width in pixels (default 512; rounded down to a multiple of 8 "
+                          "and moved onto the model's own size grid if it does not fit -- the "
+                          "preview names any change)")
+    gen.add_argument("--height", type=int, default=512,
+                     help="image height in pixels (default 512; rounded and moved onto the "
+                          "model's size grid the same way as --width)")
+    gen.add_argument("--steps", type=int, default=25,
+                     help="sampling steps (default 25; not sent to a model that publishes its "
+                          "own quality profiles, which set their own)")
+    gen.add_argument("--cfg", type=float, default=7.0,
+                     help="CFG scale (default 7; not sent to a model that publishes its own "
+                          "quality profiles, which set their own)")
     gen.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
-    gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--seed", type=int, default=None,
+                     help="seed for a repeatable picture (default: random -- none is sent)")
     gen.add_argument("--priority", type=int, default=PRIORITY_TURBO,
                      choices=list(PRIORITY_CHOICES),
                      help="speed channel: 0 = standard, no extra cost; 500 = turbo, "
@@ -17822,7 +18057,10 @@ def main():
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
                           "model's default -- always VALID (price depends on the model's own "
                           "default). lite/standard suit SD_V1 models; "
-                          "pro/ultra are for newer model types (an unsupported mode is rejected)")
+                          "pro/ultra are for newer model types. A mode the model does not list "
+                          "is refused before anything is sent; if the list cannot be read and "
+                          "PixAI rejects the mode, it is dropped and the run goes once on the "
+                          "model's default")
     gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")
@@ -17873,7 +18111,9 @@ def main():
     gen.add_argument("--poll-timeout", type=int, default=300,
                      help="seconds to wait for a submitted task to finish before giving up (default 300)")
     gen.add_argument("--confirm", action="store_true",
-                     help="REQUIRED for --generate/--generate-video to actually submit (spends credits)")
+                     help="REQUIRED for --generate, --generate-video, --reference-video and "
+                          "--edit-image to actually submit (spends credits), and for --claim "
+                          "(grants free credits/stamina to your own account)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
     gen.add_argument("--generate-video", dest="generate_video", action="store_true",
                      help="create an image-to-video clip via PixAI from a source image "
@@ -17882,7 +18122,10 @@ def main():
     gen.add_argument("--image", default="", help="source image media_id to animate (first frame)")
     gen.add_argument("--tail", default="", help="optional last-frame image media_id "
                      "(first/last-frame interpolation)")
-    gen.add_argument("--duration", type=int, default=5, help="video length in seconds (e.g. 5/10/15)")
+    gen.add_argument("--duration", type=int, default=5,
+                     help="video length in seconds: 5, 6, 10 or 15 (default 5). Snapped to the "
+                          "nearest length the chosen --video-model takes: 15 is V4.0 and Tsubaki "
+                          "only (other engines stop at 10), and the Tsubaki engines have no 6")
     gen.add_argument("--video-model", dest="video_model", default="",
                      help="video model (default v4.0.1); overrides --model for --generate-video")
     gen.add_argument("--video-mode", dest="vmode", default="professional",
@@ -17914,8 +18157,10 @@ def main():
                           "@image1=first, @image2=second, ...")
     gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
-    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
-                     help="reference audio (repeatable; cite as @audio1, ...)")
+    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
+                     help="reference audio, as a media_id only -- a local audio file cannot be "
+                          "uploaded (put it in a video and pass that with --ref-video). "
+                          "Repeatable; cite as @audio1, ...")
     gen.add_argument("--video-ratio", dest="video_ratio", default="",
                      choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
                      help="--reference-video output aspect ratio, Tsubaki video engines only "
@@ -17966,11 +18211,33 @@ def main():
     ap.add_argument("--audit", action="store_true",
                     help="read-only duplicate audit of the whole backup folder; writes "
                          "audit_report.csv and prints a summary, then exit. Independent of catalog.db.")
+    ap.add_argument("--verify-library", dest="verify_library", action="store_true",
+                    help="read-only integrity pass over every catalogued file: missing, zero-byte, "
+                         "missing or empty thumbnails, uncataloged files. Writes "
+                         "integrity_report.csv/.json at the library root and prints a summary, "
+                         "then exit. Changes nothing else.")
+    ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
+                    help="with --verify-library, also check each file's end structurally "
+                         "(PNG/JPEG/WebP/GIF end markers, MP4 moov); a torn file is reported as "
+                         "suspect. Reads two small ranges per file, decodes nothing.")
     ap.add_argument("--dedup", action="store_true",
                     help="act on the audit: move redundant copies to _duplicates/ (keeping the "
                          "most-organized copy), then reconcile catalog.db. Dry-run unless --apply.")
     ap.add_argument("--apply", action="store_true",
-                    help="with --dedup, actually perform the moves/deletes (default is dry-run)")
+                    help="with --dedup, actually perform the moves/deletes (default is dry-run); "
+                         "with --import-curation, actually write the curation")
+    ap.add_argument("--export-curation", dest="export_curation", nargs="?", const="",
+                    default=None, metavar="FILE",
+                    help="write your curation (ratings, collections and their order, smart "
+                         "collections, tags, keeper/reject marks, notes) to a JSON file keyed by "
+                         "media id, then exit. Default file: curation_<stamp>.json in the library")
+    ap.add_argument("--import-curation", dest="import_curation", default="", metavar="FILE",
+                    help="read a curation file back into this catalog. Dry run unless --apply; "
+                         "fill-only (keeps any rating, mark or note already there) unless "
+                         "--curation-overwrite. Saves the current state first.")
+    ap.add_argument("--curation-overwrite", dest="curation_overwrite", action="store_true",
+                    help="with --import-curation, the file wins for the pictures it lists: "
+                         "rating, mark, note, tags, collections and manual orders")
     ap.add_argument("--dedup-delete", action="store_true",
                     help="with --dedup --apply, delete redundant copies instead of quarantining them")
     ap.add_argument("--no-content", action="store_true",
@@ -18142,6 +18409,33 @@ def main():
             return
         if args.audit:
             cmd_audit(args, out)
+            return
+        if getattr(args, "verify_library", False):
+            # Read-only (moonglade_integrity.py): no _check_read_only, nothing to gate.
+            import moonglade_integrity
+            _job = _cli_job_start(out, "Verify library integrity")
+            try:
+                moonglade_integrity.run_cli(out, db_path, deep=getattr(args, "verify_deep", False),
+                                            progress=args.progress)
+            except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged
+                _cli_job_finish(out, _job, error=e)
+                raise
+            _cli_job_finish(out, _job)
+            return
+        if getattr(args, "export_curation", None) is not None:
+            # Local catalog only (moonglade_curation_io.py); no PixAI call.
+            import moonglade_curation_io
+            moonglade_curation_io.run_export_cli(out, db_path, args.export_curation)
+            return
+        if getattr(args, "import_curation", ""):
+            import moonglade_curation_io
+            try:
+                moonglade_curation_io.run_import_cli(
+                    out, db_path, args.import_curation, apply=args.apply,
+                    overwrite=getattr(args, "curation_overwrite", False))
+            except moonglade_curation_io.CurationIOError as e:
+                print("Nothing imported: {}".format(e))
+                sys.exit(1)
             return
         if args.dedup:
             cmd_dedup(args, out, db_path)

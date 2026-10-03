@@ -15,8 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (3.11.0 to 3.14.0 on 2026-09-26), per the
-  rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.16.0 — Keeping Watch,
+  2026-10-03), per the rule at the top of this file.
 
 ---
 
@@ -32,6 +32,13 @@ why this section exists.
 
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.
+
+- **Free cards: say when they expire, and open PixAI's current event.** *(owner, 2026-10-02)*
+  Event cards have been expiring unused. Add a plain warning before held cards run out, and a
+  link to whatever event PixAI is running, read from its public home-banner list. No per-event
+  check-in: PixAI has no read-only check-in status, and each event's routes differ. The
+  placement needs a short design session first:
+  [#69](https://github.com/Nelnamara/moonglade-athenaeum/issues/69).
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
@@ -57,7 +64,10 @@ why this section exists.
   driven browser at phone size. The design-queue wave has merged, so nothing gates this.
 
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
-  Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
+  Owner, 2026-10-02 (iPad, last played before 3.11): content cut off in the Lightbox and Details, and
+  overlapping buttons in the main gallery
+  ([#72](https://github.com/Nelnamara/moonglade-athenaeum/issues/72)); the mobile-surface audit walks
+  iPad sizes too. Today one hook (`MOBILE_QUERY` 520px + a coarse-pointer fallback for a phone-width screen held in portrait)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
   breakpoint so tablets get the mobile build (one number, least work, most side effects on a
   desktop-shaped surface); add a real third tier; or keep the split and port touch affordances
@@ -92,7 +102,7 @@ why this section exists.
   and the `/next/assets/` static prefix baked into the build, the page templates and the installed-app
   manifest. Rename the API routes to plain names (`/api/library`, `/api/detail/<id>`, `/api/history`) on
   one shared handler with the old paths kept as aliases for a release, send every client call through one
-  constants module (54 scattered call sites today), and leave payloads untouched. The assets prefix is
+  constants module (the call sites are scattered today), and leave payloads untouched. The assets prefix is
   decided separately and never simply dropped: installed phone apps read their icons from it. Built after
   the open work is merged and walked, not alongside it (the details route keeps gaining fields). Scope,
   measured blast radius, phases, tests and risks:
@@ -100,19 +110,23 @@ why this section exists.
 
 ## Design-pass reworks — rescope, don't just build
 
-- **PixAI inbox and comment replies.** Likes, bookmarks and follows are dropped (owner,
-  2026-09-07: no reason to like or bookmark his own work). What stays: being told about comments
-  and likes on his works, and replying to comments. A probe first, then a design session, then the
-  build; a reply is the first write to PixAI other than generate and delete.
+- **PixAI inbox and comment replies.** Being told about everything PixAI's inbox carries for his
+  works (all kinds: comments, likes, follows; owner, 2026-10-02), and replying to comments. Liking,
+  bookmarking and following are not actions the app takes (owner, 2026-09-07). The promo gift folds
+  in, with a gift-box button by the credits chip, which issue #26 always intended. A probe (running
+  2026-10-02), then design Session R, then the build; a reply is the first write to PixAI other than
+  generate and delete.
 
 ## Scoped-but-unbuilt — decided once, never executed
 
-- **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
-  still sit loose at the install root. Partly addressed by the container; finish the thought
-  (possibly alongside the final naming pass, which may move `branding/` once more). Folds into the
-  naming pass's Phase 2, scoped after 3.10 (owner, 2026-09-07).
+- **Install-folder tidy.** "A tidy install folder says a lot." Half done: the art pack and its
+  coded tree replaced the old loose `branding/` folder, which no longer exists. Before anything is
+  scoped, re-audit what still sits loose at the install root today (owner, 2026-10-02: "old topic and
+  half done now").
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
-  left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
+  left behind (what else is dead?). `--faststart-videos` is live and stays (it rewrites a video so it
+  starts playing before it has fully downloaded). `--delete-task`, deprecated since 2026-09-06 in favour
+  of the gallery's Delete, is removed in the next minor release. **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
   it removed real cruft in passing — the `_connect` catalog shim and the front-end `postJSON` helper are
   gone, `LibraryBar` shed thirteen dead props, and dozens of hand-rolled call sites collapsed onto single
@@ -124,15 +138,21 @@ why this section exists.
   named public/private collections. The model picker's Bookmarked tab still works on the older
   call, so nothing is broken; a check in the build warns when that call leaves PixAI's site.
   Adopting collections needs one read-only capture of their shapes and a design step for the
-  picker's source tabs.
+  picker's source tabs. **Owner, 2026-10-02: show and save.** The picker shows his PixAI collections
+  so site-saved models appear in the app, and a Save in the picker puts a model into one of his PixAI
+  collections (design Session S).
 
 ## Open questions — need a call before they can be scoped
 
 - **App security review** *(owner, 2026-09-06: "I wonder if there is a better way to secure the
   app now that it has grown to this level")* — a proper audit of the auth surface: login and the
   no-accounts mode, session/JWT/cookie handling, the localhost trust model, mirror/write gating,
-  and what "grown to this level" changes about the threat picture. Runs on the owner's go.
-  Runs after 3.10 (owner, 2026-09-07).
+  and what "grown to this level" changes about the threat picture. **Go (owner, 2026-10-02): after
+  Wave 1, as a read-only audit that ends in a ranked list.** Most state-changing routes skip the
+  explicit CSRF token today; Wave 1 fixes three and the review ranks the rest. Ruled already: a
+  signed-in device on the LAN keeps spending and deleting with no extra step (owner: keep), and
+  Log Out signs out only the device it was pressed on
+  ([#70](https://github.com/Nelnamara/moonglade-athenaeum/issues/70)).
 
 ---
 
@@ -145,6 +165,7 @@ why this section exists.
   proves itself provider-agnostic — and it follows the Loom-unify decision in that sequence. Low
   priority until that decision is taken.
 - **UPnP / SSDP (or WS-Discovery) LAN presence — show up in Windows Explorer's "Network".**
+  *(owner, 2026-10-02: scope it; macOS is covered by Bonjour)*
   Bonjour/mDNS (shipped) makes the server discoverable to phones/tablets and resolvable at
   `moonglade.local`, but Windows Explorer's Network folder browses UPnP/SSDP + WS-Discovery, NOT
   mDNS — so Moonglade never appears there (confirmed live 2026-08-25: the `.local` URL works from
@@ -158,13 +179,16 @@ why this section exists.
   current user on first run / from the launcher-shortcut path (friendly name "Moonglade asset pack",
   the app icon) — the same per-user registry spot the Desktop-shortcut code already writes. Touches the
   manifest/downloader file name, `_container_path()`, the builder's default `--out`, and the Release
-  asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority.
+  asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority. Owner,
+  2026-10-02: yes to the extension and to the per-user registry entry, in pack v7.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
-  still to be sourced/added.
-- **BlurHash grid placeholders.** A `blurhash` column is stored but there's no front-end decoder /
-  placeholder render. Low ROI; revisit if it matters.
+  still to be sourced/added. Sources scouted in July (recovered 2026-10-02 from the deleted STATE
+  notes): Kenney, the Sonniss GDC bundles, freesound and OpenGameArt (free/CC0 libraries), or Stable
+  Audio Open run locally through Pinokio to generate them; the owner has one or two WoW sounds of
+  his own.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
-  already likes. Low priority, deliberately unscoped — owner to walk it.
+  already likes. Low priority, deliberately unscoped — owner to walk it. The items on record are
+  listed as an agenda in the Loom-in-the-gallery workshop prep (2026-10-02).
 - **Split the two megamodules (`moonglade_backup.py` / `moonglade_gallery.py`).** They are the
   repo's two largest, highest-complexity, most-churned modules — the top regression-risk / hotspot
   / refactor targets (Flare tracks the live scores). Split into cohesive modules to cut the risk.
@@ -179,42 +203,44 @@ why this section exists.
   The smaller god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,
   `videoDrawerCore.js`) can ride a structural pass instead; these two are banked as their own effort.
 
----
-
 - **Remake the AI Tools thumbnails.** *(owner plan, 2026-09-08)* The Enhance preset thumbnails
   shipped; the owner intends to redo the AI Tools thumbnails himself. Nothing to build until the
   art lands.
 
+---
+
 ## Backlog — needs scoping
 
-- **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
-  internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
-  contest verbs, the `/v2` REST growth, the React front door). Scope: audit `--help` + the wiki
-  command pages against what actually ships, then finish the code map's missing chapters (PixAI
-  layer · achievements engine · server routes · React+Loom · sidecars — ranked gaps already listed
-  at the map's EOF). Docs-only, no behavior changes.
+- **Docs: code-map follow-ups** *(owner-flagged 2026-08-31)* — what is left of the docs refresh once
+  `--help` and the wiki command pages match what ships and the internal code map has all its
+  chapters. A presence-gated test that diffs the map's flag set and stated defaults against
+  argparse (skipping when the private repo is absent), so the map cannot drift unseen; a generator
+  script so a refresh is a re-run; the two original chapters' line numbers replaced with symbol
+  names (after the module split lands); and the gaps listed at the map's end (a first-commands
+  on-ramp, argparse's own vocabulary, a flag-to-column table, the `--sync` stage-to-column table).
+  Docs-only, no behavior changes.
 
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
 
-- **Loom:** draft-quality blocking pass · project "Look" block.
-- **Curator:** archive-integrity job.
-- **Power user:** metadata recovery for hand-made folders.
-- **Mobile:** the mobile details sheet's View-batch chip still gates on the legacy `batch` column
-  (re-point at `task_id` like desktop did in #30).
+- **Curator:** archive-integrity job, Phase B: the list of broken files and what to do about each
+  (the read-only check, its Health tiles and its Panel row are Phase A, built in Wave 1). Needs
+  design Session W first.
 
 From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationale in
 `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
 above, tagged "Scope":
 
-- **Curator:** a full per-file archive-integrity pass (zero-byte / truncated / missing-thumb + a
-  "last verified" stamp, beyond today's missing/orphan tiles) · a round-trippable curation-only
-  sidecar export.
-- **Mobile:** optional infinite scroll · an opt-in "remember this device" longer LAN session (still
+- **Curator:** an in-app screen for importing a curation backup (the export, and the command-line
+  import, are built in Wave 1; a screen needs a design step).
+- **Mobile:** optional infinite scroll, after the phone gallery itself is fixed
+  ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73)) · an opt-in "remember this device" longer LAN session (still
   authenticated) · QR-connect onboarding (URL only, login gate unchanged).
 
-Small integrity fixes the sweep surfaced (issue-candidates, not features): the mobile Details
-"k of N" index counts one loaded page, not the true result total; Contact Sheet Mobile renders
-placeholder thumbs where real art exists; and `deleted_remote` (archive-only) pieces aren't badged
-and can be swept by a bulk quarantine. Detail in the sweep doc §3. (The sweep's fourth item, Loom
-draft-vs-professional marking on rendered shots, was dropped by the owner on 2026-09-07.)
+(The sweep's Loom draft-vs-professional marking on rendered shots was dropped by the owner on
+2026-09-07.)
+
+- **The achievements' stats cache can miss an edit.** The memo that feeds the honors is keyed on the
+  catalog's row count and newest picture, so rating, tagging or publishing an existing picture may not
+  move the matching counts until a new picture arrives (found by the 2026-10-02 code-map pass). Design
+  work, not a defect: decide what invalidates the memo.

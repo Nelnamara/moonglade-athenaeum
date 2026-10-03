@@ -14,6 +14,21 @@ python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + 
 python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
+Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
+disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's options:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting |
+| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `config.json` as `PORT`). Typing it always wins |
+| `--host` | `127.0.0.1` | the address to listen on — or the saved one (`HOST` in `config.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
+| `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |
+| `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
+| `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
+| `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
+| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Serve Gallery`** launcher waits until the server answers and opens the browser itself |
+| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `logs/` in your library always has them |
+
 ## The header
 
 The banner across the top carries the big buttons at its right, and a row of smaller destinations
@@ -36,7 +51,7 @@ The row under the banner holds the other destinations — **My Art**, **Publish*
 of it once **Mirror to PixAI** is armed, and **Activity** at one end. **Import** is drawn only
 on the machine running the gallery (see below). **Publish** publishes a picture of yours on PixAI,
 **Train** is [training your own LoRA](Generating#training-your-own-lora), and **Log Out** signs
-you out everywhere.
+out this device only (to sign out every device, see [Trust & Safety](Trust-and-Safety)).
 
 - **Contests** — live PixAI contests, your entries and their verified results (see
   [Generating → Contests](Generating#contests---contests)).
@@ -214,10 +229,11 @@ panel has an **Aspect** field that does the same without typing, and each card n
 shape (`3:2`) in the row that appears when you hover it. A value the search doesn't understand
 (`ar:banana`) is said out loud under the field instead of quietly finding nothing.
 
-**Operator chips.** Open **⚲ Filters** and the last row of the tray is a set of one-tap chips
-(`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`): tap one
-to add it to the search, tap again to take it out. A shape chip replaces any other shape chip, since
-a picture only has one shape.
+**Operators.** Click into the search field and its suggestion list opens with an **Operators**
+group (`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`),
+each with a word on what it does. Pick one to add it to the search and run it; pick it again (it
+says *in your search*) to take it out. While you type a word, the list keeps only the operators it
+begins (`ke` offers `keeper`). A shape replaces any other shape, since a picture only has one.
 
 **`type:`** splits the library three ways with no overlap: `type:image`, `type:video`, and
 `type:loom` for pictures and clips [The Loom](The-Loom) made (a shot's result, or a re-roll it
@@ -230,7 +246,11 @@ like `width:tall`) isn't an error — the whole token is simply searched as prom
 the way search engines behave. Operator searches work everywhere the search box does:
 the grid, the pickers, saved views, and the filtered CSV export.
 
-Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
+Cards show a ▶ badge on videos and **AI** / **local** badges by source. A picture PixAI no
+longer has wears **ARCHIVE** in that same corner instead (hover it: *"Deleted on PixAI. This is
+the only copy."*) — its task has left your PixAI history as of the last check, or PixAI dropped
+that one image, so your library holds the only copy anywhere. Its detail page says the same
+under **More details**. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.
 
@@ -254,14 +274,19 @@ so you can bookmark one, and the browser's Back button closes it.
 
 - **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`/Space
   slideshow, `Esc` or ✕ to close. Arrow keys **roll over page boundaries** — reach the
-  end of a page and it loads the next one, continuing seamlessly. Closing leaves your
-  scroll and selections intact. Every still picture carries a **Describe your
-  edits…** bar (`E` to jump to it) that sends a Tsubaki.3 edit of it, priced before you send —
-  see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
+  end of a page and it loads the next one, continuing seamlessly. Its top bar says where
+  the picture sits among everything your search and filters match (*101 OF 3,240*), not
+  just its place on the page. Closing leaves your
+  scroll and selections intact. On a still picture, **✎ Edit** (or `E`) opens a **Describe
+  your edits…** bar under the picture that sends a Tsubaki.3 edit of it, priced before you send;
+  ✎ Edit again or `Esc` closes it, and its **More options in the Edit drawer ↗** opens the Edit
+  tab — see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
   metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
-  prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
+  prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode. The header says where the
+  picture sits among everything your search and filters match (*14 of 3,240*), not just
+  among the page on screen, so it agrees with how far Prev and Next will carry you.
 
   The facts list shows **the whole generation record**, not just the recipe: alongside
   prompt, seed, steps, sampler, CFG, model and LoRAs you'll see the inference profile
@@ -339,7 +364,9 @@ phone** (in the browser, like the popup blur), not on your account.
 remembers the newest picture it showed you and the time. Next time, a lavender line reading **N new
 since HH:MM** marks where the new pictures end. There is no line when nothing is new, and none on a
 filtered view, a later page or the lookalikes view; those never change what the phone remembers. After
-one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top.
+one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top. It
+steps aside at the foot of the page, while the **‹ Prev · Page … · Next ›** row is on screen, so it never
+covers the pager.
 
 **Pull to refresh.** At the very top of the Gallery, pull down: the moon fills as you pull (it is a real
 fraction of the distance to the release line — a full moon means "let go now"). Release past the line
@@ -356,7 +383,17 @@ picture on its own says *single image*. **▶ To Video** and, on a picture's rec
 **▶ Send to Video** all only open the **Create** tab already filled in — Remix fills the Image form with
 the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
-Generate.
+Generate. The viewer's buttons (Edit, To Video, Similar, Upscale, Details and the rest) wrap onto two or
+three lines when the phone is upright, so every one is on screen without a sideways swipe.
+
+**Where you are in the library.** A picture's record and the full-screen viewer both say where the
+picture sits among everything your search and filters match (*14 of 3,240*), not just among the page
+on screen, so the number agrees with how far **‹** and **›** will carry you. A picture your current
+filter does not contain shows no number on its record.
+
+**View batch** on a picture's record shows the other pictures made in the same generation. It
+appears for any picture that came from a generation, not only ones filed in an old batch folder.
+To get your whole library back, press **Clear** in **Advanced search**.
 
 ### The phone turned sideways
 
@@ -375,10 +412,11 @@ one), laid out for a wide, short screen:
   film strip, which scroll beneath them.
 - **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the
   model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
-  is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
+  is a panel on the right that scrolls as one: **Remix**, **Send to Video** and the record's other
+  buttons sit after the details and scroll with them (upright they stay pinned at the foot).
 - **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
-  columns re-flow, and a picture you have open stays open. A notch or the home bar on either side is left
-  clear.
+  columns re-flow, and a picture you have open stays open. Turned back upright, the gallery is two columns
+  again and never scrolls sideways. A notch or the home bar on either side is left clear.
 
 A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
 wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks

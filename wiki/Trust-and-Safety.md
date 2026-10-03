@@ -12,7 +12,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   **Matrix** run shows **one confirm** with the count and the total credits, and sends nothing
   until you press its button; **Start training** first gets PixAI's price for exactly
   that run and asks once, with a tick for a paid one, and Advanced training's **Describe
-  automatically** names its price on the button and sends exactly that amount; and **The Loom
+  automatically** shows PixAI's own price on a confirm card and sends only from that card's button; and **The Loom
   never renders on its own** — every render is your own click on **Render**, **Re-render**, the
   drawer's **Generate video** or **Generate all**, and a paid one is priced and asked about
   before it goes. (The **art filters** in the Darkroom
@@ -29,9 +29,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
-  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`) `--apply`
-  plus typing the word `delete` on the CLI, skippable with `--yes` only if you pass it
-  explicitly. A **single-image** delete asks PixAI what it still has of that generation
+  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`, which goes
+  in the next minor release) `--apply` plus typing the word `delete` on the CLI, skippable
+  with `--yes` only if you pass it explicitly. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
   record. It never sends a delete on a generation it could not read. Whenever a delete
@@ -77,14 +77,15 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   still be cleared locally), and the static pieces the login page needs to render: your
   branding art and the web-app manifest, none of which carries any library content. Sessions
   are signed cookies over scrypt-hashed passwords,
-  rate-limited per address. **Sign out** signs you out *everywhere* — it revokes every
-  outstanding session for that account on every device, which is what makes it the right thing
-  to press if you think a session was captured. (Simply visiting the sign-out URL, rather than
-  pressing the button, only clears the browser you're sitting at; nothing that merely *links*
-  to it can knock your other devices offline.) **Sign out also clears anything your browser
+  rate-limited per address. **Log Out** signs out the device you pressed it on and nothing
+  else — your other devices stay signed in. If a device is lost, or you think a session was
+  captured, **change your password** in **Control Panel → Users**: that signs out every other
+  device on your account at once and keeps the one you changed it from. (Nothing that merely
+  *links* to the sign-out address can sign anyone out — it only answers the button's own
+  request.) **Log Out also clears anything your browser
   cached locally** — installing this as an app (see [FAQ](FAQ)) keeps a copy of images you've
   viewed so it can work offline, and signing out deletes that local copy too, so a shared or
-  borrowed device doesn't keep showing them after you sign out.
+  borrowed device doesn't keep showing them after you log out.
   Account creation is **closed after the first local bootstrap**: the login page mints the very
   first account (only from the server's own machine, only while none exist), then never offers
   signup again. New accounts come only from **Panel → Users** *on the machine running the
@@ -197,7 +198,9 @@ different way, and **not the same way as each other**: `--dedup` is dry-run by d
 explicit `--apply` makes it act), while `--organize` runs live by default and is instead
 opted *out* of with `--dry-run` — its safety net is that moves are reversible
 (`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
-flag is specifically about your PixAI *account*, not your local files.
+flag is specifically about your PixAI *account*, not your local files. The one local exception
+is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate aside and
+undoing that move are both refused, since they are the browser's way to run a dedup.
 
 ## Found a real gap in any of this?
 

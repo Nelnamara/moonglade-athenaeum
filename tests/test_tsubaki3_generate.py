@@ -20,7 +20,10 @@ BUILD-w2-gen.md. What is pinned here:
 Every PixAI read is faked at `_rest_get`; nothing here reaches a network.
 """
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -424,3 +427,139 @@ def test_the_image_ref_rule_matches_the_drawer_copy():
     assert "export const AT_REF_RE = /@image(\\d+)/g;" in js
     assert core._IMAGE_REF_RE.pattern == r"@image(\d+)"
     assert core._image_refs("a @image1 b @image12 @image0 @imagex") == [1, 12, 0]
+
+
+# =============================================================================
+# the Lightbox edit bar's request is the site's Smart Reference submit (2026-10-03)
+# =============================================================================
+
+def bar_payload(**kw):
+    """What the Lightbox edit bar's buildPayload sends for a 1280 x 768 source. A HAND COPY, so the
+    tests below run where node is absent; test_the_hand_copy_is_the_bars_real_payload runs the real
+    genCore.js under node and fails the moment the two differ (the 2026-10-03 review)."""
+    p = {"version_id": T3, "model_id": T3_MODEL_ID, "prompt": "make it night", "negative": "",
+         "width": 1280, "height": 768, "mode": "pro", "steps": 25, "cfg": None, "count": 1,
+         "seed": None, "high_priority": True, "prompt_helper": True, "creativity": "medium",
+         "ref_media_id": None, "ref_strength": None, "upscale": None, "upscale_denoise": None,
+         "upscale_denoise_steps": None, "face_fix": False, "quality_tag": None, "loras": [],
+         "context_images": ["701"], "image_refs": []}
+    p.update(kw)
+    return p
+
+
+NODE = shutil.which("node")
+T3_MODEL_ID = "2024383378759147749"
+# The Tsubaki.3 meta the bar's state is built on (loom/test/tsubaki-core.test.js's T3, XL tier).
+_T3_META = {
+    "version_id": T3, "model_id": T3_MODEL_ID, "title": "Tsubaki.3", "context_images": True,
+    "creativity": True, "context_max": 3, "size_rule": {"step": 16, "lo": 512, "hi": 2496},
+    "size_tiers": [{"name": "XL", "min": 512, "max": 2496, "step": 16, "required_tier": 0,
+                    "access": "available", "default": [1104, 1824],
+                    "presets": [{"ratio": "3:5", "width": 1104, "height": 1824},
+                                {"ratio": "1:1", "width": 1408, "height": 1408}]}],
+    "profile_rows": [{"name": "pro", "title": "Pro", "base_price": 3000, "flag": "default",
+                      "required_tier": 0}],
+}
+
+
+@pytest.fixture(scope="module")
+def js_bar(tmp_path_factory):
+    """The bar's REAL payload: genCore.js's buildPayload(tsubakiEditState(...)) run under node for a
+    1280 x 768 source, exactly as TsubakiEditBar.jsx builds it. Skips without node, as the drawer's
+    size-parity test does."""
+    if NODE is None:
+        pytest.skip("node not installed")
+    tmp = tmp_path_factory.mktemp("edit-bar-payload")
+    gen = (ROOT / "gallery" / "src" / "gen" / "genCore.js").as_uri()
+    script = tmp / "bar.mjs"
+    script.write_text(
+        "import { buildPayload, tsubakiEditState } from " + json.dumps(gen) + ";\n"
+        "const model = " + json.dumps(_T3_META) + ";\n"
+        "console.log(JSON.stringify(buildPayload(tsubakiEditState({ model, prompt: 'make it night',\n"
+        "  image: { media_id: '701', w: 1280, h: 768 }, mode: 'pro', tier: 'XL', member: true }))));\n",
+        encoding="utf-8")
+    out_file, err_file = tmp / "bar.out", tmp / "bar.err"
+    try:
+        with open(os.devnull, "rb") as nul, open(out_file, "wb") as fo, open(err_file, "wb") as fe:
+            rc = subprocess.call([NODE, str(script)], stdin=nul, stdout=fo, stderr=fe, timeout=60)
+    except OSError as e:
+        pytest.skip("cannot spawn node in this environment: {}".format(e))
+    assert rc == 0, err_file.read_text(encoding="utf-8", errors="replace")
+    return json.loads(out_file.read_text(encoding="utf-8"))
+
+
+def test_the_hand_copy_is_the_bars_real_payload(js_bar):
+    assert bar_payload() == js_bar
+
+
+def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
+    """PixAI's own site, captured live on 2026-10-03, sends a Smart Reference edit as
+    {extra: {naturalPrompts}, priority, width, height, prompts, modelId, seed, inferenceProfile,
+    controlNets: [], contextImages, promptHelper: {forcePromptHelperDetectionSide, creativity}}:
+    the source's own size, an empty controlNets, and no batchSize for one picture. The bar's request
+    now has exactly those keys (seed is left out when none is set, as before), and the quote prices
+    the very same dict."""
+    req = road(bar_payload(high_priority=False))
+    assert req.parameters == {
+        "extra": {"naturalPrompts": "make it night"}, "priority": core.PRIORITY_TURBO,
+        "width": 1280, "height": 768, "prompts": "make it night", "modelId": T3,
+        "inferenceProfile": "pro", "controlNets": [], "contextImages": ["701"],
+        "promptHelper": {"forcePromptHelperDetectionSide": "server", "creativity": "medium"}}
+    rest.priced.clear()
+    core.price_task(object(), req.parameters)
+    assert rest.priced and all("batchSize" not in q for q in rest.priced)
+    assert rest.priced[-1]["width"] in (1280, "1280") and rest.priced[-1]["height"] in (768, "768")
+
+
+def test_a_run_of_several_still_says_how_many(rest):
+    """batchSize is left out only at one -- the site's own shape; a count above one (the dock's
+    confirm road) still says how many."""
+    assert road(bar_payload(count=2)).parameters["batchSize"] == 2
+
+
+# =============================================================================
+# the Lightbox edit bar runs at High Priority (the owner's call, 2026-10-03)
+# =============================================================================
+
+def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatch, js_bar):
+    """PixAI's free Turbo lane was not starting context-image edits; the site edits that worked ran at
+    High Priority. The bar's REAL payload (genCore.js under node, js_bar) asks for it, so its request
+    carries priority 1000 -- and the quote prices and card-checks that very dict, so the cost line
+    shows what is spent: free when a card covers it, the quoted credits when none does."""
+    req = road(dict(js_bar))
+    assert req.parameters["priority"] == core.PRIORITY_HIGH == 1000
+    assert not req.unlimited and not core.asks_unlimited(dict(js_bar))
+    # no card: the quoted credits, priced on the dict that carries priority 1000
+    matched = []
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: matched.append(params))
+    rest.priced.clear()
+    out = core.price(object(), req)
+    assert out["free"] is False and out["cost"] == 4000 + 900
+    assert str(rest.priced[0]["priority"]) == "1000"
+    assert matched == [req.parameters] and matched[0]["priority"] == 1000
+    # a card that covers it: free, checked against the same dict
+    seen = []
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: seen.append(params) or {
+        "total": 2, "consumeAmount": 1, "covered": True, "name": "card"})
+    out = core.price(object(), req)
+    assert out["free"] is True and seen[0]["priority"] == 1000
+
+
+def test_nothing_else_changes_priority():
+    """Only the bar asks: the web payload without high_priority (the dock's default, the Loom's
+    unticked box) is still Turbo, and with it ticked is still High."""
+    assert core._gen_args_from_web_payload({"prompt": "p"}).priority == core.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == core.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == core.PRIORITY_HIGH
+
+
+def test_the_price_query_of_a_context_image_request_carries_control_nets(rest):
+    """The /v2/task-price query for the bar's request carries `controlNets` as the JSON string "[]"
+    beside its contextImages. A live read-only check (2026-10-03 review) found the quote identical
+    with and without it (3,900), and +1,000 at priority 1000 -- so the empty list is safe to quote,
+    and this pins the shape."""
+    req = road(bar_payload())
+    q = core._task_price_query(object(), req.parameters)
+    assert q["controlNets"] == "[]"
+    assert json.loads(q["contextImages"]) == ["701"]
+    assert "batchSize" not in q

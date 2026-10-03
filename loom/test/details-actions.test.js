@@ -176,3 +176,22 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
     assert.match(css, /\.placard-record \.p-actions \{ opacity: 1; \}/);
   });
 });
+
+// #65: the phone record's View batch chip. Desktop was re-pointed at task_id in #30 because
+// `--organize` blanks the old `batch` column (only a picture in a legacy batches/<name>/ folder has
+// one), but the phone still tested and passed row.batch, so on an ordinary library the chip never
+// showed. The server's batch filter matches either column, so the phone gates and passes task_id
+// exactly as desktop does.
+describe("the phone record's View batch chip gates on task_id, as desktop's does", () => {
+  const phone = src("gallery/src/components/ImageDetailsMobile.jsx");
+
+  test("the chip shows for a picture with a task and filters by that task id", () => {
+    assert.match(phone, /\{row\.task_id \? \(\s*<button type="button" className="idm-chip" onClick=\{\(\) => onFilterByBatch\(row\.task_id\)\}>View batch<\/button>\s*\) : null\}/);
+  });
+  test("the legacy batch column is not read anywhere in the phone record", () => {
+    assert.doesNotMatch(phone, /row\.batch/);
+  });
+  test("the phone and desktop chips agree on the gate and the argument", () => {
+    assert.match(details, /\{row\.task_id \? <button className="btn" title="The rest of this batch"\s*onClick=\{\(\) => onFilterByBatch\(row\.task_id\)\}>View batch<\/button> : null\}/);
+  });
+});

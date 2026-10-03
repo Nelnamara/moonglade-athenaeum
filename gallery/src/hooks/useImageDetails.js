@@ -146,10 +146,17 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     } catch { setSaveStatus("Error"); }
   };
 
+  // #66: PixAI no longer has this picture (as of the last check), so this copy is the only
+  // one anywhere. The record says so, and Delete locally asks in those words.
+  const archiveOnly = !!(state.data && state.data.archive_only);
+
   const deleteLocal = async () => {
-    if (!window.confirm(
-      "Remove this image from your local library? The file moves to _deleted/ and is " +
-      "recoverable, and PixAI still has it — a later sync brings it back.")) return;
+    if (!window.confirm(archiveOnly
+      ? "This picture is gone from your PixAI history (as of the last check), so this is the " +
+        "last copy of it anywhere. Remove it from your local library anyway? The file moves to " +
+        "_deleted/ and can be restored from the Trash; a sync will not bring it back."
+      : "Remove this image from your local library? The file moves to _deleted/ and is " +
+        "recoverable, and PixAI still has it — a later sync brings it back.")) return;
     setBusy(true);
     try {
       // /api/delete-local (the JSON route the bulk actions already use), replacing the
@@ -227,5 +234,6 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     upscaleOpen, upEl, toggleUpscale,
     handleRate,
     personal,
+    archiveOnly,
   };
 }

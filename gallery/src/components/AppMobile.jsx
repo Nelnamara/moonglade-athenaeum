@@ -14,7 +14,7 @@ import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
 import { invalidate } from "../hooks/swrCache.js";
 import useDataSaver from "../hooks/usePhonePrefs.js";
-import { isFrontPage, makeMarker, syncOutcomeText } from "../lib/phoneCore.js";
+import { isFrontPage, makeMarker, pageOffset, syncOutcomeText } from "../lib/phoneCore.js";
 import { readMarker, writeMarker } from "../lib/phonePrefs.js";
 import { syncNow } from "../lib/syncNow.js";
 import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
@@ -363,8 +363,8 @@ import "../styles/phone-landscape.css";
    LightboxMobile/FolioMobile below. GalleryMobile.jsx's own onPrintSheet prop
    closes its local Actions sheet and calls openContactSheet(selIds) in the
    same click -- see that file's own header comment and ContactSheetMobile.jsx's
-   for the full real-data-vs-design-mock disclosure (placeholder thumbnails,
-   Share via the Web Share API instead of window.print()). */
+   for the full real-data-vs-design-mock disclosure (real thumbnails in the
+   card well, Share via the Web Share API instead of window.print()). */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
@@ -1442,7 +1442,7 @@ export default function AppMobile({ boot }) {
           onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
           onDeleted={() => { closeDetails(); lib.load(1, true); }}
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
-          advParams={detailsAdvParams} items={lib.items}
+          advParams={detailsAdvParams}
           onOpenLightbox={openLightbox}
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
           onEnterContest={openContestFor}
@@ -1463,6 +1463,7 @@ export default function AppMobile({ boot }) {
           onClose={closeLightbox} onRate={rate}
           onCurate={(ids, op) => curate.apply(ids, op, false)}
           page={lib.page} pages={lib.pages} loadPage={userLoad}
+          offset={pageOffset(lib.page, lib.perPage)} total={lib.total}
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
           onEnterContest={openContestFor}

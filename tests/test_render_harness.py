@@ -4826,6 +4826,55 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
         "assertion above is about nothing")
 
 
+def _mirror_ring_with_status(logged_in_page, status):
+    """Open the Panel with /api/mirror/status answered by `status` (route-fulfilled in the
+    page; the server's real status is never consulted) and read the rendered ring back."""
+    page = logged_in_page(**DESKTOP)
+    page.route("**/*pixai.art/**", lambda route: route.abort())
+    page.route("**/api/mirror/status", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(status)))
+    _visit(page, "/")
+    page.wait_for_selector("header")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-bridge .mgbr-tile.armed")
+    _settle(page)
+    ring = page.evaluate(_READ_MIRROR_RING_JS)
+    ring["peach"] = page.evaluate("""() => { const d = document.createElement('div');
+        d.style.color = 'var(--peach)'; document.body.appendChild(d);
+        const c = getComputedStyle(d).color; d.remove(); return c; }""")
+    ring["sub"] = page.locator(".mgbr-session-sub").inner_text()
+    return ring
+
+
+def test_the_mirror_ring_reads_a_fresh_seven_day_token_as_full_and_healthy(logged_in_page):
+    """#71, rendered. A token renewed a moment ago has 6.9 of its 7 days left: the ring is
+    nearly full and emerald. Before #71 the same token drew 6/40 of the ring, in peach,
+    "Expires soon", for its whole healthy life (PROBE 2026-10-02, task 1)."""
+    ring = _mirror_ring_with_status(logged_in_page, {
+        "enabled": True, "connected": True, "days_left": 6,
+        "left_s": int(6.9 * 86400), "span_s": 7 * 86400,
+        "renewal": {"state": "ok", "reason": "", "last_ok_at": None, "next_try_at": None}})
+    assert "healthy" in ring["ringClass"].split(), ring["ringClass"]
+    assert ring["stroke"] == ring["emerald"]
+    full, offset = float(ring["dasharray"]), float(ring["dashoffset"])
+    assert offset < full * 0.05, (
+        "a fresh token must draw a nearly full ring ({} of {} left undrawn)".format(offset, full))
+    assert "renews itself" in ring["sub"]
+
+
+def test_the_mirror_ring_turns_peach_only_when_a_renewal_failed(logged_in_page):
+    """The peach rung moved from "7 days or fewer" to "a renewal failed or cannot run": the
+    same days, with the renewal reported failed, paint peach and say so."""
+    ring = _mirror_ring_with_status(logged_in_page, {
+        "enabled": True, "connected": True, "days_left": 2,
+        "left_s": 2 * 86400 + 600, "span_s": 7 * 86400,
+        "renewal": {"state": "failed", "reason": "network", "last_ok_at": None,
+                    "next_try_at": 1}})
+    assert "low" in ring["ringClass"].split(), ring["ringClass"]
+    assert ring["stroke"] == ring["peach"] and ring["stroke"] != ring["emerald"]
+    assert "Couldn't renew" in ring["sub"] and "2 days left" in ring["sub"]
+
+
 # --- The pickers page past 24 (owner, 2026-09-07, twice: "still do not scroll past a set
 # selection of models and lora in all tabs and sorts", desktop and phone). Two fixes were
 # claimed from code reads before this test existed; this is the browser proof, on both shells,
@@ -7457,25 +7506,37 @@ def test_landscape_sheets_are_side_panels_up_to_380px_with_their_actions_reachab
         ctx.close()
 
 
-def test_landscape_record_is_a_picture_beside_a_380px_panel_with_its_foot_pinned(
+def test_landscape_record_is_a_picture_beside_a_380px_panel_that_scrolls_as_one(
         phone_q_server, render_browser, monkeypatch):
-    """Q4 (the record's foot). Image Details sideways: the picture on the left fits the height, the record
-    is a side panel no wider than 380 px, and Remix / Send to Video sit pinned at the panel's foot,
-    on screen and tappable. Upright, the record's wrapper has no box at all."""
+    """Q4, amended by the owner's walk of 2026-10-03. Image Details sideways: the picture on the left fits
+    the height and the record is a side panel no wider than 380 px. The panel scrolls AS ONE: its action
+    group (Remix / Send to Video, then Edit prompt, Filter by model, View batch, Suggest prompt) sits in
+    its own place in the flow and scrolls with the fields -- it used to be pinned to the panel's foot,
+    which on a short sideways screen took about half the height and let the fields slide up under it.
+    Scrolled to it, its buttons are on screen and tappable. Upright nothing changed: the record's wrapper
+    has no box and the foot is pinned as before."""
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
     try:
         _q_open(page)
         _q_open_details(page, 0)
-        frame, rec, foot = _q_box(page, ".idm-frame"), _q_box(page, ".idm-rec"), _q_box(page, ".idm-recrow")
+        frame, rec = _q_box(page, ".idm-frame"), _q_box(page, ".idm-rec")
         assert rec["w"] <= 380 and rec["r"] == LAND["width"], rec
         assert frame["r"] <= rec["l"], "the picture is beside the record, not under it"
-        assert LAND["height"] - 1 <= foot["b"] <= LAND["height"] + 0.5, "pinned to the panel's foot: %r" % foot
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).overflowY") == "auto"
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-recrow')).position") == "static"
+        # the panel scrolls as one: the action group moves with the fields, nothing stays put over them
+        moved = page.evaluate("""() => { const rec = document.querySelector('.idm-rec');
+            const foot = document.querySelector('.idm-recrow'); rec.scrollTop = 0;
+            const a = foot.getBoundingClientRect().top; rec.scrollTop = 120;
+            const b = foot.getBoundingClientRect().top; return {a, b, max: rec.scrollHeight - rec.clientHeight}; }""")
+        assert moved["max"] > 0 and moved["a"] - moved["b"] > 60, moved
+        page.evaluate("document.querySelector('.idm-recrow').scrollIntoView({block: 'nearest'})")
+        _settle(page)
         for sel in (".idm-remixbtn.remix", ".idm-remixbtn.video"):
             b = _q_box(page, sel)
-            assert b["h"] >= 44 and b["b"] <= LAND["height"]
+            assert b["h"] >= 44 and b["t"] >= 0 and b["b"] <= LAND["height"], (sel, b)
             assert page.evaluate("""(s) => { const b = document.querySelector(s).getBoundingClientRect();
                 const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest(s)); }""", sel)
-        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).overflowY") == "auto"
         page.click(".idm-remixbtn.video")
         page.wait_for_selector(".idm-root", state="detached")
         assert _q_generation_posts(seen) == []
@@ -7486,6 +7547,7 @@ def test_landscape_record_is_a_picture_beside_a_380px_panel_with_its_foot_pinned
         _q_open(page)
         _q_open_details(page, 0)
         assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).display") == "contents"
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-recrow')).position") == "sticky"
         assert _q_box(page, ".idm-recrow")["b"] <= PHONE["height"] + 0.5
     finally:
         ctx.close()
@@ -7612,5 +7674,303 @@ def test_landscape_feed_new_since_rule_and_saver_chip_are_all_there(
         chip, hero = _q_box(page, ".glm-saverchip"), _q_box(page, ".glm-hero")
         assert chip["t"] >= hero["t"] and chip["b"] <= hero["b"] and chip["r"] <= hero["r"], (chip, hero)
         assert page.locator(".glm-tile-tag").first.inner_text() in ("256 px", "▶ paused")
+    finally:
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------------------------
+# The owner's walk of 2026-10-03 (lane wave1/walk-fixes)
+# ---------------------------------------------------------------------------------------------
+
+def test_the_search_fields_dropdown_carries_the_operators_and_the_tray_does_not(logged_in_page):
+    """Walk item 2: the Filters tray's row of operator chips moved into the search field's own
+    suggestion list. Clicking into the field opens it -- an "Operators" caption over the eight
+    operators, on screen and on top of the grid -- and picking one puts it in the search and runs
+    it, as the chip did. The tray has no Operators row any more. Second phase: blur the field and
+    the list is gone, so the first phase saw the field's own list and not something always drawn."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    page.wait_for_selector(".mgg-card")
+    page.click(".mgl-search input")
+    page.wait_for_selector(".mgcu-ac .mgcu-ac-row")
+    _settle(page)
+    got = page.evaluate("""() => {
+        const ac = document.querySelector('.mgcu-ac');
+        const rows = [...ac.querySelectorAll('.mgcu-ac-row')];
+        const r = rows[4].getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return {cap: (ac.querySelector('.mgcu-ac-cap') || {}).textContent,
+                tokens: rows.map((x) => x.querySelector('code').textContent),
+                bottom: ac.getBoundingClientRect().bottom, vh: innerHeight,
+                onTop: !!(hit && hit.closest('.mgcu-ac-row') === rows[4])}; }""")
+    assert got["cap"] == "Operators", got
+    assert got["tokens"] == ["ar:tall", "ar:wide", "ar:square", "★4+", "keeper", "-reject",
+                             "type:video", "type:loom"], got
+    assert got["bottom"] <= got["vh"] and got["onTop"], got
+    # picking one runs the search, as the chip did
+    with page.expect_request(lambda r: "/api/next/library" in r.url and "q=keeper" in r.url):
+        page.click(".mgcu-ac-row:has(code:text-is('keeper'))")
+    page.wait_for_function("() => document.querySelector('.mgl-search input').value === 'keeper '")
+    _settle(page)
+    # the list stays open for the next one, and says keeper is in the search now
+    row = page.locator(".mgcu-ac-row:has(code:text-is('keeper')) span")
+    assert row.inner_text() == "in your search · pick to take it out"
+    # phase two: away from the field the list is gone
+    page.evaluate("document.activeElement.blur()")
+    page.wait_for_selector(".mgcu-ac", state="detached")
+    # the Filters tray has no Operators row
+    page.click(".mgl-filters")
+    page.wait_for_selector(".mgl-tray")
+    assert page.locator(".mgl-tray .mgcu-opchips, .mgl-tray :text-is('Operators')").count() == 0
+
+
+def test_the_lightbox_edit_bar_opens_below_the_picture_from_edit(
+        phone_q_server, render_browser, monkeypatch):
+    """Walk item 4 (desktop): the Tsubaki edit bar is hidden until the Lightbox's own ✎ Edit opens it,
+    then sits BELOW the picture -- the stage gives up the room, the bar never covers the image -- with
+    the field focused. Esc from the field closes the bar and only the bar; ✎ toggles it; its "More
+    options in the Edit drawer ↗" does what ✎ Edit used to do (the dock's Edit tab). A clip's ✎ Edit
+    still goes straight to the drawer. Nothing is sent at any point."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0, "hidden until ✎ Edit asks for it"
+        stage0 = _q_box(page, ".lbx-stage")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb.below .mgteb-input")
+        _settle(page)
+        hero, bar, stage = _q_box(page, ".lbx-hero"), _q_box(page, ".mgteb"), _q_box(page, ".lbx-stage")
+        assert bar["t"] >= stage["b"] - 0.5 and bar["t"] >= hero["b"], (hero, bar, stage)
+        assert stage["h"] < stage0["h"], "the stage gave up the room: %r -> %r" % (stage0, stage)
+        assert bar["b"] <= DESKTOP["height"], bar
+        assert page.evaluate("document.activeElement.classList.contains('mgteb-input')")
+        assert page.locator(".mgteb-more").inner_text() == "More options in the Edit drawer ↗"
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".mgteb", state="detached")
+        assert page.locator(".lbx").count() == 1, "Esc closed the bar, not the Lightbox"
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb", state="detached")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.click(".mgteb-more")
+        page.wait_for_selector(".lbx", state="detached")
+        page.wait_for_selector(".mgdock")
+        # a clip: ✎ Edit is the drawer, as it always was
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/506.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero video")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".lbx", state="detached")
+        assert page.locator(".mgteb").count() == 0
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_the_phone_lightbox_edit_pill_opens_under_the_picture_from_edit(
+        phone_q_server, render_browser, monkeypatch):
+    """Walk item 4 (phone): the same trigger. ✎ Edit opens the pill first in the lower panel, right
+    under the picture, and ✎ again closes it; a clip's ✎ Edit keeps its note and opens nothing.
+    The phone has no Edit drawer, so its pill has no More options link. Nothing is sent."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-root .lbm-hero img")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0, "hidden until ✎ Edit asks for it"
+        stage0 = _q_box(page, ".lbm-stage")
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb.phone .mgteb-input")
+        _settle(page)
+        hero, bar, stage = _q_box(page, ".lbm-hero"), _q_box(page, ".mgteb"), _q_box(page, ".lbm-stage")
+        assert bar["t"] >= stage["b"] - 0.5 and bar["t"] >= hero["b"], (hero, bar, stage)
+        assert stage["h"] < stage0["h"], "the stage gave up the room: %r -> %r" % (stage0, stage)
+        assert bar["b"] <= PHONE["height"] and bar["h"] >= 44, bar
+        assert page.locator(".mgteb-more").count() == 0
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb", state="detached")
+        page.locator(".lbm-thumb").nth(6).click()
+        page.wait_for_selector(".lbm-hero video")
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, render_browser, monkeypatch):
+    """Walk item 5 (#74): the desktop Lightbox's bar read "1 / 20" and "OF 20" on page 2 of a
+    120-picture library -- counted inside the loaded page, the total twice. It reads the picture's
+    true place and the walk's length once: "101" OF "120", and the next picture is "102"."""
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        page.route("**/api/model-version*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+        _visit(page, "/?page=2")
+        page.wait_for_selector(".pagebar .pg-num.current")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "2"
+        page.locator(".mgg-card").first.click()
+        page.wait_for_selector(".lbx .lbx-index b")
+        read = "() => [document.querySelector('.lbx-index b').textContent, document.querySelector('.lbx-index span').textContent]"
+        assert page.evaluate(read) == ["101", "OF 120"]
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.querySelector('.lbx-index b').textContent === '102'")
+        assert page.evaluate(read) == ["102", "OF 120"]
+    finally:
+        ctx.close()
+
+
+def test_the_phone_newest_jump_never_covers_the_pager(paged_library_server, render_browser, monkeypatch):
+    """Walk item 6: at the bottom of the phone gallery the floating "↑ Newest" sat on the pager row and
+    hid its middle ("Page 1 of 2 · 120 matches"), upright and sideways. Mid-list the jump is there;
+    once the pager row is on screen it steps aside, and a tap on the pager's middle reaches the pager."""
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    for vp in (PHONE, LAND):
+        ctx = render_browser.new_context(viewport=vp, device_scale_factor=1, has_touch=True, is_mobile=True,
+                                         base_url=paged_library_server.base_url)
+        ctx.set_default_timeout(10_000)
+        try:
+            page = ctx.new_page()
+            _login(page)
+            _visit(page, "/")
+            page.wait_for_selector(".glm-grid .glm-tile")
+            page.wait_for_selector(".glm-pager")
+            _dismiss_any_achievement_toast(page)
+            page.evaluate("document.querySelector('.glm-body').scrollTop = 2000")
+            page.wait_for_selector(".glm-newest")
+            page.evaluate("(() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollHeight; })()")
+            page.wait_for_function("""() => { const p = document.querySelector('.glm-pager').getBoundingClientRect();
+                const b = document.querySelector('.glm-body').getBoundingClientRect(); return p.bottom <= b.bottom + 1; }""")
+            page.wait_for_timeout(150)
+            _settle(page)
+            got = page.evaluate("""() => {
+                const p = document.querySelector('.glm-pager').getBoundingClientRect();
+                const n = document.querySelector('.glm-newest');
+                const nb = n ? n.getBoundingClientRect() : null;
+                const i = document.querySelector('.glm-pager-info').getBoundingClientRect();
+                const hit = document.elementFromPoint(i.left + i.width / 2, i.top + i.height / 2);
+                return {jump: !!n, overlap: !!(nb && nb.left < p.right && nb.right > p.left && nb.top < p.bottom && nb.bottom > p.top),
+                        pagerHit: !!(hit && hit.closest('.glm-pager'))}; }""")
+            assert got == {"jump": False, "overlap": False, "pagerHit": True}, (vp, got)
+        finally:
+            ctx.close()
+
+
+_Q_COLS_JS = """() => {
+    const rows = document.querySelector('.glm-grid-rows');
+    const cols = rows ? getComputedStyle(rows).gridTemplateColumns.split(' ').length
+                      : document.querySelectorAll('.glm-grid .glm-col').length;
+    const body = document.querySelector('.glm-body');
+    let right = 0;
+    for (const t of document.querySelectorAll('.glm-grid .glm-tile')) right = Math.max(right, t.getBoundingClientRect().right);
+    return {cols, rows: !!rows, docW: document.documentElement.scrollWidth, vw: innerWidth,
+            bodyW: body.scrollWidth, bodyCW: body.clientWidth, right: Math.round(right)}; }"""
+
+
+# A turn the way a real phone delivers it. Chromium re-evaluates a media query the moment its viewport is
+# resized and fires the query's change event; a phone's browser does not always: the resize and
+# orientation events of a turn can arrive while the orientation query still answers for the old
+# orientation, and nothing fires once it settles. This stand-in answers the landscape query with the
+# OLD orientation for the first 150 ms after the real one changes, and never fires its change event.
+# Only that query is touched; everything else is the browser's own.
+_Q_LAGGING_TURN_JS = """(() => {
+  const real = window.matchMedia.bind(window);
+  const seen = {};
+  window.matchMedia = (q) => {
+    const m = real(q);
+    if (String(q).indexOf('orientation: landscape') < 0) return m;
+    const now = performance.now();
+    const r = seen[q] || (seen[q] = {truth: m.matches, at: -1e9});
+    if (r.truth !== m.matches) { r.truth = m.matches; r.at = now; }
+    const matches = now - r.at < 150 ? !r.truth : r.truth;
+    return {matches, media: q, onchange: null, addEventListener() {}, removeEventListener() {},
+            addListener() {}, removeListener() {}, dispatchEvent() { return true; }};
+  };
+})();"""
+
+
+def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_server, render_browser, monkeypatch):
+    """Walk item 7: after the phone was held sideways, the upright grid kept the sideways column count,
+    a column hung off the right edge and the page scrolled sideways. Upright -> sideways -> upright, at
+    each width the phone comes in, with the turn delivered the way a phone delivers it (the orientation
+    query answers late and fires nothing; _Q_LAGGING_TURN_JS): the columns follow the turn both ways,
+    upright is two columns again, every tile is inside the screen, and neither the page nor the
+    gallery's own scroller scrolls sideways."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, init=_Q_LAGGING_TURN_JS)
+    try:
+        _q_open(page)
+        for w in (390, 320, 430):
+            upright = {"width": w, "height": 844}
+            page.set_viewport_size(upright)
+            page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0")
+            page.set_viewport_size({"width": 844, "height": w})
+            page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
+            _settle(page)
+            page.set_viewport_size(upright)
+            page.wait_for_timeout(400)
+            _settle(page)
+            got = page.evaluate(_Q_COLS_JS)
+            assert got["cols"] == 2 and not got["rows"], (w, got)
+            assert got["docW"] <= got["vw"] and got["bodyW"] <= got["bodyCW"], (w, got)
+            assert got["right"] <= w, (w, got)
+    finally:
+        ctx.close()
+
+
+_Q_ACTS_JS = """() => {
+    const row = document.querySelector('.lbm-actsrow');
+    const vw = innerWidth;
+    const chips = [...row.children].map((c) => { const b = c.getBoundingClientRect();
+        const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return {t: c.textContent.trim(), l: b.left, r: b.right, top: Math.round(b.top), h: b.height, hit: !!(e && c.contains(e))}; });
+    const rb = row.getBoundingClientRect();
+    return {chips, scrollW: row.scrollWidth, clientW: row.clientWidth, vw, rowL: rb.left, rowR: rb.right,
+            lines: new Set(chips.map((c) => c.top)).size, overflowX: getComputedStyle(row).overflowX}; }"""
+
+
+def test_the_phone_lightbox_buttons_wrap_onto_lines_with_room_to_tap(phone_q_server, render_browser, monkeypatch):
+    """Walk item 8: the phone Lightbox's row of buttons scrolled sideways with its scrollbar drawn across
+    them, and looked cramped. Upright at 320, 390 and 430 px the row wraps onto lines instead: every
+    button on screen and tappable, none past the row's edges, no sideways scroll, each at least 44 px
+    tall. Sideways the actions stay the rail's single column (Q4)."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-actsrow .lbm-similar")
+        for w in (320, 390, 430):
+            page.set_viewport_size({"width": w, "height": 844})
+            page.evaluate("document.querySelector('.lbm-bottom').scrollTop = 1e6")
+            _settle(page)
+            got = page.evaluate(_Q_ACTS_JS)
+            assert len(got["chips"]) >= 6, got
+            assert got["scrollW"] <= got["clientW"], (w, got)
+            assert got["lines"] >= 2, (w, got)
+            for c in got["chips"]:
+                assert c["l"] >= got["rowL"] - 0.5 and c["r"] <= got["rowR"] + 0.5 and c["r"] <= w, (w, c)
+                assert c["h"] >= 44 and c["hit"], (w, c)
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => getComputedStyle(document.querySelector('.lbm-root')).display === 'grid'")
+        _settle(page)
+        got = page.evaluate(_Q_ACTS_JS)
+        lefts = {round(c["l"]) for c in got["chips"]}
+        assert len(lefts) == 1 and got["lines"] == len(got["chips"]), "sideways: one column in the rail %r" % got
     finally:
         ctx.close()

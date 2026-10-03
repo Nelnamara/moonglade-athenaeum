@@ -1,9 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import {
   BED_DB_DEFAULT, BED_DB_MIN, BED_DB_MAX, BED_FADE_IN, BED_FADE_OUT, BED_DUCK_DB, BED_FILE_RE,
   clampBedDb, makeBed, bedOf, bedClock, dbLabel, hasOwnAudio, cutSegments, bedPlan, dbToGain,
-  bedDbAt, bedGainAt, bedAutomation, peaksToBuckets, peakAt, cutStatusLine,
+  bedDbAt, bedGainAt, bedAutomation, peaksToBuckets, peakAt, cutStatusLine, unreadableBedsNote,
 } from "../src/loom-bed-core.js";
 import { flat, bundleMissingReport } from "../src/loom-core.js";
 
@@ -206,5 +209,52 @@ describe("the full bundle names a bed that did not travel (ruling 8)", () => {
     const p = board([card("c1")], { bed: { file: SHA + ".mp3", name: "x", db: -8 } });
     const r = bundleMissingReport(p, "1", SHA + ".mp3");
     assert.deepEqual(r.rows, [{ mid: SHA + ".mp3", where: ["music bed"] }]);
+  });
+});
+
+/* GitHub #57: a storyboard that will not read blocks the unused-bed list (409, the safe way).
+   The Loom used to throw that answer away, so the line just vanished; now it names the board(s)
+   and where the file is (scope option a: no in-app delete). */
+describe("unreadableBedsNote: the line for a board that will not read", () => {
+  const row = (board, name, where, saved = "2026-09-30T12:00:00Z") => ({ board, name, where, saved });
+  test("one board: its name, when it was saved, that nothing was removed, and where its file is", () => {
+    assert.equal(unreadableBedsNote({ unreadable: [row("b9", "Moonwell ep 1", "loom/kv/acct/b9.json")] }),
+      "Can't tell which music beds are unused: \"Moonwell ep 1\" (saved Sep 30) didn't read. Nothing was removed. "
+      + "Restore its file from a backup or delete it: loom/kv/acct/b9.json");
+  });
+  test("two boards: both named, both files listed", () => {
+    assert.equal(unreadableBedsNote({ unreadable: [row("b9", "Moonwell ep 1", "loom/kv/acct/b9.json"),
+      row("b8", "Old reel", "loom/kv/b8.json", "2026-10-01T12:00:00Z")] }),
+      "Can't tell which music beds are unused: \"Moonwell ep 1\" (saved Sep 30) and \"Old reel\" (saved Oct 1) didn't read. "
+      + "Nothing was removed. Restore their files from a backup or delete them: loom/kv/acct/b9.json, loom/kv/b8.json");
+  });
+  test("a board whose name could not be read falls back to its id; an unknown save time is left out", () => {
+    const s = unreadableBedsNote({ unreadable: [row("b7", "", "loom/kv/b7.json", ""), row("b6", "Six", "loom/kv/b6.json"),
+      row("b5", "Five", "loom/kv/b5.json", "not a date")] });
+    assert.match(s, /^Can't tell which music beds are unused: storyboard b7, "Six" \(saved Sep 30\) and "Five" didn't read\./);
+    assert.match(s, /delete them: loom\/kv\/b7\.json, loom\/kv\/b6\.json, loom\/kv\/b5\.json$/);
+  });
+  test("nothing unreadable: no line", () => {
+    for (const u of [null, undefined, {}, { unreadable: [] }, { files: [], count: 0 }]) assert.equal(unreadableBedsNote(u), "");
+  });
+});
+
+describe("the wiring: the Loom keeps the refusal and shows it in the bed row's note slot", () => {
+  const SRC = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "master-storyboard.jsx"), "utf8")
+    .replace(/\r\n/g, "\n");
+  test("refreshUnusedBeds keeps a 409's unreadable boards instead of dropping the answer", () => {
+    const i = SRC.indexOf("const refreshUnusedBeds = useCallback(async () => {");
+    assert.ok(i >= 0, "refreshUnusedBeds is gone -- re-point this test, never drop it");
+    const b = SRC.slice(i, SRC.indexOf("\n  }, []);", i));
+    assert.match(b, /r\.status === 409 && d && Array\.isArray\(d\.unreadable\)/);
+    assert.match(b, /setUnusedBeds\(\{ files: \[\], count: 0, unreadable: d\.unreadable \}\)/);
+  });
+  test("BedRow draws unreadableBedsNote in the existing err note, ahead of the unused count", () => {
+    const i = SRC.indexOf("function BedRow(");
+    assert.ok(i >= 0);
+    const row = SRC.slice(i, SRC.indexOf("\n}\n", i));
+    assert.match(row, /const unreadable = unreadableBedsNote\(u\);/);
+    assert.match(row, /: unreadable \? <div className="lv-bednote err" role="status">\{unreadable\}<\/div>/);
+    assert.ok(row.indexOf(": unreadable ?") < row.indexOf("u && u.count > 0"), "the refusal outranks the unused count");
   });
 });

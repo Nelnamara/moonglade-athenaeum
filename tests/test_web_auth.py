@@ -77,12 +77,12 @@ def _api_login(cli, payload, remote_addr=_NO_OVERRIDE):
     return r.get_json()
 
 
-def _logout(cli):
+def _logout(cli, **extra):
     """Sign out the way the React app does: POST /api/logout carrying this
-    session's csrf token. The default scope is the GLOBAL revoke (it bumps the
-    per-user sess_epoch), which is what any test about REVOKING OTHER SESSIONS
-    needs -- scope="this-device" is the opt-out, not the default."""
-    return cli.post("/api/logout", json={"csrf": _session_csrf(cli)})
+    session's csrf token. No scope signs out this device only (#70); a test about
+    REVOKING OTHER SESSIONS passes scope="everywhere", which bumps the per-user
+    sess_epoch."""
+    return cli.post("/api/logout", json=dict({"csrf": _session_csrf(cli)}, **extra))
 
 
 LAN = "203.0.113.5"          # TEST-NET-3 -- a "some other device on the LAN" stand-in
@@ -594,8 +594,9 @@ def test_logout_revokes_a_stolen_cookie_on_another_client(tmp_path):
     the browser that clicked logout. Regression test for the adversarial-review
     finding that logout only ever called session.clear() (which can only ever
     affect the ONE client making that request) with nothing server-side to
-    revoke the cookie itself -- fixed via a per-user sess_epoch, bumped on
-    logout (POST /api/logout's default global scope) and re-checked by
+    revoke the cookie itself -- fixed via a per-user sess_epoch, bumped by a
+    sign-out everywhere (POST /api/logout with scope "everywhere"; a plain Log Out
+    signs out only its own device since #70) and re-checked by
     _is_authorized_request() on every request."""
     app = _client(tmp_path)
     victim = app.test_client()
@@ -603,7 +604,7 @@ def test_logout_revokes_a_stolen_cookie_on_another_client(tmp_path):
     attacker = app.test_client()
     attacker.set_cookie("session", victim.get_cookie("session").value)
     assert attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    _logout(victim)
+    _logout(victim, scope="everywhere")
     r = attacker.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
 

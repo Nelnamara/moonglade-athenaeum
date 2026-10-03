@@ -17,7 +17,9 @@ page — click it again or `Esc` to close. Its tab is **Maintenance**; **Account
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
 **PixAI account** opens on a strip of figures — credits, how much of that is paid and how
 much free, free cards on hand, coupons, and your **followers** and **following** — above
-tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+tabs for the card roster, coupons and the credit ledger. The card history says what happened
+to each card — consumed, refunded, expired or revoked — and names a task only beside a card
+that was attached to one. Every figure on it is a reading:
 the window never spends, redeems, purchases, follows or unfollows anything.
 The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
 auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
@@ -34,7 +36,10 @@ itself**, **Sync now** and the version stamp (see
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
 free-card count. **⬇ Download catalog (CSV)** saves the whole catalog to your browser's
-Downloads — it does *not* write a file into your backup folder.
+Downloads — it does *not* write a file into your backup folder. **⬇ Download curation (JSON)**
+beside it saves just what you made of the library — ratings, collections and their order,
+smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
+`--import-curation` (see [Collections → Backing up your curation](Collections)).
 
 ## Running a maintenance job
 
@@ -65,6 +70,10 @@ The buttons are grouped exactly as the risk splits.
   different ids.
 - **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is
   byte-identical to a surviving copy, and flags orphans, before you empty the folder.
+- **Verify library integrity** — the read-only integrity check (`--verify-library
+  --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
+  Its row under **Check — read-only** shows when it last ran; the log shows the summary and the
+  first lines of `integrity_report.csv`. See [Health → Library integrity](Health).
 - **Top up the Similar index (adds only what's missing)** — embeds any images the
   visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous
@@ -295,6 +304,12 @@ finishes: connected or reconnecting, when the last event arrived, and how many i
 mirrored this session. It's read-only, free, and always on while the server runs — which is
 why `--update` is a fallback rather than the only way new work lands locally.
 
+PixAI closes these connections from its side now and then, several at once. When a connection
+that had been up for a while drops, Live Mirror reconnects within a second or two and then
+reads back your most recent generations, collecting anything that finished while it was
+away. A connection that keeps failing straight away waits a little longer each time, up to a
+minute, so a PixAI outage never turns into a flood of retries.
+
 > Not to be confused with **Mirror to PixAI website** (Maintenance tab, below), which goes the
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
 > Mirror to PixAI website files what you make *in Moonglade* out to your PixAI web library.
@@ -313,8 +328,15 @@ It works by riding your own logged-in browser session:
    never leaves that machine — the tile shows *Connected · N days left*, never the token.
 2. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
    you so.
-3. From then on it renews itself; you'll only need **Refresh session** if you sign out of
-   PixAI in the browser or the tile drops back to *Not connected*.
+3. From then on it renews itself while the app is running. PixAI's session lasts a week from
+   each renewal, and Moonglade renews it in the background every few days, so you'll only need
+   **Refresh session** if you sign out of PixAI in the browser, or if the app was closed for
+   more than a week and the session lapsed in the meantime.
+
+The ring on the tile shows how much of the current session is left, out of its own week. It
+stays green through the normal renewal; it turns peach only if a renewal actually failed (it
+keeps retrying, and says so) or if `READ_ONLY` is stopping it, and red once the session has
+expired. Renewal never runs while the mirror is switched off or while `READ_ONLY` is set.
 
 Things worth knowing:
 
@@ -353,13 +375,13 @@ About opens leading with a card that reads *"v3.7.3 is out"* (with the release's
 running the stamp reads *updating…* and opens the window that is reporting it.
 
 **About** is the app's own "what am I running" card. It shows Nel, the name, and a line such
-as *app 3.14.0 · art pack v5 · 2026-09-26*, then **this version's changelog** — the headline
+as *app 3.15.0 · art pack v6 · 2026-10-01*, then **this version's changelog** — the headline
 changes of the release you are running, and a short *Under the hood* line for the rest.
 **Earlier versions ›** lists the older entries in this install's changelog; click one to read
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the
 [in-app guide](Home#help-inside-the-app), **Report an issue ↗** opens the project's issue
 page and **Releases ↗** its release notes. Up to date, the stamp shows the build (for
-example `v3.14.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
+example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
 Moonglade**, under the update row, and the guide's last page is About too.
 
 **An update that worked says so when the app comes back.** Pressing **Update now** ends in
@@ -410,7 +432,9 @@ The **Users** tab lists your gallery login accounts.
   take the count to zero and re-open the first-run bootstrap, use `--remove-web-user` on the
   server machine; that's the escape hatch, and it's CLI-only on purpose.
 - **Your password** — change your own from anywhere, including a tablet on the LAN. You have
-  to enter your current password to prove it's you.
+  to enter your current password to prove it's you. Changing it signs out every other device
+  on your account and keeps the one you're using — the way to sign out everywhere if a device
+  is lost (**Log Out** signs out only the device you press it on).
 - **Reset password** — appears next to each *other* account, and only when you're using the
   browser **on the server machine itself**. It sets a new password without needing the old
   one, which is what makes it a recovery path rather than a convenience.

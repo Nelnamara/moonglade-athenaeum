@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from
 import { createPortal } from "react-dom";
 import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
 import { cloudDeleteCounts } from "../lib/cloudDeleteCounts.js";
+import { onlyCopyNote } from "../lib/onlyCopy.js";
 import { planShotsSend } from "../curation/loomSend.js";
 import "../styles/librarybar.css";
 
@@ -363,9 +364,16 @@ export default function ActionsMenu({
   });
 
   const deleteLocal = run(async () => {
+    // #66, the owner's ruling (2026-10-03): warn, don't block. A picture PixAI no longer has is
+    // the only copy anywhere; it goes with the rest, and the confirm names how many first. The
+    // route counts them (preview touches nothing) because a selection can span pages.
+    const p = await apiPost("/api/delete-local", { media_ids: ids, preview: true });
+    if (p.error) { toastErr("Not removed", p.error); return; }
+    const note = onlyCopyNote(p.archive_only, count);
     if (!window.confirm(
       "Remove " + count + " image" + (count !== 1 ? "s" : "") +
-      " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
+      " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched." +
+      (note ? "\n\n" + note : ""))) return;
     const d = await apiPost("/api/delete-local", { media_ids: ids });
     if (d.error) { toastErr("Not removed", d.error); return; }
     if (d.failed) {

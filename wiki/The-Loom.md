@@ -171,7 +171,10 @@ inside one), a button appears under the open slot:
 
 Splice and Re-anchor upload the frame to your PixAI account (free, never a render) and save its
 thumbnail beside it, so the frame draws in the drawer and on the next shot's card. With
-`READ_ONLY` set they are refused like every other write to your account.
+`READ_ONLY` set they are refused like every other write to your account. A frame spliced before
+version 3.15.0 had no thumbnail saved: when you open its storyboard, the Loom fetches that picture
+from PixAI once (a read, never a write or a spend). If PixAI no longer has it, the frame's box says
+**Frame not on this machine. Splice again.** instead of showing a broken picture.
 
 That's how a run of independent 5–15s clips reads as one continuous scene. The very first
 shot of the project has no previous frame, and neither does draft mode — you get a hint
@@ -340,8 +343,10 @@ A re-render that fails leaves the shot on its ★ take and says **Last render di
 card. A shot rendered before takes existed shows its clip as take 1; its earlier re-rolls still
 count in *spent* but aren't listed as takes. If the same storyboard is open in two tabs and both
 save, the one that saved second is told **This storyboard changed in another tab. Your takes
-were kept; other edits from this tab were replaced.**, naming any shot whose ★ or take numbers
-moved.
+were kept; other edits from this tab were replaced.**, then says what that undid here: a split
+made in this tab (**Your split of A·01 was undone because the board changed in another tab.**), a
+shot or a whole act the other tab deleted (it stays deleted), a shot kept for its new take in
+another act because its own act was deleted, and any shot whose ★ or take numbers moved.
 
 ### When the server didn't confirm a render
 
@@ -397,14 +402,17 @@ and never uploaded** — nothing about it reaches PixAI. Its waveform sits under
 **▶▶ Play** and **⇩ Render** mix it in, the full bundle carries it, and the edit decision list
 lists it as an audio event. **✕** takes it off this storyboard; the file itself stays. Bed files
 are never deleted on their own: when some are no longer on any storyboard, the full view offers
-**Remove…** for exactly those, and asks first.
+**Remove…** for exactly those, and asks first. If one of your storyboards won't read (a file torn by a crash, say),
+nothing is offered for removal: the line names that storyboard, when it was saved, and where its
+file is under the library's `loom/kv/` folder, so you can restore it from a backup or delete it.
 
 ### The continuity ribbon
 
 Under the reel in the full view, **CONTINUITY RIBBON · close frame → next open frame** pairs each
 cut: a shot's closing frame beside the next shot's opening frame (**A·01 out** · **A·02 in**),
 both from the ★ takes and their trims, so a jump in light, pose or costume shows at a glance.
-Shots with nothing rendered are left out, as Play leaves them out.
+An untrimmed shot closes on its clip's true last frame, read from the file itself, even when the
+clip's length was never recorded. Shots with nothing rendered are left out, as Play leaves them out.
 
 A pair gets a **peach dot** when the second shot's [anchor changed](#re-anchor), or when the two
 frames' colours differ strongly — measured as the average colour difference in Lab (ΔE over 25).

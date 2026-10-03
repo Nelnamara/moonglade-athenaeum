@@ -12,8 +12,9 @@ import "../styles/tsubaki.css";
 /* The Lightbox edit bar (Session H T3a; handoff frame G, "T3a · LIGHTBOX EDIT BAR"): "Describe
    your edits…" over the stage foot, on every still picture -- the same pictures as the "Edit
    with Tsubaki" menu item (the card's tsubaki_edit; never a video). ↵ sends a Tsubaki.3 run: this picture as @image1, the words as the prompt, the
-   dock's profile (the per-account gen.image setting), size Auto, count 1, no recipes, no
-   palette, no LoRAs, no negative, no boosters, no High priority. The run joins the dock's reel
+   dock's profile (the per-account gen.image setting), the picture's own size, count 1, no recipes, no
+   palette, no LoRAs, no negative, no boosters, at High Priority (owner's call 2026-10-03; chosen in
+   genCore.tsubakiEditState). The run joins the dock's reel
    and the Activity toast; the Lightbox stays open.
 
    ONE PAYLOAD ROAD: the state is genCore.tsubakiEditState and the payload the dock's own
@@ -24,7 +25,15 @@ import "../styles/tsubaki.css";
    carries one -- a synchronous busyRef set before the POST -- ignores an auto-repeating or
    composing Enter, checks the probe's verdict INSIDE the handler (a keyboard Enter needs no
    repaint), and forces a re-price when the server answers. The probe runs only while the bar
-   has words (review N6). */
+   has words (review N6).
+
+   WHERE IT SITS (the owner's call on the 2026-10-03 walk): no longer over the stage foot on every
+   still. The Lightbox draws it only once its ✎ Edit opens it, BELOW the picture (`below`: the
+   desktop stage gives up the room; the phone's sits first in the lower panel), and closes it on
+   ✎ again or Esc (`onDismiss`, which Esc in the field now calls after leaving it). `onMore` adds
+   the one link at the bar's end, "More options in the Edit drawer ↗": what ✎ Edit used to do.
+   Placement and trigger only -- the price, the gate, the latch and send() are as they were, and
+   loom/test/lightbox-edit-bar.test.js pins them byte for byte. */
 
 let _metaCache = null;          // {at, model} -- Tsubaki.3's applied meta, one read per page
 let _metaWait = null;
@@ -48,7 +57,7 @@ function loadTsubakiMeta() {
   return _metaWait;
 }
 
-const TsubakiEditBar = forwardRef(function TsubakiEditBar({ item, member, phone }, ref) {
+const TsubakiEditBar = forwardRef(function TsubakiEditBar({ item, member, phone, below, onMore, onDismiss }, ref) {
   const [words, setWords] = useState("");
   const [model, setModel] = useState(_metaCache ? _metaCache.model : null);
   const [line, setLine] = useState(null);          // {kind, text} -- the last send's answer
@@ -127,16 +136,17 @@ const TsubakiEditBar = forwardRef(function TsubakiEditBar({ item, member, phone 
       return;
     }
     if (e.key === "Escape") {
-      // Esc leaves the bar first; the next Esc is the Lightbox's
+      // Esc leaves the field, and closes the bar when its Lightbox opened it (onDismiss)
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.blur();
+      if (onDismiss) onDismiss();
     }
   };
 
   if (!item || !item.tsubaki_edit) return null;
   return (
-    <div className={"mgteb" + (phone ? " phone" : "")} onClick={(e) => e.stopPropagation()}
+    <div className={"mgteb" + (phone ? " phone" : "") + (below ? " below" : "")} onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
       <div className="mgteb-pill">
         <input ref={inputRef} className="mgteb-input" value={words} placeholder="Describe your edits…"
@@ -145,6 +155,9 @@ const TsubakiEditBar = forwardRef(function TsubakiEditBar({ item, member, phone 
         {words.trim() ? <CostBadge ref={costRef} compact className="mgteb-cost" hint="" /> : null}
         <button type="button" className="mgteb-go" disabled={!canSend} onClick={send}
           aria-label="Send the edit" title={busy ? "Sending…" : gate || "Send — this spends credits or a card"}>↑</button>
+        {onMore ? (
+          <button type="button" className="mgteb-more" onClick={onMore}>More options in the Edit drawer ↗</button>
+        ) : null}
       </div>
       {line && line.text ? <div className={"mgteb-line " + line.kind}>{line.text}</div> : null}
     </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import "../styles/account-detail.css";
 import { apiGet } from "../api.js";
+import { cardLogRow } from "../lib/cardLog.js";
 
 /* PixAI account detail — cards · coupons · credit ledger. The web UI for the
    card-coupon-ledger branch's backend, built to Control Panel.dc.html's account-detail
@@ -169,16 +170,21 @@ export default function AccountSubOverlay({ onClose }) {
                 )) : <div className="acct-empty">{roster ? "No card history yet." : "loading…"}</div>}
 
                 <div className="acct-grp" style={{ marginTop: 16 }}>Usage history</div>
-                {log.map((ev, i) => (
-                  <div className="acct-row" key={ev.record_id || i}>
-                    <span className={"acct-act" + (ev.action === "refunded" ? " refund" : "")}>{ev.action === "refunded" ? "↺ refunded" : "– consumed"}</span>
-                    <div className="acct-rowmain" style={{ fontSize: 12 }}>{ev.template_name}
-                      <div className="acct-rowmeta">task {ev.task_id}</div>
+                {log.map((ev, i) => {
+                  // #68: each row says what happened to the card; only a used or refunded
+                  // card names a task (lib/cardLog.js).
+                  const row = cardLogRow(ev);
+                  return (
+                    <div className="acct-row" key={ev.record_id || i}>
+                      <span className={"acct-act" + (row.refund ? " refund" : "")}>{row.label}</span>
+                      <div className="acct-rowmain" style={{ fontSize: 12 }}>{ev.template_name}
+                        {row.task ? <div className="acct-rowmeta">task {row.task}</div> : null}
+                      </div>
+                      <span className="acct-monodim">{ev.credit_cost != null ? nfmt(ev.credit_cost) : ""}</span>
+                      <span className="acct-monodim">{day(ev.created_at)}</span>
                     </div>
-                    <span className="acct-monodim">{ev.credit_cost != null ? nfmt(ev.credit_cost) : ""}</span>
-                    <span className="acct-monodim">{day(ev.created_at)}</span>
-                  </div>
-                ))}
+                  );
+                })}
                 {logMore && <div className="acct-load" onClick={loadMoreLog}>Load more ⌄</div>}
               </>
             )}

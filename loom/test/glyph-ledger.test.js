@@ -240,8 +240,10 @@ test("G12: undo wears the history dial at all four sites -- and Remix still turn
   // Remix is a different verb and keeps the arrow (G13 kept ⟳ for Sync the same way)
   assert.match(details, /↺ Remix<\/button>/);
   assert.match(src("components/GridContextMenu.jsx"), /\["↺", "Remix"/);
-  // and the credit ledger's "refunded" arrow is a receipt, not an action
-  assert.match(src("components/AccountSubOverlay.jsx"), /↺ refunded/);
+  // and the card history's "refunded" arrow is a receipt, not an action (its row words live
+  // in lib/cardLog.js since #68, which the Account overlay draws from)
+  assert.match(src("lib/cardLog.js"), /"↺ refunded"/);
+  assert.match(src("components/AccountSubOverlay.jsx"), /import \{ cardLogRow \} from "\.\.\/lib\/cardLog\.js"/);
   // the Panel's OWN ↺ is "Restore selected" -- pulling files back out of the trash, not
   // undoing the last thing you did. Not an undo site, and it keeps its arrow.
   assert.match(panel, /↺ Restore selected/);

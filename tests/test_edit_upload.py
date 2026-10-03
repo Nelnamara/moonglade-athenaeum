@@ -260,7 +260,8 @@ def _js_edit_caps():
             return [_val(t) for t in
                     re.search(name + r": \[([^\]]*)\]", block).group(1).split(",") if t.strip()]
         extra = {"max_refs": int(re.search(r"max_refs: (\d+)", block).group(1)),
-                 "resolutions": _list("resolutions"), "qualities": _list("qualities")}
+                 "resolutions": _list("resolutions"), "qualities": _list("qualities"),
+                 "label": re.search(r'label: "([^"]*)"', block).group(1)}
         out[key] = (aspects, {k: _val(v) for k, v in re.findall(r"(\w+): ([^,]+)", d)}, extra)
     return out
 
@@ -271,15 +272,20 @@ def test_edit_caps_and_edit_models_agree():
     pre-selects an aspect the server then snaps away (SCOPE_2026-09-26 E2). And the same
     reference cap, resolutions and qualities (w2-small spend review S1, 2026-09-28): the edit
     road returns no receipt, so a drift there would show 4K or ten references on the card while
-    clamp_edit_config and the max_refs slice quietly quote and charge something else."""
+    clamp_edit_config and the max_refs slice quietly quote and charge something else.
+
+    And, since two rows are versions of one PixAI model (Edit Pro v1.0 and V2.0, #67), the same
+    rows in the same order under the same label: the card's list is EDIT_CAPS' order, and the
+    label a collected edit is catalogued under is EDIT_MODELS' -- a row named one thing on the
+    card and another on the picture it made would leave the owner guessing which version ran."""
     js = _js_edit_caps()
-    assert set(js) == set(core.EDIT_MODELS)
+    assert list(js) == list(core.EDIT_MODELS)
     for key, spec in core.EDIT_MODELS.items():
         aspects, dflt, extra = js[key]
         assert aspects == spec["aspects"], key
         assert dflt == spec["default"], key
         assert extra == {"max_refs": spec["max_refs"], "resolutions": spec["resolutions"],
-                         "qualities": spec["qualities"]}, key
+                         "qualities": spec["qualities"], "label": spec["label"]}, key
 
 
 # ---- a model OUTSIDE the table (review fix, SCOPE_2026-09-26 E1) ----
@@ -332,6 +338,17 @@ def test_edit_v4_is_first_with_its_own_record():
     assert core.DEFAULT_EDIT_MODEL == "edit-pro"          # the card's default is unchanged
 
 
+def test_edit_v4_is_labelled_as_pixai_labels_it():
+    """The owner's walk, 2026-10-03: it is PixAI's own "PixAI Edit (v4.0)", the latest version of
+    PixAI's general Edit model -- not Edit Pro, not Tsubaki.3 -- and it reads exactly that on the
+    card and on the picture it makes."""
+    assert core.EDIT_MODELS["edit-v4"]["label"] == "PixAI Edit (v4.0)"
+    meta = core.extract_full_meta({"parameters": {"chat": {
+        "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_V4,
+        "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
+    assert meta["model_id"] == EDIT_V4 and meta["model_name"] == "PixAI Edit (v4.0)"
+
+
 def test_edit_v4_clamps_to_what_it_takes():
     assert core.clamp_edit_config(EDIT_V4, "4K", "medium", "8:1") == ("4K", "", "8:1")
     assert core.clamp_edit_config(EDIT_V4, "8K", "high", "3:5") == ("1K", "", "auto")
@@ -375,3 +392,93 @@ def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
     assert seen["priced"]["chat"] == seen["sent"]["chat"]
     assert seen["sent"]["chat"]["modelId"] == EDIT_V4
     assert seen["sent"]["chat"]["modelConfig"] == {"resolution": "4K", "aspectRatio": "21:9"}
+
+
+# ---- PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site "Edit Pro V2.0 -- the facts") ----
+# A new VERSION of the Edit Pro model PixAI shipped 2026-09-29, offered beside v1.0: v1.0 stays,
+# because PixAI still offers it and the 14 Edit Pro AI Tools scenes still run on it. Copied from
+# the version's own record (the preset roster's / `/versions`' extra.chatEditing).
+
+EDIT_PRO_V1 = "2006468692917575683"
+EDIT_PRO_V2 = "2061589941358465024"
+EDIT_PRO_V2_ASPECTS = ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+                       "3:5", "5:3"]
+
+
+def test_edit_pro_v2_is_its_own_row_beside_v1():
+    spec = core.EDIT_MODELS["edit-pro-v2"]
+    assert core.edit_model_id("edit-pro-v2") == EDIT_PRO_V2
+    assert spec["label"] == "Edit Pro (v2.0)"          # PixAI's "PixAI Edit Pro (v2.0)"
+    assert spec["max_refs"] == 10
+    assert spec["aspects"] == EDIT_PRO_V2_ASPECTS      # v1.0's 13 minus 1:3 and 3:1
+    assert spec["resolutions"] == ["1K", "2K"]
+    assert spec["qualities"] == ["low", "medium", "high"]
+    assert spec["default"] == {"resolution": "1K", "quality": "medium", "aspect": "3:5"}
+    # offered BESIDE v1.0, which keeps its id, its cap and its place as the card's default
+    keys = list(core.EDIT_MODELS)
+    assert keys.index("edit-pro-v2") == keys.index("edit-pro") + 1
+    assert core.EDIT_PRO_MODEL_ID == EDIT_PRO_V1
+    assert core.edit_model_id("edit-pro") == EDIT_PRO_V1
+    assert core.EDIT_MODELS["edit-pro"]["max_refs"] == 4
+    assert core.DEFAULT_EDIT_MODEL == "edit-pro"
+
+
+def test_edit_pro_v2_clamps_to_its_own_aspects():
+    # V2.0 dropped 1:3 and 3:1: they snap to its 3:5 default; v1.0 still takes them
+    assert core.clamp_edit_config(EDIT_PRO_V2, "1K", "medium", "1:3") == ("1K", "medium", "3:5")
+    assert core.clamp_edit_config(EDIT_PRO_V2, "2K", "high", "5:3") == ("2K", "high", "5:3")
+    assert core.clamp_edit_config(EDIT_PRO_V2, "4K", "xhigh", "auto") == ("1K", "medium", "3:5")
+    assert core.clamp_edit_config(EDIT_PRO_V1, "1K", "medium", "1:3")[2] == "1:3"
+
+
+def test_edit_pro_v2_payload_sends_its_model_and_up_to_ten_refs():
+    """The submit shape is v1.0's chat block with V2.0's modelId; the slice follows the ROW's
+    own max_refs -- ten on V2.0, still four on v1.0 -- never one fixed number."""
+    rs = core.RequestResolver()
+    srcs = [str(i) for i in range(1, 13)]
+    p = core._edit_parameters_from_payload(
+        {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro-v2",
+         "resolution": "2K", "quality": "high", "aspect": "16:9"}, "", rs)
+    assert p == {"chat": {
+        "prompts": "x", "mediaId": "1", "mediaIds": srcs[:10], "modelId": EDIT_PRO_V2,
+        "modelConfig": {"resolution": "2K", "aspectRatio": "16:9", "quality": "high"}}}
+    v1 = core._edit_parameters_from_payload(
+        {"source": "1", "sources": srcs, "instruction": "x", "edit_model": "edit-pro"}, "", rs)
+    assert v1["chat"]["modelId"] == EDIT_PRO_V1 and v1["chat"]["mediaIds"] == srcs[:4]
+    # no aspect picked -> V2.0's own 3:5 default
+    p = core._edit_parameters_from_payload(
+        {"source": "1", "instruction": "x", "edit_model": "edit-pro-v2"}, "", rs)
+    assert p["chat"]["modelConfig"] == {"resolution": "1K", "aspectRatio": "3:5",
+                                        "quality": "medium"}
+
+
+def test_an_edit_pro_v2_edit_is_catalogued_under_its_own_label():
+    meta = core.extract_full_meta({"parameters": {"chat": {
+        "prompts": "x", "mediaId": "1", "mediaIds": ["1"], "modelId": EDIT_PRO_V2,
+        "modelConfig": {"resolution": "1K"}}}, "outputs": {}})
+    assert meta["model_id"] == EDIT_PRO_V2 and meta["model_name"] == "Edit Pro (v2.0)"
+
+
+def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch):
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
+                                                media_id="1", filename="a_1.png")])
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 27800)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit",
+                        lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
+    cli = login_test_client(create_app(tmp_path))
+    srcs = [str(55 + i) for i in range(11)]
+    body = {"mode": "edit", "edit_model": "edit-pro-v2", "source": "55", "sources": srcs,
+            "instruction": "make it night", "resolution": "1K", "quality": "medium",
+            "aspect": "3:5"}
+    cli.post("/api/price", json=body)
+    assert cli.post("/api/edit", json=body).get_json().get("task_id") == "t1"
+    assert seen["priced"]["chat"] == seen["sent"]["chat"]
+    chat = seen["sent"]["chat"]
+    assert chat["modelId"] == EDIT_PRO_V2
+    assert len(chat["mediaIds"]) == 10 and chat["mediaId"] == chat["mediaIds"][0]
+    assert chat["modelConfig"] == {"resolution": "1K", "aspectRatio": "3:5", "quality": "medium"}

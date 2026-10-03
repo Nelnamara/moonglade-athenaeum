@@ -148,6 +148,14 @@
 .lbm-thumb.on { outline-color: var(--accent); opacity: 1; }
 
 .lbm-actsrow { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 0 12px; }
+/* Upright, the row WRAPS onto lines instead of scrolling sideways (owner's walk, 2026-10-03: its
+   scrollbar was drawn across the buttons and the row looked cramped). Even gaps, the lines centred,
+   the row's own 12 px in from each edge, and every button at least 44 px tall to tap. Sideways the
+   actions are the rail's column (phone-landscape.css), outside this condition. */
+@media not all and (orientation: landscape) and (max-height: 520px) {
+  .lbm-actsrow { flex-wrap: wrap; justify-content: center; gap: 8px; overflow: visible; }
+  .lbm-actsrow > * { min-height: 44px; }
+}
 .lbm-chip { font-size: 10.5px; font-weight: 600; white-space: nowrap; padding: 7px 12px; border-radius: 14px;
   cursor: pointer; font-family: inherit; color: var(--text);
   background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)), color-mix(in srgb, var(--surface0) 88%, #000);

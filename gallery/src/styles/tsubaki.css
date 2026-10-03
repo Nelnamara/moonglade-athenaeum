@@ -233,6 +233,13 @@
   background: rgba(12, 10, 28, .9); color: var(--subtext); }
 .mgteb-line.err { color: var(--peach); }
 .mgteb-line.ok { color: var(--emerald); }
+/* below the picture, not over it (owner's walk, 2026-10-03): the desktop Lightbox draws the bar in its
+   bottom band once ✎ Edit opens it, the same 72% pill, centred, in the flow */
+.mgteb.below { position: static; transform: none; align-self: center; max-width: 760px; }
+/* the bar's one link, in the bar's own small type (the cost badge's) */
+.mgteb-more { flex: none; border: 0; background: none; padding: 0 8px 0 2px; cursor: pointer; white-space: nowrap;
+  font-family: inherit; font-size: 11px; color: var(--overlay0); }
+.mgteb-more:hover, .mgteb-more:focus-visible { color: var(--text); }
 /* phone: a 44 px pill between the stage and the action row */
 .mgteb.phone { position: static; transform: none; width: auto; max-width: none; margin: 8px 12px 0; }
 .mgteb.phone .mgteb-pill { min-height: 44px; box-sizing: border-box; padding: 5px 5px 5px 14px; }

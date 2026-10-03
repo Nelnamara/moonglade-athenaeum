@@ -247,10 +247,11 @@ describe("T3a -- the Lightbox edit bar's payload is the dock's buildPayload", ()
     assert.equal(p.model_id, T3.model_id);
     assert.deepEqual(p.context_images, ["701"]);
     assert.equal(p.prompt, "make it night");
-    assert.deepEqual([p.width, p.height], [1712, 1168]);
+    // the SOURCE picture's own size, as PixAI's own Smart Reference submit sends (2026-10-03)
+    assert.deepEqual([p.width, p.height], [1216, 832]);
     assert.equal(p.mode, "ultra");
     assert.equal(p.count, 1);
-    assert.equal(p.high_priority, false);
+    assert.equal(p.high_priority, true);          // the bar runs at High Priority (2026-10-03)
     assert.deepEqual(p.loras, []);
     assert.equal(p.negative, "");
     assert.equal(p.recipeIds, undefined);
@@ -260,6 +261,78 @@ describe("T3a -- the Lightbox edit bar's payload is the dock's buildPayload", ()
     assert.equal(p.quality_tag, null);
     assert.equal(p.upscale, null);
     assert.equal(p.seed, null);
+  });
+});
+
+describe("T3a -- the bar sends the request PixAI's own site sends (2026-10-03 capture)", () => {
+  /* The site's Smart Reference submit for the same edit, captured live: width and height are the
+     source picture's own (1280 x 768), one picture, Pro, creativity medium, the picture as the one
+     context image. The server half (controlNets [], no batchSize at one) is
+     tests/test_tsubaki3_generate.py::test_the_edit_bar_request_is_the_sites_smart_reference_shape. */
+  const bar = (img) => buildPayload(tsubakiEditState({ model: T3, image: img, prompt: "make it night",
+    mode: "pro", tier: "XL", member: true }));
+  test("a 1280 x 768 source: these keys, these values", () => {
+    const p = bar({ media_id: "701", w: 1280, h: 768 });
+    assert.deepEqual(Object.keys(p).sort(), ["cfg", "context_images", "count", "creativity", "face_fix",
+      "height", "high_priority", "image_refs", "loras", "mode", "model_id", "negative", "prompt",
+      "prompt_helper", "quality_tag", "ref_media_id", "ref_strength", "seed", "steps", "upscale",
+      "upscale_denoise", "upscale_denoise_steps", "version_id", "width"]);
+    assert.deepEqual([p.width, p.height], [1280, 768]);
+    assert.deepEqual(p.context_images, ["701"]);
+    assert.equal(p.count, 1);
+    assert.equal(p.mode, "pro");
+    assert.equal(p.creativity, "medium");
+    assert.equal(p.negative, "");
+    assert.deepEqual(p.loras, []);
+  });
+  /* Review of 2026-10-03: the source's own size is used ONLY when both sides are at most 2048 (the
+     logged-in site's Tsubaki.3 model-config, PROBE_2026-09-26_site) AND its area is within the tier's
+     default area (PixAI's largest presets are about 2 MP). Anything bigger -- an upscale, a 4K
+     picture -- goes back to Auto, the size the bar sent before. */
+  const auto = (img) => buildPayload({ ...tsubakiEditState({ model: T3, image: img, prompt: "make it night",
+    mode: "pro", tier: "XL", member: true }), customW: "", customH: "" });
+  const wh = (p) => [p.width, p.height];
+  const XL_AREA = XL.default[0] * XL.default[1];
+  test("a small source keeps its own size, put on the model's 16 px steps", () => {
+    assert.deepEqual(wh(bar({ media_id: "1", w: 1000, h: 600 })), [1008, 608]);
+    assert.deepEqual(wh(bar({ media_id: "5", w: 1216, h: 832 })), [1216, 832]);
+    const small = bar({ media_id: "3", w: 300, h: 200 });
+    assert.ok(small.width >= T3.size_rule.lo && small.height >= T3.size_rule.lo, JSON.stringify(small));
+  });
+  for (const [w, h] of [[2560, 2560], [4096, 2304], [2048, 3072], [2048, 1152]]) {
+    test("a " + w + " x " + h + " source goes back to Auto, never past 2048 a side or the tier's area", () => {
+      const img = { media_id: "9", w, h };
+      const p = bar(img);
+      assert.deepEqual(wh(p), wh(auto(img)));
+      assert.ok(p.width <= 2048 && p.height <= 2048, JSON.stringify(wh(p)));
+      assert.ok(p.width * p.height <= XL_AREA * 1.02, JSON.stringify(wh(p)));
+    });
+  }
+  test("the edges: 2048 a side and the tier's own area are still the source's size", () => {
+    assert.deepEqual(wh(bar({ media_id: "6", w: 2048, h: 976 })), [2048, 976]);
+    assert.deepEqual(wh(bar({ media_id: "7", w: 1104, h: 1824 })), [1104, 1824]);
+  });
+});
+
+describe("T3a -- the bar runs at High Priority (owner's call, 2026-10-03)", () => {
+  /* PixAI's free Turbo lane was not starting context-image edits; his site edits that worked ran at
+     High Priority (a card covered one whole, extra included). The bar sends high_priority, and the
+     quote is built from the same payload, so the shown cost is the spend. The server half is
+     tests/test_tsubaki3_generate.py (priority 1000 sent and quoted, card and no card). */
+  const st = () => tsubakiEditState({ model: T3, image: { media_id: "701", w: 1280, h: 768 },
+    prompt: "make it night", mode: "pro", tier: "XL", member: true });
+  test("the bar's payload asks for High Priority", () => {
+    assert.equal(st().highPriority, true);
+    assert.equal(buildPayload(st()).high_priority, true);
+  });
+  test("and never the Unlimited lane, whose runs refuse High Priority", () => {
+    const p = buildPayload({ ...st(), unlimited: true });
+    assert.equal("unlimited" in p, false);
+    assert.equal(buildPayload(st()).unlimited, undefined);
+  });
+  test("nothing else changes: the dock's default stays off", () => {
+    assert.equal(GEN_DEFAULTS.highPriority, false);
+    assert.equal(buildPayload({ ...GEN_DEFAULTS, model: T3, prompt: "p" }).high_priority, false);
   });
 });
 

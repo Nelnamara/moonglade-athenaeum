@@ -20,7 +20,6 @@
 
    Same discipline as loom-core.js: NO React, no DOM, no window, no fetch.
    ========================================================================================= */
-import { durOf } from "./loom-core.js";
 import { selectedTakeView, anchorState } from "./loom-takes-core.js";
 
 export const RIBBON_DE_THRESHOLD = 25;
@@ -33,7 +32,7 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; 
 /**
  * ribbonPairs(entries, byId) -> [{key, a, b, stale}]
  *   entries  flat(project), board order
- *   a        the cut's outgoing shot: {cardId, code, mid, take, at: trimOut ?? dur}
+ *   a        the cut's outgoing shot: {cardId, code, mid, take, at: trimOut ?? dur ?? null (its end)}
  *   b        the incoming shot:       {cardId, code, mid, take, at: trimIn}
  *   stale    the incoming shot's anchor is stale (P2)
  * One pair per consecutive pair of RENDERED shots; an unrendered shot between them is skipped.
@@ -45,10 +44,13 @@ export const ribbonPairs = (entries, byId) => {
   const out = [];
   for (let i = 0; i + 1 < rendered.length; i++) {
     const A = rendered[i], B = rendered[i + 1];
-    const aAt = A.v.trimOut != null ? A.v.trimOut : (A.v.dur != null ? A.v.dur : durOf(A.e.c));
+    // The close: the trim, else the clip's recorded length, else THE END (null): a length that
+    // was never recorded is not estimated from the planned one (GitHub #63) -- frameUrl asks the
+    // server for the clip's true last frame instead.
+    const aAt = A.v.trimOut != null ? A.v.trimOut : (A.v.dur != null ? A.v.dur : null);
     out.push({
       key: A.e.c.id + ">" + B.e.c.id,
-      a: { cardId: A.e.c.id, code: A.e.code, mid: String(A.v.mid), take: A.v.n, at: num(aAt) || 0 },
+      a: { cardId: A.e.c.id, code: A.e.code, mid: String(A.v.mid), take: A.v.n, at: aAt == null ? null : (num(aAt) || 0) },
       b: { cardId: B.e.c.id, code: B.e.code, mid: String(B.v.mid), take: B.v.n, at: num(B.v.trimIn) || 0 },
       stale: anchorState(B.e.c, map) === "stale",
     });
@@ -56,9 +58,10 @@ export const ribbonPairs = (entries, byId) => {
   return out;
 };
 
-/** The frame's address: the time quantised to a 24 fps frame, as the server names its cache. */
+/** The frame's address: the time quantised to a 24 fps frame, as the server names its cache.
+ *  No time (null) is the clip's true last frame: `&end=1` (GitHub #63). */
 export const frameUrl = (mid, at) => "/api/loom/frame?mid=" + encodeURIComponent(String(mid || ""))
-  + "&at=" + (Math.round(Math.max(0, num(at) || 0) * RIBBON_FPS) / RIBBON_FPS).toFixed(4);
+  + (at == null ? "&end=1" : "&at=" + (Math.round(Math.max(0, num(at) || 0) * RIBBON_FPS) / RIBBON_FPS).toFixed(4));
 
 /* ---------- colour: sRGB -> linear -> XYZ (D65) -> CIELAB ---------- */
 

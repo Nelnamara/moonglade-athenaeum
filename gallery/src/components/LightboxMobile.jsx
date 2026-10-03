@@ -8,7 +8,7 @@ import useDataSaver from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useFullGate from "../hooks/useFullGate.js";
 import { apiGet, fetchSiblings } from "../api.js";
-import { taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
+import { lightboxCount, taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
 import "../styles/lightbox-mobile.css";
 import "../styles/curation-mobile.css";
 import "../styles/phone-q.css";
@@ -95,7 +95,8 @@ import "../styles/phone-q.css";
    build's brief. Upscale/Details/Slideshow are all real.
    (SESSION Q, 2026-09-29: ▶ To Video is real now -- it takes the same route as the record's Send to
    Video, `onSendToVideo`: the Create tab's Video mode with this picture as the start frame, nothing
-   sent. Edit is still the disclosed toast.)
+   sent. Edit is still the disclosed toast -- on a picture the Tsubaki edit pill cannot take; on a still
+   it opens that pill, owner's walk 2026-10-03.)
 
    SESSION Q, THE PHONE, additive to everything above:
      Q1  the placard -- accession stamp and the sibling strip -- between the picture and the meta row
@@ -125,7 +126,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest, member, onSendToVideo,
+  onEnterContest, member, onSendToVideo, offset, total,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -135,6 +136,12 @@ export default function LightboxMobile({
   const [promptOpen, setPromptOpen] = useState(false);
   const [dragDX, setDragDX] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /* THE EDIT BAR IS OPENED, NOT STANDING (owner's walk, 2026-10-03), as on the desktop: ✎ Edit opens
+     the Tsubaki edit pill for a picture it can edit, first in the lower panel right under the picture,
+     and ✎ again or Esc closes it. Any other picture's ✎ Edit keeps its note. The phone has no Edit
+     drawer, so its bar has no "More options" link. */
+  const [editOpen, setEditOpen] = useState(false);
+  const barRef = useRef(null);
   const [, bumpDetail] = useState(0); // re-render tick when a lazy detail row lands
 
   const saver = useDataSaver().active;
@@ -200,11 +207,14 @@ export default function LightboxMobile({
       if (sheetOpen) { if (e.key === "Escape") closeUpscale(); return; }
       if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
-      else if (e.key === "Escape") close();
+      else if (e.key === "Escape") { if (editOpen) setEditOpen(false); else close(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen, step, close, closeUpscale]);
+  }, [sheetOpen, step, close, closeUpscale, editOpen]);
+
+  // An opened pill takes the keyboard once it has mounted (the tap on ✎ Edit asked for it).
+  useEffect(() => { if (editOpen && barRef.current) barRef.current.focus(); }, [editOpen]);
 
   // 4200ms per slide -- a timeout keyed on the index (not an interval), so a
   // manual step/filmstrip jump restarts the clock; the CSS progress bar below
@@ -299,14 +309,18 @@ export default function LightboxMobile({
   const field = (v) => (pending ? "…" : (v == null || v === "" ? "—" : v));
   const promptText = (row && row.prompt_full) || it.prompt || "—";
   const gated = fullGate.gated;
+  // #64: the big number and "OF N" are the picture's place in the WHOLE filtered walk -- the
+  // pictures before the loaded page (offset) plus its place in the page, over the walk's length
+  // (total) -- not the loaded page's own count. Falls back to the page until a total is known.
+  const count = lightboxCount(index, offset, total, items.length);
 
   return (
     <div className={"lbm-root" + (closing ? " closing" : "")} role="dialog" aria-modal="true" aria-label="Full-screen viewer">
       <div className="lbm-topbar">
         <button type="button" className="lbm-close" onClick={close} aria-label="Close">✕</button>
         <div className="lbm-indexwrap">
-          <span className="lbm-index">{index + 1}</span>
-          <span className="lbm-total">OF {items.length}</span>
+          <span className="lbm-index">{count.at}</span>
+          <span className="lbm-total">OF {count.of}</span>
         </div>
         <div className="lbm-starswrap">
           <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
@@ -354,12 +368,14 @@ export default function LightboxMobile({
       </div>
 
       <div className="lbm-bottom">
+        {/* Session H T3a's Tsubaki edit pill, opened by ✎ Edit (owner's walk, 2026-10-03): first in
+            the lower panel, right under the picture; renders nothing on a video. */}
+        {editOpen && it.tsubaki_edit ? (
+          <TsubakiEditBar ref={barRef} item={it} member={member} phone onDismiss={() => setEditOpen(false)} />
+        ) : null}
         {/* Q1: the placard sits right under the picture, above the meta row and the action row. */}
         <PlacardMobile item={it} items={items} siblings={it.task_id ? sibMap[it.task_id] : null}
           onPick={(k) => { setDragDX(0); setPromptOpen(false); setIndex(k); }} />
-        {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
-            on every still picture (renders nothing on a video). */}
-        <TsubakiEditBar item={it} member={member} phone />
         <div className="lbm-metarow">
           {it.model ? <b className="lbm-model">{it.model}</b> : null}
           {it.date ? <span>{it.date}</span> : null}
@@ -421,8 +437,9 @@ export default function LightboxMobile({
             view and Details needed a sideways swipe. The owner's order wins over the Recipes
             handoff's "between Similar and Upscale" here, on the phone only. */}
         <div className="lbm-actsrow">
-          <button type="button" className="lbm-chip"
-            onClick={() => toast("Edit", "Its own mobile wiring — coming later.")}>✎ Edit</button>
+          <button type="button" className="lbm-chip" aria-expanded={it.tsubaki_edit ? editOpen : undefined}
+            onClick={() => (it.tsubaki_edit ? setEditOpen((v) => !v)
+              : toast("Edit", "Its own mobile wiring — coming later."))}>✎ Edit</button>
           {/* Q2: the same route as the record's Send to Video -- the Create tab's Video mode with this
               picture as the start frame. Nothing is sent. A clip has no still to start from. */}
           {!it.is_video ? (

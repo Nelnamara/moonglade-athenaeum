@@ -119,10 +119,10 @@ def test_the_achievements_route_still_answers_correctly(tmp_path, monkeypatch):
 def test_telemetry_metrics_accepts_a_preloaded_store(tmp_path):
     """The parameter that collapsed three parses into one. Passing the store in must give
     the identical answer to letting it load its own."""
-    g.telem_bump("edits", 3, out_dir=tmp_path)
+    g.telem_bump("uploads", 3, out_dir=tmp_path)
     loaded = g.load_telemetry(tmp_path)
     assert g.telemetry_metrics(tmp_path, telem=loaded) == g.telemetry_metrics(tmp_path)
-    assert g.telemetry_metrics(tmp_path, telem=loaded)["edits"] == 3
+    assert g.telemetry_metrics(tmp_path, telem=loaded)["uploads"] == 3
 
 
 def test_first_sync_complete_accepts_a_preloaded_store(tmp_path):

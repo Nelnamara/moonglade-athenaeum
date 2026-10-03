@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { balanceLine, spendLandedKey } from "../src/loom-core.js";
+import { balanceLine, spendLandedKey, makeAccountRefresh, ACCOUNT_BIND_DEBOUNCE_MS } from "../src/loom-core.js";
 
 /* THE GENERATE PANEL'S BALANCE LINE (owner walk 2026-09-30). After two paid renders the Loom's
    Generate panel still read "2151263 credits · 9 cards" while the gallery header read 2,079,763:
@@ -60,14 +60,19 @@ describe("spendLandedKey: changes when a spend lands, and only then", () => {
 });
 
 describe("the wiring: both Loom views read through useAccountLine", () => {
-  test("one hook re-reads /api/account on a bind and whenever the spend key moves", () => {
+  test("one hook re-reads /api/account: at once on open and when a spend lands, debounced on a bind", () => {
     const i = CODE.indexOf("function useAccountLine(landedKey, bind) {");
     assert.ok(i >= 0, "useAccountLine is gone -- re-point this test, never drop it");
     const body = CODE.slice(i, CODE.indexOf("\n}\n", i));
     assert.match(body, /fetch\("\/api\/account"\)/);
-    assert.match(body, /\}, \[landedKey, bind\]\);/, "re-read on a bind and on a landed spend");
-    assert.match(body, /if \(live\) setAcct\(d\)/, "an overtaken read is dropped");
-    assert.match(body, /return \(\) => \{ live = false; \};/);
+    assert.match(body, /makeAccountRefresh\(\{ read, setTimer: \(fn, ms\) => setTimeout\(fn, ms\), clearTimer: \(h\) => clearTimeout\(h\) \}\)/);
+    assert.match(body, /useEffect\(\(\) => \{ refresh\.current\.now\(\); \}, \[landedKey\]\);/,
+      "open and a landed spend read at once (and drop a bind read still waiting)");
+    assert.match(body, /if \(firstBind\.current\) \{ firstBind\.current = false; return; \}\s*refresh\.current\.bind\(\);\s*\}, \[bind\]\);/,
+      "a bind waits for the burst to end; the first one is the open read above");
+    assert.match(body, /if \(gate\.current\.wins\(tk\)\) setAcct\(d\)/, "an overtaken read is dropped");
+    assert.match(body, /return \(\) => \{ refresh\.current\.cancel\(\); gate\.current\.cancel\(\); \};/,
+      "closing drops a waiting bind read and any answer still out");
   });
   test("desktop and phone pass the board's five generation states and their bound shot", () => {
     const key = "spendLandedKey(genState, genImgState, genEditState, genRefState, genFixState)";
@@ -80,5 +85,59 @@ describe("the wiring: both Loom views read through useAccountLine", () => {
     assert.equal((CODE.match(/const bal = balanceLine\(acct\);/g) || []).length, 2);
     assert.doesNotMatch(CODE, /acct\.credits == null \? "—" : acct\.credits\}/);
     assert.doesNotMatch(CODE, /\+\{acct\.claim_credits\} claimable/);
+  });
+});
+
+/* Code review 2026-10-02: /api/account costs three PixAI reads, and the bind key moves on every
+   shot click, so clicking down the board read the account once per click. A bind now waits for
+   the burst to end and reads once; a landed spend (and the open) still reads at once. */
+describe("makeAccountRefresh: a burst of binds is one read, a spend reads at once", () => {
+  const rig = () => {
+    let now = 0, seq = 0;
+    const timers = new Map();
+    const reads = [];
+    const r = makeAccountRefresh({
+      read: () => reads.push(now),
+      setTimer: (fn, ms) => { seq += 1; timers.set(seq, { at: now + ms, fn }); return seq; },
+      clearTimer: (h) => { timers.delete(h); },
+    });
+    const advance = (ms) => {
+      const end = now + ms;
+      for (;;) {
+        const due = [...timers.entries()].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]); now = due[1].at; due[1].fn();
+      }
+      now = end;
+    };
+    return { r, reads, advance, timers };
+  };
+  test("the wait is short enough to feel live and long enough to cover a run of clicks", () => {
+    assert.ok(ACCOUNT_BIND_DEBOUNCE_MS >= 300 && ACCOUNT_BIND_DEBOUNCE_MS <= 1000, String(ACCOUNT_BIND_DEBOUNCE_MS));
+  });
+  test("five binds in a burst make ONE read, once the burst has settled", () => {
+    const { r, reads, advance } = rig();
+    for (let i = 0; i < 5; i++) { r.bind(); advance(100); }
+    assert.deepEqual(reads, [], "nothing read while the clicks keep coming");
+    advance(ACCOUNT_BIND_DEBOUNCE_MS);
+    assert.deepEqual(reads, [400 + ACCOUNT_BIND_DEBOUNCE_MS], "one read, after the last bind's wait");
+    advance(5000);
+    assert.equal(reads.length, 1);
+  });
+  test("a spend reads at once, and a bind read still waiting is dropped (it would read the same balance)", () => {
+    const { r, reads, advance, timers } = rig();
+    r.bind(); advance(100);
+    r.now();
+    assert.deepEqual(reads, [100], "promptly: no wait at all");
+    assert.equal(timers.size, 0, "the waiting bind read is gone");
+    advance(5000);
+    assert.deepEqual(reads, [100]);
+    r.now(); r.now();
+    assert.deepEqual(reads, [100, 5100, 5100], "every landed spend reads, never debounced");
+  });
+  test("closing the panel cancels a waiting read", () => {
+    const { r, reads, advance } = rig();
+    r.bind(); r.cancel(); advance(5000);
+    assert.deepEqual(reads, []);
   });
 });

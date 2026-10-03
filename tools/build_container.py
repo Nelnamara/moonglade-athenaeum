@@ -64,6 +64,32 @@ import moonglade_gallery as g
 
 EXCLUDED_DIRS = {"_thumbs"}
 
+# The SEALED achievement definitions every pack carries, from the PRIVATE sibling repo. The
+# folio donor is the one the shipped roster comes from (the full roster plus the narrator's
+# poke lines); until 2026-10-02 the default was the earlier, shorter sealed donor, so a rebuild
+# that forgot --donor silently shipped the old roster.
+DEFAULT_DONOR = (Path(__file__).resolve().parents[2] / "moonglade-internal"
+                 / "achievements_folio_donor.json")
+
+# Every top-level key the app reads from the achievements payload, with the shape it expects
+# (what the v6 pack carried). A donor missing one, or holding one of the wrong shape, is
+# refused before anything is written: a pack without it would run on bare defaults.
+REQUIRED_DONOR_KEYS = (("roster", list), ("skins", list), ("skin_unlock", dict),
+                       ("ach_criteria", dict), ("ladder_tracks", list), ("poke_lines", dict))
+
+
+def donor_problems(defs):
+    """The required keys `defs` lacks or holds in the wrong shape, as plain words; [] is fine."""
+    if not isinstance(defs, dict):
+        return ["the donor is not a JSON object"]
+    out = []
+    for key, kind in REQUIRED_DONOR_KEYS:
+        if key not in defs:
+            out.append("missing %s" % key)
+        elif not isinstance(defs[key], kind):
+            out.append("%s should be a %s" % (key, "list" if kind is list else "JSON object"))
+    return out
+
 # What goes in the container's `builder` stamp (moonglade_container schema 1). Bump the /N
 # when THIS packer's output changes in a way a reader of an old pack should be able to tell
 # apart; the app version rides along so a pack can be traced to the release that cut it.
@@ -198,7 +224,7 @@ def main():
     ap.add_argument("--donor", default=None,
                     help="path to the SEALED achievement-definitions JSON (roster + "
                          "ancillary tables). Default: the private sibling repo "
-                         "../moonglade-internal/achievements_sealed_donor.json -- the "
+                         "../moonglade-internal/achievements_folio_donor.json -- the "
                          "definitions no longer live in this public tree.")
     ap.add_argument("--built-at", default=None,
                     help="the ISO-8601 UTC build time stamped into the container "
@@ -234,17 +260,15 @@ def main():
     # Pack the SEALED achievement definitions from the PRIVATE donor -- NOT from source
     # (the roster no longer lives in this public tree). Same class as config.json: a file
     # the public build reads but the public repo does not carry.
-    donor_path = Path(args.donor) if args.donor else (
-        Path(__file__).resolve().parents[2] / "moonglade-internal"
-        / "achievements_sealed_donor.json")
+    donor_path = Path(args.donor) if args.donor else DEFAULT_DONOR
     if not donor_path.is_file():
         sys.exit("Sealed-definitions donor missing at %s -- can't build the achievements "
                  "payload. Pass --donor, or clone the private companion repo." % donor_path)
     defs = json.loads(donor_path.read_text(encoding="utf-8"))
-    missing = [k for k in ("roster", "skins", "skin_unlock", "ach_criteria", "ladder_tracks")
-               if k not in defs]
-    if missing:
-        sys.exit("Donor %s is missing required keys: %s" % (donor_path, ", ".join(missing)))
+    problems = donor_problems(defs)
+    if problems:
+        sys.exit("Donor %s can't build a pack (%s). The pack needs every key the app reads; "
+                 "the folio donor has them all." % (donor_path, "; ".join(problems)))
     payloads = {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")}
 
     built_at = args.built_at or utc_now_iso()

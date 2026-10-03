@@ -248,7 +248,7 @@ single-image generation.
   not list, an already-deleted member, a video task: no mutation, a plain-words message.
 - `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response.)
 - Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards are what stand between you and a real delete.
-- **`--delete-task` is DEPRECATED (2026-09-06)** — still working this release, printing its own notice, and its `--help` says so. The maintained roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`). Its guards are unchanged while it lasts: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin); single-attempt per task; cloud-only, so it leaves local rows behind for `--reconcile-deleted`.
+- **`--delete-task` is DEPRECATED (2026-09-06)** — still working, printing its own notice, and removed in the next minor release; its `--help` says so. The maintained roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`). Its guards are unchanged while it lasts: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin); single-attempt per task; cloud-only, so it leaves local rows behind for `--reconcile-deleted`.
 - `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
 
 > **Reverse-engineering detail (frontend handler flow, sibling mutations, hash-capture
@@ -405,9 +405,9 @@ python moonglade_backup.py --dedup                    # dry-run dedup plan (noth
 python moonglade_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
 python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
 python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
-python moonglade_gallery.py --out pixai_backup                # launch gallery at :5000 (+ /health dashboard)
-python moonglade_backup.py --delete-task <id> [<id> ...]        # DEPRECATED (use the gallery's Delete from PixAI). DRY-RUN: list what would be deleted
-python moonglade_backup.py --delete-task <id> --apply --yes     # DEPRECATED. Actually delete from your account (irreversible; null=success)
+"Serve Gallery.pyw"                                   # launch the gallery (double-click; never bare `python moonglade_gallery.py` -- see the standing rule above; machine-local flags live in serve.txt)
+python moonglade_backup.py --delete-task <id> [<id> ...]        # DEPRECATED, removed in the next minor release (use the gallery's Delete from PixAI). DRY-RUN: list what would be deleted
+python moonglade_backup.py --delete-task <id> --apply --yes     # DEPRECATED, same. Actually delete from your account (irreversible; null=success)
 python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
 python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
 python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes

@@ -449,6 +449,7 @@ export default function ControlMobile({ account, brandRequest }) {
                 <div className="mgcp-grp" style={{ marginTop: 16 }}>Check — read-only</div>
                 {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
                   ["verify-dupes", "Verify _duplicates/"],
+                  ["verify-library", "Verify library integrity"],
                   ["sync-artworks", "Sync published-artwork metadata"],
                   ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
                   actionSpec(key) ? (
@@ -566,6 +567,8 @@ export default function ControlMobile({ account, brandRequest }) {
 
       <div className="ctm-sec">
         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+        <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
+          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation.">⬇ Download curation (JSON)</a>
       </div>
 
       {/* The blur toggle, in its own ctm-sec exactly like Skins below -- the same shared

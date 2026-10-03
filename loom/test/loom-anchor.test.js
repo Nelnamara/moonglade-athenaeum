@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   anchorInfo, anchorState, staleText, needsNewTake, reanchorPatch, splicePatch, keepAnchor,
-  makeAnchor, landTake, selectTake, cutPointOf,
+  makeAnchor, landTake, selectTake, cutPointOf, tookOf,
 } from "../src/loom-takes-core.js";
 
 // Session P, P2 (BUILD-w5-p §2, review N1). The page: a shot whose open frame came from
@@ -182,5 +182,20 @@ describe("the anchor records where the frame really came from", () => {
   });
   test("with no answer from the handoff (an older server) the anchor falls back to the card, as before", () => {
     assert.deepEqual(makeAnchor(src(), "F1", "splice"), { shot: "A1", take: 1, at: 8, frame: "F1", via: "splice" });
+  });
+});
+
+describe("tookOf: the handoff's answer as the anchor's `took` (one builder, code review 2026-10-02)", () => {
+  test("{at, at_end} -> {at, end}, nothing else carried", () => {
+    assert.deepEqual(tookOf({ frame_media_id: "F", duration: 5.04, at: 5.04, at_end: true }), { at: 5.04, end: true });
+    assert.deepEqual(tookOf({ at: 3.2, at_end: false }), { at: 3.2, end: false });
+  });
+  test("an older server's answer (no at / at_end) leaves makeAnchor to the card's own cut point", () => {
+    const t = tookOf({ frame_media_id: "F" });
+    assert.deepEqual(t, { at: undefined, end: undefined });
+    const a = makeAnchor({ id: "S", resultMid: "M", actualDur: 6, trimOut: null }, "F", "splice", t);
+    assert.equal(a.at, 6);
+    assert.equal("end" in a, false, "no end flag invented");
+    assert.deepEqual(tookOf(null), { at: undefined, end: undefined });
   });
 });

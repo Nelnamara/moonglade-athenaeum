@@ -12,7 +12,7 @@ Tier enforcement (login-required) is asserted by tests/test_route_tiers.py.
 import json
 
 from moonglade_gallery import _account_key, create_app
-from tests.conftest import login_client
+from tests.conftest import login_client, with_csrf
 
 
 def _presets_file(tmp_path, user="tester"):
@@ -41,7 +41,7 @@ def test_get_starts_empty(tmp_path):
 
 def test_save_roundtrip_and_atomic_file(tmp_path):
     cli = login_client(tmp_path)
-    r = cli.post("/api/view-presets", json={"name": "wallpapers", "query": "?q=wallpaper&sort=rating"})
+    r = cli.post("/api/view-presets", json=with_csrf(cli, {"name": "wallpapers", "query": "?q=wallpaper&sort=rating"}))
     assert r.status_code == 200
     assert r.get_json()["presets"] == {"wallpapers": "?q=wallpaper&sort=rating"}
     # a fresh GET reads the same thing back
@@ -54,31 +54,31 @@ def test_save_roundtrip_and_atomic_file(tmp_path):
 
 def test_save_overwrites_same_name(tmp_path):
     cli = login_client(tmp_path)
-    cli.post("/api/view-presets", json={"name": "n", "query": "?a=1"})
-    cli.post("/api/view-presets", json={"name": "n", "query": "?b=2"})
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "n", "query": "?a=1"}))
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "n", "query": "?b=2"}))
     assert cli.get("/api/view-presets").get_json()["presets"] == {"n": "?b=2"}
 
 
 def test_save_requires_name_and_query_shape(tmp_path):
     cli = login_client(tmp_path)
-    assert cli.post("/api/view-presets", json={"query": "?a=1"}).status_code == 400
-    assert cli.post("/api/view-presets", json={"name": "  ", "query": "?a=1"}).status_code == 400
+    assert cli.post("/api/view-presets", json=with_csrf(cli, {"query": "?a=1"})).status_code == 400
+    assert cli.post("/api/view-presets", json=with_csrf(cli, {"name": "  ", "query": "?a=1"})).status_code == 400
     # no leading '?': not what savePreset stores, refused
-    assert cli.post("/api/view-presets", json={"name": "n", "query": "a=1"}).status_code == 400
+    assert cli.post("/api/view-presets", json=with_csrf(cli, {"name": "n", "query": "a=1"})).status_code == 400
     # the redirect vector the guard exists for: '/' + '//evil.example' is protocol-relative
-    assert cli.post("/api/view-presets", json={"name": "n", "query": "//evil.example"}).status_code == 400
+    assert cli.post("/api/view-presets", json=with_csrf(cli, {"name": "n", "query": "//evil.example"})).status_code == 400
     assert cli.get("/api/view-presets").get_json()["presets"] == {}
 
 
 def test_delete_removes_and_unknown_delete_is_a_noop(tmp_path):
     cli = login_client(tmp_path)
-    cli.post("/api/view-presets", json={"name": "keep", "query": "?k=1"})
-    cli.post("/api/view-presets", json={"name": "drop", "query": "?d=1"})
-    r = cli.post("/api/view-presets", json={"delete": "drop"})
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "keep", "query": "?k=1"}))
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "drop", "query": "?d=1"}))
+    r = cli.post("/api/view-presets", json=with_csrf(cli, {"delete": "drop"}))
     assert r.status_code == 200
     assert r.get_json()["presets"] == {"keep": "?k=1"}
     # deleting a name that isn't there changes nothing and doesn't error
-    r = cli.post("/api/view-presets", json={"delete": "never-existed"})
+    r = cli.post("/api/view-presets", json=with_csrf(cli, {"delete": "never-existed"}))
     assert r.status_code == 200
     assert r.get_json()["presets"] == {"keep": "?k=1"}
 
@@ -88,13 +88,13 @@ def test_merge_imports_legacy_without_clobbering(tmp_path):
     already has KEEPS the server's value -- two browsers migrating in sequence must
     not fight over whose stale copy wins."""
     cli = login_client(tmp_path)
-    cli.post("/api/view-presets", json={"name": "shared", "query": "?server=1"})
-    r = cli.post("/api/view-presets", json={"merge": {
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "shared", "query": "?server=1"}))
+    r = cli.post("/api/view-presets", json=with_csrf(cli, {"merge": {
         "shared": "?browser=1",          # collision: server's value must survive
         "browser-only": "?b=1",          # new: comes in
         "bad": "//evil.example",         # fails the query guard: silently skipped
         "  ": "?blank=1",                # blank name: skipped
-    }})
+    }}))
     assert r.status_code == 200
     assert r.get_json()["presets"] == {"shared": "?server=1", "browser-only": "?b=1"}
 
@@ -105,7 +105,7 @@ def test_corrupt_store_fails_soft_to_empty(tmp_path):
     _presets_file(tmp_path).write_text("{not json", encoding="utf-8")
     assert cli.get("/api/view-presets").get_json() == {"presets": {}}
     # and a save from that state simply starts a fresh, valid store
-    cli.post("/api/view-presets", json={"name": "n", "query": "?a=1"})
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "n", "query": "?a=1"}))
     assert json.loads(_presets_file(tmp_path).read_text(encoding="utf-8")) == {"n": "?a=1"}
 
 
@@ -133,20 +133,20 @@ def test_one_account_cannot_see_or_clobber_anothers_saved_views(tmp_path):
     app = create_app(tmp_path)
 
     alice = login_test_client(app, username="alice", password="a-real-test-password-1")
-    alice.post("/api/view-presets", json={"name": "mine", "query": "?q=alice-only"})
+    alice.post("/api/view-presets", json=with_csrf(alice, {"name": "mine", "query": "?q=alice-only"}))
 
     bob = login_test_client(app, username="bob", password="a-real-test-password-2")
     assert bob.get("/api/view-presets").get_json()["presets"] == {}, (
         "bob can see alice's saved searches -- the store is not per-account")
 
     # bob saving the SAME name must not touch alice's entry
-    bob.post("/api/view-presets", json={"name": "mine", "query": "?q=bob-only"})
+    bob.post("/api/view-presets", json=with_csrf(bob, {"name": "mine", "query": "?q=bob-only"}))
     assert bob.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=bob-only"}
     assert alice.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=alice-only"}, (
         "bob's save overwrote alice's identically-named view")
 
     # ...and bob's delete must not reach into alice's set either
-    bob.post("/api/view-presets", json={"delete": "mine"})
+    bob.post("/api/view-presets", json=with_csrf(bob, {"delete": "mine"}))
     assert alice.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=alice-only"}
 
 
@@ -166,13 +166,13 @@ def test_saved_views_are_independent_for_accounts_differing_only_by_case(tmp_pat
     app = create_app(tmp_path)
 
     upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
-    upper.post("/api/view-presets", json={"name": "mine", "query": "?q=Nel-only"})
+    upper.post("/api/view-presets", json=with_csrf(upper, {"name": "mine", "query": "?q=Nel-only"}))
 
     lower = login_test_client(app, username="nel", password="a-real-test-password-2")
     assert lower.get("/api/view-presets").get_json()["presets"] == {}, (
         "nel can see Nel's saved views -- case-differing usernames collide on disk")
 
-    lower.post("/api/view-presets", json={"name": "mine", "query": "?q=nel-only"})
+    lower.post("/api/view-presets", json=with_csrf(lower, {"name": "mine", "query": "?q=nel-only"}))
     assert lower.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=nel-only"}
     assert upper.get("/api/view-presets").get_json()["presets"] == {"mine": "?q=Nel-only"}, (
         "nel's save overwrote Nel's identically-named view -- case-collision on disk")
@@ -195,7 +195,7 @@ def test_an_account_without_its_own_file_still_sees_the_legacy_shared_set(tmp_pa
 
     # First save takes ownership: the account's own file appears, carrying the inherited
     # entry plus the new one, and the legacy file is left untouched for other accounts.
-    cli.post("/api/view-presets", json={"name": "new-one", "query": "?q=new"})
+    cli.post("/api/view-presets", json=with_csrf(cli, {"name": "new-one", "query": "?q=new"}))
     own = json.loads(_presets_file(tmp_path).read_text(encoding="utf-8"))
     assert own == {"from-before": "?q=legacy", "new-one": "?q=new"}
     assert json.loads(_legacy_presets_file(tmp_path).read_text(encoding="utf-8")) == {

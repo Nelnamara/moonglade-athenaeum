@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { onlyCopyMembers } from "../lib/onlyCopy.js";
 
 /* useDuplicateReview -- DuplicateReviewOverlay.jsx's fetch/state/keeper-
    selection/resolve/undo/auto-resolve logic, mechanically lifted out
@@ -235,6 +236,11 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
   const autoGroupCount = autoResolutions.length;
   const autoFileCount = autoResolutions.reduce((n, r) => n + r.remove.length, 0);
   const autoSkippedCount = pendingGroups.length - autoGroupCount;
+  // #66 (warn, don't block): how many of the files about to go are the only copy of their picture
+  // -- PixAI no longer has them. They go with the rest; the confirm names them.
+  const autoOnlyCopyCount = pendingGroups
+    .filter((g) => buildResolution(g))
+    .reduce((n, g) => n + onlyCopyMembers(g, keeperByGroup[g.id]).length, 0);
 
   const runAutoResolve = async () => {
     // Same explicit-guard rule: the confirm button's disabled state is UX
@@ -279,6 +285,7 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     toggleKeeper, resetKeeper, buildResolution, resolveGroup, undoGroup,
     autoConfirmOpen, setAutoConfirmOpen, autoBusy, autoError, setAutoError,
     pendingGroups, autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount,
+    autoOnlyCopyCount,
     runAutoResolve,
   };
 }

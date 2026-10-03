@@ -19,7 +19,7 @@
 import {
   accountSizeRule, autoActive, autoDims, contextMax, contextModel, creativityModel, deadRefs,
   effectiveCreativity, effectiveTier, onContextSide, profileLocked, profileRows, ratioIndexOf,
-  sizeTiers, tierDims,
+  sizeTiers, sourceSizeFits, tierDims,
 } from "./tsubakiCore.js";
 import { paletteForPayload } from "./colorPaletteCore.js";
 import { recipeGate } from "../recipes/recipesCore.js";
@@ -533,16 +533,33 @@ export function imageRefs(prompt) {
 /* The Tsubaki edit's state (Session H decision 2's menu item prefills the dock with it; T3a's
    Lightbox bar builds its payload from it through buildPayload itself, so the bar can never
    send a shape the dock would not): Tsubaki.3's applied meta, the picture as context slot 1,
-   Auto size, creativity medium, the given profile, count 1 -- and nothing else of the dock:
-   no LoRAs, no recipes, no negative, no boosters, no High priority, a random seed. */
+   the picture's own size (Auto when it is bigger than the site would send), creativity medium,
+   the given profile, count 1, High Priority -- and nothing else of the dock: no LoRAs, no
+   recipes, no negative, no boosters, a random seed. */
 export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
+  /* THE SIZE IS THE SOURCE PICTURE'S OWN (the owner's walk, 2026-10-03): PixAI's own Smart
+     Reference submit sends the picture's width and height, not a size-tier area. It rides the
+     dock's own custom-size road, so a source off the model's rule (its 16 px step, inside its
+     range) is put on it exactly as a typed W x H is -- but only while the site itself would send
+     that size (tsubakiCore.sourceSizeFits: at most 2048 a side, within the tier's default area;
+     the 2026-10-03 review). A bigger source, or one of unknown size, goes back to Auto. */
+  const w = Math.round(Number(image && image.w) || 0), h = Math.round(Number(image && image.h) || 0);
+  const own = sourceSizeFits(model, effectiveTier(model, tier || "", member === true ? true : member === false ? false : null), { w, h });
   return {
     ...GEN_DEFAULTS, model, member: member === true ? true : member === false ? false : null,
     inputs: "context", ctxWarned: true, auto: true,
+    customW: own ? String(w) : "", customH: own ? String(h) : "",
     ctx: image && image.media_id ? [{ media_id: String(image.media_id), thumb: image.thumb || "",
       w: Number(image.w) || 0, h: Number(image.h) || 0 }] : [],
     prompt: String(prompt || ""), mode: mode || "auto", tier: tier || "",
-    count: 1, creativity: "medium", highPriority: false, negative: "", seed: "",
+    count: 1, creativity: "medium", negative: "", seed: "",
+    /* THE BAR'S SPEED -- the one place it is chosen (the owner's call, 2026-10-03): HIGH PRIORITY
+       (priority 1000). PixAI's free Turbo lane was not starting context-image edits, and his site
+       edits that worked ran at High; a free card covers one whole when he has one. The quote is
+       built from this same state, so the cost line shows the spend. A context-image run never
+       enters the Unlimited lane (buildPayload sends `unlimited` only off the Context side), so the
+       lane's no-High rule never meets it. The dock's own default stays off (GEN_DEFAULTS). */
+    highPriority: true,
   };
 }
 

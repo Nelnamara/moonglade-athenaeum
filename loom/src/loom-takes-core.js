@@ -46,6 +46,11 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; 
 // outgoing shot's FIRST frame with the next shot's open -- a false "strong colour jump" on a
 // true handoff (owner walk 2026-09-30).
 const known = (v) => (v == null || v === "" ? null : num(v));
+// A clip LENGTH is known only when it is above 0 (code review 2026-10-02): landTake already
+// stores null for a reported length of 0, but withTakes / writeBack copied a card's actualDur of
+// 0 into the stored take, and a 0 s length read as "the clip ends at its first frame". A time (a
+// trim, a cut point) of 0 is real and keeps using `known`.
+const knownDur = (v) => { const n = known(v); return n != null && n > 0 ? n : null; };
 
 /* ---------- views: never write ---------- */
 
@@ -57,7 +62,7 @@ const maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || 
 const mirrorTake = (card, n) => {
   const t = {
     id: "t" + n, n, mid: str(card.resultMid), taskId: "", at: "",
-    dur: known(card.actualDur), trimIn: Number(card.trimIn) || 0,
+    dur: knownDur(card.actualDur), trimIn: Number(card.trimIn) || 0,
     trimOut: card.trimOut == null ? null : Number(card.trimOut),
     settings: null, anchor: null, imported: !!card.imported, source: "legacy",
   };
@@ -72,11 +77,14 @@ export const takesOf = (card) => {
   const stored = storedTakes(card);
   const mid = str(card.resultMid);
   if (!stored) return mid ? [mirrorTake(card, 1)] : [];
-  if (mid && !stored.some((t) => t && str(t.mid) === mid)) {
-    const n = Math.max(maxN(stored), Number(card.takeSeq) || 0) + 1;
-    return stored.concat([mirrorTake(card, n)]);
+  // A stored length of 0 or below reads as unknown; the next reducer writes that null back.
+  const healed = stored.some((t) => t && t.dur != null && knownDur(t.dur) == null)
+    ? stored.map((t) => (t && t.dur != null && knownDur(t.dur) == null ? { ...t, dur: null } : t)) : stored;
+  if (mid && !healed.some((t) => t && str(t.mid) === mid)) {
+    const n = Math.max(maxN(healed), Number(card.takeSeq) || 0) + 1;
+    return healed.concat([mirrorTake(card, n)]);
   }
-  return stored;
+  return healed;
 };
 
 /** The ★ take's number, or null when the shot has no render. Read from the mirror. */
@@ -101,7 +109,7 @@ export const selectedTakeView = (card) => {
   const n = selectedTakeOf(card);
   if (n == null) return null;
   const t = takesOf(card).find((x) => x.n === n) || mirrorTake(card, n);
-  const v = { ...t, mid: str(card.resultMid), dur: known(card.actualDur) != null ? known(card.actualDur) : t.dur,
+  const v = { ...t, mid: str(card.resultMid), dur: knownDur(card.actualDur) != null ? knownDur(card.actualDur) : knownDur(t.dur),
     trimIn: Number(card.trimIn) || 0, trimOut: card.trimOut == null ? null : Number(card.trimOut),
     imported: !!card.imported };
   if (card.crop) v.crop = card.crop; else delete v.crop;
@@ -231,7 +239,7 @@ export const withTakes = (card) => {
 
 // Copy take `t` onto the card's mirror fields (it becomes the ★ one).
 const mirrorOnto = (card, t) => {
-  const next = { ...card, resultMid: str(t.mid), actualDur: t.dur == null ? null : t.dur,
+  const next = { ...card, resultMid: str(t.mid), actualDur: knownDur(t.dur),
     trimIn: Number(t.trimIn) || 0, trimOut: t.trimOut == null ? null : t.trimOut,
     imported: !!t.imported, selectedTake: t.n };
   if (t.crop) next.crop = t.crop; else delete next.crop;
@@ -621,7 +629,7 @@ export const stripInFlight = (project) => {
 export const cutPointOf = (card) => {
   if (!card) return null;
   const t = known(card.trimOut);
-  return t != null ? t : known(card.actualDur);
+  return t != null ? t : knownDur(card.actualDur);
 };
 const sameAt = (a, b) => (a == null || b == null) ? true : Math.abs(Number(a) - Number(b)) < 0.05;
 
@@ -631,6 +639,11 @@ const sameAt = (a, b) => (a == null || b == null) ? true : Math.abs(Number(a) - 
  *  last frame) -- the server is the one that knows, since a card may not know its clip's
  *  length (owner walk 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s").
  *  Without it (an older server), the source's cut point as the card records it. */
+/** The handoff route's answer (/api/loom/handoff: {frame_media_id, duration, at, at_end}) as
+ *  makeAnchor's `took` -- where it really cut, and whether that was the clip's last frame. The
+ *  ONE builder: the desktop splice, the phone's and Re-anchor all read the answer through it. */
+export const tookOf = (d) => ({ at: (d || {}).at, end: (d || {}).at_end });
+
 export const makeAnchor = (src, frameMid, via, took) => {
   const tk = took || {};
   const at = known(tk.at);
@@ -787,11 +800,16 @@ const cardsById = (project) => {
  *    tab removed is still kept -- it is new footage, possibly paid for. With no `base` (never
  *    read) every local-only card with takes is kept, as before.
  * `changed` names every card whose ★ or take numbers now differ from this tab's view, so
- * the toast can say so.
+ * the toast can say so. `kept` names each local-only card kept for its footage ({id, act,
+ * actGone, actRestored}: the act it now sits in, and whether its own act was deleted in the
+ * other tab -- it then sits in the first act, or its act comes back when the other tab left
+ * none). `reverted` names each card of this tab's that the merge dropped ({id, kind, shot?}):
+ * "split" (a split half made against a stale board; `shot` is the card it was cut from),
+ * "removed" (the other tab deleted it) or "act-removed" (it went with its act) (GitHub #59).
  */
 export const mergeBoards = (local, remote, opts) => {
-  if (!remote) return { project: local, changed: [] };
-  if (!local) return { project: remote, changed: [] };
+  if (!remote) return { project: local, changed: [], kept: [], reverted: [] };
+  if (!local) return { project: remote, changed: [], kept: [], reverted: [] };
   const resolved = new Set(((opts || {}).resolvedSubmits || []).map(str));
   const loc = cardsById(local);
   const changed = [];
@@ -880,14 +898,89 @@ export const mergeBoards = (local, remote, opts) => {
     const before = new Set(was ? takesOf(was.c).map((t) => str(t.mid)) : []);
     return takesOf(c).some((t) => { const m = str(t.mid); return m && !remoteMids.has(m) && !before.has(m); });
   };
+  // What a dropped card WAS (GitHub #59): read-only on the result, so it can never drop a take.
+  // A card the last sync knew is one the other tab deleted -- with its act, when that act is gone
+  // from the other tab's board too. A card made here since then that holds no new footage is the
+  // right half of a split made against a stale board: name the shot it was cut from (the remote
+  // card holding its clip, preferring the one whose trim the other tab's board now overrides).
+  const remActs = new Set((remote.acts || []).map((x) => x && x.id));
+  const mergedById = cardsById(merged);
+  const trimOf = (c) => [Number(c.trimIn) || 0, c.trimOut == null ? null : Number(c.trimOut)].join("|");
+  const splitShot = (c) => {
+    const want = takesOf(c).map((t) => str(t.mid)).filter(Boolean);
+    let pick = "";
+    remIds.forEach(({ c: rc }) => {
+      const have = new Set(takesOf(rc).map((t) => str(t.mid)));
+      if (!want.every((m) => have.has(m))) return;
+      const lt = loc.get(rc.id), mt = mergedById.get(rc.id);
+      const overridden = !!(lt && mt && trimOf(lt.c) !== trimOf(mt.c));
+      if (!pick || (overridden && !pick.overridden)) pick = { id: rc.id, overridden };
+    });
+    return pick ? pick.id : "";
+  };
+  const reverted = [], kept = [];
   loc.forEach(({ c, a }) => {
-    if (remIds.has(c.id) || !takesOf(c).length || !landedHere(c)) return;
-    const act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
-    if (!act) { merged.acts = [{ ...a, cards: [c] }]; changed.push({ id: c.id, kept: true }); return; }
-    act.cards = act.cards.concat([c]);
-    changed.push({ id: c.id, kept: true });
+    if (remIds.has(c.id)) return;
+    const has = takesOf(c).length > 0;
+    if (has && landedHere(c)) {
+      const actGone = !remActs.has(a.id);
+      let act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
+      const restored = !act;
+      if (restored) { act = { ...a, cards: [] }; merged.acts = [act]; }
+      act.cards = act.cards.concat([c]);
+      kept.push({ id: c.id, act: str(act.name), actGone, actRestored: restored });
+      return;
+    }
+    if (baseCards && baseCards.has(c.id)) reverted.push({ id: c.id, kind: remActs.has(a.id) ? "removed" : "act-removed" });
+    else if (has) reverted.push({ id: c.id, kind: "split", shot: splitShot(c) });
   });
-  return { project: merged, changed };
+  return { project: merged, changed, kept, reverted };
+};
+
+/**
+ * The conflict toast's text (GitHub #59), leading with the part that is always true. `out` is
+ * mergeBoards' answer; `codes.local` / `codes.merged` map card ids to their codes on this tab's
+ * board and on the merged one (a dropped card is named as this tab knew it). One sentence per
+ * kind, three names at most and then "and N more".
+ */
+export const mergeNotice = (out, codes) => {
+  const o = out || {};
+  const lc = (codes && codes.local) || {}, mc = (codes && codes.merged) || {};
+  const names = (xs) => {
+    const n = xs.filter(Boolean);
+    if (n.length <= 1) return n.join("");
+    if (n.length <= 3) return n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
+    return n.slice(0, 3).join(", ") + " and " + (n.length - 3) + " more";
+  };
+  const say = (list, codeOf) => {
+    const n = list.map((x) => codeOf(x)).filter(Boolean);
+    return { n: n.length, text: names(n) };
+  };
+  const parts = ["Your takes were kept; other edits from this tab were replaced."];
+  const keptMoved = (o.kept || []).filter((x) => x && x.actGone && !x.actRestored);
+  const byAct = new Map();
+  keptMoved.forEach((x) => { if (!byAct.has(x.act)) byAct.set(x.act, []); byAct.get(x.act).push(x); });
+  byAct.forEach((list, act) => {
+    const k = say(list, (x) => lc[x.id] || mc[x.id]);
+    if (k.n) parts.push(k.text + " " + (k.n === 1 ? "was" : "were") + " kept in " + (act || "the first act") + " because "
+      + (k.n === 1 ? "its" : "their") + " act was deleted in the other tab.");
+  });
+  const back = say((o.kept || []).filter((x) => x && x.actRestored), (x) => lc[x.id] || mc[x.id]);
+  if (back.n) parts.push(back.text + " " + (back.n === 1 ? "was" : "were") + " kept and "
+    + (back.n === 1 ? "its" : "their") + " act is back: the other tab had deleted it.");
+  const rev = o.reverted || [];
+  const of = (kind) => rev.filter((x) => x && x.kind === kind);
+  const splits = say(of("split"), (x) => lc[x.shot] || mc[x.shot] || lc[x.id]);
+  if (splits.n) parts.push("Your split" + (splits.n === 1 ? "" : "s") + " of " + splits.text + " "
+    + (splits.n === 1 ? "was" : "were") + " undone because the board changed in another tab.");
+  const gone = say(of("removed"), (x) => lc[x.id]);
+  if (gone.n) parts.push(gone.text + (gone.n === 1 ? " stays deleted: the other tab removed it." : " stay deleted: the other tab removed them."));
+  const actGone = say(of("act-removed"), (x) => lc[x.id]);
+  if (actGone.n) parts.push(actGone.text + (actGone.n === 1 ? " stays deleted: the other tab removed its act."
+    : " stay deleted: the other tab removed their act."));
+  const moved = say(o.changed || [], (x) => mc[x.id]);
+  if (moved.n) parts.push("★ or take numbers changed on " + moved.text + ".");
+  return parts.join(" ");
 };
 
 /* ---------- split and duplicate (F11, §1.5) ---------- */

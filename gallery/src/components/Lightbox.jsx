@@ -3,6 +3,7 @@ import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
+import { lightboxCount } from "../lib/phoneCore.js";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -31,7 +32,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails, onPublish, onSimilar, member,
+  onOpenDetails, onPublish, onSimilar, member, offset, total,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -52,7 +53,16 @@ export default function Lightbox({
   const [dragDX, setDragDX] = useState(0);
   const [zoom, setZoom] = useState(false);   // classic's double-tap 2x
   const upEl = useRef(null);
-  const barRef = useRef(null);      // the Tsubaki edit bar (Session H T3a): E focuses it
+  const barRef = useRef(null);      // the Tsubaki edit bar (Session H T3a): E opens and focuses it
+  /* THE EDIT BAR IS OPENED, NOT STANDING (owner's walk, 2026-10-03). It used to sit over the stage
+     foot on every still. Now ✎ Edit opens it BELOW the picture -- in the bottom band, so the stage
+     gives up the room and the bar never covers the image -- for a picture it can edit (the card's
+     tsubaki_edit); ✎ again or Esc closes it. Any other picture's ✎ Edit opens the drawer as before,
+     and so does the bar's own "More options in the Edit drawer ↗". */
+  const [editOpen, setEditOpen] = useState(false);
+  const closeEdit = useCallback(() => setEditOpen(false), []);
+  const toggleEdit = () => setEditOpen((v) => !v);
+  const focusBar = useRef(false);   // the open asks for the field once the bar has mounted
   const closingRef = useRef(false);
   const drag = useRef({ active: false, moved: false });
   const touch = useRef({ x0: 0, dx: 0, live: false, lastTap: 0 });
@@ -114,21 +124,30 @@ export default function Lightbox({
       if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
       else if ((e.key === "e" || e.key === "E") && !e.metaKey && !e.ctrlKey && !e.altKey
-               && barRef.current && items[index] && items[index].tsubaki_edit) {
+               && items[index] && items[index].tsubaki_edit) {
         e.preventDefault();
-        barRef.current.focus();
+        focusBar.current = true;
+        if (editOpen && barRef.current) { barRef.current.focus(); focusBar.current = false; }
+        else setEditOpen(true);
       }
       else if (e.key === "f" || e.key === "F") setSlideOn((v) => !v);
       else if (e.key === "Escape") {
-        // innermost-first still, with the prompt slab gone: a running slideshow or a
-        // double-tap zoom cancels on the first Esc, the page closes on the next.
-        if (slideOn || zoom) { setSlideOn(false); setZoom(false); }
+        // innermost-first still, with the prompt slab gone: an open edit bar closes first,
+        // then a running slideshow or a double-tap zoom cancels, and the page closes on the next.
+        if (editOpen) closeEdit();
+        else if (slideOn || zoom) { setSlideOn(false); setZoom(false); }
         else close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, step, slideOn, zoom, items, index]);
+  }, [close, step, slideOn, zoom, items, index, editOpen, closeEdit]);
+
+  // An opened bar takes the keyboard (✎ Edit or E), once it has mounted.
+  useEffect(() => {
+    if (!editOpen) { focusBar.current = false; return; }
+    if (focusBar.current && barRef.current) { barRef.current.focus(); focusBar.current = false; }
+  }, [editOpen, mid]);
 
   /* 4200ms per slide (DC). A timeout keyed on the index, not an interval, so a
      manual step/filmstrip jump restarts the clock -- and the 2px progress bar
@@ -218,6 +237,11 @@ export default function Lightbox({
   const hasAR = W > 0 && H > 0;
   const rating = Number(it.rating) || 0;
   const dragging = dragDX !== 0;
+  // #74: the picture's TRUE place in the filtered walk and the walk's length, once each, formatted
+  // like the pager ("101 OF 3,240") -- the phone viewer's helper. It used to read "{k} / {page}" and
+  // "OF {page}": counted inside the loaded page, with the total twice. Falls back to the page until
+  // the library's total is known.
+  const count = lightboxCount(index, offset, total, items.length);
 
   return (
     <div className={"lbx" + (closing ? " closing" : "")} role="dialog" aria-modal="true">
@@ -234,8 +258,8 @@ export default function Lightbox({
       <div className="lbx-shell">
         <div className="lbx-bar">
           <div className="lbx-index">
-            <b>{index + 1} / {items.length}</b>
-            <span>OF {items.length}</span>
+            <b>{count.at}</b>
+            <span>OF {count.of}</span>
           </div>
           <div className="lbx-stars">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
@@ -247,8 +271,10 @@ export default function Lightbox({
             {hasAR ? <span className="lbx-fig">{W}×{H}</span> : null}
           </div>
           <div className="lbx-acts">
-            <button className="lbx-chip" title="Send to the Edit tab"
-              onClick={() => onEdit(it.media_id)}>✎ Edit</button>
+            <button className="lbx-chip"
+              title={it.tsubaki_edit ? (editOpen ? "Close the edit bar (Esc)" : "Describe an edit (E)") : "Send to the Edit tab"}
+              aria-expanded={it.tsubaki_edit ? editOpen : undefined}
+              onClick={() => { focusBar.current = true; it.tsubaki_edit ? toggleEdit() : onEdit(it.media_id); }}>✎ Edit</button>
             <button className="lbx-chip" title="Send as a start frame"
               onClick={() => onToVideo(it.media_id, it.thumb)}>▶ To Video</button>
             {/* ◈ Similar NAVIGATES (Lightbox.dc.html:354 sends it to the gallery): the viewer
@@ -325,12 +351,15 @@ export default function Lightbox({
               ) : null}
             </div>
           </div>
-          {/* Session H T3a: the Tsubaki edit bar over the stage foot -- on every still picture
-              (the card's tsubaki_edit); it renders nothing on a video. */}
-          <TsubakiEditBar ref={barRef} item={it} member={member} />
         </div>
 
         <div className="lbx-bottom">
+          {/* Session H T3a's Tsubaki edit bar, opened by ✎ Edit (owner's walk, 2026-10-03): below
+              the picture, at the head of the bottom band, never over the stage. */}
+          {editOpen && it.tsubaki_edit ? (
+            <TsubakiEditBar ref={barRef} item={it} member={member} below
+              onMore={() => onEdit(it.media_id)} onDismiss={closeEdit} />
+          ) : null}
           <div className="lbx-striprow">
             <div className="lbx-strip" ref={stripRef}>
               {items.map((sh, k) => {
@@ -348,7 +377,7 @@ export default function Lightbox({
                 );
               })}
             </div>
-            <div className="lbx-hint">← → to browse · F slideshow{it.tsubaki_edit ? " · E edits with Tsubaki" : ""} · Esc closes · swipe or double-tap on tablet</div>
+            <div className="lbx-hint">← → to browse · F slideshow{it.tsubaki_edit ? " · ✎ or E edits with Tsubaki" : ""} · Esc closes · swipe or double-tap on tablet</div>
           </div>
         </div>
       </div>

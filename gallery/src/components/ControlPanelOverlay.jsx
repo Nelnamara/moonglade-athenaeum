@@ -164,18 +164,31 @@ function MirrorTile() {
     setMsg("Connected.");
     await refresh();                        // re-read real status (enabled + connected + days)
   };
-  // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome;
-  // the ring reads the JWT's days-left, colour-coded emerald>7 / peach<=7 / ruby<=0 / grey when off.
+  // §1 "The gate" (The Bridge.dc.html 65-135, renderVals 386-432): armed drives the chrome and
+  // the same four rungs colour the ring -- emerald healthy / peach low / ruby expired / grey off.
+  // #71 (PROBE 2026-10-02: every renewal mints a 7-day token) changed what draws and picks them:
+  //   - the arc is the token's seconds left out of its OWN life (the server's left_s / span_s;
+  //     never iat to exp, which grows with every renewal), not out of a fixed 40 days;
+  //   - peach means a renewal FAILED or cannot run (READ_ONLY), not "7 days or fewer" -- a
+  //     7-day token sits under 7 days for its whole healthy life and renews itself at 3;
+  //   - ruby is decided by the real seconds left, not the floored days (10 h left is 0 days).
   const armed = !!(st && st.enabled);
-  const days = st && st.days_left != null ? Math.max(0, Math.min(40, st.days_left)) : 0;
+  const days = st && st.days_left != null ? Math.max(0, st.days_left) : 0;
+  const leftS = st && st.left_s != null ? st.left_s : null;
+  const spanS = st && st.span_s != null ? st.span_s : null;
+  const expired = leftS != null ? leftS <= 0 : days <= 0;
+  const frac = leftS != null && spanS > 0 ? Math.max(0, Math.min(1, leftS / spanS)) : (expired ? 0 : 1);
+  const renewal = (st && st.renewal && st.renewal.state) || "ok";
+  const daysLeft = days >= 1 ? days + " day" + (days === 1 ? "" : "s") + " left" : "less than a day left";
   const C = 163.4;  // 2*pi*26
   let ringMod, sessionSub, connectLabel = "Refresh session";
   if (!st) { ringMod = "off"; sessionSub = "…"; connectLabel = "Connect"; }
   else if (!armed) { ringMod = "off"; sessionSub = "Not connected — Connect to arm the tier."; connectLabel = "Connect"; }
-  else if (days <= 0) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; connectLabel = "Reconnect"; }
-  else if (days <= 7) { ringMod = "low"; sessionSub = "Expires soon — " + days + " day" + (days === 1 ? "" : "s") + " left."; }
-  else { ringMod = "healthy"; sessionSub = "Healthy — decoded offline, no re-auth needed."; }
-  const ringOffset = armed ? (C * (1 - days / 40)).toFixed(1) : C;
+  else if (expired) { ringMod = "expired"; sessionSub = "Session expired — reconnect to keep tools live."; connectLabel = "Reconnect"; }
+  else if (renewal === "failed") { ringMod = "low"; sessionSub = "Couldn't renew — " + daysLeft + ". Retrying."; }
+  else if (renewal === "paused") { ringMod = "low"; sessionSub = "Renewal is paused while READ_ONLY is on — " + daysLeft + "."; }
+  else { ringMod = "healthy"; sessionSub = "Healthy — renews itself while the app runs."; }
+  const ringOffset = armed ? (C * (1 - frac)).toFixed(1) : C;
 
   return (
     <div className="mgcp-bridge">
@@ -832,6 +845,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                             <div className="mgcp-grp">Check — read-only</div>
                             {[["stats", "Catalog stats"], ["inventory", "Inventory count"],
                               ["verify-dupes", "Verify _duplicates/"],
+                              ["verify-library", "Verify library integrity"],
                               ["sync-artworks", "Sync published-artwork metadata"],
                               ["sync-videos", "Sync i2v videos"]].map(([key, label]) => (
                               actionSpec(key) ? (
@@ -1042,6 +1056,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                       <div className="mgcp-mkick">Catalog &amp; files</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+                        <a className="mgcp-smallchip" href="/export-curation" style={{ textDecoration: "none" }}
+                          title="Ratings, collections and their order, smart collections, tags, marks and notes, as one file. It goes back in with --import-curation.">⬇ Download curation (JSON)</a>
                         {isLocal && (
                           <button type="button" className="mgcp-smallchip" onClick={openLibPicker}>library folder…</button>
                         )}

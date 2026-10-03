@@ -5,16 +5,14 @@ local + fail-soft -- a telemetry hiccup must never break a page or a backup."""
 import json
 import time
 
-import datetime as _dt
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
+from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -25,15 +23,6 @@ needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
                                  reason="sealed-definitions donor (private repo) not present")
 
 
-class _FixedNoon(_dt.datetime):
-    """Freeze the wall clock at noon so /api/achievements never flags the 2-4am
-    a time-of-day feat (session_hour) mid-test. That real-time side effect made the
-    hidden-feat masking assertions flaky whenever the suite ran overnight."""
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2025, 6, 15, 12, 0, 0)
-
-
 def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
 
@@ -41,11 +30,11 @@ def _row(**kw):
 # ---- the persisted store ----------------------------------------------------
 
 def test_store_roundtrip(tmp_path):
-    g.telem_bump("edits", out_dir=tmp_path)
-    g.telem_bump("edits", out_dir=tmp_path)
-    g.telem_bump("culled", 40, out_dir=tmp_path)
-    g.telem_max("lora_stacked", 2, out_dir=tmp_path)
-    g.telem_max("lora_stacked", 1, out_dir=tmp_path)      # max keeps 2
+    g.telem_bump("uploads", out_dir=tmp_path)
+    g.telem_bump("uploads", out_dir=tmp_path)
+    g.telem_bump("culled", 40, out_dir=tmp_path)          # the pre-2026-10-02 count, still read
+    g.telem_max("jobs_concurrent", 2, out_dir=tmp_path)
+    g.telem_max("jobs_concurrent", 1, out_dir=tmp_path)   # max keeps 2
     g.telem_set_add("tools", "edit", out_dir=tmp_path)
     g.telem_set_add("tools", "edit", out_dir=tmp_path)    # set dedupes
     g.telem_set_add("tools", "fix", out_dir=tmp_path)
@@ -53,8 +42,8 @@ def test_store_roundtrip(tmp_path):
     g.telem_mark_day(out_dir=tmp_path)
     g.telem_mark_day(out_dir=tmp_path)                    # same day counts once
     m = g.telemetry_metrics(tmp_path)
-    assert m["edits"] == 2 and m["culled"] == 40
-    assert m["lora_stacked"] == 2
+    assert m["uploads"] == 2 and m["culled"] == 40
+    assert m["jobs_concurrent"] == 2
     assert m["tools_used"] == 2
     assert m["konami_triggered"] == 1
     assert m["days_used"] == 1
@@ -63,19 +52,19 @@ def test_store_roundtrip(tmp_path):
 def test_store_corrupt_and_unset_fail_soft(tmp_path):
     (tmp_path / "telemetry.json").write_text("{not json", encoding="utf-8")
     assert g.telemetry_metrics(tmp_path)["days_used"] == 0   # never raises
-    g.telem_bump("edits", out_dir=tmp_path)                  # overwrites the wreck
-    assert g.telemetry_metrics(tmp_path)["edits"] == 1
+    g.telem_bump("uploads", out_dir=tmp_path)                # overwrites the wreck
+    assert g.telemetry_metrics(tmp_path)["uploads"] == 1
     # valid JSON with hostile inner types must not len()-crash a page
     (tmp_path / "telemetry.json").write_text(
-        json.dumps({"counters": {"edits": "x"}, "sets": {"tools": 1},
+        json.dumps({"counters": {"uploads": "x", "culled": "x"}, "sets": {"tools": 1},
                     "flags": {}, "maxima": {}, "days": []}), encoding="utf-8")
     m = g.telemetry_metrics(tmp_path)
-    assert m["tools_used"] == 0 and m["edits"] == 0
+    assert m["tools_used"] == 0 and m["uploads"] == 0 and m["culled"] == 0
     # bare bumps no-op (not crash) when no out_dir was ever set
     old = g._TELEM_OUT
     try:
         g.set_telemetry_out(None)
-        g.telem_bump("edits")
+        g.telem_bump("uploads")
     finally:
         g.set_telemetry_out(old)
 
@@ -142,8 +131,7 @@ def _client(tmp_path, rows):
 def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    with mock.patch("datetime.datetime", _FixedNoon):   # never trip a time-of-day feat mid-test
-        d = cli.get("/api/achievements").get_json()
+    d = cli.get("/api/achievements").get_json()
     # every hidden feat is unearned here, and NONE of them is in the array: the one "???"
     # placeholder that used to stand for them all is gone (Session G) -- the payload must not
     # reveal how many remain undiscovered, and an entry count that moved with them would.
@@ -199,8 +187,7 @@ def test_points_rung_scaled_feats_zero_and_aggregates():
 def test_api_masked_feats_leak_no_points(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/achievements").get_json()
+    d = cli.get("/api/achievements").get_json()
     assert "earned_points" in d and "possible_points" in d
     # no hidden feat rides the array at all now, so nothing carries a point value that could
     # hint at one, and every feat that does ride it scores zero
@@ -213,8 +200,7 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
     g.telem_flag("first_sync_done", out_dir=out)   # past first sync -> achievements recognize
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/achievements?mark=1").get_json()
+    d = cli.get("/api/achievements?mark=1").get_json()
     assert "earned_at" in d
     earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
     assert earned_ids and all(i in d["earned_at"] for i in earned_ids)   # every earned gets a date
@@ -265,7 +251,7 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    r = ach_event(cli, "konami")
+    r = ach_event(cli, STARFALL_EVENT)
     assert r.status_code == 200
     assert g.telemetry_metrics(out)["konami_triggered"] == 1
     ach_event(cli, "docs")
@@ -278,6 +264,14 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     # unknown events are rejected, nonce or no nonce
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
     assert ach_event(cli, "nope").status_code == 400
+    # ...and so is the key-sequence event's RETIRED public name, with no alias: the beacon is
+    # fail-soft, so a stale cached page's refusal costs one press, and an alias would keep the
+    # old word in public source. (Derived from the flag key, which keeps its name.)
+    flags_before = dict(g.load_telemetry(out)["flags"])
+    retired = "konami_triggered"[:-len("_triggered")]
+    r = ach_event(cli, retired)
+    assert r.status_code == 400 and r.get_json()["error"] == "unknown event"
+    assert g.load_telemetry(out)["flags"] == flags_before
 
 
 def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
@@ -285,14 +279,14 @@ def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
     cli = login_client(tmp_path)
     d = cli.get("/api/ach-nonce").get_json()
     assert d["nonce"] and isinstance(d["nonce"], str)
-    r = cli.post("/api/ach-event", json={"event": "konami", "nonce": d["nonce"]})
+    r = cli.post("/api/ach-event", json={"event": STARFALL_EVENT, "nonce": d["nonce"]})
     assert r.status_code == 200 and r.get_json()["next_nonce"] != d["nonce"]
 
 
 def test_ach_event_without_a_nonce_is_refused(tmp_path):
     """The console POST the 2026-08-26 LOCALHOST gate existed to stop."""
     cli = login_client(tmp_path)
-    r = cli.post("/api/ach-event", json={"event": "konami"})
+    r = cli.post("/api/ach-event", json={"event": STARFALL_EVENT})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
     assert "konami_triggered" not in g.telemetry_metrics(tmp_path)
 
@@ -351,7 +345,7 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     assert second["debounced"] is True and second["next_nonce"]
     assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
     # ...and the debounce is per (session, event): a different event is not held back.
-    cli.post("/api/ach-event", json={"event": "konami", "nonce": second["next_nonce"]})
+    cli.post("/api/ach-event", json={"event": STARFALL_EVENT, "nonce": second["next_nonce"]})
     assert g.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 
@@ -513,8 +507,7 @@ def test_api_criteria_on_set_masteries(tmp_path):
     g.telem_set_add("tools", "fix", out_dir=tmp_path)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/achievements").get_json()
+    d = cli.get("/api/achievements").get_json()
     ft = [a for a in d["achievements"] if a["id"] == "full-toolbox"][0]
     assert {x["key"]: x["done"] for x in ft["criteria"]} == {
         "edit": True, "enhance": False, "fix": True}
@@ -570,8 +563,11 @@ def test_best_day_streak_and_keyed_daylists(tmp_path):
                       "curation_days": ["2026-03-01", "2026-03-03"],
                       "active_days": ["2026-02-01", "2026-02-02", "2026-03-01"]}}), encoding="utf-8")
     m = g.telemetry_metrics(tmp_path)
-    assert m["gen_streak"] == 3 and m["curation_streak"] == 1
+    assert m["curation_streak"] == 1
     assert m["distinct_active_days"] == 3
+    # gen_streak is counted from the catalog's in-app rows since 2026-10-02 (evidence, not a
+    # ledger): the store no longer speaks for it -- tests/test_evidence_counters.py
+    assert "gen_streak" not in m
 
 
 @needs_donor
@@ -624,8 +620,7 @@ def test_api_masks_every_hidden_only_metric(tmp_path):
     metas' `meta`) can never slip into `still_visible`."""
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/achievements").get_json()
+    d = cli.get("/api/achievements").get_json()
     by_metric = {}
     for a in g._roster():
         by_metric.setdefault(a["metric"], []).append(a)
@@ -795,9 +790,11 @@ def test_only_the_two_tool_terminals_write_the_bridge_set():
     assert len(writes) == 2, writes
 
 
-def test_train_submit_hook_bumps_loras_trained(tmp_path, monkeypatch):
-    """The Academy (loras_trained): a confirmed, free LoRA training submit bumps the counter
-    once. Uses the same CSRF + validate/quota/submit stubbing shape test_panel already uses."""
+def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
+    """The Academy (loras_trained) counts runs PixAI reports FINISHED (recorded off the Runs
+    read -- tests/test_training_advanced.py), not accepted submits, since 2026-10-02: a
+    submit that fails, is retried or is replayed must not count. Uses the same CSRF +
+    validate/quota/submit stubbing shape test_panel already uses."""
     import moonglade_backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "validate_training", lambda *a, **k: "nel druid")
@@ -815,4 +812,4 @@ def test_train_submit_hook_bumps_loras_trained(tmp_path, monkeypatch):
     assert g.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
     d = cli.post("/api/train/submit", json=body).get_json()
     assert d.get("submitted") is True
-    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 1
+    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 0

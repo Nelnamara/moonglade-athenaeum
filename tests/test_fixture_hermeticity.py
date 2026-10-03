@@ -24,8 +24,8 @@ reach the real tree or the real pack (the session pin holds). Two: each harness 
 fixture that needs to pin and seed for ITSELF still does -- which the session pin now masks,
 since a harness that lost its pin would land in the session's tmp root and look fine. Three:
 every harness server pins its clock before it starts serving. Four: that pin actually keeps
-the hour out of an install's ledger -- measured against the real route at 03:00, because a
-source-level check can only see the spelling of a call.
+the hour out of an install's ledger -- measured against the real collect path with the clock
+at 03:00, because a source-level check can only see the spelling of a call.
 
 One and four are measured live; two and three are read off the harness's source, because
 measuring them is exactly what the floors beneath them made impossible.
@@ -133,11 +133,11 @@ def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
 def test_every_harness_server_pins_its_clock_before_it_starts_serving(fixture_name):
     """A harness result must never be a property of the hour the run started in.
 
-    `/api/achievements` reads the hour off the wall clock and, for part of the night, writes
-    a telemetry flag into the install's own ledger. An achievement reads that flag, so it can
-    arrive as newly earned mid-test and put the full-screen celebration overlay over whatever
-    was being measured. A downstream lane lost a run to exactly that, purely because it
-    started in the small hours.
+    A generation collected in the small hours writes a telemetry flag into the install's own
+    ledger (until 2026-10-02 a bare `/api/achievements` load at that hour did). An achievement
+    reads that flag, so it can arrive as newly earned mid-test and put the full-screen
+    celebration overlay over whatever was being measured. A downstream lane lost a run to
+    exactly that, purely because it started in the small hours.
 
     Every fixture that starts a server therefore pins its install to a fixed daytime weekday
     instant (`tests/conftest.py::pin_daytime_clock`, with the fixture's own MonkeyPatch),
@@ -168,48 +168,85 @@ def test_every_harness_server_pins_its_clock_before_it_starts_serving(fixture_na
 
 
 class _ThreeAM(_dt.datetime):
-    """The wall clock inside the window the route writes the hour-driven flag in. The
-    suite's existing idiom (tests/test_achievements.py, tests/test_telemetry.py) with the
-    hands moved to the hour that is actually dangerous instead of away from it."""
+    """The wall clock inside the hour-driven flag's window. The suite's existing idiom
+    with the hands moved to the hour that is actually dangerous instead of away from it."""
     @classmethod
     def now(cls, tz=None):
         return cls(2025, 6, 11, 3, 0, 0)
 
 
-def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path):
-    """The pin's EFFECT, measured through the real route -- the half no source read covers.
+def _collect_at_three(root, monkeypatch):
+    """Run ONE generation through the real collect path (/api/task-status's done branch)
+    with the clock at 03:10 local and the row PixAI-stamped 03:00 local -- the only road
+    the hour-driven flag has had since 2026-10-02 (a page load no longer reads the hour)."""
+    import moonglade_backup as core
+    import moonglade_gallery as g
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-    Both halves run `/api/achievements` on a real app at 03:00, and the control is what makes
-    the result mean anything: un-pinned, the flag must land, which proves this probe can see
-    the write at all. Pinned, the same request at the same hour must leave the ledger clear.
-    Gut `pin_daytime_clock`'s body and the second half goes red here while every source-level
-    check above stays green.
+    from tests.conftest import login_client
+
+    made = _dt.datetime(2025, 6, 11, 3, 0)
+    stamp = made.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    row = {f: "" for f in CATALOG_FIELDS} | {"media_id": "H1", "filename": "h1.png",
+                                              "task_id": "TH", "source": "api",
+                                              "created_at": stamp}
+    save_catalog(root / "catalog.db", [])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status",
+                        lambda s, tid: {"phase": "done", "paid_credit": 0})
+
+    def _collect(session, tid, out, **k):
+        save_catalog(root / "catalog.db", [row])
+        return {"media_ids": ["H1"], "saved": 1, "is_video": False}
+    monkeypatch.setattr(core, "collect_generation", _collect)
+    monkeypatch.setattr(g, "_utc_now", lambda: (made + _dt.timedelta(minutes=10))
+                        .astimezone(_dt.timezone.utc))
+    cli = login_client(root)
+    assert cli.get("/api/task-status", query_string={"task_id": "TH"}).status_code == 200
+    return cli
+
+
+def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkeypatch):
+    """The pin's EFFECT, measured through the real collect path -- the half no source read
+    covers.
+
+    Both halves collect a generation made at 03:00 with the clock at 03:10, and the control is
+    what makes the result mean anything: un-pinned, the flag must land, which proves this probe
+    can see the write at all. Pinned, the same collect at the same hour must leave the ledger
+    clear. Gut `pin_daytime_clock`'s body and the second half goes red here while every
+    source-level check above stays green. A page load at 03:00 writes nothing either way --
+    that is no longer a road to the flag, and the first half asserts it too.
 
     No donor needed: this asserts the telemetry ledger, not the roster, so it holds on public
     CI as well as on a machine with the sealed definitions."""
     import moonglade_gallery as g
-    from moonglade_gallery import save_catalog
 
-    from tests.conftest import HOUR_DRIVEN_FLAG, login_client, pin_daytime_clock
+    from tests.conftest import HOUR_DRIVEN_FLAG, pin_daytime_clock
 
     unpinned = tmp_path / "unpinned"
     unpinned.mkdir()
-    save_catalog(unpinned / "catalog.db", [])
-    with mock.patch("datetime.datetime", _ThreeAM):
-        assert login_client(unpinned).get("/api/achievements").status_code == 200
+    _collect_at_three(unpinned, monkeypatch)
     assert g.load_telemetry(unpinned)["flags"].get(HOUR_DRIVEN_FLAG) == 1, (
         "the control half never wrote the hour-driven flag, so this test cannot say anything "
-        "about the pin: either the route stopped reading the clock (then delete the pin and "
-        "this test) or the clock substitution no longer reaches it (then fix the probe)")
+        "about the pin: either the collect path stopped stamping it (then delete the pin's hour "
+        "half and this test) or the clock seam no longer reaches it (then fix the probe)")
+
+    page_only = tmp_path / "page-only"
+    page_only.mkdir()
+    from moonglade_gallery import save_catalog
+    from tests.conftest import login_client
+    save_catalog(page_only / "catalog.db", [])
+    with mock.patch("datetime.datetime", _ThreeAM):
+        assert login_client(page_only).get("/api/achievements").status_code == 200
+    assert HOUR_DRIVEN_FLAG not in g.load_telemetry(page_only)["flags"], (
+        "a page load at 03:00 armed the hour-driven flag again -- only a new generation may")
 
     pinned = tmp_path / "pinned"
     pinned.mkdir()
-    save_catalog(pinned / "catalog.db", [])
     mp = pytest.MonkeyPatch()
     pin_daytime_clock(mp)
     try:
-        with mock.patch("datetime.datetime", _ThreeAM):
-            assert login_client(pinned).get("/api/achievements").status_code == 200
+        _collect_at_three(pinned, monkeypatch)
     finally:
         mp.undo()
     assert HOUR_DRIVEN_FLAG not in g.load_telemetry(pinned)["flags"], (

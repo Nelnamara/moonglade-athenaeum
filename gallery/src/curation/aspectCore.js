@@ -145,12 +145,48 @@ export function ratioLabel(w, h) {
   return r.toFixed(2) + ":1";
 }
 
-/* ---- the operator chips ---- */
+/* ---- the operators ---- */
 
-/* The chip row under the search: one tap adds an operator to the search text, a second removes
-   it. The design page's row, less its two sample-library chips (a tag and a 3:4 shape that only
-   exist in its 24 stand-in pictures) and plus Loom renders. */
+/* The design page's row of operator chips, less its two sample-library chips (a tag and a 3:4 shape
+   that only exist in its 24 stand-in pictures) and plus Loom renders. One pick adds an operator to
+   the search text, a second takes it out. They lived in the Filters tray as a row of chips until the
+   owner's walk of 2026-10-03, which moved them into the search field's own suggestion list, as its
+   "Operators" group (operatorSuggestions below). */
 export const OPERATOR_CHIPS = ["ar:tall", "ar:wide", "ar:square", "★4+", "keeper", "-reject", "type:video", "type:loom"];
+
+/* What each one does, in the words the Advanced flyout's legend and the Aspect field already use. */
+const OPERATOR_HINTS = {
+  "ar:tall": "9:16 or taller", "ar:wide": "16:9 or wider", "ar:square": "0.97 to 1.03",
+  "★4+": "4 stars or more", "keeper": "your keeper mark", "-reject": "leave out your rejects",
+  "type:video": "videos only", "type:loom": "Loom renders only",
+};
+
+const isOperator = (t) => OPERATOR_CHIPS.some((c) => c.toLowerCase() === String(t).toLowerCase());
+
+/* The Operators group of the search field's suggestions, each {token, hint, on} (`on`: already in the
+   search, so picking it takes it out). All of them when the field has just been clicked into
+   (`fresh`), is empty, ends in a space, or ends in an operator just picked; while a word is being
+   typed, the operators it begins (two letters at least, as for ar:); none for a plain word. */
+export function operatorSuggestions(query, opts) {
+  const q = String(query == null ? "" : query);
+  const all = OPERATOR_CHIPS.map((t) => ({ token: t, hint: OPERATOR_HINTS[t] || "", on: hasToken(q, t) }));
+  if ((opts && opts.fresh) || !q.trim() || /\s$/.test(q)) return all;
+  const last = (tokens(q).pop() || "").toLowerCase();
+  if (isOperator(last)) return all;
+  if (last.length < 2) return [];
+  return all.filter((o) => o.token.toLowerCase().startsWith(last));
+}
+
+/* Picking an operator: what the chip did (toggleToken), with a half-typed operator ("ke") replaced
+   rather than left beside it, and a space after so the list stays open for the next one. */
+export function pickOperator(query, token) {
+  const q = String(query == null ? "" : query);
+  const parts = tokens(q);
+  const last = parts.length && !/\s$/.test(q) ? parts[parts.length - 1] : "";
+  const half = last && !isOperator(last) && String(token).toLowerCase().startsWith(last.toLowerCase());
+  const out = toggleToken(half ? parts.slice(0, -1).join(" ") : q, token).trim();
+  return out ? out + " " : "";
+}
 
 /* Is `token` in the search as a whole word? */
 export function hasToken(query, token) {

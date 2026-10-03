@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath } from "../hooks/useDuplicateReview.js";
+import { onlyCopyMembers, onlyCopyNote, onlyCopyShort } from "../lib/onlyCopy.js";
 import "../styles/overlays.css";
 import "../styles/duplicate-review-overlay.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -145,7 +146,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
     isBusy, keeperByGroup, resolvedByGroup, groupErrors,
     toggleKeeper, resolveGroup, undoGroup,
     autoConfirmOpen, setAutoConfirmOpen, autoBusy, autoError, setAutoError,
-    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount,
+    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount, autoOnlyCopyCount,
     runAutoResolve,
   } = useDuplicateReview({ csrf, onResolved });
 
@@ -260,6 +261,8 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                       <> {autoSkippedCount} group{autoSkippedCount !== 1 ? "s" : ""} with no keeper
                       selected will be skipped, untouched.</>
                     )}
+                    {/* #66: warn, don't block -- an only copy goes with the rest, named here. */}
+                    {autoOnlyCopyCount > 0 && <> {onlyCopyNote(autoOnlyCopyCount, autoFileCount, "duplicates")}</>}
                   </p>
                   {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}
                   <div className="mgdr-autoconfirm-actions">
@@ -283,6 +286,9 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                   const keepCount = keeperPath ? 1 : 0;
                   const busy = isBusy(g.id);
                   const groupErr = groupErrors[g.id];
+                  // #66: the members that are the only copy of their picture (PixAI no longer has
+                  // them). They are removed with the rest; the pill and Resolve say so first.
+                  const only = new Set(onlyCopyMembers(g, keeperPath).map((m) => m.path));
                   return (
                     <div className={"mgdr-group" + (resolved ? " resolved" : "")} key={g.id}>
                       <div className="mgdr-group-head">
@@ -322,9 +328,11 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                     disabled={busy || autoBusy}
                                     title={isKeeper
                                       ? "Click to deselect this as the keeper"
-                                      : "Keep this copy instead"}
+                                      : only.has(m.path)
+                                        ? "PixAI no longer has this picture, so this is the only copy. Resolve moves it to _duplicates/ with the rest; Undo puts it back. Click to keep it instead."
+                                        : "Keep this copy instead"}
                                     onClick={() => toggleKeeper(g.id, m.path)}>
-                                    {isKeeper ? "✓ keep" : "✕ remove"}
+                                    {isKeeper ? "✓ keep" : only.has(m.path) ? "✕ remove · only copy" : "✕ remove"}
                                   </button>
                                 )}
                               </div>
@@ -366,7 +374,8 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                               title={keepCount === 0 ? "Select a keeper first" : undefined}
                               onClick={() => resolveGroup(g)}>
                               {busy ? "Resolving…" : (keepCount
-                                ? "Resolve — keep 1, remove " + (g.members.length - 1)
+                                ? "Resolve — keep 1, remove " + (g.members.length - 1) +
+                                  (only.size ? " · " + onlyCopyShort(only.size) : "")
                                 : "Resolve")}
                             </button>
                             {/* Skip leaves the group untouched, same as just not

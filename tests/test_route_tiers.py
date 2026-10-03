@@ -209,6 +209,7 @@ TIER_SNAPSHOT = [
     "/api/loom/export-file [GET] LOGIN",
     "/api/loom/export-status [GET] LOGIN",
     "/api/loom/frame [GET] LOGIN",           # Session P (P9): a local still for the ribbon, no upload
+    "/api/loom/frame-thumbs [POST] LOGIN",   # GitHub #62: fills a missing frame thumbnail once, read-only
     "/api/loom/generate [POST] LOGIN",
     "/api/loom/get [GET] LOGIN",
     "/api/loom/handoff [POST] LOGIN",
@@ -328,6 +329,7 @@ TIER_SNAPSHOT = [
     "/branding/<path:fname> [GET] PUBLIC",
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",
+    "/export-curation [GET] LOGIN",
     "/export-zip [POST] LOGIN",
     "/feat-mask/<token>.png [GET] LOGIN",
     "/full/<media_id> [GET] LOGIN",
@@ -1001,7 +1003,9 @@ _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs
                   # wave 5, Session P: the Loom's new local routes
                   "/api/loom/submit-abandon",
                   # Session P, Stage B1: the music bed, the EDL export, the manual order
-                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order")
+                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order",
+                  # GitHub #62: the Loom fills a missing frame thumbnail
+                  "/api/loom/frame-thumbs")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -1021,4 +1025,4 @@ def test_every_lane_post_checks_csrf(app):
     assert "/api/narrator/poke" in checked, checked
     assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
     assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl",
-            "/api/collections/order"} <= set(checked), checked
+            "/api/collections/order", "/api/loom/frame-thumbs"} <= set(checked), checked

@@ -10,7 +10,7 @@ from pathlib import Path
 import moonglade_backup as core
 from moonglade_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
-from tests.conftest import login_client, login_existing_client
+from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
 
 
@@ -628,7 +628,7 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch, pixai):
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/snippets").get_json() == {"snippets": []}
     saved = cli.post("/api/snippets",
-                     json={"snippets": ["masterpiece, 4k", "", "  ", "night"]}).get_json()
+                     json=with_csrf(cli, {"snippets": ["masterpiece, 4k", "", "  ", "night"]})).get_json()
     assert saved == {"snippets": ["masterpiece, 4k", "night"]}   # blanks dropped
     # Per-account storage (D-7): the file lives under prompt_snippets/<key>.json now,
     # not the old flat prompt_snippets.json every account used to share. Keyed via
@@ -640,7 +640,7 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch, pixai):
 def test_snippets_rejects_non_list(tmp_path):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    assert cli.post("/api/snippets", json={"snippets": "nope"}).status_code == 400
+    assert cli.post("/api/snippets", json=with_csrf(cli, {"snippets": "nope"})).status_code == 400
 
 
 def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
@@ -652,13 +652,13 @@ def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
     app = create_app(tmp_path)
 
     alice = login_test_client(app, username="alice", password="a-real-test-password-1")
-    alice.post("/api/snippets", json={"snippets": ["alice-only"]})
+    alice.post("/api/snippets", json=with_csrf(alice, {"snippets": ["alice-only"]}))
 
     bob = login_test_client(app, username="bob", password="a-real-test-password-2")
     assert bob.get("/api/snippets").get_json()["snippets"] == [], (
         "bob can see alice's snippets -- the store is not per-account")
 
-    bob.post("/api/snippets", json={"snippets": ["bob-only"]})
+    bob.post("/api/snippets", json=with_csrf(bob, {"snippets": ["bob-only"]}))
     assert bob.get("/api/snippets").get_json()["snippets"] == ["bob-only"]
     assert alice.get("/api/snippets").get_json()["snippets"] == ["alice-only"], (
         "bob's save wiped alice's snippets -- the store is not per-account")
@@ -676,13 +676,13 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
     app = create_app(tmp_path)
 
     upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
-    upper.post("/api/snippets", json={"snippets": ["Nel-only"]})
+    upper.post("/api/snippets", json=with_csrf(upper, {"snippets": ["Nel-only"]}))
 
     lower = login_test_client(app, username="nel", password="a-real-test-password-2")
     assert lower.get("/api/snippets").get_json()["snippets"] == [], (
         "nel can see Nel's snippets -- case-differing usernames collide on disk")
 
-    lower.post("/api/snippets", json={"snippets": ["nel-only"]})
+    lower.post("/api/snippets", json=with_csrf(lower, {"snippets": ["nel-only"]}))
     assert lower.get("/api/snippets").get_json()["snippets"] == ["nel-only"]
     assert upper.get("/api/snippets").get_json()["snippets"] == ["Nel-only"], (
         "nel's save overwrote Nel's snippets -- case-collision on disk")
@@ -722,7 +722,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path
 
     assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
 
-    cli.post("/api/snippets", json={"snippets": ["from-before", "new-one"]})
+    cli.post("/api/snippets", json=with_csrf(cli, {"snippets": ["from-before", "new-one"]}))
     own = json.loads((tmp_path / "prompt_snippets" / (_account_key("tester") + ".json"))
                      .read_text(encoding="utf-8"))
     assert own == ["from-before", "new-one"]
@@ -1056,7 +1056,7 @@ def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
                                 "modelId": "1948514378441961474"}}})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    d = cli.post("/api/presets", json={"task_id": "2030050946353349700"}).get_json()
+    d = cli.post("/api/presets", json=with_csrf(cli, {"task_id": "2030050946353349700"})).get_json()
     assert d["imported"] == "character-card"
     lst = cli.get("/api/presets").get_json()["presets"]
     assert lst["character-card"]["label"] == "Character Card"
@@ -1084,7 +1084,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     app = create_app(tmp_path)
 
     alice = login_test_client(app, username="alice", password="a-real-test-password-1")
-    d = alice.post("/api/presets", json={"task_id": "111"}).get_json()
+    d = alice.post("/api/presets", json=with_csrf(alice, {"task_id": "111"})).get_json()
     assert d["imported"] == "alice-scene"
 
     bob = login_test_client(app, username="bob", password="a-real-test-password-2")
@@ -1094,7 +1094,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "bob-scene",
                        "chat": {"prompts": "BOB PROMPT", "modelId": "2"}}})
-    bob.post("/api/presets", json={"task_id": "222"})
+    bob.post("/api/presets", json=with_csrf(bob, {"task_id": "222"}))
     assert set(bob.get("/api/presets").get_json()["presets"]) == {"bob-scene"}
     assert set(alice.get("/api/presets").get_json()["presets"]) == {"alice-scene"}, (
         "bob's save wiped alice's presets -- the store is not per-account")
@@ -1113,7 +1113,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     app = create_app(tmp_path)
 
     upper = login_test_client(app, username="Nel", password="a-real-test-password-1")
-    upper.post("/api/presets", json={"task_id": "111"})
+    upper.post("/api/presets", json=with_csrf(upper, {"task_id": "111"}))
 
     lower = login_test_client(app, username="nel", password="a-real-test-password-2")
     assert lower.get("/api/presets").get_json()["presets"] == {}, (
@@ -1122,7 +1122,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "lower-scene",
                        "chat": {"prompts": "LOWER PROMPT", "modelId": "2"}}})
-    lower.post("/api/presets", json={"task_id": "222"})
+    lower.post("/api/presets", json=with_csrf(lower, {"task_id": "222"}))
     assert set(lower.get("/api/presets").get_json()["presets"]) == {"lower-scene"}
     assert set(upper.get("/api/presets").get_json()["presets"]) == {"upper-scene"}, (
         "nel's save wiped Nel's presets -- case-collision on disk")
@@ -1144,7 +1144,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
 
     assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
 
-    cli.post("/api/presets", json={"task_id": "333"})
+    cli.post("/api/presets", json=with_csrf(cli, {"task_id": "333"}))
     own = json.loads((tmp_path / "toolbox_presets" / (_account_key("tester") + ".json"))
                      .read_text(encoding="utf-8"))
     assert set(own) == {"from-before", "new-scene"}

@@ -16,7 +16,7 @@ import {
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
   // The Generate panel's balance line: grouped, and re-read when a spend lands (walk 2026-09-30).
-  balanceLine, spendLandedKey,
+  balanceLine, spendLandedKey, makeAccountRefresh,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
@@ -62,7 +62,7 @@ import {
 import {
   landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
-  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
+  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards, mergeNotice, tookOf,
   splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
   // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
   // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
@@ -77,7 +77,7 @@ import { makeSaveQueue } from "./src/loom-store-core.js";
 // (loom-no-auto-render.test.js pins that none of them can reach a render).
 import {
   BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
-  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
+  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine, unreadableBedsNote,
 } from "./src/loom-bed-core.js";
 import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
 import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELECTION } from "./src/loom-shots-core.js";
@@ -95,6 +95,10 @@ import {
 import {
   RIBBON_GRID, ribbonPairs, frameUrl, meanDeltaE, pairFlagged, pairTitle,
 } from "./src/loom-ribbon-core.js";
+// GitHub #62: frames spliced before 3.15.0 -- which to ask a thumbnail for, and what a frame slot draws.
+import {
+  FRAME_THUMBS_MAX, FRAME_GONE_TEXT, collectFrameIds, frameThumbSrc, frameGone, applyFrameThumbs, emptyFrameFix,
+} from "./src/loom-frames-core.js";
 // Session P, Stage B2 (the page's P1 "Phone:" line): the phone's swipe / long-press take math.
 import { LONG_PRESS_MS, swipeDir, adjacentTakeN } from "./src/loom-phone-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
@@ -1565,18 +1569,32 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
    when the Loom opened. It is read on open, again on a bind (`bind`: the shot the panel is bound
    to) and again whenever a spend lands on this board (`landedKey`: spendLandedKey over the board's
    generation states, loom-core.js); a read that a newer one overtook is dropped. Display only:
-   it never gates a submit (`lora_cap` rides the same read, as before). */
+   it never gates a submit (`lora_cap` rides the same read, as before). Each read costs three
+   PixAI reads, so a bind waits for a burst of clicks to settle and reads once
+   (makeAccountRefresh, code review 2026-10-02); the open and a landed spend read at once. */
 function useAccountLine(landedKey, bind) {
   const [acct, setAcct] = useState(null);
+  const gate = useRef(null);
+  if (!gate.current) gate.current = makeLatestOnly();
+  const refresh = useRef(null);
+  if (!refresh.current) {
+    const read = () => {
+      const tk = gate.current.begin();
+      fetch("/api/account").then((r) => r.json()).then((d) => { if (gate.current.wins(tk)) setAcct(d); }).catch(() => {});
+    };
+    refresh.current = makeAccountRefresh({ read, setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h) });
+  }
+  useEffect(() => { refresh.current.now(); }, [landedKey]);
+  const firstBind = useRef(true);
   useEffect(() => {
-    let live = true;
-    fetch("/api/account").then((r) => r.json()).then((d) => { if (live) setAcct(d); }).catch(() => {});
-    return () => { live = false; };
-  }, [landedKey, bind]);
+    if (firstBind.current) { firstBind.current = false; return; }
+    refresh.current.bind();
+  }, [bind]);
+  useEffect(() => { return () => { refresh.current.cancel(); gate.current.cancel(); }; }, []);
   return acct;
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, frameFix, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
   // "attach to A·0n" (all useGenerationPipeline's).
   beginDrawerRender, recheckSubmit, releaseSubmit, attachDraftVideo,
@@ -2130,7 +2148,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // handlers could not see it, so Save and No filter threw "patch is not defined".
   const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
-  const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
+  const frameSrc = (f) => frameThumbSrc(f, thumbs, frameFix);
   activeRef.current = active;
   loomTargetRef.current = projectApi.activeId
     ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
@@ -2695,7 +2713,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       + (findOn ? (findSet.has(e.c.id) ? (e.c.id === findCur ? " fcur" : "") : " fdim") : "")}
                     onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
-                    <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
+                    <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{frameGone(e.c.openFrame, frameFix) ? FRAME_GONE_TEXT : e.c.mode}</span>; })()}</div>
                     <div className="lv-code">{e.code}</div>
                     <div className="lv-ctitle">{e.c.title || "untitled"}</div>
                     <div className="lv-cmeta"><span className="lv-mode">{e.c.mode}</span><span className="lv-dur">{durOf(e.c)}s</span>
@@ -2998,7 +3016,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
-            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
           }).catch(() => setHandoff("err"));
       } else {
         patchFrame("openFrame", { ...src.c.closeFrame });
@@ -4907,7 +4925,7 @@ const LOOM_MOBILE_STYLES = `
 .lm-review .lv-ribbon{margin-top:18px;}
 `;
 
-function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, addCard, addAct, setDraft,
+function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, setSelShot, addCard, addAct, setDraft,
   mobileUI, setMobileUI,
   // Second increment (2026-08-03): Shot Detail (Deep Focus's mobile equivalent), the
   // Cast & assets sheet, and the Frame picker all need to actually MUTATE the project and
@@ -4987,7 +5005,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // implementation, which is the established pattern here, not an oversight.
   const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId]
     : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
-  const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
+  const frameSrc = (f) => frameThumbSrc(f, thumbs, frameFix);
   const cardThumb = (c) => frameSrc(c.openFrame) || (c.resultMid ? "/thumbs/" + c.resultMid + ".jpg" : null);
   // Real, shared, offline art-filter library (static/mg-art-filters.js) -- PixAI's own 7
   // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
@@ -5336,7 +5354,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
           setDfHandoff("");
-          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
         }).catch(() => setDfHandoff("err"));
     } else {
       dfPatchFrame("openFrame", { ...src.c.closeFrame });
@@ -6843,14 +6861,14 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               <div className="lm-genframerow">
                 <div className="lm-genframecol">
                   <div className="lm-genframe">
-                    {frameSrc(c.openFrame) ? <img src={frameSrc(c.openFrame)} alt="opening frame" /> : "no frame"}
+                    {frameSrc(c.openFrame) ? <img src={frameSrc(c.openFrame)} alt="opening frame" /> : frameGone(c.openFrame, frameFix) ? FRAME_GONE_TEXT : "no frame"}
                     <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "openFrame") || "—"}</span>
                   </div>
                 </div>
                 {showClose && (
                   <div className="lm-genframecol">
                     <div className="lm-genframe">
-                      {frameSrc(c.closeFrame) ? <img src={frameSrc(c.closeFrame)} alt="closing frame" /> : "no frame"}
+                      {frameSrc(c.closeFrame) ? <img src={frameSrc(c.closeFrame)} alt="closing frame" /> : frameGone(c.closeFrame, frameFix) ? FRAME_GONE_TEXT : "no frame"}
                       <span className="lm-genframetag">{positionTag(dfLive, project, imgSrc, "closeFrame") || "—"}</span>
                     </div>
                   </div>
@@ -7437,10 +7455,11 @@ function useProjectStore(setSelShot) {
   // stale board with the SAME conflict object, and only one of them may merge and re-save.
   const mergesRef = useRef(new WeakMap());
 
-  const namesOf = (p, ids) => {
+  // Card id -> its code on a board (the conflict toast names a dropped card as this tab knew it).
+  const codesOf = (p) => {
     const codes = {};
-    (p ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
-    return ids.map((id) => codes[id]).filter(Boolean);
+    (isBoard(p) ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
+    return codes;
   };
   // A save answered 409: another tab saved this board first. Merge (the other tab's board
   // wins every field except takes and in-flight markers), show it, save it on the rev the
@@ -7464,14 +7483,15 @@ function useProjectStore(setSelShot) {
     // stale split half) from footage that landed here (red team 2026-10-01).
     let base = null;
     try { base = lastSavedRef.current[key] ? JSON.parse(lastSavedRef.current[key]) : null; } catch (e) { base = null; }
-    const { project: merged, changed } = mergeBoards(local, remote,
+    const out = mergeBoards(local, remote,
       { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null });
+    const merged = out.project;
     if (open) setProject(merged);
     if (typeof window !== "undefined" && window.Toast) {
-      const codes = namesOf(merged, changed.map((x) => x.id));
+      // GitHub #59: say what the merge undid here (a split, a shot or act deleted in the other
+      // tab) and where a kept shot went, not only that the takes were kept.
       window.Toast.show({ kind: "err", title: "This storyboard changed in another tab",
-        msg: "Your takes were kept; other edits from this tab were replaced."
-          + (codes.length ? " ★ or take numbers changed on " + codes.join(", ") + "." : "") });
+        msg: mergeNotice(out, { local: codesOf(local), merged: codesOf(merged) }) });
     }
     const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
     if (again.ok) return { conflict: true, remote, merged, saved: true };
@@ -8171,7 +8191,7 @@ function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
     }
     setAnchorWork((s) => { const n = { ...s }; delete n[cardId]; return n; });
     setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) =>
-      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p));
+      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: tookOf(d) })) : p));
   };
 
   // Keep: accept this pair of takes (and this cut) only; a later change of the source warns again.
@@ -8354,12 +8374,15 @@ const bedUrl = (file) => "/api/loom/bed?file=" + encodeURIComponent(file || "");
 
 function useBedActions({ setProject, activeIdRef }) {
   const [bedWork, setBedWork] = useState({ phase: "", msg: "" });
-  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h} | null
+  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h, unreadable?} | null
   const refreshUnusedBeds = useCallback(async () => {
     try {
       const r = await fetch("/api/loom/beds/unused");
       const d = await r.json();
-      setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+      // GitHub #57: a storyboard that will not read refuses the list (409). Its answer names the
+      // board(s) and where each file is; keep it, so the bed row can say so (unreadableBedsNote).
+      if (r.status === 409 && d && Array.isArray(d.unreadable)) setUnusedBeds({ files: [], count: 0, unreadable: d.unreadable });
+      else setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
     } catch (e) { setUnusedBeds(null); }
   }, []);
   const pickBed = async (file) => {
@@ -9883,6 +9906,42 @@ function useExportPipeline(project, thumbs) {
     edlView, setEdlView, openEdl, closeEdl, exportEdl, edlBusy };
 }
 
+/* FRAMES SPLICED BEFORE 3.15.0 (GitHub #62). A frame spliced before 3.15.0 has no thumbnail
+   on this machine, so it drew as a broken picture. On opening a board -- once per board per page
+   session -- its frame ids go to POST /api/loom/frame-thumbs (local; it fills a missing one
+   from PixAI with two reads, nothing that spends). A filled frame is re-drawn with a
+   cache-busting suffix; one PixAI could not give back draws "Frame not on this machine. Splice
+   again." (loom-frames-core.js). An effect, never a render sink, and it writes no board:
+   opening a board still writes nothing. */
+const FRAME_THUMBS_CHECKED = new Set();
+async function checkFrameThumbs(ids) {
+  const out = { fetched: [], gone: [] };
+  for (let i = 0; i < ids.length; i += FRAME_THUMBS_MAX) {
+    try {
+      const r = await fetch("/api/loom/frame-thumbs", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf: await loomCsrf(), media_ids: ids.slice(i, i + FRAME_THUMBS_MAX) }) });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) continue;
+      out.fetched.push(...(d.fetched || []));
+      out.gone.push(...(d.gone || []));
+    } catch (e) { /* nothing known: the frames draw as before */ }
+  }
+  return out;
+}
+function useFrameThumbs(project, activeId) {
+  const [fix, setFix] = useState(emptyFrameFix);
+  useEffect(() => {
+    if (!activeId || !isBoard(project) || FRAME_THUMBS_CHECKED.has(activeId)) return;
+    FRAME_THUMBS_CHECKED.add(activeId);
+    const ids = collectFrameIds(project);
+    if (!ids.length) return;
+    checkFrameThumbs(ids).then((ans) => {
+      if (ans.fetched.length || ans.gone.length) setFix((f) => applyFrameThumbs(f, ans, Date.now()));
+    });
+  }, [activeId, project]);
+  return fix;
+}
+
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
   // "📱 Mobile view" -- the switch between LoomV2 (desktop-style shell) and LoomMobile
@@ -9917,6 +9976,8 @@ export default function App() {
     projectRef, activeIdRef, saveBoardNow, noteResolved, loadError, castIo } = useProjectStore(setSelShot);
   // Session P, Stage B2 (P7): the cast library's view and its owner actions (none can render).
   const castApi = useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo });
+  // GitHub #62: a frame spliced before 3.15.0 gets its thumbnail filled once, or says it is gone.
+  const frameFix = useFrameThumbs(project, activeId);
   // The draft card as it is now, for the drawer host's settings snapshot of a draft render.
   const draftCardRef = useRef(draftCard);
   draftCardRef.current = draftCard;
@@ -10050,7 +10111,7 @@ export default function App() {
       <GuideHost surface="loom" phone={mobileUI} />
       {mobileUI ? (
         <V2Boundary><LoomMobile
-          project={project} entries={entries} thumbs={thumbs} genState={genState}
+          project={project} entries={entries} thumbs={thumbs} frameFix={frameFix} genState={genState}
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
           castApi={castApi}
@@ -10073,7 +10134,7 @@ export default function App() {
         <V2Boundary><LoomV2
           project={project} setCard={setCard} setAssets={setAssets} castApi={castApi} entries={entries} durOf={durOf} scale={scale}
           selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
-          thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
+          thumbs={thumbs} frameFix={frameFix} openPick={openPick} storeThumb={storeThumb}
           setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}
           moveCardToAct={moveCardToAct} addAct={addAct} delAct={delAct} moveAct={moveAct}
           genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
@@ -10468,6 +10529,7 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
   const busy = api.bedWork.phase === "wip";
   const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
   const u = api.unusedBeds;
+  const unreadable = unreadableBedsNote(u);
   const dur = bed ? (bed.dur || (peaks && peaks.dur) || null) : null;
   const picker = (label, cls, title) => (
     <label className={cls + (busy ? " busy" : "")} title={title}>{label}
@@ -10515,6 +10577,7 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
       </div>
       {api.bedWork.phase === "err" ? <div className="lv-bednote err" role="status">{api.bedWork.msg}</div>
         : bed && peaks && peaks.failed ? <div className="lv-bednote err" role="status">The music bed's file couldn't be read on this machine, so Play and &#8679; Render leave it out.</div>
+        : unreadable ? <div className="lv-bednote err" role="status">{unreadable}</div>
         : u && u.count > 0 ? (
           <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
             <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>
@@ -10849,7 +10912,8 @@ function FrameSlot({ which, frame, liveTag, discreet, framePrev, onPatch, storeT
         <span className="sb-tagin sb-mono" title="This slot's live @imageN — computed from position, not editable">{liveTag || "—"}</span>
       </div>
       <label className={"sb-frameprev" + (discreet ? " discreet" : "")} title="Attach image">
-        {img ? <img src={img} alt={which} /> : "＋ attach frame"}
+        {/* GitHub #62: a frame PixAI could not give back draws nothing (frameThumbSrc); say so. */}
+        {img ? <img src={img} alt={which} /> : frame && frame.mediaId && !frame.thumbId ? FRAME_GONE_TEXT : "＋ attach frame"}
         <input type="file" accept="image/*" style={{ display: "none" }}
           onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f); onPatch({ thumbId: id, source: frame.source || f.name, mediaId: "" }); }} /></label>
       <input className="sb-in" placeholder="describe this frame (composition, subject position, light)" value={frame.desc} onChange={(e) => onPatch({ desc: e.target.value })} />

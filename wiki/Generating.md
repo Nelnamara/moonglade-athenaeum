@@ -75,12 +75,18 @@ never deletes anything.
 prompt started as "Use @image1 …". Nothing is spent until you press Generate. The Edit card is
 unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
 
-**The Lightbox edit bar.** Every still picture shows **Describe your edits…**
-over the foot of the Lightbox (on a phone, a bar under the picture). Type the change and press
-↵: it sends a Tsubaki.3 run with that picture as @image1, your words as the prompt, the dock's
-profile and an Auto size — no LoRAs, recipes, palette or negative. The price shows in the bar
-before you send, and the run joins the dock's reel and the Activity tray while the Lightbox stays
-open. **E** jumps to the bar; **Esc** leaves it (a second Esc closes the Lightbox).
+**The Lightbox edit bar.** On a still picture, the Lightbox's **✎ Edit** (or **E**) opens a
+**Describe your edits…** bar under the picture — the picture moves up to make room, and the bar
+never covers it. Type the change and press ↵: it sends a Tsubaki.3 run with that picture as
+@image1, your words as the prompt, the dock's profile and the picture's own size (up to 2,048 a side and
+the size tier's own area; a bigger picture goes at the Auto size) — no LoRAs, recipes,
+palette or negative. It runs at **High Priority**; a free card covers it when you have one,
+otherwise the cost shows in the bar before you send. The run joins the dock's
+reel and the Activity tray while the Lightbox stays open. **✎ Edit** again or **Esc** closes the
+bar (a second Esc closes the Lightbox). **More options in the Edit drawer ↗** at the bar's end
+opens the Edit tab instead, which is also what ✎ Edit does on a video. On a phone the same ✎
+Edit opens the bar right under the picture; the phone has no Edit drawer, so its bar has no
+More options link.
 
 ### Colour palette
 
@@ -489,14 +495,14 @@ python moonglade_backup.py --generate --task-id <id>
 | `--prompt` / `--negative` | — | the prompts |
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
-| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — an unsupported mode auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way); the web Generate tab does the same since 2026-07-24 |
+| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — `auto` lets PixAI use the model's own default. A mode the model doesn't list is refused before anything is sent; if the model's list can't be read and PixAI rejects the mode, the run goes once on the model's default instead (a rejected submit costs no credits). See [Modes are model-specific](#modes-are-model-specific) |
 | `--priority` / `--high-priority` / `--low-priority` | `500` | PixAI's speed channels: `0` standard (free) · `500` Turbo, ~7.6× faster and free but **members only** · `1000` High, ~10× faster and **costs extra** · `1500` extra high. Turbo is the default and falls back to `0` on its own if the account is not a member |
 | `--no-prompt-helper` | off | use the prompt literally |
-| `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
+| `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | sizes are rounded down to a multiple of 8, then moved onto the model's own size grid if they don't fit (the preview names the change). A model that publishes its own quality profiles sets its own steps and CFG, so yours aren't sent to it. No `--seed` means a random one |
 | `--enlarge RATIO` | off | upscale the finished image with an upscaler network (PixAI's **Upscale** method). 0.1 steps, clamped to the biggest ratio your `--width`/`--height` allows |
 | `--enlarge-model NAME` | `R-ESRGAN 4x+ Anime6B` | which upscaler `--enlarge` runs: `ESRGAN_4x`, `R-ESRGAN 4x+`, `R-ESRGAN 4x+ Anime6B`, `SwinIR_4x`, `Lollypop` |
 | `--upscale RATIO` | off | re-render at the larger size (PixAI's **Hires** method) — adds detail rather than just resolution, allows a smaller maximum ratio, costs roughly 3× `--enlarge`. Mutually exclusive with it |
-| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `26` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
+| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `20` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
 | `--face-fix` | off | run PixAI's face restorer over the result (their **Face Fix** booster) |
 | `--quality-tag [PREFIX]` | off | prepend a quality booster to the prompt (their **Quality Tag**; bare flag uses `Masterpiece`) |
 | `--confirm` | off | **required** to spend credits |
@@ -559,7 +565,7 @@ python moonglade_backup.py --generate-video --task-id <id>
 
 ### Video models and shot-mode gating
 
-Nine video engines are selectable (newest first), and they are **not interchangeable** —
+These video engines are selectable (newest first), and they are **not interchangeable** —
 each has its own duration cap, free-card eligibility, and which of the Loom's four
 [Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
 drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
@@ -610,6 +616,9 @@ Notes:
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--duration` | `5` | clip length in seconds: 5, 6, 10 or 15, snapped to what the chosen model takes (see above) |
+| `--video-model` | `v4.0.1` | which engine — the codes in the table above. Overrides `--model` for the clip |
+| `--video-mode` | `professional` | `basic` is the cheaper tier |
 | `--tail <media_id>` | — | last-frame image → first/last-frame (FLF) interpolation between `--image` and this |
 | `--camera-movement` | unset | `horizontal`/`pan`/`roll`/`tilt`/`vertical-pan`/`zoom`; unset omits it (camera direction can also just go in the prompt) |
 | `--audio` / `--audio-language` | off / `english` | generate audio with the clip; the language only matters with `--audio` |
@@ -623,9 +632,11 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
-type the change, set resolution/aspect/quality, then submit. Three edit models: **Edit v4.0**
-(new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
-setting), **Edit Pro** and **Reference Pro**.
+type the change, set resolution/aspect/quality, then submit. The edit models are **PixAI Edit
+(v4.0)** (new — the latest version of PixAI's general Edit model: up to 10 images, 1K/2K/4K,
+ratios down to 1:8 and 8:1 under **More**, no quality setting), **Edit Pro**, **Edit Pro (v2.0)** (new — PixAI's newer version of Edit Pro: up to 10
+images, 1K/2K, low/medium/high, the same price as Edit Pro, without Edit Pro's 1:3 and 3:1) and
+**Reference Pro**. Edit Pro stays the default; PixAI still offers both versions.
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
@@ -646,7 +657,7 @@ Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values 
 corrected (and shown in the preview) rather than rejected.
 
 **Edits made with a model Moonglade doesn't know locally still get a real name.** It
-recognizes PixAI's three edit models by name without asking anyone; anything else — a newer
+recognizes the edit models in its own Edit list by name without asking anyone; anything else — a newer
 `modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
 PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
 than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
@@ -953,8 +964,8 @@ the button comes back — the app will tell you it doesn't know rather than leav
   live: gradient overlays applied right in your browser, so they cost nothing, make no request,
   and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
   tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
-  The edit models take different numbers of reference images (Edit Pro up to 4, Edit v4.0 and
-  Reference Pro up to 10, and the picture being edited counts as one of them), so switching
+  The edit models take different numbers of reference images (Edit Pro up to 4; Edit Pro (v2.0),
+  PixAI Edit (v4.0) and Reference Pro up to 10; the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
   you what it dropped** — "Only 3 reference images kept … 3 of your 6 references were left
   out" — instead of thinning the strip in silence and letting you submit a paid edit
