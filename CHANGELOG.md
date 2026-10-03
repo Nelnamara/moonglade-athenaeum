@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Library safety
+
+- Fixed: while another program (a running sync) holds the catalog locked, the gallery no longer re-tries its start-up schema check on every page and request, each one waiting up to five seconds. After a locked attempt it waits ten seconds before trying again, and requests that queued behind the locked attempt go straight through instead of each waiting their own turn. (#58) (2026-10-02)
+
 ## [3.15.0] - 2026-10-01 — The Reading Room
 
 - **On a phone or tablet, the bottom row of buttons is always within reach.** In the Lightbox with a long prompt open, on the image details screen, and in the sheets that slide up from the bottom, the last row of buttons could sit just past the end of the scroll — under the browser's own toolbar — where no amount of scrolling reached it. Every full-screen phone view now sizes itself to the part of the screen you can actually see, the Lightbox's lower panel scrolls with its action row pinned to the bottom, sheets are capped to the visible height with their buttons pinned to their foot, and everything leaves room for the home bar. (2026-09-28)

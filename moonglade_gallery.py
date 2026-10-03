@@ -478,6 +478,15 @@ _MIGRATIONS = [
 # for a given path in this process runs migrate() for it. No entry point has to
 # remember to migrate; create_app and _ensure_db call migrate() explicitly only
 # to say so out loud, and the memo makes that call cost nothing.
+#
+# A LOCKED CATALOG BACKS OFF (#58). When another process (a --sync) holds the
+# write lock, migrate() gives up after MIGRATE_BUSY_TIMEOUT_S, leaves the path
+# un-memoized so a later access finishes the job, and starts a back-off of
+# MIGRATE_BUSY_BACKOFF_S: until it runs out, every catalog() skips the migration
+# rather than waiting out the timeout again -- and so does every request thread
+# that queued behind the locked attempt on _MIGRATE_LOCK, which used to wait its
+# own timeout in turn. Kept short on purpose: during the window a table that a
+# NEW release adds can still be missing.
 # ---------------------------------------------------------------------------
 
 # Resolved catalog paths already migrated in THIS process. Per-process by design:
@@ -485,6 +494,13 @@ _MIGRATIONS = [
 # by a new release pick the new columns up on its next run without a migration step.
 _MIGRATED = set()
 _MIGRATE_LOCK = threading.Lock()
+# The back-off after a locked attempt: memo key -> time.monotonic() deadline. An
+# entry exists only between a locked attempt and the next successful run.
+_MIGRATE_RETRY_AT = {}
+MIGRATE_BUSY_BACKOFF_S = 10.0
+# How long one attempt waits on another process's lock (sqlite's own default).
+# A module constant so a test can shorten it.
+MIGRATE_BUSY_TIMEOUT_S = 5.0
 
 
 def _catalog_key(db_path):
@@ -514,17 +530,29 @@ def migrate(db_path, force=False):
     and _ensure_db call it explicitly AND lets catalog() call it lazily without the
     two ever colliding into real work twice.
 
-    `force=True` runs the statements again anyway, ignoring the memo. Nothing in the
-    app needs it (a new process starts with an empty memo, which is exactly the
-    upgrade path a new release takes); it exists so a test can prove the DDL really
-    is re-runnable rather than proving only that the memo skipped it."""
+    A LOCKED catalog (another process holding the write lock past
+    MIGRATE_BUSY_TIMEOUT_S) is left un-memoized and starts a back-off: for
+    MIGRATE_BUSY_BACKOFF_S every call returns at once without opening anything,
+    including the threads that were already queued on the lock behind the locked
+    attempt. The first call after the window tries again; a run that completes
+    clears the window and memoizes (#58).
+
+    `force=True` runs the statements again anyway, ignoring the memo and the
+    back-off. Nothing in the app needs it (a new process starts with an empty memo,
+    which is exactly the upgrade path a new release takes); it exists so a test can
+    prove the DDL really is re-runnable rather than proving only that the memo
+    skipped it."""
     key = _catalog_key(db_path)
     if key in _MIGRATED and not force:
         return
+    if not force and time.monotonic() < _MIGRATE_RETRY_AT.get(key, 0.0):
+        return                               # locked a moment ago: don't wait on it again
     with _MIGRATE_LOCK:
         if key in _MIGRATED and not force:   # another thread got here first
             return
-        con = sqlite3.connect(str(db_path))
+        if not force and time.monotonic() < _MIGRATE_RETRY_AT.get(key, 0.0):
+            return                           # queued behind the attempt that found it locked
+        con = sqlite3.connect(str(db_path), timeout=MIGRATE_BUSY_TIMEOUT_S)
         busy = False
         try:
             for sql in _MIGRATIONS:
@@ -545,11 +573,15 @@ def migrate(db_path, force=False):
         finally:
             con.close()
         if busy:
+            # One warning per window: the back-off is what keeps this from repeating
+            # on every access.
+            _MIGRATE_RETRY_AT[key] = time.monotonic() + MIGRATE_BUSY_BACKOFF_S
             import logging
             logging.getLogger(__name__).warning(
-                "catalog migration deferred: %s is locked; it will run again on the "
-                "next catalog access", db_path)
+                "catalog migration deferred: %s is locked; it will run again on a "
+                "catalog access after %ss", db_path, MIGRATE_BUSY_BACKOFF_S)
             return
+        _MIGRATE_RETRY_AT.pop(key, None)
         _MIGRATED.add(key)
 
 
