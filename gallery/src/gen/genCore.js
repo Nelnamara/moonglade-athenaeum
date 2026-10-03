@@ -533,8 +533,9 @@ export function imageRefs(prompt) {
 /* The Tsubaki edit's state (Session H decision 2's menu item prefills the dock with it; T3a's
    Lightbox bar builds its payload from it through buildPayload itself, so the bar can never
    send a shape the dock would not): Tsubaki.3's applied meta, the picture as context slot 1,
-   Auto size, creativity medium, the given profile, count 1 -- and nothing else of the dock:
-   no LoRAs, no recipes, no negative, no boosters, no High priority, a random seed. */
+   the picture's own size (Auto when it is bigger than the site would send), creativity medium,
+   the given profile, count 1, High Priority -- and nothing else of the dock: no LoRAs, no
+   recipes, no negative, no boosters, a random seed. */
 export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
   /* THE SIZE IS THE SOURCE PICTURE'S OWN (the owner's walk, 2026-10-03): PixAI's own Smart
      Reference submit sends the picture's width and height, not a size-tier area. It rides the
