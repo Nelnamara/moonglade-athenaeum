@@ -19,6 +19,13 @@ import { useSwrGet } from "./swrCache.js";
 
 export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 
+// The last integrity run's day, in local time; "never" before the first one.
+export const lastVerified = (integrity) => {
+  const at = integrity && integrity.verified_at;
+  const d = at ? new Date(at) : null;
+  return d && !isNaN(d.getTime()) ? d.toLocaleDateString() : "never";
+};
+
 // Stale-while-revalidate (owner report 2026-08-06: the panel was "VERY slow" at 35k
 // images). The last payload survives across opens for the whole page session; a reopen
 // renders those numbers INSTANTLY while the refetch replaces them in place. First open
@@ -61,6 +68,13 @@ export default function useHealth() {
     { label: "Reclaimable", value: h.dup_bytes_h || "—", dup: true },
     { label: "Missing files", value: fmt(h.missing) },
     { label: "Uncataloged", value: fmt(h.uncataloged), gold: true },
+    // The integrity pass (scope 2+3, Phase A): three more tiles of the same kind. Zero-byte
+    // files is counted live by the Health walk; the other two read the last "Verify library
+    // integrity" run (Control Panel -> Check), "—" / "never" until one has run.
+    { label: "Zero-byte files", value: fmt(h.zero_byte) },
+    { label: "Missing thumbs",
+      value: h.integrity && h.integrity.counts ? fmt(h.integrity.counts.missing_thumb) : "—" },
+    { label: "Last verified", value: lastVerified(h.integrity) },
   ] : [];
 
   const monthMax = h && h.by_month && h.by_month.length

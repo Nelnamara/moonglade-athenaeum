@@ -3,8 +3,9 @@
 The **Health** overlay is your analytics dashboard over `catalog.db`:
 
 - **The tiles**: **Images on disk**, **Catalog rows**, **Full-meta**, **Model known**, **Rated**,
-  **Published**, **Total likes**, **Duplicates**, **Reclaimable**, **Missing files** and
-  **Uncataloged**.
+  **Published**, **Total likes**, **Duplicates**, **Reclaimable**, **Missing files**,
+  **Uncataloged**, **Zero-byte files**, **Missing thumbs** and **Last verified** (the last three
+  are explained under *Library integrity* below).
 - **Storage used**, drawn as stacked bars (below).
 - Images by month, **Top models**, **Top tags & contests**, **Top LoRAs**, and a **Prompt word cloud**.
 
@@ -62,7 +63,12 @@ something was missing.
 
 ## Duplicates review
 
-**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup. For the filesystem-level audit/dedup tooling, see
+**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup.
+In the **Same seed** and **Near-duplicate** groups the members are different pictures, so a
+member PixAI no longer has (gone from your PixAI history as of the last check) is the only
+copy of its picture: it is marked *only copy*, **Resolve** and **Auto-resolve all**
+leave it where it is, and the confirm says how many stay. The byte-identical groups are
+unaffected — the copy you keep has the same bytes. For the filesystem-level audit/dedup tooling, see
 [Backing Up → Duplicate audit](Backing-Up).
 
 ## How fresh are these numbers?
@@ -91,6 +97,35 @@ rarely wait for a fresh one:
   panel while it loads.
 - **Force a re-measure** any time by closing and reopening after a sync, or by reloading the
   page.
+
+## Library integrity
+
+The tiles above count files; they do not look inside them. A file that is on disk but empty, or
+cut short by an interrupted download, still counts under **Images on disk** and keeps its row
+out of **Missing files**. Three tiles cover that:
+
+- **Zero-byte files** — empty files in the library, counted every time Health measures.
+  They still count in **Images on disk** and **Missing files** keeps its meaning; this tile
+  says it plainly instead.
+- **Missing thumbs** and **Last verified** — read from the last integrity check: **Control
+  Panel → Check — read-only → Verify library integrity → run ▸** (or
+  `python moonglade_backup.py --verify-library`). They show "—" and "never" until it has run once.
+
+The check looks at every catalogued file: missing, empty, no thumbnail (or, for a video, no
+poster), an empty thumbnail, files with no catalog row, and thumbnails with no row. The Panel's
+button also checks the end of each file without opening the picture — a PNG, JPEG, WebP or GIF
+that stops before its end marker, or a video with no index, is listed as **suspect: truncated**.
+"Suspect" on purpose: the check reads two small pieces of each file and decodes nothing, and an
+unusual but valid file can look cut short.
+
+It changes nothing: no file is deleted, moved, downloaded or rebuilt. It writes two reports
+at the library root, `integrity_report.csv` (one line per problem: media id, problem, path,
+size, recoverable) and `integrity_report.json` (the counts and when it ran), and the Panel's log
+shows the summary and the first lines. A broken picture that PixAI no longer has says
+**recoverable: no** — there is nothing left to download it from again. The check itself
+repairs nothing. What already does: **Sync now** builds thumbnails that are missing (not
+empty ones), and the Advanced **Full re-walk** downloads a missing or empty file again. A file
+that is cut short but not empty is skipped by both, so for now it stays on the report.
 
 ## Thumbnails & health accuracy
 

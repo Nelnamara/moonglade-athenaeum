@@ -34,7 +34,10 @@ itself**, **Sync now** and the version stamp (see
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
 free-card count. **⬇ Download catalog (CSV)** saves the whole catalog to your browser's
-Downloads — it does *not* write a file into your backup folder.
+Downloads — it does *not* write a file into your backup folder. **⬇ Download curation (JSON)**
+beside it saves just what you made of the library — ratings, collections and their order,
+smart collections, tags, keeper/reject marks and notes — as one file that goes back in with
+`--import-curation` (see [Collections → Backing up your curation](Collections)).
 
 ## Running a maintenance job
 
@@ -65,6 +68,10 @@ The buttons are grouped exactly as the risk splits.
   different ids.
 - **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is
   byte-identical to a surviving copy, and flags orphans, before you empty the folder.
+- **Verify library integrity** — the read-only integrity check (`--verify-library
+  --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
+  Its row under **Check — read-only** shows when it last ran; the log shows the summary and the
+  first lines of `integrity_report.csv`. See [Health → Library integrity](Health).
 - **Top up the Similar index (adds only what's missing)** — embeds any images the
   visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous

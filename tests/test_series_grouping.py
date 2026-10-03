@@ -272,6 +272,8 @@ def test_without_group_the_payload_is_unchanged(tmp_path):
         # Session N3: the owner's own layer (a keeper|reject mark, tags) -- empty for a picture
         # nobody has curated, and local to the catalog
         "mark": "", "tags": [],
+        # #66: PixAI still has it, so the card's corner pill does not read ARCHIVE
+        "archive_only": False,
     }
 
 

@@ -245,7 +245,11 @@ like `width:tall`) isn't an error — the whole token is simply searched as prom
 the way search engines behave. Operator searches work everywhere the search box does:
 the grid, the pickers, saved views, and the filtered CSV export.
 
-Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
+Cards show a ▶ badge on videos and **AI** / **local** badges by source. A picture PixAI no
+longer has wears **ARCHIVE** in that same corner instead (hover it: *"Deleted on PixAI. This is
+the only copy."*) — its task has left your PixAI history as of the last check, or PixAI dropped
+that one image, so your library holds the only copy anywhere. Its detail page says the same
+under **More details**. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.
 

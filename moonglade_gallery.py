@@ -478,6 +478,15 @@ _MIGRATIONS = [
 # for a given path in this process runs migrate() for it. No entry point has to
 # remember to migrate; create_app and _ensure_db call migrate() explicitly only
 # to say so out loud, and the memo makes that call cost nothing.
+#
+# A LOCKED CATALOG BACKS OFF (#58). When another process (a --sync) holds the
+# write lock, migrate() gives up after MIGRATE_BUSY_TIMEOUT_S, leaves the path
+# un-memoized so a later access finishes the job, and starts a back-off of
+# MIGRATE_BUSY_BACKOFF_S: until it runs out, every catalog() skips the migration
+# rather than waiting out the timeout again -- and so does every request thread
+# that queued behind the locked attempt on _MIGRATE_LOCK, which used to wait its
+# own timeout in turn. Kept short on purpose: during the window a table that a
+# NEW release adds can still be missing.
 # ---------------------------------------------------------------------------
 
 # Resolved catalog paths already migrated in THIS process. Per-process by design:
@@ -485,6 +494,13 @@ _MIGRATIONS = [
 # by a new release pick the new columns up on its next run without a migration step.
 _MIGRATED = set()
 _MIGRATE_LOCK = threading.Lock()
+# The back-off after a locked attempt: memo key -> time.monotonic() deadline. An
+# entry exists only between a locked attempt and the next successful run.
+_MIGRATE_RETRY_AT = {}
+MIGRATE_BUSY_BACKOFF_S = 10.0
+# How long one attempt waits on another process's lock (sqlite's own default).
+# A module constant so a test can shorten it.
+MIGRATE_BUSY_TIMEOUT_S = 5.0
 
 
 def _catalog_key(db_path):
@@ -514,17 +530,29 @@ def migrate(db_path, force=False):
     and _ensure_db call it explicitly AND lets catalog() call it lazily without the
     two ever colliding into real work twice.
 
-    `force=True` runs the statements again anyway, ignoring the memo. Nothing in the
-    app needs it (a new process starts with an empty memo, which is exactly the
-    upgrade path a new release takes); it exists so a test can prove the DDL really
-    is re-runnable rather than proving only that the memo skipped it."""
+    A LOCKED catalog (another process holding the write lock past
+    MIGRATE_BUSY_TIMEOUT_S) is left un-memoized and starts a back-off: for
+    MIGRATE_BUSY_BACKOFF_S every call returns at once without opening anything,
+    including the threads that were already queued on the lock behind the locked
+    attempt. The first call after the window tries again; a run that completes
+    clears the window and memoizes (#58).
+
+    `force=True` runs the statements again anyway, ignoring the memo and the
+    back-off. Nothing in the app needs it (a new process starts with an empty memo,
+    which is exactly the upgrade path a new release takes); it exists so a test can
+    prove the DDL really is re-runnable rather than proving only that the memo
+    skipped it."""
     key = _catalog_key(db_path)
     if key in _MIGRATED and not force:
         return
+    if not force and time.monotonic() < _MIGRATE_RETRY_AT.get(key, 0.0):
+        return                               # locked a moment ago: don't wait on it again
     with _MIGRATE_LOCK:
         if key in _MIGRATED and not force:   # another thread got here first
             return
-        con = sqlite3.connect(str(db_path))
+        if not force and time.monotonic() < _MIGRATE_RETRY_AT.get(key, 0.0):
+            return                           # queued behind the attempt that found it locked
+        con = sqlite3.connect(str(db_path), timeout=MIGRATE_BUSY_TIMEOUT_S)
         busy = False
         try:
             for sql in _MIGRATIONS:
@@ -545,11 +573,15 @@ def migrate(db_path, force=False):
         finally:
             con.close()
         if busy:
+            # One warning per window: the back-off is what keeps this from repeating
+            # on every access.
+            _MIGRATE_RETRY_AT[key] = time.monotonic() + MIGRATE_BUSY_BACKOFF_S
             import logging
             logging.getLogger(__name__).warning(
-                "catalog migration deferred: %s is locked; it will run again on the "
-                "next catalog access", db_path)
+                "catalog migration deferred: %s is locked; it will run again on a "
+                "catalog access after %ss", db_path, MIGRATE_BUSY_BACKOFF_S)
             return
+        _MIGRATE_RETRY_AT.pop(key, None)
         _MIGRATED.add(key)
 
 
@@ -1451,6 +1483,20 @@ def get_row_by_task(db_path, task_id):
         return dict(row) if row else None
 
 
+def is_archive_only(row):
+    """True when PixAI no longer has this picture, so the library's copy is the only one
+    anywhere (#66): its task has left your PixAI history (`deleted_remote == '1'`, as of the
+    last --reconcile-deleted, which rewrites it every run) or PixAI dropped this one image
+    (`cloud_deleted_at`, per-row and permanent). Pure; `row` is a catalog row dict.
+
+    The bulk "Delete locally" keeps these back, Duplicate Review never removes one in the
+    tiers whose members are different pictures, and the grid badges them ARCHIVE."""
+    if not row:
+        return False
+    return (str(row.get("deleted_remote") or "").strip() == "1"
+            or bool(str(row.get("cloud_deleted_at") or "").strip()))
+
+
 def _split_collections(s):
     return [c.strip() for c in (s or "").split(",") if c.strip()]
 
@@ -2071,6 +2117,27 @@ def curate_apply(db_path, media_ids, op):
             con.commit()
     return {"changed": len(after), "prev": prev, "after": after,
             "skipped": skipped, "refused": refused}
+
+
+def curation_rows(db_path):
+    """The owner's whole curation layer as plain rows, for the curation sidecar export
+    (moonglade_curation_io.py): {catalog: rows carrying a rating or a collection label,
+    personal: every personal_meta row, smart: every smart collection, order: every manual
+    position by name then position}. Read-only."""
+    with catalog(db_path) as con:
+        return {
+            "catalog": [dict(r) for r in con.execute(
+                "SELECT media_id, rating, collections FROM catalog "
+                "WHERE COALESCE(media_id,'') != '' AND (COALESCE(NULLIF(rating,''),'0') != '0' "
+                "OR COALESCE(collections,'') != '') ORDER BY media_id")],
+            "personal": [dict(r) for r in con.execute(
+                "SELECT media_id, tags, mark, note FROM personal_meta ORDER BY media_id")],
+            "smart": [dict(r) for r in con.execute(
+                "SELECT name, query FROM smart_collections ORDER BY name")],
+            "order": [dict(r) for r in con.execute(
+                "SELECT name, media_id, position FROM collection_order "
+                "ORDER BY name, position")],
+        }
 
 
 def curate_restore(db_path, prev):
@@ -8435,6 +8502,16 @@ def rows_for_media_ids(db_path, ids):
         return [found[i] for i in ids if i in found]
 
 
+def integrity_rows(db_path):
+    """Every catalog row, narrowed to what the integrity pass (moonglade_integrity.py)
+    needs: the file it claims, whether it is a video, and the two archive-only flags.
+    Plain dicts, catalog order."""
+    with catalog(db_path) as con:
+        return [dict(r) for r in con.execute(
+            "SELECT media_id, filename, is_video, deleted_remote, cloud_deleted_at "
+            "FROM catalog WHERE COALESCE(media_id, '') != '' ORDER BY rowid").fetchall()]
+
+
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
                    media_type="", source="", collection=""):
@@ -8585,9 +8662,16 @@ def collection_health(out_dir, db_path):
     # anything if it watches exactly the roots this walk descends into.
     size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
     size_by_mid = {}          # (kind, media_id) -> bytes of its largest copy (the Storage bars)
+    # Empty files, images and videos (the "Zero-byte files" tile). Counted here for free; they
+    # still count in total_files and keep a row out of `missing`, exactly as before -- the
+    # tile says it plainly instead of moving a number the owner already knows (scope 2+3,
+    # owner question 1, option a).
+    zero_byte = 0
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
         _rel = str(e.rel).replace("\\", "/")
         on_disk_rels.add(_rel)
+        if e.size == 0:
+            zero_byte += 1
         if e.size is not None:
             size_by_rel[_rel] = e.size
             _k = (e.kind, e.media_id)
@@ -8696,6 +8780,16 @@ def collection_health(out_dir, db_path):
     # _duplicates/_deleted/branding already excluded from the disk walk).
     uncataloged = on_disk_ids - catalog_ids
 
+    # The last integrity pass (--verify-library / the Panel's "Verify library integrity"):
+    # a read of its integrity_report.json, never a walk of its own. None until one has run.
+    try:
+        import moonglade_integrity
+        _last = moonglade_integrity.read_summary(out_dir)
+    except Exception:                                    # noqa: BLE001 -- Health never fails on it
+        _last = None
+    integrity = ({k: _last.get(k) for k in ("verified_at", "deep", "rows", "counts", "lost")}
+                 if _last else None)
+
     return {
         "total_files": total_files,
         "total_bytes": total_bytes,
@@ -8713,6 +8807,8 @@ def collection_health(out_dir, db_path):
         "rated": rated,
         "missing": missing,
         "uncataloged": len(uncataloged),
+        "zero_byte": zero_byte,
+        "integrity": integrity,
         "by_month": [(m, c) for (m, c) in by_month],
         "top_models": [(m, c) for (m, c) in top_models],
         "published": published,
@@ -12927,6 +13023,11 @@ def create_app(out_dir: Path):
         "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
         "verify-dupes":  {"args": ["--verify-dupes"],
                           "label": "Verify _duplicates/ is safe to delete", "destructive": False},
+        # The integrity pass (moonglade_integrity.py): read-only, it writes only its own two
+        # report files. A deliberate click runs the quick tier AND the structural checks
+        # (scope 2+3, owner question 2's recommendation); Health's tiles read the result.
+        "verify-library": {"args": ["--verify-library", "--verify-deep"],
+                           "label": "Verify library integrity (read-only)", "destructive": False},
         # Listed BEFORE rebuild so the non-destructive, usually-correct action reads first.
         # "Rebuild" drops the table and re-embeds everything; this adds only what is missing and
         # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for
@@ -15373,6 +15474,23 @@ def create_app(out_dir: Path):
                          download_name="moonglade-catalog-{}.csv".format(
                              datetime.date.today().isoformat()))
 
+    @app.route("/export-curation")
+    @tier(LOGIN)
+    def export_curation_download():
+        """Download the curation sidecar -- ratings, hand-picked collections and their manual
+        order, smart collections, and the personal layer (tags, keeper/reject, notes) -- as
+        one JSON file keyed by media id (moonglade_curation_io.py). The same browser
+        download as /export-csv beside it, built in memory, never written into the library.
+        It goes back in with `--import-curation` (dry run by default)."""
+        import io
+        import datetime
+        import moonglade_curation_io as cio
+        mem = io.BytesIO(cio.dumps(cio.export_curation(db_path)).encode("utf-8"))
+        mem.seek(0)
+        return send_file(mem, mimetype="application/json", as_attachment=True,
+                         download_name="moonglade-curation-{}.json".format(
+                             datetime.date.today().isoformat()))
+
     @app.route("/api/panel/run", methods=["POST"])
     @tier(LOGIN)
     def api_panel_run():
@@ -15928,16 +16046,27 @@ def create_app(out_dir: Path):
         the count describes FILES quarantined, so a repeated id must not inflate it.
         Per-file OSError keeps the loop going, exactly as /delete-bulk's does -- one
         file the OS won't release must not strand the rest -- and comes back as a
-        `failed` count with ok=false instead of a delerr banner."""
+        `failed` count with ok=false instead of a delerr banner.
+
+        ARCHIVE-ONLY PICTURES ARE KEPT BACK (#66). A row PixAI no longer has
+        (is_archive_only) holds the only copy anywhere, so it is skipped, left exactly
+        where it is, and counted in `kept_archive_only` -- the same thing the cloud bulk
+        delete does with the images PixAI already dropped. `include_archive_only: true`
+        removes one anyway, and is honoured ONLY for a request naming exactly one picture:
+        the image's own page sends it after its own confirm. A selection has no override."""
         body = request.get_json(silent=True) or {}
         media_ids = list(dict.fromkeys(
             str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
-        purged = failed = 0
+        include_archive = body.get("include_archive_only") is True and len(media_ids) == 1
+        purged = failed = kept = 0
         for mid in media_ids:
             row = get_row(db_path, mid)
             if not row:
+                continue
+            if is_archive_only(row) and not include_archive:
+                kept += 1
                 continue
             try:
                 purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
@@ -15946,7 +16075,8 @@ def create_app(out_dir: Path):
                 failed += 1
         if purged:
             telem_bump("culled", purged, out_dir=out_dir)           # The Great Sweep
-        return jsonify({"ok": failed == 0, "count": purged, "failed": failed})
+        return jsonify({"ok": failed == 0, "count": purged, "failed": failed,
+                        "kept_archive_only": kept})
 
     def _purge_local(media_id, filename):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
@@ -18230,6 +18360,9 @@ def create_app(out_dir: Path):
                 "bucket": bucket,
                 "size": size,
                 "is_keeper": bool(is_keeper),
+                # PixAI no longer has it (#66): /api/duplicates/resolve never removes one
+                # in the same_seed / near_duplicate tiers.
+                "archive_only": is_archive_only(row),
             }
 
         groups = []
@@ -18383,7 +18516,14 @@ def create_app(out_dir: Path):
         submit_fixer/delete_task_gql/claim_reward -- see
         quarantine_duplicate_file().
 
-        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N}.
+        ARCHIVE-ONLY MEMBERS STAY (#66). In the same_seed and near_duplicate tiers the
+        members are different pictures with their own pixels, so a member PixAI no longer
+        has (is_archive_only) is the only copy of ITS picture: it is never removed, comes
+        back as a per-item error, and is counted in `kept_archive_only`. The byte-identical
+        tiers (same_media, identical_file) are unaffected -- the keeper holds the same bytes.
+
+        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N,
+        "kept_archive_only": N}.
         Per-item, not all-or-nothing -- one bad group in a batch (a stale
         group_id, a file already gone) does not block the rest, same "one file
         the OS won't release must not strand the rest" shape as
@@ -18400,6 +18540,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "no resolutions given"}), 400
 
         quarantined, errors = [], []
+        kept_archive = 0
         for res in resolutions:
             res = res if isinstance(res, dict) else {}
             group_id = str(res.get("group_id") or "").strip()
@@ -18450,6 +18591,13 @@ def create_app(out_dir: Path):
 
             keep_mid = str(keep.get("media_id"))
             for item in remove_items:
+                if (match_type in ("same_seed", "near_duplicate")
+                        and is_archive_only(get_row(db_path, item["media_id"]))):
+                    kept_archive += 1
+                    errors.append({"group_id": group_id, "media_id": item["media_id"],
+                                   "error": "kept: gone from your PixAI history as of the "
+                                            "last check, so this is the only copy"})
+                    continue
                 result = quarantine_duplicate_file(out_dir, thumb_dir, db_path,
                                                    item["media_id"], item["path"], group_id)
                 if result.get("ok"):
@@ -18463,7 +18611,8 @@ def create_app(out_dir: Path):
         if quarantined:
             telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
         return jsonify({"quarantined": quarantined, "errors": errors,
-                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
+                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined),
+                        "kept_archive_only": kept_archive})
 
     @app.route("/api/duplicates/undo", methods=["POST"])
     @tier(LOGIN)
@@ -24170,6 +24319,9 @@ __DESIGN_TOKENS__
                 # "Edit with Tsubaki" menu item -- every still, whatever model made it (owner
                 # ruling, 2026-09-28). Never on a video.
                 "tsubaki_edit": str(r.get("is_video") or "") != "1",
+                # #66: PixAI no longer has it, so this is the only copy -- the card's
+                # corner pill reads ARCHIVE.
+                "archive_only": is_archive_only(r),
             }
 
         if group == "series":
@@ -24282,6 +24434,9 @@ __DESIGN_TOKENS__
             # cloud account.
             "can_delete_cloud": _is_local_request(),
             "siblings": _batch_sibling_count(row.get("task_id")),
+            # #66: gone from PixAI as of the last check -- the record says so, and its
+            # "Delete locally" asks first and sends include_archive_only.
+            "archive_only": is_archive_only(row),
         }
         # Session M (NOTES 3): the run this picture came from, when the caller's own account
         # sent it through the dock -- History reuse restores the TEMPLATE from it, not the

@@ -241,6 +241,7 @@ export default function DetailsView({
     upEl,
     handleRate,
     personal,
+    archiveOnly,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   // ◈ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
@@ -369,6 +370,10 @@ export default function DetailsView({
   // capture), and no disclosure at all when there is nothing to fold.
   const extra = [];
   const push = (label, value, opts) => { if (value != null && String(value).trim() !== "") extra.push({ label, value, ...(opts || {}) }); };
+  // #66: first, and only on a picture PixAI no longer has -- the ledger above stays the
+  // DC's eleven. Worded "as of the last check": the reconcile that sets it re-reads your
+  // PixAI history every run. The grid card says the same in its ARCHIVE pill.
+  if (archiveOnly) push("On PixAI", "Gone from your PixAI history as of the last check. This is the only copy.");
   push("Clip Skip", row.clip_skip);
   push("Mode", row.inference_profile);
   push("Quality Tag", row.quality_tag);

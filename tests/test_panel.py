@@ -872,6 +872,8 @@ def test_new_parity_actions_spawn_the_right_whitelisted_argv(tmp_path, monkeypat
     cases = [
         ("audit-full",      ["--audit"],                              False),
         ("verify-dupes",    ["--verify-dupes"],                       False),
+        # The integrity pass: read-only; a click runs the structural checks too.
+        ("verify-library",  ["--verify-library", "--verify-deep"],    False),
         ("rebuild-similar", ["--rebuild-similar"],                    False),
         # The incremental counterpart. Both are non-destructive by the Panel's definition
         # (nothing leaves the disk), but only this one is safe to reach for after an

@@ -363,18 +363,31 @@ export default function ActionsMenu({
   });
 
   const deleteLocal = run(async () => {
+    // #66: the server keeps back any picture PixAI no longer has -- this library holds the
+    // last copy of it anywhere -- and says how many; the confirm says so before, the toast
+    // after. Removing one of those is the image's own page, after its own question.
     if (!window.confirm(
       "Remove " + count + " image" + (count !== 1 ? "s" : "") +
-      " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
+      " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched." +
+      " Any picture already gone from your PixAI history (as of the last check) is kept back:" +
+      " this library holds the last copy of it anywhere.")) return;
     const d = await apiPost("/api/delete-local", { media_ids: ids });
     if (d.error) { toastErr("Not removed", d.error); return; }
+    const kept = d.kept_archive_only || 0;
+    const keptNote = kept
+      ? plural(kept, "picture", "pictures") + " kept: gone from your PixAI history, so this is the last copy"
+      : "";
     if (d.failed) {
       // the page route's wording, minus the redirect banner
       toastErr("Some files are locked",
-        d.failed + " of " + count + " could not be moved to the trash folder and were left alone");
+        d.failed + " of " + count + " could not be moved to the trash folder and were left alone" +
+        (keptNote ? " · " + keptNote : ""));
+    } else if (!d.count && kept) {
+      toastOk("Nothing removed", keptNote);
     } else {
       toastOk("Removed locally",
-        plural(d.count || 0, "file", "files") + " moved to _deleted/ (recoverable)");
+        plural(d.count || 0, "file", "files") + " moved to _deleted/ (recoverable)" +
+        (keptNote ? " · " + keptNote : ""));
     }
     if (d.count) afterMutation();
   });

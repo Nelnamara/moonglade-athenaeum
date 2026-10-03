@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import useDuplicateReview, { MATCH_LABEL, fmtBytes } from "../hooks/useDuplicateReview.js";
+import useDuplicateReview, { MATCH_LABEL, fmtBytes, keptBack } from "../hooks/useDuplicateReview.js";
 import { MemberStars } from "./DuplicateReviewOverlay.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import Icon from "../icons/Icons.jsx";
@@ -101,7 +101,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
     isBusy, keeperByGroup, resolvedByGroup, groupErrors,
     toggleKeeper, resetKeeper, buildResolution, resolveGroup, undoGroup,
     autoConfirmOpen, setAutoConfirmOpen, autoBusy, autoError, setAutoError,
-    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount,
+    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount, autoKeptCount,
     runAutoResolve,
   } = useDuplicateReview({ csrf, onResolved });
 
@@ -180,6 +180,9 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
           const keepCount = keeperPath ? 1 : 0;
           const busy = isBusy(g.id);
           const groupErr = groupErrors[g.id];
+          // #66: members that are the only copy of their picture stay put.
+          const stays = new Set(keptBack(g, keeperPath).map((m) => m.path));
+          const removeCount = g.members.length - keepCount - stays.size;
           return (
             <div className={"mgdr-group" + (resolved ? " resolved" : "")} key={g.id}>
               <div className="mgdr-group-head">
@@ -193,8 +196,10 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
               <div className="mgdr-members">
                 {g.members.map((m) => {
                   const isKeeper = m.path === keeperPath;
+                  const onlyCopy = stays.has(m.path);
                   return (
-                    <div className={"mgdr-tile mgdrm-tile" + (isKeeper ? "" : " removed") + (busy || autoBusy ? " busy" : "")}
+                    <div className={"mgdr-tile mgdrm-tile" + (isKeeper || onlyCopy ? "" : " removed") + (busy || autoBusy ? " busy" : "")}
+                      title={onlyCopy ? "Gone from your PixAI history as of the last check, so this is the only copy of this picture. Resolve leaves it where it is." : undefined}
                       key={m.path}>
                       <div className="mgdr-thumb"
                         onClick={() => { if (!busy && !autoBusy && !resolved) toggleKeeper(g.id, m.path); }}
@@ -202,7 +207,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                         <img src={m.thumb} alt="" loading="lazy" draggable={false} />
                         {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
                         {resolved ? (
-                          isKeeper
+                          isKeeper || onlyCopy
                             ? <span className="mgdr-keeper">KEPT</span>
                             // Per-tile, not per-group -- see header comment
                             // point 6: a partial Undo can restore some members
@@ -212,6 +217,8 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                               : <span className="mgdr-restored">RESTORED</span>
                         ) : isKeeper ? (
                           <span className="mgdr-keeper">KEEP</span>
+                        ) : onlyCopy ? (
+                          <span className="mgdr-keeper">ONLY COPY</span>
                         ) : (
                           <span className="mgdrm-removed-x" aria-hidden="true">✕</span>
                         )}
@@ -251,10 +258,14 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                       Clear
                     </button>
                     <button type="button" className="mgdr-resolve"
-                      disabled={keepCount === 0 || busy || autoBusy}
-                      title={keepCount === 0 ? "Select a keeper first" : undefined}
+                      disabled={keepCount === 0 || removeCount <= 0 || busy || autoBusy}
+                      title={keepCount === 0 ? "Select a keeper first"
+                        : removeCount <= 0 ? "Nothing to remove: the other picture is the only copy"
+                        : undefined}
                       onClick={() => askResolve(g)}>
-                      {keepCount ? "Resolve — quarantine " + (g.members.length - 1) : "Resolve"}
+                      {!keepCount ? "Resolve"
+                        : removeCount <= 0 ? "Nothing to remove — only copy"
+                        : "Resolve — quarantine " + removeCount}
                     </button>
                   </>
                 )}
@@ -297,6 +308,11 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
               {autoSkippedCount > 0 && (
                 <> {autoSkippedCount} group{autoSkippedCount !== 1 ? "s" : ""} with no keeper
                 selected will be skipped, untouched.</>
+              )}
+              {autoKeptCount > 0 && (
+                <> {autoKeptCount} picture{autoKeptCount !== 1 ? "s" : ""} gone from your PixAI
+                history (as of the last check) stay{autoKeptCount !== 1 ? "" : "s"} where{" "}
+                {autoKeptCount !== 1 ? "they are" : "it is"}: this library holds the only copy.</>
               )}
             </p>
             {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}

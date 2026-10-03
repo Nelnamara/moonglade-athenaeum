@@ -125,6 +125,37 @@ flash confirms on each one (a still ★ if your system asks for reduced motion).
 while you type in a field, and while a panel or the command palette is up. The palette lists
 this as **Rate 1–5**.
 
+## Backing up your curation
+
+Your ratings, collections (and their manual order), smart collections, tags, keeper/reject
+marks and notes live only in `catalog.db`. **Control Panel → ⬇ Download curation (JSON)**, or
+`python moonglade_backup.py --export-curation [FILE]`, saves them as one small file keyed by
+media id. If you ever rebuild the catalog from a fresh pull, put them back:
+
+```bash
+python moonglade_backup.py --import-curation curation.json            # dry run: what it would do
+python moonglade_backup.py --import-curation curation.json --apply    # do it
+```
+
+- **Nothing is written without `--apply`.** The dry run prints exactly what would change.
+- **Fill-only by default.** A rating, mark or note the catalog already has is kept; tags and
+  collections are added to what is there; a collection that already has a manual order keeps
+  it. **`--curation-overwrite`** makes the file win for the pictures it lists — their rating,
+  mark, note, tags and collections become the file's (a collection label it does not list is
+  taken off that picture: a label, never a file) and its manual orders replace yours.
+- **Pictures this catalog does not have are listed, not invented** — import again after a sync.
+- **A smart collection whose name is already used** by another collection is skipped and named.
+- **An import can be undone.** Before `--apply` writes anything it saves the current state as
+  `curation_pre_import_<time>.json` in the library folder; import that file with `--apply
+  --curation-overwrite` to put every picture it touched back. A smart collection or a manual
+  order the import created stays.
+- A file that is not a curation file, is from a newer version, or holds a value the app would
+  refuse (a rating of 7, an over-long note, too many tags) is turned back whole, saying why;
+  nothing changes.
+
+It holds the library's curation only. Per-account things — saved views, prompt snippets,
+Toolbox presets, preferences — are tied to a sign-in and are not part of it.
+
 ## Why collections instead of folders?
 Physical folders break when you re-run Organize (which renames/moves files into
 `YYYY-MM/`). Collections live in the catalog and are keyed by `media_id`, so they

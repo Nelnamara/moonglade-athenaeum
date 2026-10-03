@@ -62,7 +62,7 @@ def test_delete_local_quarantines_through_the_same_trash_path(tmp_path):
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["a", "b"]}).get_json()
-    assert d == {"ok": True, "count": 2, "failed": 0}
+    assert d == {"ok": True, "count": 2, "failed": 0, "kept_archive_only": 0}
 
     deleted = tmp_path / g.DELETED_DIRNAME
     assert (deleted / "a.png").exists() and (deleted / "b.png").exists()
@@ -89,7 +89,7 @@ def test_delete_local_skips_unknown_ids_and_dedupes(tmp_path):
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local",
                  json={"media_ids": ["x", "x", "ghost"]}).get_json()
-    assert d == {"ok": True, "count": 1, "failed": 0}
+    assert d == {"ok": True, "count": 1, "failed": 0, "kept_archive_only": 0}
     assert load_catalog(db) == []
 
 
@@ -113,7 +113,7 @@ def test_delete_local_reports_a_failed_move_without_stranding_the_rest(tmp_path,
 
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["bad", "good"]}).get_json()
-    assert d == {"ok": False, "count": 1, "failed": 1}
+    assert d == {"ok": False, "count": 1, "failed": 1, "kept_archive_only": 0}
     assert (tmp_path / g.DELETED_DIRNAME / "good.png").exists()
     # The failed file keeps BOTH its file and its row (purge_media_local's contract).
     assert (tmp_path / "images" / "bad.png").exists()
