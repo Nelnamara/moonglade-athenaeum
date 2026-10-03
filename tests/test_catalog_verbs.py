@@ -584,7 +584,7 @@ def test_history_verb_and_route_agree(tmp_path):
              task_id="T1", model_name="anything", paid_credit="120"),
     ])
     body = login_client(tmp_path).get(
-        "/api/next/history?days=7&tz=-420&before=2026-08-18").get_json()
+        "/api/history?days=7&tz=-420&before=2026-08-18").get_json()
     rows = [r for day in body["days"] for r in day["rows"]]
     verb = history_page(db, "2026-08-11T07:00:00.000Z", "2026-08-18T07:00:00.000Z")["rows"]
     assert [r["media_id"] for r in rows] == [r["media_id"] for r in verb]

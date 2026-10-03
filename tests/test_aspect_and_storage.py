@@ -441,7 +441,7 @@ def test_the_health_route_carries_the_storage_block(lib):
 def test_the_library_route_filters_by_ar_and_type(lib):
     out, db = lib
     client = login_client(out)
-    r = client.get("/api/next/library?q=type:loom&page_size=50").get_json()
+    r = client.get("/api/library?q=type:loom&page_size=50").get_json()
     assert sorted(i["media_id"] for i in r["items"]) == ["loomstill", "v2"]
-    r = client.get("/api/next/library?q=ar:tall&page_size=50").get_json()
+    r = client.get("/api/library?q=ar:tall&page_size=50").get_json()
     assert r["items"] == []                                 # none of these rows has a size
