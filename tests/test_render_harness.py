@@ -7924,7 +7924,13 @@ def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_ser
             page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
             _settle(page)
             page.set_viewport_size(upright)
-            page.wait_for_timeout(400)
+            # Wait for the condition, not a fixed time. The lagging query answers the old way up for
+            # 150 ms after the turn; the hook re-reads at TURN_SETTLE_MS (120/400/1000 ms). A fixed
+            # 400 ms wait raced the hook's own 400 ms re-read and lost on GitHub's slower runner
+            # (2026-10-03, v3.16.0 merge). The deadline still fails the test if the hook never
+            # catches up after its last re-read.
+            page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0",
+                                   timeout=2500)
             _settle(page)
             got = page.evaluate(_Q_COLS_JS)
             assert got["cols"] == 2 and not got["rows"], (w, got)
