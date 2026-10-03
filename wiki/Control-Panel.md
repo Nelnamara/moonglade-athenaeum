@@ -321,8 +321,15 @@ It works by riding your own logged-in browser session:
    never leaves that machine — the tile shows *Connected · N days left*, never the token.
 2. Flip the toggle to **on**. It refuses to turn on until a session is connected, and tells
    you so.
-3. From then on it renews itself; you'll only need **Refresh session** if you sign out of
-   PixAI in the browser or the tile drops back to *Not connected*.
+3. From then on it renews itself while the app is running. PixAI's session lasts a week from
+   each renewal, and Moonglade renews it in the background every few days, so you'll only need
+   **Refresh session** if you sign out of PixAI in the browser, or if the app was closed for
+   more than a week and the session lapsed in the meantime.
+
+The ring on the tile shows how much of the current session is left, out of its own week. It
+stays green through the normal renewal; it turns peach only if a renewal actually failed (it
+keeps retrying, and says so) or if `READ_ONLY` is stopping it, and red once the session has
+expired. Renewal never runs while the mirror is switched off or while `READ_ONLY` is set.
 
 Things worth knowing:
 
