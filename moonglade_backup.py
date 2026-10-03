@@ -882,9 +882,16 @@ DELETE_OPERATION = "deleteGenerationTask"
 REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
     "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
 PIXAI_COOKIE_DOMAIN = "pixai.art"
-# Roll the ~27-day JWT once it drops under this many days left (a box that runs even
-# weekly never lapses).
-MIRROR_REFRESH_WHEN_DAYS_LEFT = 5
+# A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
+# own renewal and the app's refreshToken alike; the ~27 days measured in August no longer
+# holds). Renew once fewer than this many days are left -- measured in the token's real
+# seconds, not floored whole days -- which leaves the background tick (mirror_renew_tick) three
+# days of retries before a failing renewal could let the token lapse (#71).
+MIRROR_REFRESH_WHEN_DAYS_LEFT = 3
+# What one renewal grants. Only the Control Panel's ring reads it: a token the app did not mint
+# itself (a browser read on Connect, or one stored before #71) has no known start, so its ring
+# is drawn out of max(seconds left, this) -- see mirror_token_span.
+MIRROR_TOKEN_LIFE_S = 7 * 86400
 # The localStorage key the pixai.art frontend keeps the live JWT under (confirmed on a
 # logged-in tab 2026-08-15). localStorage is NOT app-bound(v20)-encrypted the way modern
 # Chrome cookies are, so reading THIS is how the mirror bootstraps on a current Chrome
@@ -5707,10 +5714,15 @@ def jwt_days_left(token, now=None):
 
 
 def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
-    """True when the JWT is missing, unparseable, expired, or within the cushion --
-    i.e. the renewal loop should call refreshToken. Pure; the scheduler's decision."""
-    left = jwt_days_left(token, now=now)
-    return left is None or left <= threshold_days
+    """True when the JWT is missing, unparseable, expired, or has `threshold_days` or fewer
+    left -- i.e. the renewal should call refreshToken. Measured on the token's real seconds
+    left (exp - now), not on jwt_days_left's floored whole days: the floor made the old 5-day
+    rule renew with up to 6 days left. Pure; the scheduler's decision."""
+    exp = jwt_expiry(token)
+    if exp is None:
+        return True
+    now = time.time() if now is None else now
+    return exp - now <= threshold_days * 86400
 
 
 def read_browser_session(browsers=("chrome", "edge", "brave")):
@@ -6214,7 +6226,13 @@ def refresh_jwt(session, current_jwt=None):
     `token` header on ordinary authenticated responses, and a GraphQL error (e.g.
     PersistedQueryNotFound after a hash rotation) still answers HTTP 200 carrying that echo.
     So a renewal requires status 200, NO `errors` array, and a token that DIFFERS from the
-    one we sent -- an unchanged token is not a renewal."""
+    one we sent -- an unchanged token is not a renewal.
+
+    Why it returned None lands in `_refresh_last["reason"]` (network | http_<code> |
+    graphql_error | unchanged) for the Control Panel's "couldn't renew" line (#71). The reason
+    is a fixed word, never a header, body or token. A side channel rather than a second return
+    value, so every caller and every test fake keeps the one-value contract."""
+    _refresh_last["reason"] = ""
     headers = {
         "Content-Type": "application/json",
         "apollo-require-preflight": "true",
@@ -6233,14 +6251,17 @@ def refresh_jwt(session, current_jwt=None):
     try:
         r = session.post(API_URL, json=body, headers=headers, timeout=30)
     except Exception:
+        _refresh_last["reason"] = "network"
         return None
     if r.status_code != 200:
+        _refresh_last["reason"] = "http_{}".format(r.status_code)
         return None
     try:
         payload = r.json() or {}
     except Exception:
         payload = {}
     if payload.get("errors"):
+        _refresh_last["reason"] = "graphql_error"
         return None                        # error response -> its echoed token is NOT fresh
     cur = current_jwt or ""
     tok = r.headers.get("token")
@@ -6249,7 +6270,11 @@ def refresh_jwt(session, current_jwt=None):
     val = (payload.get("data") or {}).get("refreshToken")
     if isinstance(val, str) and val != cur and jwt_expiry(val):
         return val
+    _refresh_last["reason"] = "unchanged"
     return None
+
+
+_refresh_last = {"reason": ""}
 
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
@@ -6259,10 +6284,32 @@ def refresh_jwt(session, current_jwt=None):
 # every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
 # (adversarial review 2026-08-15). The gallery serves threaded=True.
 _mirror_lock = threading.Lock()
-# Backoff so a persistently-failing refresh (rotated hash, expired session, PixAI 5xx) is not
-# re-fired on EVERY create while the JWT sits inside its refresh cushion (review). time-based.
-_mirror_refresh_next_try = 0.0
-_MIRROR_REFRESH_COOLDOWN = 600      # seconds to wait after a failed refresh before retrying
+# THE RENEWAL RECORD (#71) -- one home for everything about renewing, shared by the create
+# path (make_mirror_session), a press of Connect, and the background tick (mirror_renew_tick):
+#   fails / next_try   a failing renewal backs off _MIRROR_REFRESH_COOLDOWN, doubling, capped
+#                      at MIRROR_RENEW_BACKOFF_CAP_S -- for the token that failed (failed_exp);
+#                      a different token is not held behind another token's failures;
+#   failed_exp         the exp of the token the last failure was against: the Panel reports
+#                      "couldn't renew" only while THAT token is still the stored one and due;
+#   last_ok_at         the last successful renewal; none again within MIRROR_RENEW_FLOOR_S, so
+#                      a token PixAI mints already inside the cushion can never loop;
+#   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence.
+# Module state: tests/conftest.py resets it around every test (_mirror_renewal_reset).
+_MIRROR_REFRESH_COOLDOWN = 600      # the first backoff step after a failed renewal (seconds)
+MIRROR_RENEW_BACKOFF_CAP_S = 7200   # the longest step: a failing renewal retries every 2 h
+MIRROR_RENEW_FLOOR_S = 6 * 3600     # at most one successful renewal per 6 h, whatever is due
+MIRROR_RENEW_TICK_S = 900           # the background tick looks at the token every 15 minutes
+_mirror_renewal = {}
+
+
+def _mirror_renewal_reset():
+    """Back to "never tried": no failures, no backoff, no recent success, tick due now."""
+    _mirror_renewal.clear()
+    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=None,
+                           last_attempt_at=None, last_reason="", tick_at=None)
+
+
+_mirror_renewal_reset()
 
 
 def _mirror_state_path():
@@ -6274,8 +6321,8 @@ def _mirror_state_path():
 
 
 def load_mirror_state():
-    """The stored mirror session {jwt} or {} if none. (A legacy `cookies` key from older
-    builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
+    """The stored mirror session {jwt[, minted_at]} or {} if none. (A legacy `cookies` key from
+    older builds is ignored -- the mirror is JWT-only now.) Never raises, never logs a value."""
     p = _mirror_state_path()
     if not p.exists():
         return {}
@@ -6288,11 +6335,26 @@ def load_mirror_state():
 
 
 def save_mirror_state(state):
-    """Atomically persist {jwt} to the git-ignored mirror file. Best-effort: True/False,
-    never raises, never logs a value. JWT-only: cookies are no longer stored -- the Bearer
-    JWT authenticates both the create and the refresh; the short session cookies died ~1 h
-    after issue (so they never survived to a day-22 refresh anyway), and pairing a
-    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review)."""
+    """Atomically persist {jwt[, minted_at]} to the git-ignored mirror file. Best-effort:
+    True/False, never raises, never logs a value. JWT-only: cookies are no longer stored -- the
+    Bearer JWT authenticates both the create and the refresh; the short session cookies died
+    ~1 h after issue (so they never survived to a day-22 refresh anyway), and pairing a
+    Default-profile cookie jar with an any-profile JWT risked a cross-identity submit (review).
+
+    `minted_at` (#71) is a timestamp, not a credential: the moment the APP's own renewal minted
+    this token, set ONLY by a successful renewal. It is what the Control Panel's ring measures
+    the token's life from, because `iat` never moves off the original sign-in. Saving the SAME
+    token without one keeps the stored one (run_mirror_check re-saves an unchanged token on a
+    failed renewal); saving a DIFFERENT token without one -- a browser read -- drops it."""
+    jwt = state.get("jwt", "")
+    minted = state.get("minted_at")
+    if minted is None:
+        prev = load_mirror_state()
+        if jwt and prev.get("jwt") == jwt:
+            minted = prev.get("minted_at")
+    record = {"jwt": jwt}
+    if isinstance(minted, (int, float)) and not isinstance(minted, bool):
+        record["minted_at"] = minted
     p = _mirror_state_path()
     # Per-WRITE-unique temp (pid + random), not per-process: the gallery is threaded, so a
     # per-pid temp name lets two concurrent savers interleave into one file then both
@@ -6301,7 +6363,7 @@ def save_mirror_state(state):
     tmp = p.with_name(p.name + ".tmp-{}-{}".format(os.getpid(), secrets.token_hex(6)))
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"jwt": state.get("jwt", "")}, f, indent=2)
+            json.dump(record, f, indent=2)
         os.replace(tmp, p)
         return True
     except OSError:
@@ -6385,7 +6447,69 @@ def present_as_web(session):
     return session
 
 
-def make_mirror_session(bootstrap_from_browser=False):
+def mirror_token_span(state, now=None):
+    """(seconds left, seconds in the token's life) for the Control Panel's ring, or
+    (None, None) with no parseable token. Offline; neither number reveals the token.
+
+    The life is exp - minted_at for a token the app renewed itself. A token read from the
+    browser on Connect (or stored before #71) has no known start -- `iat` stays at the original
+    sign-in through every renewal (PROBE 2026-10-02), so exp - iat grows without bound -- and
+    is drawn out of max(left, MIRROR_TOKEN_LIFE_S). Never shorter than what is left, so the ring
+    never draws past full."""
+    exp = jwt_expiry((state or {}).get("jwt") or "")
+    if exp is None:
+        return None, None
+    now = time.time() if now is None else now
+    left = exp - now
+    minted = (state or {}).get("minted_at")
+    if isinstance(minted, (int, float)) and not isinstance(minted, bool) and minted < exp:
+        span = exp - minted
+    else:
+        span = max(left, MIRROR_TOKEN_LIFE_S)
+    return left, max(span, left)
+
+
+def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
+    """THE one renewal (#71): every path that renews -- a create (make_mirror_session), a press
+    of Connect, the background tick -- comes through here. Returns (jwt, outcome); outcome is
+    renewed | failed | not_due | read_only | backoff | floor | no_session.
+
+    Runs entirely inside _mirror_lock and re-reads the stored token there, so two renewals
+    racing (the tick and a Connect, or two creates) make ONE refreshToken call: the second sees
+    the fresh token and finds nothing due. READ_ONLY is re-checked here, immediately before the
+    POST, because it can flip between a caller's own check and this lock. A failure backs off
+    (see _mirror_renewal) unless this is a press of Connect, which always tries once; and no
+    renewal follows a successful one within MIRROR_RENEW_FLOOR_S."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    with _mirror_lock:
+        cur = load_mirror_state().get("jwt") or fallback or ""
+        if not cur:
+            return cur, "no_session"
+        if READ_ONLY or _read_only_now():
+            return cur, "read_only"
+        if not mirror_needs_refresh(cur, now=now):
+            return cur, "not_due"
+        exp = jwt_expiry(cur)
+        if not user_initiated and r["failed_exp"] == exp and now < r["next_try"]:
+            return cur, "backoff"
+        if r["last_ok_at"] is not None and now - r["last_ok_at"] < MIRROR_RENEW_FLOOR_S:
+            return cur, "floor"
+        r["last_attempt_at"] = now
+        fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
+        if fresh:
+            save_mirror_state({"jwt": fresh, "minted_at": now})
+            r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="")
+            return fresh, "renewed"
+        fails = (r["fails"] if r["failed_exp"] == exp else 0) + 1
+        r.update(fails=fails, failed_exp=exp,
+                 next_try=now + min(_MIRROR_REFRESH_COOLDOWN * 2 ** (fails - 1),
+                                    MIRROR_RENEW_BACKOFF_CAP_S),
+                 last_reason=_refresh_last.get("reason") or "failed")
+        return cur, "failed"
+
+
+def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
     """The mirror submit/refresh session: a requests.Session authed with the browser JWT
     (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
     no USABLE (present, parseable, unexpired) JWT even after a browser re-read and a refresh;
@@ -6394,39 +6518,92 @@ def make_mirror_session(bootstrap_from_browser=False):
     JWT-only, and built via _mirror_session_from (NOT _make_session): the API-key path's
     precondition/USER_ID-resolution must not run over the browser token (review).
 
-    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the refresh->persist
-    critical section takes the lock (single-flight), and a failed refresh backs off so it is
-    not re-fired on every create (review)."""
-    global _mirror_refresh_next_try
+    `user_initiated` is a press of Connect (#71): it re-reads the browser even when the stored
+    token is still usable -- PixAI can revoke a token before its exp -- and keeps whichever of
+    the two expires later; and its renewal tries once even inside a failure backoff.
+
+    Lock scope: the SLOW browser read runs OUTSIDE _mirror_lock; only the keep-the-later choice
+    and the refresh->persist critical section (_mirror_try_renew) take the lock."""
     jwt = load_mirror_state().get("jwt") or ""
     # (Re-)bootstrap from the browser whenever the stored JWT is not USABLE -- not merely when
     # it is absent. Gating on `not jwt` meant an expired stored token could never be replaced,
     # which left Connect and --mirror-check permanently dead until the file was hand-deleted
     # (review). The browser read is slow, so it happens before the lock.
-    if bootstrap_from_browser and not _jwt_usable(jwt):
+    if bootstrap_from_browser and (user_initiated or not _jwt_usable(jwt)):
         bj = read_browser_jwt()
         if bj:
-            jwt = bj
-            save_mirror_state({"jwt": jwt})
+            with _mirror_lock:
+                cur = load_mirror_state().get("jwt") or ""
+                if not _jwt_usable(cur) or (jwt_expiry(bj) or 0) > (jwt_expiry(cur) or 0):
+                    save_mirror_state({"jwt": bj})        # a browser token: no minted_at
+                    cur = bj
+                jwt = cur
     # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
-    # (refreshToken is account-mutating), and not more often than the cooldown after a failure.
+    # (refreshToken is account-mutating; _mirror_try_renew checks again inside its lock).
     if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
-        with _mirror_lock:
-            cur = load_mirror_state().get("jwt") or jwt      # a peer thread may have refreshed
-            if mirror_needs_refresh(cur):
-                now = time.time()
-                if now >= _mirror_refresh_next_try:
-                    fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
-                    if fresh:
-                        cur = fresh
-                        save_mirror_state({"jwt": cur})
-                        _mirror_refresh_next_try = 0.0
-                    else:
-                        _mirror_refresh_next_try = now + _MIRROR_REFRESH_COOLDOWN
-            jwt = cur
+        jwt, _outcome = _mirror_try_renew(user_initiated=user_initiated, fallback=jwt)
     if not _jwt_usable(jwt):
         return None                        # absent/expired -> refuse, never API-key (F5)
     return _mirror_session_from(jwt)
+
+
+def mirror_renew_tick(now=None):
+    """THE BACKGROUND RENEWAL (#71), asked every minute by the gallery's scheduler heartbeat
+    and deciding every MIRROR_RENEW_TICK_S. Without it the token was renewed only when a
+    generation or a Connect asked, so a week of not generating let it lapse.
+
+    Returns what it did: cadence | mirror_off | read_only | no_session | expired | fresh |
+    backoff | floor | not_due | renewed | failed. Everything before the renewal is offline (two
+    small file reads); the renewal itself is _mirror_try_renew, one refreshToken at most. An
+    expired token is left for Connect -- the tick does not try it. Never raises, never logs or
+    returns the token."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    if r["tick_at"] is not None and now - r["tick_at"] < MIRROR_RENEW_TICK_S:
+        return "cadence"
+    r["tick_at"] = now
+    try:
+        if not mirror_enabled():
+            return "mirror_off"
+        if READ_ONLY or _read_only_now():
+            return "read_only"
+        jwt = load_mirror_state().get("jwt") or ""
+        exp = jwt_expiry(jwt)
+        if exp is None:
+            return "no_session"
+        if exp - now <= 0:
+            return "expired"
+        if not mirror_needs_refresh(jwt, now=now):
+            return "fresh"
+        return _mirror_try_renew(now=now)[1]
+    except Exception:                                  # noqa: BLE001 -- a tick never raises
+        return "failed"
+
+
+def mirror_renewal_status(now=None):
+    """The Control Panel's renewal line (#71): {state, reason, last_ok_at, next_try_at}.
+
+    state: off (the Mirror is disarmed) | none (no parseable token) | expired (no seconds left)
+    | paused (due, but READ_ONLY forbids the renewal) | failed (due, and the last renewal failed
+    against THIS stored token -- a token saved since, by Connect or a renewal, clears it) | ok.
+    Offline, never the token or any of its claims."""
+    now = time.time() if now is None else now
+    r = _mirror_renewal
+    out = {"state": "ok", "reason": "", "last_ok_at": r["last_ok_at"], "next_try_at": None}
+    jwt = load_mirror_state().get("jwt") or ""
+    exp = jwt_expiry(jwt)
+    if not mirror_enabled():
+        out["state"] = "off"
+    elif exp is None:
+        out["state"] = "none"
+    elif exp - now <= 0:
+        out["state"] = "expired"
+    elif mirror_needs_refresh(jwt, now=now):
+        if READ_ONLY or _read_only_now():
+            out["state"] = "paused"
+        elif r["fails"] and r["failed_exp"] == exp:
+            out.update(state="failed", reason=r["last_reason"], next_try_at=r["next_try"])
+    return out
 
 
 def _session_for_create(api_session):
@@ -6490,7 +6667,12 @@ def run_mirror_check(args):
               "pixai.art logged-in, then retry.".format(src))
         return {"ok": False, "source": src, "renewed": False}
     after = jwt_days_left(fresh)
-    saved = save_mirror_state({"jwt": fresh})
+    # The app's own renewal: stamp when it minted the token (the ring's span, #71) and record
+    # the success, so the background tick's 6 h floor counts it.
+    minted = time.time()
+    saved = save_mirror_state({"jwt": fresh, "minted_at": minted})
+    _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=minted,
+                           last_reason="")
     print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. {}".format(
         src, after, "" if before is None else " (was {})".format(before),
         "Stored." if saved else "WARNING: could not persist mirror_session.json."))
@@ -6505,7 +6687,8 @@ def run_mirror_check(args):
 #     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
 #  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
 #  3. READ_ONLY fires before any mirror network call: refreshToken (make_mirror_session,
-#     run_mirror_check, /api/mirror/connect) and the create (submit_generation/submit_fixer).
+#     run_mirror_check, /api/mirror/connect, mirror_renew_tick -- and again inside
+#     _mirror_try_renew's lock) and the create (submit_generation/submit_fixer).
 #  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
 #     only days-left + ok/None; the credential travels only in a POST body/Authorization.
 #  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a

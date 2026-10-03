@@ -13551,6 +13551,43 @@ def create_app(out_dir: Path):
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
+    _mirror_renew_seen = {"last": None}
+
+    def _mirror_renew_tick():
+        """The Mirror token's background renewal (#71), on the scheduler's existing 60-second
+        heartbeat like the release check and the contest-wins check: no thread or timer of its
+        own. core.mirror_renew_tick keeps its own 15-minute cadence and is offline unless the
+        token is due, so all this does most minutes is a clock comparison.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check, sampled above) for the same reason
+        the contest sweep and the release check do: a renewal reaches PixAI with this machine's
+        real credentials, and the suite's conftest sets that flag precisely so create_app()
+        cannot make that request.
+
+        Logs a renewal, and a failure once per run of failures (not every tick); never the
+        token -- only days left and the failure's fixed reason word."""
+        if not _bg_release_check:
+            return
+        try:
+            import logging as _logging
+            import moonglade_backup as _core
+            out = _core.mirror_renew_tick()
+            _log = _logging.getLogger(__name__)
+            if out == "renewed":
+                left = _core.jwt_days_left(_core.load_mirror_state().get("jwt") or "")
+                _log.info("mirror: renewed the PixAI web session in the background "
+                          "(%s days left)", left)
+            elif out == "failed" and _mirror_renew_seen["last"] != "failed":
+                _log.warning("mirror: couldn't renew the PixAI web session (%s); retrying "
+                             "with backoff", _core._mirror_renewal.get("last_reason") or "failed")
+            if out in ("renewed", "failed"):
+                _mirror_renew_seen["last"] = out
+        except Exception:              # noqa: BLE001 -- a renewal must never kill the loop
+            pass
+
+    # Test seam: the gate is the thing worth proving at runtime (the suite runs with it off).
+    app.extensions["mg_mirror_renew_tick"] = _mirror_renew_tick
+
     def _living_tick():
         """THE LIVING LIBRARY'S HEARTBEAT -- the job LIST, riding the same sixty-second tick
         as everything else in this process. No new thread, no second poll loop: the standing
@@ -13647,6 +13684,8 @@ def create_app(out_dir: Path):
             _update_check_tick()
             # Same place, same reason: contest wins are verified on this heartbeat too.
             _contest_win_tick()
+            # And the Mirror token's background renewal (#71), for the same reason.
+            _mirror_renew_tick()
             # Same reason, same place: the living library's job list is not the legacy
             # standing order, and that `continue` would skip it on every install that
             # never configured one.
@@ -21574,11 +21613,21 @@ def create_app(out_dir: Path):
     def api_mirror_status():
         """Read-only status of 'Mirror to PixAI website': the toggle flag + the stored
         JWT's days-left, decoded OFFLINE (no network). NEVER returns the token (review
-        F13). LOGIN tier."""
+        F13). LOGIN tier.
+
+        #71 adds what the ring is drawn from: `left_s` / `span_s` (core.mirror_token_span --
+        the token's own life, never iat to exp) and `renewal` (core.mirror_renewal_status: ok,
+        failed, paused, expired, off), so the tile warns only when a renewal actually failed
+        or cannot run, not whenever the token sits in its normal renewal window."""
         import moonglade_backup as core
-        jwt = (core.load_mirror_state().get("jwt") or "")
+        state = core.load_mirror_state()
+        jwt = (state.get("jwt") or "")
+        left_s, span_s = core.mirror_token_span(state)
         return jsonify({"enabled": core.mirror_enabled(), "connected": bool(jwt),
-                        "days_left": core.jwt_days_left(jwt) if jwt else None})
+                        "days_left": core.jwt_days_left(jwt) if jwt else None,
+                        "left_s": int(left_s) if left_s is not None else None,
+                        "span_s": int(span_s) if span_s is not None else None,
+                        "renewal": core.mirror_renewal_status()})
 
     @app.route("/api/mirror/enable", methods=["POST"])
     @tier(LOCALHOST)
@@ -21628,7 +21677,9 @@ def create_app(out_dir: Path):
         import moonglade_backup as core
         try:
             core._check_read_only("connect the PixAI mirror")   # refreshToken is account-mutating
-            s = core.make_mirror_session(bootstrap_from_browser=True)
+            # A press (#71): re-read the browser even for a usable stored token, keep the
+            # later-expiring of the two, and try a due renewal even inside a failure backoff.
+            s = core.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)
         except Exception as e:
             return jsonify({"ok": False, "error": _redact_host_paths(str(e))[:160]}), 200
         if s is None:
@@ -23399,7 +23450,10 @@ def create_app(out_dir: Path):
         cached = _enh_price_cache["presets"]
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
             return jsonify({"presets": cached})
-        s = core.make_mirror_session()          # stored session (no bootstrap) -- as the gate uses
+        # Stored session (no bootstrap) -- as the gate uses -- and only while the Mirror is ON,
+        # like the scene routes: make_mirror_session can renew the token, and nothing may renew
+        # it as a side effect while the owner has the Mirror switched off (#71).
+        s = core.make_mirror_session() if core.mirror_enabled() else None
 
         def _row(pr):
             row = {"key": pr.get("key"), "label": pr.get("label"),
