@@ -639,6 +639,11 @@ const sameAt = (a, b) => (a == null || b == null) ? true : Math.abs(Number(a) - 
  *  last frame) -- the server is the one that knows, since a card may not know its clip's
  *  length (owner walk 2026-09-30: a frame spliced from E·01's end was recorded "at 0.0 s").
  *  Without it (an older server), the source's cut point as the card records it. */
+/** The handoff route's answer (/api/loom/handoff: {frame_media_id, duration, at, at_end}) as
+ *  makeAnchor's `took` -- where it really cut, and whether that was the clip's last frame. The
+ *  ONE builder: the desktop splice, the phone's and Re-anchor all read the answer through it. */
+export const tookOf = (d) => ({ at: (d || {}).at, end: (d || {}).at_end });
+
 export const makeAnchor = (src, frameMid, via, took) => {
   const tk = took || {};
   const at = known(tk.at);

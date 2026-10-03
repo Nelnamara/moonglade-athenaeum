@@ -62,7 +62,7 @@ import {
 import {
   landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
-  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards, mergeNotice,
+  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards, mergeNotice, tookOf,
   splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
   // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
   // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
@@ -2998,7 +2998,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
-            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
           }).catch(() => setHandoff("err"));
       } else {
         patchFrame("openFrame", { ...src.c.closeFrame });
@@ -5336,7 +5336,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
           setDfHandoff("");
-          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: { at: d.at, end: d.at_end } }));
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code, took: tookOf(d) }));
         }).catch(() => setDfHandoff("err"));
     } else {
       dfPatchFrame("openFrame", { ...src.c.closeFrame });
@@ -8173,7 +8173,7 @@ function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
     }
     setAnchorWork((s) => { const n = { ...s }; delete n[cardId]; return n; });
     setProject((p) => (p ? patchCardByIdWith(p, cardId, (c) =>
-      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: { at: d.at, end: d.at_end } })) : p));
+      reanchorPatch(c, { frameMid: String(d.frame_media_id), src: src.c, srcCode: src.code, expect, took: tookOf(d) })) : p));
   };
 
   // Keep: accept this pair of takes (and this cut) only; a later change of the source warns again.
