@@ -413,8 +413,8 @@ one), laid out for a wide, short screen:
   model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
   is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
 - **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
-  columns re-flow, and a picture you have open stays open. A notch or the home bar on either side is left
-  clear.
+  columns re-flow, and a picture you have open stays open. Turned back upright, the gallery is two columns
+  again and never scrolls sideways. A notch or the home bar on either side is left clear.
 
 A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
 wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks

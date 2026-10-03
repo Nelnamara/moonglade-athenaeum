@@ -378,6 +378,14 @@ export function isPhoneViewport({ width, coarse, portrait, screenW, screenH, lan
 }
 
 /* How many columns the phone gallery draws: two upright; sideways four, or three under 700 px wide. */
+/* A TURN IS READ AGAIN ONCE IT HAS SETTLED (owner's walk, 2026-10-03). A phone's browser can deliver a
+   turn's resize and orientation events while the orientation query still answers for the old way up,
+   and fire nothing once it settles -- so a read made only on the events kept the sideways columns on
+   an upright phone (a column hung off the edge). hooks/usePhoneLandscape.js reads again on the next
+   frame and at each of these delays after any such event; a read that finds nothing changed changes
+   nothing. */
+export const TURN_SETTLE_MS = [120, 400, 1000];
+
 export function phoneColumns(width, landscape) {
   if (!landscape) return 2;
   const w = Number(width);

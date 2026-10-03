@@ -7858,3 +7858,64 @@ def test_the_phone_newest_jump_never_covers_the_pager(paged_library_server, rend
             assert got == {"jump": False, "overlap": False, "pagerHit": True}, (vp, got)
         finally:
             ctx.close()
+
+
+_Q_COLS_JS = """() => {
+    const rows = document.querySelector('.glm-grid-rows');
+    const cols = rows ? getComputedStyle(rows).gridTemplateColumns.split(' ').length
+                      : document.querySelectorAll('.glm-grid .glm-col').length;
+    const body = document.querySelector('.glm-body');
+    let right = 0;
+    for (const t of document.querySelectorAll('.glm-grid .glm-tile')) right = Math.max(right, t.getBoundingClientRect().right);
+    return {cols, rows: !!rows, docW: document.documentElement.scrollWidth, vw: innerWidth,
+            bodyW: body.scrollWidth, bodyCW: body.clientWidth, right: Math.round(right)}; }"""
+
+
+# A turn the way a real phone delivers it. Chromium re-evaluates a media query the moment its viewport is
+# resized and fires the query's change event; a phone's browser does not always: the resize and
+# orientation events of a turn can arrive while the orientation query still answers for the old
+# orientation, and nothing fires once it settles. This stand-in answers the landscape query with the
+# OLD orientation for the first 150 ms after the real one changes, and never fires its change event.
+# Only that query is touched; everything else is the browser's own.
+_Q_LAGGING_TURN_JS = """(() => {
+  const real = window.matchMedia.bind(window);
+  const seen = {};
+  window.matchMedia = (q) => {
+    const m = real(q);
+    if (String(q).indexOf('orientation: landscape') < 0) return m;
+    const now = performance.now();
+    const r = seen[q] || (seen[q] = {truth: m.matches, at: -1e9});
+    if (r.truth !== m.matches) { r.truth = m.matches; r.at = now; }
+    const matches = now - r.at < 150 ? !r.truth : r.truth;
+    return {matches, media: q, onchange: null, addEventListener() {}, removeEventListener() {},
+            addListener() {}, removeListener() {}, dispatchEvent() { return true; }};
+  };
+})();"""
+
+
+def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_server, render_browser, monkeypatch):
+    """Walk item 7: after the phone was held sideways, the upright grid kept the sideways column count,
+    a column hung off the right edge and the page scrolled sideways. Upright -> sideways -> upright, at
+    each width the phone comes in, with the turn delivered the way a phone delivers it (the orientation
+    query answers late and fires nothing; _Q_LAGGING_TURN_JS): the columns follow the turn both ways,
+    upright is two columns again, every tile is inside the screen, and neither the page nor the
+    gallery's own scroller scrolls sideways."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, init=_Q_LAGGING_TURN_JS)
+    try:
+        _q_open(page)
+        for w in (390, 320, 430):
+            upright = {"width": w, "height": 844}
+            page.set_viewport_size(upright)
+            page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0")
+            page.set_viewport_size({"width": 844, "height": w})
+            page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
+            _settle(page)
+            page.set_viewport_size(upright)
+            page.wait_for_timeout(400)
+            _settle(page)
+            got = page.evaluate(_Q_COLS_JS)
+            assert got["cols"] == 2 and not got["rows"], (w, got)
+            assert got["docW"] <= got["vw"] and got["bodyW"] <= got["bodyCW"], (w, got)
+            assert got["right"] <= w, (w, got)
+    finally:
+        ctx.close()
