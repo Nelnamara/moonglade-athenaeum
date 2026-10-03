@@ -7663,3 +7663,49 @@ def test_landscape_feed_new_since_rule_and_saver_chip_are_all_there(
         assert page.locator(".glm-tile-tag").first.inner_text() in ("256 px", "▶ paused")
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------------------------
+# The owner's walk of 2026-10-03 (lane wave1/walk-fixes)
+# ---------------------------------------------------------------------------------------------
+
+def test_the_search_fields_dropdown_carries_the_operators_and_the_tray_does_not(logged_in_page):
+    """Walk item 2: the Filters tray's row of operator chips moved into the search field's own
+    suggestion list. Clicking into the field opens it -- an "Operators" caption over the eight
+    operators, on screen and on top of the grid -- and picking one puts it in the search and runs
+    it, as the chip did. The tray has no Operators row any more. Second phase: blur the field and
+    the list is gone, so the first phase saw the field's own list and not something always drawn."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    page.wait_for_selector(".mgg-card")
+    page.click(".mgl-search input")
+    page.wait_for_selector(".mgcu-ac .mgcu-ac-row")
+    _settle(page)
+    got = page.evaluate("""() => {
+        const ac = document.querySelector('.mgcu-ac');
+        const rows = [...ac.querySelectorAll('.mgcu-ac-row')];
+        const r = rows[4].getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return {cap: (ac.querySelector('.mgcu-ac-cap') || {}).textContent,
+                tokens: rows.map((x) => x.querySelector('code').textContent),
+                bottom: ac.getBoundingClientRect().bottom, vh: innerHeight,
+                onTop: !!(hit && hit.closest('.mgcu-ac-row') === rows[4])}; }""")
+    assert got["cap"] == "Operators", got
+    assert got["tokens"] == ["ar:tall", "ar:wide", "ar:square", "★4+", "keeper", "-reject",
+                             "type:video", "type:loom"], got
+    assert got["bottom"] <= got["vh"] and got["onTop"], got
+    # picking one runs the search, as the chip did
+    with page.expect_request(lambda r: "/api/next/library" in r.url and "q=keeper" in r.url):
+        page.click(".mgcu-ac-row:has(code:text-is('keeper'))")
+    page.wait_for_function("() => document.querySelector('.mgl-search input').value === 'keeper '")
+    _settle(page)
+    # the list stays open for the next one, and says keeper is in the search now
+    row = page.locator(".mgcu-ac-row:has(code:text-is('keeper')) span")
+    assert row.inner_text() == "in your search · pick to take it out"
+    # phase two: away from the field the list is gone
+    page.evaluate("document.activeElement.blur()")
+    page.wait_for_selector(".mgcu-ac", state="detached")
+    # the Filters tray has no Operators row
+    page.click(".mgl-filters")
+    page.wait_for_selector(".mgl-tray")
+    assert page.locator(".mgl-tray .mgcu-opchips, .mgl-tray :text-is('Operators')").count() == 0

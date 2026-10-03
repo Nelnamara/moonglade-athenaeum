@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### From the owner's walk (2026-10-03)
+
+- **The search operators live in the search box now.** Click into the search field and its suggestion list shows an **Operators** group (`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`); picking one adds it to the search and runs it, picking it again takes it out. The row of operator chips at the end of the **⚲ Filters** tray is gone. (2026-10-03)
+
 ### Docs and help text
 
 - **The command help and the wiki's command pages now match what ships.** `--width`, `--height`, `--steps`, `--cfg` and `--seed` finally say what they do and their defaults; `--confirm` lists every command it gates (`--reference-video`, `--edit-image` and `--claim` too); `--duration` lists 5, 6, 10 and 15 with the per-engine limits; `--ref-audio` says it takes a media id only; and `--mode` says what happens to a mode a model doesn't offer. The wiki corrects the Hires denoising steps default (20, not 26), says plainly that a command typed in a terminal does not read the library-folder setting (add `--out`), documents `--account`, `--cards`, `--claims`, `--claim`, `--mirror-check`, `--rebuild-thumbs`, `--sync-similar` and `--rebuild-similar`, lists every option of the gallery server (`--allow-port-reuse`, `--skip-thumbs`, `--open-browser`, `-v`), and notes that Duplicate Review's move and undo are refused under `READ_ONLY`. (2026-10-02)

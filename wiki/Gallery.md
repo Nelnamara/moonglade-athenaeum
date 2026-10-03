@@ -229,10 +229,11 @@ panel has an **Aspect** field that does the same without typing, and each card n
 shape (`3:2`) in the row that appears when you hover it. A value the search doesn't understand
 (`ar:banana`) is said out loud under the field instead of quietly finding nothing.
 
-**Operator chips.** Open **⚲ Filters** and the last row of the tray is a set of one-tap chips
-(`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`): tap one
-to add it to the search, tap again to take it out. A shape chip replaces any other shape chip, since
-a picture only has one shape.
+**Operators.** Click into the search field and its suggestion list opens with an **Operators**
+group (`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`),
+each with a word on what it does. Pick one to add it to the search and run it; pick it again (it
+says *in your search*) to take it out. While you type a word, the list keeps only the operators it
+begins (`ke` offers `keeper`). A shape replaces any other shape, since a picture only has one.
 
 **`type:`** splits the library three ways with no overlap: `type:image`, `type:video`, and
 `type:loom` for pictures and clips [The Loom](The-Loom) made (a shot's result, or a re-roll it

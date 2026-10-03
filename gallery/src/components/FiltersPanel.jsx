@@ -5,7 +5,7 @@ import ActionsMenu from "./ActionsMenu.jsx";
 import LayoutStrip from "./LayoutStrip.jsx";
 import CollectionsPanel from "./CollectionsPanel.jsx";
 import {
-  OPERATOR_CHIPS, aspectError, aspectSuggestions, applySuggestion, hasToken, toggleToken,
+  aspectError, aspectSuggestions, applySuggestion, operatorSuggestions, pickOperator,
 } from "../curation/aspectCore.js";
 import "../styles/librarybar.css";
 import "../styles/curation.css";
@@ -70,7 +70,7 @@ function cycleNext(list, cur) {
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
 export function FilterTray({ closing, media, shelf, perPage, adv, models, commit, group, setGroup,
-    collectionNames, onManageCollections, onEditOrder, query }) {
+    collectionNames, onManageCollections, onEditOrder }) {
   /* Session P (P6): a hand-picked collection's view offers a "Manual" sort -- the order the
      owner set in the order editor (then pictures added since, oldest first). Smart collections
      do not offer it: their membership is live. While it is on, "⇅ Order" opens the editor. */
@@ -176,19 +176,8 @@ export function FilterTray({ closing, media, shelf, perPage, adv, models, commit
       <Chip label={"Page · " + perPage} active={perPage !== 100}
         title="Results per page"
         onClick={() => commit({ perPage: cycleNext(PER_CYCLE, perPage) })} />
-      {/* OPERATOR CHIPS (Session N7, the page's row under the search field): one tap adds an
-          operator to the search text, a second takes it out. They ride the tray rather than a row
-          of their own under the bar, because the shipped bar has no spare row and the library
-          stands still -- nine chips on every visit would push the grid down for everyone. */}
-      {query !== undefined ? (
-        <div className="mgcu-opchips" role="group" aria-label="Search operators">
-          <span className="mgcu-opchips-cap">Operators</span>
-          {OPERATOR_CHIPS.map((t) => (
-            <button key={t} type="button" className={"mgcu-opchip" + (hasToken(query, t) ? " on" : "")}
-              aria-pressed={hasToken(query, t)} onClick={() => commit({ q: toggleToken(query, t) })}>{t}</button>
-          ))}
-        </div>
-      ) : null}
+      {/* The Operators row that ended this tray (Session N7) moved into the search field's own
+          suggestion list on the owner's walk of 2026-10-03 -- see LibraryBar's autocomplete. */}
     </div>
   );
 }
@@ -246,13 +235,33 @@ export function LibraryBar({
   const searchRef = useRef(null);
   /* THE OPERATOR AUTOCOMPLETE (Session N7): while an `ar:` is being typed the field offers the
      values that continue it. Tab or Enter takes the highlighted one (Enter with none highlighted
-     is still a search), the arrows move, a click takes one, Escape closes the list. */
+     is still a search), the arrows move, a click takes one, Escape closes the list.
+
+     THE OPERATORS GROUP (owner's walk, 2026-10-03): the Filters tray's row of operator chips lives
+     here now. Clicking into the field opens the same list with an "Operators" caption over the
+     eight operators (aspectCore's operatorSuggestions; while a word is typed, only those it
+     begins). Picking one does what the chip did -- toggles it in the search and runs the search
+     (pickOperator, then submitQuery) -- and the list stays open for the next. Tab takes an
+     operator only once one is highlighted, so Tab still leaves a field that was merely clicked. */
   const [focused, setFocused] = useState(false);
+  const [fresh, setFresh] = useState(false);       // clicked into, nothing typed since
   const [acIdx, setAcIdx] = useState(-1);
   const [acOff, setAcOff] = useState(false);
-  const sugg = focused && !acOff && !similar ? aspectSuggestions(query) : [];
+  const listOn = focused && !acOff && !similar;
+  const aspectSugg = listOn ? aspectSuggestions(query) : [];
+  const aspectList = aspectSugg.length > 0;
+  const sugg = aspectList ? aspectSugg : listOn ? operatorSuggestions(query, { fresh }) : [];
   const arErr = aspectError(query, { ignoreLast: focused && query.trim() !== (applied || "").trim() });
-  const takeSuggestion = (token) => { setQuery(applySuggestion(query, token)); setAcIdx(-1); };
+  const takeSuggestion = (token) => {
+    if (aspectList) setQuery(applySuggestion(query, token));
+    else {
+      // the chip's own commit: the search runs at once (the field keeps its trailing space)
+      const next = pickOperator(query, token);
+      setQuery(next);
+      submitQuery(next.trim());
+    }
+    setAcIdx(-1);
+  };
 
   /* the pill's active-count badge: tray-visible filters (media/shelf) plus
      everything advCount already tracks (source/sort/rating/model/…). perPage
@@ -311,7 +320,6 @@ export function LibraryBar({
           collectionNames={curation ? curation.names : undefined}
           onManageCollections={curation ? curation.onManage : undefined}
           onEditOrder={curation ? curation.onEditOrder : undefined}
-          query={query}
           models={boot.models || []}
           commit={applyAdvanced}
           group={group} setGroup={setGroup}
@@ -338,15 +346,15 @@ export function LibraryBar({
           <input
             value={query}
             placeholder="search the library — night*, an id, model:tsubaki…"
-            onChange={(e) => { setQuery(e.target.value); setAcIdx(-1); setAcOff(false); }}
-            onFocus={() => setFocused(true)}
+            onChange={(e) => { setQuery(e.target.value); setAcIdx(-1); setAcOff(false); setFresh(false); }}
+            onFocus={() => { setFocused(true); setFresh(true); setAcOff(false); setAcIdx(-1); }}
             onBlur={() => setFocused(false)}
             role="combobox" aria-expanded={sugg.length > 0} aria-autocomplete="list"
             onKeyDown={(e) => {
-              if (sugg.length) {
+              if (sugg.length && !flyOpen) {
                 if (e.key === "ArrowDown") { e.preventDefault(); setAcIdx((i) => (i + 1) % sugg.length); return; }
                 if (e.key === "ArrowUp") { e.preventDefault(); setAcIdx((i) => (i <= 0 ? sugg.length - 1 : i - 1)); return; }
-                if (e.key === "Tab") { e.preventDefault(); takeSuggestion(sugg[Math.max(0, acIdx)].token); return; }
+                if (e.key === "Tab" && (aspectList || acIdx >= 0)) { e.preventDefault(); takeSuggestion(sugg[Math.max(0, acIdx)].token); return; }
                 if (e.key === "Enter" && acIdx >= 0) { e.preventDefault(); takeSuggestion(sugg[acIdx].token); return; }
                 if (e.key === "Escape") { e.stopPropagation(); setAcOff(true); return; }
               }
@@ -363,12 +371,13 @@ export function LibraryBar({
             ▾
           </button>
           {sugg.length > 0 && !flyOpen ? (
-            <div className="mgcu-ac" role="listbox" aria-label="Aspect values">
+            <div className="mgcu-ac" role="listbox" aria-label={aspectList ? "Aspect values" : "Operators"}>
+              {aspectList ? null : <div className="mgcu-ac-cap">Operators</div>}
               {sugg.map((sg, i) => (
                 <button key={sg.token} type="button" role="option" aria-selected={i === acIdx}
                   className={"mgcu-ac-row" + (i === acIdx ? " on" : "")}
                   onMouseDown={(e) => { e.preventDefault(); takeSuggestion(sg.token); }}>
-                  <code>{sg.token}</code><span>{sg.hint}</span>
+                  <code>{sg.token}</code><span>{sg.on ? "in your search · pick to take it out" : sg.hint}</span>
                 </button>
               ))}
             </div>

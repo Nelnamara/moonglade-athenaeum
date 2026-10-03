@@ -189,15 +189,6 @@
 .flyrow input[aria-invalid="true"] { border-color: var(--peach); }
 .flyaspect-err { font-size: 10px; color: var(--peach); }
 .fly .flyft .apply:disabled { cursor: not-allowed; opacity: .5; }
-/* the operator chips in the Filters tray */
-.mgcu-opchips { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
-  padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--surface0); }
-.mgcu-opchips-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); margin-right: 3px; }
-.mgcu-opchip { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 3px 9px; border-radius: 999px;
-  cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext);
-  transition: border-color .15s, color .15s, background .15s; }
-.mgcu-opchip:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
-.mgcu-opchip.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, transparent); color: var(--text); }
 /* the search field's value suggestions, and its one-line note for a shape nobody understands */
 .mgcu-ac { position: absolute; left: 0; top: calc(100% + 6px); z-index: 318; min-width: 240px; max-width: 100%;
   display: flex; flex-direction: column; gap: 1px; padding: 5px; border-radius: 10px;
@@ -209,6 +200,9 @@
 .mgcu-ac-row code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
 .mgcu-ac-row span { font-size: 10px; color: var(--overlay0); }
 .mgcu-ac-row:hover, .mgcu-ac-row.on { background: color-mix(in srgb, var(--lavender) 14%, transparent); }
+/* the Operators group's caption -- the Filters tray row's own caption, moved into the list
+   (owner's walk, 2026-10-03), set in from the edge like the rows under it */
+.mgcu-ac-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); padding: 4px 8px 2px; }
 .mgcu-arerr { position: absolute; left: 12px; top: calc(100% + 4px); z-index: 4; font-size: 10.5px;
   color: var(--peach); white-space: nowrap; pointer-events: none; }
 
@@ -241,5 +235,5 @@
 .mgcu-stor.compact .mgcu-stor-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
 .mgcu-stor.compact .mgcu-stor-lbl { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; text-align: left; }
 @media (prefers-reduced-motion: reduce) {
-  .mgcu-opchip, .mgcu-stor-seg { transition: none; }
+  .mgcu-stor-seg { transition: none; }
 }
