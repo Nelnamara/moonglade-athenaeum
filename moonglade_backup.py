@@ -17573,8 +17573,9 @@ def main():
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
     ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DEPRECATED (use the gallery's Delete from PixAI, on one image or "
-                         "on a selection). DELETE the given generation task id(s) from your "
+                    help="DEPRECATED, removed in the next minor release (use the gallery's "
+                         "Delete from PixAI, on one image or on a selection). DELETE the "
+                         "given generation task id(s) from your "
                          "PixAI account (irreversible). Dry-run unless --apply is also "
                          "given; then asks for typed confirmation unless --yes. Local "
                          "backups are untouched. (DELETE_TASK_HASH ships with a working "
@@ -17798,13 +17799,23 @@ def main():
     gen.add_argument("--prompt", default="", help="positive prompt for --generate")
     gen.add_argument("--negative", default="", help="negative prompt for --generate")
     gen.add_argument("--model", default="", help="modelId for --generate (default: Tsubaki.2)")
-    gen.add_argument("--width", type=int, default=512)
-    gen.add_argument("--height", type=int, default=512)
-    gen.add_argument("--steps", type=int, default=25)
-    gen.add_argument("--cfg", type=float, default=7.0)
+    gen.add_argument("--width", type=int, default=512,
+                     help="image width in pixels (default 512; rounded down to a multiple of 8 "
+                          "and moved onto the model's own size grid if it does not fit -- the "
+                          "preview names any change)")
+    gen.add_argument("--height", type=int, default=512,
+                     help="image height in pixels (default 512; rounded and moved onto the "
+                          "model's size grid the same way as --width)")
+    gen.add_argument("--steps", type=int, default=25,
+                     help="sampling steps (default 25; not sent to a model that publishes its "
+                          "own quality profiles, which set their own)")
+    gen.add_argument("--cfg", type=float, default=7.0,
+                     help="CFG scale (default 7; not sent to a model that publishes its own "
+                          "quality profiles, which set their own)")
     gen.add_argument("--batch-size", dest="count", type=int, default=1,
                      help="number of images per --generate run (batch size)")
-    gen.add_argument("--seed", type=int, default=None)
+    gen.add_argument("--seed", type=int, default=None,
+                     help="seed for a repeatable picture (default: random -- none is sent)")
     gen.add_argument("--priority", type=int, default=PRIORITY_TURBO,
                      choices=list(PRIORITY_CHOICES),
                      help="speed channel: 0 = standard, no extra cost; 500 = turbo, "
@@ -17822,7 +17833,10 @@ def main():
                      help="quality mode (inferenceProfile). auto (default) lets PixAI pick the "
                           "model's default -- always VALID (price depends on the model's own "
                           "default). lite/standard suit SD_V1 models; "
-                          "pro/ultra are for newer model types (an unsupported mode is rejected)")
+                          "pro/ultra are for newer model types. A mode the model does not list "
+                          "is refused before anything is sent; if the list cannot be read and "
+                          "PixAI rejects the mode, it is dropped and the run goes once on the "
+                          "model's default")
     gen.add_argument("--no-prompt-helper", dest="prompt_helper", action="store_false",
                      help="disable PixAI's prompt-helper (use your prompt more literally; "
                           "helps when auto-enhancement mangles a carefully-built prompt)")
@@ -17873,7 +17887,9 @@ def main():
     gen.add_argument("--poll-timeout", type=int, default=300,
                      help="seconds to wait for a submitted task to finish before giving up (default 300)")
     gen.add_argument("--confirm", action="store_true",
-                     help="REQUIRED for --generate/--generate-video to actually submit (spends credits)")
+                     help="REQUIRED for --generate, --generate-video, --reference-video and "
+                          "--edit-image to actually submit (spends credits), and for --claim "
+                          "(grants free credits/stamina to your own account)")
     # --- image-to-video generation (shares --prompt/--negative/--model/--confirm/--task-id) ---
     gen.add_argument("--generate-video", dest="generate_video", action="store_true",
                      help="create an image-to-video clip via PixAI from a source image "
@@ -17882,7 +17898,10 @@ def main():
     gen.add_argument("--image", default="", help="source image media_id to animate (first frame)")
     gen.add_argument("--tail", default="", help="optional last-frame image media_id "
                      "(first/last-frame interpolation)")
-    gen.add_argument("--duration", type=int, default=5, help="video length in seconds (e.g. 5/10/15)")
+    gen.add_argument("--duration", type=int, default=5,
+                     help="video length in seconds: 5, 6, 10 or 15 (default 5). Snapped to the "
+                          "nearest length the chosen --video-model takes: 15 is V4.0 and Tsubaki "
+                          "only (other engines stop at 10), and the Tsubaki engines have no 6")
     gen.add_argument("--video-model", dest="video_model", default="",
                      help="video model (default v4.0.1); overrides --model for --generate-video")
     gen.add_argument("--video-mode", dest="vmode", default="professional",
@@ -17914,8 +17933,10 @@ def main():
                           "@image1=first, @image2=second, ...")
     gen.add_argument("--ref-video", dest="ref_video", action="append", metavar="MEDIA_ID|FILE",
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
-    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
-                     help="reference audio (repeatable; cite as @audio1, ...)")
+    gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID",
+                     help="reference audio, as a media_id only -- a local audio file cannot be "
+                          "uploaded (put it in a video and pass that with --ref-video). "
+                          "Repeatable; cite as @audio1, ...")
     gen.add_argument("--video-ratio", dest="video_ratio", default="",
                      choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
                      help="--reference-video output aspect ratio, Tsubaki video engines only "

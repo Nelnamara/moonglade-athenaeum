@@ -29,9 +29,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
-  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`) `--apply`
-  plus typing the word `delete` on the CLI, skippable with `--yes` only if you pass it
-  explicitly. A **single-image** delete asks PixAI what it still has of that generation
+  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`, which goes
+  in the next minor release) `--apply` plus typing the word `delete` on the CLI, skippable
+  with `--yes` only if you pass it explicitly. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
   record. It never sends a delete on a generation it could not read. Whenever a delete
@@ -197,7 +197,9 @@ different way, and **not the same way as each other**: `--dedup` is dry-run by d
 explicit `--apply` makes it act), while `--organize` runs live by default and is instead
 opted *out* of with `--dry-run` — its safety net is that moves are reversible
 (`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
-flag is specifically about your PixAI *account*, not your local files.
+flag is specifically about your PixAI *account*, not your local files. The one local exception
+is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate aside and
+undoing that move are both refused, since they are the browser's way to run a dedup.
 
 ## Found a real gap in any of this?
 

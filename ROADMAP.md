@@ -187,12 +187,14 @@ why this section exists.
 
 ## Backlog — needs scoping
 
-- **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
-  internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
-  contest verbs, the `/v2` REST growth, the React front door). Scope: audit `--help` + the wiki
-  command pages against what actually ships, then finish the code map's missing chapters (PixAI
-  layer · achievements engine · server routes · React+Loom · sidecars — ranked gaps already listed
-  at the map's EOF). Docs-only, no behavior changes.
+- **Docs: code-map follow-ups** *(owner-flagged 2026-08-31)* — what is left of the docs refresh once
+  `--help` and the wiki command pages match what ships and the internal code map has all its
+  chapters. A presence-gated test that diffs the map's flag set and stated defaults against
+  argparse (skipping when the private repo is absent), so the map cannot drift unseen; a generator
+  script so a refresh is a re-run; the two original chapters' line numbers replaced with symbol
+  names (after the module split lands); and the gaps listed at the map's end (a first-commands
+  on-ramp, argparse's own vocabulary, a flag-to-column table, the `--sync` stage-to-column table).
+  Docs-only, no behavior changes.
 
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
