@@ -197,7 +197,9 @@ different way, and **not the same way as each other**: `--dedup` is dry-run by d
 explicit `--apply` makes it act), while `--organize` runs live by default and is instead
 opted *out* of with `--dry-run` — its safety net is that moves are reversible
 (`organize_manifest.csv` + `--undo-organize`), not that it waits for permission first. This
-flag is specifically about your PixAI *account*, not your local files.
+flag is specifically about your PixAI *account*, not your local files. The one local exception
+is the gallery's **Duplicate Review**: with `READ_ONLY` set, moving a duplicate aside and
+undoing that move are both refused, since they are the browser's way to run a dedup.
 
 ## Found a real gap in any of this?
 
