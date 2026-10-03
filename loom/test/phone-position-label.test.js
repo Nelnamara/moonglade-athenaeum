@@ -139,3 +139,29 @@ describe("source: the desktop record counts the whole walk too", () => {
     assert.match(app, /onOpenLightbox=\{\(mid\) => \{\s*const i = items\.findIndex\(\(it\) => it\.media_id === mid\);/);
   });
 });
+
+// #74, the owner's walk of 2026-10-03: the desktop Lightbox's bar read "{k} / {page size}" and then
+// "OF {page size}" beside it -- counted within the loaded page, and the total twice. It now shows the
+// picture's true place in the walk and the walk's length once, with the phone viewer's helpers: the
+// pictures before the loaded page (pageOffset) plus its place in the page, over the library total.
+describe("source: the desktop Lightbox counts the whole walk, once (#74)", () => {
+  const lbx = src("gallery/src/components/Lightbox.jsx");
+  const app = src("gallery/src/App.jsx");
+
+  test("its bar prints the walk's place and length, once each", () => {
+    assert.match(lbx, /const count = lightboxCount\(index, offset, total, items\.length\);/);
+    assert.match(lbx, /<b>\{count\.at\}<\/b>\s*<span>OF \{count\.of\}<\/span>/);
+    assert.match(lbx, /import \{ lightboxCount \} from "\.\.\/lib\/phoneCore\.js";/);
+  });
+
+  test("it no longer counts inside the loaded page, or says the total twice", () => {
+    assert.doesNotMatch(lbx, /\{index \+ 1\} \/ \{items\.length\}/);
+    assert.doesNotMatch(lbx, /OF \{items\.length\}/);
+  });
+
+  test("App hands it the page offset and the library total, as the phone shell does", () => {
+    const call = app.slice(app.indexOf("<Lightbox"), app.indexOf("/>", app.indexOf("<Lightbox")));
+    assert.match(call, /offset=\{pageOffset\(page, perPage\)\} total=\{total\}/);
+    assert.match(app, /import \{[^}]*\bpageOffset\b[^}]*\} from "\.\/lib\/phoneCore\.js"/);
+  });
+});

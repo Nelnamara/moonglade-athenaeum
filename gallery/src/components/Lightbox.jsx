@@ -3,6 +3,7 @@ import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
+import { lightboxCount } from "../lib/phoneCore.js";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -31,7 +32,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    page-level close back to the gallery. */
 export default function Lightbox({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onEdit, onToVideo,
-  onOpenDetails, onPublish, onSimilar, member,
+  onOpenDetails, onPublish, onSimilar, member, offset, total,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const it = items[index];
@@ -236,6 +237,11 @@ export default function Lightbox({
   const hasAR = W > 0 && H > 0;
   const rating = Number(it.rating) || 0;
   const dragging = dragDX !== 0;
+  // #74: the picture's TRUE place in the filtered walk and the walk's length, once each, formatted
+  // like the pager ("101 OF 3,240") -- the phone viewer's helper. It used to read "{k} / {page}" and
+  // "OF {page}": counted inside the loaded page, with the total twice. Falls back to the page until
+  // the library's total is known.
+  const count = lightboxCount(index, offset, total, items.length);
 
   return (
     <div className={"lbx" + (closing ? " closing" : "")} role="dialog" aria-modal="true">
@@ -252,8 +258,8 @@ export default function Lightbox({
       <div className="lbx-shell">
         <div className="lbx-bar">
           <div className="lbx-index">
-            <b>{index + 1} / {items.length}</b>
-            <span>OF {items.length}</span>
+            <b>{count.at}</b>
+            <span>OF {count.of}</span>
           </div>
           <div className="lbx-stars">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />

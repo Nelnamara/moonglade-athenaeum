@@ -59,6 +59,7 @@ import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
+import { pageOffset } from "./lib/phoneCore.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
 import { registerFolioOpener } from "./notify/ach.js";
 import { readFolioHash, setFolioRow } from "./folio/folioFocus.js";
@@ -1891,6 +1892,10 @@ export default function App({ boot }) {
              the viewer is up; this is what keeps that true in the moment AFTER he closes
              it with a page of his own still in the air. */
           page={page} pages={pages} loadPage={userLoad}
+          /* #74: the bar's "k OF N" is the picture's place in the whole walk -- the pictures
+             before the loaded page plus its place in it, over the library's total -- the
+             phone viewer's own numbers (lib/phoneCore.js), not the page's own count. */
+          offset={pageOffset(page, perPage)} total={total}
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
           onPublish={openPublish}

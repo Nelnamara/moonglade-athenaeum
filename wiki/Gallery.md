@@ -274,7 +274,9 @@ so you can bookmark one, and the browser's Back button closes it.
 
 - **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`/Space
   slideshow, `Esc` or ✕ to close. Arrow keys **roll over page boundaries** — reach the
-  end of a page and it loads the next one, continuing seamlessly. Closing leaves your
+  end of a page and it loads the next one, continuing seamlessly. Its top bar says where
+  the picture sits among everything your search and filters match (*101 OF 3,240*), not
+  just its place on the page. Closing leaves your
   scroll and selections intact. On a still picture, **✎ Edit** (or `E`) opens a **Describe
   your edits…** bar under the picture that sends a Tsubaki.3 edit of it, priced before you send;
   ✎ Edit again or `Esc` closes it, and its **More options in the Edit drawer ↗** opens the Edit

@@ -7793,3 +7793,32 @@ def test_the_phone_lightbox_edit_pill_opens_under_the_picture_from_edit(
         assert _q_generation_posts(seen) == []
     finally:
         ctx.close()
+
+
+def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, render_browser, monkeypatch):
+    """Walk item 5 (#74): the desktop Lightbox's bar read "1 / 20" and "OF 20" on page 2 of a
+    120-picture library -- counted inside the loaded page, the total twice. It reads the picture's
+    true place and the walk's length once: "101" OF "120", and the next picture is "102"."""
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        page.route("**/api/model-version*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+        _visit(page, "/?page=2")
+        page.wait_for_selector(".pagebar .pg-num.current")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "2"
+        page.locator(".mgg-card").first.click()
+        page.wait_for_selector(".lbx .lbx-index b")
+        read = "() => [document.querySelector('.lbx-index b').textContent, document.querySelector('.lbx-index span').textContent]"
+        assert page.evaluate(read) == ["101", "OF 120"]
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.querySelector('.lbx-index b').textContent === '102'")
+        assert page.evaluate(read) == ["102", "OF 120"]
+    finally:
+        ctx.close()
