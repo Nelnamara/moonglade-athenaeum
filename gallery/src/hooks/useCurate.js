@@ -3,6 +3,7 @@ import { curate, curateRestore } from "../api.js";
 import { invalidate } from "./swrCache.js";
 import { announceCurated } from "../curation/curationBus.js";
 import { applyAfter, curateSummary, undoSecondsLeft, UNDO_MS } from "../curation/curationCore.js";
+import { DETAIL_PREFIX } from "../apiRoutes.js";
 
 /* BULK CURATION with an honest count and a 10 second Undo (Session N, N4/N5).
 
@@ -48,7 +49,7 @@ export default function useCurate({ csrf, setItems }) {
     setItems((old) => applyAfter(old, after));
     announceCurated(after);
     // what the overlays paint from last-known data: the record, My Art's totals, the roster
-    invalidate(["/api/next/detail/", "/api/your-art", "/api/myart/items", "/api/achievements", "/api/health"]);
+    invalidate([DETAIL_PREFIX, "/api/your-art", "/api/myart/items", "/api/achievements", "/api/health"]);
   }, [setItems]);
 
   /* Apply `op` to `ids`. `say` chooses the toast: true = the summary sentence with an Undo,

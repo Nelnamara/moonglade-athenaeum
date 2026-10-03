@@ -2,6 +2,7 @@ import { apiGet as defaultApiGet } from "../api.js";
 import { planLoraRestore } from "./genCore.js";
 import { escapeLiteral, newRoll } from "./templateCore.js";
 import { videoRemixFromRow } from "./videoRemixCore.js";
+import { detail } from "../apiRoutes.js";
 
 /* Remix and Send to Video on the phone (Session Q, Q2; Phone Handoff.dc.html). They OPEN the Create
    tab already filled in and they NEVER SEND.
@@ -92,7 +93,7 @@ export async function remixImageInto(g, mediaId, opts, deps) {
   const my = ++flowSeq;
   const live = () => flowSeq === my;
   const notes = [];
-  const d = await get("/api/next/detail/" + encodeURIComponent(mediaId));
+  const d = await get(detail(mediaId));
   if (!live()) return { ok: false, notes, source: "" };
   if (!d || d.error || !d.row) {
     return { ok: false, notes, source: "", error: (d && d.error) || "" };
@@ -165,7 +166,7 @@ export async function remixVideoInto(drawer, mediaId, deps) {
   const get = (deps && deps.apiGet) || defaultApiGet;
   const my = ++flowSeq;
   const live = () => flowSeq === my;
-  const d = await get("/api/next/detail/" + encodeURIComponent(mediaId));
+  const d = await get(detail(mediaId));
   if (!live()) return { ok: false, notes: [] };
   if (!d || d.error || !d.row) return { ok: false, notes: [], error: (d && d.error) || "" };
   const row = d.row;

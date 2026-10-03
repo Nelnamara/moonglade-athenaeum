@@ -16,7 +16,7 @@ import { peek, put, invalidate } from "./swrStore.js";
    WHAT MUST NOT RIDE THIS. Three kinds of read are deliberately left uncached, and the
    rule is "would a stale answer be wrong, not just old":
      - every csrf token (the store drops the field outright; see swrStore.js),
-     - GET /api/next/detail/<mid> in Publish -- a stale artwork_id re-enables a Publish
+     - GET /api/detail/<mid> in Publish -- a stale artwork_id re-enables a Publish
        button for a piece that is already published,
      - GET /api/panel/status (the live-job resume check) and GET /api/ping (the
        restart watch): both exist to answer "what is true RIGHT NOW". */

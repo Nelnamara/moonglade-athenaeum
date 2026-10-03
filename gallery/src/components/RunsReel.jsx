@@ -90,7 +90,7 @@ function MatrixBlock({ runId, jobs, th, onPrefill, onInspect }) {
    bound to REAL /api/jobs data, never the DC's SEEDED demo runs.
 
    TODAY ONLY (History pass, 2026-08-17): the 7-day, per-day timeline is HistoryStrip.jsx
-   (its own dock mode, GET /api/next/history); this reel is the DC's single unlabeled
+   (its own dock mode, GET /api/history); this reel is the DC's single unlabeled
    'today' bucket. Running tiles carry the same mascot + halo + shimmer as History's
    (RunningFace / ClusterFace, shared), cost strings come from historyCore's ONE
    formatter, and the tooltip on every single tile is hoisted to the dock (`onTip`) --

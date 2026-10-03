@@ -39,6 +39,7 @@ import { apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrStore.js";
 import { refresh as trayRefresh } from "./jobsStore.js";
 import { cadenceFor } from "./pollCadence.js";
+import { LIBRARY } from "../apiRoutes.js";
 
 const seen = {};
 
@@ -144,7 +145,7 @@ function poll(id, cb, startedAt, tier) {
          and issues no request of any kind, which is why it is allowed inside this module at
          all: the spend-safety contract at the top of this file forbids adding any fetch or
          submit here, and dropping a client-side map is neither. */
-      if (d.phase === "done") { try { if (cb) cb("done", d); } catch { /* host cb must not resurrect a finished poll */ } invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]); clearPending(id); trayRefresh(); }
+      if (d.phase === "done") { try { if (cb) cb("done", d); } catch { /* host cb must not resurrect a finished poll */ } invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", LIBRARY]); clearPending(id); trayRefresh(); }
       else if (d.phase === "failed") { try { if (cb) cb("failed", d); } catch { /* as above */ } clearPending(id); trayRefresh(); }
       else { if (cb) cb("running", d); again(d, 0); }
     })

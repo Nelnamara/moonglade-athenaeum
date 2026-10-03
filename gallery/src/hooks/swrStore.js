@@ -59,9 +59,11 @@ export function put(path, data) {
 }
 
 /** Drop every cached path that STARTS WITH `prefix` (a string, or an array of them).
-    Prefix, not equality, because one mutation invalidates a family: "/api/next/detail/"
+    Prefix, not equality, because one mutation invalidates a family: "/api/detail/"
     covers every per-image record without the caller knowing which ids are cached, and
-    "/api/next/library" covers every page/filter querystring built on it.
+    "/api/library" covers every page/filter querystring built on it. Callers pass those
+    two as apiRoutes.js's DETAIL_PREFIX and LIBRARY, the same constants their reads are
+    built from, so a write cannot name a route differently from the reads it drops.
     A falsy prefix removes NOTHING -- a mistyped call must not silently empty the cache.
     Returns how many entries were removed. */
 export function invalidate(prefix) {

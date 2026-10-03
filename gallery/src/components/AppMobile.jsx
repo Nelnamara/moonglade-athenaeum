@@ -63,6 +63,7 @@ import "../styles/create-mobile.css";
 /* Last, on purpose: the landscape rules re-flow rules from every sheet above, and at equal specificity
    the later stylesheet wins (Session Q, Q4). */
 import "../styles/phone-landscape.css";
+import { DETAIL_PREFIX } from "../apiRoutes.js";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -852,7 +853,7 @@ export default function AppMobile({ boot }) {
   };
 
   // Same advParams shape App.jsx's own DetailsView mount builds (mirrors
-  // /api/next/library's own filter params) -- so Prev/Next and "Filter by
+  // /api/library's own filter params) -- so Prev/Next and "Filter by
   // model"/"View batch" walk the SAME filtered/sorted set the lifted
   // useLibrary() instance is currently showing, exactly like desktop.
   //
@@ -996,7 +997,7 @@ export default function AppMobile({ boot }) {
   const refreshFromPull = useCallback(async () => {
     const out = await syncNow({ post: apiPost, get: apiGet });
     if (out.state !== "error") {
-      invalidate(["/api/health", "/api/achievements", "/api/your-art", "/api/next/detail/"]);
+      invalidate(["/api/health", "/api/achievements", "/api/your-art", DETAIL_PREFIX]);
       const d = await userLoad(shownPageRef.current, true);
       if (d) pruneSelected(setLibSelected, d.items);
     }

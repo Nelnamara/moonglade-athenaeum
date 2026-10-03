@@ -196,9 +196,9 @@ function groupSeriesSteps(steps, currentTaskId) {
    localStorage (mg_details_more). Nothing lost its handler; the app's own extra actions
    keep their quiet More row at the end of the record.
 
-   Data comes from /api/next/detail/<mid>, which mirrors classic's detail()
+   Data comes from /api/detail/<mid>, which mirrors classic's detail()
    route: the full catalog row, plus prev_id/next_id computed under the CURRENT
-   filter/sort (advParams, the same shape /api/next/library takes). Unlike
+   filter/sort (advParams, the same shape /api/library takes). Unlike
    classic, file-existence isn't precomputed server-side -- the <img>/<video>
    onError below gets the same "not found" message for free. */
 export default function DetailsView({

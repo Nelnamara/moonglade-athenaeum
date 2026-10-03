@@ -159,7 +159,7 @@ export default function Lightbox({
   }, [slideOn, index, step]);
 
   // Record fields (prompt/negative/loras/seed) belong to Image Details, not here --
-  // the viewer no longer calls /api/next/detail at all. Owner, 2026-08-19: the slab was
+  // the viewer no longer calls /api/detail at all. Owner, 2026-08-19: the slab was
   // never in the classic lightbox; it arrived via a mis-attribution in this file's own
   // header comment. See design_handoff/.../Lightbox.dc.html (amended in the same pass).
 

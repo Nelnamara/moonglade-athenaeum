@@ -67,6 +67,7 @@ import GuideHost from "./help/GuideHost.jsx";
 import { openHelp, OPEN_SURFACE_EVENT, isHelpUp, isAboutUp, isWhatsNewUp } from "./help/helpStore.js";
 import { useGuideIndex } from "./help/helpData.js";
 import { githubSlug } from "./help/helpCore.js";
+import { LIBRARY, DETAIL_PREFIX } from "./apiRoutes.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -142,7 +143,7 @@ export default function App({ boot }) {
   // pages in the URL; the refit hardcoded page 1. Read once, handed to the hook.
   const [initialPage] = useState(() => readPage(window.location.search));
   /* ---- session stacking (#34 direction B): the "Stack sessions" toggle. When
-     on, /api/next/library folds every task into ONE cover card (a multi-task
+     on, /api/library folds every task into ONE cover card (a multi-task
      dial-in series, or a lone batch's siblings). Persisted like `layout`
      (mg_gallery_group), default OFF so ungrouped mode is untouched for anyone who
      never opts in. Declared BEFORE useLibrary because the hook takes it -- flipping
@@ -781,8 +782,8 @@ export default function App({ boot }) {
      the achievement roster (collecting/deleting moves metrics), the Health walk, and the
      library pages themselves. A purge only DROPS cached reads; it fetches nothing. */
   const afterMutation = async () => {
-    invalidate(["/api/your-art", "/api/myart/items", "/api/next/detail/",
-                "/api/achievements", "/api/health", "/api/next/library"]);
+    invalidate(["/api/your-art", "/api/myart/items", DETAIL_PREFIX,
+                "/api/achievements", "/api/health", LIBRARY]);
     setSelected(new Set());
     load(1, true);
     const c = await fetchCollections();
@@ -920,7 +921,7 @@ export default function App({ boot }) {
   const [orderFor, setOrderFor] = useState("");
   const closeOrder = useCallback(() => {
     setOrderFor("");
-    invalidate(["/api/next/library"]);
+    invalidate([LIBRARY]);
     if (shelf && lib.adv && lib.adv.sort === "manual") load(1, true);
   }, [shelf, lib.adv, load]);
   const orderSlot = useCallback((c) => (
@@ -932,7 +933,7 @@ export default function App({ boot }) {
      deleted; a merge INTO the open collection reloads it so the newcomers show. */
   const onCollectionsChanged = useCallback(async (chg) => {
     await refreshCollections();
-    invalidate(["/api/next/library"]);
+    invalidate([LIBRARY]);
     if (chg.renamed && shelf === chg.renamed.from) applyAdvanced({ shelf: chg.renamed.to });
     else if (chg.merged && chg.merged.others.indexOf(shelf) >= 0) applyAdvanced({ shelf: chg.merged.target });
     else if (chg.merged && chg.merged.target === shelf) load(1, true);
@@ -960,7 +961,7 @@ export default function App({ boot }) {
   }, [boot.csrf, say, refreshCollections, applyAdvanced]);
   // opening a smart collection IS running its query; this runs it again
   const refreshSmart = useCallback(() => {
-    invalidate(["/api/next/library"]);
+    invalidate([LIBRARY]);
     userLoad(1, true);
     refreshCollections();
   }, [userLoad, refreshCollections]);
@@ -994,7 +995,7 @@ export default function App({ boot }) {
     addTo: async (name) => {
       const d = await apiPost("/api/collection", { action: "add", collection: name, media_ids: selIds });
       if (d.error) { say(d.error, null, "peach"); return; }
-      invalidate(["/api/next/library"]);
+      invalidate([LIBRARY]);
       say(addedSummary(d.count || 0, name, selIds.length));
     },
   };
@@ -1694,7 +1695,7 @@ export default function App({ boot }) {
      `advParams` by reference ([mediaId, advParams]), so it re-fired on
      every single render: setState -> re-render -> new advParams object ->
      effect fires again -> setState -> ... An infinite loop, hammering
-     GET /api/next/detail/<mid> continuously and never settling out of
+     GET /api/detail/<mid> continuously and never settling out of
      `loading`, which is what actually produced the reported stuck-
      Loading/rapid-flash bug (reproduced live: ~1000 identical requests in
      a few seconds). useMemo keyed on the real underlying values fixes it --

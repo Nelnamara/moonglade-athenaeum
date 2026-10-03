@@ -287,7 +287,7 @@ describe("the dock wires History (source guards -- the parts that are not pure)"
     assert.match(reel, /<RunningFace/);
   });
   test("the strip: fixed 96 tiles, day divider evolved (padding-right 4px), the 2-row grid, No runs, the older control", () => {
-    assert.match(strip, /GET \/api\/next\/history|\/api\/next\/history\?days=/);
+    assert.match(strip, /HISTORY \+ "\?days="/);
     assert.match(strip, /"No runs"|>No runs</);
     assert.match(strip, /className="mgdock-histgrid"/);
     assert.match(strip, /className="mgdock-older"/);

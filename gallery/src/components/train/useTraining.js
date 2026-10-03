@@ -5,6 +5,7 @@ import {
   archTabs, basicFooterCost, countedItems, defaultBase, imageProblem, loraForDock, markRejected,
   mergeImages, reuseCandidate, roomLeft, triggerCheck,
 } from "../../gen/trainCore.js";
+import { LIBRARY } from "../../apiRoutes.js";
 
 /* Train a LoRA, Session J (Training Handoff, 2026-09-28) -- the state and the calls behind BOTH
    the desktop overlay (TrainOverlay.jsx) and the phone screen (TrainMobile.jsx). The two draw
@@ -118,7 +119,7 @@ export function useTrainRuns({ light = false, enabled = true } = {}) {
 
 /* The history pool (handoff 2a "From history": the shipped pool that pages on scroll, Grouped /
    All, search). Grouped pages by TASK through /api/train/recent-tasks (issue #56); All pages
-   single pictures through /api/next/library. `loadMore` is what a sentinel calls. */
+   single pictures through /api/library. `loadMore` is what a sentinel calls. */
 export function useHistoryPool({ mode = "all", q = "" } = {}) {
   const [items, setItems] = useState([]);
   const cursor = useRef(null);
@@ -155,7 +156,7 @@ export function useHistoryPool({ mode = "all", q = "" } = {}) {
       });
     } else {
       const next = page.current + 1;
-      apiGet("/api/next/library", { page: next, page_size: 60, media: "image", sort: "newest", q })
+      apiGet(LIBRARY, { page: next, page_size: 60, media: "image", sort: "newest", q })
         .then((d) => {
           if (my !== gen.current) return;
           busy.current = false;

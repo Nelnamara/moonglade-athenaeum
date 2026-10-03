@@ -12,6 +12,7 @@ import { lightboxCount, taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
 import "../styles/lightbox-mobile.css";
 import "../styles/curation-mobile.css";
 import "../styles/phone-q.css";
+import { detail } from "../apiRoutes.js";
 
 /* Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
    moonglade_suite/). The mobile pass of the desktop Lightbox.jsx -- Details'
@@ -42,7 +43,7 @@ import "../styles/phone-q.css";
         already read): media_id, thumb, w, h, rating, model, date, prompt,
         is_video -- drives every bit of chrome (index, Stars, meta row, hero,
         filmstrip).
-     2. A deliberately LAZY fetch of /api/next/detail/<mid>, only made once the
+     2. A deliberately LAZY fetch of /api/detail/<mid>, only made once the
         prompt slab is actually opened, cached in a plain Map ref (never React
         state) -- and only for NEGATIVE/LORAS, matching the design file's own
         expanded-slab fields exactly (Media ID is it.media_id, already in
@@ -226,12 +227,12 @@ export default function LightboxMobile({
   }, [slideOn, index, step]);
 
   // The prompt slab's NEGATIVE/LORAS live only on the full detail row
-  // (/api/next/detail) -- fetched lazily on first open, cached per media_id.
+  // (/api/detail) -- fetched lazily on first open, cached per media_id.
   // A failed fetch caches {} so the slab settles on em dashes, not a retry loop.
   useEffect(() => {
     if (!mid || !promptOpen || detailCache.current.has(mid)) return;
     let dead = false;
-    apiGet("/api/next/detail/" + encodeURIComponent(mid))
+    apiGet(detail(mid))
       .then((d) => {
         detailCache.current.set(mid, (d && d.row) || {});
         if (!dead) bumpDetail((n) => n + 1);

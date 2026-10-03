@@ -102,7 +102,7 @@ describe("remixImageInto", () => {
   test("reads the record, the model version and the task, then fills the composer; it sends nothing", async () => {
     const { g, calls } = fakeComposer();
     const api = fakeApi({
-      "/api/next/detail/": { row: ROW, run: RUN },
+      "/api/detail/": { row: ROW, run: RUN },
       "/api/model-version?version_id=ver-7": { model_id: "base-1" },
       "/api/task-params/": { loras: [{ model_id: "l1", version_id: "lv1", weight: 0.7 }], unresolved: 0 },
     });
@@ -111,7 +111,7 @@ describe("remixImageInto", () => {
     assert.equal(out.source, "template");
     assert.deepEqual(out.notes, []);
     assert.deepEqual(api.seen, [
-      "/api/next/detail/700", "/api/model-version?version_id=ver-7", "/api/task-params/9001"]);
+      "/api/detail/700", "/api/model-version?version_id=ver-7", "/api/task-params/9001"]);
     const names = calls.map((c) => c[0]);
     assert.deepEqual(names, ["applyModelRow", "pickVersion", "set", "addLora", "set"]);
     assert.deepEqual(calls[1], ["pickVersion", "ver-7"]);               // the exact version that rendered
@@ -121,7 +121,7 @@ describe("remixImageInto", () => {
 
   test("a model that cannot be restored is DISCLOSED and the LoRAs are not wired onto another model", async () => {
     const { g, calls } = fakeComposer();
-    const api = fakeApi({ "/api/next/detail/": { row: ROW, run: null }, "/api/model-version": { error: "gone" } });
+    const api = fakeApi({ "/api/detail/": { row: ROW, run: null }, "/api/model-version": { error: "gone" } });
     const out = await remixImageInto(g, "700", {}, { apiGet: api.apiGet });
     assert.equal(out.ok, true);
     assert.ok(out.notes.includes("model could not be restored — pick it manually"));
@@ -132,7 +132,7 @@ describe("remixImageInto", () => {
 
   test("an unreadable record touches nothing and says ok:false", async () => {
     const { g, calls } = fakeComposer();
-    const api = fakeApi({ "/api/next/detail/": { error: "not found" } });
+    const api = fakeApi({ "/api/detail/": { error: "not found" } });
     const out = await remixImageInto(g, "700", {}, { apiGet: api.apiGet });
     assert.equal(out.ok, false);
     assert.equal(out.error, "not found");
@@ -144,8 +144,8 @@ describe("remixImageInto", () => {
     let release;
     const gate = new Promise((r) => { release = r; });
     const api = fakeApi({
-      "/api/next/detail/701": async () => { await gate; return { row: { ...ROW, media_id: "701", prompt_full: "first" }, run: null }; },
-      "/api/next/detail/702": { row: { ...ROW, media_id: "702", prompt_full: "second" }, run: null },
+      "/api/detail/701": async () => { await gate; return { row: { ...ROW, media_id: "701", prompt_full: "first" }, run: null }; },
+      "/api/detail/702": { row: { ...ROW, media_id: "702", prompt_full: "second" }, run: null },
       "/api/model-version": { model_id: "base-1" },
       "/api/task-params/": { loras: [] },
     });
@@ -182,12 +182,12 @@ describe("Send to Video and a video's Remix", () => {
     const seen = [];
     const drawer = { prefill: (o) => seen.push(["prefill", o]), setReuse: (v) => seen.push(["setReuse", v]) };
     const api = fakeApi({
-      "/api/next/detail/": { row: { media_id: "800", task_id: "9100", is_video: "1", prompt_full: "slow push in" } },
+      "/api/detail/": { row: { media_id: "800", task_id: "9100", is_video: "1", prompt_full: "slow push in" } },
       "/api/video-task-params/9100": { kind: "i2v", video_model: "v4" },
     });
     const out = await remixVideoInto(drawer, "800", { apiGet: api.apiGet });
     assert.equal(out.ok, true);
-    assert.deepEqual(api.seen, ["/api/next/detail/800", "/api/video-task-params/9100"]);
+    assert.deepEqual(api.seen, ["/api/detail/800", "/api/video-task-params/9100"]);
     assert.equal(seen[0][0], "prefill");
     assert.equal(seen[1][0], "setReuse");
     assert.equal(seen[1][1].tag, "#9100");
@@ -196,7 +196,7 @@ describe("Send to Video and a video's Remix", () => {
   test("an unreadable clip touches nothing", async () => {
     const seen = [];
     const drawer = { prefill: (o) => seen.push(o), setReuse: (v) => seen.push(v) };
-    const out = await remixVideoInto(drawer, "800", { apiGet: fakeApi({ "/api/next/detail/": { error: "x" } }).apiGet });
+    const out = await remixVideoInto(drawer, "800", { apiGet: fakeApi({ "/api/detail/": { error: "x" } }).apiGet });
     assert.equal(out.ok, false);
     assert.deepEqual(seen, []);
   });
@@ -217,15 +217,19 @@ describe("nothing that spends is reachable from the handoff", () => {
   test("gen/phoneRemix.js imports only reads and pure cores, and calls nothing that sends", () => {
     const text = codeOnly(read("gen/phoneRemix.js"));
     const imports = [...text.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
-    assert.deepEqual(imports.sort(), ["../api.js", "./genCore.js", "./templateCore.js", "./videoRemixCore.js"].sort());
+    assert.deepEqual(imports.sort(),
+                     ["../api.js", "../apiRoutes.js", "./genCore.js", "./templateCore.js", "./videoRemixCore.js"].sort());
     // and of api.js it takes the GET only
     assert.ok(/import \{ apiGet as defaultApiGet \} from "\.\.\/api\.js";/.test(text));
     for (const rx of FORBIDDEN_IMPORTS) assert.ok(!rx.test(text), "imports " + rx);
     for (const rx of FORBIDDEN_CALLS) assert.ok(!rx.test(text), "calls " + rx);
-    // every route it reads is a GET the desktop remix reads too
+    // every route it reads is a GET the desktop remix reads too: the details record through
+    // apiRoutes.js (a path builder, no transport), the rest written out
+    assert.ok(/import \{ detail \} from "\.\.\/apiRoutes\.js";/.test(text));
+    assert.match(text, /\bget\(detail\(mediaId\)\)/);
     const routes = [...text.matchAll(/get\("(\/api\/[^"]+)"/g)].map((m) => m[1]);
     assert.deepEqual([...new Set(routes)].sort(), [
-      "/api/model-version?version_id=", "/api/next/detail/", "/api/task-params/", "/api/video-task-params/"].sort());
+      "/api/model-version?version_id=", "/api/task-params/", "/api/video-task-params/"].sort());
   });
 
   test("the pure cores it leans on have no transport at all", () => {
