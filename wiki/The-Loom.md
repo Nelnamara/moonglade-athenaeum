@@ -340,8 +340,10 @@ A re-render that fails leaves the shot on its ★ take and says **Last render di
 card. A shot rendered before takes existed shows its clip as take 1; its earlier re-rolls still
 count in *spent* but aren't listed as takes. If the same storyboard is open in two tabs and both
 save, the one that saved second is told **This storyboard changed in another tab. Your takes
-were kept; other edits from this tab were replaced.**, naming any shot whose ★ or take numbers
-moved.
+were kept; other edits from this tab were replaced.**, then says what that undid here: a split
+made in this tab (**Your split of A·01 was undone because the board changed in another tab.**), a
+shot or a whole act the other tab deleted (it stays deleted), a shot kept for its new take in
+another act because its own act was deleted, and any shot whose ★ or take numbers moved.
 
 ### When the server didn't confirm a render
 

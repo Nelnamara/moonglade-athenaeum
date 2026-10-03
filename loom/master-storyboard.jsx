@@ -62,7 +62,7 @@ import {
 import {
   landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
-  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
+  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards, mergeNotice,
   splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
   // Stage A2 (P1/P2, the page's section A card): the takes strip, the take list and the stale
   // anchor box read these views; ★ select, delete, reuse, Re-anchor and Keep are these reducers.
@@ -7437,10 +7437,11 @@ function useProjectStore(setSelShot) {
   // stale board with the SAME conflict object, and only one of them may merge and re-save.
   const mergesRef = useRef(new WeakMap());
 
-  const namesOf = (p, ids) => {
+  // Card id -> its code on a board (the conflict toast names a dropped card as this tab knew it).
+  const codesOf = (p) => {
     const codes = {};
-    (p ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
-    return ids.map((id) => codes[id]).filter(Boolean);
+    (isBoard(p) ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
+    return codes;
   };
   // A save answered 409: another tab saved this board first. Merge (the other tab's board
   // wins every field except takes and in-flight markers), show it, save it on the rev the
@@ -7464,14 +7465,15 @@ function useProjectStore(setSelShot) {
     // stale split half) from footage that landed here (red team 2026-10-01).
     let base = null;
     try { base = lastSavedRef.current[key] ? JSON.parse(lastSavedRef.current[key]) : null; } catch (e) { base = null; }
-    const { project: merged, changed } = mergeBoards(local, remote,
+    const out = mergeBoards(local, remote,
       { resolvedSubmits: Array.from(resolvedRef.current), base: isBoard(base) ? base : null });
+    const merged = out.project;
     if (open) setProject(merged);
     if (typeof window !== "undefined" && window.Toast) {
-      const codes = namesOf(merged, changed.map((x) => x.id));
+      // GitHub #59: say what the merge undid here (a split, a shot or act deleted in the other
+      // tab) and where a kept shot went, not only that the takes were kept.
       window.Toast.show({ kind: "err", title: "This storyboard changed in another tab",
-        msg: "Your takes were kept; other edits from this tab were replaced."
-          + (codes.length ? " ★ or take numbers changed on " + codes.join(", ") + "." : "") });
+        msg: mergeNotice(out, { local: codesOf(local), merged: codesOf(merged) }) });
     }
     const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
     if (again.ok) return { conflict: true, remote, merged, saved: true };

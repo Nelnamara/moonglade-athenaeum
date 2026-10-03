@@ -363,15 +363,18 @@ describe("board storage: nothing writes on open; every board write is the compar
     assert.match(hookFn(CODE, "duplicateProject"), /const p = stripInFlight\(\{ \.\.\.cur, name:/);
     assert.match(hookFn(CODE, "_adoptBackup"), /await createBoard\(stripInFlight\(d\.project\)\);/);
   });
-  test("a save conflict merges (takes kept), shows it, and names the shots whose ★ or take numbers moved (F6)", () => {
+  test("a save conflict merges (takes kept), shows it, and says what moved and what was undone (F6, #59)", () => {
     const m = hookFn(CODE, "mergeAfterConflict");
-    assert.match(m, /mergeBoards\(local, remote,\s*\{ resolvedSubmits: Array\.from\(resolvedRef\.current\), base: isBoard\(base\) \? base : null \}\)/);
+    assert.match(m, /const out = mergeBoards\(local, remote,\s*\{ resolvedSubmits: Array\.from\(resolvedRef\.current\), base: isBoard\(base\) \? base : null \}\);\s*const merged = out\.project;/);
     assert.match(m, /base = lastSavedRef\.current\[key\] \? JSON\.parse\(lastSavedRef\.current\[key\]\) : null/,
       "the merge is told what this tab last synced (red team 2026-10-01)");
     assert.match(m, /queueRef\.current\.save\(key, JSON\.stringify\(merged\), \{ baseRev: res\.rev \}\)/);
     assert.match(m, /This storyboard changed in another tab/);
-    assert.match(m, /Your takes were kept; other edits from this tab were replaced\./);
-    assert.match(m, /changed on " \+ codes\.join/);
+    // The text is mergeNotice's (loom-board-merge.test.js pins it: "Your takes were kept; ..." first,
+    // then a split undone, a shot or act deleted elsewhere, a shot kept in another act). A dropped
+    // card is named as THIS tab knew it, so the codes come from the local board as well as the merged one.
+    assert.match(m, /msg: mergeNotice\(out, \{ local: codesOf\(local\), merged: codesOf\(merged\) \}\)/);
+    assert.doesNotMatch(m, /Your takes were kept; other edits from this tab were replaced\./, "one home for the copy");
   });
 });
 
