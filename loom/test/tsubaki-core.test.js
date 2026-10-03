@@ -285,12 +285,32 @@ describe("T3a -- the bar sends the request PixAI's own site sends (2026-10-03 ca
     assert.equal(p.negative, "");
     assert.deepEqual(p.loras, []);
   });
-  test("a source off the model's own size rule is put on it (16 px steps, inside its range)", () => {
-    assert.deepEqual(Object.values((({ width, height }) => ({ width, height }))(bar({ media_id: "1", w: 1000, h: 600 }))), [1000, 600].map((x) => Math.round(x / 16) * 16));
-    const big = bar({ media_id: "2", w: 4096, h: 2304 });
-    assert.ok(big.width <= T3.size_rule.hi && big.height <= T3.size_rule.hi && big.width % 16 === 0 && big.height % 16 === 0, JSON.stringify(big));
+  /* Review of 2026-10-03: the source's own size is used ONLY when both sides are at most 2048 (the
+     logged-in site's Tsubaki.3 model-config, PROBE_2026-09-26_site) AND its area is within the tier's
+     default area (PixAI's largest presets are about 2 MP). Anything bigger -- an upscale, a 4K
+     picture -- goes back to Auto, the size the bar sent before. */
+  const auto = (img) => buildPayload({ ...tsubakiEditState({ model: T3, image: img, prompt: "make it night",
+    mode: "pro", tier: "XL", member: true }), customW: "", customH: "" });
+  const wh = (p) => [p.width, p.height];
+  const XL_AREA = XL.default[0] * XL.default[1];
+  test("a small source keeps its own size, put on the model's 16 px steps", () => {
+    assert.deepEqual(wh(bar({ media_id: "1", w: 1000, h: 600 })), [1008, 608]);
+    assert.deepEqual(wh(bar({ media_id: "5", w: 1216, h: 832 })), [1216, 832]);
     const small = bar({ media_id: "3", w: 300, h: 200 });
     assert.ok(small.width >= T3.size_rule.lo && small.height >= T3.size_rule.lo, JSON.stringify(small));
+  });
+  for (const [w, h] of [[2560, 2560], [4096, 2304], [2048, 3072], [2048, 1152]]) {
+    test("a " + w + " x " + h + " source goes back to Auto, never past 2048 a side or the tier's area", () => {
+      const img = { media_id: "9", w, h };
+      const p = bar(img);
+      assert.deepEqual(wh(p), wh(auto(img)));
+      assert.ok(p.width <= 2048 && p.height <= 2048, JSON.stringify(wh(p)));
+      assert.ok(p.width * p.height <= XL_AREA * 1.02, JSON.stringify(wh(p)));
+    });
+  }
+  test("the edges: 2048 a side and the tier's own area are still the source's size", () => {
+    assert.deepEqual(wh(bar({ media_id: "6", w: 2048, h: 976 })), [2048, 976]);
+    assert.deepEqual(wh(bar({ media_id: "7", w: 1104, h: 1824 })), [1104, 1824]);
   });
 });
 

@@ -19,7 +19,7 @@
 import {
   accountSizeRule, autoActive, autoDims, contextMax, contextModel, creativityModel, deadRefs,
   effectiveCreativity, effectiveTier, onContextSide, profileLocked, profileRows, ratioIndexOf,
-  sizeTiers, tierDims,
+  sizeTiers, sourceSizeFits, tierDims,
 } from "./tsubakiCore.js";
 import { paletteForPayload } from "./colorPaletteCore.js";
 import { recipeGate } from "../recipes/recipesCore.js";
@@ -539,12 +539,15 @@ export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
   /* THE SIZE IS THE SOURCE PICTURE'S OWN (the owner's walk, 2026-10-03): PixAI's own Smart
      Reference submit sends the picture's width and height, not a size-tier area. It rides the
      dock's own custom-size road, so a source off the model's rule (its 16 px step, inside its
-     range) is put on it exactly as a typed W x H is; an unknown size falls back to Auto. */
+     range) is put on it exactly as a typed W x H is -- but only while the site itself would send
+     that size (tsubakiCore.sourceSizeFits: at most 2048 a side, within the tier's default area;
+     the 2026-10-03 review). A bigger source, or one of unknown size, goes back to Auto. */
   const w = Math.round(Number(image && image.w) || 0), h = Math.round(Number(image && image.h) || 0);
+  const own = sourceSizeFits(model, effectiveTier(model, tier || "", member === true ? true : member === false ? false : null), { w, h });
   return {
     ...GEN_DEFAULTS, model, member: member === true ? true : member === false ? false : null,
     inputs: "context", ctxWarned: true, auto: true,
-    customW: w > 0 && h > 0 ? String(w) : "", customH: w > 0 && h > 0 ? String(h) : "",
+    customW: own ? String(w) : "", customH: own ? String(h) : "",
     ctx: image && image.media_id ? [{ media_id: String(image.media_id), thumb: image.thumb || "",
       w: Number(image.w) || 0, h: Number(image.h) || 0 }] : [],
     prompt: String(prompt || ""), mode: mode || "auto", tier: tier || "",

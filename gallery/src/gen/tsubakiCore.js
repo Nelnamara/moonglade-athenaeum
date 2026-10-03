@@ -166,6 +166,20 @@ export function autoDims(m, tier, img) {
   return w >= h ? { width: long, height: short, held } : { width: short, height: long, held };
 }
 
+/* The Lightbox edit bar sends the source picture's own size, as PixAI's own Smart Reference submit
+   does (2026-10-03 capture) -- but only a size the site itself would send: both sides at most
+   SOURCE_MAX_SIDE (the logged-in site's Tsubaki.3 model-config, 512-2048 a side;
+   PROBE_2026-09-26_site) AND an area within the tier's own default preset (PixAI's largest presets
+   are about 2 MP). An upscale or a 4K picture is neither, and goes back to Auto (autoDims). */
+export const SOURCE_MAX_SIDE = 2048;
+export function sourceSizeFits(m, tier, img) {
+  const w = Number(img && img.w), h = Number(img && img.h);
+  const t = tier || null;
+  const [dw, dh] = (t && t.default) || [0, 0];
+  if (!(w > 0 && h > 0) || !(dw > 0 && dh > 0)) return false;
+  return w <= SOURCE_MAX_SIDE && h <= SOURCE_MAX_SIDE && w * h <= dw * dh;
+}
+
 /* ---- the LoRAs | Context images switch (decision 1) -------------------------------------- */
 
 /* The Context side is live only on a version whose meta says a context image is taken
