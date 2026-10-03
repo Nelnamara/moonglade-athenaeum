@@ -75,12 +75,16 @@ never deletes anything.
 prompt started as "Use @image1 …". Nothing is spent until you press Generate. The Edit card is
 unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
 
-**The Lightbox edit bar.** Every still picture shows **Describe your edits…**
-over the foot of the Lightbox (on a phone, a bar under the picture). Type the change and press
-↵: it sends a Tsubaki.3 run with that picture as @image1, your words as the prompt, the dock's
-profile and an Auto size — no LoRAs, recipes, palette or negative. The price shows in the bar
-before you send, and the run joins the dock's reel and the Activity tray while the Lightbox stays
-open. **E** jumps to the bar; **Esc** leaves it (a second Esc closes the Lightbox).
+**The Lightbox edit bar.** On a still picture, the Lightbox's **✎ Edit** (or **E**) opens a
+**Describe your edits…** bar under the picture — the picture moves up to make room, and the bar
+never covers it. Type the change and press ↵: it sends a Tsubaki.3 run with that picture as
+@image1, your words as the prompt, the dock's profile and an Auto size — no LoRAs, recipes,
+palette or negative. The price shows in the bar before you send, and the run joins the dock's
+reel and the Activity tray while the Lightbox stays open. **✎ Edit** again or **Esc** closes the
+bar (a second Esc closes the Lightbox). **More options in the Edit drawer ↗** at the bar's end
+opens the Edit tab instead, which is also what ✎ Edit does on a video. On a phone the same ✎
+Edit opens the bar right under the picture; the phone has no Edit drawer, so its bar has no
+More options link.
 
 ### Colour palette
 

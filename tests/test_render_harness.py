@@ -7709,3 +7709,87 @@ def test_the_search_fields_dropdown_carries_the_operators_and_the_tray_does_not(
     page.click(".mgl-filters")
     page.wait_for_selector(".mgl-tray")
     assert page.locator(".mgl-tray .mgcu-opchips, .mgl-tray :text-is('Operators')").count() == 0
+
+
+def test_the_lightbox_edit_bar_opens_below_the_picture_from_edit(
+        phone_q_server, render_browser, monkeypatch):
+    """Walk item 4 (desktop): the Tsubaki edit bar is hidden until the Lightbox's own ✎ Edit opens it,
+    then sits BELOW the picture -- the stage gives up the room, the bar never covers the image -- with
+    the field focused. Esc from the field closes the bar and only the bar; ✎ toggles it; its "More
+    options in the Edit drawer ↗" does what ✎ Edit used to do (the dock's Edit tab). A clip's ✎ Edit
+    still goes straight to the drawer. Nothing is sent at any point."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, touch=False, viewport=DESKTOP)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/500.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero img")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0, "hidden until ✎ Edit asks for it"
+        stage0 = _q_box(page, ".lbx-stage")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb.below .mgteb-input")
+        _settle(page)
+        hero, bar, stage = _q_box(page, ".lbx-hero"), _q_box(page, ".mgteb"), _q_box(page, ".lbx-stage")
+        assert bar["t"] >= stage["b"] - 0.5 and bar["t"] >= hero["b"], (hero, bar, stage)
+        assert stage["h"] < stage0["h"], "the stage gave up the room: %r -> %r" % (stage0, stage)
+        assert bar["b"] <= DESKTOP["height"], bar
+        assert page.evaluate("document.activeElement.classList.contains('mgteb-input')")
+        assert page.locator(".mgteb-more").inner_text() == "More options in the Edit drawer ↗"
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".mgteb", state="detached")
+        assert page.locator(".lbx").count() == 1, "Esc closed the bar, not the Lightbox"
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb", state="detached")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.click(".mgteb-more")
+        page.wait_for_selector(".lbx", state="detached")
+        page.wait_for_selector(".mgdock")
+        # a clip: ✎ Edit is the drawer, as it always was
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        page.locator('.mgg-card:has(img[src*="/thumbs/506.jpg"])').first.click()
+        page.wait_for_selector(".lbx .lbx-hero video")
+        page.click(".lbx-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".lbx", state="detached")
+        assert page.locator(".mgteb").count() == 0
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_the_phone_lightbox_edit_pill_opens_under_the_picture_from_edit(
+        phone_q_server, render_browser, monkeypatch):
+    """Walk item 4 (phone): the same trigger. ✎ Edit opens the pill first in the lower panel, right
+    under the picture, and ✎ again closes it; a clip's ✎ Edit keeps its note and opens nothing.
+    The phone has no Edit drawer, so its pill has no More options link. Nothing is sent."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-root .lbm-hero img")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0, "hidden until ✎ Edit asks for it"
+        stage0 = _q_box(page, ".lbm-stage")
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb.phone .mgteb-input")
+        _settle(page)
+        hero, bar, stage = _q_box(page, ".lbm-hero"), _q_box(page, ".mgteb"), _q_box(page, ".lbm-stage")
+        assert bar["t"] >= stage["b"] - 0.5 and bar["t"] >= hero["b"], (hero, bar, stage)
+        assert stage["h"] < stage0["h"], "the stage gave up the room: %r -> %r" % (stage0, stage)
+        assert bar["b"] <= PHONE["height"] and bar["h"] >= 44, bar
+        assert page.locator(".mgteb-more").count() == 0
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        page.wait_for_selector(".mgteb", state="detached")
+        page.locator(".lbm-thumb").nth(6).click()
+        page.wait_for_selector(".lbm-hero video")
+        page.click(".lbm-chip:has-text('✎ Edit')")
+        _settle(page)
+        assert page.locator(".mgteb").count() == 0
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
