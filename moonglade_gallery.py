@@ -12645,6 +12645,93 @@ def _hunt_by_name(fetch_page, q, size):
     return {"results": keep, "has_more": False, "next_cursor": "", "hunted_pages": pages}
 
 
+# ---- The live mirror: when to reconnect, and when to catch up (#60) -------------------------
+# PROBE_2026-10-02 (bridge-live-inbox-studio, task 2): PixAI neither idles sockets out nor caps
+# their life. Drops are PixAI-side events that end several connections at once, cleanly
+# (`complete`) or with no close frame at all, whatever their ping state -- so no keep-alive can
+# prevent them. What the app controls is the gap after each one: how long it waits to reconnect,
+# and whether it reads back what finished while it was gone. Both decisions are pure functions
+# here, driven as tables by tests/test_watch.py.
+
+# A connection that subscribed and then lived at least one heartbeat (core._WS_HEARTBEAT) has
+# proved itself; when it ends, the cause is PixAI's, not ours, and the reconnect comes at once.
+WATCH_HEALTHY_S = 60
+# "At once" in human terms. 1 s, not 0, so that no bug anywhere else can ever spin this loop.
+WATCH_RECONNECT_WAIT = 1
+# The ladder for everything else (a refused handshake, a drop seconds after subscribing).
+WATCH_BACKOFF_FIRST = 5
+WATCH_BACKOFF_MAX = 60
+# The periodic backstop sweeps every this many seconds, and skips while a SUCCESSFUL sweep is
+# younger than it.
+WATCH_CATCHUP_MIN_GAP = 300
+# No two sweeps start closer than this. A connect-triggered sweep inside it WAITS (it is never
+# skipped: its gap is new); a periodic one inside it is skipped (it is only a backstop).
+WATCH_SWEEP_FLOOR = 60
+# `subscribed` fires when the subscribe frame is SENT. PixAI acknowledges nothing, so when the
+# subscription actually starts delivering is unobservable; the sweep waits this long after the
+# send before reading. A task finishing in that instant is delivered by the socket once the
+# subscription is live, or found by this read, or -- if the subscription took longer than this to
+# go live -- by the next periodic sweep. Unlikely, never silent for longer than one backstop.
+WATCH_SUBSCRIBE_SETTLE = 2
+# A task whose collect failed is left alone this long before a sweep tries it again.
+WATCH_COLLECT_RETRY_S = 300
+
+
+def watch_reconnect_plan(backoff, lived_s):
+    """How long to wait before reconnecting, and the backoff to carry: `(wait_s, next_backoff)`.
+
+    `lived_s` is how long the connection lived after it subscribed, or None if it never did.
+    A healthy connection (lived >= WATCH_HEALTHY_S) reconnects after WATCH_RECONNECT_WAIT and
+    resets the ladder, however it ended -- a clean `complete`, a stale watchdog, or a drop with no
+    close frame. Everything else waits the current step and climbs 5/15/45/60. Healthy reconnects
+    are therefore at least a minute apart by construction, which is the storm bound."""
+    if lived_s is not None and lived_s >= WATCH_HEALTHY_S:
+        return WATCH_RECONNECT_WAIT, WATCH_BACKOFF_FIRST
+    return backoff, min(backoff * 3, WATCH_BACKOFF_MAX)
+
+
+def catchup_plan(reason, now, last_started, last_ok, not_before=0.0):
+    """Whether the catch-up worker may sweep now: ("run", 0), ("wait", seconds) or ("skip", 0).
+
+    `last_started` is when the previous sweep started (None: never), `last_ok` when the last
+    SUCCESSFUL one started (a failed read is not coverage), `not_before` the settle deadline the
+    latest subscribe set. All on one monotonic clock.
+
+    A connect-triggered sweep ("startup", "reconnect") is never skipped -- its gap is new, and
+    skipping it is how a task that finished during a drop used to wait five minutes for the next
+    periodic sweep. It waits for the settle deadline and for WATCH_SWEEP_FLOOR after the previous
+    sweep, then reads. The periodic backstop skips while a successful sweep is younger than
+    WATCH_CATCHUP_MIN_GAP, or any attempt younger than the floor."""
+    if reason == "periodic":
+        if last_ok is not None and now - last_ok < WATCH_CATCHUP_MIN_GAP:
+            return ("skip", 0)
+        if last_started is not None and now - last_started < WATCH_SWEEP_FLOOR:
+            return ("skip", 0)
+        return ("run", 0)
+    wait = (not_before or 0.0) - now
+    if last_started is not None:
+        wait = max(wait, last_started + WATCH_SWEEP_FLOOR - now)
+    return ("wait", wait) if wait > 0 else ("run", 0)
+
+
+def watch_close_info(exc, redact=None):
+    """How a live connection ended, from the exception that ended it, for the status record and
+    the log. A websockets ConnectionClosed carries the Close frame it received (`rcvd`) and sent
+    (`sent`): none either way is an abrupt drop ("no close frame received or sent"), today's usual
+    kind. Anything else is an error before or around the socket. `redact` is create_app's
+    host-path redactor, applied to the close reason. Never raises."""
+    try:
+        if hasattr(exc, "rcvd") and hasattr(exc, "sent"):
+            frame = exc.rcvd or exc.sent
+            if frame is None:
+                return {"kind": "abrupt", "code": None, "reason": ""}
+            return {"kind": "closed", "code": getattr(frame, "code", None),
+                    "reason": (redact or str)(str(getattr(frame, "reason", "") or ""))[:80]}
+    except Exception:                              # noqa: BLE001
+        pass
+    return {"kind": "error", "type": type(exc).__name__}
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -13628,7 +13715,12 @@ def create_app(out_dir: Path):
                       # when the most recent one happened. Existing readers of this dict
                       # (the Panel's watch-status UI, tests) only read the fields they
                       # already know about, so this is safe to add without touching them.
-                      "stale_reconnects": 0, "last_stale_reconnect_at": None}
+                      "stale_reconnects": 0, "last_stale_reconnect_at": None,
+                      # #60: how the last connection ended and how long it lived, so the next
+                      # drop investigation is a read of /api/watch/status, not a probe.
+                      # `last_close` is watch_close_info's dict; the Panel does not draw these.
+                      "connected_at": None, "last_close_at": None, "last_close": None,
+                      "last_connection_s": None, "reconnects": 0}
 
     # ---- Single-flight collect (per task id, in-process) -------------------------
     # THREE uncoordinated collectors live in this process: the always-on live-mirror
@@ -13805,11 +13897,13 @@ def create_app(out_dir: Path):
                 _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
             _log.warning("live mirror: failed to mirror task %s: %s: %s",
                          tid, type(e).__name__, _redact_host_paths(str(e))[:200])
-            return
+            return False
         # Outside the except above ON PURPOSE: _log_mirrored_media swallows its own
         # failures, and keeping it out of that handler makes it structurally impossible for
         # a logging problem to be reported as a mirror error on the watch-status line.
         _log_mirrored_media(tid, got)
+        # Whether it collected: the catch-up sweep marks a task backed only on a True (#60).
+        return True
 
     # The closures above are unreachable from outside create_app; the test suite
     # drives the watcher-mirror path through this seam (conftest disables the real
@@ -14002,33 +14096,52 @@ def create_app(out_dir: Path):
     # every reconnect, and a history walk on a flapping connection would hammer PixAI for no
     # benefit. Anything older than this page is what --sync / --update are for.
     WATCH_CATCHUP_TASKS = 30
-    # Floor between catch-ups. A reconnect storm (flapping wifi, PixAI restarting) must not
-    # become a request storm, so extra reconnects inside this window skip the sweep entirely.
-    WATCH_CATCHUP_MIN_GAP = 300
+    # THE ONE SWEEP WORKER (#60). Every trigger -- a subscribe (the first one is the startup
+    # sweep), the periodic backstop -- only ASKS, through _request_catchup; one worker thread at
+    # a time decides with catchup_plan and sweeps. phase: idle -> pending (a worker exists and
+    # is waiting) -> running (it is reading or collecting). `_catchup_lock` guards ONLY these
+    # flags: it is never held across a sleep or a network call, because _request_catchup runs on
+    # the websocket's own event loop and must never block it. `started` / `ok` are the worker
+    # clock's start times of the last sweep and of the last SUCCESSFUL one (a failed read is not
+    # coverage); `not_before` is the settle deadline the latest subscribe set.
     _catchup_lock = threading.Lock()
-    _catchup_at = {"t": 0.0}
+    _catchup_state = {"phase": "idle", "reason": None, "rerun": False, "not_before": 0.0,
+                      "started": None, "ok": None}
+    # task id -> worker-clock time its collect last failed; skipped for WATCH_COLLECT_RETRY_S.
+    _catchup_failed = {}
+
+    def _spawn_daemon(fn):
+        threading.Thread(target=fn, daemon=True).start()
+
+    # The worker's clock, sleep and thread starter. Late-bound lambdas, so a patched
+    # time.sleep reaches them; a test swaps them for a fake clock and an inline spawn rather
+    # than patching time.monotonic, which asyncio.run reads. Exposed below.
+    _catchup_env = {"clock": lambda: time.monotonic(), "sleep": lambda s: time.sleep(s),
+                    "spawn": _spawn_daemon}
 
     def _watch_catchup(reason):
-        """Collect finished tasks the mirror never saw. Safe to call on every reconnect.
+        """THE SWEEP: collect finished tasks the mirror never saw. Returns whether its read
+        succeeded (the worker counts only a successful read as coverage).
 
         A push mirror is blind while disconnected, and reconnecting does not replay what it
         missed -- so without this, anything that completed during a drop is stranded until
         someone runs a manual sync. That is the gap; this closes it.
 
-        Bounded, rate-limited and idempotent by construction: one page of recent tasks, at most
-        one sweep per WATCH_CATCHUP_MIN_GAP, and a task is skipped unless the catalog is actually
-        missing its media. Collection goes through the SAME _watch_mirror the event path uses, so
-        its single-flight guard prevents a task being collected twice.
+        Bounded and idempotent by construction: one page of recent tasks, and a task is skipped
+        unless the catalog is actually missing its media. Collection goes through the SAME
+        _watch_mirror the event path uses, so its single-flight guard prevents a task being
+        collected twice. A task whose collect fails is left alone for WATCH_COLLECT_RETRY_S, and
+        a task joins _watch_backed only after a collect that worked.
 
-        Never raises -- a failed catch-up must not kill the watcher thread that called it."""
+        NOT rate-limited here any more (#60): when a sweep may run is catchup_plan's decision,
+        applied by _catchup_worker -- the only caller in the running app. This body is what the
+        mg_watch_catchup seam drives.
+
+        Never raises -- a failed catch-up must not kill the thread that called it."""
         import logging as _logging
         import time as _time
         import moonglade_backup as core
         _log = _logging.getLogger(__name__)
-        with _catchup_lock:
-            if _time.time() - _catchup_at["t"] < WATCH_CATCHUP_MIN_GAP:
-                return
-            _catchup_at["t"] = _time.time()
         try:
             session = core._make_session(None)
             conn = core.find_connection(
@@ -14042,6 +14155,10 @@ def create_app(out_dir: Path):
                 tid = str(node.get("id") or "")
                 if not tid or str(node.get("status") or "") not in core._GEN_DONE:
                     continue
+                failed_at = _catchup_failed.get(tid)
+                if failed_at is not None and \
+                        _catchup_env["clock"]() - failed_at < WATCH_COLLECT_RETRY_S:
+                    continue          # its collect failed moments ago; retried after the window
                 # Absent from the catalog is the ONLY trigger. A task whose media is already
                 # here needs nothing, and re-collecting it would be pure waste.
                 #
@@ -14072,7 +14189,7 @@ def create_app(out_dir: Path):
                 nodes[tid] = node
             if not missed:
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
-                return
+                return True
             _log.warning(
                 "live mirror: catch-up after %s -- %d finished task(s) are missing media "
                 "from the catalog, collecting now: %s",
@@ -14081,11 +14198,20 @@ def create_app(out_dir: Path):
                 # The Activity row this task never got, the socket having been down when it
                 # finished (see _website_job_seen). Before the mirror, and born done.
                 _website_job_seen(tid, "completed", nodes.get(tid), terminal=True)
-                _watch_mirror(tid)
+                if _watch_mirror(tid):
+                    # Backed only once collected: a late `completed` frame for it now starts
+                    # no second mirror thread. A failed one is NOT backed, so the event path
+                    # or a later sweep can still bring it in.
+                    _watch_backed.add(tid)
+                    _catchup_failed.pop(tid, None)
+                else:
+                    _catchup_failed[tid] = _catchup_env["clock"]()
                 _time.sleep(1.0)          # paced -- be polite to their servers
+            return True
         except Exception as e:
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
+            return False
 
     # Test seam (same rationale as mg_watch_mirror above): the self-heal sweep is a closure
     # only ever called from the watcher thread, which the suite disables (MOONGLADE_DISABLE_WATCH).
@@ -14093,24 +14219,105 @@ def create_app(out_dir: Path):
     # just grep the source for its guardrails.
     app.extensions["mg_watch_catchup"] = _watch_catchup
 
+    def _request_catchup(reason):
+        """Ask for a sweep. NON-BLOCKING: called from _watch_on_event on the websocket's own
+        event loop, so it takes the flag lock for a moment and at most starts the one worker.
+
+        A connect ("startup" for the first subscribe, "reconnect" after a drop) pushes the
+        settle deadline out to WATCH_SUBSCRIBE_SETTLE after now. If a worker is pending, the
+        request is absorbed -- that worker reads after this deadline, so after this subscribe --
+        and a connect upgrades a pending periodic sweep to a connect one (never skipped). If a
+        worker is running, a connect sets `rerun`: the gap it opened is read once more when the
+        current sweep finishes. A periodic ask while anything is pending or running is moot."""
+        env = _catchup_env
+        with _catchup_lock:
+            if reason != "periodic":
+                _catchup_state["not_before"] = max(_catchup_state["not_before"],
+                                                   env["clock"]() + WATCH_SUBSCRIBE_SETTLE)
+            phase = _catchup_state["phase"]
+            if phase == "running":
+                if reason != "periodic":
+                    _catchup_state["rerun"] = True
+                return
+            if phase == "pending":
+                if reason != "periodic":
+                    _catchup_state["reason"] = reason
+                return
+            _catchup_state.update(phase="pending", reason=reason)
+        try:
+            env["spawn"](_catchup_worker)
+        except Exception:                          # noqa: BLE001 -- a thread that never started
+            with _catchup_lock:                    # must not leave `pending` wedged forever
+                _catchup_state.update(phase="idle", reason=None)
+
+    def _catchup_worker():
+        """The one sweep worker -- see _catchup_state. Decides with the pure catchup_plan under
+        the flag lock, then sleeps or sweeps with the lock RELEASED.
+
+        It goes idle INSIDE the same locked block that decides it is finished: a request that
+        arrives after that block starts a new worker, and one that arrives before it sees
+        `running` and sets `rerun`, which that block reads. No gap in between can lose a
+        request. An unexpected crash still leaves the phase idle (the `finally`), so it can
+        never wedge every later request behind a worker that no longer exists."""
+        env = _catchup_env
+        finished = False
+        try:
+            while True:
+                with _catchup_lock:
+                    reason = _catchup_state["reason"]
+                    verdict, wait = catchup_plan(reason, env["clock"](),
+                                                 _catchup_state["started"], _catchup_state["ok"],
+                                                 _catchup_state["not_before"])
+                    if verdict == "skip":
+                        _catchup_state.update(phase="idle", reason=None, rerun=False)
+                        finished = True
+                        return
+                    if verdict == "run":
+                        started = env["clock"]()
+                        _catchup_state.update(phase="running", rerun=False, started=started)
+                if verdict == "wait":
+                    env["sleep"](wait)
+                    continue
+                ok = _watch_catchup(reason)
+                with _catchup_lock:
+                    if ok:
+                        _catchup_state["ok"] = started
+                    if _catchup_state["rerun"]:
+                        _catchup_state.update(phase="pending", reason="reconnect", rerun=False)
+                        continue
+                    _catchup_state.update(phase="idle", reason=None, rerun=False)
+                    finished = True
+                    return
+        finally:
+            if not finished:
+                with _catchup_lock:
+                    _catchup_state.update(phase="idle", reason=None, rerun=False)
+
+    # Test seams for the worker (#60): the request entry point, its state, and its clock /
+    # sleep / spawn, so a test drives the coalescing on a fake clock with an inline worker.
+    app.extensions["mg_watch_request_catchup"] = _request_catchup
+    app.extensions["mg_watch_catchup_state"] = _catchup_state
+    app.extensions["mg_watch_catchup_env"] = _catchup_env
+
     def _periodic_catchup():
-        """Backstop for _watch_catchup's other two triggers (startup, reconnect), both of
-        which fire off a WS lifecycle event -- so a connection that stays nominally
-        "subscribed" for a long stretch never gets a fresh sweep. Found live: PixAI's
-        personalEvents push simply did not fire for an app-submitted generation (a
-        website-submitted one, same session, did) -- no error, no disconnect, nothing to
-        react to, so reconnect-triggered catch-up alone left it undiscovered. This loop
-        just calls the same rate-limited, bounded _watch_catchup on a fixed clock, so
-        discovery never depends entirely on the socket's own reconnect cadence."""
+        """Backstop for the connect-triggered sweeps, which fire off a WS lifecycle event --
+        so a connection that stays nominally "subscribed" for a long stretch never gets a fresh
+        sweep. Found live: PixAI's personalEvents push simply did not fire for an
+        app-submitted generation (a website-submitted one, same session, did) -- no error, no
+        disconnect, nothing to react to, so reconnect-triggered catch-up alone left it
+        undiscovered. This loop asks the same worker on a fixed clock, so discovery never
+        depends entirely on the socket's own reconnect cadence."""
         import time as _time
         while True:
             _time.sleep(WATCH_CATCHUP_MIN_GAP)
-            _watch_catchup("periodic")
+            _request_catchup("periodic")
 
     # Task ids already mirrored this process's lifetime (a 'completed' event can repeat, and
     # a reconnect can replay one). Process-scoped, not per-connection: it lived inside
     # _watch_loop before 2026-09-07 and meant exactly this then too.
     _watch_backed = set()
+    # Test seam (#60): the sweep adds a task here only after a collect that worked.
+    app.extensions["mg_watch_backed"] = _watch_backed
 
     def _watch_on_event(ev):
         """Everything the live mirror does with ONE frame off the socket.
@@ -14132,13 +14339,17 @@ def create_app(out_dir: Path):
             with _watch_lock:
                 _watch_status["connected"] = True
                 _watch_status["last_error"] = None
+                _watch_status["connected_at"] = _time.time()
+                after_a_drop = _watch_status["last_close_at"] is not None
             _log.info("live mirror: connected and subscribed")
-            # Every connect covers a window we were blind for -- the gap since the
-            # last one. Rate-limited inside, so a flapping socket cannot turn this
-            # into a request storm, and threaded so it never blocks this callback
-            # (which is running on the WebSocket's own event loop).
-            threading.Thread(target=_watch_catchup, args=("reconnect",),
-                             daemon=True).start()
+            # Every connect covers a window we were blind for: the gap since the last
+            # connection ended, or -- on the first one -- the whole time the app was closed
+            # (this IS the startup sweep; it no longer has a thread of its own). "Subscribed"
+            # means the subscribe frame was SENT; PixAI acknowledges nothing, so the sweep
+            # waits WATCH_SUBSCRIBE_SETTLE before it reads (see that constant for what is and
+            # is not covered). Never skipped, never blocking: _request_catchup only sets a
+            # flag or starts the one worker, because this runs on the websocket's event loop.
+            _request_catchup("reconnect" if after_a_drop else "startup")
             return
         tu = ev.get("taskUpdated")
         if not tu:
@@ -14174,73 +14385,115 @@ def create_app(out_dir: Path):
     # handler is only ever called from the WebSocket the suite never opens.
     app.extensions["mg_watch_on_event"] = _watch_on_event
 
-    def _watch_loop():
+    def _watch_cycle(state):
+        """ONE connection's life: connect, run until it ends, record how it ended, and wait as
+        long as watch_reconnect_plan says. `state` carries what outlives a connection -- the
+        backoff -- plus the clock and sleep, passed in so a test drives cycles on a fake clock
+        (asyncio.run reads time.monotonic, so that is never patched).
+
+        Every way a connection ends goes through the same rule (#60): before, a drop with no
+        close frame never reset the backoff, so after a few of PixAI's batch drops every
+        reconnect waited 60 s, while a clean end logged the climbed number and waited 5.
+
+        The mirror's state used to exist ONLY in _watch_status, in memory, readable solely
+        through /api/watch/status while the process lived. So when a generation failed to
+        mirror there was no way to answer "was it connected at the time?" -- not from the log,
+        not afterwards, not at all. Every transition below is recorded in
+        out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
+        this stream can carry a lot of traffic and a per-event line would bury the signal."""
         import asyncio
         import logging as _logging
         import time as _time
         import moonglade_backup as core
-        # The mirror's state used to exist ONLY in _watch_status, in memory, readable solely
-        # through /api/watch/status while the process lived. So when a generation failed to
-        # mirror there was no way to answer "was it connected at the time?" -- not from the log,
-        # not afterwards, not at all. Every transition below is now recorded in
-        # out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
-        # this stream can carry a lot of traffic and a per-event line would bury the signal.
+        _log = _logging.getLogger(__name__)
+        clock = state["clock"]
+        attempt = {"subscribed_at": None}
+
+        def _on(ev):
+            if ev.get("__meta__") == "subscribed":
+                attempt["subscribed_at"] = clock()
+            # The frame handler itself is _watch_on_event, above -- see its docstring for
+            # why it is a create_app closure rather than a nested one.
+            _watch_on_event(ev)
+
+        err = ""
+        try:
+            # _make_session raises PixAIError (caught below) when no credentials
+            # are configured -- it never returns a session with a blank auth
+            # header, so there's nothing else to check here before subscribing.
+            session = core._make_session(None)
+            auth = session.headers.get("Authorization")
+            asyncio.run(core._watch_events_async(auth, _on, None))
+            close = {"kind": "clean"}
+        except core.WatchStaleError as e:
+            # core._watch_events_async's own recv() timeout fired: the socket
+            # reported no error and `connected` was already True, but nothing --
+            # not even a keepalive ping -- arrived for core._WS_STALE_TIMEOUT
+            # seconds. This is the exact failure this watchdog exists for (see
+            # the module docstring above): a connection that LOOKS healthy on
+            # every existing signal while silently seeing nothing. Recorded in
+            # its own counter/timestamp, distinct from `last_error`'s generic
+            # reconnect noise, so this specific failure mode stays visible in
+            # /api/watch/status instead of looking like an ordinary drop.
+            with _watch_lock:
+                _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+                _watch_status["stale_reconnects"] += 1
+                _watch_status["last_stale_reconnect_at"] = _time.time()
+            close = {"kind": "stale"}
+        except Exception as e:
+            err = "{}: {}".format(type(e).__name__, _redact_host_paths(str(e))[:200])
+            with _watch_lock:
+                _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
+            close = watch_close_info(e, _redact_host_paths)
+        sub = attempt["subscribed_at"]
+        lived = (clock() - sub) if sub is not None else None
+        # A stale connection had subscribed and lived a full stale window, so the rule treats it
+        # as healthy and reconnects at once -- the Panel no longer reads "Reconnecting" for a
+        # whole minute after one.
+        wait, state["backoff"] = watch_reconnect_plan(state["backoff"], lived)
+        with _watch_lock:
+            _watch_status["connected"] = False
+            _watch_status["last_close_at"] = _time.time()
+            _watch_status["last_close"] = close
+            _watch_status["last_connection_s"] = round(lived) if lived is not None else None
+            _watch_status["reconnects"] += 1
+        age = "{}s".format(round(lived)) if lived is not None else "before subscribing"
+        if close["kind"] == "clean":
+            _log.info("live mirror: disconnected cleanly after %s -- reconnecting in %ss",
+                      age, wait)
+        elif close["kind"] == "stale":
+            # WARNING, not info: this is the failure mode where the socket looked healthy
+            # on every signal while seeing nothing. Since #60 the catch-up after the
+            # reconnect reads back whatever finished during the silence.
+            _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
+                         "reconnecting in %ss; the catch-up reads back anything that "
+                         "completed during the silence.",
+                         getattr(core, "_WS_STALE_TIMEOUT", "?"), wait)
+        else:
+            _log.warning("live mirror: %s (close %s) after %s -- reconnecting in %ss",
+                         err, close.get("code") if close.get("kind") == "closed"
+                         else close.get("kind"), age, wait)
+        state["sleep"](wait)
+
+    # Test seams (#60): one connection's life on a fake clock, and the status it writes.
+    app.extensions["mg_watch_cycle"] = _watch_cycle
+    app.extensions["mg_watch_status"] = _watch_status
+
+    def _watch_loop():
+        import logging as _logging
+        import time as _time
         _log = _logging.getLogger(__name__)
         with _watch_lock:
             _watch_status["started_at"] = _time.time()
         _log.info("live mirror: starting")
         _reconcile_orphan_jobs()   # clear any job left hanging at 'running' from a prior session
-        # The app was closed until now, so by definition the mirror saw nothing in that window.
-        # Off-thread: this does network I/O and must not delay the first subscribe.
-        threading.Thread(target=_watch_catchup, args=("startup",), daemon=True).start()
+        # No separate startup sweep (#60): the first subscribe asks the one sweep worker for it,
+        # and it reads after the subscription is live rather than racing it.
         threading.Thread(target=_periodic_catchup, daemon=True).start()
-        backoff = 5
+        state = {"backoff": WATCH_BACKOFF_FIRST, "clock": _time.monotonic,
+                 "sleep": _time.sleep}
         while True:
-            try:
-                # _make_session raises PixAIError (caught below) when no credentials
-                # are configured -- it never returns a session with a blank auth
-                # header, so there's nothing else to check here before subscribing.
-                session = core._make_session(None)
-                auth = session.headers.get("Authorization")
-                # The frame handler itself is _watch_on_event, above -- see its docstring for
-                # why it is a create_app closure rather than a nested one.
-                asyncio.run(core._watch_events_async(auth, _watch_on_event, None))
-                _log.info("live mirror: disconnected cleanly; reconnecting in %ss", backoff)
-                backoff = 5   # a clean disconnect resets the backoff
-            except core.WatchStaleError as e:
-                # core._watch_events_async's own recv() timeout fired: the socket
-                # reported no error and `connected` was already True, but nothing --
-                # not even a keepalive ping -- arrived for core._WS_STALE_TIMEOUT
-                # seconds. This is the exact failure this watchdog exists for (see
-                # the module docstring above): a connection that LOOKS healthy on
-                # every existing signal while silently seeing nothing. Recorded in
-                # its own counter/timestamp, distinct from `last_error`'s generic
-                # reconnect noise, so this specific failure mode stays visible in
-                # /api/watch/status instead of looking like an ordinary drop.
-                with _watch_lock:
-                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
-                    _watch_status["stale_reconnects"] += 1
-                    _watch_status["last_stale_reconnect_at"] = _time.time()
-                # WARNING, not info: this is the failure mode where the socket looked healthy
-                # on every signal while seeing nothing, so anything that completed during the
-                # silence was missed and will NOT arrive later. Worth finding in the log.
-                _log.warning("live mirror: socket went silent (no traffic for %ss) -- "
-                             "reconnecting. Anything that completed during the silence was "
-                             "NOT mirrored.", getattr(core, "_WS_STALE_TIMEOUT", "?"))
-                # A stale connection had subscribed and lived a full stale window, so it is
-                # not a failing connect for the backoff to slow down: reconnect at the
-                # shortest step (it had climbed to 60s, so the Panel read "Reconnecting"
-                # for a whole minute after every one).
-                backoff = 5
-            except Exception as e:
-                with _watch_lock:
-                    _watch_status["last_error"] = _redact_host_paths(str(e))[:200]
-                _log.warning("live mirror: %s: %s -- reconnecting in %ss",
-                             type(e).__name__, _redact_host_paths(str(e))[:200], backoff)
-            with _watch_lock:
-                _watch_status["connected"] = False
-            _time.sleep(backoff)
-            backoff = min(backoff * 3, 60)
+            _watch_cycle(state)
 
     def _contest_sync_startup():
         """One contest detection sweep shortly after boot. Entries made on pixai.art, and

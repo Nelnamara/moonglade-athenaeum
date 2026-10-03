@@ -297,6 +297,12 @@ finishes: connected or reconnecting, when the last event arrived, and how many i
 mirrored this session. It's read-only, free, and always on while the server runs — which is
 why `--update` is a fallback rather than the only way new work lands locally.
 
+PixAI closes these connections from its side now and then, several at once. When a connection
+that had been up for a while drops, Live Mirror reconnects within a second or two and then
+reads back your most recent generations, collecting anything that finished while it was
+away. A connection that keeps failing straight away waits a little longer each time, up to a
+minute, so a PixAI outage never turns into a flood of retries.
+
 > Not to be confused with **Mirror to PixAI website** (Maintenance tab, below), which goes the
 > *other* direction. Live Mirror pulls what you make on PixAI *into* your local library;
 > Mirror to PixAI website files what you make *in Moonglade* out to your PixAI web library.
