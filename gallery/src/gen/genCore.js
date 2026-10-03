@@ -548,7 +548,14 @@ export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
     ctx: image && image.media_id ? [{ media_id: String(image.media_id), thumb: image.thumb || "",
       w: Number(image.w) || 0, h: Number(image.h) || 0 }] : [],
     prompt: String(prompt || ""), mode: mode || "auto", tier: tier || "",
-    count: 1, creativity: "medium", highPriority: false, negative: "", seed: "",
+    count: 1, creativity: "medium", negative: "", seed: "",
+    /* THE BAR'S SPEED -- the one place it is chosen (the owner's call, 2026-10-03): HIGH PRIORITY
+       (priority 1000). PixAI's free Turbo lane was not starting context-image edits, and his site
+       edits that worked ran at High; a free card covers one whole when he has one. The quote is
+       built from this same state, so the cost line shows the spend. A context-image run never
+       enters the Unlimited lane (buildPayload sends `unlimited` only off the Context side), so the
+       lane's no-High rule never meets it. The dock's own default stays off (GEN_DEFAULTS). */
+    highPriority: true,
   };
 }
 

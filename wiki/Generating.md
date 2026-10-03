@@ -79,7 +79,8 @@ unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
 **Describe your edits…** bar under the picture — the picture moves up to make room, and the bar
 never covers it. Type the change and press ↵: it sends a Tsubaki.3 run with that picture as
 @image1, your words as the prompt, the dock's profile and the picture's own size — no LoRAs, recipes,
-palette or negative. The price shows in the bar before you send, and the run joins the dock's
+palette or negative. It runs at **High Priority**; a free card covers it when you have one,
+otherwise the cost shows in the bar before you send. The run joins the dock's
 reel and the Activity tray while the Lightbox stays open. **✎ Edit** again or **Esc** closes the
 bar (a second Esc closes the Lightbox). **More options in the Edit drawer ↗** at the bar's end
 opens the Edit tab instead, which is also what ✎ Edit does on a video. On a phone the same ✎

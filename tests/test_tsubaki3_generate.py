@@ -466,3 +466,39 @@ def test_a_run_of_several_still_says_how_many(rest):
     """batchSize is left out only at one -- the site's own shape; a count above one (the dock's
     confirm road) still says how many."""
     assert road(bar_payload(count=2)).parameters["batchSize"] == 2
+
+
+# =============================================================================
+# the Lightbox edit bar runs at High Priority (the owner's call, 2026-10-03)
+# =============================================================================
+
+def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatch):
+    """PixAI's free Turbo lane was not starting context-image edits; the site edits that worked ran at
+    High Priority. The bar's payload asks for it (genCore.tsubakiEditState), so its request carries
+    priority 1000 -- and the quote prices and card-checks that very dict, so the cost line shows what
+    is spent: free when a card covers it, the quoted credits when none does."""
+    req = road(bar_payload(high_priority=True))
+    assert req.parameters["priority"] == core.PRIORITY_HIGH == 1000
+    assert not req.unlimited and not core.asks_unlimited(bar_payload(high_priority=True))
+    # no card: the quoted credits, priced on the dict that carries priority 1000
+    matched = []
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: matched.append(params))
+    rest.priced.clear()
+    out = core.price(object(), req)
+    assert out["free"] is False and out["cost"] == 4000 + 900
+    assert str(rest.priced[0]["priority"]) == "1000"
+    assert matched == [req.parameters] and matched[0]["priority"] == 1000
+    # a card that covers it: free, checked against the same dict
+    seen = []
+    monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: seen.append(params) or {
+        "total": 2, "consumeAmount": 1, "covered": True, "name": "card"})
+    out = core.price(object(), req)
+    assert out["free"] is True and seen[0]["priority"] == 1000
+
+
+def test_nothing_else_changes_priority():
+    """Only the bar asks: the web payload without high_priority (the dock's default, the Loom's
+    unticked box) is still Turbo, and with it ticked is still High."""
+    assert core._gen_args_from_web_payload({"prompt": "p"}).priority == core.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": False}).priority == core.PRIORITY_TURBO
+    assert core._gen_args_from_web_payload({"prompt": "p", "high_priority": True}).priority == core.PRIORITY_HIGH

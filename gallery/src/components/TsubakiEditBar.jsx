@@ -13,7 +13,8 @@ import "../styles/tsubaki.css";
    your edits…" over the stage foot, on every still picture -- the same pictures as the "Edit
    with Tsubaki" menu item (the card's tsubaki_edit; never a video). ↵ sends a Tsubaki.3 run: this picture as @image1, the words as the prompt, the
    dock's profile (the per-account gen.image setting), the picture's own size, count 1, no recipes, no
-   palette, no LoRAs, no negative, no boosters, no High priority. The run joins the dock's reel
+   palette, no LoRAs, no negative, no boosters, at High Priority (owner's call 2026-10-03; chosen in
+   genCore.tsubakiEditState). The run joins the dock's reel
    and the Activity toast; the Lightbox stays open.
 
    ONE PAYLOAD ROAD: the state is genCore.tsubakiEditState and the payload the dock's own

@@ -251,7 +251,7 @@ describe("T3a -- the Lightbox edit bar's payload is the dock's buildPayload", ()
     assert.deepEqual([p.width, p.height], [1216, 832]);
     assert.equal(p.mode, "ultra");
     assert.equal(p.count, 1);
-    assert.equal(p.high_priority, false);
+    assert.equal(p.high_priority, true);          // the bar runs at High Priority (2026-10-03)
     assert.deepEqual(p.loras, []);
     assert.equal(p.negative, "");
     assert.equal(p.recipeIds, undefined);
@@ -291,6 +291,28 @@ describe("T3a -- the bar sends the request PixAI's own site sends (2026-10-03 ca
     assert.ok(big.width <= T3.size_rule.hi && big.height <= T3.size_rule.hi && big.width % 16 === 0 && big.height % 16 === 0, JSON.stringify(big));
     const small = bar({ media_id: "3", w: 300, h: 200 });
     assert.ok(small.width >= T3.size_rule.lo && small.height >= T3.size_rule.lo, JSON.stringify(small));
+  });
+});
+
+describe("T3a -- the bar runs at High Priority (owner's call, 2026-10-03)", () => {
+  /* PixAI's free Turbo lane was not starting context-image edits; his site edits that worked ran at
+     High Priority (a card covered one whole, extra included). The bar sends high_priority, and the
+     quote is built from the same payload, so the shown cost is the spend. The server half is
+     tests/test_tsubaki3_generate.py (priority 1000 sent and quoted, card and no card). */
+  const st = () => tsubakiEditState({ model: T3, image: { media_id: "701", w: 1280, h: 768 },
+    prompt: "make it night", mode: "pro", tier: "XL", member: true });
+  test("the bar's payload asks for High Priority", () => {
+    assert.equal(st().highPriority, true);
+    assert.equal(buildPayload(st()).high_priority, true);
+  });
+  test("and never the Unlimited lane, whose runs refuse High Priority", () => {
+    const p = buildPayload({ ...st(), unlimited: true });
+    assert.equal("unlimited" in p, false);
+    assert.equal(buildPayload(st()).unlimited, undefined);
+  });
+  test("nothing else changes: the dock's default stays off", () => {
+    assert.equal(GEN_DEFAULTS.highPriority, false);
+    assert.equal(buildPayload({ ...GEN_DEFAULTS, model: T3, prompt: "p" }).high_priority, false);
   });
 });
 
