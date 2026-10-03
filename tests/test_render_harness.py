@@ -7506,25 +7506,37 @@ def test_landscape_sheets_are_side_panels_up_to_380px_with_their_actions_reachab
         ctx.close()
 
 
-def test_landscape_record_is_a_picture_beside_a_380px_panel_with_its_foot_pinned(
+def test_landscape_record_is_a_picture_beside_a_380px_panel_that_scrolls_as_one(
         phone_q_server, render_browser, monkeypatch):
-    """Q4 (the record's foot). Image Details sideways: the picture on the left fits the height, the record
-    is a side panel no wider than 380 px, and Remix / Send to Video sit pinned at the panel's foot,
-    on screen and tappable. Upright, the record's wrapper has no box at all."""
+    """Q4, amended by the owner's walk of 2026-10-03. Image Details sideways: the picture on the left fits
+    the height and the record is a side panel no wider than 380 px. The panel scrolls AS ONE: its action
+    group (Remix / Send to Video, then Edit prompt, Filter by model, View batch, Suggest prompt) sits in
+    its own place in the flow and scrolls with the fields -- it used to be pinned to the panel's foot,
+    which on a short sideways screen took about half the height and let the fields slide up under it.
+    Scrolled to it, its buttons are on screen and tappable. Upright nothing changed: the record's wrapper
+    has no box and the foot is pinned as before."""
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
     try:
         _q_open(page)
         _q_open_details(page, 0)
-        frame, rec, foot = _q_box(page, ".idm-frame"), _q_box(page, ".idm-rec"), _q_box(page, ".idm-recrow")
+        frame, rec = _q_box(page, ".idm-frame"), _q_box(page, ".idm-rec")
         assert rec["w"] <= 380 and rec["r"] == LAND["width"], rec
         assert frame["r"] <= rec["l"], "the picture is beside the record, not under it"
-        assert LAND["height"] - 1 <= foot["b"] <= LAND["height"] + 0.5, "pinned to the panel's foot: %r" % foot
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).overflowY") == "auto"
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-recrow')).position") == "static"
+        # the panel scrolls as one: the action group moves with the fields, nothing stays put over them
+        moved = page.evaluate("""() => { const rec = document.querySelector('.idm-rec');
+            const foot = document.querySelector('.idm-recrow'); rec.scrollTop = 0;
+            const a = foot.getBoundingClientRect().top; rec.scrollTop = 120;
+            const b = foot.getBoundingClientRect().top; return {a, b, max: rec.scrollHeight - rec.clientHeight}; }""")
+        assert moved["max"] > 0 and moved["a"] - moved["b"] > 60, moved
+        page.evaluate("document.querySelector('.idm-recrow').scrollIntoView({block: 'nearest'})")
+        _settle(page)
         for sel in (".idm-remixbtn.remix", ".idm-remixbtn.video"):
             b = _q_box(page, sel)
-            assert b["h"] >= 44 and b["b"] <= LAND["height"]
+            assert b["h"] >= 44 and b["t"] >= 0 and b["b"] <= LAND["height"], (sel, b)
             assert page.evaluate("""(s) => { const b = document.querySelector(s).getBoundingClientRect();
                 const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest(s)); }""", sel)
-        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).overflowY") == "auto"
         page.click(".idm-remixbtn.video")
         page.wait_for_selector(".idm-root", state="detached")
         assert _q_generation_posts(seen) == []
@@ -7535,6 +7547,7 @@ def test_landscape_record_is_a_picture_beside_a_380px_panel_with_its_foot_pinned
         _q_open(page)
         _q_open_details(page, 0)
         assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).display") == "contents"
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-recrow')).position") == "sticky"
         assert _q_box(page, ".idm-recrow")["b"] <= PHONE["height"] + 0.5
     finally:
         ctx.close()

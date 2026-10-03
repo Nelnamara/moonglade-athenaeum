@@ -142,7 +142,7 @@
     padding-right: calc(15px + env(safe-area-inset-right)); transform: translateX(100%); }
   .lbm-sheet-slab.open { transform: translateX(0); }
 
-  /* ---- the record (Image Details): the picture beside a side panel, the foot pinned to the panel --- */
+  /* ---- the record (Image Details): the picture beside a side panel that scrolls as one ------------ */
   .idm-root { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .idm-topbar { padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
   .idm-body { flex-direction: row; gap: 0; overflow: hidden; padding: 10px 0 0 14px; }
@@ -152,8 +152,12 @@
     min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     border-left: 1px solid var(--surface0);
     padding: 0 14px calc(16px + env(safe-area-inset-bottom)); }
-  /* the foot is a sticky bar bleeding to the panel's edges (its margins are the panel's 14 px pad) */
-  .idm-rec .idm-recrow { margin: 0 -14px; }
+  /* The action group (Remix / Send to Video, Edit prompt, Filter by model, View batch, Suggest prompt)
+     sits in its own place in the flow and scrolls with the fields (owner's walk, 2026-10-03): pinned to
+     the panel's foot it took about half a short sideways screen, and the fields scrolled in a sliver
+     and slid up under it. It keeps its bar look, bleeding to the panel's edges (its margins are the
+     panel's 14 px pad). Upright the foot is still pinned (image-details-mobile.css). */
+  .idm-rec .idm-recrow { position: static; margin: 0 -14px; }
   .idm-rec .idm-recrow:last-child { margin-bottom: calc(-16px - env(safe-area-inset-bottom)); }
   /* the Upscale slab: a side panel */
   .idm-sheet-slab { left: auto; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;

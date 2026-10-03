@@ -412,7 +412,8 @@ one), laid out for a wide, short screen:
   film strip, which scroll beneath them.
 - **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the
   model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
-  is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
+  is a panel on the right that scrolls as one: **Remix**, **Send to Video** and the record's other
+  buttons sit after the details and scroll with them (upright they stay pinned at the foot).
 - **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
   columns re-flow, and a picture you have open stays open. Turned back upright, the gallery is two columns
   again and never scrolls sideways. A notch or the home bar on either side is left clear.
