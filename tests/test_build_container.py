@@ -61,7 +61,7 @@ _TEST_DONOR = {
     "roster": [{"id": "first-light", "name": "First Light", "icon": "*", "desc": "d",
                 "metric": "images", "threshold": 1, "tier": "common", "bucket": "milestone"}],
     "skins": [{"id": "moonglade", "name": "Moonglade", "free": True, "desc": "d"}],
-    "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [],
+    "skin_unlock": {}, "ach_criteria": {}, "ladder_tracks": [], "poke_lines": {},
 }
 
 
@@ -180,6 +180,44 @@ def test_explicit_version_and_urls_override(monkeypatch):
 # ---------------------------------------------------------------------------
 # Refusals and safety
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The donor: the folio donor by default, and every key the v6 pack needed
+# ---------------------------------------------------------------------------
+def test_the_default_donor_is_the_folio_donor():
+    """The pack ships from the folio donor (the full roster plus its poke lines). The old
+    default was the earlier sealed donor, so a rebuild that forgot --donor silently shipped
+    the old, shorter roster."""
+    assert bc.DEFAULT_DONOR.name == "achievements_folio_donor.json"
+    assert bc.DEFAULT_DONOR.parent.name == "moonglade-internal"
+
+
+@pytest.mark.parametrize("missing", ["roster", "skins", "skin_unlock", "ach_criteria",
+                                     "ladder_tracks", "poke_lines"])
+def test_a_donor_missing_a_v6_key_is_refused_and_nothing_is_written(monkeypatch, missing):
+    _seed_branding({"banner.png": PNG_1PX})
+    donor = {k: v for k, v in _TEST_DONOR.items() if k != missing}
+    donor_file = g.branding_root().parent / "_short_donor.json"
+    donor_file.write_text(json.dumps(donor), encoding="utf-8")
+    before = _out_path().read_bytes() if _out_path().exists() else None   # the seeded pack
+    with pytest.raises(SystemExit) as e:
+        _run(monkeypatch, "--donor", str(donor_file))
+    assert missing in str(e.value)
+    assert (_out_path().read_bytes() if _out_path().exists() else None) == before
+    assert ma.read_manifest() is None
+
+
+def test_a_donor_key_of_the_wrong_shape_is_refused(monkeypatch):
+    _seed_branding({"banner.png": PNG_1PX})
+    donor_file = g.branding_root().parent / "_bad_donor.json"
+    donor_file.write_text(json.dumps(dict(_TEST_DONOR, poke_lines=[])), encoding="utf-8")
+    before = _out_path().read_bytes() if _out_path().exists() else None
+    with pytest.raises(SystemExit) as e:
+        _run(monkeypatch, "--donor", str(donor_file))
+    assert "poke_lines" in str(e.value)
+    assert (_out_path().read_bytes() if _out_path().exists() else None) == before
+    assert ma.read_manifest() is None
+
+
 def test_refuses_missing_branding(monkeypatch):
     assert not g.branding_root().exists()
     with pytest.raises(SystemExit):
