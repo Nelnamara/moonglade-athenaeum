@@ -2,12 +2,15 @@
 your feed as of the last --reconcile-deleted) or a `cloud_deleted_at` stamp (PixAI dropped this
 one image) -- holds the only copy of that picture anywhere.
 
-  * the bulk "Delete locally" keeps them back and says how many it kept;
-  * only the single-image path can remove one, and only when it says so (`include_archive_only`);
-  * Duplicate Review never removes one in the same-seed or near-duplicate tiers, where the members
-    are different pictures with their own pixels; the byte-identical tiers are unaffected;
+The owner's ruling (walk, 2026-10-03): warn, don't block. Keeping them back was tedious.
+
+  * the bulk "Delete locally" removes them with the rest; its confirm first asks the route how
+    many of the selection are the only copy (`preview`) and names them;
+  * the Trash's Restore brings back the picture AND its catalog row, ARCHIVE flags included,
+    which is what lets the confirm say so;
+  * Duplicate Review removes them with the rest too, and its Undo puts the row back;
   * the grid card, the duplicate members and the detail read carry `archive_only` so the gallery
-    can badge them.
+    can badge them and the confirms can count them.
 """
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, load_catalog, save_catalog
@@ -56,40 +59,61 @@ def test_the_rule(tmp_path):
 # /api/delete-local
 # ---------------------------------------------------------------------------
 
-def test_bulk_delete_locally_keeps_archive_only_pictures_and_says_how_many(tmp_path):
+def test_bulk_delete_locally_removes_archive_only_pictures_with_the_rest(tmp_path):
     db = _three(tmp_path)
     cli = login_client(tmp_path)
     d = cli.post("/api/delete-local", json={"media_ids": ["100", "200", "300"]}).get_json()
-    assert d == {"ok": True, "count": 1, "failed": 0, "kept_archive_only": 2}
-    assert (tmp_path / g.DELETED_DIRNAME / "p_100.png").exists()
+    assert d == {"ok": True, "count": 3, "failed": 0}
+    for name in ("p_100.png", "p_200.png", "p_300.png"):
+        assert (tmp_path / g.DELETED_DIRNAME / name).exists(), name
+        assert not (tmp_path / "images" / name).exists(), name
+    assert load_catalog(db) == []
+
+
+def test_the_preview_counts_the_only_copies_and_touches_nothing(tmp_path):
+    """The bulk confirm asks first: how many of the selection are the only copy. Unknown and
+    repeated ids are not counted, the same way the delete itself skips them."""
+    db = _three(tmp_path)
+    cli = login_client(tmp_path)
+    d = cli.post("/api/delete-local", json={"media_ids": ["100", "200", "300", "200", "ghost"],
+                                            "preview": True}).get_json()
+    assert d == {"preview": True, "count": 3, "archive_only": 2}
+    assert {r["media_id"] for r in load_catalog(db)} == {"100", "200", "300"}
+    assert not (tmp_path / g.DELETED_DIRNAME).exists()
+    assert cli.post("/api/delete-local", json={"media_ids": ["100"], "preview": True}
+                    ).get_json() == {"preview": True, "count": 1, "archive_only": 0}
+
+
+def test_the_trash_restores_an_only_copy_with_its_row(tmp_path):
+    """What lets the confirm say the Trash can restore them: Restore puts the file back AND
+    reinserts the whole catalog row from the snapshot taken at delete time -- the ARCHIVE flags,
+    the rating and the collections included -- so the picture comes back badged as it left."""
+    db = _seed(tmp_path, [
+        _row(media_id="200", filename="p_200.png", deleted_remote="1", rating="4",
+             collections="keepers", prompt_full="a lantern"),
+        _row(media_id="300", filename="p_300.png", cloud_deleted_at="2026-09-20T10:00:00Z"),
+    ], {"p_200.png": b"B", "p_300.png": b"C"})
+    cli = login_client(tmp_path)
+    assert cli.post("/api/delete-local", json={"media_ids": ["200", "300"]}).get_json()["count"] == 2
+    assert load_catalog(db) == []
+
+    r = cli.post("/api/trash/restore", json={"media_ids": ["200", "300"]}).get_json()
+    assert sorted(r["restored"]) == ["200", "300"] and not r["errors"]
+    rows = {row["media_id"]: row for row in load_catalog(db)}
+    assert rows["200"]["deleted_remote"] == "1" and rows["200"]["rating"] == "4"
+    assert rows["200"]["collections"] == "keepers" and rows["200"]["prompt_full"] == "a lantern"
+    assert rows["300"]["cloud_deleted_at"] == "2026-09-20T10:00:00Z"
     assert (tmp_path / "images" / "p_200.png").read_bytes() == b"B"
     assert (tmp_path / "images" / "p_300.png").read_bytes() == b"C"
-    assert {r["media_id"] for r in load_catalog(db)} == {"200", "300"}
+    assert cli.get("/api/next/detail/200").get_json()["archive_only"] is True
 
 
-def test_the_bulk_path_has_no_override(tmp_path):
-    """`include_archive_only` is honoured for ONE picture only -- the image's own page, after
-    its own confirm. Sent with a selection, it changes nothing."""
+def test_the_single_image_path_removes_one_like_any_other(tmp_path):
     db = _three(tmp_path)
     cli = login_client(tmp_path)
-    d = cli.post("/api/delete-local", json={"media_ids": ["100", "200"],
-                                            "include_archive_only": True}).get_json()
-    assert d["count"] == 1 and d["kept_archive_only"] == 1
-    assert (tmp_path / "images" / "p_200.png").exists()
-    assert "200" in {r["media_id"] for r in load_catalog(db)}
-
-
-def test_the_single_image_path_removes_one_when_it_says_so(tmp_path):
-    db = _three(tmp_path)
-    cli = login_client(tmp_path)
-    kept = cli.post("/api/delete-local", json={"media_ids": ["200"]}).get_json()
-    assert kept == {"ok": True, "count": 0, "failed": 0, "kept_archive_only": 1}
-    assert (tmp_path / "images" / "p_200.png").exists()
-
-    d = cli.post("/api/delete-local", json={"media_ids": ["200"],
-                                            "include_archive_only": True}).get_json()
-    assert d == {"ok": True, "count": 1, "failed": 0, "kept_archive_only": 0}
-    assert (tmp_path / g.DELETED_DIRNAME / "p_200.png").exists()   # recoverable from Trash
+    d = cli.post("/api/delete-local", json={"media_ids": ["200"]}).get_json()
+    assert d == {"ok": True, "count": 1, "failed": 0}
+    assert (tmp_path / g.DELETED_DIRNAME / "p_200.png").exists()
     assert "200" not in {r["media_id"] for r in load_catalog(db)}
 
 
@@ -147,23 +171,26 @@ def _resolve(cli, group_id, keep, remove):
         "csrf": _csrf(cli), "group_id": group_id, "keep": keep, "remove": remove}).get_json()
 
 
-def test_resolve_refuses_an_archive_only_same_seed_loser(tmp_path):
-    db = _same_seed(tmp_path, {"cloud_deleted_at": "2026-09-20T10:00:00Z"})
+def test_resolve_removes_an_archive_only_same_seed_loser_and_undo_brings_it_back(tmp_path):
+    db = _same_seed(tmp_path, {"cloud_deleted_at": "2026-09-20T10:00:00Z", "rating": "3"})
     cli = login_client(tmp_path)
     d = _resolve(cli, "same_seed:12345:x",
                  {"media_id": "444", "path": "images/a_444.webp"},
                  [{"media_id": "555", "path": "images/b_555.webp"}])
-    assert d["quarantined"] == []
-    assert d["kept_archive_only"] == 1
-    assert len(d["errors"]) == 1
-    err = d["errors"][0]
-    assert err["media_id"] == "555"
-    assert "only copy" in err["error"] and "PixAI" in err["error"]
+    assert [q["media_id"] for q in d["quarantined"]] == ["555"]
+    assert d["errors"] == [] and "kept_archive_only" not in d
+    assert not (tmp_path / "images" / "b_555.webp").exists()
+    assert "555" not in {r["media_id"] for r in load_catalog(db)}
+
+    u = cli.post("/api/duplicates/undo", json={
+        "csrf": _csrf(cli), "quarantine_path": d["quarantined"][0]["quarantine_path"]}).get_json()
+    assert u.get("ok") is True, u
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["555"]["cloud_deleted_at"] == "2026-09-20T10:00:00Z" and rows["555"]["rating"] == "3"
     assert (tmp_path / "images" / "b_555.webp").read_bytes() == b"YYY"
-    assert "555" in {r["media_id"] for r in load_catalog(db)}
 
 
-def test_resolve_refuses_an_archive_only_near_duplicate_loser(tmp_path):
+def test_resolve_removes_an_archive_only_near_duplicate_loser(tmp_path):
     _seed(tmp_path, [
         _row(media_id="888", filename="a_888.webp", phash="0000000000000000",
              created_at="2024-01-01"),
@@ -174,11 +201,11 @@ def test_resolve_refuses_an_archive_only_near_duplicate_loser(tmp_path):
     d = _resolve(cli, "near_duplicate:888-999",
                  {"media_id": "888", "path": "images/a_888.webp"},
                  [{"media_id": "999", "path": "images/b_999.webp"}])
-    assert d["quarantined"] == [] and d["kept_archive_only"] == 1
-    assert (tmp_path / "images" / "b_999.webp").exists()
+    assert [q["media_id"] for q in d["quarantined"]] == ["999"] and d["errors"] == []
+    assert not (tmp_path / "images" / "b_999.webp").exists()
 
 
-def test_resolve_still_removes_the_ordinary_members_beside_an_archive_only_one(tmp_path):
+def test_resolve_removes_every_member_but_the_keeper(tmp_path):
     _seed(tmp_path, [
         _row(media_id="1", filename="a_1.webp", seed="7", prompt_full="p", created_at="2024-01-01"),
         _row(media_id="2", filename="b_2.webp", seed="7", prompt_full="p", created_at="2024-01-02",
@@ -190,9 +217,9 @@ def test_resolve_still_removes_the_ordinary_members_beside_an_archive_only_one(t
                  {"media_id": "1", "path": "images/a_1.webp"},
                  [{"media_id": "2", "path": "images/b_2.webp"},
                   {"media_id": "3", "path": "images/c_3.webp"}])
-    assert [q["media_id"] for q in d["quarantined"]] == ["3"]
-    assert d["kept_archive_only"] == 1
-    assert (tmp_path / "images" / "b_2.webp").exists()
+    assert sorted(q["media_id"] for q in d["quarantined"]) == ["2", "3"]
+    assert (tmp_path / "images" / "a_1.webp").exists()
+    assert not (tmp_path / "images" / "b_2.webp").exists()
     assert not (tmp_path / "images" / "c_3.webp").exists()
 
 
@@ -208,6 +235,5 @@ def test_resolve_leaves_the_byte_identical_tiers_alone(tmp_path):
                  {"media_id": "111", "path": "2024-03/111.webp"},
                  [{"media_id": "111", "path": "images/p_t1_111.webp"}])
     assert d["errors"] == [] and len(d["quarantined"]) == 1
-    assert d["kept_archive_only"] == 0
     assert (tmp_path / "2024-03" / "111.webp").exists()
     assert [r["media_id"] for r in load_catalog(db)] == ["111"]

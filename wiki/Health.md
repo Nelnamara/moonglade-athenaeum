@@ -66,9 +66,11 @@ something was missing.
 **Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup.
 In the **Same seed** and **Near-duplicate** groups the members are different pictures, so a
 member PixAI no longer has (gone from your PixAI history as of the last check) is the only
-copy of its picture: it is marked *only copy*, **Resolve** and **Auto-resolve all**
-leave it where it is, and the confirm says how many stay. The byte-identical groups are
-unaffected — the copy you keep has the same bytes. For the filesystem-level audit/dedup tooling, see
+copy of its picture. It goes with the rest, named first: its pill reads *✕ remove · only
+copy*, **Resolve** says how many are only copies, and the **Auto-resolve all** confirm (and,
+on a phone, the Resolve confirm) says *"2 of these are the only copy — PixAI no longer has
+them."* **Undo** puts the file and its catalog row back. The byte-identical groups have
+nothing to warn about — the copy you keep has the same bytes. For the filesystem-level audit/dedup tooling, see
 [Backing Up → Duplicate audit](Backing-Up).
 
 ## How fresh are these numbers?

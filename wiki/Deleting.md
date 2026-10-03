@@ -4,11 +4,13 @@ Two delete actions live in the **Actions** dropdown that appears when images are
 in the gallery:
 
 - **Delete locally** — removes from your local catalog only (the cloud task is
-  untouched). **Pictures PixAI no longer has are kept back** — the ones the gallery badges
-  **ARCHIVE**: their task has left your PixAI history as of the last check, or PixAI dropped
-  that one image. Your library holds the only copy of those, so a selection never sweeps
-  them along; the notice afterwards says how many were kept. To remove one anyway, open it
-  and use **Delete locally** on its own page, which asks first.
+  untouched). **Pictures PixAI no longer has go with the rest, and the confirm names them
+  first** — the ones the gallery badges **ARCHIVE**: their task has left your PixAI history as
+  of the last check, or PixAI dropped that one image. Your library holds the only copy of
+  those, so the question says how many are in the selection (*"3 of these are the only copy —
+  PixAI no longer has them."*). Like every local delete they go to the Trash, and **Restore**
+  there brings each one back with its catalog row — the ARCHIVE badge, rating and collections
+  included.
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
   locally, so they never drift. Requires a request from the machine running the server, even
   for a signed-in account on another device: this one is irreversible on PixAI's side, so it
@@ -164,10 +166,11 @@ prune those orphans:
 It skips imports and anything generated in the last ~2 days (so a fresh generation
 isn't false-flagged), and aborts if the feed comes back empty.
 
-Those rows are the only copy of their pictures left anywhere, so the selection's **Delete
-locally** keeps them back and says how many. Remove one you really don't want from its own
-page (**Delete locally** there asks first; the file goes to the Trash). The flag is
-re-checked on every reconcile, so a picture that turns up in your feed again loses it.
+Those rows are the only copy of their pictures left anywhere. The selection's **Delete
+locally** still takes them, after a confirm that says how many of the selection are only
+copies, and so does a picture's own page; the files go to the Trash, where **Restore** puts
+each back with its catalog row. The flag is re-checked on every reconcile, so a picture that
+turns up in your feed again loses it.
 
 ## CLI
 

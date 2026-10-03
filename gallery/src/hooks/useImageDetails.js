@@ -164,18 +164,9 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
       // this caller never even read, so a failed delete looked identical to a success.
       // Now a real error surfaces and onDeleted only fires when something was deleted.
       // (Migration off classic leftovers, 2026-08-08; /delete/<id> dies with the cut.)
-      // An archive-only picture is kept back unless this ONE-picture request says so,
-      // which it does only after the question above named it the last copy.
-      const d = await apiPost("/api/delete-local",
-        archiveOnly ? { media_ids: [mediaId], include_archive_only: true } : { media_ids: [mediaId] });
+      const d = await apiPost("/api/delete-local", { media_ids: [mediaId] });
       if (!d || d.error) { window.alert((d && d.error) || "Could not remove it."); return; }
       if (d.failed) { window.alert("The file could not be moved to the trash folder — nothing was deleted."); return; }
-      if (!d.count && d.kept_archive_only) {
-        // the flag landed after this page read the record (a reconcile ran meanwhile)
-        window.alert("Nothing was removed: PixAI no longer has this picture, so this is the last copy. " +
-          "Open it again to remove it anyway.");
-        return;
-      }
       onDeleted();
     } finally { setBusy(false); }
   };

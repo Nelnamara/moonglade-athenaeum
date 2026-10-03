@@ -1489,8 +1489,9 @@ def is_archive_only(row):
     last --reconcile-deleted, which rewrites it every run) or PixAI dropped this one image
     (`cloud_deleted_at`, per-row and permanent). Pure; `row` is a catalog row dict.
 
-    The bulk "Delete locally" keeps these back, Duplicate Review never removes one in the
-    tiers whose members are different pictures, and the grid badges them ARCHIVE."""
+    The grid badges them ARCHIVE, and the bulk "Delete locally" and Duplicate Review name
+    them in their confirms before they go with the rest (the owner's ruling, 2026-10-03:
+    warn, don't block)."""
     if not row:
         return False
     return (str(row.get("deleted_remote") or "").strip() == "1"
@@ -16501,25 +16502,26 @@ def create_app(out_dir: Path):
         file the OS won't release must not strand the rest -- and comes back as a
         `failed` count with ok=false instead of a delerr banner.
 
-        ARCHIVE-ONLY PICTURES ARE KEPT BACK (#66). A row PixAI no longer has
-        (is_archive_only) holds the only copy anywhere, so it is skipped, left exactly
-        where it is, and counted in `kept_archive_only` -- the same thing the cloud bulk
-        delete does with the images PixAI already dropped. `include_archive_only: true`
-        removes one anyway, and is honoured ONLY for a request naming exactly one picture:
-        the image's own page sends it after its own confirm. A selection has no override."""
+        ARCHIVE-ONLY PICTURES: WARN, DON'T BLOCK (#66; the owner's ruling on the 2026-10-03
+        walk -- keeping them back was tedious). A row PixAI no longer has (is_archive_only)
+        holds the only copy anywhere, and it goes with the rest: the Trash's Restore puts the
+        file AND its whole catalog row back (restore_quarantined_media, from the snapshot
+        purge_media_local writes first). What the bulk confirm needs is the count BEFORE it
+        asks, so `preview: true` answers {"preview": true, "count", "archive_only"} -- the rows
+        the delete would take and how many of them are the only copy -- and touches nothing."""
         body = request.get_json(silent=True) or {}
         media_ids = list(dict.fromkeys(
             str(m) for m in (body.get("media_ids") or []) if str(m).strip()))
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
-        include_archive = body.get("include_archive_only") is True and len(media_ids) == 1
-        purged, failed, kept = [], 0, 0
+        if body.get("preview") is True:
+            rows = [r for r in (get_row(db_path, m) for m in media_ids) if r]
+            return jsonify({"preview": True, "count": len(rows),
+                            "archive_only": sum(1 for r in rows if is_archive_only(r))})
+        purged, failed = [], 0
         for mid in media_ids:
             row = get_row(db_path, mid)
             if not row:
-                continue
-            if is_archive_only(row) and not include_archive:
-                kept += 1
                 continue
             try:
                 purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
@@ -16530,8 +16532,7 @@ def create_app(out_dir: Path):
             telem_set_add_many("culled_keys", ["media:" + m for m in purged], out_dir=out_dir)
         except Exception:                                    # noqa: BLE001
             pass
-        return jsonify({"ok": failed == 0, "count": len(purged), "failed": failed,
-                        "kept_archive_only": kept})
+        return jsonify({"ok": failed == 0, "count": len(purged), "failed": failed})
 
     def _purge_local(media_id, filename):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
@@ -18816,8 +18817,8 @@ def create_app(out_dir: Path):
                 "bucket": bucket,
                 "size": size,
                 "is_keeper": bool(is_keeper),
-                # PixAI no longer has it (#66): /api/duplicates/resolve never removes one
-                # in the same_seed / near_duplicate tiers.
+                # PixAI no longer has it (#66): in the same_seed / near_duplicate tiers it is
+                # the only copy of its picture, and the Resolve confirms name it.
                 "archive_only": is_archive_only(row),
             }
 
@@ -18972,14 +18973,13 @@ def create_app(out_dir: Path):
         submit_fixer/delete_task_gql/claim_reward -- see
         quarantine_duplicate_file().
 
-        ARCHIVE-ONLY MEMBERS STAY (#66). In the same_seed and near_duplicate tiers the
-        members are different pictures with their own pixels, so a member PixAI no longer
-        has (is_archive_only) is the only copy of ITS picture: it is never removed, comes
-        back as a per-item error, and is counted in `kept_archive_only`. The byte-identical
-        tiers (same_media, identical_file) are unaffected -- the keeper holds the same bytes.
+        ARCHIVE-ONLY MEMBERS GO WITH THE REST (#66; the owner's ruling on the 2026-10-03
+        walk: warn, don't block). In the same_seed and near_duplicate tiers a member PixAI no
+        longer has (is_archive_only) is the only copy of ITS picture; the screens name it
+        before Resolve (each member carries `archive_only`), and Undo puts its file and its
+        snapshotted catalog row back (restore_quarantined_duplicate).
 
-        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N,
-        "kept_archive_only": N}.
+        Response: {"quarantined": [...], "errors": [...], "reclaimed_bytes": N}.
         Per-item, not all-or-nothing -- one bad group in a batch (a stale
         group_id, a file already gone) does not block the rest, same "one file
         the OS won't release must not strand the rest" shape as
@@ -18996,7 +18996,6 @@ def create_app(out_dir: Path):
             return jsonify({"error": "no resolutions given"}), 400
 
         quarantined, errors = [], []
-        kept_archive = 0
         for res in resolutions:
             res = res if isinstance(res, dict) else {}
             group_id = str(res.get("group_id") or "").strip()
@@ -19047,13 +19046,6 @@ def create_app(out_dir: Path):
 
             keep_mid = str(keep.get("media_id"))
             for item in remove_items:
-                if (match_type in ("same_seed", "near_duplicate")
-                        and is_archive_only(get_row(db_path, item["media_id"]))):
-                    kept_archive += 1
-                    errors.append({"group_id": group_id, "media_id": item["media_id"],
-                                   "error": "kept: gone from your PixAI history as of the "
-                                            "last check, so this is the only copy"})
-                    continue
                 result = quarantine_duplicate_file(out_dir, thumb_dir, db_path,
                                                    item["media_id"], item["path"], group_id)
                 if result.get("ok"):
@@ -19067,8 +19059,7 @@ def create_app(out_dir: Path):
         if quarantined:
             telem_bump("duplicates_resolved", len(quarantined), out_dir=out_dir)
         return jsonify({"quarantined": quarantined, "errors": errors,
-                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined),
-                        "kept_archive_only": kept_archive})
+                        "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
 
     @app.route("/api/duplicates/undo", methods=["POST"])
     @tier(LOGIN)
@@ -24906,7 +24897,7 @@ __DESIGN_TOKENS__
             "can_delete_cloud": _is_local_request(),
             "siblings": _batch_sibling_count(row.get("task_id")),
             # #66: gone from PixAI as of the last check -- the record says so, and its
-            # "Delete locally" asks first and sends include_archive_only.
+            # "Delete locally" names it the last copy before it asks.
             "archive_only": is_archive_only(row),
         }
         # Session M (NOTES 3): the run this picture came from, when the caller's own account
