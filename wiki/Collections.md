@@ -145,7 +145,9 @@ holding everything below, rather than a row of separate buttons:
   shots, one per picture, in the order of the collection you're looking at (its manual order,
   or oldest first) — up to 60 pictures, videos left out, and nothing rendered. See [The
   Loom](The-Loom#sending-pictures-from-the-gallery).
-- **Print sheet** opens a print-ready contact sheet of the selection.
+- **Print sheet** opens a print-ready contact sheet of the selection. On a phone it opens as a
+  list, one card per picture with its thumbnail, title, model and stars; **Share** hands the
+  print-ready page to your phone's share menu.
 - **Find/replace in prompts** across the selection.
 - **Download ZIP** of the selected full-res images.
 - **Delete locally** / **Delete from PixAI** — see [Deleting & Sync](Deleting).

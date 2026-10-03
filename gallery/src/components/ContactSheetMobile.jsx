@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import useContactSheet, { pad } from "../hooks/useContactSheet.js";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { thumbSrc } from "../lib/phoneCore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/contact-sheet-mobile.css";
 
@@ -44,14 +46,19 @@ import "../styles/contact-sheet-mobile.css";
      1. SINGLE-COLUMN SCROLLABLE LIST, not desktop's 4-across print grid --
         the design's own layout, not a scaled-down copy of contact-sheet-
         overlay.css's .mgcs-grid.
-     2. PLACEHOLDER-QUALITY THUMBNAILS, real per-image content NOT loaded --
-        locked by the drift report ("no per-image browse" -- this screen is
-        for browsing/sharing the LIST, not inspecting each frame), so every
-        card renders the design's own decorative gradient box rather than a
-        real /thumbs/<id>.jpg, even though useContactSheet's data.frames[]
-        carries a real thumb_url for each one. Not a missing-data gap --
-        deliberately unused data, see contact-sheet-mobile.css's own comment
-        on .csm-thumb.
+     2. REAL THUMBNAILS IN THE 60 PX WELL (2026-10-02). The design draws that
+        well empty, a decorative gradient, and the drift report's note on it
+        ("Placeholder thumbnails only, no per-image browse", item 26,
+        2026-08-03) was read as an instruction to leave it empty. The owner
+        reversed that reading: a list of frames is not much use without the
+        pictures, the desktop sheet shows them, and the well is already drawn
+        at thumbnail size. Each card now fills it with the frame's own
+        thumbnail (useContactSheet's data.frames[].thumb_url), sized by Data
+        saver like every other phone thumbnail (thumbSrc), cropped to cover,
+        and lazy because a collection sheet can hold hundreds of frames. The
+        gradient stays behind the picture as the fallback while it loads and
+        if it fails. A card is still not a door to the picture: there is no
+        per-image browse from this list.
      3. SHARE, NOT PRINT -- the design mock's own onShare is a bare
         alert('Share Contact Sheet (or export as PDF)') stub; the real
         behavior (drift report: "Share button routes OS-native print/export
@@ -63,13 +70,15 @@ import "../styles/contact-sheet-mobile.css";
         Messages, "Print" from Safari's own share sheet, "Save to Files" as
         a PDF, another device) opens a page that actually prints correctly,
         rather than trying to drive window.print() against this screen's own
-        placeholder-thumbnail DOM. Browsers with no navigator.share (older
+        DOM. Browsers with no navigator.share (older
         Android WebViews, some desktop test surfaces) fall back to opening
         that same URL in a new tab, so the action is never a dead end. */
 
 export default function ContactSheetMobile({ ids, collectionName, onClose }) {
   const [closing, setClosing] = useState(false);
   const { data, err, shareUrl } = useContactSheet({ ids, collectionName });
+  // Data saver (Q7): the same 256 px tier every other phone thumbnail asks for while the saver acts.
+  const saver = useDataSaver().active;
 
   const close = () => {
     setClosing(true);
@@ -126,7 +135,10 @@ export default function ContactSheetMobile({ ids, collectionName, onClose }) {
           <div className="csm-list">
             {data.frames.map((f, i) => (
               <div className="csm-card" key={f.media_id}>
-                <div className="csm-thumb" aria-hidden="true" />
+                <div className="csm-thumb" aria-hidden="true">
+                  <img src={thumbSrc(f.thumb_url, saver)} alt="" loading="lazy" decoding="async"
+                    onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                </div>
                 <div className="csm-info">
                   <div className="csm-row1">
                     <span className="csm-no">No. {pad(i + 1, 3)}</span>

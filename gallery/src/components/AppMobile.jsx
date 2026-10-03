@@ -363,8 +363,8 @@ import "../styles/phone-landscape.css";
    LightboxMobile/FolioMobile below. GalleryMobile.jsx's own onPrintSheet prop
    closes its local Actions sheet and calls openContactSheet(selIds) in the
    same click -- see that file's own header comment and ContactSheetMobile.jsx's
-   for the full real-data-vs-design-mock disclosure (placeholder thumbnails,
-   Share via the Web Share API instead of window.print()). */
+   for the full real-data-vs-design-mock disclosure (real thumbnails in the
+   card well, Share via the Web Share API instead of window.print()). */
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },

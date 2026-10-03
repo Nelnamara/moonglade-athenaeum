@@ -20,6 +20,7 @@ git tags. Full prose notes for tagged versions live on
 
 - **The phone's "14 of 3,240" is your real place in the library.** A picture's record and the full-screen viewer used to count only the page on screen ("14 of 100", however many pictures matched); they now count through everything your search and filters match, the same walk the ‹ and › buttons step through. (2026-10-02)
 - **View batch shows on the phone's picture record.** The chip only appeared for pictures filed in an old batch folder, so on a library that has been organized it never showed. It now shows for any picture that came from a generation, as it does on the desktop. (2026-10-02)
+- **The phone's Print sheet shows the pictures.** Each card in the contact sheet list drew an empty gradient box where its thumbnail belongs; it now shows the frame's own thumbnail (the small Data saver size while Data saver is on), loading as you scroll. (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 
