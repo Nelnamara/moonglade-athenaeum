@@ -1801,7 +1801,6 @@ export default function App({ boot }) {
               }}
               onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
               advParams={detailsAdvParams}
-              items={items}
               onOpenLightbox={(mid) => {
                 const i = items.findIndex((it) => it.media_id === mid);
                 if (i >= 0) setLbIndex(i);

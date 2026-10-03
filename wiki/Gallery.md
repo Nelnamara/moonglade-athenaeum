@@ -276,7 +276,9 @@ so you can bookmark one, and the browser's Back button closes it.
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
   metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
-  prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
+  prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode. The header says where the
+  picture sits among everything your search and filters match (*14 of 3,240*), not just
+  among the page on screen, so it agrees with how far Prev and Next will carry you.
 
   The facts list shows **the whole generation record**, not just the recipe: alongside
   prompt, seed, steps, sampler, CFG, model and LoRAs you'll see the inference profile
@@ -372,6 +374,15 @@ picture on its own says *single image*. **▶ To Video** and, on a picture's rec
 the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
 Generate.
+
+**Where you are in the library.** A picture's record and the full-screen viewer both say where the
+picture sits among everything your search and filters match (*14 of 3,240*), not just among the page
+on screen, so the number agrees with how far **‹** and **›** will carry you. A picture your current
+filter does not contain shows no number on its record.
+
+**View batch** on a picture's record shows the other pictures made in the same generation. It
+appears for any picture that came from a generation, not only ones filed in an old batch folder.
+To get your whole library back, press **Clear** in **Advanced search**.
 
 ### The phone turned sideways
 

@@ -56,14 +56,16 @@
   background: var(--surface0); border: 1px solid var(--surface1);
   animation: csmCardIn .3s ease both; }
 
-/* Placeholder-quality thumbnail -- deliberate, locked (drift-report.md item
-   26: "Placeholder thumbnails only, no per-image browse"), NOT a missing-data
-   gap: this screen exists to browse/share the LIST, not to inspect each
-   image, so the design's own decorative gradient box stands in for a real
-   /thumbs/<id>.jpg -- see ContactSheetMobile.jsx's header comment. */
+/* The thumbnail well. The design draws it empty, a decorative gradient; the
+   2026-08-03 reading of the drift report's note on it (leave it empty) was
+   reversed by the owner on 2026-10-02, so each card puts the frame's own
+   /thumbs/<id>.jpg in it -- see ContactSheetMobile.jsx's header comment. The
+   gradient stays as the well's background: it shows while a picture loads and
+   stands in if one fails. */
 .csm-thumb { flex: none; width: 60px; height: 60px; border-radius: 6px; overflow: hidden;
   background: linear-gradient(135deg, color-mix(in srgb, var(--lavender) 20%, transparent),
     color-mix(in srgb, var(--blue) 15%, transparent)); }
+.csm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .csm-info { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .csm-row1 { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; min-width: 0; }

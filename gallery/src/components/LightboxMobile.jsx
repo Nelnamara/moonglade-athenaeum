@@ -8,7 +8,7 @@ import useDataSaver from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useFullGate from "../hooks/useFullGate.js";
 import { apiGet, fetchSiblings } from "../api.js";
-import { taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
+import { lightboxCount, taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
 import "../styles/lightbox-mobile.css";
 import "../styles/curation-mobile.css";
 import "../styles/phone-q.css";
@@ -125,7 +125,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest, member, onSendToVideo,
+  onEnterContest, member, onSendToVideo, offset, total,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -299,14 +299,18 @@ export default function LightboxMobile({
   const field = (v) => (pending ? "…" : (v == null || v === "" ? "—" : v));
   const promptText = (row && row.prompt_full) || it.prompt || "—";
   const gated = fullGate.gated;
+  // #64: the big number and "OF N" are the picture's place in the WHOLE filtered walk -- the
+  // pictures before the loaded page (offset) plus its place in the page, over the walk's length
+  // (total) -- not the loaded page's own count. Falls back to the page until a total is known.
+  const count = lightboxCount(index, offset, total, items.length);
 
   return (
     <div className={"lbm-root" + (closing ? " closing" : "")} role="dialog" aria-modal="true" aria-label="Full-screen viewer">
       <div className="lbm-topbar">
         <button type="button" className="lbm-close" onClick={close} aria-label="Close">✕</button>
         <div className="lbm-indexwrap">
-          <span className="lbm-index">{index + 1}</span>
-          <span className="lbm-total">OF {items.length}</span>
+          <span className="lbm-index">{count.at}</span>
+          <span className="lbm-total">OF {count.of}</span>
         </div>
         <div className="lbm-starswrap">
           <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />

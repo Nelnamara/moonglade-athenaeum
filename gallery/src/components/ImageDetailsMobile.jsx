@@ -10,7 +10,7 @@ import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useDataSaver from "../hooks/usePhonePrefs.js";
 import useFullGate from "../hooks/useFullGate.js";
-import { thumbSrc } from "../lib/phoneCore.js";
+import { positionLabel, thumbSrc } from "../lib/phoneCore.js";
 import { apiGet } from "../api.js";
 import "../styles/phone-q.css";
 import "../styles/power.css";
@@ -65,11 +65,13 @@ import "../styles/curation-mobile.css";
        POST /edit-prompt/<mid> as desktop's "Edit Prompt"), Filter by model
        (real -- wired to the same onFilterByModel desktop's kicker "find more"
        link uses; hidden when the model isn't known, matching desktop's own
-       row.batch-gated "View Batch" precedent; called "Find similar (model)"
+       gated "View batch" precedent; called "Find similar (model)"
        until 2026-09-05, when it took the same rename desktop's record took --
        it filters by the model that made the picture and never found lookalikes,
        so the borrowed word made two unrelated controls look like a pair),
-       View batch (real, same onFilterByBatch),
+       View batch (real, same onFilterByBatch -- gated on and filtered by the picture's
+       task id, exactly as desktop's is since #30: `--organize` blanks the old batch
+       column, so gating on it hid the chip on every organized library),
        Suggest prompt (real, same runSuggest). Send to Video was a DISCLOSED
        placeholder toast until 2026-09-29 (Session Q, Q2): the Video mode had no
        "load this image as the source frame" entry point. It has one now (the
@@ -118,7 +120,7 @@ import "../styles/curation-mobile.css";
    the desktop DetailsView's inline strip -- same fetch, same seq guard, byte-for-byte. */
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onCurate, onDeleted,
-  onFilterByModel, onFilterByBatch, advParams, items,
+  onFilterByModel, onFilterByBatch, advParams,
   onOpenLightbox, onPublish, onEnterContest, onTsubakiEdit, onRemix, onSendToVideo,
 }) {
   const [closing, setClosing] = useState(false);
@@ -186,13 +188,12 @@ export default function ImageDetailsMobile({
     return () => window.removeEventListener("keydown", onKey);
   }, [row, state.data, onNavigate, upscaleOpen, toggleUpscale]);
 
-  // Page-local position ("k of N loaded items"), matching Lightbox.jsx's own
-  // "index+1 / items.length" convention -- real and honest, though scoped to
-  // whichever page is currently loaded rather than a true global position
-  // (Prev/Next itself still walks the REAL, full filtered set across page
-  // boundaries via the server's prev_id/next_id, exactly like desktop).
-  const idx = items ? items.findIndex((it) => it.media_id === mediaId) : -1;
-  const indexLabel = idx >= 0 && items ? (idx + 1) + " of " + items.length : "";
+  // The picture's TRUE place in the filtered walk ("14 of 3,240", #64). The detail route
+  // builds the whole filtered, sorted list to find prev_id/next_id and now also says where
+  // this picture sits in it (position) and how long it is (nav_total), so the number agrees
+  // with what Prev and Next step through -- not with the one page the grid happens to hold.
+  // Nothing while loading, and nothing for a picture the filter does not contain.
+  const indexLabel = state.data ? positionLabel(state.data.position, state.data.nav_total) : "";
 
   if (state.loading) {
     return (
@@ -444,8 +445,8 @@ export default function ImageDetailsMobile({
               Filter by model
             </button>
           ) : null}
-          {row.batch ? (
-            <button type="button" className="idm-chip" onClick={() => onFilterByBatch(row.batch)}>View batch</button>
+          {row.task_id ? (
+            <button type="button" className="idm-chip" onClick={() => onFilterByBatch(row.task_id)}>View batch</button>
           ) : null}
           <button type="button" className="idm-chip" disabled={suggestBusy} onClick={runSuggest}>
             {suggestBusy ? "Reading…" : "Suggest prompt"}
