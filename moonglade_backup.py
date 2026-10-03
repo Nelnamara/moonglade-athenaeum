@@ -12322,6 +12322,15 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         if rs.unlimited is None or rs.gate is None:
             raise PixAIError(_UNLIMITED_UNWIRED)
         params = rs.unlimited(params, args.model)
+    # THE SMART REFERENCE SUBMIT, AS PIXAI'S OWN SITE SENDS IT (captured live 2026-10-03, the
+    # owner's walk): a context-image edit carries `controlNets: []` and, for one picture, no
+    # batchSize. The quote prices this same dict (req.parameters), so the two cannot differ.
+    # The source picture's own size is the drawer's (genCore.tsubakiEditState); the gate above
+    # already put it on the model's size rule.
+    if params.get("contextImages"):
+        params.setdefault("controlNets", [])
+        if params.get("batchSize") == 1:
+            params.pop("batchSize")
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card or lane, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)

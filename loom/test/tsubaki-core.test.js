@@ -247,7 +247,8 @@ describe("T3a -- the Lightbox edit bar's payload is the dock's buildPayload", ()
     assert.equal(p.model_id, T3.model_id);
     assert.deepEqual(p.context_images, ["701"]);
     assert.equal(p.prompt, "make it night");
-    assert.deepEqual([p.width, p.height], [1712, 1168]);
+    // the SOURCE picture's own size, as PixAI's own Smart Reference submit sends (2026-10-03)
+    assert.deepEqual([p.width, p.height], [1216, 832]);
     assert.equal(p.mode, "ultra");
     assert.equal(p.count, 1);
     assert.equal(p.high_priority, false);
@@ -260,6 +261,36 @@ describe("T3a -- the Lightbox edit bar's payload is the dock's buildPayload", ()
     assert.equal(p.quality_tag, null);
     assert.equal(p.upscale, null);
     assert.equal(p.seed, null);
+  });
+});
+
+describe("T3a -- the bar sends the request PixAI's own site sends (2026-10-03 capture)", () => {
+  /* The site's Smart Reference submit for the same edit, captured live: width and height are the
+     source picture's own (1280 x 768), one picture, Pro, creativity medium, the picture as the one
+     context image. The server half (controlNets [], no batchSize at one) is
+     tests/test_tsubaki3_generate.py::test_the_edit_bar_request_is_the_sites_smart_reference_shape. */
+  const bar = (img) => buildPayload(tsubakiEditState({ model: T3, image: img, prompt: "make it night",
+    mode: "pro", tier: "XL", member: true }));
+  test("a 1280 x 768 source: these keys, these values", () => {
+    const p = bar({ media_id: "701", w: 1280, h: 768 });
+    assert.deepEqual(Object.keys(p).sort(), ["cfg", "context_images", "count", "creativity", "face_fix",
+      "height", "high_priority", "image_refs", "loras", "mode", "model_id", "negative", "prompt",
+      "prompt_helper", "quality_tag", "ref_media_id", "ref_strength", "seed", "steps", "upscale",
+      "upscale_denoise", "upscale_denoise_steps", "version_id", "width"]);
+    assert.deepEqual([p.width, p.height], [1280, 768]);
+    assert.deepEqual(p.context_images, ["701"]);
+    assert.equal(p.count, 1);
+    assert.equal(p.mode, "pro");
+    assert.equal(p.creativity, "medium");
+    assert.equal(p.negative, "");
+    assert.deepEqual(p.loras, []);
+  });
+  test("a source off the model's own size rule is put on it (16 px steps, inside its range)", () => {
+    assert.deepEqual(Object.values((({ width, height }) => ({ width, height }))(bar({ media_id: "1", w: 1000, h: 600 }))), [1000, 600].map((x) => Math.round(x / 16) * 16));
+    const big = bar({ media_id: "2", w: 4096, h: 2304 });
+    assert.ok(big.width <= T3.size_rule.hi && big.height <= T3.size_rule.hi && big.width % 16 === 0 && big.height % 16 === 0, JSON.stringify(big));
+    const small = bar({ media_id: "3", w: 300, h: 200 });
+    assert.ok(small.width >= T3.size_rule.lo && small.height >= T3.size_rule.lo, JSON.stringify(small));
   });
 });
 

@@ -424,3 +424,45 @@ def test_the_image_ref_rule_matches_the_drawer_copy():
     assert "export const AT_REF_RE = /@image(\\d+)/g;" in js
     assert core._IMAGE_REF_RE.pattern == r"@image(\d+)"
     assert core._image_refs("a @image1 b @image12 @image0 @imagex") == [1, 12, 0]
+
+
+# =============================================================================
+# the Lightbox edit bar's request is the site's Smart Reference submit (2026-10-03)
+# =============================================================================
+
+def bar_payload(**kw):
+    """What the Lightbox edit bar's buildPayload sends for a 1280 x 768 source (pinned on the JS side
+    by loom/test/tsubaki-core.test.js, 'a 1280 x 768 source: these keys, these values')."""
+    p = {"version_id": T3, "model_id": "", "prompt": "make it night", "negative": "",
+         "width": 1280, "height": 768, "mode": "pro", "steps": 25, "cfg": None, "count": 1,
+         "seed": None, "high_priority": False, "prompt_helper": True, "creativity": "medium",
+         "ref_media_id": None, "ref_strength": None, "upscale": None, "upscale_denoise": None,
+         "upscale_denoise_steps": None, "face_fix": False, "quality_tag": None, "loras": [],
+         "context_images": ["701"], "image_refs": []}
+    p.update(kw)
+    return p
+
+
+def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
+    """PixAI's own site, captured live on 2026-10-03, sends a Smart Reference edit as
+    {extra: {naturalPrompts}, priority, width, height, prompts, modelId, seed, inferenceProfile,
+    controlNets: [], contextImages, promptHelper: {forcePromptHelperDetectionSide, creativity}}:
+    the source's own size, an empty controlNets, and no batchSize for one picture. The bar's request
+    now has exactly those keys (seed is left out when none is set, as before), and the quote prices
+    the very same dict."""
+    req = road(bar_payload())
+    assert req.parameters == {
+        "extra": {"naturalPrompts": "make it night"}, "priority": core.PRIORITY_TURBO,
+        "width": 1280, "height": 768, "prompts": "make it night", "modelId": T3,
+        "inferenceProfile": "pro", "controlNets": [], "contextImages": ["701"],
+        "promptHelper": {"forcePromptHelperDetectionSide": "server", "creativity": "medium"}}
+    rest.priced.clear()
+    core.price_task(object(), req.parameters)
+    assert rest.priced and all("batchSize" not in q for q in rest.priced)
+    assert rest.priced[-1]["width"] in (1280, "1280") and rest.priced[-1]["height"] in (768, "768")
+
+
+def test_a_run_of_several_still_says_how_many(rest):
+    """batchSize is left out only at one -- the site's own shape; a count above one (the dock's
+    confirm road) still says how many."""
+    assert road(bar_payload(count=2)).parameters["batchSize"] == 2

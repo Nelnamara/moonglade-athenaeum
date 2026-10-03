@@ -78,7 +78,7 @@ unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
 **The Lightbox edit bar.** On a still picture, the Lightbox's **✎ Edit** (or **E**) opens a
 **Describe your edits…** bar under the picture — the picture moves up to make room, and the bar
 never covers it. Type the change and press ↵: it sends a Tsubaki.3 run with that picture as
-@image1, your words as the prompt, the dock's profile and an Auto size — no LoRAs, recipes,
+@image1, your words as the prompt, the dock's profile and the picture's own size — no LoRAs, recipes,
 palette or negative. The price shows in the bar before you send, and the run joins the dock's
 reel and the Activity tray while the Lightbox stays open. **✎ Edit** again or **Esc** closes the
 bar (a second Esc closes the Lightbox). **More options in the Edit drawer ↗** at the bar's end

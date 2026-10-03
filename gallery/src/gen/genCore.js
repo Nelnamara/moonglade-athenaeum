@@ -536,9 +536,15 @@ export function imageRefs(prompt) {
    Auto size, creativity medium, the given profile, count 1 -- and nothing else of the dock:
    no LoRAs, no recipes, no negative, no boosters, no High priority, a random seed. */
 export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
+  /* THE SIZE IS THE SOURCE PICTURE'S OWN (the owner's walk, 2026-10-03): PixAI's own Smart
+     Reference submit sends the picture's width and height, not a size-tier area. It rides the
+     dock's own custom-size road, so a source off the model's rule (its 16 px step, inside its
+     range) is put on it exactly as a typed W x H is; an unknown size falls back to Auto. */
+  const w = Math.round(Number(image && image.w) || 0), h = Math.round(Number(image && image.h) || 0);
   return {
     ...GEN_DEFAULTS, model, member: member === true ? true : member === false ? false : null,
     inputs: "context", ctxWarned: true, auto: true,
+    customW: w > 0 && h > 0 ? String(w) : "", customH: w > 0 && h > 0 ? String(h) : "",
     ctx: image && image.media_id ? [{ media_id: String(image.media_id), thumb: image.thumb || "",
       w: Number(image.w) || 0, h: Number(image.h) || 0 }] : [],
     prompt: String(prompt || ""), mode: mode || "auto", tier: tier || "",

@@ -12,7 +12,7 @@ import "../styles/tsubaki.css";
 /* The Lightbox edit bar (Session H T3a; handoff frame G, "T3a · LIGHTBOX EDIT BAR"): "Describe
    your edits…" over the stage foot, on every still picture -- the same pictures as the "Edit
    with Tsubaki" menu item (the card's tsubaki_edit; never a video). ↵ sends a Tsubaki.3 run: this picture as @image1, the words as the prompt, the
-   dock's profile (the per-account gen.image setting), size Auto, count 1, no recipes, no
+   dock's profile (the per-account gen.image setting), the picture's own size, count 1, no recipes, no
    palette, no LoRAs, no negative, no boosters, no High priority. The run joins the dock's reel
    and the Activity toast; the Lightbox stays open.
 
