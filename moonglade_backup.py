@@ -6742,7 +6742,7 @@ def run_probe(args):
 #: place with none of the reading, so it is deprecated -- still working this release, but no
 #: longer the answer.
 _DELETE_TASK_DEPRECATED = (
-    "NOTE: --delete-task is DEPRECATED and will be removed in a later release.\n"
+    "NOTE: --delete-task is DEPRECATED and will be removed in the next minor release.\n"
     "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
     "  with PixAI first and removes just that image when the rest of its batch is still\n"
     "  there. To delete whole generations, select them in the gallery and use Delete from\n"

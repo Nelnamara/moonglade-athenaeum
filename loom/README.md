@@ -67,19 +67,13 @@ to `loom/` via `loom/package.json`.
   import) into `loom/dist/master-storyboard.bundle.js` via esbuild
   (`cd loom && npm run build`; `npm install` once first).
 
-**Two delivery paths, both live in `moonglade_gallery.py`:**
-- `/loom` (default) — unchanged in-browser Babel-standalone transpile. `loom()` inlines
-  `loom-core.js` ahead of the JSX (stripping `export`, same trick already used for
-  `export default function App()`) so it works without a build step, exactly as before.
-- `/loom?bundle=1` (opt-in) — serves the pre-built `loom/dist/` bundle instead (no
-  Babel, no client-side transpile). Falls back to the default page automatically if the
-  bundle hasn't been built yet, so a fresh checkout never breaks.
+**One delivery path.** `/loom` serves the pre-built `loom/dist/` bundle; the old in-browser
+Babel-standalone transpile was retired on 2026-08-08 (see the comment above `loom()` in
+`moonglade_gallery.py`). The page refuses to open if the bundle was never built.
 
-The Babel-standalone path remains the trusted default; the bundle path is additive and
-opt-in until it's proven out. **The bundle is committed and has no automated rebuild** —
-if you change `master-storyboard.jsx`, run `npm run build` and commit `dist/`, or the
-`?bundle=1` path serves stale code. (`tests/test_js_syntax.py` catches only the narrower
-case where the bundle's React-hook preamble drifts from the source.)
+**The bundle is committed.** If you change `master-storyboard.jsx` or anything under `loom/src/`,
+run `npm run build` and commit `dist/`. CI rebuilds it and fails on any difference, and
+`python tools/ci_local.py` runs the same check locally.
 
 ---
 

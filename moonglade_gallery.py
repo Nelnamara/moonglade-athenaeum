@@ -4081,7 +4081,7 @@ def _ranged_bytes_response(response_class, raw, mime):
 # The bundle's unlock split, ENFORCED at the serving layer (docs/DECISIONS.md
 # "The bundle's unlock split" 2026-07-27 + the "Mascots-in-Branding" correction
 # 2026-08-06): achievement-bound art -- badge masters, the per-achievement
-# mascot poses under mascots/ach/, the rewards/ tree, the Konami ee_* assets --
+# mascot poses under mascots/ach/, the rewards/ tree, the easter-egg ee_* assets --
 # is sealed to the achievement that earns it. System chrome (narrator, login
 # companion, wizard poses, tracker spinner/status art, present_* fallbacks)
 # stays open: it is the app's default dress, not a reward. Deny answers are
