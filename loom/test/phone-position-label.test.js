@@ -111,3 +111,31 @@ describe("source: neither label counts the loaded page any more", () => {
     assert.match(py, /"position": position, "nav_total": len\(nav_ids\)/);
   });
 });
+
+// The desktop record had the same flaw (its header said "14 of 100" the same way), and it reads the same
+// two numbers from the same route.
+describe("source: the desktop record counts the whole walk too", () => {
+  const desktop = src("gallery/src/components/DetailsView.jsx");
+  const app = src("gallery/src/App.jsx");
+
+  test("the header label comes from the route's position and walk total", () => {
+    assert.match(desktop, /positionLabel\(state\.data\.position, state\.data\.nav_total\)/);
+    assert.match(desktop, /import \{ positionLabel \} from "\.\.\/lib\/phoneCore\.js";/);
+    assert.match(desktop, /\{indexLabel \? <span className="detail-index">\{indexLabel\}<\/span> : null\}/);
+  });
+
+  test("it no longer counts inside the loaded page", () => {
+    assert.doesNotMatch(desktop, /items\.length/);
+    assert.doesNotMatch(desktop, /items\.findIndex/);
+    assert.doesNotMatch(desktop, /detailIdx/);
+  });
+
+  test("it no longer takes the loaded page as a prop, and App no longer hands it over", () => {
+    assert.doesNotMatch(desktop, /\n\s*items, onOpenLightbox/);
+    const call = app.slice(app.indexOf("<DetailsView"), app.indexOf("onOpenLightbox={(mid)", app.indexOf("<DetailsView")));
+    assert.ok(call.length > 0, "found the DetailsView call site");
+    assert.doesNotMatch(call, /items=\{items\}/);
+    // the Lightbox hand-off still reads the loaded page: that is its job
+    assert.match(app, /onOpenLightbox=\{\(mid\) => \{\s*const i = items\.findIndex\(\(it\) => it\.media_id === mid\);/);
+  });
+});
