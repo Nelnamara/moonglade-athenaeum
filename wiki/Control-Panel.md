@@ -375,13 +375,13 @@ About opens leading with a card that reads *"v3.7.3 is out"* (with the release's
 running the stamp reads *updating…* and opens the window that is reporting it.
 
 **About** is the app's own "what am I running" card. It shows Nel, the name, and a line such
-as *app 3.14.0 · art pack v5 · 2026-09-26*, then **this version's changelog** — the headline
+as *app 3.15.0 · art pack v6 · 2026-10-01*, then **this version's changelog** — the headline
 changes of the release you are running, and a short *Under the hood* line for the rest.
 **Earlier versions ›** lists the older entries in this install's changelog; click one to read
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the
 [in-app guide](Home#help-inside-the-app), **Report an issue ↗** opens the project's issue
 page and **Releases ↗** its release notes. Up to date, the stamp shows the build (for
-example `v3.14.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
+example `v3.15.0 · 1a2b3c4`) and opens the same card. On a phone it is **Control → About
 Moonglade**, under the update row, and the guide's last page is About too.
 
 **An update that worked says so when the app comes back.** Pressing **Update now** ends in
