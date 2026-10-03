@@ -19,7 +19,7 @@ import moonglade_container as mc
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import (_SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
+from tests.conftest import (STARFALL_EVENT, _SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
                             login_client, moment_clip_keys)
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -303,7 +303,7 @@ def test_the_keyturn_clip_404s_until_its_feat_is_earned(tmp_path, sealed_donor_p
 def test_the_starfall_clip_404s_until_its_feat_is_earned(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
     assert cli.get(_STARFALL_URL).status_code == 404
-    ach_event(cli, "konami")
+    ach_event(cli, STARFALL_EVENT)
     r = cli.get(_STARFALL_URL, headers={"Range": "bytes=-100"})
     assert r.status_code == 206 and r.data == MOMENT_FIXTURE_CLIP.read_bytes()[-100:]
     assert cli.get(_KEYTURN_URL).status_code == 404
@@ -343,7 +343,7 @@ def test_moment_flags_are_absent_before_the_earn(tmp_path, sealed_donor_present)
 def test_moment_flags_arrive_with_the_earn(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
     _earn_keyturn(cli)
-    ach_event(cli, "konami")
+    ach_event(cli, STARFALL_EVENT)
     d = cli.get("/api/achievements").get_json()
     by_moment = {a["moment"]: a for a in d["achievements"] if a.get("moment")}
     assert set(by_moment) == {"starfall", "keyturn"}
@@ -366,7 +366,7 @@ def test_moment_flags_arrive_with_the_earn(tmp_path, sealed_donor_present):
 
 def test_one_earn_reveals_only_its_own_moment(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
-    ach_event(cli, "konami")
+    ach_event(cli, STARFALL_EVENT)
     d = cli.get("/api/achievements")
     moments = [a["moment"] for a in d.get_json()["achievements"] if a.get("moment")]
     assert moments == ["starfall"]

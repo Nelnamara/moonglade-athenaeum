@@ -102,3 +102,39 @@ def test_built_bundles_do_not_name_a_hidden_feat():
                 leaks.append("%s: names a hidden feat" % rel)   # never echo the secret itself
     assert not leaks, ("a hidden feat is named in a built bundle -- rebuild from src after "
                        "removing the string: " + "; ".join(sorted(set(leaks))))
+
+
+# The key-sequence moment's beacon posted an event name that described the gesture, in served
+# JS and in the server's whitelist (scope 2026-10-02, platform item 3). It posts a neutral name
+# now, and the old one must not come back as a QUOTED literal in public source: the beacon's
+# event, the whitelist, a branch on it. The needle is DERIVED from the private donor -- the
+# metric of the roster entry that carries the starfall moment, minus its "_triggered" suffix --
+# never spelled here, for the reason the bundle guard above gives. That metric key itself keeps
+# its name (it is the sealed roster's), which is why the needle is the quoted bare word only.
+# Source, not the built bundle: the committed bundle is held to a rebuild of this source by
+# the bundle-freshness tests, so a clean source is a clean bundle.
+_EVENT_SCAN_GLOBS = ["moonglade_*.py", "tools/*.py", "gallery/src/**/*.js",
+                     "gallery/src/**/*.jsx", "loom/src/**/*.js", "loom/src/**/*.jsx"]
+
+
+@pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                    reason="sealed-definitions donor (private repo) not present")
+def test_the_key_sequence_beacon_event_has_a_neutral_name():
+    defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+    metrics = [a.get("metric") or "" for a in defs.get("roster", [])
+               if a.get("moment") == "starfall"]
+    assert len(metrics) == 1 and metrics[0].endswith("_triggered"), (
+        "the donor no longer has exactly one starfall-moment entry with a *_triggered metric "
+        "-- re-derive this needle")
+    word = metrics[0][:-len("_triggered")]
+    needles = ['"%s"' % word, "'%s'" % word]
+    leaks = []
+    for pat in _EVENT_SCAN_GLOBS:
+        for path in _REPO.glob(pat):
+            if not path.is_file() or "node_modules" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if any(n in text for n in needles):
+                leaks.append(str(path.relative_to(_REPO)))     # never echo the word itself
+    assert not leaks, ("the key-sequence beacon's old event name is back in public source: "
+                       + "; ".join(sorted(set(leaks))))

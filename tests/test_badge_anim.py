@@ -28,7 +28,7 @@ from PIL import Image, ImageSequence
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import ach_event, login_client
+from tests.conftest import STARFALL_EVENT, ach_event, login_client
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +175,7 @@ def test_hidden_feat_animation_is_gated_exactly_like_its_still(tmp_path, sealed_
     _anim(sf)
     assert cli.get("/badge-thumb/" + sf + ".webp").status_code == 404
     assert cli.get("/badge-thumb/" + sf + ".png").status_code == 404
-    ach_event(cli, "konami")
+    ach_event(cli, STARFALL_EVENT)
     assert cli.get("/badge-thumb/" + sf + ".webp").status_code == 200
     assert cli.get("/badge-thumb/" + sf + ".png").status_code == 200
 

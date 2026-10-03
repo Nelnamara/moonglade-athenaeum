@@ -14,7 +14,7 @@ import pytest
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
+from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -265,7 +265,7 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    r = ach_event(cli, "konami")
+    r = ach_event(cli, STARFALL_EVENT)
     assert r.status_code == 200
     assert g.telemetry_metrics(out)["konami_triggered"] == 1
     ach_event(cli, "docs")
@@ -278,6 +278,14 @@ def test_api_ach_event_beacon(tmp_path, monkeypatch):
     # unknown events are rejected, nonce or no nonce
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
     assert ach_event(cli, "nope").status_code == 400
+    # ...and so is the key-sequence event's RETIRED public name, with no alias: the beacon is
+    # fail-soft, so a stale cached page's refusal costs one press, and an alias would keep the
+    # old word in public source. (Derived from the flag key, which keeps its name.)
+    flags_before = dict(g.load_telemetry(out)["flags"])
+    retired = "konami_triggered"[:-len("_triggered")]
+    r = ach_event(cli, retired)
+    assert r.status_code == 400 and r.get_json()["error"] == "unknown event"
+    assert g.load_telemetry(out)["flags"] == flags_before
 
 
 def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
@@ -285,14 +293,14 @@ def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
     cli = login_client(tmp_path)
     d = cli.get("/api/ach-nonce").get_json()
     assert d["nonce"] and isinstance(d["nonce"], str)
-    r = cli.post("/api/ach-event", json={"event": "konami", "nonce": d["nonce"]})
+    r = cli.post("/api/ach-event", json={"event": STARFALL_EVENT, "nonce": d["nonce"]})
     assert r.status_code == 200 and r.get_json()["next_nonce"] != d["nonce"]
 
 
 def test_ach_event_without_a_nonce_is_refused(tmp_path):
     """The console POST the 2026-08-26 LOCALHOST gate existed to stop."""
     cli = login_client(tmp_path)
-    r = cli.post("/api/ach-event", json={"event": "konami"})
+    r = cli.post("/api/ach-event", json={"event": STARFALL_EVENT})
     assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
     assert "konami_triggered" not in g.telemetry_metrics(tmp_path)
 
@@ -351,7 +359,7 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     assert second["debounced"] is True and second["next_nonce"]
     assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
     # ...and the debounce is per (session, event): a different event is not held back.
-    cli.post("/api/ach-event", json={"event": "konami", "nonce": second["next_nonce"]})
+    cli.post("/api/ach-event", json={"event": STARFALL_EVENT, "nonce": second["next_nonce"]})
     assert g.telemetry_metrics(tmp_path)["konami_triggered"] == 1
 
 

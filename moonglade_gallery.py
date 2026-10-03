@@ -12486,7 +12486,7 @@ def scene_row(sc):
 # ---- the feat-beacon nonce, debounce and rate limit (2026-09-07) ------------------------
 # What replaced the LOCALHOST gate on /api/ach-event. The gate's problem was that the
 # beacon is the ONLY witness a feat gesture happened, so any signed-in session could POST
-# {"event": "konami"} from a console and arm the feat. Loopback made the gesture witnessable
+# a feat event from a console and arm the feat. Loopback made the gesture witnessable
 # but cost every phone and LAN device the three feats outright. The owner's call
 # (2026-09-07): "triggered should be obtainable easily on a phone just like desktop. For
 # sure build the nonce."
@@ -21189,7 +21189,7 @@ def create_app(out_dir: Path):
     @app.route("/api/ach-event", methods=["POST"])
     @tier(LOGIN)
     def api_ach_event():
-        """Feat-event beacon from the front-end: the Starfall konami egg and the
+        """Feat-event beacon from the front-end: the Starfall key-sequence moment and the
         in-app manual. Whitelisted event names only; each is a cosmetic local counter
         (no spend). Narrator pokes used to ride this beacon; they have their own route
         (/api/narrator/poke) since the ladder, which keeps its count and clocks per
@@ -21206,7 +21206,7 @@ def create_app(out_dir: Path):
         2026-08-26 to 2026-09-07: the beacon is the ONLY thing standing between a
         feat and being earned -- there is no server-side re-check that the
         gesture actually happened, so any signed-in session could POST
-        {"event": "konami"} straight from a console and arm the feat without ever
+        a feat event straight from a console and arm the feat without ever
         entering the code. Narrowing to loopback meant a feat could only be armed
         at the server's own keyboard, the one place the gesture can be witnessed.
         The cost was that a phone or any other LAN device lost all three feats,
@@ -21238,17 +21238,23 @@ def create_app(out_dir: Path):
         same gesture twice from the other side.
 
         The clients still treat a refusal as a no-op by design: api.js never
-        throws (a 403 comes back as an {error} body) and App.jsx's konami handler
+        throws (a 403 comes back as an {error} body) and the key-sequence handler
         is explicitly fail-soft (the stars and toast still play). What is new
         is that every caller now goes through notify/achNonce.js, which adopts
         the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
-        once on a stale-page 403 before giving up quietly."""
+        once on a stale-page 403 before giving up quietly.
+
+        THE EVENT NAMES ARE PUBLIC -- they sit in served JS and in this whitelist -- so they
+        name the moment, never the gesture: the key sequence posts "starfall" (renamed
+        2026-10-02 from a word that gave the egg away). There is no alias for the old name:
+        a stale cached page's 400 is a silent no-op and the next press after a reload counts.
+        The telemetry flag it sets keeps its key, which is the sealed roster's metric."""
         sid = _ach_sid()
         if not _ach_rate_ok(sid):
             return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
-        if ev not in ("konami", "docs"):
+        if ev not in ("starfall", "docs"):
             return jsonify({"error": "unknown event"}), 400
         # One refusal wording for missing, unknown, expired and foreign alike: which
         # check failed is exactly the thing a replay probe would want to learn, and
@@ -21260,7 +21266,7 @@ def create_app(out_dir: Path):
         nxt = _ach_mint(sid)
         if _ach_debounced(sid, ev):
             return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
-        if ev == "konami":
+        if ev == "starfall":
             telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
         telem_bump("docs_opened", out_dir=out_dir)

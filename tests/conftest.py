@@ -685,6 +685,12 @@ def with_csrf(cli, body=None):
     return dict(body or {}, csrf=session_csrf(cli))
 
 
+# The key-sequence moment's beacon event, as moments/starfallTrigger.js posts it to
+# /api/ach-event. Neutral on purpose: served JS and the server's whitelist are public, so
+# the event name must not describe the gesture.
+STARFALL_EVENT = "starfall"
+
+
 def ach_nonce(cli):
     """A fresh feat-beacon nonce for `cli`'s session. Since the 2026-09-07 nonce ruling
     /api/ach-event refuses a POST that carries none, so a test that just wants the

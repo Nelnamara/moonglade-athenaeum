@@ -127,6 +127,15 @@ describe("the trigger plays the clip moment; the DOM cast is gone", () => {
       "normal path: the hold lasts exactly as long as the moment");
   });
 
+  test("the beacon posts the moment's neutral event name and nothing else", () => {
+    // Served JS is public, so the event name must not describe the gesture (scope 2026-10-02,
+    // platform item 3). The server's whitelist takes the same word; the old one is refused.
+    const posted = [...trigger.matchAll(/sendAchEvent\(\s*([^)]*)\)/g)].map((m) => m[1].trim());
+    assert.deepEqual(posted, ['"starfall"'],
+      "the key-sequence trigger must post exactly one beacon, with the literal event name " +
+      "\"starfall\" -- found " + JSON.stringify(posted));
+  });
+
   test("a beacon that never answers cannot wedge the engine", () => {
     // The root App never unmounts, so its cleanup never runs, and apiGet/apiPost make a bare
     // fetch that a hung request neither resolves nor rejects -- only wall-clock time can end
