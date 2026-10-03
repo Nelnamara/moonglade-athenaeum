@@ -7822,3 +7822,39 @@ def test_the_desktop_lightbox_counts_the_whole_walk_once(paged_library_server, r
         assert page.evaluate(read) == ["102", "OF 120"]
     finally:
         ctx.close()
+
+
+def test_the_phone_newest_jump_never_covers_the_pager(paged_library_server, render_browser, monkeypatch):
+    """Walk item 6: at the bottom of the phone gallery the floating "↑ Newest" sat on the pager row and
+    hid its middle ("Page 1 of 2 · 120 matches"), upright and sideways. Mid-list the jump is there;
+    once the pager row is on screen it steps aside, and a tap on the pager's middle reaches the pager."""
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    for vp in (PHONE, LAND):
+        ctx = render_browser.new_context(viewport=vp, device_scale_factor=1, has_touch=True, is_mobile=True,
+                                         base_url=paged_library_server.base_url)
+        ctx.set_default_timeout(10_000)
+        try:
+            page = ctx.new_page()
+            _login(page)
+            _visit(page, "/")
+            page.wait_for_selector(".glm-grid .glm-tile")
+            page.wait_for_selector(".glm-pager")
+            _dismiss_any_achievement_toast(page)
+            page.evaluate("document.querySelector('.glm-body').scrollTop = 2000")
+            page.wait_for_selector(".glm-newest")
+            page.evaluate("(() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollHeight; })()")
+            page.wait_for_function("""() => { const p = document.querySelector('.glm-pager').getBoundingClientRect();
+                const b = document.querySelector('.glm-body').getBoundingClientRect(); return p.bottom <= b.bottom + 1; }""")
+            page.wait_for_timeout(150)
+            _settle(page)
+            got = page.evaluate("""() => {
+                const p = document.querySelector('.glm-pager').getBoundingClientRect();
+                const n = document.querySelector('.glm-newest');
+                const nb = n ? n.getBoundingClientRect() : null;
+                const i = document.querySelector('.glm-pager-info').getBoundingClientRect();
+                const hit = document.elementFromPoint(i.left + i.width / 2, i.top + i.height / 2);
+                return {jump: !!n, overlap: !!(nb && nb.left < p.right && nb.right > p.left && nb.top < p.bottom && nb.bottom > p.top),
+                        pagerHit: !!(hit && hit.closest('.glm-pager'))}; }""")
+            assert got == {"jump": False, "overlap": False, "pagerHit": True}, (vp, got)
+        finally:
+            ctx.close()

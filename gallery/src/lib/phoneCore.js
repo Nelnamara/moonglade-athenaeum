@@ -282,6 +282,15 @@ export function showNewest(scrollTop, viewportHeight) {
   return Number(scrollTop) > (Number.isFinite(vh) && vh > 0 ? vh : 560);
 }
 
+/* ...and steps aside while the pager row is on screen (owner's walk, 2026-10-03: it sat on top of
+   "‹ Prev · Page 1 of 380 · 37,917 matches · Next ›" and hid its middle). Where the pager shows, the
+   page is ending anyway. `pager` and `view` are the pager row's and the scroller's boxes ({top,
+   bottom}); a missing one is "not on screen". */
+export function pagerInView(pager, view) {
+  if (!pager || !view) return false;
+  return Number(pager.top) < Number(view.bottom) && Number(pager.bottom) > Number(view.top);
+}
+
 export function newestLabel(count) {
   return "↑ Newest" + (count ? " · " + count + " new" : "");
 }

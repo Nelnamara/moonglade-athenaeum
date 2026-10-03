@@ -11,7 +11,7 @@ import PullToRefresh from "./PullToRefresh.jsx";
 import useDataSaver, { useFeedLayout } from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useScrollAnchor from "../hooks/useScrollAnchor.js";
-import { newSince, newSinceLabel, newestLabel, showNewest } from "../lib/phoneCore.js";
+import { newSince, newSinceLabel, newestLabel, pagerInView, showNewest } from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
 import "../styles/gallery-mobile.css";
@@ -121,19 +121,23 @@ export default function GalleryMobile({
   const ns = frontPage ? newSince(items, marker) : { count: 0, capped: false };
   const ruleText = newSinceLabel(ns.count, ns.capped, marker && marker.at);
   /* "↑ Newest" -- after one screen of scrolling, on the tab's own scroller (.glm-body). The state only
-     changes when the threshold is crossed, so a scroll is not a render. */
+     changes when the threshold is crossed, so a scroll is not a render. It steps aside while the pager
+     row is on screen (owner's walk, 2026-10-03: it sat on the pager and hid its middle). */
   const [jump, setJump] = useState(false);
   useEffect(() => {
     const host = rootRef.current && rootRef.current.closest(".glm-body");
     if (!host) return undefined;
     let on = false;
     const onScroll = () => {
-      const v = showNewest(host.scrollTop, host.clientHeight);
+      const pager = host.querySelector(".glm-pager");
+      const v = showNewest(host.scrollTop, host.clientHeight)
+        && !pagerInView(pager && pager.getBoundingClientRect(), host.getBoundingClientRect());
       if (v !== on) { on = v; setJump(v); }
     };
     host.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
     onScroll();
-    return () => host.removeEventListener("scroll", onScroll);
+    return () => { host.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); };
   }, []);
   const toNewest = () => {
     const host = rootRef.current && rootRef.current.closest(".glm-body");

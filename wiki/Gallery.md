@@ -364,7 +364,9 @@ phone** (in the browser, like the popup blur), not on your account.
 remembers the newest picture it showed you and the time. Next time, a lavender line reading **N new
 since HH:MM** marks where the new pictures end. There is no line when nothing is new, and none on a
 filtered view, a later page or the lookalikes view; those never change what the phone remembers. After
-one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top.
+one screen of scrolling a **↑ Newest** button appears (with the count) and jumps back to the top. It
+steps aside at the foot of the page, while the **‹ Prev · Page … · Next ›** row is on screen, so it never
+covers the pager.
 
 **Pull to refresh.** At the very top of the Gallery, pull down: the moon fills as you pull (it is a real
 fraction of the distance to the release line — a full moon means "let go now"). Release past the line
