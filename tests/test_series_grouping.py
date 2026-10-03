@@ -17,7 +17,7 @@ UNITS, and the ?series=<sid> filter that "opens a stack" to one series' members.
   * regression: without group=series the payload is byte-identical to before -- one
     card per row, no series key;
   * the route keeps its LOGIN tier and adds NO new endpoint (group/series are params
-    on the existing api_next_library).
+    on the existing api_library).
 """
 import json
 
@@ -292,13 +292,14 @@ def test_group_off_returns_every_row_and_no_series_key(tmp_path):
 # --- tier / no new route ----------------------------------------------------------------
 
 def test_group_and_series_are_params_not_a_new_route(tmp_path):
-    """group/series ride on api_next_library -- no new endpoint, so no ROUTE_TIERS
-    change: the url_map has exactly one rule for /api/next/library and it is
-    api_next_library."""
+    """group/series ride on api_library -- no new endpoint, so no ROUTE_TIERS
+    change: the url_map has exactly one rule for /api/library and it is
+    api_library (the old /api/next/library name is an alias rule on that same view;
+    tests/test_api_route_aliases.py owns it)."""
     app = create_app(tmp_path)
-    rules = [r for r in app.url_map.iter_rules() if str(r) == "/api/next/library"]
+    rules = [r for r in app.url_map.iter_rules() if str(r) == "/api/library"]
     assert len(rules) == 1
-    assert rules[0].endpoint == "api_next_library"
+    assert rules[0].endpoint == "api_library"
 
 
 def test_grouped_listing_inherits_the_login_tier(tmp_path):

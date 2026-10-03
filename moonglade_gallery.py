@@ -3145,7 +3145,7 @@ def history_created_ats(db_path, since_utc, until_utc, media="", source=""):
 def _series_text(row):
     """The EXACT text the owner validated the clustering rule on (#34, engine
     requirement comment): the library API's `prompt` field, which is
-    `(prompt_full or prompt_preview or "")[:1200]` (see /api/next/library's item
+    `(prompt_full or prompt_preview or "")[:1200]` (see /api/library's item
     builder). Same fallback order, same 1200-char cap -- Mio-era prose runs ~2k
     chars, and an uncapped read yields DIFFERENT clause sets than the validated
     board. Pinned by the >1200-char test in tests/test_series_engine.py."""
@@ -3488,7 +3488,7 @@ def series_index(db_path):
 
 
 # --- direction B: the grouped listing (series-as-units) --------------------------------
-# Folding a filtered, sorted row set into dial-in series UNITS for /api/next/library
+# Folding a filtered, sorted row set into dial-in series UNITS for /api/library
 # ?group=series. Kept as module-level pure functions so the fold + cover choice are
 # unit-testable without a request (tests/test_series_grouping.py). The route supplies
 # the rows (list_group_rows) and the series index (series_index); these decide only
@@ -20387,13 +20387,13 @@ def create_app(out_dir: Path):
 
         The rows are the task's SURVIVING catalog rows -- read through query_catalog's
         own `batch` predicate, which is `(batch = ? OR task_id = ?)`, so this and the
-        pictures listing the modal fetches next (/api/next/library?batch=<id>) see
+        pictures listing the modal fetches next (/api/library?batch=<id>) see
         exactly the same set and their counts cannot disagree. Order is #33's batch
         order (batch_member_order).
 
         404 for an unknown id AND for a LONE image: one surviving row is not a batch.
         The grouped grid marks a batch stack only at >= 2 survivors (see the folded-BATCH
-        arm of /api/next/library), so nothing can open one -- answering 200 here would
+        arm of /api/library), so nothing can open one -- answering 200 here would
         invent a stack the library never draws. Pure catalog read, no network."""
         tid = str(task_id or "").strip()
         rows = []
@@ -24692,9 +24692,18 @@ __DESIGN_TOKENS__
         resp.headers["Cache-Control"] = "no-cache"
         return resp
 
+    # The app's three data routes: /api/library, /api/detail/<media_id>, /api/history.
+    # Each also answers on its old name under /api/next/, the React app's pilot codename
+    # (#51 retired the /next page route and left these for their own change). The old rule
+    # sits on the SAME view, so both paths answer byte-for-byte alike and there is no second
+    # handler to drift. It stays for ONE release, so a tab still running an older cached
+    # bundle against an updated server keeps working; the release after removes it
+    # (tests/test_api_route_aliases.py). The /next/assets/ prefix above is NOT part of this:
+    # installed phone apps read their icons from it, so it is never dropped.
+    @app.route("/api/library")
     @app.route("/api/next/library")
     @tier(LOGIN)
-    def api_next_library():
+    def api_library():
         """The new gallery's own listing surface -- full filter set, clean field
         names, one purpose. Reads the same catalog engine (query_catalog) as
         everything else; nothing here is borrowed from the picker routes.
@@ -24839,13 +24848,14 @@ __DESIGN_TOKENS__
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
 
+    @app.route("/api/detail/<media_id>")
     @app.route("/api/next/detail/<media_id>")
     @tier(LOGIN)
-    def api_next_detail(media_id):
+    def api_detail(media_id):
         """The pilot's Details view backing data -- classic's detail() route (~12254),
         JSON instead of a server-rendered page. Full row, plus prev_id/next_id computed
         the SAME way: list_media_ids() under the CURRENT filter/sort (the same param
-        names /api/next/library accepts), index looked up in that ordered id list.
+        names /api/library accepts), index looked up in that ordered id list.
 
         Deliberately does NOT precompute img_url/video_url/an existence check the way
         classic's route does -- classic needed that because a dead <img src> shows a
@@ -24944,9 +24954,10 @@ __DESIGN_TOKENS__
             ms = float("0" + frac)
         return base.timestamp() + ms
 
+    @app.route("/api/history")
     @app.route("/api/next/history")
     @tier(LOGIN)
-    def api_next_history():
+    def api_history():
         """Read-only feed for the Generate dock's History mode: the last `days` LOCAL
         calendar days of finished runs (catalog rows by created_at, newest first, empty
         days included as [] = "No runs"), with the live job log merged on top -- a
@@ -25720,7 +25731,7 @@ __DESIGN_TOKENS__
                 ids.append(s)
         if len(ids) > _LOOM_SPEND_MAX_IDS:
             return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
-        # as_int mirrors /api/next/history's own paid_credit reading exactly ('' -> None, a
+        # as_int mirrors /api/history's own paid_credit reading exactly ('' -> None, a
         # real number -> int): one interpretation of that column across both surfaces.
         #
         # NON-FINITE IS NOT A CHARGE, and it must not take the batch down with it. This
@@ -28081,7 +28092,7 @@ def main():
     # load slowly" (owner report, diagnosed live 2026-08-06). Chrome resolves
     # `localhost` dual-stack and tries IPv6 ::1 FIRST; bound only to 127.0.0.1, every
     # FRESH connection burns ~300ms failing that attempt before falling back to IPv4
-    # (measured: connect 312ms vs 39ms of actual server work on /api/next/detail).
+    # (measured: connect 312ms vs 39ms of actual server work on /api/detail).
     # Keep-alive reuse hides it, every new connection pays it -- hence "sometimes."
     # A second werkzeug server on [::1], same port, same app, makes the browser's
     # first attempt succeed instead. The main IPv4 bind below is UNTOUCHED (LAN via

@@ -165,6 +165,7 @@ TIER_SNAPSHOT = [
     "/api/delete-local [POST] LOGIN",
     "/api/delete-preview [POST] LOCALHOST",
     "/api/delete-tasks [POST] LOCALHOST",
+    "/api/detail/<media_id> [GET] LOGIN",
     "/api/duplicates [GET] LOGIN",
     "/api/duplicates/resolve [POST] LOGIN",
     "/api/duplicates/undo [POST] LOGIN",
@@ -185,12 +186,14 @@ TIER_SNAPSHOT = [
     "/api/help/index [GET] LOGIN",
     "/api/help/online/<slug> [GET] LOGIN",
     "/api/help/page/<slug> [GET] LOGIN",
+    "/api/history [GET] LOGIN",
     "/api/image-meta/<media_id> [GET] LOGIN",
     "/api/import-local [POST] LOCALHOST",
     "/api/import-task [POST] LOGIN",
     "/api/jobs [GET] LOGIN",
     "/api/jobs [POST] LOGIN",
     "/api/jobs/dismiss [POST] LOGIN",
+    "/api/library [GET] LOGIN",
     "/api/library-path [GET] LOGIN",
     "/api/library-path [POST] LOCALHOST",
     "/api/lineage/<media_id> [GET] LOGIN",
@@ -230,6 +233,8 @@ TIER_SNAPSHOT = [
     "/api/myart/items [GET] LOGIN",
     "/api/myart/publish [POST] LOGIN",
     "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
+    # the pilot-codename aliases of /api/detail, /api/history and /api/library: the SAME
+    # views, kept one release for older cached bundles, then removed
     "/api/next/detail/<media_id> [GET] LOGIN",
     "/api/next/history [GET] LOGIN",
     "/api/next/library [GET] LOGIN",
