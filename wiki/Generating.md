@@ -489,14 +489,14 @@ python moonglade_backup.py --generate --task-id <id>
 | `--prompt` / `--negative` | — | the prompts |
 | `--model` | Tsubaki.2 | model **version** id |
 | `--lora VERSIONID:WEIGHT` | — | repeatable |
-| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — an unsupported mode auto-falls-back to the model's default and retries once instead of erroring (a rejected submit costs no credits either way); the web Generate tab does the same since 2026-07-24 |
+| `--mode` | `auto` | `auto`/`lite`/`standard`/`pro`/`ultra` — `auto` lets PixAI use the model's own default. A mode the model doesn't list is refused before anything is sent; if the model's list can't be read and PixAI rejects the mode, the run goes once on the model's default instead (a rejected submit costs no credits). See [Modes are model-specific](#modes-are-model-specific) |
 | `--priority` / `--high-priority` / `--low-priority` | `500` | PixAI's speed channels: `0` standard (free) · `500` Turbo, ~7.6× faster and free but **members only** · `1000` High, ~10× faster and **costs extra** · `1500` extra high. Turbo is the default and falls back to `0` on its own if the account is not a member |
 | `--no-prompt-helper` | off | use the prompt literally |
-| `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | |
+| `--width`/`--height`/`--steps`/`--cfg`/`--batch-size`/`--seed` | 512/512/25/7/1/random | sizes are rounded down to a multiple of 8, then moved onto the model's own size grid if they don't fit (the preview names the change). A model that publishes its own quality profiles sets its own steps and CFG, so yours aren't sent to it. No `--seed` means a random one |
 | `--enlarge RATIO` | off | upscale the finished image with an upscaler network (PixAI's **Upscale** method). 0.1 steps, clamped to the biggest ratio your `--width`/`--height` allows |
 | `--enlarge-model NAME` | `R-ESRGAN 4x+ Anime6B` | which upscaler `--enlarge` runs: `ESRGAN_4x`, `R-ESRGAN 4x+`, `R-ESRGAN 4x+ Anime6B`, `SwinIR_4x`, `Lollypop` |
 | `--upscale RATIO` | off | re-render at the larger size (PixAI's **Hires** method) — adds detail rather than just resolution, allows a smaller maximum ratio, costs roughly 3× `--enlarge`. Mutually exclusive with it |
-| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `26` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
+| `--upscale-denoise` / `--upscale-denoise-steps` | `0.6` / `20` | Hires denoising (strength 0.01–0.99, steps 1–50). PixAI's own hint: strength works better between 0.4 and 0.6 |
 | `--face-fix` | off | run PixAI's face restorer over the result (their **Face Fix** booster) |
 | `--quality-tag [PREFIX]` | off | prepend a quality booster to the prompt (their **Quality Tag**; bare flag uses `Masterpiece`) |
 | `--confirm` | off | **required** to spend credits |
@@ -559,7 +559,7 @@ python moonglade_backup.py --generate-video --task-id <id>
 
 ### Video models and shot-mode gating
 
-Nine video engines are selectable (newest first), and they are **not interchangeable** —
+These video engines are selectable (newest first), and they are **not interchangeable** —
 each has its own duration cap, free-card eligibility, and which of the Loom's four
 [Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
 drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
@@ -610,6 +610,9 @@ Notes:
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--duration` | `5` | clip length in seconds: 5, 6, 10 or 15, snapped to what the chosen model takes (see above) |
+| `--video-model` | `v4.0.1` | which engine — the codes in the table above. Overrides `--model` for the clip |
+| `--video-mode` | `professional` | `basic` is the cheaper tier |
 | `--tail <media_id>` | — | last-frame image → first/last-frame (FLF) interpolation between `--image` and this |
 | `--camera-movement` | unset | `horizontal`/`pan`/`roll`/`tilt`/`vertical-pan`/`zoom`; unset omits it (camera direction can also just go in the prompt) |
 | `--audio` / `--audio-language` | off / `english` | generate audio with the clip; the language only matters with `--audio` |
@@ -623,7 +626,7 @@ Source can be a **catalog `media_id`** or a **local file** (uploaded automatical
 `--edit-src` more than once for multi-image reference. Results catalog as `source='api'`.
 
 **Web:** the Generate drawer's **Edit** tab — pick the source image(s) from your gallery,
-type the change, set resolution/aspect/quality, then submit. Three edit models: **Edit v4.0**
+type the change, set resolution/aspect/quality, then submit. The edit models are **Edit v4.0**
 (new — up to 10 images, 1K/2K/4K, ratios down to 1:8 and 8:1 under **More**, no quality
 setting), **Edit Pro** and **Reference Pro**.
 
@@ -646,7 +649,7 @@ Reference Pro only offers 2K/4K and has no quality knob, so out-of-range values 
 corrected (and shown in the preview) rather than rejected.
 
 **Edits made with a model Moonglade doesn't know locally still get a real name.** It
-recognizes PixAI's three edit models by name without asking anyone; anything else — a newer
+recognizes PixAI's edit models by name without asking anyone; anything else — a newer
 `modelId` pushed through `--params-json`, or `--task-id` recovering a chat task you made on
 PixAI's own site — used to land in the catalog as the literal word "Edit". That was worse
 than leaving it blank, because "Edit" *looks* like a resolved name: `--fix-model-names`
