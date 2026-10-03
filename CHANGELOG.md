@@ -19,6 +19,7 @@ git tags. Full prose notes for tagged versions live on
 ### Library safety
 
 - Fixed: while another program (a running sync) holds the catalog locked, the gallery no longer re-tries its start-up schema check on every page and request, each one waiting up to five seconds. After a locked attempt it waits ten seconds before trying again, and requests that queued behind the locked attempt go straight through instead of each waiting their own turn. (#58) (2026-10-02)
+- **Pictures PixAI no longer has are badged and kept safe.** A picture whose task has left your PixAI history (as of the last check) or that PixAI dropped on its own wears **ARCHIVE** in the card's corner pill (hover: "Deleted on PixAI. This is the only copy."), and its detail page says so under More details. The selection's **Delete locally** keeps those pictures back and says how many it kept; Duplicate Review never removes one from a same-seed or near-duplicate group. Removing one is still possible from its own page, which asks first and names it the last copy. (#66) (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 

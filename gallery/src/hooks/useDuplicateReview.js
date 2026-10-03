@@ -72,6 +72,19 @@ export function bestKeeperPath(g) {
   return best ? best.path : null;
 }
 
+// #66: in the tiers whose members are DIFFERENT pictures (same seed, near-duplicate) a
+// member PixAI no longer has is the only copy of its picture, so it is never sent for
+// removal -- the server refuses it anyway (/api/duplicates/resolve). The byte-identical
+// tiers are unaffected: their keeper holds the same bytes.
+export const PROTECTS_ARCHIVE = { same_seed: true, near_duplicate: true };
+
+// The members of `g` that stay where they are because they are the only copy: archive-only,
+// not the keeper, in a tier that protects them.
+export function keptBack(g, keeperPath) {
+  if (!PROTECTS_ARCHIVE[g.matchType]) return [];
+  return (g.members || []).filter((m) => m.archive_only && m.path !== keeperPath);
+}
+
 export default function useDuplicateReview({ csrf, onResolved } = {}) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -150,8 +163,9 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     const keeperPath = keeperByGroup[g.id];
     const keepMember = (g.members || []).find((m) => m.path === keeperPath);
     if (!keepMember) return null;
+    const stays = new Set(keptBack(g, keeperPath).map((m) => m.path));
     const remove = (g.members || [])
-      .filter((m) => m.path !== keeperPath)
+      .filter((m) => m.path !== keeperPath && !stays.has(m.path))
       .map((m) => ({ media_id: m.media_id, path: m.path }));
     if (!remove.length) return null;
     return { group_id: g.id, keep: { media_id: keepMember.media_id, path: keepMember.path }, remove };
@@ -234,7 +248,12 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
   const autoResolutions = pendingGroups.map((g) => buildResolution(g)).filter(Boolean);
   const autoGroupCount = autoResolutions.length;
   const autoFileCount = autoResolutions.reduce((n, r) => n + r.remove.length, 0);
-  const autoSkippedCount = pendingGroups.length - autoGroupCount;
+  // Skipped = no keeper picked. A group whose only other member is the only copy of its
+  // picture has nothing to remove; it is counted in autoKeptCount instead.
+  const hasKeeper = (g) => (g.members || []).some((m) => m.path === keeperByGroup[g.id]);
+  const autoSkippedCount = pendingGroups.filter((g) => !hasKeeper(g)).length;
+  const autoKeptCount = pendingGroups.filter(hasKeeper)
+    .reduce((n, g) => n + keptBack(g, keeperByGroup[g.id]).length, 0);
 
   const runAutoResolve = async () => {
     // Same explicit-guard rule: the confirm button's disabled state is UX
@@ -279,6 +298,7 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     toggleKeeper, resetKeeper, buildResolution, resolveGroup, undoGroup,
     autoConfirmOpen, setAutoConfirmOpen, autoBusy, autoError, setAutoError,
     pendingGroups, autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount,
+    autoKeptCount,
     runAutoResolve,
   };
 }

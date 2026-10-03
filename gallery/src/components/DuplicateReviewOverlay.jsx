@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import Icon from "../icons/Icons.jsx";
-import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath } from "../hooks/useDuplicateReview.js";
+import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath, keptBack } from "../hooks/useDuplicateReview.js";
 import "../styles/overlays.css";
 import "../styles/duplicate-review-overlay.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -145,7 +145,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
     isBusy, keeperByGroup, resolvedByGroup, groupErrors,
     toggleKeeper, resolveGroup, undoGroup,
     autoConfirmOpen, setAutoConfirmOpen, autoBusy, autoError, setAutoError,
-    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount,
+    autoResolutions, autoGroupCount, autoFileCount, autoSkippedCount, autoKeptCount,
     runAutoResolve,
   } = useDuplicateReview({ csrf, onResolved });
 
@@ -260,6 +260,11 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                       <> {autoSkippedCount} group{autoSkippedCount !== 1 ? "s" : ""} with no keeper
                       selected will be skipped, untouched.</>
                     )}
+                    {autoKeptCount > 0 && (
+                      <> {autoKeptCount} picture{autoKeptCount !== 1 ? "s" : ""} gone from your PixAI
+                      history (as of the last check) stay{autoKeptCount !== 1 ? "" : "s"} where{" "}
+                      {autoKeptCount !== 1 ? "they are" : "it is"}: this library holds the only copy.</>
+                    )}
                   </p>
                   {autoError && <div className="mgdr-grouperr">⚠ {autoError}</div>}
                   <div className="mgdr-autoconfirm-actions">
@@ -283,6 +288,9 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                   const keepCount = keeperPath ? 1 : 0;
                   const busy = isBusy(g.id);
                   const groupErr = groupErrors[g.id];
+                  // #66: members that are the only copy of their picture stay put.
+                  const stays = new Set(keptBack(g, keeperPath).map((m) => m.path));
+                  const removeCount = g.members.length - keepCount - stays.size;
                   return (
                     <div className={"mgdr-group" + (resolved ? " resolved" : "")} key={g.id}>
                       <div className="mgdr-group-head">
@@ -296,6 +304,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                         {(() => { const suggestedPath = bestKeeperPath(g); return g.members.map((m) => {
                           const isKeeper = m.path === keeperPath;
                           const isSuggested = m.path === suggestedPath;
+                          const onlyCopy = stays.has(m.path);
                           return (
                             <div className={"mgdr-tile" + (isKeeper ? " keep" : " remove")} key={m.path}>
                               <div className="mgdr-thumb">
@@ -303,7 +312,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                 {m.is_video ? <span className="mgdr-vglyph">▶</span> : null}
                                 {!resolved && isSuggested ? <span className="mgdr-ribbon">★ suggested keep</span> : null}
                                 {resolved ? (
-                                  isKeeper
+                                  isKeeper || onlyCopy
                                     ? <span className="mgdr-keeper">KEPT</span>
                                     // Per-tile, not per-group: a partial Undo can restore
                                     // some members of a resolved group while others stay
@@ -322,9 +331,10 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                                     disabled={busy || autoBusy}
                                     title={isKeeper
                                       ? "Click to deselect this as the keeper"
+                                      : onlyCopy ? "Gone from your PixAI history as of the last check, so this is the only copy of this picture. Resolve leaves it where it is."
                                       : "Keep this copy instead"}
                                     onClick={() => toggleKeeper(g.id, m.path)}>
-                                    {isKeeper ? "✓ keep" : "✕ remove"}
+                                    {isKeeper ? "✓ keep" : onlyCopy ? "only copy · stays" : "✕ remove"}
                                   </button>
                                 )}
                               </div>
@@ -362,11 +372,14 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                           // footer-action convention (e.g. Undo above).
                           <div className="mgdr-footactions">
                             <button type="button" className="mgdr-resolve"
-                              disabled={keepCount === 0 || busy || autoBusy}
-                              title={keepCount === 0 ? "Select a keeper first" : undefined}
+                              disabled={keepCount === 0 || removeCount <= 0 || busy || autoBusy}
+                              title={keepCount === 0 ? "Select a keeper first"
+                                : removeCount <= 0 ? "Nothing to remove: the other picture is the only copy"
+                                : undefined}
                               onClick={() => resolveGroup(g)}>
                               {busy ? "Resolving…" : (keepCount
-                                ? "Resolve — keep 1, remove " + (g.members.length - 1)
+                                ? "Resolve — keep 1, remove " + removeCount +
+                                  (stays.size ? " · " + stays.size + " only cop" + (stays.size !== 1 ? "ies stay" : "y stays") : "")
                                 : "Resolve")}
                             </button>
                             {/* Skip leaves the group untouched, same as just not

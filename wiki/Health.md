@@ -62,7 +62,12 @@ something was missing.
 
 ## Duplicates review
 
-**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup. For the filesystem-level audit/dedup tooling, see
+**Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup.
+In the **Same seed** and **Near-duplicate** groups the members are different pictures, so a
+member PixAI no longer has (gone from your PixAI history as of the last check) is the only
+copy of its picture: it is marked *only copy*, **Resolve** and **Auto-resolve all**
+leave it where it is, and the confirm says how many stay. The byte-identical groups are
+unaffected — the copy you keep has the same bytes. For the filesystem-level audit/dedup tooling, see
 [Backing Up → Duplicate audit](Backing-Up).
 
 ## How fresh are these numbers?

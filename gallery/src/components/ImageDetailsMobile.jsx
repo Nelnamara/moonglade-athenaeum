@@ -142,6 +142,7 @@ export default function ImageDetailsMobile({
     upscaleOpen, upEl, toggleUpscale,
     handleRate,
     personal,
+    archiveOnly,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   const similar = useSimilar(row ? row.media_id : null);
@@ -236,6 +237,10 @@ export default function ImageDetailsMobile({
     ["Task ID", row.task_id || "—", { mono: true, dim: true, copy: true }],
     ["Media ID", row.media_id, { mono: true, dim: true, copy: true }],
     ["Filename", row.filename || "—", { mono: true, dim: true, copy: true }],
+    // #66, the same conditional row as desktop's: only on a picture PixAI no longer has.
+    ...(archiveOnly
+      ? [["On PixAI", "Gone from your PixAI history as of the last check. This is the only copy.", {}]]
+      : []),
   ];
 
   return (

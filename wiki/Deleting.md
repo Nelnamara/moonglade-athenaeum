@@ -4,7 +4,11 @@ Two delete actions live in the **Actions** dropdown that appears when images are
 in the gallery:
 
 - **Delete locally** — removes from your local catalog only (the cloud task is
-  untouched).
+  untouched). **Pictures PixAI no longer has are kept back** — the ones the gallery badges
+  **ARCHIVE**: their task has left your PixAI history as of the last check, or PixAI dropped
+  that one image. Your library holds the only copy of those, so a selection never sweeps
+  them along; the notice afterwards says how many were kept. To remove one anyway, open it
+  and use **Delete locally** on its own page, which asks first.
 - **Delete from PixAI** — deletes the whole **task** from your account *and* removes it
   locally, so they never drift. Requires a request from the machine running the server, even
   for a signed-in account on another device: this one is irreversible on PixAI's side, so it
@@ -57,7 +61,10 @@ The gallery's bulk action takes whole tasks. When you want to remove **one** pic
 batch and keep its siblings, open that image and use the buttons on its own page:
 
 - **Delete locally** — moves the file to `_deleted/` and clears the catalog row. PixAI
-  still has the image, so a later sync brings it back. This is the recoverable one.
+  still has the image, so a later sync brings it back. This is the recoverable one. On a
+  picture PixAI no longer has (badged **ARCHIVE**), it says first that this is the last copy
+  anywhere and that a sync will not bring it back; the file still goes to the Trash, where
+  **Restore** puts it back.
 - **Delete from PixAI** — removes the image from your account. Irreversible on their side,
   and it removes the local copy too, so the two never drift. **How much it removes depends
   on what PixAI still has of that generation** — read the next section before you use it.
@@ -152,10 +159,15 @@ prune those orphans:
 1. Run **`python moonglade_backup.py --reconcile-deleted`** (it's also the last step of
    `--sync`, and one of the jobs that runs itself weekly). It pages your live feed (~1–2 min) and flags catalog
    rows whose task is gone.
-2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete locally**.
+2. Gallery → **Source → "Deleted on PixAI"** lists them, each badged **ARCHIVE**.
 
 It skips imports and anything generated in the last ~2 days (so a fresh generation
 isn't false-flagged), and aborts if the feed comes back empty.
+
+Those rows are the only copy of their pictures left anywhere, so the selection's **Delete
+locally** keeps them back and says how many. Remove one you really don't want from its own
+page (**Delete locally** there asks first; the file goes to the Trash). The flag is
+re-checked on every reconcile, so a picture that turns up in your feed again loses it.
 
 ## CLI
 
