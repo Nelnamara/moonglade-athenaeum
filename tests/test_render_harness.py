@@ -446,6 +446,10 @@ def logged_in_page(render_server, render_browser, monkeypatch):
 # guard below and the contest helpers at the bottom of the file cannot drift apart.
 _CONTEST_ENTER_ROUTE = "**/api/contest/enter"
 
+# The library listing's reads (/api/library, with or without a query) and nothing else: a
+# "**/api/library*" glob would also catch the Control Panel's /api/library-path.
+_LIBRARY_READ = re.compile(r"/api/library(\?|$)")
+
 
 def _is_confirmed_entry(body):
     """Does this /api/contest/enter body ask the server to actually SUBMIT?
@@ -2302,7 +2306,7 @@ def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
     Details' chip is gated on `row.artwork_id` (ImageDetailsMobile.jsx) and `render_server`
     seeds all six catalog rows from a blank CATALOG_FIELDS template, so artwork_id is ""
     for every one of them and that chip does not render on this fixture at all. Reaching it
-    would mean stubbing /api/next/detail with an invented published row -- a fixture this
+    would mean stubbing /api/detail with an invented published row -- a fixture this
     module does not have and this test is not the place to invent. The z-index half is
     covered regardless, and by the HARDER of the two: .idm-root is 50 and .lbm-root is 55,
     so a chooser that clears the lightbox clears Image Details by construction. What stays
@@ -2776,7 +2780,7 @@ window.__mgHold = { pattern: null, started: 0, release: null };
 const _f = window.fetch;
 window.fetch = function (...args) {
   const u = String((args[0] && args[0].url) || args[0] || "");
-  if (u.indexOf("/api/next/library") >= 0) window.__mgCalls.library++;
+  if (u.split("?")[0].endsWith("/api/library")) window.__mgCalls.library++;   // not /api/library-path
   else if (u.indexOf("/api/account") >= 0) window.__mgCalls.account++;
   const h = window.__mgHold;
   if (h.pattern && u.indexOf(h.pattern) >= 0) {
@@ -5191,7 +5195,7 @@ def test_the_train_dataset_pool_pages_past_its_first_60(
         paged_library_server, render_browser, monkeypatch, pixai):
     """Owner, 2026-09-26, on the Tsubaki.3 boop walk: the Train a LoRA image picker "does not
     continuous scroll and is capped like old image picker bugs" -- it read ONE page of 60 from
-    /api/next/library and never asked for another. Session J moved the pool into Basic's step 2
+    /api/library and never asked for another. Session J moved the pool into Basic's step 2
     ("From history"), where it pages on scroll through a sentinel observed from its own scrolling
     grid (.mgtr-pool-grid), the ModelPicker mechanism. In All on the 120-row library that is two
     pages: all 120 must arrive, each once."""
@@ -6994,7 +6998,7 @@ def test_pull_to_refresh_fills_a_true_fraction_syncs_past_72_and_never_starts_of
         _q_open(page)
         page.route("**/api/panel/run", lambda r: (runs.append(r.request.post_data), _q_json(r, {"ok": True, "action": "sync"}))[1])
         page.route("**/api/panel/status", lambda r: _q_json(r, {"status": "done", "lines": []}))
-        page.route("**/api/next/library*", lambda r: (libs.append(r.request.url), r.continue_())[1])
+        page.route(_LIBRARY_READ, lambda r: (libs.append(r.request.url), r.continue_())[1])
         page.evaluate("window.__qWrites.length = 0")
 
         # not at the top: the pull does not start
@@ -7068,7 +7072,7 @@ def test_a_finished_generation_waits_for_a_pull_while_the_saver_acts(
     libs = []
     try:
         _q_open(page)
-        page.route("**/api/next/library*", lambda r: (libs.append(1), r.continue_())[1])
+        page.route(_LIBRARY_READ, lambda r: (libs.append(1), r.continue_())[1])
         page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
         _settle(page)
         for _ in range(20):
@@ -7278,7 +7282,7 @@ def test_remix_fills_the_image_form_with_the_recorded_prompt_or_a_runs_template_
             body["run"] = {"template": "a {red|blue} door", "var_mode": "random", "count": 3,
                            "run_seed": 42, "dock_seed": "", "cell": 0, "vars": []}
             route.fulfill(response=resp, json=body)
-        page.route("**/api/next/detail/502", _with_run)
+        page.route("**/api/detail/502", _with_run)
         page.click(".glm-navitem >> nth=0")
         _q_open_details(page, 2)
         page.click(".idm-remixbtn.remix")
@@ -7708,7 +7712,7 @@ def test_the_search_fields_dropdown_carries_the_operators_and_the_tray_does_not(
                              "type:video", "type:loom"], got
     assert got["bottom"] <= got["vh"] and got["onTop"], got
     # picking one runs the search, as the chip did
-    with page.expect_request(lambda r: "/api/next/library" in r.url and "q=keeper" in r.url):
+    with page.expect_request(lambda r: _LIBRARY_READ.search(r.url) and "q=keeper" in r.url):
         page.click(".mgcu-ac-row:has(code:text-is('keeper'))")
     page.wait_for_function("() => document.querySelector('.mgl-search input').value === 'keeper '")
     _settle(page)
