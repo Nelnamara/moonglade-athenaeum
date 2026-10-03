@@ -837,3 +837,64 @@ def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
     r = cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})
     assert r.status_code == 409
     assert (_beds_dir(rig["tmp"]) / n).exists()
+
+
+def _legacy_board_file(tmp, board_id, text):
+    """A board only the legacy shared layer (out_dir/loom/kv/) holds, written as-is."""
+    from urllib.parse import quote
+    d = tmp / "loom" / "kv"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / (quote("storyboard:v2:proj:" + board_id, safe="") + ".json")
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_the_refusal_names_every_board_that_will_not_read_and_where_its_file_is(rig):
+    """GitHub #57: the refusal used to name no board, so there was no way to find the file. It
+    now names EVERY unreadable board (the first bad one no longer hides a second), each with its
+    id, a best-effort name, when it was saved and where its file is -- relative to the library,
+    never a host path -- and nothing else from the board. Both routes, and the bed stays."""
+    cli, tmp = rig["cli"], rig["tmp"]
+    n = _upload(cli, FLAC).get_json()["file"]
+    _age(_beds_dir(tmp) / n)
+    _save_board(cli, "b9", {"name": "Moonwell ep 1", "acts": [], "bed": {"file": n}})
+    own = [p for p in (tmp / "loom").rglob("*.json") if "b9" in p.name]
+    assert len(own) == 1, own
+    # The account's own copy, torn mid-write (the stored value is the board as a JSON string).
+    own[0].write_text('"{\\"name\\": \\"Moonwell ep 1\\", \\"acts\\": [{\\"id\\": \\"x', encoding="utf-8")
+    # A board only the legacy layer holds: its file reads, the board inside it does not.
+    _legacy_board_file(tmp, "b8", json.dumps('{"name": "Old reel", "acts": [{"id": "act-private-words'))
+    own_where = "loom/kv/" + _account_key(_TEST_USERNAME) + "/storyboard%3Av2%3Aproj%3Ab9.json"
+    legacy_where = "loom/kv/storyboard%3Av2%3Aproj%3Ab8.json"
+    for r in (cli.get("/api/loom/beds/unused"),
+              cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})):
+        assert r.status_code == 409, r.get_json()
+        d = r.get_json()
+        rows = sorted(d["unreadable"], key=lambda x: x["board"])
+        assert [(x["board"], x["name"], x["where"]) for x in rows] == [
+            ("b8", "Old reel", legacy_where), ("b9", "Moonwell ep 1", own_where)], rows
+        assert all(re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", x["saved"]) for x in rows), rows
+        assert all(set(x) == {"board", "name", "saved", "where"} for x in rows), "nothing else from the board"
+        assert '"Moonwell ep 1"' in d["error"] and '"Old reel"' in d["error"]
+        assert own_where in d["error"] and legacy_where in d["error"]
+        assert d["error"].endswith("Nothing was swept.")
+        body = r.get_data(as_text=True)
+        assert str(tmp) not in body and tmp.as_posix() not in body and "\\\\" not in body, "no host path"
+        assert "act-private-words" not in body and "acts" not in body, "no board content"
+    assert (_beds_dir(tmp) / n).exists()
+    assert rig["traps"] == []
+
+
+@pytest.mark.parametrize("text,name", [
+    ('{"name": "Moonwell ep 1", "acts": [', "Moonwell ep 1"),             # torn after the name
+    (json.dumps(json.dumps({"name": 'Say "hi" \u263e', "acts": []}))[:-9], 'Say "hi" \u263e'),   # stored as a string
+    ('  {\n  "name" : "Spaced",', "Spaced"),
+    ('{"name": "Moonw', ""),                                             # torn inside the name
+    ('{"acts": [{"name": "Act 1"}], "name": "late"}', ""),               # an act's name is never the board's
+    ('{"name": 7}', ""),
+    ("", ""),
+    ("\x00\x00\x00", ""),
+])
+def test_the_board_name_is_salvaged_from_a_file_that_will_not_read(text, name):
+    assert g.loom_board_name_salvage(text) == name
+    assert len(g.loom_board_name_salvage('{"name": "' + "x" * 500 + '"}')) == 120

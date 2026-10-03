@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### The Loom
+
+- **A storyboard that won't read now says which one.** The music bed's unused-file line used to vanish without a word when any storyboard's file was torn; it now names each such storyboard, when it was saved and where its file is (under `loom/kv/` in your library), and still removes nothing until the file reads again or is gone. (2026-10-02)
+
 ## [3.15.0] - 2026-10-01 — The Reading Room
 
 - **On a phone or tablet, the bottom row of buttons is always within reach.** In the Lightbox with a long prompt open, on the image details screen, and in the sheets that slide up from the bottom, the last row of buttons could sit just past the end of the scroll — under the browser's own toolbar — where no amount of scrolling reached it. Every full-screen phone view now sizes itself to the part of the screen you can actually see, the Lightbox's lower panel scrolls with its action row pinned to the bottom, sheets are capped to the visible height with their buttons pinned to their foot, and everything leaves room for the home bar. (2026-09-28)

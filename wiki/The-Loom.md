@@ -397,7 +397,9 @@ and never uploaded** — nothing about it reaches PixAI. Its waveform sits under
 **▶▶ Play** and **⇩ Render** mix it in, the full bundle carries it, and the edit decision list
 lists it as an audio event. **✕** takes it off this storyboard; the file itself stays. Bed files
 are never deleted on their own: when some are no longer on any storyboard, the full view offers
-**Remove…** for exactly those, and asks first.
+**Remove…** for exactly those, and asks first. If one of your storyboards won't read (a file torn by a crash, say),
+nothing is offered for removal: the line names that storyboard, when it was saved, and where its
+file is under the library's `loom/kv/` folder, so you can restore it from a backup or delete it.
 
 ### The continuity ribbon
 

@@ -77,7 +77,7 @@ import { makeSaveQueue } from "./src/loom-store-core.js";
 // (loom-no-auto-render.test.js pins that none of them can reach a render).
 import {
   BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
-  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
+  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine, unreadableBedsNote,
 } from "./src/loom-bed-core.js";
 import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
 import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELECTION } from "./src/loom-shots-core.js";
@@ -8354,12 +8354,15 @@ const bedUrl = (file) => "/api/loom/bed?file=" + encodeURIComponent(file || "");
 
 function useBedActions({ setProject, activeIdRef }) {
   const [bedWork, setBedWork] = useState({ phase: "", msg: "" });
-  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h} | null
+  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h, unreadable?} | null
   const refreshUnusedBeds = useCallback(async () => {
     try {
       const r = await fetch("/api/loom/beds/unused");
       const d = await r.json();
-      setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+      // GitHub #57: a storyboard that will not read refuses the list (409). Its answer names the
+      // board(s) and where each file is; keep it, so the bed row can say so (unreadableBedsNote).
+      if (r.status === 409 && d && Array.isArray(d.unreadable)) setUnusedBeds({ files: [], count: 0, unreadable: d.unreadable });
+      else setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
     } catch (e) { setUnusedBeds(null); }
   }, []);
   const pickBed = async (file) => {
@@ -10468,6 +10471,7 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
   const busy = api.bedWork.phase === "wip";
   const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
   const u = api.unusedBeds;
+  const unreadable = unreadableBedsNote(u);
   const dur = bed ? (bed.dur || (peaks && peaks.dur) || null) : null;
   const picker = (label, cls, title) => (
     <label className={cls + (busy ? " busy" : "")} title={title}>{label}
@@ -10515,6 +10519,7 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
       </div>
       {api.bedWork.phase === "err" ? <div className="lv-bednote err" role="status">{api.bedWork.msg}</div>
         : bed && peaks && peaks.failed ? <div className="lv-bednote err" role="status">The music bed's file couldn't be read on this machine, so Play and &#8679; Render leave it out.</div>
+        : unreadable ? <div className="lv-bednote err" role="status">{unreadable}</div>
         : u && u.count > 0 ? (
           <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
             <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>

@@ -1155,6 +1155,53 @@ def loom_edl_zip_stem(name):
     return s or "storyboard"
 
 
+_LOOM_BOARD_NAME_RE = re.compile(r'\s*\{\s*"name"\s*:\s*"((?:[^"\\\x00-\x1f]|\\.){0,600})"')
+
+
+def _json_string_body(text):
+    """The text inside a JSON string literal that starts `text`, unescaped as far as it goes
+    (a torn file simply stops). Lenient on purpose: it only ever feeds the name salvage."""
+    out, i, n = [], 1, len(text)
+    simple = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            break
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= n:
+            break
+        esc = text[i + 1]
+        if esc == "u" and re.match(r"[0-9a-fA-F]{4}$", text[i + 2:i + 6]):
+            out.append(chr(int(text[i + 2:i + 6], 16)))
+            i += 6
+            continue
+        out.append(simple.get(esc, esc))
+        i += 2
+    return "".join(out)
+
+
+def loom_board_name_salvage(text):
+    """A board's name from a file that will not read (GitHub #57), or "" when it cannot be
+    read. Best effort and nothing else: the name is the first field of every board, so only a
+    `"name": "..."` that opens the board counts (an act's or a cast member's name is never
+    taken for it). A board stored as a JSON string (the Loom's own saves) is unescaped first.
+    At most 120 characters; never any other content of the board."""
+    t = str(text or "").lstrip()
+    if t.startswith('"'):
+        t = _json_string_body(t)
+    m = _LOOM_BOARD_NAME_RE.match(t)
+    if not m:
+        return ""
+    try:
+        name = json.loads('"' + m.group(1) + '"')
+    except ValueError:
+        return ""
+    return name.strip()[:120]
+
+
 def loom_board_beds(projects):
     """The bed files a list of parsed boards references (project.bed.file), valid names only."""
     out = set()
@@ -23510,7 +23557,10 @@ def create_app(out_dir: Path):
     _LOOM_REV_MISSING = "missing"
 
     class _LoomUnreadable(Exception):
-        pass
+        """The key(s) whose file exists but will not read or parse (`keys`, in order)."""
+        def __init__(self, *keys):
+            super().__init__(*keys)
+            self.keys = [str(k) for k in keys]
 
     def _loom_kv_text(user, key):
         """(text, layer) for this account's view of `key`: layer "own" | "legacy" | None.
@@ -23704,18 +23754,23 @@ def create_app(out_dir: Path):
         buried -- loom_list's set), parsed. Read-only. Raises _LoomUnreadable when any board's
         file exists but does not read: an unreadable board is not a missing one, so a caller
         deciding what is UNUSED must refuse rather than treat that board's bed as free (red
-        team 2026-10-01: the sweep deleted the bed of a truncated board)."""
+        team 2026-10-01: the sweep deleted the bed of a truncated board). It reads every board
+        before it raises, so the refusal names ALL the unreadable ones (GitHub #57)."""
         from urllib.parse import unquote
         with _loom_lock:
             own = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
             legacy = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
             buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
             keys = sorted((own | legacy) - buried)
-            out = []
+            out, bad = [], []
             for k in keys:
                 if not (k.startswith("storyboard:v2:proj:") or k == "storyboard:v2:project"):
                     continue
-                text, _layer = _loom_kv_text(user, k)
+                try:
+                    text, _layer = _loom_kv_text(user, k)
+                except _LoomUnreadable:
+                    bad.append(k)
+                    continue
                 if text is None:
                     continue
                 v = json.loads(text)
@@ -23723,10 +23778,50 @@ def create_app(out_dir: Path):
                     try:
                         v = json.loads(v)
                     except ValueError:
-                        raise _LoomUnreadable(k)
+                        bad.append(k)
+                        continue
                 if isinstance(v, dict):
                     out.append(v)
+        if bad:
+            raise _LoomUnreadable(*bad)
         return out
+
+    def _loom_unreadable_boards(user, keys):
+        """What the owner needs to find each board that will not read (GitHub #57), and nothing
+        else from it: {board: its id, name: best-effort (loom_board_name_salvage), saved: the
+        file's time (UTC ISO), where: the file relative to the library -- never a host path}.
+        The file is the one that decides the answer, as _loom_kv_text resolves it."""
+        from datetime import datetime, timezone
+        rows = []
+        for k in keys:
+            p = _loom_kv_path(user, k)
+            if not p.exists():
+                p = _legacy_loom_kv_path(k)
+            try:
+                where = p.resolve().relative_to(out_dir.resolve()).as_posix()
+            except (OSError, ValueError):
+                where = p.name
+            saved, name = "", ""
+            try:
+                saved = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                with open(p, "rb") as fh:
+                    name = loom_board_name_salvage(fh.read(4096).decode("utf-8", "replace"))
+            except OSError:
+                pass
+            board = k[len("storyboard:v2:proj:"):] if k.startswith("storyboard:v2:proj:") else k
+            rows.append({"board": board, "name": name, "saved": saved, "where": where})
+        return rows
+
+    def _loom_beds_unreadable_answer(user, exc):
+        """The 409 both bed routes answer while a board will not read: a sentence naming each
+        board and its file, ending "Nothing was swept.", plus the rows for the Loom's own line."""
+        rows = _loom_unreadable_boards(user, exc.keys)
+        named = ", ".join('"{}" ({})'.format(r["name"] or r["board"], r["where"]) for r in rows)
+        head = ("A storyboard didn't read" if len(rows) == 1 else "{} storyboards didn't read".format(len(rows)))
+        msg = ("{}, so no music bed can be called unused: {}. Restore {} from a backup or delete {}. "
+               "Nothing was swept.").format(head, named, "its file" if len(rows) == 1 else "their files",
+                                             "it" if len(rows) == 1 else "them")
+        return jsonify({"error": msg, "unreadable": rows}), 409
 
     def _loom_unused_beds(user):
         """[(name, bytes)] of the caller's beds no board of the account references, oldest
@@ -25423,9 +25518,6 @@ __DESIGN_TOKENS__
         return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
                          conditional=True, max_age=3600)
 
-    _LOOM_BEDS_UNREADABLE = ("One of your storyboards didn't read, so no music bed can be called "
-                             "unused. Nothing was swept.")
-
     @app.route("/api/loom/beds/unused")
     @tier(LOGIN)
     def api_loom_beds_unused():
@@ -25437,8 +25529,8 @@ __DESIGN_TOKENS__
             return jsonify({"error": "not logged in"}), 401
         try:
             rows = _loom_unused_beds(user)
-        except _LoomUnreadable:
-            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        except _LoomUnreadable as e:
+            return _loom_beds_unreadable_answer(user, e)
         total = sum(b for (_n, b) in rows)
         return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
                         "count": len(rows), "bytes": total, "h": _fmt_size(total)})
@@ -25462,8 +25554,8 @@ __DESIGN_TOKENS__
             return jsonify({"error": "bad bed file name"}), 400
         try:
             unused = {n for (n, _b) in _loom_unused_beds(user)}
-        except _LoomUnreadable:
-            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        except _LoomUnreadable as e:
+            return _loom_beds_unreadable_answer(user, e)
         removed, kept = [], []
         for n in want:
             p = _loom_bed_path(user, n)
