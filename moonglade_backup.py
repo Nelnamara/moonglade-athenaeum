@@ -9207,6 +9207,14 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # record's own order. No published default aspect means PixAI's own client sends no
 # aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
 # Reference Pro. Listed first; the card's default model stays Edit Pro.
+#
+# PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new VERSION of the Edit Pro model
+# (2026-09-29), not a new model, copied from its own version row 2061589941358465024,
+# extra.chatEditing: maxInputImageCount 10; 1K/2K; low/medium/high; eleven aspects (v1.0's
+# thirteen minus 1:3 and 3:1) in the record's order; defaults 1K/medium/3:5. Labelled as PixAI
+# labels it ("PixAI Edit Pro (v2.0)") and listed right after v1.0. v1.0 stays -- PixAI still
+# offers it, the Edit Pro AI Tools scenes run on it, and it stays the card's default
+# (EDIT_PRO_MODEL_ID). Same submit shape and price table as v1.0; only chat.modelId differs.
 EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
     "edit-v4": {
@@ -9225,6 +9233,15 @@ EDIT_MODELS = {
         "qualities": ["low", "medium", "high"],
         "aspects": ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
                     "5:4", "1:3", "3:1"],
+        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
+    },
+    "edit-pro-v2": {
+        "model_id": "2061589941358465024",
+        "label": "Edit Pro (v2.0)", "max_refs": 10,
+        "resolutions": ["1K", "2K"],
+        "qualities": ["low", "medium", "high"],
+        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "3:5",
+                    "5:3"],
         "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
     },
     "reference-pro": {
@@ -9253,8 +9270,8 @@ FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
-    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'reference-pro'); '' if
-    unknown."""
+    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'edit-pro-v2'/
+    'reference-pro'); '' if unknown."""
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 
@@ -11822,7 +11839,8 @@ def _edit_parameters_from_payload(p, user, resolve):
     kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
                   model_id=model_id)
     # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
-    # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
+    # capped to the resolved row's OWN reference limit (Edit Pro v1.0 4; Edit Pro V2.0, Edit
+    # v4.0 and Reference Pro 10) -- two versions of one model can differ, so never a fixed cap.
     media = p.get("sources")
     media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
     if not media:

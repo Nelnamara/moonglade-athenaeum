@@ -45,6 +45,19 @@ export const EDIT_CAPS = {
     aspects: ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
     def: { resolution: "1K", quality: "medium", aspect: "3:5" },
   },
+  /* PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new version of Edit Pro, its own
+     version record (2061589941358465024, extra.chatEditing) -- ten inputs, 1K/2K,
+     low/medium/high, eleven aspects (v1.0's minus 1:3 / 3:1), default 3:5. Labelled as PixAI
+     labels it, right after v1.0, with the "new" tag PixAI gives it for 30 days. v1.0 stays the
+     card's default. */
+  "edit-pro-v2": {
+    label: "Edit Pro (v2.0)", max_refs: 10,
+    resolutions: ["1K", "2K"],
+    qualities: ["low", "medium", "high"],
+    aspects: ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "3:5", "5:3"],
+    def: { resolution: "1K", quality: "medium", aspect: "3:5" },
+    new_until: "2026-11-01",
+  },
   "reference-pro": {
     label: "Reference Pro", max_refs: 10,
     resolutions: ["2K", "4K"],
