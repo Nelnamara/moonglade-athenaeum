@@ -5138,18 +5138,18 @@ def cmd_dedup(args, out, db_path):
     apply = getattr(args, "apply", False)  # default is dry-run unless --apply
 
     rep = audit_collection(out, content=content, progress=getattr(args, "progress", None))
-    losers = []  # (rel_path, abs_path)
+    losers = []  # (rel_path, abs_path, what it is a copy of -- the Great Sweep's key)
     for g in rep["class_a"]:
         for (p, rel, b, sz) in g["losers"]:
-            losers.append((rel, p))
+            losers.append((rel, p, "dup-media:%s" % g["media_id"]))
     for g in rep["class_b"]:
         for (p, rel, b, sz, mid) in g["losers"]:
-            losers.append((rel, p))
+            losers.append((rel, p, "dup-sha:%s" % g["sha"]))
 
     action = "DELETE" if delete else "quarantine to _duplicates/"
     print("\nDedup plan: {:,} redundant files to {} ({})".format(
         len(losers), action, _fmt_bytes(rep["totals"]["reclaimable_bytes"])))
-    for rel, _ in losers[:8]:
+    for rel, _, _ in losers[:8]:
         print("  {}".format(rel))
     if len(losers) > 8:
         print("  ... and {:,} more".format(len(losers) - 8))
@@ -5160,8 +5160,9 @@ def cmd_dedup(args, out, db_path):
 
     quarantine_root = out / "_duplicates"
     moved = removed = failed = 0
+    culled_keys = []
     _prog = getattr(args, "progress", None)
-    for i, (rel, p) in enumerate(losers):
+    for i, (rel, p, key) in enumerate(losers):
         try:
             if delete:
                 p.unlink()
@@ -5173,6 +5174,7 @@ def cmd_dedup(args, out, db_path):
                     dest = dest.with_name(dest.stem + "_dup" + dest.suffix)
                 p.replace(dest)
                 moved += 1
+            culled_keys.append(key)
         except OSError as e:
             print("  failed {} ({})".format(rel, e))
             failed += 1
@@ -5186,10 +5188,11 @@ def cmd_dedup(args, out, db_path):
             moved, quarantine_root.relative_to(out.parent) if out.parent else quarantine_root,
             failed))
 
-    if moved or removed:
-        try:      # The Great Sweep: cumulative pieces removed via --dedup
-            from moonglade_gallery import telem_bump
-            telem_bump("culled", moved + removed, out_dir=out)
+    if culled_keys:
+        try:      # The Great Sweep: each redundant copy once, keyed by what it duplicated --
+            # copying a file back and deduping it again is not a second piece swept
+            from moonglade_gallery import telem_set_add_many
+            telem_set_add_many("culled_keys", culled_keys, out_dir=out)
         except Exception:
             pass
 

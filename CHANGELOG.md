@@ -16,10 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
-### Security and sign-in
+### Security, sign-out and honor counts
 
 - Under the hood: saving a view, a prompt snippet or a banked Toolbox preset now carries the page's own security token, like every other per-account write; a page left open from before a sign-in says to reload instead. A new test lists every other state-changing route that does not check the token yet, for the coming security review, and fails on any new one. (2026-10-02)
 - **Log Out signs out only the device you press it on** (#70). Your other devices stay signed in. To sign out every device — a lost phone — change your password in Control Panel → Users, which signs out everything but the device you changed it from. (2026-10-02)
+- **Honors count what you actually made.** Edits, the LoRA honors, LoRAs trained, the run of days you generate, deleted pictures and jobs at once now count from evidence — your library's own records of what you made in the app, the training runs PixAI reports finished, each deleted picture once — instead of from button presses a page could repeat. The first load after updating may unlock a few honors you had already reached. (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 

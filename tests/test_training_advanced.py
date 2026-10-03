@@ -546,6 +546,34 @@ def test_runs_merge_both_flows_with_progress_and_one_action_each(tmp_path, pixai
     assert pixai.mutations() == 0
 
 
+def test_finished_runs_are_what_the_academy_counts(tmp_path, pixai):
+    """loras_trained counts runs PixAI reports FINISHED, by id, recorded when Runs is read:
+    a draft, a running or a failed run adds nothing, a second read adds nothing, and the
+    light read (the pinned strip) still records a finished basic run. (owner 2026-10-02:
+    evidence-based counts; a submit, a retry or a replayed request is not a LoRA trained.)"""
+    import moonglade_gallery as g
+    cli, _ = _app(tmp_path)
+    pixai.on("/training-task/in-progress", {"tasks": [
+        {"id": "702", "status": "running", "title": "x", "baseModelId": T3, "mediaCount": 3,
+         "updatedAt": "2026-09-28T03:00:00Z"},
+        {"id": "703", "status": "failed", "title": "y", "baseModelId": T3, "mediaCount": 3,
+         "updatedAt": "2026-09-27T01:00:00Z"}]})
+    pixai.on("/training-task/completed", {"tasks": [
+        {"id": "900", "title": "z", "baseModelId": T3, "mediaCount": 40, "modelId": None,
+         "completedAt": "2026-09-28T00:00:00Z"}]})
+    _loras(pixai, [_basic_node("m1", "501", "completed"),
+                   _basic_node("m2", "502", "running"),
+                   _basic_node("m3", "503", "failed")])
+    pixai.on("trainingTask", lambda call: _task(tid=call.variables["id"], status="failed"))
+    assert g.telemetry_metrics(tmp_path).get("loras_trained", 0) == 0
+    cli.get("/api/train/runs")
+    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 2          # 501 and 900
+    assert sorted(g.load_telemetry(tmp_path)["sets"]["trained_runs"]) == ["501", "900"]
+    cli.get("/api/train/runs?running=1")
+    assert g.telemetry_metrics(tmp_path)["loras_trained"] == 2          # nothing twice
+    assert pixai.mutations() == 0
+
+
 def test_a_retried_run_carries_its_guard(tmp_path, pixai):
     TrainGuard(tmp_path / "train_guard.json").retry_resolve("703", "done", "704")
     cli, _ = _app(tmp_path)

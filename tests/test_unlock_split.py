@@ -14,9 +14,7 @@ URL; the serve route translates once at the boundary.
 
 All hermetic: conftest's _isolated_branding redirects branding_root() to
 tmp_path, so every fake asset below lives and dies with its test."""
-import datetime as _dt
 import json
-from unittest import mock
 
 import pytest
 
@@ -24,13 +22,6 @@ import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
-
-
-class _FixedNoon(_dt.datetime):
-    """Same freeze as test_telemetry's: never trip Night Owl mid-test."""
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2025, 6, 15, 12, 0, 0)
 
 
 def _row(**kw):
@@ -224,8 +215,7 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
 
 def test_branding_slots_are_banners_only(tmp_path):
     cli = _client(tmp_path)
-    with mock.patch("datetime.datetime", _FixedNoon):
-        d = cli.get("/api/branding").get_json()
+    d = cli.get("/api/branding").get_json()
     assert set(d["slots"]) == {"banner_main", "banner_login", "banner_loom"}
 
 
