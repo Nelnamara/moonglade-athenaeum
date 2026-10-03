@@ -29,9 +29,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
-  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`) `--apply`
-  plus typing the word `delete` on the CLI, skippable with `--yes` only if you pass it
-  explicitly. A **single-image** delete asks PixAI what it still has of that generation
+  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`, which goes
+  in the next minor release) `--apply` plus typing the word `delete` on the CLI, skippable
+  with `--yes` only if you pass it explicitly. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
   record. It never sends a delete on a generation it could not read. Whenever a delete

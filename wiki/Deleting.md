@@ -161,14 +161,14 @@ isn't false-flagged), and aborts if the feed comes back empty.
 
 ```bash
 python moonglade_backup.py --reconcile-deleted     # flag cloud-deleted orphans
-python moonglade_backup.py --delete-task <taskid>  # DEPRECATED -- use the gallery's Delete from PixAI
+python moonglade_backup.py --delete-task <taskid>  # DEPRECATED, removed in the next minor release -- use the gallery's Delete from PixAI
 ```
 
-**`--delete-task` is deprecated.** It still works this release and it still prints its own
-notice saying so, but it is no longer the way to delete. Use the gallery's **Delete from
-PixAI** — on one image for a single picture, or from the **Actions** dropdown for a
-selection. Those check with PixAI first and keep your library in step; `--delete-task`
-does neither.
+**`--delete-task` is deprecated, and it goes in the next minor release.** Until then it still
+works and still prints its own notice saying so, but it is no longer the way to delete — so
+don't build a script on it. Use the gallery's **Delete from PixAI** — on one image for a single
+picture, or from the **Actions** dropdown for a selection. Those check with PixAI first and
+keep your library in step; `--delete-task` does neither.
 
 While it lasts, it behaves as it always has: dry-run until `--apply`, and **cloud-only** —
 your local files and `catalog.db` are untouched, so a task deleted this way leaves orphan
