@@ -20,7 +20,10 @@ BUILD-w2-gen.md. What is pinned here:
 Every PixAI read is faked at `_rest_get`; nothing here reaches a network.
 """
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -431,16 +434,62 @@ def test_the_image_ref_rule_matches_the_drawer_copy():
 # =============================================================================
 
 def bar_payload(**kw):
-    """What the Lightbox edit bar's buildPayload sends for a 1280 x 768 source (pinned on the JS side
-    by loom/test/tsubaki-core.test.js, 'a 1280 x 768 source: these keys, these values')."""
-    p = {"version_id": T3, "model_id": "", "prompt": "make it night", "negative": "",
+    """What the Lightbox edit bar's buildPayload sends for a 1280 x 768 source. A HAND COPY, so the
+    tests below run where node is absent; test_the_hand_copy_is_the_bars_real_payload runs the real
+    genCore.js under node and fails the moment the two differ (the 2026-10-03 review)."""
+    p = {"version_id": T3, "model_id": T3_MODEL_ID, "prompt": "make it night", "negative": "",
          "width": 1280, "height": 768, "mode": "pro", "steps": 25, "cfg": None, "count": 1,
-         "seed": None, "high_priority": False, "prompt_helper": True, "creativity": "medium",
+         "seed": None, "high_priority": True, "prompt_helper": True, "creativity": "medium",
          "ref_media_id": None, "ref_strength": None, "upscale": None, "upscale_denoise": None,
          "upscale_denoise_steps": None, "face_fix": False, "quality_tag": None, "loras": [],
          "context_images": ["701"], "image_refs": []}
     p.update(kw)
     return p
+
+
+NODE = shutil.which("node")
+T3_MODEL_ID = "2024383378759147749"
+# The Tsubaki.3 meta the bar's state is built on (loom/test/tsubaki-core.test.js's T3, XL tier).
+_T3_META = {
+    "version_id": T3, "model_id": T3_MODEL_ID, "title": "Tsubaki.3", "context_images": True,
+    "creativity": True, "context_max": 3, "size_rule": {"step": 16, "lo": 512, "hi": 2496},
+    "size_tiers": [{"name": "XL", "min": 512, "max": 2496, "step": 16, "required_tier": 0,
+                    "access": "available", "default": [1104, 1824],
+                    "presets": [{"ratio": "3:5", "width": 1104, "height": 1824},
+                                {"ratio": "1:1", "width": 1408, "height": 1408}]}],
+    "profile_rows": [{"name": "pro", "title": "Pro", "base_price": 3000, "flag": "default",
+                      "required_tier": 0}],
+}
+
+
+@pytest.fixture(scope="module")
+def js_bar(tmp_path_factory):
+    """The bar's REAL payload: genCore.js's buildPayload(tsubakiEditState(...)) run under node for a
+    1280 x 768 source, exactly as TsubakiEditBar.jsx builds it. Skips without node, as the drawer's
+    size-parity test does."""
+    if NODE is None:
+        pytest.skip("node not installed")
+    tmp = tmp_path_factory.mktemp("edit-bar-payload")
+    gen = (ROOT / "gallery" / "src" / "gen" / "genCore.js").as_uri()
+    script = tmp / "bar.mjs"
+    script.write_text(
+        "import { buildPayload, tsubakiEditState } from " + json.dumps(gen) + ";\n"
+        "const model = " + json.dumps(_T3_META) + ";\n"
+        "console.log(JSON.stringify(buildPayload(tsubakiEditState({ model, prompt: 'make it night',\n"
+        "  image: { media_id: '701', w: 1280, h: 768 }, mode: 'pro', tier: 'XL', member: true }))));\n",
+        encoding="utf-8")
+    out_file, err_file = tmp / "bar.out", tmp / "bar.err"
+    try:
+        with open(os.devnull, "rb") as nul, open(out_file, "wb") as fo, open(err_file, "wb") as fe:
+            rc = subprocess.call([NODE, str(script)], stdin=nul, stdout=fo, stderr=fe, timeout=60)
+    except OSError as e:
+        pytest.skip("cannot spawn node in this environment: {}".format(e))
+    assert rc == 0, err_file.read_text(encoding="utf-8", errors="replace")
+    return json.loads(out_file.read_text(encoding="utf-8"))
+
+
+def test_the_hand_copy_is_the_bars_real_payload(js_bar):
+    assert bar_payload() == js_bar
 
 
 def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
@@ -450,7 +499,7 @@ def test_the_edit_bar_request_is_the_sites_smart_reference_shape(rest):
     the source's own size, an empty controlNets, and no batchSize for one picture. The bar's request
     now has exactly those keys (seed is left out when none is set, as before), and the quote prices
     the very same dict."""
-    req = road(bar_payload())
+    req = road(bar_payload(high_priority=False))
     assert req.parameters == {
         "extra": {"naturalPrompts": "make it night"}, "priority": core.PRIORITY_TURBO,
         "width": 1280, "height": 768, "prompts": "make it night", "modelId": T3,
@@ -472,14 +521,14 @@ def test_a_run_of_several_still_says_how_many(rest):
 # the Lightbox edit bar runs at High Priority (the owner's call, 2026-10-03)
 # =============================================================================
 
-def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatch):
+def test_the_edit_bar_is_sent_at_high_priority_and_quoted_at_it(rest, monkeypatch, js_bar):
     """PixAI's free Turbo lane was not starting context-image edits; the site edits that worked ran at
-    High Priority. The bar's payload asks for it (genCore.tsubakiEditState), so its request carries
-    priority 1000 -- and the quote prices and card-checks that very dict, so the cost line shows what
-    is spent: free when a card covers it, the quoted credits when none does."""
-    req = road(bar_payload(high_priority=True))
+    High Priority. The bar's REAL payload (genCore.js under node, js_bar) asks for it, so its request
+    carries priority 1000 -- and the quote prices and card-checks that very dict, so the cost line
+    shows what is spent: free when a card covers it, the quoted credits when none does."""
+    req = road(dict(js_bar))
     assert req.parameters["priority"] == core.PRIORITY_HIGH == 1000
-    assert not req.unlimited and not core.asks_unlimited(bar_payload(high_priority=True))
+    assert not req.unlimited and not core.asks_unlimited(dict(js_bar))
     # no card: the quoted credits, priced on the dict that carries priority 1000
     matched = []
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, **k: matched.append(params))
