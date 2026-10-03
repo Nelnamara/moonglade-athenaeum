@@ -22,7 +22,7 @@ import pytest
 import moonglade_backup as core
 import moonglade_contest_wins as cw
 import moonglade_gallery as g
-from tests.conftest import login_client
+from tests.conftest import login_client, record_own_sleeps
 
 DAY = 86400.0
 T0 = 1790000000.0                       # a result time (2026-09-21, UTC); only differences matter
@@ -484,8 +484,7 @@ class TestTheAutomaticCheck:
         for s in ("s1", "s2", "s3"):
             pixai.on("/contest/%s/winners" % s, [])
         _enter(tmp_path, "c1:a1", "c2:a2", "c3:a3")
-        naps = []
-        monkeypatch.setattr(g.time, "sleep", lambda x: naps.append(x))
+        naps = record_own_sleeps(monkeypatch)       # never another thread's sleep
         out = g.contest_win_pass(tmp_path, now=T0 + 5)
         assert sorted(out["checked"]) == ["c1", "c2", "c3"]
         assert [len(_winners_calls(pixai, s)) for s in ("s1", "s2", "s3")] == [1, 1, 1]

@@ -684,6 +684,28 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     return login_test_client(create_app(tmp_path), username=username, password=password)
 
 
+def record_own_sleeps(monkeypatch):
+    """Patch time.sleep to RECORD this thread's naps instead of taking them; every other
+    thread keeps sleeping for real. Returns the list the naps land in.
+
+    time.sleep is process-wide, and the process is never quiet: every create_app() starts a
+    daemon _scheduler_loop that calls time.sleep(60) forever, and a whole run leaves hundreds
+    of them alive. One that wakes while a bare `monkeypatch.setattr(time, "sleep",
+    naps.append)` is in place calls the patch instead, records 60, and spins on it -- a pacing
+    assertion then fails on naps the code under test never took (ci_local, 2026-10-03)."""
+    import threading
+    import time as _time
+    naps, me, real = [], threading.get_ident(), _time.sleep
+
+    def _sleep(seconds):
+        if threading.get_ident() == me:
+            naps.append(seconds)
+        else:
+            real(seconds)
+    monkeypatch.setattr(_time, "sleep", _sleep)
+    return naps
+
+
 def session_csrf(cli):
     """The CSRF token `cli`'s signed-in session carries -- the one a real page reads out of
     window.MG_BOOT.csrf. Read off the session rather than a scraped page, because the login

@@ -25,7 +25,7 @@ import moonglade_backup as core
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, record_own_sleeps
 
 
 def _row(**kw):
@@ -857,8 +857,7 @@ def test_the_board_is_read_to_its_own_last_page_at_the_sweeps_pace(pixai, monkey
     its oldest page silently fell off. It is read to its own `totalPage` now, 0.35 s apart."""
     board = _paged_board(7)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
-    naps = []
-    monkeypatch.setattr(core.time, "sleep", naps.append)
+    naps = record_own_sleeps(monkeypatch)           # never another thread's sleep
     rows = core.list_contests(pixai, active_only=False)
     assert [r["id"] for r in rows] == [str(p) for p in range(1, 8)]
     assert [c.params["page"] for c in pixai.calls] == list(range(1, 8))
@@ -869,8 +868,7 @@ def test_the_board_is_read_to_its_own_last_page_at_the_sweeps_pace(pixai, monkey
 def test_a_one_page_board_is_one_read_and_no_pause(pixai, monkeypatch):
     board = _paged_board(1)
     pixai.on("/contest/list", lambda call: board[call.params["page"]])
-    naps = []
-    monkeypatch.setattr(core.time, "sleep", naps.append)
+    naps = record_own_sleeps(monkeypatch)           # never another thread's sleep
     assert len(core.list_contests(pixai)) == 1
     assert len(pixai.calls) == 1 and naps == []
 
