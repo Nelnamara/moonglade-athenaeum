@@ -671,6 +671,20 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     return login_test_client(create_app(tmp_path), username=username, password=password)
 
 
+def session_csrf(cli):
+    """The CSRF token `cli`'s signed-in session carries -- the one a real page reads out of
+    window.MG_BOOT.csrf. Read off the session rather than a scraped page, because the login
+    POST mints a fresh token (_establish_session): the login page's token is stale by the
+    time the client is authenticated."""
+    with cli.session_transaction() as sess:
+        return sess.get("csrf", "")
+
+
+def with_csrf(cli, body=None):
+    """`body` plus this session's CSRF token, the shape every token-checking POST expects."""
+    return dict(body or {}, csrf=session_csrf(cli))
+
+
 def ach_nonce(cli):
     """A fresh feat-beacon nonce for `cli`'s session. Since the 2026-09-07 nonce ruling
     /api/ach-event refuses a POST that carries none, so a test that just wants the

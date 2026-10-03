@@ -18840,6 +18840,10 @@ def create_app(out_dir: Path):
         with _snips_lock:
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
+                # The explicit token, like every other per-account write
+                # (tests/test_csrf_coverage.py): checked before anything is read or written.
+                if not _check_csrf(body):
+                    return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 snips = body.get("snippets")
                 if not isinstance(snips, list):
                     return jsonify({"error": "snippets must be a list"}), 400
@@ -21930,6 +21934,10 @@ def create_app(out_dir: Path):
                     k: {"label": v.get("label") or k, "scene_id": v.get("scene_id", "")}
                     for k, v in presets.items()}})
             body = request.get_json(silent=True) or {}
+            # The explicit token, before the import reads the task from PixAI with the
+            # owner's key (tests/test_csrf_coverage.py).
+            if not _check_csrf(body):
+                return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
             tid = str(body.get("task_id") or "").strip()
             if not tid:
                 return jsonify({"error": "task_id required"}), 400
@@ -22049,6 +22057,10 @@ def create_app(out_dir: Path):
             presets = _load_view_presets(user)
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
+                # The explicit token, like every other per-account write
+                # (tests/test_csrf_coverage.py): checked before the set is changed.
+                if not _check_csrf(body):
+                    return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 if isinstance(body.get("merge"), dict):
                     for k, v in body["merge"].items():
                         k = str(k).strip()
