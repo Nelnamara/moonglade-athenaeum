@@ -16,7 +16,7 @@ import {
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
   // The Generate panel's balance line: grouped, and re-read when a spend lands (walk 2026-09-30).
-  balanceLine, spendLandedKey,
+  balanceLine, spendLandedKey, makeAccountRefresh,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
@@ -1565,14 +1565,28 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
    when the Loom opened. It is read on open, again on a bind (`bind`: the shot the panel is bound
    to) and again whenever a spend lands on this board (`landedKey`: spendLandedKey over the board's
    generation states, loom-core.js); a read that a newer one overtook is dropped. Display only:
-   it never gates a submit (`lora_cap` rides the same read, as before). */
+   it never gates a submit (`lora_cap` rides the same read, as before). Each read costs three
+   PixAI reads, so a bind waits for a burst of clicks to settle and reads once
+   (makeAccountRefresh, code review 2026-10-02); the open and a landed spend read at once. */
 function useAccountLine(landedKey, bind) {
   const [acct, setAcct] = useState(null);
+  const gate = useRef(null);
+  if (!gate.current) gate.current = makeLatestOnly();
+  const refresh = useRef(null);
+  if (!refresh.current) {
+    const read = () => {
+      const tk = gate.current.begin();
+      fetch("/api/account").then((r) => r.json()).then((d) => { if (gate.current.wins(tk)) setAcct(d); }).catch(() => {});
+    };
+    refresh.current = makeAccountRefresh({ read, setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h) });
+  }
+  useEffect(() => { refresh.current.now(); }, [landedKey]);
+  const firstBind = useRef(true);
   useEffect(() => {
-    let live = true;
-    fetch("/api/account").then((r) => r.json()).then((d) => { if (live) setAcct(d); }).catch(() => {});
-    return () => { live = false; };
-  }, [landedKey, bind]);
+    if (firstBind.current) { firstBind.current = false; return; }
+    refresh.current.bind();
+  }, [bind]);
+  useEffect(() => { return () => { refresh.current.cancel(); gate.current.cancel(); }; }, []);
   return acct;
 }
 
