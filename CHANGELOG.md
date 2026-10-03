@@ -20,6 +20,7 @@ git tags. Full prose notes for tagged versions live on
 
 - **A storyboard that won't read now says which one.** The music bed's unused-file line used to vanish without a word when any storyboard's file was torn; it now names each such storyboard, when it was saved and where its file is (under `loom/kv/` in your library), and still removes nothing until the file reads again or is gone. (2026-10-02)
 - **The two-tab message says what was undone.** When a storyboard saved in another tab overrides this one, the message used to say only that your takes were kept, while a split you had just made here was quietly undone. It now names it ("Your split of A·01 was undone because the board changed in another tab"), says which shots or acts the other tab deleted (they stay deleted), and where a shot kept for its new take went when its act was deleted; a kept shot is no longer described as a take-number change. (2026-10-02)
+- **The continuity ribbon closes on the real last frame.** When a take's clip length had never been recorded, the ribbon took the closing frame at the shot's planned length, which is not the last frame when the clip runs a little longer. It now asks for the clip's true last frame, read from the file. A new take also records its real length when the finished render's length came back blank (it is measured once from the downloaded clip). (2026-10-02)
 
 ## [3.15.0] - 2026-10-01 — The Reading Room
 

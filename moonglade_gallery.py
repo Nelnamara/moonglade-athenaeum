@@ -1097,7 +1097,9 @@ LOOM_FRAME_WIDTH = 160
 LOOM_FRAME_MAX_SECONDS = 6 * 3600
 LOOM_FRAME_CACHE_MAX_FILES = 600
 LOOM_FRAME_CACHE_MAX_BYTES = 64 * 1024 * 1024
-LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7})\.png$")
+# <mid>_<frame>.png, or <mid>_end.png: the clip's true last frame, asked for when a take's
+# length was never recorded (GitHub #63). The splice's <mid>_last.png is NOT this shape.
+LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7}|end)\.png$")
 
 # The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
 LOOM_BED_FADE_IN = 2.0
@@ -24880,6 +24882,9 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def loom_frame():
         """GET ?mid=<media id>&at=<seconds> -> a PNG of that clip's frame at `at`, ~160 px wide.
+        ?mid=<media id>&end=1 (and no `at`) -> the clip's TRUE last frame, measured from the
+        file (GitHub #63: a take whose length was never recorded is closed at its real end,
+        not at the shot's planned length).
         400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
         could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
         placeholder tint. Login required; local only."""
@@ -24889,13 +24894,19 @@ __DESIGN_TOKENS__
         mid = (request.args.get("mid") or "").strip()
         if not LOOM_MEDIA_ID_RE.match(mid):
             return jsonify({"error": "mid must be a media id"}), 400
-        try:
-            at = float(request.args.get("at", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "at must be a number of seconds"}), 400
-        if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
-            return jsonify({"error": "at is out of range"}), 400
-        frame = int(round(at * LOOM_FRAME_FPS))
+        if "end" in request.args:
+            if request.args.get("end") != "1" or "at" in request.args:
+                return jsonify({"error": "end=1 asks for the clip's last frame, and takes no time"}), 400
+            frame, seek = "end", None
+        else:
+            try:
+                at = float(request.args.get("at", ""))
+            except (TypeError, ValueError):
+                return jsonify({"error": "at must be a number of seconds"}), 400
+            if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
+                return jsonify({"error": "at is out of range"}), 400
+            frame = int(round(at * LOOM_FRAME_FPS))
+            seek = frame / float(LOOM_FRAME_FPS)
         fdir = out_dir / "loom" / "_frames"
         png = fdir / "{}_{}.png".format(mid, frame)
         if png.is_file():
@@ -24915,7 +24926,7 @@ __DESIGN_TOKENS__
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
         small = fdir / ".small-{}-{}.png".format(tag, frame)
         try:
-            if not core.frame_at(str(vid), frame / float(LOOM_FRAME_FPS), str(raw)):
+            if not core.frame_at(str(vid), seek, str(raw)):
                 return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
             src = raw
             if Image is not None:
@@ -26481,6 +26492,25 @@ __DESIGN_TOKENS__
         with _scene_pending_lock:
             _scene_pending.pop(str(tid), None)
 
+    def _measured_clip_length(media_ids):
+        """GitHub #63: a finished video whose length came back blank -- the task was already
+        collected, so the catalog answered (it records no length), or ffprobe could not run in
+        the collect -- is measured once from the downloaded file (2 dp, as the collect does), so
+        the Loom's landTake records the clip's true length. None when no complete file is here
+        or ffprobe cannot read it. Local only: never PixAI. It never raises: the task IS done,
+        and a measurement that went wrong must not turn that answer into a failure or a retry."""
+        import moonglade_backup as core
+        try:
+            for mid in media_ids or []:
+                vid = _loom_complete_clip(str(mid))
+                if vid is None:
+                    continue
+                d = core.duration(str(vid))
+                return round(d, 2) if d is not None and d > 0 else None
+        except Exception:                                      # noqa: BLE001
+            return None
+        return None
+
     @app.route("/api/task-status")
     @tier(LOGIN)
     def api_task_status():
@@ -26518,9 +26548,12 @@ __DESIGN_TOKENS__
                 _fire_enhance_telemetry(tid)
                 _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
                 _loom_journal_finish_task(tid)   # Session P: the shot may render again
+                dur = got.get("duration")
+                if got.get("is_video") and dur in (None, ""):
+                    dur = _measured_clip_length(got.get("media_ids"))
                 done = {"phase": "done", "media_ids": got["media_ids"],
                         "is_video": got.get("is_video", False),
-                        "duration": got.get("duration"),
+                        "duration": dur,
                         "paid_credit": st["paid_credit"]}
                 # Session M (review F14): a run job's charge beside what its confirm expected,
                 # so the dock can mark a mismatch peach. Absent for everything else.

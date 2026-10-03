@@ -408,7 +408,8 @@ file is under the library's `loom/kv/` folder, so you can restore it from a back
 Under the reel in the full view, **CONTINUITY RIBBON · close frame → next open frame** pairs each
 cut: a shot's closing frame beside the next shot's opening frame (**A·01 out** · **A·02 in**),
 both from the ★ takes and their trims, so a jump in light, pose or costume shows at a glance.
-Shots with nothing rendered are left out, as Play leaves them out.
+An untrimmed shot closes on its clip's true last frame, read from the file itself, even when the
+clip's length was never recorded. Shots with nothing rendered are left out, as Play leaves them out.
 
 A pair gets a **peach dot** when the second shot's [anchor changed](#re-anchor), or when the two
 frames' colours differ strongly — measured as the average colour difference in Lab (ΔE over 25).

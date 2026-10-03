@@ -898,3 +898,115 @@ def test_the_refusal_names_every_board_that_will_not_read_and_where_its_file_is(
 def test_the_board_name_is_salvaged_from_a_file_that_will_not_read(text, name):
     assert g.loom_board_name_salvage(text) == name
     assert len(g.loom_board_name_salvage('{"name": "' + "x" * 500 + '"}')) == 120
+
+
+# ---- GitHub #63: the ribbon closes on the clip's REAL end -------------------------------------------
+# A take with no recorded length used to be closed at the shot's planned length, which is not the
+# last frame when the clip runs longer. The ribbon now asks for "the end" (end=1): the route takes
+# the clip's true last frame (core.frame_at with t=None) and caches it as <mid>_end.png.
+
+def _frame_end(cli, mid, **extra):
+    return cli.get("/api/loom/frame", query_string=dict({"mid": mid, "end": "1"}, **extra))
+
+
+def test_end_1_is_the_clips_true_last_frame_cached_as_mid_end(frames):
+    cli = frames["cli"]
+    r = _frame_end(cli, "7001")
+    assert r.status_code == 200 and r.mimetype == "image/png"
+    assert [(n, t) for (n, t, _o) in frames["calls"]] == [("shot_7001.mp4", None)], "t=None: the last frame"
+    assert (frames["fdir"] / "7001_end.png").is_file()
+    assert _frame_end(cli, "7001").status_code == 200
+    assert len(frames["calls"]) == 1, "served from the cache"
+    assert g.LOOM_FRAME_FILE_RE.match("7001_end.png") and g.LOOM_FRAME_FILE_RE.match("local_0123456789ab_end.png")
+    assert not g.LOOM_FRAME_FILE_RE.match("7001_last.png"), "the splice's own frame is never swept"
+    assert frames["traps"] == []
+
+
+@pytest.mark.parametrize("qs", [{"mid": "7001", "end": "1", "at": "2"}, {"mid": "7001", "end": "0"},
+                                {"mid": "7001", "end": "yes"}, {"mid": "7001"}, {"mid": "../7001", "end": "1"}])
+def test_end_with_a_time_or_anything_but_1_is_refused_before_anything_runs(frames, qs):
+    assert frames["cli"].get("/api/loom/frame", query_string=qs).status_code == 400
+    assert frames["calls"] == []
+
+
+def test_the_end_frame_is_in_the_lru_and_the_splice_frame_is_not(frames, monkeypatch):
+    cli, fdir = frames["cli"], frames["fdir"]
+    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_FILES", 2)
+    fdir.mkdir(parents=True)
+    (fdir / "7001_last.png").write_bytes(b"the splice's own frame")
+    assert _frame_end(cli, "7001").status_code == 200
+    _age(fdir / "7001_end.png", 3600)
+    assert _frame(cli, "7002", "1").status_code == 200
+    assert _frame_end(cli, "7002").status_code == 200
+    assert sorted(f.name for f in fdir.iterdir()) == ["7001_last.png", "7002_24.png", "7002_end.png"], \
+        "the oldest end frame went; the splice's frame was not counted or touched"
+    assert (fdir / "7001_last.png").read_bytes() == b"the splice's own frame"
+    assert frames["traps"] == []
+
+
+def test_a_missing_clip_or_no_frame_at_the_end_is_a_404(frames, monkeypatch):
+    assert _frame_end(frames["cli"], "9999").status_code == 404
+    monkeypatch.setattr(core, "frame_at", lambda *a, **k: None)
+    assert _frame_end(frames["cli"], "7002").status_code == 404
+    assert not (frames["fdir"] / "7002_end.png").exists()
+
+
+# /api/task-status's done branch: when a video's length came back blank (the task was already
+# collected, so the catalog answered; or ffprobe could not run in the collect), the downloaded
+# file is measured once, so landTake records a true length for the new take.
+
+@pytest.fixture
+def poll(tmp_path, monkeypatch):
+    tmp = tmp_path
+    (tmp / "videos").mkdir()
+    (tmp / "videos" / "shot_7001.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42clip-one")
+    save_catalog(tmp / "catalog.db", [_row(media_id="7001", task_id="T1", filename="videos/shot_7001.mp4",
+                                          is_video="1", created_at="2026-10-02T00:00:00")])
+    got = {"value": {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": None}}
+    measured = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(core, "collect_generation", lambda s, tid, out: dict(got["value"]))
+    monkeypatch.setattr(core, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
+    for name in ("submit", "submit_generation", "gql_mutate", "upload_media"):
+        monkeypatch.setattr(core, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("spent")))
+    cli = login_test_client(create_app(tmp))
+    return {"cli": cli, "got": got, "measured": measured, "tmp": tmp, "mp": monkeypatch}
+
+
+def _status(cli, tid="T1"):
+    return cli.get("/api/task-status", query_string={"task_id": tid}).get_json()
+
+
+def test_a_blank_video_length_is_measured_from_the_downloaded_file(poll):
+    # Already collected: the catalog answers, and it carries no length at all.
+    d = _status(poll["cli"])
+    assert d["phase"] == "done" and d["media_ids"] == ["7001"]
+    assert d["duration"] == 10.04, "the file's real length, 2 dp like the collect's own"
+    assert poll["measured"] == ["shot_7001.mp4"]
+
+
+def test_a_reported_length_is_never_replaced(poll):
+    save_catalog(poll["tmp"] / "catalog.db", [])
+    poll["got"]["value"] = {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": 5.0}
+    d = _status(poll["cli"], "T2")
+    assert d["duration"] == 5.0
+    assert poll["measured"] == [], "no second ffprobe for a length the collect already measured"
+
+
+def test_no_ffprobe_leaves_it_blank_and_a_still_is_never_measured(poll):
+    poll["mp"].setattr(core, "duration", lambda p, **k: poll["measured"].append(Path(p).name) or None)
+    assert _status(poll["cli"])["duration"] is None
+    save_catalog(poll["tmp"] / "catalog.db", [])
+    poll["got"]["value"] = {"media_ids": ["9"], "saved": 1, "is_video": False}
+    poll["measured"].clear()
+    d = _status(poll["cli"], "T3")
+    assert d["duration"] is None and poll["measured"] == []
+
+
+def test_a_measurement_that_breaks_never_breaks_the_done_answer(poll):
+    def boom(p, **k):
+        raise TypeError("ffprobe answered something odd")
+    poll["mp"].setattr(core, "duration", boom)
+    d = _status(poll["cli"])
+    assert d["phase"] == "done" and d["media_ids"] == ["7001"] and d["duration"] is None
