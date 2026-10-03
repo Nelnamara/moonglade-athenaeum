@@ -7919,3 +7919,45 @@ def test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns(phone_q_ser
             assert got["right"] <= w, (w, got)
     finally:
         ctx.close()
+
+
+_Q_ACTS_JS = """() => {
+    const row = document.querySelector('.lbm-actsrow');
+    const vw = innerWidth;
+    const chips = [...row.children].map((c) => { const b = c.getBoundingClientRect();
+        const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return {t: c.textContent.trim(), l: b.left, r: b.right, top: Math.round(b.top), h: b.height, hit: !!(e && c.contains(e))}; });
+    const rb = row.getBoundingClientRect();
+    return {chips, scrollW: row.scrollWidth, clientW: row.clientWidth, vw, rowL: rb.left, rowR: rb.right,
+            lines: new Set(chips.map((c) => c.top)).size, overflowX: getComputedStyle(row).overflowX}; }"""
+
+
+def test_the_phone_lightbox_buttons_wrap_onto_lines_with_room_to_tap(phone_q_server, render_browser, monkeypatch):
+    """Walk item 8: the phone Lightbox's row of buttons scrolled sideways with its scrollbar drawn across
+    them, and looked cramped. Upright at 320, 390 and 430 px the row wraps onto lines instead: every
+    button on screen and tappable, none past the row's edges, no sideways scroll, each at least 44 px
+    tall. Sideways the actions stay the rail's single column (Q4)."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-actsrow .lbm-similar")
+        for w in (320, 390, 430):
+            page.set_viewport_size({"width": w, "height": 844})
+            page.evaluate("document.querySelector('.lbm-bottom').scrollTop = 1e6")
+            _settle(page)
+            got = page.evaluate(_Q_ACTS_JS)
+            assert len(got["chips"]) >= 6, got
+            assert got["scrollW"] <= got["clientW"], (w, got)
+            assert got["lines"] >= 2, (w, got)
+            for c in got["chips"]:
+                assert c["l"] >= got["rowL"] - 0.5 and c["r"] <= got["rowR"] + 0.5 and c["r"] <= w, (w, c)
+                assert c["h"] >= 44 and c["hit"], (w, c)
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => getComputedStyle(document.querySelector('.lbm-root')).display === 'grid'")
+        _settle(page)
+        got = page.evaluate(_Q_ACTS_JS)
+        lefts = {round(c["l"]) for c in got["chips"]}
+        assert len(lefts) == 1 and got["lines"] == len(got["chips"]), "sideways: one column in the rail %r" % got
+    finally:
+        ctx.close()

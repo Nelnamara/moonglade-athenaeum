@@ -383,7 +383,8 @@ picture on its own says *single image*. **▶ To Video** and, on a picture's rec
 **▶ Send to Video** all only open the **Create** tab already filled in — Remix fills the Image form with
 the recorded prompt (or, for a picture made by a Generate run with variables, that run's template);
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
-Generate.
+Generate. The viewer's buttons (Edit, To Video, Similar, Upscale, Details and the rest) wrap onto two or
+three lines when the phone is upright, so every one is on screen without a sideways swipe.
 
 **Where you are in the library.** A picture's record and the full-screen viewer both say where the
 picture sits among everything your search and filters match (*14 of 3,240*), not just among the page
