@@ -837,3 +837,318 @@ def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
     r = cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})
     assert r.status_code == 409
     assert (_beds_dir(rig["tmp"]) / n).exists()
+
+
+def _legacy_board_file(tmp, board_id, text):
+    """A board only the legacy shared layer (out_dir/loom/kv/) holds, written as-is."""
+    from urllib.parse import quote
+    d = tmp / "loom" / "kv"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / (quote("storyboard:v2:proj:" + board_id, safe="") + ".json")
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_the_refusal_names_every_board_that_will_not_read_and_where_its_file_is(rig):
+    """GitHub #57: the refusal used to name no board, so there was no way to find the file. It
+    now names EVERY unreadable board (the first bad one no longer hides a second), each with its
+    id, a best-effort name, when it was saved and where its file is -- relative to the library,
+    never a host path -- and nothing else from the board. Both routes, and the bed stays."""
+    cli, tmp = rig["cli"], rig["tmp"]
+    n = _upload(cli, FLAC).get_json()["file"]
+    _age(_beds_dir(tmp) / n)
+    _save_board(cli, "b9", {"name": "Moonwell ep 1", "acts": [], "bed": {"file": n}})
+    own = [p for p in (tmp / "loom").rglob("*.json") if "b9" in p.name]
+    assert len(own) == 1, own
+    # The account's own copy, torn mid-write (the stored value is the board as a JSON string).
+    own[0].write_text('"{\\"name\\": \\"Moonwell ep 1\\", \\"acts\\": [{\\"id\\": \\"x', encoding="utf-8")
+    # A board only the legacy layer holds: its file reads, the board inside it does not.
+    _legacy_board_file(tmp, "b8", json.dumps('{"name": "Old reel", "acts": [{"id": "act-private-words'))
+    own_where = "loom/kv/" + _account_key(_TEST_USERNAME) + "/storyboard%3Av2%3Aproj%3Ab9.json"
+    legacy_where = "loom/kv/storyboard%3Av2%3Aproj%3Ab8.json"
+    for r in (cli.get("/api/loom/beds/unused"),
+              cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})):
+        assert r.status_code == 409, r.get_json()
+        d = r.get_json()
+        rows = sorted(d["unreadable"], key=lambda x: x["board"])
+        assert [(x["board"], x["name"], x["where"]) for x in rows] == [
+            ("b8", "Old reel", legacy_where), ("b9", "Moonwell ep 1", own_where)], rows
+        assert all(re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", x["saved"]) for x in rows), rows
+        assert all(set(x) == {"board", "name", "saved", "where"} for x in rows), "nothing else from the board"
+        assert '"Moonwell ep 1"' in d["error"] and '"Old reel"' in d["error"]
+        assert own_where in d["error"] and legacy_where in d["error"]
+        assert d["error"].endswith("Nothing was swept.")
+        body = r.get_data(as_text=True)
+        assert str(tmp) not in body and tmp.as_posix() not in body and "\\\\" not in body, "no host path"
+        assert "act-private-words" not in body and "acts" not in body, "no board content"
+    assert (_beds_dir(tmp) / n).exists()
+    assert rig["traps"] == []
+
+
+@pytest.mark.parametrize("text,name", [
+    ('{"name": "Moonwell ep 1", "acts": [', "Moonwell ep 1"),             # torn after the name
+    (json.dumps(json.dumps({"name": 'Say "hi" \u263e', "acts": []}))[:-9], 'Say "hi" \u263e'),   # stored as a string
+    ('  {\n  "name" : "Spaced",', "Spaced"),
+    ('{"name": "Moonw', ""),                                             # torn inside the name
+    ('{"acts": [{"name": "Act 1"}], "name": "late"}', ""),               # an act's name is never the board's
+    ('{"name": 7}', ""),
+    ("", ""),
+    ("\x00\x00\x00", ""),
+])
+def test_the_board_name_is_salvaged_from_a_file_that_will_not_read(text, name):
+    assert g.loom_board_name_salvage(text) == name
+    assert len(g.loom_board_name_salvage('{"name": "' + "x" * 500 + '"}')) == 120
+
+
+# ---- GitHub #63: the ribbon closes on the clip's REAL end -------------------------------------------
+# A take with no recorded length used to be closed at the shot's planned length, which is not the
+# last frame when the clip runs longer. The ribbon now asks for "the end" (end=1): the route takes
+# the clip's true last frame (core.frame_at with t=None) and caches it as <mid>_end.png.
+
+def _frame_end(cli, mid, **extra):
+    return cli.get("/api/loom/frame", query_string=dict({"mid": mid, "end": "1"}, **extra))
+
+
+def test_end_1_is_the_clips_true_last_frame_cached_as_mid_end(frames):
+    cli = frames["cli"]
+    r = _frame_end(cli, "7001")
+    assert r.status_code == 200 and r.mimetype == "image/png"
+    assert [(n, t) for (n, t, _o) in frames["calls"]] == [("shot_7001.mp4", None)], "t=None: the last frame"
+    assert (frames["fdir"] / "7001_end.png").is_file()
+    assert _frame_end(cli, "7001").status_code == 200
+    assert len(frames["calls"]) == 1, "served from the cache"
+    assert g.LOOM_FRAME_FILE_RE.match("7001_end.png") and g.LOOM_FRAME_FILE_RE.match("local_0123456789ab_end.png")
+    assert not g.LOOM_FRAME_FILE_RE.match("7001_last.png"), "the splice's own frame is never swept"
+    assert frames["traps"] == []
+
+
+@pytest.mark.parametrize("qs", [{"mid": "7001", "end": "1", "at": "2"}, {"mid": "7001", "end": "0"},
+                                {"mid": "7001", "end": "yes"}, {"mid": "7001"}, {"mid": "../7001", "end": "1"}])
+def test_end_with_a_time_or_anything_but_1_is_refused_before_anything_runs(frames, qs):
+    assert frames["cli"].get("/api/loom/frame", query_string=qs).status_code == 400
+    assert frames["calls"] == []
+
+
+def test_the_end_frame_is_in_the_lru_and_the_splice_frame_is_not(frames, monkeypatch):
+    cli, fdir = frames["cli"], frames["fdir"]
+    monkeypatch.setattr(g, "LOOM_FRAME_CACHE_MAX_FILES", 2)
+    fdir.mkdir(parents=True)
+    (fdir / "7001_last.png").write_bytes(b"the splice's own frame")
+    assert _frame_end(cli, "7001").status_code == 200
+    _age(fdir / "7001_end.png", 3600)
+    assert _frame(cli, "7002", "1").status_code == 200
+    assert _frame_end(cli, "7002").status_code == 200
+    assert sorted(f.name for f in fdir.iterdir()) == ["7001_last.png", "7002_24.png", "7002_end.png"], \
+        "the oldest end frame went; the splice's frame was not counted or touched"
+    assert (fdir / "7001_last.png").read_bytes() == b"the splice's own frame"
+    assert frames["traps"] == []
+
+
+def test_a_missing_clip_or_no_frame_at_the_end_is_a_404(frames, monkeypatch):
+    assert _frame_end(frames["cli"], "9999").status_code == 404
+    monkeypatch.setattr(core, "frame_at", lambda *a, **k: None)
+    assert _frame_end(frames["cli"], "7002").status_code == 404
+    assert not (frames["fdir"] / "7002_end.png").exists()
+
+
+# /api/task-status's done branch: when a video's length came back blank (the task was already
+# collected, so the catalog answered; or ffprobe could not run in the collect), the downloaded
+# file is measured once, so landTake records a true length for the new take.
+
+@pytest.fixture
+def poll(tmp_path, monkeypatch):
+    tmp = tmp_path
+    (tmp / "videos").mkdir()
+    (tmp / "videos" / "shot_7001.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42clip-one")
+    save_catalog(tmp / "catalog.db", [_row(media_id="7001", task_id="T1", filename="videos/shot_7001.mp4",
+                                          is_video="1", created_at="2026-10-02T00:00:00")])
+    got = {"value": {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": None}}
+    measured = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(core, "collect_generation", lambda s, tid, out: dict(got["value"]))
+    monkeypatch.setattr(core, "duration", lambda p, **k: measured.append(Path(p).name) or 10.0417)
+    for name in ("submit", "submit_generation", "gql_mutate", "upload_media"):
+        monkeypatch.setattr(core, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("spent")))
+    cli = login_test_client(create_app(tmp))
+    return {"cli": cli, "got": got, "measured": measured, "tmp": tmp, "mp": monkeypatch}
+
+
+def _status(cli, tid="T1"):
+    return cli.get("/api/task-status", query_string={"task_id": tid}).get_json()
+
+
+def test_a_blank_video_length_is_measured_from_the_downloaded_file(poll):
+    # Already collected: the catalog answers, and it carries no length at all.
+    d = _status(poll["cli"])
+    assert d["phase"] == "done" and d["media_ids"] == ["7001"]
+    assert d["duration"] == 10.04, "the file's real length, 2 dp like the collect's own"
+    assert poll["measured"] == ["shot_7001.mp4"]
+
+
+def test_a_reported_length_is_never_replaced(poll):
+    save_catalog(poll["tmp"] / "catalog.db", [])
+    poll["got"]["value"] = {"media_ids": ["7001"], "saved": 1, "is_video": True, "duration": 5.0}
+    d = _status(poll["cli"], "T2")
+    assert d["duration"] == 5.0
+    assert poll["measured"] == [], "no second ffprobe for a length the collect already measured"
+
+
+def test_no_ffprobe_leaves_it_blank_and_a_still_is_never_measured(poll):
+    poll["mp"].setattr(core, "duration", lambda p, **k: poll["measured"].append(Path(p).name) or None)
+    assert _status(poll["cli"])["duration"] is None
+    save_catalog(poll["tmp"] / "catalog.db", [])
+    poll["got"]["value"] = {"media_ids": ["9"], "saved": 1, "is_video": False}
+    poll["measured"].clear()
+    d = _status(poll["cli"], "T3")
+    assert d["duration"] is None and poll["measured"] == []
+
+
+def test_a_measurement_that_breaks_never_breaks_the_done_answer(poll):
+    def boom(p, **k):
+        raise TypeError("ffprobe answered something odd")
+    poll["mp"].setattr(core, "duration", boom)
+    d = _status(poll["cli"])
+    assert d["phase"] == "done" and d["media_ids"] == ["7001"] and d["duration"] is None
+
+
+# ---- GitHub #62: frames spliced before 3.15.0 ------------------------------------------------------
+# 3.15.0 thumbnails a frame when a splice uploads it, but a frame spliced earlier is a PixAI media id
+# in no catalog with no thumbs/<id>.jpg, so every surface drew a broken picture. POST
+# /api/loom/frame-thumbs fills a missing thumbnail ONCE from PixAI (a read of the media object, then
+# the picture from the PixAI image CDN only) and answers which frames it could not get, so the Loom
+# says so instead. Two reads, no write to PixAI, nothing that spends.
+
+def _png_bytes(size=(64, 36)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, (90, 60, 140)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+class _Resp:
+    def __init__(self, status, content=b""):
+        self.status_code, self.content = status, content
+        self.headers = {"content-type": "image/png"}
+
+
+@pytest.fixture
+def ft(tmp_path, monkeypatch):
+    import requests
+    hit, looked, got, slept = [], [], [], []
+
+    def _trap(name):
+        def f(*a, **k):
+            hit.append(name)
+            raise AssertionError("the frame-thumbs route reached " + name)
+        return f
+    for name in ("submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "upload_media",
+                 "submit_fixer"):
+        monkeypatch.setattr(core, name, _trap(name))
+    session = object()
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: session)
+    urls = {"222": "https://images-ng.pixai.art/images/thumb/two", "333": None,
+            "444": "https://evil.example/images/thumb/four", "555": "https://images-ng.pixai.art/images/thumb/five",
+            "666": "http://images-ng.pixai.art/images/thumb/six"}
+
+    def fake_url(sess, mid):
+        assert sess is session
+        looked.append(mid)
+        return urls.get(mid)
+    monkeypatch.setattr(core, "media_thumbnail_url", fake_url)
+    pic = _png_bytes()
+
+    def fake_get(url, *a, **k):
+        got.append(url)
+        return _Resp(200, pic) if url.endswith("/two") else _Resp(404)
+    monkeypatch.setattr(requests, "get", fake_get)
+    # Only the route's own pause is recorded (and skipped); every other sleep in the process is real.
+    pause, real_sleep = 0.000123, time.sleep
+    monkeypatch.setattr(g, "LOOM_FRAME_THUMBS_PAUSE_S", pause)
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s) if s == pause else real_sleep(s))
+    app = create_app(tmp_path)
+    cli = login_test_client(app)
+    cli.csrf = cli.get("/api/account/prefs").get_json()["csrf"]
+    thumbs = tmp_path / "gallery" / "thumbs"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    return {"cli": cli, "app": app, "tmp": tmp_path, "thumbs": thumbs, "hit": hit, "looked": looked, "got": got,
+            "slept": slept, "urls": urls, "mp": monkeypatch}
+
+
+def _thumbs_post(ft, ids, csrf=None):
+    return ft["cli"].post("/api/loom/frame-thumbs",
+                          json={"csrf": ft["cli"].csrf if csrf is None else csrf, "media_ids": ids})
+
+
+def test_frame_thumbs_have_fetched_gone(ft):
+    (ft["thumbs"] / "111.jpg").write_bytes(b"already here")
+    r = _thumbs_post(ft, ["111", "222", "333", "444", "555", "666", "222"])
+    assert r.status_code == 200, r.get_json()
+    d = r.get_json()
+    assert d == {"have": ["111"], "fetched": ["222"], "gone": ["333", "444", "555", "666"]}
+    assert (ft["thumbs"] / "111.jpg").read_bytes() == b"already here", "a thumbnail that exists is never touched"
+    assert ft["looked"] == ["222", "333", "444", "555", "666"], "PixAI is asked only for the missing ones, once each"
+    assert ft["got"] == ["https://images-ng.pixai.art/images/thumb/two", "https://images-ng.pixai.art/images/thumb/five"], \
+        "only the PixAI image CDN, over https, is ever fetched"
+    assert ft["cli"].get("/thumbs/222.jpg").status_code == 200, "the shared thumbnail route now serves it"
+    assert not (ft["thumbs"] / "333.jpg").exists() and not (ft["thumbs"] / "444.jpg").exists()
+    assert len(ft["slept"]) == 4 and all(s > 0 for s in ft["slept"]), "a short pause between PixAI calls"
+    assert ft["hit"] == [], "no submit, no gql, no upload"
+    leftovers = [p.name for p in ft["tmp"].rglob("*") if p.name.startswith(".frame-thumb")]
+    assert leftovers == [], "no temp file left behind"
+
+
+def test_a_gone_frame_is_never_asked_about_again_this_run(ft):
+    assert _thumbs_post(ft, ["333"]).get_json()["gone"] == ["333"]
+    ft["looked"].clear()
+    assert _thumbs_post(ft, ["333"]).get_json() == {"have": [], "fetched": [], "gone": ["333"]}
+    assert ft["looked"] == [] and ft["slept"] == []
+
+
+def test_no_pixai_session_is_not_a_verdict_on_the_frame(ft):
+    def no_session(*a, **k):
+        raise RuntimeError("PIXAI_API_KEY is not set")
+    ft["mp"].setattr(core, "_make_session", no_session)
+    assert _thumbs_post(ft, ["222"]).get_json() == {"have": [], "fetched": [], "gone": ["222"]}
+    ft["mp"].setattr(core, "_make_session", lambda *a, **k: object())
+    ft["mp"].setattr(core, "media_thumbnail_url", lambda s, mid: ft["urls"].get(mid))
+    assert _thumbs_post(ft, ["222"]).get_json()["fetched"] == ["222"], "the next open asks again"
+
+
+@pytest.mark.parametrize("body,code", [
+    ({"media_ids": ["1"]}, 403),
+    ({"media_ids": "1"}, 400),
+    ({"media_ids": [str(i) for i in range(61)]}, 400),
+    ({"media_ids": ["local_0123456789ab"]}, 400),
+    ({"media_ids": ["../1"]}, 400),
+    ({"media_ids": ["12a"]}, 400),
+    ({"media_ids": [""]}, 400),
+])
+def test_frame_thumbs_refuses_a_bad_body_before_anything_runs(ft, body, code):
+    if code != 403:
+        body = dict(body, csrf=ft["cli"].csrf)
+    r = ft["cli"].post("/api/loom/frame-thumbs", json=body)
+    assert r.status_code == code
+    assert ft["looked"] == [] and ft["got"] == []
+
+
+def test_frame_thumbs_is_login_tier(tmp_path):
+    anon = create_app(tmp_path).test_client()
+    assert anon.post("/api/loom/frame-thumbs", json={"media_ids": ["1"]}).status_code == 401
+
+
+_READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
+
+
+def test_the_frame_thumbs_route_names_nothing_that_spends_or_uploads():
+    """It needs a PixAI session (the media read), so it is not in _NEW_FUNCS' no-session list;
+    it must still name no submit, no gql and no upload."""
+    tree = ast.parse((REPO / "moonglade_gallery.py").read_text(encoding="utf-8"))
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in _READ_ONLY_FUNCS:
+            found[node.name] = {(s.func.attr if isinstance(s.func, ast.Attribute) else getattr(s.func, "id", ""))
+                                for s in ast.walk(node) if isinstance(s, ast.Call)}
+    assert set(found) == set(_READ_ONLY_FUNCS), "a function was renamed: " + repr(set(_READ_ONLY_FUNCS) - set(found))
+    for name, called in found.items():
+        assert not (called & (_SPEND - {"_gen_session", "_make_session"})), name + " calls " + repr(called & _SPEND)

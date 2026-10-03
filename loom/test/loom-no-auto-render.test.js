@@ -757,7 +757,9 @@ describe("the pure modules can reach nothing", () => {
     // Stage B2 -- the continuity ribbon's pairs and colour measure (P9): the ★ take view only
     ["src/loom-ribbon-core.js", ["./loom-core.js", "./loom-takes-core.js"]],
     // Stage B2 -- the phone's swipe / long-press take math (P1): the take views only
-    ["src/loom-phone-core.js", ["./loom-takes-core.js"]]]) {
+    ["src/loom-phone-core.js", ["./loom-takes-core.js"]],
+    // GitHub #62 -- which frames to ask a thumbnail for, and what a frame slot draws: nothing else
+    ["src/loom-frames-core.js", []]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {

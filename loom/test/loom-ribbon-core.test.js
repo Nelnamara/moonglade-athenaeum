@@ -57,25 +57,32 @@ describe("ribbonPairs: one pair per cut between rendered shots, through the ★ 
     assert.equal(pairTitle(pairs[0], 0, "ok"), "A·02: anchor changed");
     assert.equal(pairFlagged(pairs[0], null), true, "a stale anchor flags even with no frames to compare");
   });
-  test("a take whose clip length was never recorded closes at its planned end, never its first frame", () => {
+  test("a take whose clip length was never recorded closes at the clip's REAL end, never its first frame or an estimate", () => {
     // Owner walk 2026-09-30: E·02 opens on exactly E·01's last frame (E·01 at 4.99 s == E·02 at
     // 0 s), yet the E·01 -> E·02 join was flagged "Strong colour jump · mean Lab ΔE 34.9". E·01's
     // take had no recorded length (landTake stores dur null when the task reported none) and
-    // Number(null) is 0, so the ribbon compared E·01's FIRST frame with E·02's open. An unknown
-    // length now falls through to the planned one; the frame route takes a time at or past the
-    // clip's real end as its last frame.
+    // Number(null) is 0, so the ribbon compared E·01's FIRST frame with E·02's open. 3.15.0 then
+    // asked for the frame at the PLANNED length, which is not the last frame when the clip runs
+    // longer (GitHub #63). An unknown length with no trim now asks for "the end" (at: null ->
+    // &end=1): the server measures the clip and takes its true last frame.
     const p = legacy();
     const [a1, a2] = p.acts[0].cards;
     Object.assign(a1, { actualDur: null, duration: 5, trimOut: null, trimIn: 0 });
     delete a1.takes; delete a1.selectedTake;
     const [first] = ribbonPairs(flat(p));
     assert.equal(first.a.cardId, a1.id);
-    assert.equal(first.a.at, 5, "the close is the clip's end, not 0");
-    assert.equal(frameUrl(first.a.mid, first.a.at), "/api/loom/frame?mid=" + a1.resultMid + "&at=5.0000");
+    assert.equal(first.a.at, null, "the close is the clip's real end: not 0, not the planned 5 s");
+    assert.equal(frameUrl(first.a.mid, first.a.at), "/api/loom/frame?mid=" + a1.resultMid + "&end=1");
     for (const blank of [undefined, ""]) {
       a1.actualDur = blank;
-      assert.equal(ribbonPairs(flat(p))[0].a.at, 5, "unrecorded (" + JSON.stringify(blank) + ") is unknown too");
+      assert.equal(ribbonPairs(flat(p))[0].a.at, null, "unrecorded (" + JSON.stringify(blank) + ") is unknown too");
     }
+    // A known length, or a trim, closes where it did before (the frame at that time).
+    a1.actualDur = 5.04;
+    assert.equal(ribbonPairs(flat(p))[0].a.at, 5.04);
+    a1.actualDur = null; a1.trimOut = 3.25;
+    assert.equal(ribbonPairs(flat(p))[0].a.at, 3.25);
+    a1.trimOut = null;
     a1.actualDur = null;
     assert.equal(a1.actualDur, null, "reading the board wrote no length onto it");
     // What the ribbon compares: both sides are the shots' RENDERED clips (GET /api/loom/frame), the
@@ -90,6 +97,11 @@ describe("ribbonPairs: one pair per cut between rendered shots, through the ★ 
     assert.equal(frameUrl("123", 1.03), "/api/loom/frame?mid=123&at=1.0417");
     assert.equal(frameUrl("local_0123456789ab", -2), "/api/loom/frame?mid=local_0123456789ab&at=0.0000");
     assert.equal(frameUrl("a&b", 0), "/api/loom/frame?mid=a%26b&at=0.0000");
+  });
+  test("no time means the clip's real last frame (&end=1); 0 is still the first frame", () => {
+    assert.equal(frameUrl("123", null), "/api/loom/frame?mid=123&end=1");
+    assert.equal(frameUrl("123", undefined), "/api/loom/frame?mid=123&end=1");
+    assert.equal(frameUrl("123", 0), "/api/loom/frame?mid=123&at=0.0000");
   });
 });
 

@@ -130,7 +130,7 @@ export const edlPlan = (project, opts = {}) => {
   entries.forEach((e) => {
     const v = selectedTakeView(e.c);
     if (!v || !v.mid) { skipped.push(e.code); return; }
-    const dur = num(v.dur) || num(e.c.actualDur) || num(e.c.duration) || 8;
+    const dur = num(v.dur) || num(e.c.duration) || 8;   // v.dur: the card's length when known (> 0), else the take's
     const tin = num(v.trimIn) || 0;
     const tout = v.trimOut != null && num(v.trimOut) != null ? num(v.trimOut) : dur;
     const inF = framesOf(tin, fps);

@@ -1097,7 +1097,15 @@ LOOM_FRAME_WIDTH = 160
 LOOM_FRAME_MAX_SECONDS = 6 * 3600
 LOOM_FRAME_CACHE_MAX_FILES = 600
 LOOM_FRAME_CACHE_MAX_BYTES = 64 * 1024 * 1024
-LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7})\.png$")
+# GitHub #62: a frame spliced before 3.15.0 has no thumbs/<id>.jpg. /api/loom/frame-thumbs fills
+# one from PixAI once (a media read, then the picture from the image CDN), at most this many ids
+# a request, one at a time with this pause between PixAI calls.
+LOOM_FRAME_THUMBS_MAX = 60
+LOOM_FRAME_THUMBS_PAUSE_S = 0.3
+LOOM_FRAME_THUMB_ID_RE = re.compile(r"^\d{1,32}$")
+# <mid>_<frame>.png, or <mid>_end.png: the clip's true last frame, asked for when a take's
+# length was never recorded (GitHub #63). The splice's <mid>_last.png is NOT this shape.
+LOOM_FRAME_FILE_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})_(\d{1,7}|end)\.png$")
 
 # The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
 LOOM_BED_FADE_IN = 2.0
@@ -1153,6 +1161,53 @@ def loom_edl_zip_stem(name):
     Content-Disposition and the zip's entry names)."""
     s = re.sub(r"[^A-Za-z0-9 _.-]", "", str(name or ""))[:64].strip().lstrip(".").strip()
     return s or "storyboard"
+
+
+_LOOM_BOARD_NAME_RE = re.compile(r'\s*\{\s*"name"\s*:\s*"((?:[^"\\\x00-\x1f]|\\.){0,600})"')
+
+
+def _json_string_body(text):
+    """The text inside a JSON string literal that starts `text`, unescaped as far as it goes
+    (a torn file simply stops). Lenient on purpose: it only ever feeds the name salvage."""
+    out, i, n = [], 1, len(text)
+    simple = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            break
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= n:
+            break
+        esc = text[i + 1]
+        if esc == "u" and re.match(r"[0-9a-fA-F]{4}$", text[i + 2:i + 6]):
+            out.append(chr(int(text[i + 2:i + 6], 16)))
+            i += 6
+            continue
+        out.append(simple.get(esc, esc))
+        i += 2
+    return "".join(out)
+
+
+def loom_board_name_salvage(text):
+    """A board's name from a file that will not read (GitHub #57), or "" when it cannot be
+    read. Best effort and nothing else: the name is the first field of every board, so only a
+    `"name": "..."` that opens the board counts (an act's or a cast member's name is never
+    taken for it). A board stored as a JSON string (the Loom's own saves) is unescaped first.
+    At most 120 characters; never any other content of the board."""
+    t = str(text or "").lstrip()
+    if t.startswith('"'):
+        t = _json_string_body(t)
+    m = _LOOM_BOARD_NAME_RE.match(t)
+    if not m:
+        return ""
+    try:
+        name = json.loads('"' + m.group(1) + '"')
+    except ValueError:
+        return ""
+    return name.strip()[:120]
 
 
 def loom_board_beds(projects):
@@ -12332,6 +12387,17 @@ _SCENE_LANG_KEYS = {
 _SCENE_CDN_HOST = "images-ng.pixai.art"
 
 
+def pixai_cdn_url_ok(url):
+    """THE host guard for fetching a PixAI picture server-side (api_train_cover's SSRF guard,
+    shared with the Loom's frame-thumbnail fill): https, on exactly the PixAI image CDN."""
+    import urllib.parse as _up
+    try:
+        p = _up.urlparse(str(url or ""))
+    except ValueError:
+        return False
+    return p.scheme == "https" and p.netloc == _SCENE_CDN_HOST
+
+
 def scene_catalog(core, session, force=False):
     """The WHOLE live scene catalog (listChatEditingScenes), memoized for SCENES_TTL.
 
@@ -19859,7 +19925,7 @@ def create_app(out_dir: Path):
             parsed = _up.urlparse(raw)
         except ValueError:
             return ("bad url", 400)
-        if parsed.scheme != "https" or parsed.netloc != "images-ng.pixai.art":
+        if not pixai_cdn_url_ok(raw):
             return ("forbidden host", 403)
         try:
             # PUBLIC CDN thumbnails -- no auth needed (verified). A PLAIN per-request
@@ -23510,7 +23576,10 @@ def create_app(out_dir: Path):
     _LOOM_REV_MISSING = "missing"
 
     class _LoomUnreadable(Exception):
-        pass
+        """The key(s) whose file exists but will not read or parse (`keys`, in order)."""
+        def __init__(self, *keys):
+            super().__init__(*keys)
+            self.keys = [str(k) for k in keys]
 
     def _loom_kv_text(user, key):
         """(text, layer) for this account's view of `key`: layer "own" | "legacy" | None.
@@ -23704,18 +23773,23 @@ def create_app(out_dir: Path):
         buried -- loom_list's set), parsed. Read-only. Raises _LoomUnreadable when any board's
         file exists but does not read: an unreadable board is not a missing one, so a caller
         deciding what is UNUSED must refuse rather than treat that board's bed as free (red
-        team 2026-10-01: the sweep deleted the bed of a truncated board)."""
+        team 2026-10-01: the sweep deleted the bed of a truncated board). It reads every board
+        before it raises, so the refusal names ALL the unreadable ones (GitHub #57)."""
         from urllib.parse import unquote
         with _loom_lock:
             own = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
             legacy = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
             buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
             keys = sorted((own | legacy) - buried)
-            out = []
+            out, bad = [], []
             for k in keys:
                 if not (k.startswith("storyboard:v2:proj:") or k == "storyboard:v2:project"):
                     continue
-                text, _layer = _loom_kv_text(user, k)
+                try:
+                    text, _layer = _loom_kv_text(user, k)
+                except _LoomUnreadable:
+                    bad.append(k)
+                    continue
                 if text is None:
                     continue
                 v = json.loads(text)
@@ -23723,10 +23797,50 @@ def create_app(out_dir: Path):
                     try:
                         v = json.loads(v)
                     except ValueError:
-                        raise _LoomUnreadable(k)
+                        bad.append(k)
+                        continue
                 if isinstance(v, dict):
                     out.append(v)
+        if bad:
+            raise _LoomUnreadable(*bad)
         return out
+
+    def _loom_unreadable_boards(user, keys):
+        """What the owner needs to find each board that will not read (GitHub #57), and nothing
+        else from it: {board: its id, name: best-effort (loom_board_name_salvage), saved: the
+        file's time (UTC ISO), where: the file relative to the library -- never a host path}.
+        The file is the one that decides the answer, as _loom_kv_text resolves it."""
+        from datetime import datetime, timezone
+        rows = []
+        for k in keys:
+            p = _loom_kv_path(user, k)
+            if not p.exists():
+                p = _legacy_loom_kv_path(k)
+            try:
+                where = p.resolve().relative_to(out_dir.resolve()).as_posix()
+            except (OSError, ValueError):
+                where = p.name
+            saved, name = "", ""
+            try:
+                saved = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                with open(p, "rb") as fh:
+                    name = loom_board_name_salvage(fh.read(4096).decode("utf-8", "replace"))
+            except OSError:
+                pass
+            board = k[len("storyboard:v2:proj:"):] if k.startswith("storyboard:v2:proj:") else k
+            rows.append({"board": board, "name": name, "saved": saved, "where": where})
+        return rows
+
+    def _loom_beds_unreadable_answer(user, exc):
+        """The 409 both bed routes answer while a board will not read: a sentence naming each
+        board and its file, ending "Nothing was swept.", plus the rows for the Loom's own line."""
+        rows = _loom_unreadable_boards(user, exc.keys)
+        named = ", ".join('"{}" ({})'.format(r["name"] or r["board"], r["where"]) for r in rows)
+        head = ("A storyboard didn't read" if len(rows) == 1 else "{} storyboards didn't read".format(len(rows)))
+        msg = ("{}, so no music bed can be called unused: {}. Restore {} from a backup or delete {}. "
+               "Nothing was swept.").format(head, named, "its file" if len(rows) == 1 else "their files",
+                                             "it" if len(rows) == 1 else "them")
+        return jsonify({"error": msg, "unreadable": rows}), 409
 
     def _loom_unused_beds(user):
         """[(name, bytes)] of the caller's beds no board of the account references, oldest
@@ -24790,6 +24904,9 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def loom_frame():
         """GET ?mid=<media id>&at=<seconds> -> a PNG of that clip's frame at `at`, ~160 px wide.
+        ?mid=<media id>&end=1 (and no `at`) -> the clip's TRUE last frame, measured from the
+        file (GitHub #63: a take whose length was never recorded is closed at its real end,
+        not at the shot's planned length).
         400 for a malformed mid or time; 404 when the clip is not on this machine or no frame
         could be produced (no ffmpeg here, a broken file) -- the ribbon then shows its
         placeholder tint. Login required; local only."""
@@ -24799,13 +24916,19 @@ __DESIGN_TOKENS__
         mid = (request.args.get("mid") or "").strip()
         if not LOOM_MEDIA_ID_RE.match(mid):
             return jsonify({"error": "mid must be a media id"}), 400
-        try:
-            at = float(request.args.get("at", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "at must be a number of seconds"}), 400
-        if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
-            return jsonify({"error": "at is out of range"}), 400
-        frame = int(round(at * LOOM_FRAME_FPS))
+        if "end" in request.args:
+            if request.args.get("end") != "1" or "at" in request.args:
+                return jsonify({"error": "end=1 asks for the clip's last frame, and takes no time"}), 400
+            frame, seek = "end", None
+        else:
+            try:
+                at = float(request.args.get("at", ""))
+            except (TypeError, ValueError):
+                return jsonify({"error": "at must be a number of seconds"}), 400
+            if not math.isfinite(at) or at < 0 or at > LOOM_FRAME_MAX_SECONDS:
+                return jsonify({"error": "at is out of range"}), 400
+            frame = int(round(at * LOOM_FRAME_FPS))
+            seek = frame / float(LOOM_FRAME_FPS)
         fdir = out_dir / "loom" / "_frames"
         png = fdir / "{}_{}.png".format(mid, frame)
         if png.is_file():
@@ -24825,7 +24948,7 @@ __DESIGN_TOKENS__
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
         small = fdir / ".small-{}-{}.png".format(tag, frame)
         try:
-            if not core.frame_at(str(vid), frame / float(LOOM_FRAME_FPS), str(raw)):
+            if not core.frame_at(str(vid), seek, str(raw)):
                 return jsonify({"error": "no frame could be taken from that clip (is ffmpeg installed?)"}), 404
             src = raw
             if Image is not None:
@@ -24851,6 +24974,92 @@ __DESIGN_TOKENS__
         if not png.is_file():
             return jsonify({"error": "the frame cache is full"}), 404
         return send_file(str(png), mimetype="image/png", max_age=3600)
+
+    # ---- FRAMES SPLICED BEFORE 3.15.0 (GitHub #62) -------------------------------------------
+    # 3.15.0 writes a thumbnail when a splice uploads a frame, but a frame spliced earlier is a
+    # PixAI media id in no catalog with no thumbs/<id>.jpg -- and /thumbs/<id>.jpg (the shared
+    # gallery route) never fetches on a miss -- so the board card, Deep Focus and the drawer's
+    # frame box drew a broken picture. The Loom posts a board's frame ids once per session on
+    # open; each missing one is filled ONCE from PixAI: a read of the media object
+    # (core.media_thumbnail_url, as /api/train/thumb does), then the picture from the PixAI image
+    # CDN only (pixai_cdn_url_ok, the proxy's own guard). Two reads, no write to PixAI, nothing
+    # that spends, so no _check_read_only. One at a time with a pause, under one lock across
+    # tabs. A frame PixAI cannot give back is remembered as gone until restart, so reopening a
+    # board never asks again; a missing PixAI session is not a verdict and is not remembered.
+    _loom_frame_thumbs_lock = threading.Lock()
+    _loom_frame_gone = set()
+
+    def _loom_fetch_frame_thumb(core, sess, mid):
+        """Fill thumbs/<mid>.jpg from PixAI. True when it is there afterwards."""
+        import requests as _req
+        url = core.media_thumbnail_url(sess, mid)
+        if not url or not pixai_cdn_url_ok(url):
+            return False
+        r = _req.get(url, timeout=20)
+        if r.status_code != 200 or not r.content:
+            return False
+        fdir = out_dir / "loom" / "_frames"
+        fdir.mkdir(parents=True, exist_ok=True)
+        src = fdir / (".frame-thumb-{}-{}".format(mid, secrets.token_hex(4)))
+        dest = thumb_dir / (mid + ".jpg")
+        try:
+            src.write_bytes(r.content)
+            return bool(make_thumbnail(src, dest)) and dest.is_file()
+        finally:
+            try:
+                src.unlink()
+            except OSError:
+                pass
+
+    @app.route("/api/loom/frame-thumbs", methods=["POST"])
+    @tier(LOGIN)
+    def loom_frame_thumbs():
+        """{csrf, media_ids: [up to LOOM_FRAME_THUMBS_MAX digit ids]} -> {have, fetched, gone}:
+        already on this machine / filled from PixAI now / PixAI could not give it back (the
+        Loom then says "Frame not on this machine. Splice again." instead of a broken picture)."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        ids = body.get("media_ids")
+        if not isinstance(ids, list) or len(ids) > LOOM_FRAME_THUMBS_MAX:
+            return jsonify({"error": "media_ids must be a list of at most %d ids" % LOOM_FRAME_THUMBS_MAX}), 400
+        ids = [str(x).strip() for x in ids]
+        if any(not LOOM_FRAME_THUMB_ID_RE.match(x) for x in ids):
+            return jsonify({"error": "media_ids must be PixAI media ids"}), 400
+        have, fetched, gone = [], [], []
+        with _loom_frame_thumbs_lock:
+            todo = []
+            for mid in dict.fromkeys(ids):
+                if (thumb_dir / (mid + ".jpg")).is_file():
+                    have.append(mid)
+                elif mid in _loom_frame_gone:
+                    gone.append(mid)
+                else:
+                    todo.append(mid)
+            if todo:
+                try:
+                    core, sess = _gen_session()
+                except Exception:                              # noqa: BLE001
+                    core = sess = None
+                for i, mid in enumerate(todo):
+                    if core is None:
+                        gone.append(mid)                       # no session: not a verdict, not remembered
+                        continue
+                    if i:
+                        time.sleep(LOOM_FRAME_THUMBS_PAUSE_S)
+                    try:
+                        ok = _loom_fetch_frame_thumb(core, sess, mid)
+                    except Exception:                          # noqa: BLE001
+                        ok = False
+                    if ok:
+                        fetched.append(mid)
+                    else:
+                        gone.append(mid)
+                        _loom_frame_gone.add(mid)
+        return jsonify({"have": have, "fetched": fetched, "gone": gone})
 
     # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
     # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
@@ -25428,9 +25637,6 @@ __DESIGN_TOKENS__
         return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
                          conditional=True, max_age=3600)
 
-    _LOOM_BEDS_UNREADABLE = ("One of your storyboards didn't read, so no music bed can be called "
-                             "unused. Nothing was swept.")
-
     @app.route("/api/loom/beds/unused")
     @tier(LOGIN)
     def api_loom_beds_unused():
@@ -25442,8 +25648,8 @@ __DESIGN_TOKENS__
             return jsonify({"error": "not logged in"}), 401
         try:
             rows = _loom_unused_beds(user)
-        except _LoomUnreadable:
-            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        except _LoomUnreadable as e:
+            return _loom_beds_unreadable_answer(user, e)
         total = sum(b for (_n, b) in rows)
         return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
                         "count": len(rows), "bytes": total, "h": _fmt_size(total)})
@@ -25467,8 +25673,8 @@ __DESIGN_TOKENS__
             return jsonify({"error": "bad bed file name"}), 400
         try:
             unused = {n for (n, _b) in _loom_unused_beds(user)}
-        except _LoomUnreadable:
-            return jsonify({"error": _LOOM_BEDS_UNREADABLE}), 409
+        except _LoomUnreadable as e:
+            return _loom_beds_unreadable_answer(user, e)
         removed, kept = [], []
         for n in want:
             p = _loom_bed_path(user, n)
@@ -26394,6 +26600,25 @@ __DESIGN_TOKENS__
         with _scene_pending_lock:
             _scene_pending.pop(str(tid), None)
 
+    def _measured_clip_length(media_ids):
+        """GitHub #63: a finished video whose length came back blank -- the task was already
+        collected, so the catalog answered (it records no length), or ffprobe could not run in
+        the collect -- is measured once from the downloaded file (2 dp, as the collect does), so
+        the Loom's landTake records the clip's true length. None when no complete file is here
+        or ffprobe cannot read it. Local only: never PixAI. It never raises: the task IS done,
+        and a measurement that went wrong must not turn that answer into a failure or a retry."""
+        import moonglade_backup as core
+        try:
+            for mid in media_ids or []:
+                vid = _loom_complete_clip(str(mid))
+                if vid is None:
+                    continue
+                d = core.duration(str(vid))
+                return round(d, 2) if d is not None and d > 0 else None
+        except Exception:                                      # noqa: BLE001
+            return None
+        return None
+
     @app.route("/api/task-status")
     @tier(LOGIN)
     def api_task_status():
@@ -26431,9 +26656,12 @@ __DESIGN_TOKENS__
                 _fire_enhance_telemetry(tid)
                 _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
                 _loom_journal_finish_task(tid)   # Session P: the shot may render again
+                dur = got.get("duration")
+                if got.get("is_video") and dur in (None, ""):
+                    dur = _measured_clip_length(got.get("media_ids"))
                 done = {"phase": "done", "media_ids": got["media_ids"],
                         "is_video": got.get("is_video", False),
-                        "duration": got.get("duration"),
+                        "duration": dur,
                         "paid_credit": st["paid_credit"]}
                 # Session M (review F14): a run job's charge beside what its confirm expected,
                 # so the dock can mark a mismatch peach. Absent for everything else.

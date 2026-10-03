@@ -749,6 +749,22 @@ export const balanceLine = (acct) => {
   };
 };
 
+/** HOW OFTEN IT RE-READS (code review 2026-10-02): /api/account costs three PixAI reads, and the
+ *  bind key moves on every shot click, so clicking down the board read the account once per
+ *  click. A bind now waits ACCOUNT_BIND_DEBOUNCE_MS for the burst to settle and reads once; the
+ *  open and a landed spend (`now`) read at once and drop a bind read still waiting. The timers
+ *  are handed in (this file touches no window); `read` is the caller's fetch. Display only. */
+export const ACCOUNT_BIND_DEBOUNCE_MS = 600;
+export const makeAccountRefresh = ({ read, setTimer, clearTimer, delay = ACCOUNT_BIND_DEBOUNCE_MS }) => {
+  let pending = null;
+  const stop = () => { if (pending != null) { clearTimer(pending); pending = null; } };
+  return {
+    now() { stop(); read(); },
+    bind() { stop(); pending = setTimer(() => { pending = null; read(); }, delay); },
+    cancel: stop,
+  };
+};
+
 /** WHEN THE LINE RE-READS THE ACCOUNT: a key over the board's generation states (genState,
  *  genImgState, ...) that changes exactly when a spend lands -- a render or generation is out
  *  (accepted: PixAI has charged it) or has finished (done, with its picture). A task moving
@@ -979,7 +995,8 @@ export const spendTooltip = (s = {}) => {
 // ---------- duration / pricing math feeding the timeline reel ----------
 
 // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration
-export const durOf = (c) => Number(c.actualDur || c.duration) || 0;
+// A recorded length of 0 or below is unknown (code review 2026-10-02): the planned one stands in.
+export const durOf = (c) => { const a = Number(c.actualDur); return a > 0 ? a : (Number(c.duration) || 0); };
 
 // The reel spans the cut (The Loom.dc.html:1009, each segment `flex: dur`): `scale` is the cut's
 // own length, so the shots always fill the strip however short the cut is. It used to be

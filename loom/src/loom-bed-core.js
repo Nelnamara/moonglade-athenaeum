@@ -121,7 +121,7 @@ export const cutSegments = (entries, project) => {
   (entries || []).forEach((e) => {
     const c = e && e.c;
     if (!c || !c.resultMid) return;
-    const dur = num(c.actualDur) || num(c.duration) || 8;
+    const dur = (num(c.actualDur) > 0 ? num(c.actualDur) : 0) || num(c.duration) || 8;   // a length <= 0 is unknown
     const cin = num(c.trimIn) || 0;
     const cout = c.trimOut != null && num(c.trimOut) != null ? num(c.trimOut) : dur;
     const span = Math.max(0.1, cout - cin);
@@ -247,4 +247,32 @@ export const cutStatusLine = (entries, segments) => {
   const len = segs[segs.length - 1].end;
   const skipped = all - segs.length;
   return "cut length " + len.toFixed(1) + " s" + (skipped > 0 ? " · " + skipped + " unrendered skipped" : "");
+};
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const savedDay = (iso) => {
+  if (!iso) return "";
+  const d = new Date(String(iso));
+  return Number.isNaN(d.getTime()) ? "" : MONTHS[d.getMonth()] + " " + d.getDate();
+};
+const andList = (xs) => (xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
+
+/**
+ * GitHub #57: the bed row's line when a storyboard will not read. The unused-bed list refuses
+ * then (409: an unreadable board's bed must never look unused), and the answer names each board
+ * -- {board, name, saved, where} from GET /api/loom/beds/unused -- so the owner can find the
+ * file. No delete is offered here (a torn file may still be recoverable by hand). "" when
+ * nothing is unreadable.
+ */
+export const unreadableBedsNote = (u) => {
+  const rows = (u && Array.isArray(u.unreadable) ? u.unreadable : []).filter((r) => r && typeof r === "object");
+  if (!rows.length) return "";
+  const named = rows.map((r) => {
+    const day = savedDay(r.saved);
+    return (r.name ? "\"" + String(r.name) + "\"" : "storyboard " + String(r.board || "")) + (day ? " (saved " + day + ")" : "");
+  });
+  const one = rows.length === 1;
+  return "Can't tell which music beds are unused: " + andList(named) + " didn't read. Nothing was removed. "
+    + (one ? "Restore its file from a backup or delete it: " : "Restore their files from a backup or delete them: ")
+    + rows.map((r) => String(r.where || "")).join(", ");
 };

@@ -437,7 +437,7 @@ export const buildPlaySequence = (entries) =>
 // (or planned) duration and trim.
 export function buildExportClips(entries) {
   const clips = entries.filter((e) => e.c.resultMid).map((e) => {
-    const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
+    const dur = (Number(e.c.actualDur) > 0 ? Number(e.c.actualDur) : 0) || e.c.duration || 8, cin = e.c.trimIn || 0;
     const cout = (e.c.trimOut != null ? e.c.trimOut : dur);
     const clip = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
     // A spatial crop (fractions of the frame) rides along so export applies it via ffmpeg's

@@ -6,10 +6,13 @@ import path from "node:path";
 import {
   takesOf, selectedTakeOf, takeSeqOf, selectedTakeView, withTakes, landTake, attachTake,
   selectTake, deleteTake, snapshotSettings, reuseSettingsPatch, spendMidsOf, needsRender,
-  inFlight, stripInFlight, shouldSave, beginRender, cancelRender,
+  inFlight, stripInFlight, shouldSave, beginRender, cancelRender, cutPointOf, makeAnchor,
 } from "../src/loom-takes-core.js";
-import { collectSpendMids, flat } from "../src/loom-core.js";
-import { buildDuplicateCard, splitCardAt, withResult } from "../src/loom-mutations.js";
+import { ribbonPairs, frameUrl } from "../src/loom-ribbon-core.js";
+import { collectSpendMids, flat, durOf } from "../src/loom-core.js";
+import { buildDuplicateCard, splitCardAt, withResult, buildExportClips } from "../src/loom-mutations.js";
+import { cutSegments } from "../src/loom-bed-core.js";
+import { edlPlan } from "../src/loom-edl-core.js";
 
 // Session P, P1 (BUILD-w5-p §1, review F1, F4, F9, F10, F14). The fixture is a synthetic
 // copy of a populated board in the real shape: three acts; rendered (with a re-roll in
@@ -344,4 +347,67 @@ describe("withTakes materialises only what the views already said", () => {
     assert.equal(selectedTakeOf(m), 1);
     assert.equal(m.resultMid, c.resultMid);
   });
+});
+
+/* Code review 2026-10-02: a stored take length of 0 (or below) is UNKNOWN, as landTake already
+   treats `dur <= 0` -- never a 0 s clip. withTakes / writeBack copied a card's actualDur of 0
+   straight into the stored take, and the readers took it at face value: the ribbon and a splice
+   anchor then read the clip as ending at 0 s, i.e. its FIRST frame. Every reader now reads a
+   length of 0 or below as unknown, and the next reducer the owner triggers writes null over it. */
+describe("a take length of 0 or below is unknown everywhere", () => {
+  const rendered = (extra = {}) => ({ id: "c", title: "one", status: "done", resultMid: "M1", actualDur: 0, trimIn: 0, trimOut: null, ...extra });
+  test("the views: selectedTakeView, takesOf and the derived take read 0, '0' and -1 as unknown", () => {
+    for (const z of [0, "0", -1, -0.5]) {
+      assert.equal(selectedTakeView(rendered({ actualDur: z })).dur, null, JSON.stringify(z));
+      assert.equal(takesOf(rendered({ actualDur: z }))[0].dur, null, "the derived take 1 of " + JSON.stringify(z));
+    }
+    const stored = rendered({ actualDur: 0, takes: [{ id: "t1", n: 1, mid: "M0", dur: 0 }, { id: "t2", n: 2, mid: "M1", dur: 7.5 }],
+      selectedTake: 2, takeSeq: 2 });
+    assert.equal(selectedTakeView(stored).dur, 7.5, "a card-level 0 never hides the take's own known length");
+    assert.equal(takesOf(stored)[0].dur, null, "a stored 0 on another take reads as unknown");
+    assert.equal(stored.takes[0].dur, 0, "reading wrote nothing onto the board");
+    assert.equal(selectedTakeView(rendered({ actualDur: 4.2 })).dur, 4.2, "a real length is untouched");
+  });
+  test("the reducers heal it: withTakes, ★ select (writeBack) and the mirror write null, never 0", () => {
+    assert.equal(withTakes(rendered()).takes[0].dur, null, "withTakes");
+    let c = landTake(rendered({ status: "wip", pendingSubmitId: "S2", pendingTaskId: "T2" }), { mid: "M2", taskId: "T2", dur: 5 }).card;
+    assert.equal(c.takes.find((t) => t.mid === "M1").dur, null, "the outgoing take's 0 was not copied");
+    c = selectTake(c, 1);
+    assert.equal(c.actualDur, null, "selecting take 1 mirrors unknown, not 0");
+    c = selectTake(c, 2);
+    assert.equal(c.takes.find((t) => t.n === 1).dur, null, "writeBack");
+    assert.equal(c.actualDur, 5);
+    const zeroTake = rendered({ actualDur: 5, takes: [{ id: "t1", n: 1, mid: "M0", dur: 0 }, { id: "t2", n: 2, mid: "M1", dur: 5 }],
+      selectedTake: 2, takeSeq: 2 });
+    const back = selectTake(zeroTake, 1);
+    assert.equal(back.actualDur, null, "a stored 0 selected onto the card mirrors as unknown");
+    assert.equal(withTakes(back).takes.find((t) => t.n === 1).dur, null, "and the next materialise stores null");
+  });
+  test("the cut point and the anchor: an untrimmed shot of length 0 cuts at its END (unknown), never at 0 s", () => {
+    assert.equal(cutPointOf(rendered()), null);
+    assert.equal(cutPointOf(rendered({ actualDur: -2 })), null);
+    assert.equal(cutPointOf(rendered({ trimOut: 0 })), 0, "a trim at 0 is a real time, not a length");
+    assert.equal(makeAnchor(rendered(), "F1", "splice").at, null, "the anchor records 'its end', not 0.0 s");
+  });
+  test("the ribbon reads it as unknown: the closing frame is the clip's real end", () => {
+    const p = { acts: [{ id: "a", cards: [rendered({ id: "x", resultMid: "M1" }), rendered({ id: "y", resultMid: "M2", actualDur: 5 })] }] };
+    const [pair] = ribbonPairs(flat(p));
+    assert.equal(pair.a.at, null);
+    assert.equal(frameUrl(pair.a.mid, pair.a.at), "/api/loom/frame?mid=M1&end=1");
+  });
+});
+
+describe("the span readers read a length of 0 or below as unknown too (the planned length stands in)", () => {
+  const shot = (actualDur) => ({ id: "s", title: "s", status: "done", mode: "I2V", duration: 6, resultMid: "M9", actualDur,
+    trimIn: 0, trimOut: null, cast: [], refs: [] });
+  const board1 = (c) => ({ name: "b", assets: [], acts: [{ id: "a", name: "A", cards: [c] }] });
+  for (const z of [0, -1, "-2"]) {
+    test("actualDur " + JSON.stringify(z) + ": durOf, the bed's cut, the local cut and the EDL all use the planned 6 s", () => {
+      assert.equal(durOf(shot(z)), 6);
+      const p = board1(shot(z));
+      assert.equal(cutSegments(flat(p), p)[0].span, 6);
+      assert.equal(buildExportClips(flat(p)).clips[0].span, 6);
+      assert.equal(edlPlan(p).cutFrames, 6 * 24);
+    });
+  }
 });
