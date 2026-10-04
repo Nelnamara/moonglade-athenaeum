@@ -803,3 +803,152 @@ def delete_reply(session, artwork_id, message_id):
     if after == "found":
         return _answer("unclear", "It's still on PixAI: it wasn't deleted. Check on PixAI.")
     return _answer("unclear", "No clear answer from PixAI. Check on PixAI before trying again.")
+
+
+# ---------------------------------------------------------------------------------------
+# Gifts (R9c): REWARD official DMs; credit-pack bonuses open PixAI
+# ---------------------------------------------------------------------------------------
+
+DM_PREFIX = "/user/me/official-dm"
+GIFT_KEEP_DONE_DAYS = 7          # a claimed or expired gift leaves the list a week later
+
+
+def _plural(n, one, many=None):
+    return "{:,} {}".format(n, one if n == 1 else (many or one + "s"))
+
+
+def reward_words(reward):
+    """What a gift holds, in plain words: "3 Tsubaki.3 cards · 500 credits"."""
+    r = reward if isinstance(reward, dict) else {}
+    parts = []
+    for k in r.get("kaisuukens") or []:
+        if not isinstance(k, dict):
+            continue
+        t = k.get("template") or {}
+        name = str(t.get("templateName") or t.get("templateCode") or "free")
+        try:
+            n = int(k.get("count") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n:
+            parts.append("{:,} {} {}".format(n, name, "card" if n == 1 else "cards"))
+    for key, one in (("credits", "credit"), ("lotteryTokens", "lottery token")):
+        try:
+            n = int(r.get(key) or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n:
+            parts.append(_plural(n, one))
+    decos = [d for d in (r.get("decorations") or []) if d]
+    if decos:
+        parts.append(_plural(len(decos), "decoration"))
+    for b in r.get("extraPackageBoosts") or []:
+        if isinstance(b, dict) and b.get("boostPercentage"):
+            parts.append("+{}% on a credit pack".format(b.get("boostPercentage")))
+    return " · ".join(parts)
+
+
+def _when(s):
+    try:
+        w = _dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return w if w.tzinfo else w.replace(tzinfo=_dt.timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def gift_of(raw):
+    """One REWARD message as a gift row, or None (a plain TEXT message is not a gift)."""
+    if not isinstance(raw, dict) or raw.get("kind") != "REWARD":
+        return None
+    title = str(raw.get("rewardTitle") or "Gift from PixAI")
+    return {"id": str(raw.get("id") or ""), "title": title,
+            "what": reward_words(raw.get("reward")) or title,
+            "status": str(raw.get("rewardStatus") or ""),
+            "expires_at": str(raw.get("rewardExpiresAt") or ""),
+            "claimed_at": str(raw.get("claimedAt") or ""),
+            "created_at": str(raw.get("createdAt") or ""),
+            "unread": bool(raw.get("unread"))}
+
+
+def _read_dm_thread(session):
+    """GET /v2/user/me/official-dm/ (newest first, up to 50): the side-effect-free thread read.
+    Marking DMs read is a different call, and this module never makes it."""
+    d = core._rest_get(session, DM_PREFIX + "/", params={"take": 50}) or {}
+    if not isinstance(d, dict):
+        raise core.PixAIError("PixAI's gift thread answered without an object")
+    return d
+
+
+def list_gifts(session, now=None):
+    """The Gifts tab: every PENDING gift, and a CLAIMED or EXPIRED one for a week after.
+    {"gifts": [...], "has_thread": bool}. No thread at all (PixAI never wrote to this account)
+    is the real empty state, not an error. Raises on a failed read."""
+    d = _read_dm_thread(session)
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    keep_after = now - _dt.timedelta(days=GIFT_KEEP_DONE_DAYS)
+    gifts = []
+    for m in d.get("messages") or []:
+        g = gift_of(m)
+        if not g:
+            continue
+        if g["status"] != "PENDING":
+            done_at = _when(g["claimed_at"] or g["expires_at"] or g["created_at"])
+            if done_at is not None and done_at < keep_after:
+                continue
+        gifts.append(g)
+    return {"gifts": gifts, "has_thread": bool(d.get("thread"))}
+
+
+def credit_bonuses(session):
+    """The credit-pack bonuses on hand (PixAI's Credit Boost coupons that are available):
+    shown with "Open on PixAI ↗", never redeemed here. Fails soft to []."""
+    out = []
+    for c in (core.list_extra_package_boosts(session) or {}).get("coupons") or []:
+        if c.get("status") == "available" and c.get("boost_percent"):
+            out.append({"code": c.get("code") or "", "percent": c.get("boost_percent"),
+                        "until": c.get("available_until") or ""})
+    return out
+
+
+# ---------------------------------------------------------------------------------------
+# Write 4 of 4: claim a gift
+# ---------------------------------------------------------------------------------------
+
+_CLAIM_REFUSALS = {409: "Already claimed. Nothing changed.",
+                   410: "This gift expired. Nothing changed.",
+                   404: "PixAI can't find that gift. Nothing changed.",
+                   401: "PixAI didn't accept this account's key. Nothing changed."}
+
+
+def claim_gift(session, message_id):
+    """[Claim] in a gift's preview: ONE POST /v2/user/me/official-dm/messages/{id}/claim (the id
+    in the path, no body), then a read-back of that gift's status. READ_ONLY first; "done" only
+    when the read-back shows CLAIMED. 409 and 410 are plain peach refusals."""
+    try:
+        core._check_read_only("claim a gift on PixAI")
+    except core.PixAIError:
+        return _read_only_answer("nothing was claimed")
+    try:
+        message_id = _checked_id(message_id, "gift")
+    except core.PixAIError as e:
+        return _answer("refused", str(e) + ". Nothing changed.")
+    try:
+        core._rest_post(session, DM_PREFIX + "/messages/" + message_id + "/claim", None)
+    except Exception as e:                                   # noqa: BLE001
+        if core.definite_refusal(e):
+            return _answer("refused", _CLAIM_REFUSALS.get(
+                _status_of(e), "PixAI refused it. Nothing changed."))
+    try:
+        d = _read_dm_thread(session)
+        mine = next((gift_of(m) for m in d.get("messages") or []
+                     if isinstance(m, dict) and str(m.get("id") or "") == message_id), None)
+    except Exception:                                        # noqa: BLE001
+        mine = None
+    if mine and mine["status"] == "CLAIMED":
+        return _answer("done", "Claimed: {}.".format(mine["what"]), gift=mine)
+    if mine and mine["status"] == "EXPIRED":
+        return _answer("refused", _CLAIM_REFUSALS[410], gift=mine)
+    if mine:
+        return _answer("unclear", "No clear answer, and PixAI still shows it waiting. Check on "
+                                  "PixAI before trying again.", gift=mine)
+    return _answer("unclear", "No clear answer from PixAI. Check on PixAI before trying again.")

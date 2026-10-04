@@ -27991,6 +27991,32 @@ __DESIGN_TOKENS__
                                                            "works. Nothing was deleted."})
         return _inbox_write(_inbox().delete_reply, artwork_id, body.get("message_id"))
 
+    @app.route("/api/inbox/gifts")
+    @tier(LOGIN)
+    def api_inbox_gifts():
+        """The Gifts tab and the phone's Gift box: PixAI's REWARD messages (the side-effect-free
+        thread read -- never the DM mark-read) and the credit-pack bonuses on hand, which open
+        PixAI. No thread at all is the real empty state."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        extra = {"csrf": session["csrf"], "read_only": _inbox_read_only()}
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            out = dict(ib.list_gifts(gsession))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, gifts=[], bonuses=[], **extra)
+        out.update(extra, bonuses=ib.credit_bonuses(gsession))
+        return jsonify(out)
+
+    @app.route("/api/inbox/gifts/claim", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_gifts_claim():
+        """[Claim] in a gift's preview: {csrf, id}. One claim write and its status read-back."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        return _inbox_write(_inbox().claim_gift, body.get("id"))
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are
