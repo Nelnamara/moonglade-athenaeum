@@ -864,6 +864,68 @@ def test_restore_still_removes_the_file_when_the_pack_does_hold_the_default(tmp_
     assert not _override_path("reward_icons", "gift").exists()
 
 
+# ---- the custom-mark upload asks the same two questions first ----------------------------------------
+# /api/branding/mark/custom decodes a user's picture the same way the roles do, so it reads a WebP's
+# declared canvas from the header before anything opens it, and opens only the everyday formats. (Its
+# own gate, the earned-achievement check, is patched open here, as tests/test_branding.py does; its
+# CSRF state is not this change's business.)
+
+def _post_mark(cli, data, name="m.png"):
+    return cli.post("/api/branding/mark/custom", data={"file": (io.BytesIO(data), name)},
+                    content_type="multipart/form-data")
+
+
+@pytest.mark.parametrize("kind", ["VP8X", "VP8 ", "VP8L"])
+def test_a_tiny_webp_declaring_a_huge_canvas_is_refused_by_the_mark_upload_before_it_is_opened(
+        tmp_path, monkeypatch, no_open, kind):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    cli = _client(tmp_path)
+    crafted = _webp_claiming(kind, 16383, 16383, pad=100)
+    r = _post_mark(cli, crafted, "evil.webp")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "That picture is larger than 4,096 px on a side."
+    assert no_open == [], "refused from the header alone"
+    assert not g._role_dir("marks").exists() or not any(g._role_dir("marks").glob("*.webp"))
+
+
+def test_the_mark_upload_refuses_a_webp_whose_header_cannot_be_read_without_opening_it(tmp_path, monkeypatch, no_open):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    cli = _client(tmp_path)
+    r = _post_mark(cli, b"RIFF\x20\x00\x00\x00WEBPJUNK" + bytes(30), "x.webp")
+    assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image."
+    assert no_open == []
+
+
+@pytest.mark.parametrize("fmt", ["TIFF", "BMP", "EPS", "ICO"])
+def test_the_mark_upload_opens_only_the_everyday_formats(tmp_path, monkeypatch, fmt):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    real_open, seen = Image.open, []
+
+    def spy(*a, **k):
+        seen.append(k.get("formats"))
+        return real_open(*a, **k)
+    monkeypatch.setattr(Image, "open", spy)
+    from PIL import EpsImagePlugin
+    monkeypatch.setattr(EpsImagePlugin.EpsImageFile, "load",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("an EPS reached Ghostscript")))
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (200, 100, 50)).save(buf, fmt)
+    cli = _client(tmp_path)
+    r = _post_mark(cli, buf.getvalue(), "m.png")
+    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image", fmt
+    assert seen and all(f and fmt not in f for f in seen), (fmt, seen)
+
+
+def test_ordinary_marks_still_upload_png_and_webp(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    cli = _client(tmp_path)
+    assert _post_mark(cli, _img((256, 256))).status_code == 200
+    buf = io.BytesIO()
+    Image.new("RGBA", (256, 256), (30, 20, 90, 255)).save(buf, "WEBP")
+    r = _post_mark(cli, buf.getvalue(), "m.webp")
+    assert r.status_code == 200 and r.get_json()["mark"]
+
+
 # ---- no private path in the public files of this lane --------------------------------------------------
 
 def test_this_lanes_public_files_name_no_private_repo_path():

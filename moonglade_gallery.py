@@ -22803,7 +22803,11 @@ def create_app(out_dir: Path):
         try:
             import io
             from PIL import Image
-            im = Image.open(io.BytesIO(raw))
+            # The same two questions every user-picture upload asks first: a WebP's declared canvas
+            # from its header (libwebp commits it all when Pillow merely opens the file), and only
+            # the everyday formats ever opened.
+            guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
+            im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
             im.load()
             if is_webp:
                 art = raw
@@ -22811,6 +22815,8 @@ def create_app(out_dir: Path):
                 buf = io.BytesIO()
                 im.convert("RGBA").save(buf, format="PNG")
                 art = buf.getvalue()
+        except ImageRefused as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
         mark = add_custom_mark(out_dir, art, ext=".webp" if is_webp else ".png")
