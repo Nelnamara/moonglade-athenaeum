@@ -4590,7 +4590,61 @@ def _mark_unlock_for(mid):
 # the full role list. Until then neither is a slot: the payload doesn't list them,
 # the upload/crop/set-active routes refuse them. Their on-disk folders stay
 # (see _BRANDING_DISCOVERY_SLOTS).
-BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
+#
+# That checklist is here now (Session X, 2026-10-03): the four named roles below. The
+# banner-shaped slots keep their own tuple, because every banner function (manifest,
+# active pick, crop, render) is about THAT shape and must not see a role.
+BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
+
+# The named roles: an owner-curated four of the app's own system art (the keep-fixed roles,
+# the easter-egg set, achievement-bound art, the claim popup, the logo, the favicon and the app
+# icons are NOT here and never will be by accident -- adding one means editing this table).
+# Each role is a set of images keyed by a short name; each image owns ONE public /branding/
+# name, the one the app already asks for. An override is a single file written where that name
+# resolves first (the coded tree, loose before the pack), so every screen that shows the art
+# wears it with no change of its own; the pack's default stays in the container and is never
+# written. `spec` is what an upload must be, checked HERE whatever the client said.
+ROLE_SLOTS = {
+    "login_companion": {
+        "name": "Login companion", "where": "the sign-in page",
+        "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "aspect": [3, 4],
+                 "min_axis": "height", "min_px": 600},
+        "images": {"companion": {"label": "Companion", "public": "login_nel.webp"}},
+    },
+    "tracker_mascots": {
+        "name": "Job tracker mascots", "where": "the job tracker",
+        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+                 "min_axis": "side", "min_px": 128},
+        "images": {"spinner": {"label": "Spinner", "public": "nel_spinner.png"},
+                   "done": {"label": "Done", "public": "mascots/trk_done.png"},
+                   "failed": {"label": "Failed", "public": "mascots/trk_fail.png"},
+                   "empty": {"label": "Empty", "public": "mascots/trk_empty.png"}},
+    },
+    "reward_icons": {
+        "name": "Reward icons", "where": "the claim toast and the header",
+        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+                 "min_axis": "side", "min_px": 64},
+        "images": {"claim": {"label": "Claim", "public": "rewards/claim.png"},
+                   "gift": {"label": "Gift", "public": "rewards/gift.png"}},
+    },
+    "power_poses": {
+        "name": "Power poses", "where": "the restart and shutdown screens",
+        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+                 "min_axis": "side", "min_px": 256},
+        "images": {"restart": {"label": "Restart", "public": "mascots/nel_restart.png"},
+                   "shutdown": {"label": "Shutdown", "public": "mascots/nel_shutdown.png"}},
+    },
+}
+BRANDING_SLOTS = BANNER_SLOTS + tuple(ROLE_SLOTS)
+
+# What an upload to a role must clear besides its spec: a hard ceiling on the bytes read and on
+# the pixels' extent (checked from the header, before any pixel is decoded), and the two
+# tolerances the spec's words stand for -- "square" and "3:4" within 2 %, "transparent" meaning
+# at least 1 % of the pixels are more than half see-through.
+ROLE_MAX_BYTES = 12 * 1024 * 1024
+ROLE_MAX_SIDE = 4096
+ROLE_ASPECT_TOLERANCE = 0.02
+ROLE_SEE_THROUGH_MIN = 0.01
 
 
 def _slot_dir(slot):
@@ -4628,7 +4682,7 @@ def list_slot_assets(out_dir, slot):
     entries whose .png actually exists. Empty on a fresh install / until that
     slot's first real upload, exactly like list_marks() above. Each asset carries
     its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return []
     raw = _branding_bytes(_role_rel(slot, "manifest.json"))
     if raw is None:
@@ -4668,7 +4722,7 @@ def _recorded_slot_active(out_dir):
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
+    return {k: str(v) for k, v in raw.items() if k in BANNER_SLOTS and v}
 
 
 def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
@@ -4690,7 +4744,7 @@ def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
     and re-rendered it to the other, on every other boot.
 
     `recorded` / `assets` let a caller that already has them skip the re-read."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return None
     ids = [a["id"] for a in (list_slot_assets(out_dir, slot) if assets is None else assets)]
     if recorded is None:
@@ -4709,7 +4763,7 @@ def load_slot_active(out_dir):
     where the healing rule -- and its determinism -- lives."""
     recorded = _recorded_slot_active(out_dir)
     return {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-            for slot in BRANDING_SLOTS}
+            for slot in BANNER_SLOTS}
 
 
 def save_slot_active(out_dir, active):
@@ -4724,7 +4778,7 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     real PNG before this is called -- this function just persists it. New
     uploads start at the neutral transform (zoom 100, centered) -- the
     equivalent of the design's own defaults."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return None
     sdir = _slot_dir(slot)
     sdir.mkdir(parents=True, exist_ok=True)
@@ -4757,7 +4811,7 @@ def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
     Panel.dc.html's three banner sliders -- zoom 100-250, cropX/cropY 0-100).
     Any field left None keeps its stored value. False for an unknown slot/item,
     never a 500. Widened 2026-08-06 from the old 3-value left/center/right crop."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return False
     sdir = _slot_dir(slot)
     # Adjusting a shipped default's crop is a WRITE -- promote the manifest
@@ -4800,7 +4854,7 @@ def set_slot_active(out_dir, slot, item_id):
     own self-heal (falling back to the first real asset when nothing is
     recorded) would silently undo a stored None anyway, since the two cases
     look identical on disk."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return False
     if not item_id or item_id not in {a["id"] for a in list_slot_assets(out_dir, slot)}:
         return False
@@ -4972,11 +5026,255 @@ def branding_slots_payload(out_dir):
     and handed to both halves."""
     recorded = _recorded_slot_active(out_dir)
     out = {}
-    for slot in BRANDING_SLOTS:
+    for slot in BANNER_SLOTS:
         assets = list_slot_assets(out_dir, slot)
         out[slot] = {"assets": assets,
                      "active": resolve_slot_active(out_dir, slot, recorded.get(slot), assets)}
     return out
+
+
+# ---------------------------------------------------------------------------
+# The named roles (Session X): what an upload must be, how it is written, how it is undone,
+# and what the app does when an override cannot be read. ROLE_SLOTS (above) is the table.
+# ---------------------------------------------------------------------------
+def _ratio_label(w, h):
+    """A picture's shape in words for a refusal: "1:1", "3:2", "16:9", or "1.71:1" when no small
+    whole-number ratio matches within half a percent."""
+    if w <= 0 or h <= 0:
+        return "0:0"
+    have = w / h
+    for q in range(1, 17):
+        p = round(have * q)
+        if p >= 1 and abs(have - p / q) / have <= 0.005:
+            g = math.gcd(p, q)
+            return "%d:%d" % (p // g, q // g)
+    return "%.2f:1" % have
+
+
+def role_spec_failures(spec, facts):
+    """The rules `facts` breaks against a role's spec, in the order the editor lists them:
+    format, transparency, shape, size. [] means the file is acceptable.
+
+    `facts` is what was MEASURED: {"format": "PNG", "w": 256, "h": 256, "see_through": 0.31}
+    (see_through = the share of pixels more than half clear). Each failure is
+    {"rule", "need", "got"}: the words a refusal and the editor's tick line both use. The
+    client runs the same rules over the same measurements (lib/brandRolesCore.js) to tick them
+    live; THIS is the one that decides."""
+    failed = []
+    fmt = str(facts.get("format") or "").upper()
+    if fmt not in spec["formats"]:
+        failed.append({"rule": "format", "need": " or ".join(spec["formats"]), "got": fmt or "unknown"})
+    if spec["transparent"] and facts["see_through"] < ROLE_SEE_THROUGH_MIN:
+        clear = facts["see_through"]
+        failed.append({"rule": "transparent", "need": "a transparent background",
+                       "got": "opaque" if clear <= 0 else "%.1f%% see-through" % (clear * 100)})
+    w, h = facts["w"], facts["h"]
+    aw, ah = spec["aspect"]
+    want = aw / ah
+    if h <= 0 or abs(w / h - want) / want > ROLE_ASPECT_TOLERANCE:
+        failed.append({"rule": "aspect", "need": "square" if aw == ah else "%d:%d" % (aw, ah),
+                       "got": _ratio_label(w, h)})
+    tall = spec["min_axis"] == "height"
+    have = h if tall else min(w, h)
+    if have < spec["min_px"]:
+        unit = " px tall" if tall else " px"
+        failed.append({"rule": "size", "need": "at least %d%s" % (spec["min_px"], unit),
+                       "got": "%d%s" % (have, unit)})
+    return failed
+
+
+_ROLE_NEED_VERB = {"format": "be", "transparent": "have", "aspect": "be", "size": "be"}
+
+
+def role_refusal_text(role_name, failed):
+    """The loud refusal, in plain words: the rule and the measured value, ending on the one
+    thing the user most needs to hear. One broken rule reads "...must be 3:4. This one is
+    1:1."; several read as pairs, "...must be square (this one is 3:2) and at least 128 px
+    (this one is 64 px)."."""
+    if len(failed) == 1:
+        f = failed[0]
+        what = "%s %s. This one is %s." % (_ROLE_NEED_VERB[f["rule"]], f["need"], f["got"])
+    else:
+        parts, last = [], None
+        for f in failed:
+            verb = _ROLE_NEED_VERB[f["rule"]]
+            parts.append(("" if verb == last else verb + " ") + "%s (this one is %s)" % (f["need"], f["got"]))
+            last = verb
+        what = ", ".join(parts[:-1]) + " and " + parts[-1] + "."
+    return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
+
+
+def _role_coded_rel(slot, key):
+    return _public_rel_to_coded(ROLE_SLOTS[slot]["images"][key]["public"])
+
+
+def _role_override_path(slot, key):
+    return branding_root() / _role_coded_rel(slot, key)
+
+
+def _role_coded_rels():
+    """Every role image's CODED rel, lowercased (the filesystem the tree lives on is
+    case-insensitive on Windows, so the serve route compares the way the seal does)."""
+    return frozenset(_role_coded_rel(slot, key).lower()
+                     for slot, role in ROLE_SLOTS.items() for key in role["images"])
+
+
+_role_decode_memo = {}
+
+
+def _role_file_decodes(path):
+    """Whether an override file on disk still decodes as a picture. Answered once per
+    (file, mtime, size): the public /branding/ route asks on every request for these names, and a
+    decode per request would be work a stranger on the LAN could schedule. A changed file is a
+    new key, so a repaired override is believed at once."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    hit = _role_decode_memo.get(key)
+    if hit is not None:
+        return hit
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            im.load()
+        ok = True
+    except Exception:                      # noqa: BLE001 -- anything undecodable is "unreadable"
+        ok = False
+    if len(_role_decode_memo) > 128:
+        _role_decode_memo.clear()
+    _role_decode_memo[key] = ok
+    return ok
+
+
+def branding_roles_payload(out_dir):
+    """The Roles section's state for the Branding tab, in the fixed meeting order (the order of
+    ROLE_SLOTS): per role its name, where it shows and its spec, and per image the URL the app
+    wears now, whether that is the install's own file, whether that file still decodes (a
+    missing or unreadable override is served as the pack's default -- see the /branding/ route
+    -- and the row says so), and a URL for the pack's own art so the row can show default
+    beside yours. Both /api/branding and /api/panel/summary hand it over, so the two cannot
+    disagree."""
+    box = _get_container()
+    roles = []
+    for slot, role in ROLE_SLOTS.items():
+        images = []
+        for key, img in role["images"].items():
+            coded = _public_rel_to_coded(img["public"])
+            path = branding_root() / coded
+            try:
+                yours = path.is_file()
+                stamp = path.stat().st_mtime_ns // 1_000_000 if yours else 0
+            except OSError:
+                yours, stamp = False, 0
+            images.append({
+                "key": key, "label": img["label"], "url": "/branding/" + img["public"],
+                "yours": yours, "unreadable": bool(yours and not _role_file_decodes(path)),
+                "v": stamp,
+                "default_url": ("/api/branding/role/default/%s/%s" % (slot, key))
+                               if box is not None and box.has(coded) else None,
+            })
+        roles.append({"slot": slot, "name": role["name"], "where": role["where"],
+                      "spec": dict(role["spec"], see_through_min=ROLE_SEE_THROUGH_MIN,
+                                   aspect_tolerance=ROLE_ASPECT_TOLERANCE),
+                      "images": images})
+    return roles
+
+
+def _role_payload(out_dir, slot):
+    return next(r for r in branding_roles_payload(out_dir) if r["slot"] == slot)
+
+
+def branding_role_upload(out_dir, slot, key, upload=None, media_id=""):
+    """POST /api/branding/slot for a role slot: one picture becomes the install's override of
+    one role image. Returns (body, status). Read it top to bottom -- it is the whole path:
+
+      1. take the bytes, from the uploaded file or from the user's own library by media id,
+         capped at ROLE_MAX_BYTES;
+      2. open the picture and read its size from the HEADER; refuse anything over ROLE_MAX_SIDE a
+         side before a pixel is decoded;
+      3. decode it (first frame), measure format, shape, size and how much of it is see-through,
+         and check those against the role's spec -- a broken rule is a 400 that names the rule
+         and the measured value, and NOTHING has been written;
+      4. only then re-encode from the decoded pixels (nothing the sender appended survives; the
+         login companion is stored as WebP, every other role as PNG, under the public name the app
+         already asks for) and replace the override file whole.
+
+    The pack is read-only here: the file lands in the coded tree, where loose beats the pack."""
+    import io
+    role = ROLE_SLOTS[slot]
+    img = role["images"].get(key)
+    if img is None:
+        return {"error": "unknown image"}, 400
+    if upload is not None and getattr(upload, "filename", ""):
+        raw = upload.stream.read(ROLE_MAX_BYTES + 1)
+    elif media_id:
+        hit = next((p for p in find_files_for_media_id(out_dir, media_id)
+                    if p.suffix.lower() in _IMAGE_EXTS), None)
+        if hit is None:
+            return {"error": "no local image for that media id"}, 400
+        try:
+            if hit.stat().st_size > ROLE_MAX_BYTES:
+                return {"error": "That file is too large."}, 400
+            raw = hit.read_bytes()
+        except OSError:
+            return {"error": "not a readable image"}, 400
+    else:
+        return {"error": "no file"}, 400
+    if len(raw) > ROLE_MAX_BYTES:
+        return {"error": "That file is too large."}, 400
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        fmt, (w, h) = im.format, im.size
+        if max(w, h) > ROLE_MAX_SIDE:
+            return {"error": "That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE)}, 400
+        im.load()
+        rgba = im.convert("RGBA")
+    except Exception:                      # noqa: BLE001 -- anything that will not open or decode
+        return {"error": "not a readable image"}, 400
+    clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
+    failed = role_spec_failures(role["spec"], {"format": fmt, "w": w, "h": h, "see_through": clear})
+    if failed:
+        return {"error": role_refusal_text(role["name"], failed), "failed": failed}, 400
+    buf = io.BytesIO()
+    if img["public"].lower().endswith(".webp"):
+        rgba.save(buf, "WEBP", lossless=True, quality=100, method=4)
+    else:
+        rgba.save(buf, "PNG", optimize=True)
+    path = _role_override_path(slot, key)
+    tmp = path.with_name("%s.%s.tmp" % (path.name, secrets.token_hex(4)))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(buf.getvalue())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return {"error": "Couldn't save that file. Your current art is unchanged."}, 500
+    _baseline_note_app_write(out_dir, _role_coded_rel(slot, key))
+    return {"slot": slot, "key": key, "role": _role_payload(out_dir, slot)}, 200
+
+
+def branding_role_restore(out_dir, slot, key):
+    """POST /api/branding/slot/restore: remove the install's override of one role image, so the
+    pack's default answers again. Returns (body, status). It unlinks ONE file under the coded
+    tree and nothing else; the pack (the container) is never opened for writing, and removing
+    an override that is not there is a quiet {"removed": false}, never an error."""
+    if key not in ROLE_SLOTS[slot]["images"]:
+        return {"error": "unknown image"}, 400
+    path = _role_override_path(slot, key)
+    removed = False
+    try:
+        if path.is_file():
+            path.unlink()
+            removed = True
+    except OSError:
+        return {"error": "Couldn't remove your file."}, 409
+    return {"slot": slot, "key": key, "removed": removed, "role": _role_payload(out_dir, slot)}, 200
 
 
 # The raw-drop path (docs/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
@@ -4998,7 +5296,7 @@ _BRANDING_README = "Maybe something goes in here.\n"
 # the branding_custom_file flag (2026-09-10), while adoption stays narrow
 # (_SWEEPABLE_SLOTS + marks), so the role-bound files those two folders hold are
 # read but never consumed.
-_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
+_BRANDING_DISCOVERY_SLOTS = BANNER_SLOTS + ("mascots", "rewards", "marks")
 
 
 def _migrate_legacy_branding_root():
@@ -5891,9 +6189,9 @@ def _record_slot_resolution(out_dir):
     try:
         recorded = _recorded_slot_active(out_dir)
         resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-                    for slot in BRANDING_SLOTS}
+                    for slot in BANNER_SLOTS}
         if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
-                   for slot in BRANDING_SLOTS):
+                   for slot in BANNER_SLOTS):
             return
         save_slot_active(out_dir, resolved)
     except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
@@ -5920,7 +6218,7 @@ def _ensure_banner_renders(out_dir):
     picks stamped into the renders below are picks this install has written
     down, and on a test build there is nothing here that can touch the coded
     tree's own pick file."""
-    for slot in BRANDING_SLOTS:
+    for slot in BANNER_SLOTS:
         try:
             _ensure_banner_flat(out_dir, slot)
         except Exception:                  # noqa: BLE001 -- a banner must never fail a boot
@@ -15291,7 +15589,8 @@ def create_app(out_dir: Path):
                              # mark only fails on click with a raw 403 toast (red team
                              # 2026-09-08). Same gate as the GET route below.
                              marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                             slots=branding_slots_payload(out_dir)),
+                             slots=branding_slots_payload(out_dir),
+                             roles=branding_roles_payload(out_dir)),
         })
 
     def _check_csrf(body):
@@ -18467,6 +18766,14 @@ def create_app(out_dir: Path):
             # -- loose root is never read.
             box = _get_container()
             raw = box.get(coded) if box else None
+        elif (coded.lower() in _role_coded_rels() and (bdir / coded).is_file()
+              and not _role_file_decodes(bdir / coded)
+              and (_get_container() is not None and _get_container().has(coded))):
+            # Fail-soft (Session X): an override of a named role that will not decode is the
+            # pack's default, silently. Container-ONLY, like the flat branch above -- the loose
+            # bytes are exactly what must not be served. With no pack default to fall back to
+            # there is nothing better to say, and the loose file is served as it always was.
+            raw = _get_container().get(coded)
         elif (bdir / coded).is_file():
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
@@ -22090,7 +22397,8 @@ def create_app(out_dir: Path):
                                 mark=cfg["mark"], anim=cfg["anim"],
                                 anims=MARK_ANIMS,
                                 marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                                slots=branding_slots_payload(out_dir)))
+                                slots=branding_slots_payload(out_dir),
+                                roles=branding_roles_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         _before = (cfg.get("mark"), cfg.get("anim"))
@@ -22149,8 +22457,8 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_branding_slot_upload():
         """Upload a new asset into one Branding slot (the three banner slots --
-        Control Panel.dc.html's 'From disk' chip; mascots/rewards are NOT slots,
-        see BRANDING_SLOTS' unlock-split note). LOGIN tier,
+        Control Panel.dc.html's 'From disk' chip; the named roles have their own
+        door, /api/branding/role, with a CSRF check this one predates). LOGIN tier,
         matching /api/branding just above: cosmetic, no host-filesystem risk
         beyond writing into branding/, the same machine-local git-ignored tree
         marks already live in (NOT the shortcut route's stricter local-only gate).
@@ -22158,7 +22466,7 @@ def create_app(out_dir: Path):
         extension, the same defense-in-depth this app already applies to real
         library thumbnails (see _thumb_for, above)."""
         slot = request.form.get("slot") or ""
-        if slot not in BRANDING_SLOTS:
+        if slot not in BANNER_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
         f = request.files.get("file")
         media_id = (request.form.get("media_id") or "").strip()
@@ -22219,6 +22527,60 @@ def create_app(out_dir: Path):
         if not set_slot_active(out_dir, slot, str(item_id) if item_id else None):
             return jsonify({"error": "unknown slot or asset"}), 400
         return jsonify({"slots": branding_slots_payload(out_dir)})
+
+    @app.route("/api/branding/role", methods=["POST"])
+    @tier(LOGIN)
+    def api_branding_role_upload():
+        """Make one picture the install's override of one image of a named role (the Branding
+        tab's Roles section; a hidden, unlock-gated surface). Multipart: csrf, slot (a key of
+        ROLE_SLOTS), key (one of that role's images) and either `file` (From disk) or `media_id`
+        (From the gallery). LOGIN tier, with the explicit CSRF token this write class carries.
+        The spec is checked and the file written in branding_role_upload() -- read that, it is the
+        whole path; this handler only reads the request."""
+        if not _check_csrf(request.form):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        slot = request.form.get("slot") or ""
+        if slot not in ROLE_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        body, status = branding_role_upload(
+            out_dir, slot, (request.form.get("key") or "").strip(),
+            upload=request.files.get("file"), media_id=(request.form.get("media_id") or "").strip())
+        return jsonify(body), status
+
+    @app.route("/api/branding/role/restore", methods=["POST"])
+    @tier(LOGIN)
+    def api_branding_role_restore():
+        """Go back to the pack's default for one role image: removes the install's override
+        (the one file under the coded tree) and nothing else. LOGIN tier, CSRF-checked."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        slot = body.get("slot")
+        if slot not in ROLE_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        out, status = branding_role_restore(out_dir, slot, str(body.get("key") or ""))
+        return jsonify(out), status
+
+    @app.route("/api/branding/role/default/<slot>/<key>")
+    @tier(LOGIN)
+    def api_branding_role_default(slot, key):
+        """The pack's own art for one role image, so the Roles row can show default beside
+        yours while an override is in place. Only the nine named role images are reachable
+        here; the bytes come from the container alone (never the loose tree), and an image the
+        pack does not carry is a plain 404."""
+        from flask import abort
+        import mimetypes
+        img = (ROLE_SLOTS.get(slot) or {}).get("images", {}).get(key)
+        if img is None:
+            abort(404)
+        box = _get_container()
+        raw = box.get(_public_rel_to_coded(img["public"])) if box else None
+        if raw is None:
+            abort(404)
+        resp = app.response_class(raw, mimetype=mimetypes.guess_type(img["public"])[0]
+                                  or "application/octet-stream")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
 
     @app.route("/api/branding/mark/custom", methods=["POST"])
     @tier(LOGIN)
