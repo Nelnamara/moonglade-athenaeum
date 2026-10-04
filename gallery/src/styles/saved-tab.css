@@ -1,0 +1,108 @@
+/* The model and LoRA pickers' Saved tab (Session S). Every size and colour is the Saved Tab
+   Handoff's (moonglade-internal/design/handoff-2026-09-04/Saved Tab Handoff.dc.html), through
+   the app's tokens; the handoff's raw #0c0a1c is --base and its rgba(182,146,230,x) lavender
+   tints are color-mix on --lavender. Components band only (z 0-7); the keep menu that floats
+   over the dock's palette lives in the overlay band (.mg-keep-layer, 420). */
+
+/* ---- section 1: the rail beside the list, or the chooser above it ---- */
+.model-picker .mg-srcwrap { position: relative; flex: none; }
+/* .mg-body wraps the list in every mode (so the grid and its load-more sentinel never remount
+   when the rail comes and goes); only .has-rail gives it a second column. */
+.model-picker .mg-body { display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+.model-picker .mg-body.has-rail { gap: 10px; margin-top: 8px; }
+.model-picker .mg-body-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.model-picker .mg-body.has-rail .mg-rail { align-self: flex-start; }
+.model-picker .mg-rail { width: 112px; flex: none; box-sizing: border-box; padding: 6px 8px; border-radius: 9px;
+  border: 1px solid var(--surface1); color: var(--subtext); font: 10px/2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: flex; flex-direction: column; position: sticky; top: 0; max-height: 60vh; overflow-y: auto; }
+.model-picker .mg-rail-row { display: flex; align-items: baseline; gap: 1ch; min-width: 0; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.model-picker .mg-rail-mark { width: 1ch; flex: none; color: var(--lavender); }
+.model-picker .mg-rail-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-picker .mg-rail-n { flex: none; }
+.model-picker .mg-rail-row.on, .model-picker .mg-rail-row:hover { color: var(--text); }
+.model-picker .mg-chooser { position: absolute; z-index: 6; top: calc(100% + 4px); left: 0; min-width: 180px; max-width: 280px;
+  max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--surface1); background: var(--base); box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 10.5px; line-height: 1.5; }
+.model-picker .mg-chooser button { display: flex; gap: .35em; min-width: 0; padding: 0; border: 0; background: none; font: inherit;
+  color: var(--text); text-align: left; white-space: nowrap; cursor: pointer; }
+.model-picker .mg-chooser button.on { color: var(--lavender); }
+.model-picker .mg-chooser-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- section 5: the header, the chips, the lines ---- */
+.model-picker .mg-saved-head { display: flex; align-items: baseline; gap: 8px; flex: none; margin-top: 8px; }
+.model-picker .mg-body.has-rail .mg-saved-head { margin-top: 2px; }
+.model-picker .mg-saved-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-picker .mg-saved-count { font: 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); white-space: nowrap; }
+.model-picker .mg-saved-gone { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.model-picker .mg-saved-gone:hover, .model-picker .mg-saved-gone[aria-expanded="true"] { color: var(--subtext); }
+.model-picker .mg-savedchips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; flex: none; }
+.model-picker .mg-savedchips button { font: inherit; font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
+.model-picker .mg-savedchips button.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, transparent);
+  color: var(--text); }
+.model-picker .mg-saved-line { font-size: 10.5px; line-height: 1.5; color: var(--subtext); padding: 10px 2px; flex: none; }
+.model-picker .mg-saved-err { color: var(--peach); }
+.model-picker .mg-saved-retry { padding: 0; border: 0; background: none; font: inherit; color: var(--peach); text-decoration: underline;
+  cursor: pointer; }
+.model-picker .mg-saved-end { text-align: center; padding: 6px 0 2px; flex: none;
+  font: 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); }
+.model-picker .mg-gone { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding: 6px 8px; border-radius: 9px;
+  border: 1px dashed var(--surface1); flex: none; }
+.model-picker .mg-gone-row { display: flex; align-items: center; gap: 6px; font-size: 10px; line-height: 1.45; color: var(--overlay0); }
+.model-picker .mg-gone-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- section 4: old bookmarks ---- */
+.model-picker .mg-keep { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 3px; min-width: 0; }
+.model-picker .mg-old { margin-right: auto; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--surface1);
+  font: 700 8.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); }
+.model-picker .mg-oldtoggle { display: flex; justify-content: flex-end; padding: 8px 2px 2px; flex: none; }
+.model-picker .mg-oldtoggle button { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none;
+  font: inherit; font-size: 10px; color: var(--subtext); cursor: pointer; }
+.model-picker .mg-oldtoggle-dot { font-size: 10px; color: var(--overlay0); }
+.model-picker .mg-oldtoggle-dot.on { color: var(--lavender); }
+
+/* ---- section 2: the card's split control, quick-pick's ★, and the write's answer ---- */
+.model-picker .mg-keep { flex-wrap: wrap; }
+.model-picker .mg-star { font-size: 12px; line-height: 1; color: var(--lavender); }
+.model-picker .mg-split { display: inline-flex; align-items: stretch; flex: none; }
+.model-picker .mg-split-body { font: inherit; font-size: 10px; line-height: 1.3; padding: 4px 8px; border-radius: 6px 0 0 6px;
+  white-space: nowrap; color: var(--subtext); background: none; border: 1px solid var(--surface1); cursor: pointer; }
+.model-picker .mg-split-menu { font: inherit; font-size: 10px; line-height: 1.3; padding: 4px 6px; border-radius: 0 6px 6px 0;
+  border: 1px solid var(--surface1); border-left: 0; color: var(--subtext); background: none; cursor: pointer; }
+.model-picker .mg-split.saved .mg-split-body { color: var(--lavender); background: color-mix(in srgb, var(--lavender) 14%, transparent);
+  border-color: color-mix(in srgb, var(--lavender) 45%, transparent); }
+.model-picker .mg-split.saved .mg-split-menu { color: var(--lavender); border-color: color-mix(in srgb, var(--lavender) 45%, transparent); }
+.model-picker .mg-split-body:hover, .model-picker .mg-split-menu:hover { color: var(--text); }
+.model-picker .mg-split.saved .mg-split-body:hover, .model-picker .mg-split.saved .mg-split-menu:hover { color: var(--lavender); }
+.model-picker .mg-split-body.dim { opacity: .45; cursor: not-allowed; }
+.model-picker .mg-split-body[aria-busy="true"] { opacity: .6; cursor: progress; }
+.model-picker .mg-keepnote { margin-top: 3px; font-size: 10.5px; line-height: 1.5; }
+.model-picker .mg-keepnote.ok { color: var(--emerald); }
+.model-picker .mg-keepnote.err { color: var(--peach); }
+
+/* ---- section 3: "Keep this model" -- the recipe Sets menu (RecipeSetsMenu variant="keep") ---- */
+.mg-keep-layer .rcp-sets { z-index: 420; }
+.rcp-keep { max-height: min(72vh, 440px); overflow-y: auto; }
+.rcp-keep .rcp-sets-head { font-size: 10.5px; font-weight: 600; letter-spacing: 0; color: var(--text); padding: 4px 8px 6px; }
+.rcp-keep .rcp-sets-row { font-size: 10.5px; gap: 8px; }
+.rcp-keep .rcp-sets-row.on { background: none; }
+.rcp-keep .rcp-sets-row:hover { background: var(--surface0); }
+.rcp-keep .rcp-sets-row:disabled { opacity: .5; cursor: not-allowed; }
+.rcp-keep-box { width: 14px; font-size: 12px; color: var(--overlay0); }
+.rcp-keep .rcp-sets-row.on .rcp-keep-box { color: var(--lavender); }
+.rcp-keep-tag { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.rcp-keep-div { height: 1px; margin: 2px 8px; background: var(--surface1); flex: none; }
+.rcp-keep-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 2px; }
+.rcp-keep-link { padding: 0; border: 0; background: none; font: inherit; font-size: 10.5px; color: var(--lavender);
+  white-space: nowrap; text-decoration: none; cursor: pointer; }
+.rcp-keep-link:hover { color: var(--mauve); text-decoration: underline; }
+.rcp-keep-link:disabled { color: var(--overlay0); cursor: not-allowed; text-decoration: none; }
+
+/* ---- section 6: the phone's Model/LoRA sheet (S6a) -- the same control, a thumb's size ---- */
+.model-picker.phone .mg-split-body { min-width: 44px; min-height: 32px; }
+.model-picker.phone .mg-split-menu { min-width: 32px; min-height: 32px; }
+.model-picker.phone .mg-card { -webkit-touch-callout: none; }
+.mg-sets-sheet .rcp-sets-row .rcp-sets-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

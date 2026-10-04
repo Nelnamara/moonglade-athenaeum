@@ -245,8 +245,8 @@ PixAI accepted.
   hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
   presets open as a sheet.
 - **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
-  and LoRAs plus the ones you ★ (the ☆ in the corner of a card in the model and LoRA pickers),
-  six to a row, then **+ more** into the picker. A model chip switches the model the same way
+  and LoRAs plus the ones you mark **★ Quick-pick** (in the **▾** menu on a card in the model
+  and LoRA pickers; a small ★ on the card shows it is one), six to a row, then **+ more** into the picker. A model chip switches the model the same way
   the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
   removes it; a LoRA for another model family is dimmed, with the reason in its tooltip. On the
   phone they are one scrolling row of large chips, models then LoRAs.
@@ -332,9 +332,48 @@ a recipe gives you the prompt that actually made the picture, word for word.
 The picker opens on **Market** — everything on PixAI. Two other places to look sit next
 to it:
 
-- **Bookmarked** — whatever you have bookmarked on pixai.art. It reads your live
-  bookmarks, so anything you bookmark on their site shows up here.
+- **Saved** — the models and LoRAs you have saved on PixAI, newest saved first: the list
+  pixai.art's own Save button adds to, read live, so a save on their site shows up here.
+  On the desktop a narrow list beside it holds **Saved** and your named **sets** from
+  PixAI, each with how many models (or LoRAs) it holds, and a set holding none of them is
+  left out; pick one to see it. Where the picker is narrow, and on the phone, the same list
+  opens from **Saved ▾**. Sets are made and renamed on pixai.art.
 - **Mine** — LoRAs you trained yourself. LoRAs only; you don't author base models.
+
+The line above Saved counts what is in it. When models you once saved are no longer
+available on PixAI (removed, or made private, say), it ends in **N not available ▸**: they
+are left out of the list, and that opens the list of them, each with PixAI's reason where it
+gives one. Opening Saved only reads; nothing is changed on PixAI by looking.
+
+**Saving a model or LoRA to PixAI.** Every card in the pickers has **⊕ Save | ▾**. **⊕ Save**
+puts it in your Saved on PixAI — the same list pixai.art's own Save button adds to — and the
+app then asks PixAI whether it landed: only when PixAI says yes does the card read **✓ Saved**
+(with a short "Saved · read back from PixAI." under it). If PixAI refuses (a private model,
+say), the card stays **⊕ Save** and says why underneath. A tap sends one request and is never
+re-sent by itself; if the answer is lost on the way, the app asks PixAI what happened instead
+of sending again. **✓ Saved** never unsaves on a tap — it opens the menu.
+
+**▾ opens "Keep this model"** (or "Keep this LoRA"): **★ Quick-pick** first, which is this app's
+own and changes at once, then your PixAI lists — **Saved** and your named sets — each ticked
+if the model is in it. Ticking or unticking one changes it on PixAI and checks back the same
+way; a change PixAI refuses goes back and says why. Unticking **Saved** takes the model out of
+your Saved, and in the Saved tab it leaves the list. **+ New set** makes a private set on PixAI
+and puts the model in it; **Open on PixAI ↗** opens the model's page there. With `READ_ONLY` on,
+**⊕ Save** is dimmed and says why, and the menu's PixAI rows are greyed with the reason —
+**★ Quick-pick** still works, since it never touches PixAI. In **N not available ▸**, each
+entry has the same **✓ Saved ▾**, whose one row takes it out of Saved — only while PixAI
+still lists it as not available, so a model that came back in the meantime keeps its save.
+
+**On the phone** the Model/LoRA sheet's row reads **Market | Saved ▾ | Mine**; tap **Saved ▾**
+again to pick Saved or one of your sets from a small sheet. Every card keeps **⊕ Save | ▾**,
+and **▾** — or a long-press on the card — opens "Keep this model" as a sheet.
+
+**Old bookmarks.** PixAI's old bookmarks list stopped taking new saves in mid-August, and
+almost everything in it is in Saved too. Any old bookmark that isn't shows after the end of
+Saved with a small **old** tag, and the count line says how many (**M old**). **Show old
+bookmarks**, at the end of the list, hides or shows them and is remembered for your
+account; it goes away once no old bookmark is left over. **⊕ Save** on an old one saves it to
+PixAI, and it loses its tag.
 
 On Market you can also narrow by **category** (character, animal, style, realistic, pose,
 clothing, background, detail, other), by **when it was posted**, by **source**
@@ -345,14 +384,13 @@ returns the same rows pixai.art returns for your account — including LoRAs the
 shows a signed-in adult account. If a search that fills pages on the site comes back empty
 here, that is a bug, not a setting.
 
-The filter row disappears on **Bookmarked**, and that is deliberate rather than an
-oversight: PixAI's bookmark list only supports a search term, so a category or date
-control there would look like it worked and quietly do nothing. Search still works, and if
-you have a base model selected the list is still limited to LoRAs that fit it.
-
-**If Bookmarked looks emptier than you expect**, that is usually the compatibility filter
-rather than a fault — with a base model selected, only LoRAs matching its architecture are
-shown. Clear the base model to see all of them.
+The filter row disappears on **Saved**, and that is deliberate rather than an oversight:
+PixAI's saved lists take a search term and, for LoRAs, one base, so a category or date
+control there would look like it worked and quietly do nothing. Search looks through what
+you saved, and the LoRA picker has its own row of base chips (**All**, **DiT.3**,
+**DiT.2**, **DiT.1**, **SDXL**, **SD 1.5**). A LoRA that doesn't fit the base model you
+have picked shows greyed with what it needs, as it does on Market. If Saved can't be read,
+it says so, with **Retry** — it is never shown as an empty list.
 
 ### Training your own LoRA
 

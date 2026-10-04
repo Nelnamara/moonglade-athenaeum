@@ -16,6 +16,14 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### The pickers' Saved tab
+- **Saved replaces Bookmarked in the model and LoRA pickers.** Bookmarked read PixAI's old bookmarks list, which has taken no new save since mid-August; Saved reads the list pixai.art's own Save button adds to, newest saved first, so a save made on their site shows up. On the desktop a narrow list beside it holds your named sets from PixAI, counting only models (or only LoRAs), and a narrower picker opens the same list from Saved ▾. The line above counts what is there and how many saved models PixAI no longer has, LoRAs filter by base, and a list that fails to load says so with Retry instead of looking empty. Opening it only reads. (2026-10-03)
+- **Old bookmarks that never reached Saved show after it, tagged old.** The count line adds "M old", and Show old bookmarks at the end of the list hides them for your account. (2026-10-03)
+- **⊕ Save on every model and LoRA card saves it to PixAI.** It adds the model to your Saved the way pixai.art's own Save does, then asks PixAI whether it landed: the card reads ✓ Saved only when PixAI says so, and a refusal stays ⊕ Save with the reason underneath. One tap sends once and is never re-sent; ✓ Saved opens the menu and never unsaves. Read-only mode dims it and says why. (2026-10-03)
+- **▾ on a card opens Keep this model.** ★ Quick-pick (this app's own) comes first, then Saved and your PixAI sets to tick or untick, + New set and Open on PixAI ↗. The ☆ in the card's corner is gone: quick-pick moved into this menu, a small ★ shows it on the card, and the quick-pick rows above the prompt are unchanged. Saved models PixAI no longer makes available, in the count's "not available" list, can be taken out of Saved the same way, and only while PixAI still lists them so. (2026-10-03)
+- **The phone's Model/LoRA sheet has Saved too.** Its row reads Market | Saved ▾ | Mine, and tapping Saved ▾ again opens your sets as a small sheet. Cards keep ⊕ Save | ▾ at thumb size, and ▾ or a long-press on a card opens Keep this model as a sheet. (2026-10-03)
+- **Recipe sets can be opened and ticked.** Since recipe Sets shipped, opening a set, or ticking one under Save to a recipe set, stopped at "That isn't a valid id" before anything reached PixAI: PixAI's set ids are a different shape from recipe ids, and the app checked them with the recipe rule. They are accepted now. (#78) (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

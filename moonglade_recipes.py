@@ -57,6 +57,10 @@ USER_SORTS = ("latest", "oldest", "most-liked", "most-used", "liked")
 # ---------------------------------------------------------------------------------------
 
 _ID_RE = re.compile(r"^[1-9][0-9]{0,19}$")
+# PixAI's collection ids and collection-item ids are UUID strings (probe 2026-10-03), not the
+# numeric ids recipes, users and models carry -- strictly the 8-4-4-4-12 hex shape (#78).
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{12}$")
 HELD_WITH_CONTEXT = ("Recipes are held while context images are on — switch back to "
                      "LoRAs to send them")
 NOT_WITH_UPSCALE = "Recipes don't apply to an upscale"
@@ -545,6 +549,7 @@ def collection(raw):
     out = {"id": str(c.get("id") or ""), "title": str(c.get("title") or ""),
            "count": _num(c.get("itemCount")), "visibility": str(c.get("visibility") or ""),
            "reserved": bool(c.get("reservedType")),
+           "reserved_type": str(c.get("reservedType") or ""),
            "covers": [THUMB_URL.format(m) for m in covers[:4]]}
     if "containsItem" in c:
         out["contains"] = bool(c.get("containsItem"))
@@ -731,13 +736,33 @@ def _checked_id(v):
     return s
 
 
+def _checked_uuid(v):
+    """A collection (set) id or a collection-item id: PixAI sends both as UUID strings. Until
+    #78 they went through `_checked_id`'s numeric rule, which refused every real one."""
+    s = str(v or "").strip()
+    if not _UUID_RE.match(s):
+        raise core.PixAIError("That isn't a valid id")
+    return s
+
+
 # ---------------------------------------------------------------------------------------
-# Sets (PixAI's collections, contentType "recipe") -- reads
+# Sets (PixAI's collections) -- reads. Recipe Sets and the model pickers' Saved tab
+# (Session S) share this code: `content_type` / `ref_type` say which kind of collection.
+# Models and LoRAs share contentType "model" (probe 2026-10-03, section 1).
 # ---------------------------------------------------------------------------------------
 
-def sets_list(session, owner_id, cursor="", limit=50):
+COLLECTION_TYPES = ("recipe", "model")
+
+
+def _checked_type(kind):
+    if kind not in COLLECTION_TYPES:
+        raise core.PixAIError("That isn't a kind of set")
+    return kind
+
+
+def sets_list(session, owner_id, cursor="", limit=50, content_type="recipe"):
     uid = _checked_id(owner_id)
-    q = {"contentType": "recipe", "limit": max(1, min(50, _num(limit) or 50))}
+    q = {"contentType": _checked_type(content_type), "limit": max(1, min(50, _num(limit) or 50))}
     if cursor:
         q["cursor"] = str(cursor)
     d = core._rest_get(session, "/collection/list/" + uid, params=q) or {}
@@ -745,11 +770,13 @@ def sets_list(session, owner_id, cursor="", limit=50):
             "next_cursor": d.get("nextCursor") or ""}
 
 
-def sets_for(session, recipe_id):
-    """The user's recipe sets with whether each holds `recipe_id` (the selector route)."""
-    rid = _checked_id(recipe_id)
+def sets_for(session, ref_id, ref_type="recipe"):
+    """The user's sets of this kind, each with whether it holds `ref_id` (the selector route:
+    `recent` then `data`, de-duplicated)."""
+    rid = _checked_id(ref_id)
     d = core._rest_get(session, "/collection/selector",
-                       params={"refType": "recipe", "refId": rid, "limit": 50}) or {}
+                       params={"refType": _checked_type(ref_type), "refId": rid,
+                               "limit": 50}) or {}
     seen, out = set(), []
     for c in list(d.get("recent") or []) + list(d.get("data") or []):
         if isinstance(c, dict) and str(c.get("id")) not in seen:
@@ -758,19 +785,46 @@ def sets_for(session, recipe_id):
     return out
 
 
-def set_items(session, set_id, cursor=""):
-    sid = _checked_id(set_id)
+def set_items(session, set_id, cursor="", ref_type="recipe", model_types="", lora_base="",
+              query=""):
+    """One page of a set (cursor mode, 24 a page, newest saved first). A recipe set answers
+    card() rows; a model set answers model_item() rows, plus `unavailable`: the saved models
+    PixAI no longer has (refId "-1", no model), which carry only their item id and save date.
+    The model filters are the ones the probe saw accepted: `modelTypes` ANY_MODEL / ANY_LORA,
+    ONE `loraBaseModelTypes` value off core.LORA_BASE_MODEL_TYPES, and a keyword (cursor
+    mode only -- with `page` it is a 400)."""
+    sid = _checked_uuid(set_id)
+    kind = _checked_type(ref_type)
     q = {"limit": 24}
     if cursor:
         q["cursor"] = str(cursor)
+    if kind == "model":
+        if model_types in MODEL_KINDS.values():
+            q["modelTypes"] = model_types
+        if lora_base and lora_base in core.LORA_BASE_MODEL_TYPES:
+            q["loraBaseModelTypes"] = lora_base
+        if str(query or "").strip():
+            q["query"] = str(query).strip()[:100]
     d = core._rest_get(session, "/collection/{}/items".format(sid), params=q) or {}
-    items = []
+    items, gone = [], []
     for it in d.get("data") or []:
-        if isinstance(it, dict) and isinstance(it.get("recipe"), dict):
-            c = card(it["recipe"])
-            c["item_id"] = str(it.get("id") or "")
-            items.append(c)
-    return {"items": items, "next_cursor": d.get("nextCursor") or ""}
+        if not isinstance(it, dict):
+            continue
+        if kind == "recipe":
+            if isinstance(it.get("recipe"), dict):
+                c = card(it["recipe"])
+                c["item_id"] = str(it.get("id") or "")
+                items.append(c)
+            continue
+        row = model_item(it)
+        if row is None:
+            gone.append(unavailable_item(it))
+        else:
+            items.append(row)
+    out = {"items": items, "next_cursor": d.get("nextCursor") or ""}
+    if kind == "model":
+        out["unavailable"] = gone
+    return out
 
 
 # ---------------------------------------------------------------------------------------
@@ -1000,34 +1054,422 @@ def transition(session, recipe_id, to):
     return card(_post(session, "/recipes/{}/transition".format(rid), {"to": to}))
 
 
-def set_create(session, title):
+def set_create(session, title, content_type="recipe"):
+    """+ New set: a private collection of this kind on PixAI."""
     title = str(title or "").strip()
+    kind = _checked_type(content_type)
     if not title:
         raise core.PixAIError("Name the set")
     if len(title) > 100:
         raise core.PixAIError("A set's name is up to 100 characters")
-    core._check_read_only("create a recipe set on PixAI")
+    core._check_read_only("create a {} set on PixAI".format(kind))
     try:
         c = core._rest_post(session, "/collection/", {
-            "title": title, "description": "", "contentType": "recipe",
+            "title": title, "description": "", "contentType": kind,
             "visibility": "private", "coverMode": "single"}) or {}
     except core.PixAIError as e:
         raise core.PixAIError("PixAI didn't make the set: " + str(e)[:160])
     return collection(c)
 
 
+def _collection_write(session, set_id, ref_type, ref_id, on, item_id=""):
+    """THE one request of a set tick: POST {refType, refId} to add, DELETE by item id to remove
+    (the site's own CollectionAddDialog calls). Single attempt -- core._rest_post and
+    _rest_delete carry no retry. Ids are checked by the caller."""
+    if on:
+        return core._rest_post(session, "/collection/{}/items".format(set_id),
+                               {"refType": ref_type, "refId": ref_id}) or {}
+    return _rest_delete(session, "/collection/{}/items/{}".format(set_id, item_id)) or {}
+
+
 def set_toggle(session, set_id, recipe_id, on, item_id=""):
     """Put a recipe in a set or take it out. Returns {contains, item_id}."""
-    sid = _checked_id(set_id)
+    sid = _checked_uuid(set_id)
     rid = _checked_id(recipe_id)
+    iid = "" if on else _checked_uuid(item_id)
     core._check_read_only("change a recipe set on PixAI")
     try:
-        if on:
-            d = core._rest_post(session, "/collection/{}/items".format(sid),
-                                {"refType": "recipe", "refId": rid}) or {}
-            return {"contains": bool(d.get("saved", True)), "item_id": str(d.get("itemId") or "")}
-        iid = _checked_id(item_id)
-        d = _rest_delete(session, "/collection/{}/items/{}".format(sid, iid)) or {}
-        return {"contains": bool(d.get("saved", False)), "item_id": ""}
+        d = _collection_write(session, sid, "recipe", rid, on, iid)
     except core.PixAIError as e:
         raise core.PixAIError("PixAI didn't change the set: " + str(e)[:160])
+    if on:
+        return {"contains": bool(d.get("saved", True)), "item_id": str(d.get("itemId") or "")}
+    return {"contains": bool(d.get("saved", False)), "item_id": ""}
+
+
+# ---------------------------------------------------------------------------------------
+# The model pickers' Saved tab (Session S) -- PixAI's model collections
+# ---------------------------------------------------------------------------------------
+# One reserved default (reservedType "default") holds every saved model AND LoRA; the site
+# shows it as "Saved" whatever its stored title, and so does the app. Named collections are
+# "sets", as for recipes. Facts: moonglade-internal/probes/PROBE_2026-10-03_collections-
+# markread.md, sections 1-5. Nothing here writes when the tab or the menu opens: the reads are
+# the list, the per-kind counts, a page, the removed-models walk and the selector, and the
+# writes are model_save, model_tick and model_remove_gone, each a deliberate click.
+
+MODEL_KINDS = {"base": "ANY_MODEL", "lora": "ANY_LORA"}
+DEFAULT_TITLE = "Saved"
+# The model picker offers neither (it already drops video); ANY_MODEL includes a chat model.
+_NOT_PICKABLE = ("CHAT", "VIDEO")
+_GONE_WALK_PAGES = 40          # the removed-models walk gives up after 40 x 24 saves
+_UNCLEAR = ("PixAI's answer was unclear and the check after it failed too, so nothing is "
+            "known. Look on PixAI before trying again.")
+_UNCONFIRMED = ("PixAI took it, but the check after it failed, so it isn't confirmed. Look on "
+                "PixAI before trying again.")
+# No clear answer (a timeout, a dropped connection, a 5xx) and the check does not show the change:
+# the write may still land, so it is "not confirmed", never "PixAI didn't".
+_NOT_CONFIRMED_ADD = ("PixAI gave no clear answer and the check doesn't show it saved, so it "
+                      "isn't confirmed. Look on PixAI before trying again.")
+_NOT_CONFIRMED_REMOVE = ("PixAI gave no clear answer and the check still shows it there, so it "
+                         "isn't confirmed. Look on PixAI before trying again.")
+
+
+def _model_kind(kind):
+    if kind not in MODEL_KINDS:
+        raise core.PixAIError("That isn't a picker")
+    return kind
+
+
+def model_item(it):
+    """One item of a model collection -> the picker's row: core.rest_model_row (the item's
+    `model` is the object /generation-model/search returns), the arch label off its latest
+    available version, the item id (what taking it out needs) and the save date. None for a
+    model PixAI no longer has (refId "-1", `model` null, effectiveStatus "unavailable")."""
+    m = it.get("model") if isinstance(it.get("model"), dict) else None
+    ref = str(it.get("refId") or "")
+    if (m is None or ref in ("", "-1")
+            or str(it.get("effectiveStatus") or "available") != "available"):
+        return None
+    row = core.rest_model_row(m)
+    lv = m.get("latestAvailableVersion")
+    lv = lv if isinstance(lv, dict) else {}
+    row["model_type"] = str(lv.get("modelType") or "")
+    row["lora_base_model_type"] = str(lv.get("loraBaseModelType") or "")
+    row["item_id"] = str(it.get("id") or "")
+    row["saved_at"] = str(it.get("createdAt") or "")
+    return row
+
+
+def unavailable_item(it):
+    """A saved model PixAI doesn't make available (`reason`: deleted, private, taken down...):
+    nothing says which model it was."""
+    return {"item_id": str(it.get("id") or ""), "saved_at": str(it.get("createdAt") or ""),
+            "reason": str(it.get("effectiveUnavailableReason") or "")}
+
+
+def _pickable(row, kind):
+    t = str(row.get("type") or "").upper()
+    return kind == "lora" or not any(x in t for x in _NOT_PICKABLE)
+
+
+def model_page(session, set_id, kind, cursor="", query="", lora_base=""):
+    """One page of a model set for a picker, in /api/model-search's own shape ({results,
+    has_more, next_cursor}) so the picker pages it exactly as it pages Market. The kind is
+    fixed by the picker; the LoRA base filter applies to the LoRA picker only."""
+    kind = _model_kind(kind)
+    d = set_items(session, set_id, cursor, ref_type="model", model_types=MODEL_KINDS[kind],
+                  lora_base=lora_base if kind == "lora" else "", query=query)
+    return {"results": [r for r in d["items"] if _pickable(r, kind)],
+            "has_more": bool(d["next_cursor"]), "next_cursor": d["next_cursor"]}
+
+
+def _type_count(session, set_id, model_types):
+    """How many of one kind a set holds: one numbered read (`page=1` answers totalItems;
+    cursor mode leaves it null)."""
+    d = core._rest_get(session, "/collection/{}/items".format(_checked_uuid(set_id)),
+                       params={"page": 1, "modelTypes": model_types}) or {}
+    return _num(d.get("totalItems"))
+
+
+def model_default(session, owner_id):
+    """Saved, the reserved default, as collection() -- or None when the account has none."""
+    for c in sets_list(session, owner_id, content_type="model")["sets"]:
+        if c.get("reserved_type") == "default":
+            return dict(c, title=DEFAULT_TITLE)
+    return None
+
+
+def model_sets(session, owner_id, kind):
+    """The Saved tab's rail: Saved first, then the named sets A-Z, each counting only this
+    picker's kind; a named set holding none of it is left out. `unavailable` is how many of
+    Saved's entries are models PixAI no longer has: its itemCount less its live models and
+    live LoRAs (a removed model has no type, so neither filter counts it)."""
+    kind = _model_kind(kind)
+    raw = sets_list(session, owner_id, content_type="model")["sets"]
+    default = next((c for c in raw if c.get("reserved_type") == "default"), None)
+    if default is None:
+        return {"sets": [], "default_id": "", "unavailable": 0}
+    counts = {k: _type_count(session, default["id"], v) for k, v in MODEL_KINDS.items()}
+    named = []
+    for c in raw:
+        if c is default or c.get("reserved"):
+            continue
+        n = _type_count(session, c["id"], MODEL_KINDS[kind])
+        if n > 0:
+            named.append({"id": c["id"], "title": c["title"], "count": n, "reserved": False})
+    named.sort(key=lambda c: c["title"].casefold())
+    return {"sets": [{"id": default["id"], "title": DEFAULT_TITLE, "count": counts[kind],
+                      "reserved": True}] + named,
+            "default_id": default["id"],
+            "unavailable": max(0, default["count"] - sum(counts.values()))}
+
+
+def model_unavailable(session, owner_id, expect=0):
+    """"K not available ▸": the removed models in Saved, found by walking it whole (unfiltered:
+    a removed model has no type). Each is {item_id, saved_at, reason}. Stops at the end, once
+    `expect` are found, or after _GONE_WALK_PAGES pages (`complete` says which)."""
+    default = model_default(session, owner_id)
+    if default is None:
+        return {"items": [], "complete": True}
+    want = _num(expect)
+    found, cursor = [], ""
+    for _ in range(_GONE_WALK_PAGES):
+        d = set_items(session, default["id"], cursor, ref_type="model")
+        found.extend(d["unavailable"])
+        cursor = d["next_cursor"]
+        if not cursor or (want and len(found) >= want):
+            return {"items": found, "complete": not cursor}
+    return {"items": found, "complete": False}
+
+
+# S2c: the old bookmarks list (core.model_bookmarks_gql) has taken no save since mid-August;
+# every one of its 463 entries was found in Saved by the 2026-10-03 probe. Saved shows the ones
+# it does not hold, tagged "old", after its own rows. Working that out reads all of Saved for
+# this kind and all of the old list, so the answer is kept for _OLD_TTL (the old list never
+# changes; Saved changes through this app's own saves, which drop the row at once).
+_OLD_WALK_PAGES = 60           # 60 x 24 live saves, or 60 x 50 old bookmarks, before giving up
+_OLD_TTL = 6 * 3600.0
+
+
+def model_old_bookmarks(session, web_session, owner_id, kind):
+    """{rows, partial}: the old bookmarks of this picker's kind that Saved does not hold, in the
+    old list's own order, each tagged `old`. `web_session` reads the old list as the Bookmarked
+    tab did (core.present_as_web). If either list cannot be read to its end, `partial` is True
+    and no row is offered: an unread page might hold it, and a row wrongly tagged "old" would
+    be a lie about what is saved."""
+    kind = _model_kind(kind)
+    uid = _checked_id(owner_id)
+
+    def walk():
+        default = model_default(session, uid)
+        held, cursor = set(), ""
+        for _ in range(_OLD_WALK_PAGES):
+            d = set_items(session, default["id"], cursor, ref_type="model",
+                          model_types=MODEL_KINDS[kind]) if default else {"items": [],
+                                                                          "next_cursor": ""}
+            held.update(r["model_id"] for r in d["items"])
+            cursor = d["next_cursor"]
+            if not cursor:
+                break
+        else:
+            return {"rows": [], "partial": True}
+        rows, seen, after = [], set(), None
+        usage = "LORA" if kind == "lora" else "MODEL"
+        for _ in range(_OLD_WALK_PAGES):
+            page = core.model_bookmarks_gql(web_session, usage=usage, limit=50, after=after) or {}
+            for r in page.get("results") or []:
+                mid = str(r.get("model_id") or "")
+                if mid and mid not in held and mid not in seen and _pickable(r, kind):
+                    seen.add(mid)
+                    rows.append(dict(r, old=True))
+            after = page.get("next_cursor") or ""
+            if not page.get("has_more") or not after:
+                break
+        else:
+            return {"rows": [], "partial": True}
+        return {"rows": rows, "partial": False}
+
+    kept = _cached(("m-old", uid, kind), _OLD_TTL, walk)
+    return {"rows": list(kept.get("rows") or []), "partial": bool(kept.get("partial"))}
+
+
+def _old_forget(model_id):
+    """A model just saved is no longer "old": take it out of every kept merge at once, and keep
+    its row aside in case it is taken back out of Saved (_old_restore)."""
+    with _cache_lock:
+        for key, (stamp, val) in list(_cache.items()):
+            if isinstance(key, tuple) and key[:1] == ("m-old",) and isinstance(val, dict):
+                rows = val.get("rows") or []
+                gone = [r for r in rows if r.get("model_id") == model_id]
+                if gone:
+                    aside = dict(val.get("aside") or {}, **{model_id: gone[0]})
+                    _cache[key] = (stamp, dict(val, aside=aside,
+                                               rows=[r for r in rows if r not in gone]))
+
+
+def _old_restore(model_id):
+    """A model set aside by _old_forget was just taken back out of Saved: it is old again."""
+    with _cache_lock:
+        for key, (stamp, val) in list(_cache.items()):
+            if isinstance(key, tuple) and key[:1] == ("m-old",) and isinstance(val, dict):
+                aside = dict(val.get("aside") or {})
+                row = aside.pop(model_id, None)
+                if row is not None:
+                    _cache[key] = (stamp, dict(val, aside=aside,
+                                               rows=list(val.get("rows") or []) + [row]))
+
+
+def model_state(session, model_id):
+    """The "Keep this model" menu's read, and every model write's read-back: the selector for
+    one model. {saved, item_id, default_id, sets}: Saved first, then the named sets A-Z, each
+    {id, title, count, reserved, contains, item_id}."""
+    sets = sets_for(session, model_id, ref_type="model")
+    default = next((c for c in sets if c.get("reserved_type") == "default"), None)
+    named = sorted((c for c in sets if c is not default and not c.get("reserved")),
+                   key=lambda c: c["title"].casefold())
+    rows = ([dict(default, title=DEFAULT_TITLE)] if default else []) + named
+    keys = ("id", "title", "count", "reserved", "contains", "item_id")
+    return {"saved": bool(default and default.get("contains")),
+            "item_id": (default or {}).get("item_id", ""),
+            "default_id": (default or {}).get("id", ""),
+            "sets": [{k: c.get(k) for k in keys} for c in rows]}
+
+
+# -- the writes ---------------------------------------------------------------------------
+
+_COLLECTION_REFUSALS = {
+    "UNAUTHORIZED": "PixAI didn't accept this account's key",
+    "SOURCE_NOT_FOUND": "PixAI couldn't find this model",
+    "SOURCE_UNAVAILABLE": "This model isn't available on PixAI any more",
+    "SOURCE_PRIVATE": "This model is private, so PixAI won't save it",
+    "SOURCE_CANNOT_BE_COLLECTED": "PixAI doesn't allow saving this model",
+    "SOURCE_CREATOR_BLOCKED_OWNER": "This model's creator has blocked your account, so PixAI "
+                                    "won't save it",
+    "COLLECTION_NOT_FOUND": "PixAI couldn't find that set; it may have been deleted on pixai.art",
+    "COLLECTION_CONTENT_TYPE_MISMATCH": "That set holds a different kind of thing",
+    "COLLECTION_MEMBERSHIP_CONFLICT": "PixAI says it's already there",
+    "RESERVED_COLLECTION_RENAME_FORBIDDEN": "PixAI doesn't allow changing Saved that way",
+    "RESERVED_COLLECTION_DELETE_FORBIDDEN": "PixAI doesn't allow changing Saved that way",
+    "RESERVED_COLLECTION_PUBLISH_FORBIDDEN": "PixAI doesn't allow changing Saved that way",
+}
+
+
+def _collection_refusal(e):
+    """Plain words for a collection write PixAI clearly refused (a 4xx), or "" when its answer
+    was unclear: no status at all (a timeout, a dropped connection) or a 5xx, where the write
+    may have landed. An unclear answer is read back, never re-sent."""
+    status = getattr(e, "status", None)
+    if not isinstance(status, int) or status >= 500:
+        return ""
+    body = getattr(e, "body", None)
+    code = ""
+    if isinstance(body, dict):
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        code = str(body.get("code") or data.get("code") or "")
+    if code not in _COLLECTION_REFUSALS:
+        m = re.search(r'"code"\s*:\s*"([A-Z_]+)"', str(e))
+        code = m.group(1) if m else code
+    return _COLLECTION_REFUSALS.get(code) or "PixAI refused it (HTTP {})".format(status)
+
+
+def model_tick(session, set_id, model_id, on, item_id=""):
+    """A tick in "Keep this model" -- and, through model_save, the card's ⊕ Save: put a model
+    in one of the account's PixAI model sets (Saved included) or take it out.
+
+    READ_ONLY first; every id checked; ONE write (POST {refType: "model", refId: the MODEL id}
+    to add, DELETE by item id to remove), never re-sent; then ONE selector read whose answer
+    decides what the user is told. Returns {contains, item_id, sets, saved} as PixAI now reports
+    them, plus `error` (plain words) when that is not what was asked for. If the read-back
+    fails too, `contains` is None and nothing is claimed."""
+    core._check_read_only("change your saved models on PixAI")
+    sid = _checked_uuid(set_id)
+    mid = _checked_id(model_id)
+    iid = "" if on else _checked_uuid(item_id)
+    refusal, answered = "", False
+    try:
+        _collection_write(session, sid, "model", mid, on, iid)
+        answered = True
+    except Exception as e:                                       # noqa: BLE001 -- any answer
+        refusal = _collection_refusal(e)
+    try:
+        state = model_state(session, mid)
+    except Exception:                                            # noqa: BLE001
+        return {"contains": None, "item_id": "",
+                "error": refusal or (_UNCONFIRMED if answered else _UNCLEAR)}
+    row = next((c for c in state["sets"] if c["id"] == sid), None)
+    if row is None:
+        return {"contains": None, "item_id": "", "sets": state["sets"], "saved": state["saved"],
+                "error": refusal or ("PixAI didn't list that set when the app checked. Look "
+                                     "on PixAI before trying again.")}
+    out = {"contains": bool(row["contains"]), "item_id": row["item_id"] or "",
+           "sets": state["sets"], "saved": state["saved"]}
+    if state["saved"]:
+        _old_forget(mid)
+    else:
+        _old_restore(mid)
+    if out["contains"] != bool(on):
+        if refusal:
+            out["error"] = refusal
+        elif not answered:
+            out["error"] = _NOT_CONFIRMED_ADD if on else _NOT_CONFIRMED_REMOVE
+        else:
+            out["error"] = "PixAI didn't save it" if on else "PixAI didn't take it out"
+    return out
+
+
+def model_save(session, owner_id, model_id):
+    """The card's ⊕ Save: one model into Saved, PixAI's reserved default, the way the site's own
+    Save does it -- POST /collection/{defaultId}/items with the MODEL id. (The contract's
+    PUT /collection/default/items is not used: no build of the site calls it.) READ_ONLY first,
+    then one read to find Saved's id, then model_tick's one write and its read-back."""
+    core._check_read_only("save a model to PixAI")
+    mid = _checked_id(model_id)
+    default = model_default(session, owner_id)
+    if default is None:
+        raise core.PixAIError("PixAI hasn't made a Saved list for this account yet. Save one "
+                              "model on pixai.art first.")
+    return model_tick(session, default["id"], mid, True)
+
+
+def _entry_state(session, set_id, item_id):
+    """Where `item_id` stands in the set, read fresh: "unavailable" (one of its not-available
+    entries), "live", "absent", or None when the walk gave up before its end without finding
+    it. A walk of the whole set (unfiltered -- a not-available entry has no type), stopping
+    once the id is found."""
+    cursor = ""
+    for _ in range(_GONE_WALK_PAGES):
+        d = set_items(session, set_id, cursor, ref_type="model")
+        if any(g["item_id"] == item_id for g in d["unavailable"]):
+            return "unavailable"
+        if any(r.get("item_id") == item_id for r in d["items"]):
+            return "live"
+        cursor = d["next_cursor"]
+        if not cursor:
+            return "absent"
+    return None
+
+
+def model_remove_gone(session, owner_id, item_id):
+    """"K not available ▸" → take a not-available model's entry out of Saved. Its item id is
+    all that is left of it, so this is ONE DELETE by that id, sent only once a fresh read shows
+    the id is still one of Saved's not-available entries (a model made private and public again
+    while the list was open is a live save again, and must not lose it). Then the same read
+    again, which decides: the id gone from Saved is removed. Saved's total is never the test --
+    saves and unsaves made elsewhere move it. Returns {removed: True | False | None, error?}."""
+    core._check_read_only("change your saved models on PixAI")
+    iid = _checked_uuid(item_id)
+    default = model_default(session, owner_id)
+    if default is None:
+        raise core.PixAIError("PixAI has no Saved list for this account")
+    if _entry_state(session, default["id"], iid) != "unavailable":
+        return {"removed": False,
+                "error": "PixAI doesn't list that entry as not available any more, so nothing "
+                         "was taken out. Reopen the list to see where it stands."}
+    refusal, answered = "", False
+    try:
+        _rest_delete(session, "/collection/{}/items/{}".format(default["id"], iid))
+        answered = True
+    except Exception as e:                                       # noqa: BLE001 -- any answer
+        refusal = _collection_refusal(e)
+    try:
+        where = _entry_state(session, default["id"], iid)
+    except Exception:                                            # noqa: BLE001
+        where = None
+    if where == "absent":
+        return {"removed": True}
+    if where is None:
+        return {"removed": None, "error": refusal or (_UNCONFIRMED if answered else _UNCLEAR)}
+    if refusal:
+        return {"removed": False, "error": refusal}
+    return {"removed": False,
+            "error": "PixAI didn't take it out" if answered else _NOT_CONFIRMED_REMOVE}

@@ -168,7 +168,8 @@ describe("No redundant LoRA search when a base model is picked (AUDIT_2026-07-21
     assert.match(src, /if \(!visible\) return;/,
       "while hidden the effect early-returns, so a base-type change does NOT search then; " +
       "because baseType is in the key, the next reveal re-searches once with it already in place");
-    assert.match(src, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType\]\);/,
+    // CHANGED ON PURPOSE (Session S): the Saved tab's set and LoRA base chip joined the key.
+    assert.match(src, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase\]\);/,
       "searchUrl must depend on baseType, or the key would not recompute when the base changes");
   });
 

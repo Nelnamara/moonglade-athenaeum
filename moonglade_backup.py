@@ -3183,46 +3183,51 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     if kw:
         params["keyword"] = kw
     data = _rest_get(session, "/generation-model/search", params=params) or {}
-    out = []
-    for m in data.get("data") or []:
-        med = m.get("media") or {}
-        # Real field names (probed 2026-07-04): the rich description lives under
-        # `modelDescription`, base-model family under `category`, and an official
-        # badge under `curations` (e.g. ["inhouse"]). See ../moonglade-internal/private/GENERATOR_SURFACE.md.
-        cur = m.get("curations") or []
-        out.append({
-            "title": m.get("title") or "",
-            "type": m.get("type") or "",
-            "model_id": str(m.get("id") or ""),
-            "liked_count": int(m.get("likedCount") or 0),
-            # Shared with _market_row so both paths blur the same model the same way --
-            # this row keeps its authoritative flag.shouldBlur, and a row that somehow
-            # arrives without one now falls back to isNsfw instead of silently not blurring.
-            "should_blur": _row_should_blur(m),
-            # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
-            # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
-            # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
-            # actually on screen.
-            "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
-            "has_version": bool(m.get("hasLatestAvailableVersion")),
-            # Rich surface for the preview pop-out card.
-            "description": (m.get("modelDescription") or "")[:600],
-            "base_model": m.get("category") or "",
-            "curations": [c for c in cur if isinstance(c, str)],
-            "official": any((c or "").lower() == "inhouse" for c in cur if isinstance(c, str)),
-            "comment_count": int(m.get("commentCount") or 0),
-            "ref_count": int(m.get("refCount") or 0),
-            "author_id": str(m.get("authorId") or ""),
-            "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
-            # GraphQL-only per-viewer state absent here -> False, the mirror of
-            # model_search_market_gql's "REST-only rich fields absent here -> empty so the
-            # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
-            # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
-            # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
-            # missing) so a consumer can read the key off either path's rows.
-            "bookmarked": False, "liked": False,
-        })
+    out = [rest_model_row(m) for m in data.get("data") or [] if isinstance(m, dict)]
     return {"results": out, "has_more": bool(data.get("hasMore"))}
+
+
+def rest_model_row(m):
+    """One model object as /v2 REST hands it (the /generation-model/search row, and the `model`
+    of a model collection's item -- the same object, probe 2026-10-03) -> the picker's row.
+    Shared so the Saved tab's cards and the search's cards can never drift apart."""
+    med = m.get("media") or {}
+    # Real field names (probed 2026-07-04): the rich description lives under
+    # `modelDescription`, base-model family under `category`, and an official
+    # badge under `curations` (e.g. ["inhouse"]). See ../moonglade-internal/private/GENERATOR_SURFACE.md.
+    cur = m.get("curations") or []
+    return {
+        "title": m.get("title") or "",
+        "type": m.get("type") or "",
+        "model_id": str(m.get("id") or ""),
+        "liked_count": int(m.get("likedCount") or 0),
+        # Shared with _market_row so both paths blur the same model the same way --
+        # this row keeps its authoritative flag.shouldBlur, and a row that somehow
+        # arrives without one now falls back to isNsfw instead of silently not blurring.
+        "should_blur": _row_should_blur(m),
+        # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
+        # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
+        # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
+        # actually on screen.
+        "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+        "has_version": bool(m.get("hasLatestAvailableVersion")),
+        # Rich surface for the preview pop-out card.
+        "description": (m.get("modelDescription") or "")[:600],
+        "base_model": m.get("category") or "",
+        "curations": [c for c in cur if isinstance(c, str)],
+        "official": any((c or "").lower() == "inhouse" for c in cur if isinstance(c, str)),
+        "comment_count": int(m.get("commentCount") or 0),
+        "ref_count": int(m.get("refCount") or 0),
+        "author_id": str(m.get("authorId") or ""),
+        "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+        # GraphQL-only per-viewer state absent here -> False, the mirror of
+        # model_search_market_gql's "REST-only rich fields absent here -> empty so the
+        # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
+        # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
+        # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
+        # missing) so a consumer can read the key off either path's rows.
+        "bookmarked": False, "liked": False,
+    }
 
 
 # Model-Market categories the GraphQL `generationModels` connection actually honors (probed
