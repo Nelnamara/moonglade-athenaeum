@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Under the hood
+- The old `/api/next/...` paths are gone. The app reads `/api/library`, `/api/detail/<id>` and `/api/history`, which have answered since 3.17.0, so nothing you see changes; a page left open since before 3.17.0 needs a reload. (2026-10-04)
+
 ## [3.17.0] - 2026-10-04 — Mail Call
 
 ### The pickers' Saved tab
