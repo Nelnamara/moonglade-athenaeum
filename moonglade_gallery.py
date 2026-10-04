@@ -5186,7 +5186,7 @@ def _role_payload(out_dir, slot):
     return next(r for r in branding_roles_payload(out_dir) if r["slot"] == slot)
 
 
-def branding_role_upload(out_dir, slot, key, upload=None, media_id=""):
+def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_only=False):
     """POST /api/branding/slot for a role slot: one picture becomes the install's override of
     one role image. Returns (body, status). Read it top to bottom -- it is the whole path:
 
@@ -5200,6 +5200,11 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id=""):
       4. only then re-encode from the decoded pixels (nothing the sender appended survives; the
          login companion is stored as WebP, every other role as PNG, under the public name the app
          already asks for) and replace the override file whole.
+
+    `check_only` stops after step 3 and answers with the measurements ({"facts": ...}) instead of
+    judging them: that is how a picture already in the library ("From the gallery") gets its rules
+    ticked in the editor before Use this, with the same numbers the client's rules read. It never
+    writes.
 
     The pack is read-only here: the file lands in the coded tree, where loose beats the pack."""
     import io
@@ -5235,7 +5240,10 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id=""):
     except Exception:                      # noqa: BLE001 -- anything that will not open or decode
         return {"error": "not a readable image"}, 400
     clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
-    failed = role_spec_failures(role["spec"], {"format": fmt, "w": w, "h": h, "see_through": clear})
+    facts = {"format": fmt, "w": w, "h": h, "see_through": clear}
+    if check_only:
+        return {"facts": facts}, 200
+    failed = role_spec_failures(role["spec"], facts)
     if failed:
         return {"error": role_refusal_text(role["name"], failed), "failed": failed}, 400
     buf = io.BytesIO()
@@ -22544,7 +22552,8 @@ def create_app(out_dir: Path):
             return jsonify({"error": "unknown slot"}), 400
         body, status = branding_role_upload(
             out_dir, slot, (request.form.get("key") or "").strip(),
-            upload=request.files.get("file"), media_id=(request.form.get("media_id") or "").strip())
+            upload=request.files.get("file"), media_id=(request.form.get("media_id") or "").strip(),
+            check_only=request.form.get("check") == "1")
         return jsonify(body), status
 
     @app.route("/api/branding/role/restore", methods=["POST"])

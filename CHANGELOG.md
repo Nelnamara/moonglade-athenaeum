@@ -19,6 +19,9 @@ git tags. Full prose notes for tagged versions live on
 ### Goal-tile art
 - **Basic training's four goal tiles have pictures.** Character, Art style, Outfit and Something else each show their own picture beside the name (on the phone, 44 px), where a glyph stood in since 3.15.0. The square paints its colour at once with a soft sheen while the picture loads, and stays a flat colour, with no symbol, if it can't. The pictures ship inside the app; an art pack that carries its own wins when installed. (#61) (2026-10-03)
 
+### Branding roles
+- **The Branding tab has a Roles section.** Four rows, in the order you meet them: the login companion, the job tracker's mascots, the reward icons and the power poses. Each shows its art and a **Change** button that opens a drop zone (a file from your disk, or a picture from your gallery). Your picture is checked on the spot against that role's rules (format, a transparent background, shape and minimum size) with a live tick or cross for each, and one that breaks a rule is refused in plain words naming the rule and what the picture measured, with nothing uploaded; the server checks it again. A picture you've changed shows the app's own art dimmed beside yours, and tapping it asks once before putting the default back: only your file is removed, the art pack is never touched. If your file ever stops being readable, the app shows the default and the row says so. On the phone the same Roles open a screen per role. (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

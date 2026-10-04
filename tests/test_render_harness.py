@@ -6189,6 +6189,209 @@ def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_brandi
 
 
 # ---------------------------------------------------------------------------
+# The Branding tab's named roles (Session X, Branding Roles Handoff; hidden with the tab)
+# ---------------------------------------------------------------------------
+# The Roles section in a real browser, end to end through the real routes: four rows in meeting
+# order, Change expanding a row, a file checked on the device before anything is sent (a refusal
+# names the rule and the measured value and sends NOTHING), Use this writing the install's
+# override, default -> yours, the one-time ask, and the fail-soft note. The Branding tab is
+# unlock-gated by the sealed roster, so these carry the donor gate like the tab's other tests.
+
+_ROLE_NAMES = ["Login companion", "Job tracker mascots", "Reward icons", "Power poses"]
+
+
+def _role_png(path, size, clear=True, mode="RGBA", fmt="PNG"):
+    """A small picture for the editor: a filled disc on a clear ground (or opaque, or a JPEG)."""
+    from PIL import Image, ImageDraw
+    im = Image.new(mode, size, (0, 0, 0, 0) if mode == "RGBA" else (90, 60, 160))
+    if mode == "RGBA":
+        ImageDraw.Draw(im).ellipse((size[0] * .15, size[1] * .15, size[0] * .85, size[1] * .85),
+                                   fill=(190, 140, 255, 255))
+        if not clear:
+            im.putalpha(255)
+    im.save(path, format=fmt)
+    return str(path)
+
+
+def _dress_role_pack():
+    """The harness container, rewritten to carry the nine role images as PACK defaults next to
+    the roster the Branding tab's gate reads (conftest's seed_sealed_container is the roster half).
+    Written at the PER-TEST container path: conftest's autouse fixture has re-pointed it."""
+    import io as _io
+    import json as _json
+    import moonglade_container as _mc
+    import moonglade_gallery as _g
+    from PIL import Image
+    from tests.conftest import _seed_assets, clear_sealed_caches
+
+    def _pic(rgb):
+        buf = _io.BytesIO()
+        Image.new("RGBA", (96, 96), rgb + (255,)).save(buf, "PNG")
+        return buf.getvalue()
+    assets = dict(_seed_assets())
+    for slot, role in _g.ROLE_SLOTS.items():
+        for key, img in role["images"].items():
+            assets[_g._public_rel_to_coded(img["public"])] = _pic((60, 120, 90))
+    defs = _json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+    _mc.write_container(_g._container_path(), assets,
+                        {"achievements": _json.dumps(defs, separators=(",", ":")).encode("utf-8")})
+    clear_sealed_caches()
+
+
+def _open_roles_section(page):
+    _dismiss_any_achievement_toast(page)
+    page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
+    page.wait_for_selector('[aria-label="Control Panel"]')
+    page.click('button:has-text("✦ Branding")')
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rl")
+
+
+def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_pack_untouched(
+        logged_in_page, tmp_path, sealed_donor_present):
+    import moonglade_gallery as _g
+    _dress_role_pack()
+    pack_before = _g._container_path().read_bytes()
+    page = logged_in_page(**DESKTOP)
+    sent = []
+    page.on("request", lambda r: sent.append((r.method, r.url)) if "/api/branding/role" in r.url else None)
+    _visit(page, "/")
+    _settle(page)
+    _open_roles_section(page)
+
+    # four rows, in the order you meet them, 52 px each, with their images at 34 px
+    assert page.locator(".mgcp-rl-name > div:first-child").all_inner_texts() == _ROLE_NAMES
+    geo = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl-row')].map(r => ({
+        h: Math.round(r.getBoundingClientRect().height),
+        art: [...r.querySelectorAll('.mgcp-rl-art')].map(a => Math.round(a.getBoundingClientRect().width))}))""")
+    assert [len(r["art"]) for r in geo] == [1, 4, 2, 2]
+    assert all(r["h"] == 52 for r in geo), geo
+    assert all(w == 34 for r in geo for w in r["art"]), geo
+
+    login = page.locator('.mgcp-rl[data-role="login_companion"]')
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector(".mgcp-rl-editor")
+    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · 3:4 · ≥ 600 px tall"
+    use = page.locator(".mgcp-rl-primary:has-text('Use this')")
+    assert use.is_disabled()
+
+    # a square picture for a 3:4 role: ticked live, refused loudly, nothing sent, nothing written
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "sq.png", (800, 800)))
+    page.wait_for_selector(".mgcp-rl-loud")
+    ticks = page.locator(".mgcp-rl-ticks span").all_inner_texts()
+    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 3:4 (got 1:1)", "\u2713 \u2265 600 px"], ticks
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Login companion must be 3:4. This one is 1:1. Your current art is unchanged.")
+    assert use.is_disabled()
+    assert not [s for s in sent if s[0] == "POST"], "a refused file sends nothing: %r" % sent
+    assert not _g._role_override_path("login_companion", "companion").exists()
+
+    # a JPEG for a PNG role: two rules at once, in pairs
+    page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    assert page.locator(".mgcp-rl-editor").count() == 1, "one row open at a time"
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(
+        _role_png(tmp_path / "flat.jpg", (300, 300), mode="RGB", fmt="JPEG"))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert "must be PNG (this one is JPEG) and have a transparent background (this one is opaque)" in \
+        page.locator(".mgcp-rl-loud").inner_text()
+
+    # a good one: ticks all pass, Use this opens, one POST goes, the row now wears it
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "pose.png", (300, 300)))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    assert not page.locator(".mgcp-rl-loud").count()
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-art.yours')
+    page.wait_for_selector(".mgcp-rl-editor", state="detached")
+    assert [s[0] for s in sent if s[0] == "POST"] == ["POST"], sent
+    poses = page.locator('.mgcp-rl[data-role="power_poses"]')
+    assert "1 of 2 yours" in poses.inner_text()
+    assert _g._role_override_path("power_poses", "restart").is_file()
+    served = page.request.get("/branding/mascots/nel_restart.png")
+    assert served.status == 200 and served.body() == _g._role_override_path("power_poses", "restart").read_bytes()
+
+    # default -> yours on a single-image row, and the one-time ask
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "me.png", (600, 800)))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.def')
+    sizes = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl[data-role="login_companion"] .mgcp-rl-row .mgcp-rl-art')]
+        .map(a => ({w: Math.round(a.getBoundingClientRect().width), cls: a.className}))""")
+    assert [s["w"] for s in sizes] == [28, 34]
+    assert "def" in sizes[0]["cls"] and "yours" in sizes[1]["cls"]
+    assert page.evaluate("() => getComputedStyle(document.querySelector('.mgcp-rl-art.def')).opacity") == "0.45"
+    login.locator("button.mgcp-rl-art.def").click()
+    ask = page.locator(".mgcp-rl-ask")
+    assert ask.inner_text().startswith("Go back to the default Login companion?\nYour image is removed from this install.")
+    ask.locator("button:has-text('Keep mine')").click()
+    assert _g._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
+    login.locator("button.mgcp-rl-art.def").click()
+    page.locator(".mgcp-rl-ask button:has-text('Use default')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours', state="detached")
+    assert not _g._role_override_path("login_companion", "companion").exists()
+    assert _g._container_path().read_bytes() == pack_before, "the pack is never touched"
+
+    # fail-soft: a stored override that will not decode -> the default is shown and the row says so
+    _g._role_override_path("power_poses", "restart").write_bytes(b"not a picture")
+    page.reload()
+    _settle(page)
+    _open_roles_section(page)
+    assert page.locator(".mgcp-rl-note").all_inner_texts() == ["Your file couldn't be read; showing the default."]
+    served = page.request.get("/branding/mascots/nel_restart.png")
+    assert served.status == 200 and served.body() != b"not a picture"
+
+
+def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
+        logged_in_page, tmp_path, sealed_donor_present):
+    _dress_role_pack()
+    page = logged_in_page(width=390, height=844, device_scale_factor=1, is_mobile=True, has_touch=True)
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+    page.click('button:has-text("Control")')
+    page.wait_for_selector(".mgcp-tile.click")
+    page.locator('.mgcp-tile.click:has-text("Branding")').click()
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rlm-row")
+    rows = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
+        name: r.querySelector('.mgcp-rl-name > div').textContent,
+        state: r.querySelectorAll('.mgcp-rl-name > div')[1].textContent,
+        h: Math.round(r.getBoundingClientRect().height),
+        art: Math.round(r.querySelector('.mgcp-rl-art').getBoundingClientRect().width)}))""")
+    assert [r["name"] for r in rows] == _ROLE_NAMES
+    assert all(r["state"] == "default" and r["art"] == 28 and r["h"] >= 52 for r in rows), rows
+
+    page.locator(".mgcp-rlm-row", has_text="Reward icons").click()
+    page.wait_for_selector(".mgcp-rlm-screen")
+    # a multi-image role gets a segment control, one segment per image
+    assert page.locator(".mgcp-rlm-seg .mgcp-rl-tab").all_inner_texts() == ["Claim", "Gift"]
+    assert page.locator(".mgcp-rl-spec").inner_text() == "PNG · transparent · square · ≥ 64 px"
+    heights = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-btns button')].map(b => Math.round(b.getBoundingClientRect().height))")
+    assert heights == [44, 44], heights
+    assert page.locator(".mgcp-rlm-btns button:has-text('Use default')").is_disabled()
+
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "wide.png", (200, 100)))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Reward icons must be square. This one is 2:1. Your current art is unchanged.")
+    assert not page.locator(".mgcp-rlm-use").count()
+
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "ok.png", (128, 128)))
+    page.wait_for_selector(".mgcp-rlm-use")
+    page.click(".mgcp-rlm-use")
+    page.wait_for_function("() => document.querySelector('.mgcp-rlm-pair .mgcp-rl-art.yours')")
+    pair = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-pair .mgcp-rl-art')].map(a => Math.round(a.getBoundingClientRect().width))")
+    assert pair == [44, 64], pair
+    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
+    page.locator(".glm-screen-back").last.click()      # the role screen's own, over Branding's
+    page.wait_for_function("() => [...document.querySelectorAll('.mgcp-rlm-row')].some(r => /1 of 2 yours/.test(r.innerText))")
+
+
+# ---------------------------------------------------------------------------
 # Session M: THE ONE multi-send confirm (Generate Power Tools Handoff, "$" + frame A)
 # ---------------------------------------------------------------------------
 # The whole road is real -- the dock's pick, the template's tint and mode row, /api/generate/plan

@@ -4,6 +4,8 @@ import "../styles/control-panel.css";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
+import RolesSection from "./BrandRoles.jsx";
+import RolesPhone from "./BrandRolesPhone.jsx";
 import MarkAnimated from "./MarkAnimated.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
@@ -1869,7 +1871,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
   );
 }
 
-export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin, achievements }) {
+export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin, achievements, phone = false }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   // DC:895-909 -- brandSections sub-nav; marks is the default section.
@@ -1936,6 +1938,8 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     { key: "marks", label: "Icons, marks & animation" },
     { key: "skins", label: "Skins" },
     { key: "banners", label: "Banner slots" },
+    // The named roles (Session X). Lives inside this tab, so it is exactly as hidden as the tab.
+    { key: "roles", label: "Roles" },
   ];
 
   return (
@@ -1963,6 +1967,9 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
         {section === "banners" && (
           <BannerEditor summary={summary} onSaved={onSaved} achievements={achievements} />
         )}
+        {section === "roles" && (phone
+          ? <RolesPhone summary={summary} onSaved={onSaved} />
+          : <RolesSection summary={summary} onSaved={onSaved} />)}
       </div>
     </div>
   );

@@ -343,6 +343,36 @@ def test_a_library_picture_can_be_the_source_and_meets_the_same_spec(tmp_path):
     assert not _override_path("power_poses", "restart").exists()
 
 
+def test_a_check_only_post_measures_a_library_picture_and_writes_nothing(tmp_path):
+    """The phone and the desktop tick a library picture's rules before 'Use this'. The picture is
+    already on this machine, so it is measured here: the same facts the client's rules read, and
+    not a byte written."""
+    (tmp_path / "a_1.png").write_bytes(_img((300, 200)))
+    (tmp_path / "b_2.jpg").write_bytes(_img((256, 256), mode="RGB", fmt="JPEG"))
+    save_catalog(tmp_path / "catalog.db", [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"},
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "2", "filename": "b_2.jpg", "created_at": "2025-01-01T00:00:00"}])
+    cli = login_test_client(create_app(tmp_path))
+
+    def check(mid, slot="power_poses", key="restart"):
+        return cli.post("/api/branding/role", data={"csrf": session_csrf(cli), "slot": slot, "key": key,
+                                                    "media_id": mid, "check": "1"})
+    r = check("1")
+    assert r.status_code == 200
+    f = r.get_json()["facts"]
+    assert (f["format"], f["w"], f["h"]) == ("PNG", 300, 200) and 0.45 < f["see_through"] < 0.55
+    r = check("2")
+    assert r.status_code == 200 and r.get_json()["facts"]["format"] == "JPEG"
+    assert r.get_json()["facts"]["see_through"] == 0
+    assert check("3").status_code == 400                                   # not in the library
+    assert check("1", key="nope").get_json()["error"] == "unknown image"
+    assert not _override_path("power_poses", "restart").exists()
+    assert {p.name for p in g.branding_root().rglob("*") if p.is_file()} <= {"README.txt"}, "nothing written"
+    # the check needs the token like the write does
+    r = cli.post("/api/branding/role", data={"slot": "power_poses", "key": "restart", "media_id": "1", "check": "1"})
+    assert r.status_code == 400
+
+
 def test_an_upload_is_the_apps_own_write_not_a_file_dropped_in_the_tree(tmp_path):
     """The tree scan reads a file the install did not put there as a drop; the app's own write is
     folded into the baseline at once (as every other Branding upload is)."""
