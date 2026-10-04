@@ -4668,6 +4668,11 @@ ROLE_ASPECT_TOLERANCE = 0.08
 ROLE_SEE_THROUGH_MIN = 0.01
 ROLE_MAX_FRAMES = 300
 ROLE_MAX_ANIM_PIXELS = 64_000_000
+# The only formats a role upload ever opens. Pillow identifies dozens, some with decoders that shell
+# out or are old and sprawling (EPS via Ghostscript, TIFF, PSD...); those never reach a decoder here.
+# PNG and WebP are what a role takes; JPEG and GIF are opened only so the editor can refuse them BY
+# NAME ("this one is JPEG") rather than "couldn't read this".
+ROLE_OPEN_FORMATS = ("PNG", "WEBP", "JPEG", "GIF")
 # The same question asked of a banner upload (/api/branding/slot decodes the same way): banners are
 # wide, so the ceiling is higher, but a WebP may not declare a canvas past it.
 BANNER_MAX_SIDE = 8192
@@ -5200,7 +5205,7 @@ def role_measure(raw):
     guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
     try:
         from PIL import Image
-        im = Image.open(io.BytesIO(raw))
+        im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
         fmt, (w, h) = im.format, im.size
         if max(w, h) > ROLE_MAX_SIDE:
             raise ValueError("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
@@ -5230,7 +5235,7 @@ def _role_animation_bytes(raw):
         raise ValueError("not a readable image")
     data = raw[:end]
     try:
-        with Image.open(io.BytesIO(data)) as im:
+        with Image.open(io.BytesIO(data), formats=("WEBP",)) as im:
             for i in range(getattr(im, "n_frames", 1)):
                 im.seek(i)
                 im.load()
@@ -5272,7 +5277,7 @@ def _role_file_decodes(path):
         return hit
     try:
         from PIL import Image
-        with Image.open(path) as im:
+        with Image.open(path, formats=ROLE_OPEN_FORMATS) as im:
             im.load()
         ok = True
     except Exception:                      # noqa: BLE001 -- anything undecodable is "unreadable"

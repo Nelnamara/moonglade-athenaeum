@@ -775,3 +775,45 @@ def test_an_ordinary_banner_webp_still_uploads(tmp_path):
     r = cli.post("/api/branding/slot", data={"slot": "banner_main", "file": (io.BytesIO(buf.getvalue()), "b.webp")},
                  content_type="multipart/form-data")
     assert r.status_code == 200 and r.get_json()["item"]["id"]
+
+
+# ---- only the everyday formats are ever opened -------------------------------------------------------
+# Pillow identifies dozens of formats, some with decoders that shell out or are old and sprawling (EPS
+# through Ghostscript, TIFF, PSD, ...). The role upload names the four a person might plausibly send
+# (PNG and WebP are what a role takes; JPEG and GIF are refused BY NAME in the editor's ticks) and
+# opens only those: anything else never reaches a decoder.
+
+@pytest.mark.parametrize("fmt", ["TIFF", "BMP", "EPS", "ICO", "PPM", "PCX"])
+def test_a_format_outside_the_allowlist_is_refused_before_a_decoder_runs(tmp_path, monkeypatch, fmt):
+    real_open, seen = Image.open, []
+
+    def spy(*a, **k):
+        seen.append(k.get("formats"))
+        return real_open(*a, **k)
+    monkeypatch.setattr(Image, "open", spy)
+    from PIL import EpsImagePlugin
+
+    def no_gs(*a, **k):
+        raise AssertionError("an EPS reached its decoder (Ghostscript)")
+    monkeypatch.setattr(EpsImagePlugin.EpsImageFile, "load", no_gs)
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (200, 100, 50)).save(buf, fmt)
+    cli = _client(tmp_path)
+    r = _post(cli, "power_poses", "restart", buf.getvalue(), "x.png")
+    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image", fmt
+    assert seen and all(f and fmt not in f for f in seen), "opened with an allowlist that excludes %s: %r" % (fmt, seen)
+    assert not _override_path("power_poses", "restart").exists()
+
+
+def test_the_allowlist_is_the_four_everyday_formats_and_no_more():
+    assert tuple(g.ROLE_OPEN_FORMATS) == ("PNG", "WEBP", "JPEG", "GIF")
+
+
+def test_the_everyday_formats_still_open_and_a_jpeg_is_refused_by_name(tmp_path):
+    cli = _client(tmp_path)
+    r = _post(cli, "power_poses", "restart", _img((256, 256), mode="RGB", fmt="JPEG"), "x.jpg")
+    assert [f["rule"] for f in r.get_json()["failed"]] == ["format", "transparent"]
+    assert r.get_json()["failed"][0]["got"] == "JPEG"
+    r = _post(cli, "power_poses", "restart", _img((256, 256), mode="RGBA", fmt="GIF"), "x.gif")
+    assert r.get_json()["failed"][0]["got"] == "GIF"
+    assert _post(cli, "power_poses", "restart", _img((256, 256)), "x.png").status_code == 200
