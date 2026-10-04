@@ -171,6 +171,32 @@ def test_each_roles_base_rules_and_each_images_effective_rule():
         assert e["animated_formats"] == [] and e["formats"] == ["PNG"] and e["transparent"] is True
 
 
+def test_the_shape_rule_spans_square_to_the_defaults_shape_give_or_take_8_percent(tmp_path):
+    """A tracker image whose default is taller or wider than square accepts a square one too, and one
+    shaped like the default: anything between the two, 8 % beyond either, passes."""
+    cli = _client(tmp_path)
+    # done 329 x 364 (0.904): lower edge 0.832, upper edge 1.08
+    for size in ((256, 256), (231, 256), (215, 256), (276, 256)):        # square, default-shaped, ~0.84, ~1.078
+        assert _post(cli, "tracker_mascots", "done", _img(size)).status_code == 200, size
+    for size in ((200, 256), (280, 256)):                                # ~0.78 and ~1.094: past 8 % beyond either
+        r = _post(cli, "tracker_mascots", "done", _img(size))
+        assert r.status_code == 400 and r.get_json()["failed"][0]["need"] == "about 9:10 to square", size
+    # empty 402 x 356 (1.129): lower edge 0.92, upper edge 1.22
+    for size in ((256, 256), (289, 256), (300, 256), (236, 256)):
+        assert _post(cli, "tracker_mascots", "empty", _img(size)).status_code == 200, size
+    for size in ((320, 256), (225, 256)):
+        r = _post(cli, "tracker_mascots", "empty", _img(size))
+        assert r.status_code == 400 and r.get_json()["failed"][0]["need"] == "about square to 9:8", size
+    # failed 324 x 365 (0.888)
+    assert _post(cli, "tracker_mascots", "failed", _img((256, 256))).status_code == 200
+    assert _post(cli, "tracker_mascots", "failed", _img(_fit("tracker_mascots", "failed"))).status_code == 200
+    # a default that is square to within the tolerance keeps its plain "about square"
+    assert g.role_spec_failures(g.role_image_spec("reward_icons", "gift"),
+                                {"format": "PNG", "w": 64, "h": 64, "see_through": 0.3, "animated": False}) == []
+    r = _post(cli, "reward_icons", "claim", _img((64, 80)))
+    assert r.get_json()["failed"][0]["need"] == "about square"
+
+
 def test_the_payload_carries_each_images_effective_spec(tmp_path):
     cli = _client(tmp_path)
     for role in cli.get("/api/branding").get_json()["roles"]:
@@ -285,9 +311,9 @@ REFUSALS = [
     ("the wrong shape", "login_companion", "companion", _img((600, 800)),
      ["aspect"], ["about square"], ["3:4"],
      "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged."),
-    ("a square for a portrait-shaped default", "tracker_mascots", "done", _img((256, 256)),
-     ["aspect"], ["about 9:10"], ["1:1"],
-     "Refused: the Job tracker mascots must be about 9:10. This one is 1:1. Your current art is unchanged."),
+    ("wider than the done image's shape and square", "tracker_mascots", "done", _img((300, 200)),
+     ["aspect"], ["about 9:10 to square"], ["3:2"],
+     "Refused: the Job tracker mascots must be about 9:10 to square. This one is 3:2. Your current art is unchanged."),
     ("an animated PNG", "power_poses", "restart", None,
      ["animation"], ["a still picture"], ["animated"],
      "Refused: the Power poses must be a still picture. This one is animated. Your current art is unchanged."),
@@ -306,8 +332,8 @@ REFUSALS = [
      "Refused: the Login companion must be at least 480 px tall. This one is 470 px tall. "
      "Your current art is unchanged."),
     ("two things wrong", "tracker_mascots", "done", _img((96, 64)),
-     ["aspect", "size"], ["about 9:10", "at least 128 px"], ["3:2", "64 px"],
-     "Refused: the Job tracker mascots must be about 9:10 (this one is 3:2) and at least 128 px "
+     ["aspect", "size"], ["about 9:10 to square", "at least 128 px"], ["3:2", "64 px"],
+     "Refused: the Job tracker mascots must be about 9:10 to square (this one is 3:2) and at least 128 px "
      "(this one is 64 px). Your current art is unchanged."),
 ]
 
@@ -634,18 +660,19 @@ def test_every_pack_default_can_be_uploaded_as_the_override_of_itself(pack_art, 
 
 
 def test_the_shape_rule_is_not_vacuous_on_the_packs_own_art(pack_art):
-    """Stretch each static default 12 % wider and its own role refuses it; a square is refused for the
-    tracker's done / failed images, whose defaults are taller than wide."""
+    """Stretch each static default 20 % wider than the wider of {square, its own shape}, or squeeze it 20 %
+    narrower than the narrower, and its own role refuses it for its shape and nothing else."""
     for (slot, key), raw in pack_art.items():
         if key == "companion":
             continue
         with Image.open(io.BytesIO(raw)) as im:
-            wide = im.convert("RGBA").resize((round(im.width * 1.12), im.height))
-        buf = io.BytesIO()
-        wide.save(buf, format="PNG")
-        facts, _ = g.role_measure(buf.getvalue())
-        rules = [f["rule"] for f in g.role_spec_failures(g.role_image_spec(slot, key), facts)]
-        assert rules == ["aspect"], (slot, key, rules)
+            rgba, a = im.convert("RGBA"), im.width / im.height
+        for target in (max(1.0, a) * 1.2, min(1.0, a) / 1.2):
+            buf = io.BytesIO()
+            rgba.resize((round(rgba.height * target), rgba.height)).save(buf, format="PNG")
+            facts, _ = g.role_measure(buf.getvalue())
+            rules = [f["rule"] for f in g.role_spec_failures(g.role_image_spec(slot, key), facts)]
+            assert rules == ["aspect"], (slot, key, target, rules)
 
 
 # ---- a WebP's declared canvas is read from its header, before anything opens it ---------------------

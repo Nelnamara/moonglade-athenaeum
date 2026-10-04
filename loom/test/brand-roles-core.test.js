@@ -26,10 +26,10 @@ describe("the spec line (the gold mono line): the effective rule", () => {
     assert.equal(specLine(LOGIN), "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok");
     assert.equal(specLine(SQUARE(128)), "PNG · transparent · about square · ≥ 128 px");
   });
-  test("a shape that is not square is named as the pack's own, about", () => {
-    assert.equal(specLine(DONE), "PNG · transparent · about 9:10 · ≥ 128 px");
-    assert.equal(specLine({ ...DONE, aspect: [324, 365] }), "PNG · transparent · about 8:9 · ≥ 128 px");
-    assert.equal(specLine({ ...DONE, aspect: [402, 356] }), "PNG · transparent · about 9:8 · ≥ 128 px");
+  test("a shape that is not square spans from square to the pack's own, about", () => {
+    assert.equal(specLine(DONE), "PNG · transparent · about 9:10 to square · ≥ 128 px");
+    assert.equal(specLine({ ...DONE, aspect: [324, 365] }), "PNG · transparent · about 8:9 to square · ≥ 128 px");
+    assert.equal(specLine({ ...DONE, aspect: [402, 356] }), "PNG · transparent · about square to 9:8 · ≥ 128 px");
     assert.equal(specLine({ ...SQUARE(64), aspect: [128, 119] }), "PNG · transparent · about square · ≥ 64 px");
   });
   test("the phone's role screen drops 'tall'", () => {
@@ -41,6 +41,21 @@ describe("the rules (the same ones the server runs)", () => {
   test("a file that meets the spec has nothing to fix", () => {
     assert.deepEqual(specFailures(SQUARE(256), facts()), []);
     assert.deepEqual(specFailures(LOGIN, facts({ format: "WEBP", w: 500, h: 490, animated: true })), []);
+  });
+  test("the shape rule spans square to the default's shape, 8 % beyond either edge", () => {
+    for (const [w, h] of [[256, 256], [231, 256], [215, 256], [276, 256]]) {
+      assert.deepEqual(specFailures(DONE, facts({ w, h })), [], w + "x" + h);
+    }
+    for (const [w, h] of [[200, 256], [280, 256]]) {
+      assert.deepEqual(specFailures(DONE, facts({ w, h })).map((f) => f.rule), ["aspect"], w + "x" + h);
+    }
+    const EMPTY = { ...DONE, aspect: [402, 356] };
+    for (const [w, h] of [[256, 256], [289, 256], [300, 256], [236, 256]]) {
+      assert.deepEqual(specFailures(EMPTY, facts({ w, h })), [], w + "x" + h);
+    }
+    for (const [w, h] of [[320, 256], [225, 256]]) {
+      assert.deepEqual(specFailures(EMPTY, facts({ w, h })).map((f) => f.rule), ["aspect"], w + "x" + h);
+    }
   });
   test("the pack's own art passes its own rule, odd shapes and animation included", () => {
     assert.deepEqual(specFailures(LOGIN, facts({ format: "WEBP", w: 488, h: 480, animated: true })), []);
@@ -62,8 +77,8 @@ describe("the rules (the same ones the server runs)", () => {
     assert.deepEqual(specFailures(LOGIN, facts({ format: "WEBP", w: 600, h: 800 })), [
       { rule: "aspect", need: "about square", got: "3:4" },
     ]);
-    assert.deepEqual(specFailures(DONE, facts({ w: 256, h: 256 })), [
-      { rule: "aspect", need: "about 9:10", got: "1:1" },
+    assert.deepEqual(specFailures(DONE, facts({ w: 300, h: 200 })), [
+      { rule: "aspect", need: "about 9:10 to square", got: "3:2" },
     ]);
     assert.deepEqual(specFailures(SQUARE(64), facts({ w: 48, h: 48 })), [
       { rule: "size", need: "at least 64 px", got: "48 px" },
@@ -134,7 +149,7 @@ describe("the refusal says what the server's says", () => {
       "Refused: the Power poses must be PNG (this one is JPEG) and have a transparent background "
       + "(this one is opaque). Your current art is unchanged.");
     assert.equal(refusalText("Job tracker mascots", specFailures({ ...DONE, min_px: 128 }, facts({ w: 96, h: 64 }))),
-      "Refused: the Job tracker mascots must be about 9:10 (this one is 3:2) and at least 128 px "
+      "Refused: the Job tracker mascots must be about 9:10 to square (this one is 3:2) and at least 128 px "
       + "(this one is 64 px). Your current art is unchanged.");
     assert.equal(refusalText("Reward icons", specFailures(SQUARE(64), facts({ format: "WEBP", animated: true }))),
       "Refused: the Reward icons must be PNG (this one is WEBP) and a still picture (this one is animated). "

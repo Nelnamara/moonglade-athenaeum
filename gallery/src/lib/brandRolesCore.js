@@ -8,8 +8,9 @@
    so the editor can tick them live and nothing is uploaded that would be refused (the handoff's
    "checked locally before any upload"). The spec itself is not copied here: each IMAGE's effective
    spec arrives in the Branding payload (`roles[].images[].spec`) -- the role's formats and drawn
-   minimum, with the shape and (where the pack's own art is smaller) the minimum size taken from the
-   pack default that image replaces -- so the two cannot drift. The refusal sentences are pinned
+   minimum, with the shape (square to the pack default's, give or take 8 %) and, where the pack's own
+   art is smaller, the minimum size taken from the pack default that image replaces -- so the two
+   cannot drift. The refusal sentences are pinned
    against the server's in tests/test_branding_roles.py and loom/test/brand-roles-core.test.js alike. */
 
 export const ROLE_REFUSAL_END = "Your current art is unchanged.";
@@ -30,12 +31,15 @@ export function ratioLabel(w, h) {
   return have.toFixed(2) + ":1";
 }
 
-/** An image's shape in words, from the pack default it replaces: "about square" when that default is
-    square to within the tolerance, else "about 9:10". The server says the same (_aspect_words). */
+/** The shape an image may take, in words: "about square" when its pack default is square to within
+    the tolerance, else the span from that default's shape to square ("about 9:10 to square" for a tall
+    default, "about square to 9:8" for a wide one). The server says the same (_aspect_words). */
 export function aspectWords(spec) {
   const [aw, ah] = spec.aspect;
-  if (Math.abs(aw / ah - 1) <= spec.aspect_tolerance) return "about square";
-  return "about " + ratioLabel(aw, ah);
+  const a = aw / ah;
+  if (Math.abs(a - 1) <= spec.aspect_tolerance) return "about square";
+  const label = ratioLabel(aw, ah);
+  return a < 1 ? "about " + label + " to square" : "about square to " + label;
 }
 
 /** "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok" (the gold mono line:
@@ -66,7 +70,10 @@ export function specFailures(spec, facts) {
   }
   const [aw, ah] = spec.aspect;
   const want = aw / ah;
-  if (!(facts.h > 0) || Math.abs(facts.w / facts.h - want) / want > spec.aspect_tolerance) {
+  // anything between square and the default's shape, `aspect_tolerance` beyond either edge
+  const lo = Math.min(1, want) * (1 - spec.aspect_tolerance);
+  const hi = Math.max(1, want) * (1 + spec.aspect_tolerance);
+  if (!(facts.h > 0) || !(facts.w / facts.h >= lo && facts.w / facts.h <= hi)) {
     failed.push({ rule: "aspect", need: aspectWords(spec), got: ratioLabel(facts.w, facts.h) });
   }
   const tall = spec.min_axis === "height";

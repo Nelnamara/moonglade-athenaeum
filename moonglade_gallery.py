@@ -4607,9 +4607,10 @@ BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
 #
 # WHAT AN UPLOAD MUST BE is checked HERE whatever the client said, and it is derived from the
 # art it replaces (role_image_spec): the role's formats and drawn minimum size, plus, per image,
-# `default` -- the pack default's own size (and whether it moves). The shape must be within
-# ROLE_ASPECT_TOLERANCE of that default's, the minimum size is the drawn one unless the default is
-# smaller (then the default's own), and an animation is allowed only where the role says its format
+# `default` -- the pack default's own size (and whether it moves). The shape must lie between square
+# and that default's shape, ROLE_ASPECT_TOLERANCE beyond either (so a tall mascot's slot takes a
+# square picture as well as one shaped like it), the minimum size is the drawn one unless the default
+# is smaller (then the default's own), and an animation is allowed only where the role says its format
 # may (the login companion's default is an animated WebP). Transparency is always required. The
 # stand-in specs drawn first (3:4, square) would have refused the pack's own login companion, the
 # tracker's done / failed / empty and the gift icon; tests/test_branding_roles.py holds that every
@@ -4658,7 +4659,7 @@ BRANDING_SLOTS = BANNER_SLOTS + tuple(ROLE_SLOTS)
 
 # What an upload to a role must clear besides its spec: a hard ceiling on the bytes read and on
 # the pixels' extent (checked from the header, before any pixel is decoded), the shape tolerance
-# (a picture's shape may differ from its pack default's by this much, relative), "transparent"
+# (how far beyond square, or beyond the pack default's shape, a picture's may lie, relative), "transparent"
 # meaning at least 1 % of the pixels are more than half see-through, and the budget for an
 # animation the role allows (its frames are decoded one at a time to prove the file is sound, so
 # the count and the total pixels are capped first).
@@ -5084,9 +5085,10 @@ def _ratio_label(w, h):
 
 def role_image_spec(slot, key):
     """What ONE image's override must be: the role's formats, transparency and drawn minimum, with
-    the SHAPE taken from the pack default it replaces (within ROLE_ASPECT_TOLERANCE) and the minimum
-    size lowered to the default's own where the default is smaller than the drawn minimum (the
-    login companion's pack art is 480 px tall, the drawn minimum 600)."""
+    the SHAPE taken from the pack default it replaces (anything between square and that shape,
+    ROLE_ASPECT_TOLERANCE beyond either: see role_spec_failures) and the minimum size lowered to the
+    default's own where the default is smaller than the drawn minimum (the login companion's pack
+    art is 480 px tall, the drawn minimum 600)."""
     role = ROLE_SLOTS[slot]
     base, d = role["spec"], role["images"][key]["default"]
     own = d["h"] if base["min_axis"] == "height" else min(d["w"], d["h"])
@@ -5097,11 +5099,14 @@ def role_image_spec(slot, key):
 
 
 def _aspect_words(aw, ah, tol):
-    """A default's shape in words for a rule: "about square" when it is square to within the
-    tolerance, else "about 9:10"."""
-    if abs(aw / ah - 1.0) <= tol:
+    """The shape an image may take, in words for a rule: "about square" when its pack default is
+    square to within the tolerance, else the span from that default's shape to square, "about 9:10
+    to square" (a tall default) or "about square to 9:8" (a wide one)."""
+    a = aw / ah
+    if abs(a - 1.0) <= tol:
         return "about square"
-    return "about " + _ratio_label(aw, ah)
+    label = _ratio_label(aw, ah)
+    return "about %s to square" % label if a < 1 else "about square to %s" % label
 
 
 def role_spec_failures(spec, facts):
@@ -5126,7 +5131,9 @@ def role_spec_failures(spec, facts):
     w, h = facts["w"], facts["h"]
     aw, ah = spec["aspect"]
     want, tol = aw / ah, spec["aspect_tolerance"]
-    if h <= 0 or abs(w / h - want) / want > tol:
+    # anything between square and the default's shape, `tol` beyond either edge
+    lo, hi = min(1.0, want) * (1 - tol), max(1.0, want) * (1 + tol)
+    if h <= 0 or not (lo <= w / h <= hi):
         failed.append({"rule": "aspect", "need": _aspect_words(aw, ah, tol), "got": _ratio_label(w, h)})
     tall = spec["min_axis"] == "height"
     have = h if tall else min(w, h)
