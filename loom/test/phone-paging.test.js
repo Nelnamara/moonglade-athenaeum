@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
-  DEFAULT_PAGING, KEY_LONG_PRESS_MS, PAGINGS, PAGING_LABELS, parsePaging,
+  CONTINUOUS_PAGE, CONTINUOUS_PAGE_METERED, DEFAULT_PAGING, KEY_LONG_PRESS_MS, PAGINGS, PAGING_LABELS,
+  PREFETCH_SCREENS, appendUnique, connectionInfo, continuousDone, continuousPageSize, countLabel, endLabel,
+  footerState, nearEnd, nextContinuousPage, parsePaging,
 } from "../../gallery/src/lib/phoneCore.js";
 import {
   PAGING_HINT_KEY, PAGING_KEY, readPaging, readPagingHintSeen, writePaging, writePagingHintSeen,
@@ -109,5 +111,101 @@ describe("U1 the paging choice: where it lives", () => {
       try { text = code(rel); } catch { continue; }
       assert.doesNotMatch(text, /mg_phone_paging/, rel);
     }
+  });
+});
+
+describe("U2 continuous loading: the rules", () => {
+  const wifi = connectionInfo({ type: "wifi" });
+  const cell = connectionInfo({ type: "cellular" });
+  const unknown = connectionInfo(null);
+
+  test("100 a page; 50 only while Data saver acts on a metered connection", () => {
+    assert.equal(CONTINUOUS_PAGE, 100);
+    assert.equal(CONTINUOUS_PAGE_METERED, 50);
+    assert.equal(continuousPageSize(false, cell), 100, "saver off: the metered connection changes nothing");
+    assert.equal(continuousPageSize(true, cell), 50);
+    assert.equal(continuousPageSize(true, wifi), 100, "Always on Wi-Fi is not metered");
+    assert.equal(continuousPageSize(true, unknown), 100, "a browser that cannot tell is not metered");
+    assert.equal(continuousPageSize(true, connectionInfo({ type: "wifi", saveData: true })), 50, "the user's own save-data ask");
+  });
+
+  test("the next page follows what is loaded, whatever size cut it (a prepend or a size change overlaps, never gaps)", () => {
+    assert.equal(nextContinuousPage(0, 100), 1);
+    assert.equal(nextContinuousPage(100, 100), 2);
+    assert.equal(nextContinuousPage(300, 100), 4);
+    assert.equal(nextContinuousPage(105, 100), 2, "five prepended: page 2 starts 5 before the end and overlaps");
+    assert.equal(nextContinuousPage(200, 50), 5, "the size changed to 50: the next 50 start at 200");
+    assert.equal(nextContinuousPage(150, 0), 2, "no size is the default 100");
+  });
+
+  test("an append keeps only what is not already loaded, in order", () => {
+    const a = [{ media_id: "1" }, { media_id: "2" }, { media_id: "3" }];
+    const out = appendUnique(a, [{ media_id: "3" }, { media_id: "4" }, { media_id: "5" }]);
+    assert.deepEqual(out.map((x) => x.media_id), ["1", "2", "3", "4", "5"]);
+    assert.equal(appendUnique(a, [{ media_id: "2" }]), a, "nothing new: the same list, no re-render");
+    assert.deepEqual(appendUnique([], [{ media_id: "9" }]).map((x) => x.media_id), ["9"]);
+  });
+
+  test("the end is everything the filter matches; no total yet is not the end", () => {
+    assert.equal(continuousDone(620, 620), true);
+    assert.equal(continuousDone(625, 620), true, "deleted since: more loaded than the total is still the end");
+    assert.equal(continuousDone(600, 620), false);
+    assert.equal(continuousDone(0, null), false);
+    assert.equal(continuousDone(0, 0), true, "an empty filter is its own end");
+  });
+
+  test("the next page is asked for when the last row is within 1.5 screens of view", () => {
+    assert.equal(PREFETCH_SCREENS, 1.5);
+    assert.equal(nearEnd(2000, 800, 800), true, "1200 px below the view: exactly 1.5 screens");
+    assert.equal(nearEnd(2001, 800, 800), false);
+    assert.equal(nearEnd(500, 800, 800), true, "already in view");
+  });
+
+  test("the header count and the end line, formatted like the pager", () => {
+    assert.equal(countLabel(300, 3240), "300 of 3,240");
+    assert.equal(countLabel(0, null), "");
+    assert.equal(endLabel(3240), "That's all 3,240.");
+  });
+
+  test("the footer says one thing: loading, the peach retry, the end, or nothing", () => {
+    assert.equal(footerState({ busy: true, failed: false, done: false }), "loading");
+    assert.equal(footerState({ busy: false, failed: true, done: false }), "failed");
+    assert.equal(footerState({ busy: false, failed: false, done: true }), "end");
+    assert.equal(footerState({ busy: false, failed: false, done: false }), "idle");
+  });
+});
+
+describe("U2 continuous loading: the wiring", () => {
+  test("useLibrary's append keeps only new pictures and a load can name its page size", () => {
+    const lib = code("hooks/useLibrary.js");
+    assert.match(lib, /setItems\(\(old\) => \(replace \? data\.items : appendUnique\(old, data\.items\)\)\)/);
+    assert.match(lib, /page_size: size \|\| sizeRef\.current \|\| perPage/);
+    // the size is a ref the shell sets, so it never changes load's identity (no refetch on its own)
+    assert.match(lib, /const setPageSize = useCallback\(/);
+    assert.doesNotMatch(lib, /\[applied, media, shelf, perPage, adv, group, [^\]]*size/);
+  });
+
+  test("the phone loads the next page through the owner's own road, one request at a time, no automatic retry", () => {
+    const app = code("components/AppMobile.jsx");
+    assert.match(app, /const loadMore = useCallback\(/);
+    assert.match(app, /if \(moreBusy\.current\) return/);
+    assert.match(app, /nextContinuousPage\(/);
+    assert.match(app, /continuousPageSize\(/);
+    // the background refresh after a generation never reflows the stacked list
+    assert.match(app, /if \(continuousRef\.current\) return;/);
+    // a retry is the same single request
+    assert.doesNotMatch(app, /setTimeout\([^)]*loadMore/);
+  });
+
+  test("Continuous replaces the pager with the footer and puts the count before the layout keys", () => {
+    const g = code("components/GalleryMobile.jsx");
+    // no pager in Continuous: the pager reads a page count of 1 there
+    assert.match(g, /const pages = continuous \? 1 : pageCount;/);
+    assert.match(g, /\{!similar && !loading && pages > 1 && \(/);
+    assert.match(g, /className="glm-cfoot"/);
+    assert.match(g, /className="glm-pgcount"/);
+    assert.ok(g.indexOf('className="glm-pgcount"') < g.indexOf('className="glm-layout"'), "the count sits before the keys");
+    // the jump steps aside for the footer as it does for the pager
+    assert.match(g, /host\.querySelector\("\.glm-pager, \.glm-cfoot"\)/);
   });
 });

@@ -13,8 +13,10 @@ import { apiGet, apiPost, fetchAccount, fetchCollections, fetchCollectionDetail,
 import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
 import { invalidate } from "../hooks/swrCache.js";
-import useDataSaver from "../hooks/usePhonePrefs.js";
-import { isFrontPage, makeMarker, pageOffset, syncOutcomeText } from "../lib/phoneCore.js";
+import useDataSaver, { usePaging } from "../hooks/usePhonePrefs.js";
+import {
+  continuousDone, continuousPageSize, isFrontPage, makeMarker, nextContinuousPage, pageOffset, syncOutcomeText,
+} from "../lib/phoneCore.js";
 import { readMarker, writeMarker } from "../lib/phonePrefs.js";
 import { syncNow } from "../lib/syncNow.js";
 import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
@@ -398,6 +400,11 @@ const SCREEN_TITLES = {
   health: "Collection Health",
 };
 
+/* Session U: in Continuous the viewer walks the whole stacked list. Its index is already the picture's
+   place in the walk (the list runs from the top), so nothing comes before it and there is no page to
+   step to -- these override the Pages-mode props the Lightbox mount spells out. */
+const LIGHTBOX_CONTINUOUS = { page: 1, pages: 1, offset: 0 };
+
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
   /* WHAT "UPDATE" MEANS ON THE PHONE (owner ruling 2026-09-07, "phone gets update"). The
@@ -500,7 +507,15 @@ export default function AppMobile({ boot }) {
      ordinary reload, the address is ignored exactly as it always was. */
   const [loomReturn] = useState(() =>
     cameFromLoom(document.referrer, window.location.origin));
+  /* SESSION U (2026-10-03), phone paging. Pages is the phone as shipped; Continuous stacks pages as you
+     scroll (GalleryMobile's footer asks for the next one; loadMore below fetches it). The saver is read
+     here, before the library, because a Continuous page is 50 instead of 100 while it acts on a metered
+     connection -- the size the library asks for whenever no call names its own. */
+  const saver = useDataSaver();
+  const [paging] = usePaging();
+  const continuous = paging === "continuous";
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
+  lib.setPageSize(continuous ? continuousPageSize(saver.active, saver.info) : 0);
   /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
      shell uses. It patches the loaded page in place from the server's answer and says how many
      pictures REALLY changed; Undo puts each one back to its own previous values. Local catalog
@@ -515,9 +530,10 @@ export default function AppMobile({ boot }) {
      for what counts as a background read; each surface that draws differently under it (the grid, the
      Lightbox, the record) asks the same hook itself. `videoRef` is the video drawer's own handle, held
      here so Send to Video and a video's Remix can prefill it (gen/phoneRemix.js) -- it sends nothing. */
-  const saver = useDataSaver();
   const saverRef = useRef(false);
   saverRef.current = saver.active;
+  const saverInfoRef = useRef(saver.info);
+  saverInfoRef.current = saver.info;
   const videoRef = useRef(null);
   const [videoNote, setVideoNote] = useState("");
   useEffect(() => { if (cmode !== "video") setVideoNote(""); }, [cmode]);
@@ -1005,6 +1021,46 @@ export default function AppMobile({ boot }) {
     if (msg && window.Toast) window.Toast.show({ title: "Sync", msg });
     return out;
   }, [userLoad]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* U2: Continuous's next page -- the owner's own road (he scrolled to it), one request at a time, never
+     retried on its own. The page asked for is the one that starts at or just before the end of what is
+     loaded (phoneCore.nextContinuousPage), at the page size of the moment; the append keeps only what is
+     new (useLibrary). A failure leaves the footer's peach Retry, and Retry is this same single request.
+     The list stays where it is: no scroll moves, nothing reflows. */
+  const [more, setMore] = useState({ busy: false, failed: false });
+  const moreBusy = useRef(false);
+  const libNow = useRef(lib);
+  libNow.current = lib;
+  const loadMore = useCallback(async () => {
+    if (moreBusy.current) return undefined;
+    const l = libNow.current;
+    if (l.loading || continuousDone(l.items.length, l.total)) return undefined;
+    moreBusy.current = true;
+    setMore({ busy: true, failed: false });
+    const size = continuousPageSize(saverRef.current, saverInfoRef.current);
+    try {
+      const d = await l.load(nextContinuousPage(l.items.length, size), false, size);
+      setMore({ busy: false, failed: false });
+      return d;
+    } catch {
+      setMore({ busy: false, failed: true });
+      return undefined;
+    } finally {
+      moreBusy.current = false;
+    }
+  }, []);
+  const continuousRef = useRef(continuous);
+  continuousRef.current = continuous;
+  /* A switch between Pages and Continuous starts the library over from page 1 at the top: a stacked list
+     always runs from the top of the walk, and a page picked out of the middle is not one. The footer's
+     retry line belongs to the list it failed on, so a new list (a switch, a filter) clears it. */
+  const pagingSeen = useRef(paging);
+  useEffect(() => {
+    if (pagingSeen.current === paging) return;
+    pagingSeen.current = paging;
+    userLoad(1, true);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [paging]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setMore((m) => (m.busy || m.failed ? { busy: false, failed: false } : m)); }, [lib.load, paging]);
   useEffect(() => {
     genLoadRef.current = lib.load;
     genSimilarRef.current = similarFor;
@@ -1028,6 +1084,9 @@ export default function AppMobile({ boot }) {
          waits while the saver acts. The new picture is one pull away (a pull is explicit and never
          asks). The credits chip and the achievement check above are tiny and still run. */
       if (saverRef.current) return;
+      /* Continuous (Session U): a stacked list never reflows under the owner except by a pull he made
+         (U3a, "the library stands still"); a reload of page 1 would also throw away every page loaded. */
+      if (continuousRef.current) return;
       // ...and not under the ◈ token even at the perch: the library grid is not rendered
       // there at all, and the ✕ has to hand back exactly what was underneath.
       if (genSimilarRef.current) return;
@@ -1320,6 +1379,7 @@ export default function AppMobile({ boot }) {
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar}
             marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
+            continuous={continuous} onLoadMore={loadMore} more={more}
             curation={{
               smart, curate, saveSmart, composeView,
               // Session P (P6): the Manual sort's editor, on the Collections screen
@@ -1470,6 +1530,7 @@ export default function AppMobile({ boot }) {
           onEnterContest={openContestFor}
           member={account ? account.is_member : null}
           onSendToVideo={sendPictureToVideo}
+          {...(continuous ? LIGHTBOX_CONTINUOUS : null)}
         />
       )}
 

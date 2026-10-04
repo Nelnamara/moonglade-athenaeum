@@ -35,6 +35,67 @@ export function parsePaging(v) {
   return v === "continuous" ? "continuous" : "pages";
 }
 
+/* Continuous loading (U2a). The next 100 are asked for when the last row comes within 1.5 screens of
+   view, one request at a time; while Data saver acts on a metered connection a page is 50 instead. */
+export const CONTINUOUS_PAGE = 100;
+export const CONTINUOUS_PAGE_METERED = 50;
+export const PREFETCH_SCREENS = 1.5;
+
+export function continuousPageSize(saverIsActive, info) {
+  const i = info || connectionInfo(null);
+  return saverIsActive && i.known && i.metered ? CONTINUOUS_PAGE_METERED : CONTINUOUS_PAGE;
+}
+
+/* The stacked list is always a run from the top of the filtered walk, so the next page is the one that
+   starts at or just before its end -- whatever size cut the pages before it. After a pull has prepended
+   K new pictures, or the size changed from 100 to 50, the page asked for overlaps what is loaded by
+   fewer than one page; appendUnique drops the overlap. It can never leave a gap. */
+export function nextContinuousPage(loaded, size) {
+  const s = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number(size)) || CONTINUOUS_PAGE));
+  return Math.floor(Math.max(0, Number(loaded) || 0) / s) + 1;
+}
+
+/* Append the pictures not already loaded, in order. Nothing new answers the SAME list (no re-render). */
+export function appendUnique(old, fresh) {
+  const list = old || [];
+  const have = new Set(list.map((it) => it.media_id));
+  const add = (fresh || []).filter((it) => it && !have.has(it.media_id) && (have.add(it.media_id), true));
+  return add.length ? list.concat(add) : list;
+}
+
+/* The end: everything the filter matches is loaded. No total yet is not the end. */
+export function continuousDone(loaded, total) {
+  if (total == null || total === "") return false;
+  const t = Number(total);
+  return Number.isFinite(t) && Number(loaded) >= t;
+}
+
+/* Is the last row within 1.5 screens of the bottom of the view? `footTop` is the footer's top (the
+   last row's foot), `viewBottom` the scroller's visible bottom, `viewHeight` its height. */
+export function nearEnd(footTop, viewBottom, viewHeight) {
+  const vh = Number(viewHeight) > 0 ? Number(viewHeight) : 560;
+  return Number(footTop) - Number(viewBottom) <= PREFETCH_SCREENS * vh;
+}
+
+/* "300 of 3,240" -- loaded of the filtered total, in the header (mono). Nothing until a total is known. */
+export function countLabel(loaded, total) {
+  if (total == null || total === "" || !Number.isFinite(Number(total))) return "";
+  return Number(loaded || 0).toLocaleString() + " of " + Number(total).toLocaleString();
+}
+
+export function endLabel(total) {
+  return "That's all " + Number(total || 0).toLocaleString() + ".";
+}
+
+/* The footer says one thing at a time: the spinner line while a page is in flight, the peach retry
+   after a failed one (until Retry is tapped -- there is no automatic retry), the end line, or nothing. */
+export function footerState({ busy, failed, done }) {
+  if (busy) return "loading";
+  if (failed) return "failed";
+  if (done) return "end";
+  return "idle";
+}
+
 /* ---------------------------------------------------------------------------------------------
    Data saver (Q7)
    --------------------------------------------------------------------------------------------- */

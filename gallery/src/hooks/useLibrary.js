@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchLibrary } from "../api.js";
+import { appendUnique } from "../lib/phoneCore.js";
 
 /* All of App.jsx's library browse/search/filter/sort/pagination state and logic,
    mechanically lifted out (2026-08-02) into its own hook -- media/shelf/perPage/
@@ -102,7 +103,15 @@ export function pruneSelected(setSelected, items) {
 
 /* initialPage: the page the FIRST load lands on (App reads it from ?page=, via
    gen/urlState.js -- #31 "Where the Refit Broke" #7). Every later filter change
-   still restarts from page 1, exactly as before. */
+   still restarts from page 1, exactly as before.
+
+   setPageSize(n) (Session U, the phone's Continuous paging): the size every load asks
+   for unless the call names its own, in place of the Per page setting; 0 hands it back
+   to Per page. It is a ref, so setting it never changes load's identity and never
+   refetches on its own -- the phone decides when a page is asked for. The desktop never
+   calls it. load(p, replace, size): `size` names this one request's page size. An
+   append (replace false) keeps only the pictures not already loaded, so a page that
+   overlaps the end of the list adds just its new tail. */
 export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   // filters
   const [media, setMedia] = useState("");
@@ -121,15 +130,17 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const reqSeq = useRef(0);
+  const sizeRef = useRef(0);
+  const setPageSize = useCallback((n) => { sizeRef.current = Math.max(0, Math.floor(Number(n)) || 0); }, []);
 
   const load = useCallback(
-    async (p, replace) => {
+    async (p, replace, size) => {
       const seq = ++reqSeq.current;
       setLoading(true);
       try {
         const data = await fetchLibrary({
           q: applied, media, collection: shelf,
-          page: p, page_size: perPage,
+          page: p, page_size: size || sizeRef.current || perPage,
           sort: adv.sort !== "newest" ? adv.sort : "",
           rating_min: adv.ratingMin || "",
           model: adv.model, lora: adv.lora,
@@ -147,7 +158,7 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
           group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
         });
         if (seq !== reqSeq.current) return; // a newer request superseded this one
-        setItems((old) => (replace ? data.items : old.concat(data.items)));
+        setItems((old) => (replace ? data.items : appendUnique(old, data.items)));
         setTotal(data.total);
         setPage(data.page);
         setPages(data.pages);
@@ -215,7 +226,7 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     media, setMedia, shelf, setShelf, perPage, setPerPage,
     query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
     items, setItems, total, page, pages, loading,
-    load, applyAdvanced, advCount, submitQuery, resetAll,
+    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize,
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
   };
 }

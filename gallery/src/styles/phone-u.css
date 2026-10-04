@@ -35,3 +35,29 @@
   padding: 8px 4px; min-height: 36px; border-radius: 7px; cursor: pointer; color: var(--subtext);
   background: none; border: 1px solid var(--surface1); }
 .ctm-paging-modes button.on { background: var(--lavender); color: var(--base); }
+
+/* ---- U2 the header count ("300 of 3,240", mono 9.5 px before the layout keys) and the footer ------- */
+.glm-pgcount { margin-left: auto; flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+/* Continuous's end of the pill row: the count, the layout keys (glyphs only, as the page draws them) and
+   Sort as one group that wraps under the pills when the phone is too narrow for one line. Pages keeps the
+   row as shipped: the wrapper is display: contents there. */
+.glm-bar2-end { display: contents; }
+.glm-bar2.cont { flex-wrap: wrap; row-gap: 6px; overflow-x: visible; }
+.glm-bar2-end.cont { display: flex; align-items: center; gap: inherit; margin-left: auto; flex: none; }
+.glm-bar2-end.cont .glm-layout button .lbl { display: none; }
+.glm-bar2-end.cont .glm-layout button { min-width: 32px; padding-left: 7px; padding-right: 7px; }
+.glm-cfoot { padding: 4px 11px 20px; min-height: 24px; }
+.glm-cfoot-line { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 24px; }
+.glm-cfoot-dim { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px;
+  color: var(--overlay0); white-space: nowrap; }
+@keyframes glmCfootSpin { to { transform: rotate(360deg); } }
+.glm-cfoot-spin { flex: none; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%;
+  border: 2px solid var(--surface1); border-top-color: var(--lavender); animation: glmCfootSpin .9s linear infinite; }
+/* The page draws the retry as one peach line; the whole line is the button, 44 px tall to hit. */
+.glm-cfoot-retry { display: block; width: 100%; min-height: 44px; padding: 0; text-align: left; font: inherit;
+  font-size: 10.5px; line-height: 1.5; color: var(--peach); background: none; border: 0; cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) {
+  .glm-cfoot-spin { animation: none; }
+}

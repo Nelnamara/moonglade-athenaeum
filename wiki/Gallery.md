@@ -404,6 +404,15 @@ the phone as before, with **‹ Prev · Next ›**. Both are remembered **on tha
 choice is on the **Control** screen as **Library paging**. Until you first long-press, a small dot under
 the keys shows the gesture is there.
 
+**Continuous** loads the next 100 pictures by itself as you near the end of what is loaded, and stacks
+them under the ones you have. There is no pager: the pill row shows how many are loaded of everything
+your search and filters match (*300 of 3,240*), and at the foot of the list a small spinner says
+*loading…* while the next lot is on its way. If a page fails to load, the foot says **Couldn't load more.
+Retry** in peach; nothing retries on its own, and tapping **Retry** asks once. At the very end it says
+*That's all 3,240.* A new search or filter starts the count over. With **Data saver** on and a metered
+connection it loads 50 at a time instead of 100. On a narrow phone the count, the ▦ ▭ keys and **Sort** sit
+together on a second line under the media pills, so nothing has to scroll sideways.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

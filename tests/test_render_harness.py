@@ -8144,3 +8144,126 @@ def test_the_phone_layout_keys_long_press_opens_layout_and_paging_and_a_tap_stil
         assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Pages"
     finally:
         ctx.close()
+
+
+_U_CONTINUOUS_JS = "try { localStorage.setItem('mg_phone_paging', 'continuous'); } catch (e) {}"
+
+
+def _u_libs(seen):
+    """The library reads the page made, as (page, page_size) pairs in order."""
+    out = []
+    for (m, u) in seen:
+        if m == "GET" and _LIBRARY_READ.search(u):
+            pg = re.search(r"[?&]page=(\d+)", u)
+            sz = re.search(r"[?&]page_size=(\d+)", u)
+            out.append((int(pg.group(1)) if pg else None, int(sz.group(1)) if sz else None))
+    return out
+
+
+def _u_count(page):
+    return page.evaluate("() => (document.querySelector('.glm-pgcount') || {textContent: ''}).textContent")
+
+
+def _u_to_end(page):
+    page.evaluate("(() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollHeight; })()")
+
+
+def test_continuous_loads_the_next_page_near_the_end_counts_in_the_header_and_ends_quietly(
+        phone_u_server, render_browser, monkeypatch):
+    """U2a. Continuous at 390 px: "N of M" (mono 9.5 px) before the layout keys and no pager. The next 100
+    are asked for as the end comes within 1.5 screens, one request at a time, with the spinner line while
+    one is in flight. A failed page leaves the peach "Couldn't load more. Retry" and nothing retries by
+    itself; Retry is one request. At the end: "That's all 620." and no more requests."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        del seen[:]                       # the sign-in's own landing is not this document's
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        assert page.locator(".glm-pager").count() == 0, "Continuous has no pager"
+        assert _u_libs(seen) == [(1, 100)], _u_libs(seen)
+        geo = page.evaluate("""() => { const c = document.querySelector('.glm-pgcount'), k = document.querySelector('.glm-layout');
+            const cs = getComputedStyle(c);
+            return {before: c.getBoundingClientRect().right <= k.getBoundingClientRect().left, size: cs.fontSize,
+                    mono: /mono/i.test(cs.fontFamily)}; }""")
+        assert geo == {"before": True, "size": "9.5px", "mono": True}, geo
+
+        # in flight: the spinner line, and one request however much the list is scrolled
+        held = []
+        page.route(_LIBRARY_READ, lambda r: held.append(r))
+        _u_to_end(page)
+        page.wait_for_selector(".glm-cfoot .glm-cfoot-spin")
+        assert page.locator(".glm-cfoot").inner_text().strip() == "loading…"
+        for _ in range(3):
+            page.evaluate("document.querySelector('.glm-body').scrollTop -= 40")
+            _u_to_end(page)
+            page.wait_for_timeout(120)
+        assert len(held) == 1, "one request at a time: %d" % len(held)
+        page.unroute(_LIBRARY_READ)
+        held[0].continue_()
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '200 of 620'")
+        assert _u_libs(seen)[-1] == (2, 100), _u_libs(seen)
+        assert page.locator(".glm-tile").count() >= 200, "the second page is stacked under the first"
+
+        # a failure: the peach line, and no automatic retry
+        fails = []
+        page.route(_LIBRARY_READ, lambda r: (fails.append(r.request.url),
+                                             _q_json(r, {"error": "the harness says no"}, status=500))[1])
+        _u_to_end(page)
+        page.wait_for_selector(".glm-cfoot-retry")
+        line = page.evaluate("""() => { const b = document.querySelector('.glm-cfoot-retry');
+            return {t: b.textContent.trim(), c: getComputedStyle(b).color, h: b.getBoundingClientRect().height,
+                    peach: getComputedStyle(document.documentElement).getPropertyValue('--peach').trim()}; }""")
+        assert line["t"] == "Couldn't load more. Retry", line
+        assert line["h"] >= 44, line
+        for _ in range(3):
+            page.evaluate("document.querySelector('.glm-body').scrollTop -= 60")
+            _u_to_end(page)
+            page.wait_for_timeout(150)
+        page.wait_for_timeout(1200)
+        assert len(fails) == 1, "no automatic retry: %r" % fails
+        page.unroute(_LIBRARY_READ)
+        before = len(_u_libs(seen))
+        page.click(".glm-cfoot-retry")
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '300 of 620'")
+        assert len(_u_libs(seen)) == before + 1 and _u_libs(seen)[-1] == (3, 100), _u_libs(seen)
+
+        # to the end
+        for _ in range(12):
+            if _u_count(page) == "620 of 620":
+                break
+            _u_to_end(page)
+            page.wait_for_timeout(300)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '620 of 620'")
+        page.wait_for_selector(".glm-cfoot-dim:has-text(\"That's all 620.\")")
+        n = len(_u_libs(seen))
+        _u_to_end(page)
+        page.wait_for_timeout(600)
+        assert len(_u_libs(seen)) == n, "nothing is asked for after the end"
+    finally:
+        ctx.close()
+
+
+def test_continuous_pages_are_50_under_data_saver_on_a_metered_connection_and_a_switch_starts_at_the_top(
+        phone_u_server, render_browser, monkeypatch):
+    """U2a's Data saver line: on a metered connection (Auto, cellular) Continuous asks for 50 a page. And a
+    switch from Pages (on page 2) to Continuous starts the stacked list over from page 1 at the top."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, connection={"type": "cellular"})
+    try:
+        _q_open(page)
+        page.wait_for_selector(".glm-pager")
+        page.click(".glm-pager .glm-metal:has-text('Next')")
+        page.wait_for_function("() => /Page 2 of/.test((document.querySelector('.glm-pager-info') || {}).textContent || '')")
+        _u_long_press(page, ".glm-layout button[aria-label=Grid]")
+        page.wait_for_selector(".glm-pgsheet")
+        page.click(".glm-pgrow[aria-label=Paging] button:has-text('Continuous')")
+        page.mouse.click(195, 60)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '50 of 620'")
+        assert _u_libs(seen)[-1] == (1, 50), _u_libs(seen)
+        assert page.evaluate("document.querySelector('.glm-body').scrollTop") == 0
+        top = page.evaluate("document.querySelector('.glm-tile').getAttribute('data-mid')")
+        assert top == _u_mid(0), "the stacked list starts at the newest picture"
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '100 of 620'")
+        assert _u_libs(seen)[-1] == (2, 50), _u_libs(seen)
+    finally:
+        ctx.close()

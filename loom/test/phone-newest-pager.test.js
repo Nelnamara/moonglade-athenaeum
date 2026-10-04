@@ -38,6 +38,7 @@ describe("the gallery asks both questions", () => {
   test("the jump shows after a screen of scrolling AND only while the pager row is not on screen", () => {
     const g = src("components/GalleryMobile.jsx");
     assert.match(g, /showNewest\(host\.scrollTop, host\.clientHeight\)\s*&&\s*!pagerInView\(/);
-    assert.match(g, /querySelector\("\.glm-pager"\)/);
+    // the pager row, or in Continuous (Session U) the footer that takes its place at the end of the list
+    assert.match(g, /querySelector\("\.glm-pager, \.glm-cfoot"\)/);
   });
 });

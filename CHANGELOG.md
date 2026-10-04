@@ -18,6 +18,7 @@ git tags. Full prose notes for tagged versions live on
 
 ### Phone paging and the Home Screen nudge
 - **On the phone, a long-press on ▦ or ▭ opens a Layout and Paging sheet.** Layout is Grid or Feed, as the keys already were; Paging is **Pages** (the default, ‹ Prev · Next › as before) or **Continuous**. A tap on a key still only switches the layout. The choice is kept on that phone, and the Control screen has the same **Library paging** row beside Data saver. A small dot under the keys shows the gesture until you first use it. (2026-10-03)
+- **Continuous paging on the phone loads as you scroll.** The next 100 pictures load by themselves as you near the end and stack under the ones you have; the pill row shows "300 of 3,240" instead of a pager. The foot of the list shows a small spinner while a page loads, "Couldn't load more. Retry" if one fails (it never retries by itself; Retry asks once), and "That's all 3,240." at the end. Under Data saver on a metered connection it loads 50 at a time. A finished generation does not reload the list under you; a pull does. (2026-10-03)
 
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
