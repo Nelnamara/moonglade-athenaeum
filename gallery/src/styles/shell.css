@@ -501,6 +501,17 @@
 .mgx-tipcard i { flex: none; font-style: normal; font-size: 9px; color: var(--overlay0); }
 .mgx-tipfoot { font-size: 9px; color: var(--overlay0); margin-top: 5px;
   padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, .06); }
+/* Expiring free cards (Session Y, Y1c + Y2a; Inbox and Event Handoff §8). The CARDS half of the
+   chip is wrapped so it can carry a 2 px INSET peach underline at the pill's inner bottom edge
+   (bottom: -6px is the chip's own 6px vertical padding). Peach, never ruby; free cards are not
+   billing, so while the tooltip carries the expiry lines its border is lavender, not gold. */
+.mgx-credcards { position: relative; display: flex; align-items: center; gap: 9px; }
+.mgx-cred.expiring .mgx-credcards::after { content: ""; position: absolute; left: -4px; right: -6px;
+  bottom: -6px; height: 2px; border-radius: 2px; background: var(--peach); pointer-events: none; }
+.mgx-cred.expiring .mgx-credtip { border-color: var(--lavender); }
+.mgx-tipexpiry { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px;
+  padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.mgx-tipexp { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
 
 /* claim pill -- classic's own #acct-claim (Acct.claim() in moonglade_gallery.py),
    ported verbatim: hidden until claim_credits > 0, instant claim + toast on

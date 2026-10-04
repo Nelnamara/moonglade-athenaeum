@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Inbox, gifts and the current event
+- **Free cards about to expire say so.** When a free card you hold expires within three days, the credits chip's CARDS half gets a thin peach underline and its hover lists them first, one line per kind ("5 Tsubaki.3 expire Oct 6 · in 3 days"). (#69) (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

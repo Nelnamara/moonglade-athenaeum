@@ -81,7 +81,15 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   moved, and the page you are reading stays exactly where it is.
 - **Followers and following** sit beside the credits figure in the header, and again in the
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
-  never follows, unfollows, likes or comments on your behalf.
+  never follows, unfollows or likes on your behalf, and it comments only when you write a
+  reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
+- **Free cards about to expire.** When any free card you hold expires within three days, the
+  **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
+  them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
+  *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
+  the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
+  The dates come from the same card summary the chip already reads. On a phone, where there is
+  no hover, the **Menu**'s **Gift box** row shows the soonest one.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
 - **Health** — the [collection health](Health) dashboard, with the storage bars.

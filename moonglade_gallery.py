@@ -19135,7 +19135,10 @@ def create_app(out_dir: Path):
                 # to "" (not None) so the JS `k.category ? ... : ""` check always compares a
                 # string. (Carried by hand from the card-coupon-ledger branch, 2026-08-07.)
                 cards_by.append({"name": k.get("name"), "count": n, "expires": exp,
-                                 "category": k.get("category") or ""})
+                                 "category": k.get("category") or "",
+                                 # Session Y (#69): each expiry date and its count, for the
+                                 # chip's peach underline and "N <kind> expire <date>" lines.
+                                 "expiry_counts": k.get("expiry_counts") or []})
                 if exp and n:
                     expiries.append(exp)
             card_expiry = min(expiries) if expiries else None
