@@ -1,5 +1,5 @@
-"""The Moonglade asset container -- a custom packed binary format (.dat), the app's
-own MPQ.
+"""The Moonglade asset container -- a custom packed binary format, the app's own MPQ. The
+shipped one is the art pack, `moonglade.mgpack` (moonglade_gallery._container_path()).
 
 WHAT THIS IS. One opaque file carrying the app's default identity: every branding
 asset (marks, banners, mascots, badges, rewards) plus reserved payload slots for
@@ -42,7 +42,7 @@ asset at a time, as "absent". The four TOC keys above close that:
     schema          int, this TOC's own layout version. A reader accepts schema <=
                     SUPPORTED_SCHEMA and refuses anything newer. ABSENT means schema 0 --
                     a v2 container built before the stamp existed, which still opens
-                    (the shipped moonglade.dat is one) and simply carries no stamp.
+                    (the early shipped packs are) and simply carries no stamp.
     content_sha256  sha256 over the per-entry ORIGINAL hashes, in TOC order, section by
                     section (see _content_digest). It fixes the whole content set --
                     names and all -- without reading one blob, so open_container can
@@ -231,7 +231,7 @@ def write_container(out_path, assets, payloads=None, builder="", built_at=""):
 class Container:
     """Read handle over one container file. The TOC loads once; each get() is a
     seek + read + decode + checksum of just that blob. Holds no open fd between calls,
-    so the .dat can be atomically replaced (the downloader's swap) without Windows
+    so the pack can be atomically replaced (the downloader's swap) without Windows
     file-locking fights."""
 
     def __init__(self, path, toc):
@@ -289,8 +289,8 @@ class Container:
         return sorted(self._toc.get("payloads", {}))
 
     def schema(self):
-        """This container's TOC layout version. 0 for a pre-stamp v2 file (the shipped
-        moonglade.dat is one) -- open_container has already refused anything newer than
+        """This container's TOC layout version. 0 for a pre-stamp v2 file (the early
+        shipped packs are) -- open_container has already refused anything newer than
         SUPPORTED_SCHEMA, so this is only ever 0..SUPPORTED_SCHEMA here."""
         s = self._toc.get("schema", 0)
         return s if isinstance(s, int) and not isinstance(s, bool) else 0
@@ -315,7 +315,7 @@ def open_container(path):
     `content_sha256` that does not match the entries actually in the TOC, is a container
     this reader will not vouch for and answers None. Neither check reads a blob. A TOC with
     no `schema` key is schema 0 -- a v2 file built before the stamp existed, including the
-    shipped moonglade.dat -- and opens exactly as it always did."""
+    early shipped packs -- and opens exactly as it always did."""
     path = Path(path)
     try:
         with open(path, "rb") as fh:

@@ -63,7 +63,7 @@ def _client(tmp_path, poke_lines=LINES, **seed_kw):
     """A logged-in client on an install whose sealed pack is the synthetic one."""
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}])
-    sf.seed(tmp_path / "moonglade.dat", poke_lines=poke_lines, **seed_kw)
+    sf.seed(g._container_path(), poke_lines=poke_lines, **seed_kw)
     return login_client(tmp_path)
 
 

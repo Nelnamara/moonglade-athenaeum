@@ -60,7 +60,7 @@ def _seed(rel, data=b"\x89PNG fake"):
 
 
 def _build_box(assets):
-    """(Re)build the isolated install's moonglade.dat and drop the read cache
+    """(Re)build the isolated install's art pack and drop the read cache
     so the new content is seen immediately (the cache keys on mtime, which can
     collide with the conftest seed's within the filesystem's resolution)."""
     mc.write_container(g._container_path(), assets, {})
@@ -348,7 +348,7 @@ def test_migration_moves_role_dirs_and_top_level_files(tmp_path, monkeypatch):
     # unrecognized stays exactly where it was; nothing was deleted anywhere
     assert (old / "README.txt").read_bytes() == b"old breadcrumb"
     all_files = [p for p in tmp_path.rglob("*") if p.is_file()
-                 and p.name != "moonglade.dat"]     # the conftest roster seed
+                 and p != g._container_path()]     # the conftest roster seed
     assert sorted(p.read_bytes() for p in all_files) == sorted(seeds.values())
     # emptied role dirs are swept; the old root survives (README kept it)
     assert not (old / "banner_main").exists()

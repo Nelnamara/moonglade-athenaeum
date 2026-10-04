@@ -2,7 +2,7 @@
 manifest writer.
 
 The flagged gap (docs/DECISIONS.md, "P1 test-suite audit", 2026-08-11): the tool
-had ZERO test coverage even though it produces the shipped moonglade.dat and the
+had ZERO test coverage even though it produces the shipped art pack and the
 committed moonglade_manifest.json. Covered here: gather()'s _thumbs exclusion, the
 happy-path build (container reads back byte-for-byte + manifest keyed to the whole
 file + the achievements payload), the version-bump and url-carry-forward rules,
@@ -15,7 +15,7 @@ bytes, so it fails closed without a --url exactly as any other byte change does.
 
 The conftest's autouse _isolated_branding + _isolated_asset_manifest fixtures point
 branding_root() AND manifest_path() at each test's tmp_path, so main() -- whose
-default output is branding_root().parent/moonglade.dat and whose manifest goes
+default output is _container_path() (moonglade.mgpack) and whose manifest goes
 through manifest_path() -- can never touch the developer's real art or the committed
 manifest. That the manifest resolver is isolated is what makes it safe to run the
 real main() here at all."""
@@ -78,7 +78,7 @@ def _run(monkeypatch, *argv):
 
 
 def _out_path():
-    return g.branding_root().parent / "moonglade.dat"
+    return g._container_path()          # the builder's default IS where the app reads
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +138,7 @@ def test_changed_bytes_without_url_fails_closed(monkeypatch):
     (new sha256) but no --url is given, the prior manifest's URL still points at the OLD
     file -- a fresh install would download bytes that fail the new checksum and end up
     undressed. The builder must refuse rather than write that impossible manifest."""
-    ma.write_manifest("3", "deadbeef" * 8, 123, ["https://old.example/moonglade.dat"])
+    ma.write_manifest("3", "deadbeef" * 8, 123, ["https://old.example/moonglade.mgpack"])
     _seed_branding({"banner.png": PNG_1PX})
     with pytest.raises(SystemExit):
         _run(monkeypatch)                             # new bytes, no --url -> refuse
@@ -158,11 +158,11 @@ def test_version_bumps_and_urls_carry_forward_on_identical_bytes(monkeypatch):
     second -- see the next test, which asserts the unpinned rebuild fails closed."""
     _seed_branding({"banner.png": PNG_1PX})
     pin = ["--built-at", "2026-09-07T12:00:00Z"]
-    _run(monkeypatch, "--url", "https://old.example/moonglade.dat", *pin)  # url + real sha
+    _run(monkeypatch, "--url", "https://old.example/moonglade.mgpack", *pin)  # url + real sha
     v1 = ma.read_manifest()
     _run(monkeypatch, *pin)                           # rebuild identical bytes, no --url
     man = ma.read_manifest()
-    assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward (same bytes)
+    assert man["urls"] == ["https://old.example/moonglade.mgpack"]    # carried forward (same bytes)
     assert man["sha256"] == v1["sha256"]                          # identical
     assert int(man["version"]) == int(v1["version"]) + 1          # still bumps
 
@@ -297,7 +297,7 @@ def test_an_unpinned_rebuild_is_new_bytes_and_fails_closed_without_a_url(monkeyp
     release-integrity rule then does exactly what it should -- the sha moved, so the prior
     URL no longer serves these bytes, so the manifest is not written."""
     _seed_branding({"banner.png": PNG_1PX})
-    _run(monkeypatch, "--url", "https://old.example/moonglade.dat",
+    _run(monkeypatch, "--url", "https://old.example/moonglade.mgpack",
          "--built-at", "2026-09-07T12:00:00Z")
     first = ma.read_manifest()
 

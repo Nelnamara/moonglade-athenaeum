@@ -252,7 +252,7 @@ def render_server(tmp_path_factory):
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
     checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the coded tree
     `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
-    `moonglade.dat`, land under this fixture's own root). The same MonkeyPatch carries the
+    `moonglade.mgpack`, land under this fixture's own root). The same MonkeyPatch carries the
     clock pin -- `pin_daytime_clock`, below -- so the state this install reports is the
     state it would report at any hour.
 
@@ -293,7 +293,7 @@ def render_server(tmp_path_factory):
     # ...and before the server can answer a single request: the clock this install reads,
     # pinned to a fixed daytime weekday instant (tests/conftest.py::pin_daytime_clock).
     pin_daytime_clock(mp)
-    seed_sealed_container(root / "moonglade.dat")
+    seed_sealed_container(_gallery._container_path())
 
     save_catalog(root / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {
@@ -1243,7 +1243,7 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
     # The tab is achievement-gated (brandingUnlocked = the feat carrying unlocks: "branding_tab"; the
     # harness seeds branding_custom_file to earn it). Since bundle-v2 the roster is
-    # SEALED in moonglade.dat, so that gate can only resolve when the private donor is
+    # SEALED in the art pack, so that gate can only resolve when the private donor is
     # present -- donor-absent (public CI) the tab never renders. Gate just this block
     # so the rest of this test (jobs, account, trash, power modal) still renders in CI;
     # the branding path stays covered on any donor-present run. ---
@@ -1554,7 +1554,7 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # BEFORE create_app() builds a coded tree, and before anything reads achievement
     # state: this fixture's own coded tree, and its own sealed pack beside it.
     monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
-    seed_sealed_container(root / "moonglade.dat")
+    seed_sealed_container(_gallery._container_path())
     # ...and the clock, before the server can answer anything. "Fresh" here means no key and
     # no catalog, which is what the Setup Wizard is measured against; it also has to mean an
     # install that reads none of its state off the wall clock (conftest::pin_daytime_clock).
@@ -2815,7 +2815,7 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     an omission. This fixture is FUNCTION-scoped, so pytest has already set up conftest's
     autouse, function-scoped `_isolated_branding` (which points `branding_root()` at this
     test's own `tmp_path/branding`) and `_sealed_roster_container` (which writes a sealed
-    `moonglade.dat` at the path `_container_path()` then resolves to, and clears the sealed
+    pack at the path `_container_path()` then resolves to, and clears the sealed
     caches afterwards) by the time it runs. `render_server` pins both itself because it is
     MODULE-scoped and is therefore set up BEFORE those -- the distinction that produced the
     2026-09-10 bug. If this fixture is ever given a wider scope it acquires that problem and
@@ -4470,7 +4470,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
-    moonglade.dat, so donor-absent (public CI) there is no branding-tab feat to earn and no
+    the art pack, so donor-absent (public CI) there is no branding-tab feat to earn and no
     toast to wait for. The adoption half -- the part with no coverage at all -- runs either
     way.
     """

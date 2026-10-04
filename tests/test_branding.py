@@ -780,7 +780,7 @@ def test_non_banner_slots_never_write_a_flat(tmp_path):
 # default`), pinned so the move cannot quietly undress a new install.
 
 def _build_box(assets):
-    """(Re)build this install's moonglade.dat around `assets` and drop the read
+    """(Re)build this install's art pack around `assets` and drop the read
     cache, so the new content is seen immediately (the cache keys on mtime, which
     can collide with conftest's own seed inside the filesystem's resolution)."""
     import moonglade_container as mc

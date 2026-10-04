@@ -3561,13 +3561,13 @@ def fold_series_units(rows_min, by_task):
 # has already been *toasted* for, plus the active skin) persists to
 # out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
-# ACHIEVEMENTS roster: SEALED into moonglade.dat (see _sealed_defs below). Read via _roster().
+# ACHIEVEMENTS roster: SEALED into the art pack (see _sealed_defs below). Read via _roster().
 
 # ---------------------------------------------------------------------------
 # The achievement roster + its ancillary tables (skins, skin-unlock text, the
 # closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
 # inline here, readable in a public `git clone`; they now live SEALED in
-# moonglade.dat's "achievements" payload (a dict), built from the private donor
+# the art pack's "achievements" payload (a dict), built from the private donor
 # ../moonglade-internal/achievements_folio_donor.json by tools/build_container.py.
 # Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
 # A container-less install degrades to the free-skins-only fallback (empty Folio,
@@ -3590,7 +3590,7 @@ _sealed_lock = threading.Lock()
 
 def _sealed_defs():
     """The sealed achievement definitions {roster, skins, skin_unlock, ach_criteria,
-    ladder_tracks} from moonglade.dat's "achievements" payload, plus the derived id /
+    ladder_tracks} from the art pack's "achievements" payload, plus the derived id /
     hidden / rung / skin-id sets. Cached per (container path, mtime) and computed UNDER
     the lock, so a cold-cache race (N workers hitting /api/achievements at once) decodes
     it once, not once per request. Fallback (free skins only) when there is no valid
@@ -3761,7 +3761,7 @@ def branding_root():
 
 # ---------------------------------------------------------------------------
 # The role -> coded-folder map (bundle-v2, 2026-08-21). Codes exist ONLY on
-# disk and inside moonglade.dat; the public URL contract stays /branding/
+# disk and inside the art pack; the public URL contract stays /branding/
 # <role>/... and every emitted URL keeps the role vocabulary. This dict is the
 # SINGLE source of truth for the coded tree -- _seal_rule, the resolver
 # callers, the discovery scaffold and the migration all DERIVE their paths
@@ -3904,7 +3904,7 @@ def _branding_path(out_dir):
 # The asset container -- loose-then-container resolution (2026-08-10,
 # docs/DECISIONS.md "The asset container, re-scoped from scratch").
 #
-# moonglade.dat (moonglade_container.py's custom format; built by
+# moonglade.mgpack, the art pack (moonglade_container.py's custom format; built by
 # tools/build_container.py, delivered as a GitHub Release asset, never
 # committed) carries the app's DEFAULT branding so a fresh install is fully
 # dressed while branding/ itself stays empty -- that emptiness is a shipped
@@ -3927,8 +3927,11 @@ def _branding_path(out_dir):
 # without one. See _branding_tree_has_new_art.
 # ---------------------------------------------------------------------------
 def _container_path():
-    # Sibling of branding/ and branding.json -- the same app-root, machine-local tree.
-    return branding_root().parent / "moonglade.dat"
+    """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
+    a type of its own). Sibling of branding/ and branding.json -- the same app-root,
+    machine-local tree. Every code path that reads, fetches, checks or builds the pack asks
+    this; its `.version` marker is derived from it (moonglade_assets._version_marker_path)."""
+    return branding_root().parent / "moonglade.mgpack"
 
 
 _container_cache = {"path": None, "mtime": None, "box": None}
@@ -3936,7 +3939,7 @@ _container_lock = threading.Lock()
 
 
 def _get_container():
-    """The current container read handle, or None if no (valid) moonglade.dat
+    """The current container read handle, or None if no (valid) art pack
     exists. Cached per (path, mtime) so the TOC parses once, and re-opened
     automatically when the file is replaced -- the downloader's atomic swap and
     a hand-copied update both just work on the next request."""
@@ -5449,7 +5452,7 @@ def branding_role_restore(out_dir, slot, key):
 
     It refuses (409) when the pack holds no default for that image: then the file under the coded
     tree is the only copy of that art (the legacy branding migration moved an old install's loose
-    files into these very paths, and moonglade.dat may be absent), and deleting it would leave the
+    files into these very paths, and the art pack may be absent), and deleting it would leave the
     role with nothing at all."""
     if key not in ROLE_SLOTS[slot]["images"]:
         return {"error": "unknown image"}, 400

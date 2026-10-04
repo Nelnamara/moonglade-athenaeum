@@ -182,7 +182,7 @@ def _wait_done(job, timeout=_WAIT_DONE_TIMEOUT):
 
 
 def test_successful_fetch_writes_verified_file_and_marker(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES)
     job = ma.AssetFetchJob(target)
     started = job.start(manifest=manifest, opener=_opener(REAL_BYTES))
@@ -232,7 +232,7 @@ def test_the_progress_fixture_stays_well_inside_its_deadline():
 
 
 def test_progress_updates_during_download(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     data = _PROGRESS_DATA
     manifest = _manifest_for(data)
     job = ma.AssetFetchJob(target)
@@ -265,7 +265,7 @@ def test_progress_updates_during_download(tmp_path):
 
 
 def test_checksum_mismatch_fails_and_leaves_no_partial_file(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES)
     job = ma.AssetFetchJob(target)
     # opener serves DIFFERENT bytes than the manifest promises -- checksum must catch it.
@@ -277,7 +277,7 @@ def test_checksum_mismatch_fails_and_leaves_no_partial_file(tmp_path):
 
 
 def test_mirror_fallback_tries_next_url_on_failure(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=["https://dead.invalid/a", "https://good.invalid/b"])
     job = ma.AssetFetchJob(target)
     opener = _opener(REAL_BYTES, fail_first_n=1)
@@ -289,7 +289,7 @@ def test_mirror_fallback_tries_next_url_on_failure(tmp_path):
 
 
 def test_all_mirrors_failing_reports_the_last_error(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=["https://a.invalid", "https://b.invalid"])
     job = ma.AssetFetchJob(target)
     job.start(manifest=manifest, opener=_opener(REAL_BYTES, fail_first_n=99))
@@ -299,7 +299,7 @@ def test_all_mirrors_failing_reports_the_last_error(tmp_path):
 
 
 def test_no_urls_configured_fails_cleanly_not_a_crash(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=[])
     job = ma.AssetFetchJob(target)
     started = job.start(manifest=manifest, opener=_opener(REAL_BYTES))
@@ -309,14 +309,14 @@ def test_no_urls_configured_fails_cleanly_not_a_crash(tmp_path):
 
 
 def test_no_manifest_fails_cleanly(tmp_path):
-    job = ma.AssetFetchJob(tmp_path / "moonglade.dat")
+    job = ma.AssetFetchJob(tmp_path / "moonglade.mgpack")
     started = job.start(manifest=None, opener=_opener(REAL_BYTES))
     assert started is False
     assert job.status()["status"] == "failed"
 
 
 def test_single_flight_second_start_is_a_noop_while_running(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES * 200)   # big enough to still be running
     job = ma.AssetFetchJob(target)
     slow_opener = _opener(REAL_BYTES * 200, chunk=16)   # tiny chunks -> stays "running" a while
@@ -328,7 +328,7 @@ def test_single_flight_second_start_is_a_noop_while_running(tmp_path):
 
 
 def test_cancel_stops_the_download_and_leaves_no_partial(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES * 500)
     job = ma.AssetFetchJob(target)
     # A per-chunk delay, not a small chunk, is what keeps this download running at the

@@ -1,4 +1,4 @@
-"""Spoiler-leak guard (CI). The achievement roster is SEALED in moonglade.dat, not in the
+"""Spoiler-leak guard (CI). The achievement roster is SEALED in the art pack, not in the
 public tree (see ACHIEVEMENT_SEALING_SPEC.md). This fails the suite if a sealed roast --
 the crown-jewel spoiler -- reappears in any committed public file (a future CHANGELOG line,
 a stray comment, a rebuilt bundle). Roasts are the reliable needle: long, distinctive

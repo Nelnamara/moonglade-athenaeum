@@ -825,7 +825,7 @@ def test_the_everyday_formats_still_open_and_a_jpeg_is_refused_by_name(tmp_path)
 
 # ---- restore never deletes the only copy ------------------------------------------------------------
 # The legacy branding migration moved an old install's loose files into these exact paths, and
-# moonglade.dat may be absent. With no pack default to go back to, the install's file IS the only
+# the art pack may be absent. With no pack default to go back to, the install's file IS the only
 # copy: restore refuses (409) and leaves it.
 
 def test_restore_keeps_the_only_copy_when_the_pack_holds_no_default(tmp_path):

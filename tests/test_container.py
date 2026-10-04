@@ -7,7 +7,7 @@ re-scoped from scratch" (2026-08-10).
 The conftest's autouse _isolated_branding fixture points branding_root() at each
 test's tmp_path, so _container_path() (a SIBLING of branding_root()) lands in
 tmp_path too -- every test here builds its own container, none can see the
-developer's real moonglade.dat. That isolation is asserted, not assumed."""
+developer's real art pack. That isolation is asserted, not assumed."""
 import json
 
 import pytest
@@ -157,7 +157,7 @@ def test_no_container_no_loose_means_absent(tmp_path):
 
 
 def test_container_swap_is_picked_up_without_restart(tmp_path):
-    """The reader cache keys on (path, mtime): replacing moonglade.dat -- the
+    """The reader cache keys on (path, mtime): replacing the art pack -- the
     downloader's atomic swap -- must serve the NEW content on the next call."""
     import os
     path = _build(tmp_path)
