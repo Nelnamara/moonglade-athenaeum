@@ -1104,17 +1104,17 @@ var LoomBundle = (() => {
     const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
     return { free, paid, credits, unknown };
   };
-  var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => {
+  var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending3 = 0 } = {}) => {
     const settledNone = free === 0 && paid === 0 && unknown === 0;
-    const trail = pending2 > 0 ? " \u27F3" : "";
-    if (settledNone && pending2 > 0) return "\u2026";
+    const trail = pending3 > 0 ? " \u27F3" : "";
+    if (settledNone && pending3 > 0) return "\u2026";
     if (credits > 0) return `\u2248${credits.toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}${trail}`;
     if (unknown > 0) return `${unknown} unpriced${trail}`;
     if (free > 0) return `\u{1F3AB} free${trail}`;
     if (paid > 0) return `0 cr${trail}`;
     return "\u2026" + trail;
   };
-  var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending2 ? `, ${pending2} still estimating` : ""}.`;
+  var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending3 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending3 ? `, ${pending3} still estimating` : ""}.`;
   var balanceLine = (acct) => {
     const a = acct || {};
     const n = Number(a.cards) || 0;
@@ -1126,11 +1126,11 @@ var LoomBundle = (() => {
   };
   var ACCOUNT_BIND_DEBOUNCE_MS = 600;
   var makeAccountRefresh = ({ read, setTimer, clearTimer, delay = ACCOUNT_BIND_DEBOUNCE_MS }) => {
-    let pending2 = null;
+    let pending3 = null;
     const stop = () => {
-      if (pending2 != null) {
-        clearTimer(pending2);
-        pending2 = null;
+      if (pending3 != null) {
+        clearTimer(pending3);
+        pending3 = null;
       }
     };
     return {
@@ -1140,8 +1140,8 @@ var LoomBundle = (() => {
       },
       bind() {
         stop();
-        pending2 = setTimer(() => {
-          pending2 = null;
+        pending3 = setTimer(() => {
+          pending3 = null;
           read();
         }, delay);
       },
@@ -1554,9 +1554,9 @@ var LoomBundle = (() => {
     if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
-  function buildShotListText(project, fmt5, actLetter2, shotText2) {
+  function buildShotListText(project, fmt6, actLetter2, shotText2) {
     let out = `${project.name}
-Runtime target ${fmt5(project.target)}
+Runtime target ${fmt6(project.target)}
 `;
     if ((project.assets || []).length) {
       out += `
@@ -1675,7 +1675,7 @@ ${"=".repeat(48)}
   }
 
   // src/loom-store-core.js
-  var makeSaveQueue = (write) => {
+  var makeSaveQueue = (write3) => {
     const keys = /* @__PURE__ */ new Map();
     const slot = (k) => {
       if (!keys.has(k)) keys.set(k, { rev: void 0, busy: null, next: null });
@@ -1691,7 +1691,7 @@ ${"=".repeat(48)}
         let res;
         try {
           const base = job.baseRev !== void 0 ? job.baseRev : s.rev;
-          res = await write(k, job.json, base);
+          res = await write3(k, job.json, base);
           if (!res || !res.ok && !res.conflict) res = { failed: true, error: "no answer" };
         } catch (e) {
           res = { failed: true, error: e };
@@ -2641,6 +2641,8 @@ ${"=".repeat(48)}
 
   // ../gallery/src/lib/phoneCore.js
   var LAYOUTS = Object.freeze(["grid", "feed"]);
+  var PAGINGS = Object.freeze(["pages", "continuous"]);
+  var PAGING_LABELS = Object.freeze({ pages: "Pages", continuous: "Continuous" });
   var SAVER_MODES = Object.freeze(["off", "auto", "always"]);
   var SAVER_LABELS = Object.freeze({ off: "Off", auto: "Auto on metered", always: "Always" });
   var PHONE_MAX = 520;
@@ -3865,6 +3867,188 @@ ${"=".repeat(48)}
   }
   var ICON_NAMES = Object.keys(GLYPHS);
 
+  // ../gallery/src/hooks/accountPrefsStore.js
+  var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
+  var PREF_KEY_MAX = 64;
+  var _isPlainObject = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  var _has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  function prefKeyProblem(key) {
+    if (typeof key !== "string" || !key) return "Preference keys must be non-empty strings.";
+    if (key.length > PREF_KEY_MAX) return "Preference keys are at most " + PREF_KEY_MAX + " characters.";
+    if (!PREF_KEY_RE.test(key)) {
+      return "'" + key + "' is not a valid preference key: use lowercase dotted names like guide.library.";
+    }
+    return "";
+  }
+  function applyOps(base, ops) {
+    const out = { ...base };
+    for (const op of ops) {
+      for (const k of Object.keys(op.set)) out[k] = op.set[k];
+      for (const k of op.unset) delete out[k];
+    }
+    return out;
+  }
+  function readPref(prefs, key, fallback) {
+    return prefs && _has(prefs, key) ? prefs[key] : fallback;
+  }
+  function _jsonValue(value) {
+    let enc;
+    try {
+      enc = JSON.stringify(value);
+    } catch {
+      return void 0;
+    }
+    return enc === void 0 ? void 0 : JSON.parse(enc);
+  }
+  function createPrefsStore({ load: load2, save }) {
+    let base = {};
+    let pending3 = [];
+    let status = "idle";
+    let error = "";
+    let loadRun = null;
+    let queue = Promise.resolve();
+    let snap = { status, error, prefs: base };
+    const subs9 = /* @__PURE__ */ new Set();
+    function publish() {
+      snap = { status, error, prefs: applyOps(base, pending3) };
+      for (const fn of [...subs9]) {
+        try {
+          fn();
+        } catch {
+        }
+      }
+    }
+    function enqueue(job) {
+      const run = queue.then(job);
+      queue = run.then(() => void 0, () => void 0);
+      return run;
+    }
+    function ensureLoaded() {
+      if (status === "ready") return Promise.resolve(true);
+      if (loadRun) return loadRun;
+      status = "loading";
+      error = "";
+      publish();
+      loadRun = enqueue(async () => {
+        let d;
+        try {
+          d = await load2();
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        loadRun = null;
+        if (status === "ready") return true;
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+        } else {
+          status = "error";
+          error = d && d.error || "could not load preferences";
+        }
+        publish();
+        return status === "ready";
+      });
+      return loadRun;
+    }
+    function write3(setObj, unsetList) {
+      const op = { set: setObj, unset: unsetList };
+      pending3 = [...pending3, op];
+      publish();
+      ensureLoaded();
+      return enqueue(async () => {
+        let d;
+        try {
+          d = await save({ set: op.set, unset: op.unset });
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        pending3 = pending3.filter((o) => o !== op);
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+          publish();
+          return { ok: true };
+        }
+        publish();
+        return { error: d && d.error || "could not save preferences" };
+      });
+    }
+    function set2(key, value) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      const v = _jsonValue(value);
+      if (v === void 0) {
+        return Promise.resolve({ error: "The value for '" + key + "' is not plain JSON (use unset to remove a key)." });
+      }
+      return write3({ [key]: v }, []);
+    }
+    function unset(key) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      return write3({}, [key]);
+    }
+    return {
+      ensureLoaded,
+      set: set2,
+      unset,
+      get: (key, fallback) => readPref(snap.prefs, key, fallback),
+      getSnapshot: () => snap,
+      subscribe(fn) {
+        subs9.add(fn);
+        return () => {
+          subs9.delete(fn);
+        };
+      }
+    };
+  }
+
+  // ../gallery/src/hooks/useAccountPrefs.js
+  var PATH = "/api/account/prefs";
+  var _csrf = "";
+  var _store = null;
+  function _bootCsrf() {
+    try {
+      return typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.csrf || "";
+    } catch {
+      return "";
+    }
+  }
+  function accountCsrf() {
+    return _csrf || _bootCsrf();
+  }
+  function accountPrefs() {
+    if (!_store) {
+      _store = createPrefsStore({
+        load: async () => {
+          const d = await apiGet(PATH);
+          if (d && d.csrf) _csrf = d.csrf;
+          return d;
+        },
+        save: (patch) => apiPost(PATH, { ...patch, csrf: _csrf || _bootCsrf() })
+      });
+    }
+    return _store;
+  }
+  function useAccountPrefs() {
+    const store = accountPrefs();
+    const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+    useEffect(() => {
+      store.ensureLoaded();
+    }, [store]);
+    const get = useCallback((key, fallback) => readPref(snap.prefs, key, fallback), [snap]);
+    return {
+      prefs: snap.prefs,
+      status: snap.status,
+      ready: snap.status === "ready",
+      error: snap.error,
+      get,
+      set: store.set,
+      unset: store.unset
+    };
+  }
+
   // ../gallery/src/picker/mergeRows.js
   function rowKey(row) {
     return row && row.model_id != null && row.model_id !== "" ? String(row.model_id) : "";
@@ -3910,8 +4094,627 @@ ${"=".repeat(48)}
     return null;
   }
 
-  // ../gallery/src/components/ModelPicker.jsx
+  // ../gallery/src/picker/savedCore.js
+  var NARROW_PX = 640;
+  var SAVED_BASES = [
+    ["", "All"],
+    ["MMDIT26B_MODEL", "DiT.3"],
+    ["MMDIT26A_MODEL", "DiT.2"],
+    ["DIT7_MODEL", "DiT.1"],
+    ["SDXL_MODEL", "SDXL"],
+    ["SD_V1_MODEL", "SD 1.5"]
+  ];
+  var SAVED_END_LINE = "That's everything";
   function fmt(n) {
+    return (Number(n) || 0).toLocaleString("en-US");
+  }
+  function countClauses({ count = 0, old = 0, gone = 0 } = {}) {
+    const out = [];
+    if (Number(count) > 0) out.push({ key: "count", text: fmt(count) });
+    if (Number(old) > 0) out.push({ key: "old", text: fmt(old) + " old" });
+    if (Number(gone) > 0) out.push({ key: "gone", text: fmt(gone) + " not available" });
+    return out;
+  }
+  function savedEmptyLine(kind, q, baseLabel2) {
+    const many = kind === "lora" ? "LoRAs" : "models";
+    if (q) return "No saved " + many + " match \u201C" + q + "\u201D" + (baseLabel2 ? " for " + baseLabel2 : "") + ".";
+    if (baseLabel2) return "No saved " + many + " for " + baseLabel2 + ".";
+    return "Nothing saved for " + many + " yet. Use \u2295 Save on any " + (kind === "lora" ? "LoRA" : "model") + " in Market.";
+  }
+  function savedErrorLine(title) {
+    return "Couldn't load " + (title || "Saved") + ".";
+  }
+  function savedTabLabel(wide) {
+    return wide ? "Saved" : "Saved \u25BE";
+  }
+  function currentSet(sets, setId) {
+    const list = sets || [];
+    return list.find((s) => s.id === setId) || list.find((s) => s.reserved) || null;
+  }
+  var GONE_WORDS = {
+    deleted: "Removed from PixAI",
+    private: "Made private on PixAI",
+    taken_down: "Taken down by PixAI",
+    blocked: "Blocked on PixAI"
+  };
+  function goneLabel(item) {
+    return GONE_WORDS[String(item && item.reason || "")] || "Not available";
+  }
+  function goneLine(item) {
+    const d = String(item && item.saved_at || "").slice(0, 10);
+    return goneLabel(item) + (d ? " \xB7 saved " + d : "");
+  }
+  var OLD_PREF = "picker.old_bookmarks";
+  function mergeOld(live, old, { q = "", base = "" } = {}) {
+    const held = new Set((live || []).map((r) => String(r.model_id)));
+    const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    return (old || []).filter((r) => {
+      if (held.has(String(r.model_id))) return false;
+      if (base && r.lora_base_model_type !== base) return false;
+      const hay = ((r.title || "") + " " + (r.description || "")).toLowerCase();
+      return words.every((w) => hay.includes(w));
+    }).map((r) => r.old ? r : { ...r, old: true });
+  }
+  var SAVED_NOTE = "Saved \xB7 read back from PixAI.";
+  var READ_ONLY_LINE = "Read-only mode is on, so saving to PixAI is off.";
+  function keepTitle(kind) {
+    return kind === "lora" ? "Keep this LoRA" : "Keep this model";
+  }
+  function isTransportError(d) {
+    return !!(d && typeof d.error === "string" && /^network error/i.test(d.error));
+  }
+  function afterWrite(prev, d, want) {
+    const p = prev || { saved: false, item_id: "" };
+    if (d && typeof d.contains === "boolean") {
+      return {
+        saved: d.contains,
+        item_id: d.contains ? String(d.item_id || "") : "",
+        error: d.error || "",
+        ok: d.contains === want && !d.error
+      };
+    }
+    return {
+      saved: !!p.saved,
+      item_id: p.item_id || "",
+      error: d && d.error || "PixAI didn't answer",
+      ok: false
+    };
+  }
+  function createSavedStore() {
+    const state2 = /* @__PURE__ */ new Map();
+    const subs9 = /* @__PURE__ */ new Set();
+    let ver = 0;
+    const publish = () => {
+      ver += 1;
+      subs9.forEach((f) => f());
+    };
+    return {
+      get: (id) => state2.get(String(id)),
+      set: (id, v) => {
+        state2.set(String(id), v);
+        publish();
+      },
+      setMany: (entries) => {
+        for (const [id, v] of entries) state2.set(String(id), v);
+        publish();
+      },
+      subscribe: (f) => {
+        subs9.add(f);
+        return () => {
+          subs9.delete(f);
+        };
+      },
+      version: () => ver
+    };
+  }
+
+  // ../gallery/src/picker/SavedTab.jsx
+  function SavedRail({ sets, current: current3, onPick }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("nav", { className: "mg-rail", "aria-label": "Saved and your sets" }, (sets || []).map((s) => {
+      const on = !!current3 && current3.id === s.id;
+      return /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: s.id,
+          type: "button",
+          className: "mg-rail-row" + (on ? " on" : ""),
+          "aria-pressed": on,
+          title: s.title,
+          onClick: () => onPick(s)
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-rail-mark", "aria-hidden": "true" }, on ? "\u25B8" : ""),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-rail-name" }, s.title),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-rail-n" }, s.count)
+      );
+    }));
+  }
+  function SavedChooser({ sets, current: current3, onPick }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-chooser", role: "menu", "aria-label": "Saved and your sets" }, (sets || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        key: s.id,
+        type: "button",
+        role: "menuitemradio",
+        "aria-checked": !!current3 && current3.id === s.id,
+        className: current3 && current3.id === s.id ? "on" : "",
+        onClick: () => onPick(s)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-chooser-name" }, s.title),
+      " \xB7 ",
+      /* @__PURE__ */ react_global_shim_default.createElement("span", null, s.count)
+    )));
+  }
+  function SavedSetsSheet({ sets, current: current3, onPick, onClose }) {
+    if (typeof document === "undefined") return null;
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m mg-sets-sheet", "data-keeps-dock": "" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m-scrim", onClick: onClose, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m-sheet rcp-m-sheet-short" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m-grab", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets rcp-sets-sheet", role: "menu", "aria-label": "Saved and your sets" }, (sets || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: s.id,
+          type: "button",
+          role: "menuitemradio",
+          "aria-checked": !!current3 && current3.id === s.id,
+          className: "rcp-sets-row" + (current3 && current3.id === s.id ? " on" : ""),
+          onClick: () => onPick(s)
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-sets-name" }, s.title),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-mono rcp-muted" }, s.count)
+      ))))),
+      document.body
+    );
+  }
+  function SavedHead({ title, count, old, gone, goneOpen, onGone }) {
+    const clauses = countClauses({ count, old, gone });
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-head" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-saved-title" }, title), clauses.length ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-saved-count" }, clauses.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: c.key }, i ? " \xB7 " : "", c.key === "gone" ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mg-saved-gone",
+        "aria-expanded": !!goneOpen,
+        onClick: onGone
+      },
+      c.text + " \u25B8"
+    ) : c.text))) : null);
+  }
+  function SavedChips({ value, onPick }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-savedchips", role: "group", "aria-label": "Base" }, SAVED_BASES.map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        key: v || "all",
+        type: "button",
+        className: value === v ? "on" : "",
+        "aria-pressed": value === v,
+        "data-base": v,
+        onClick: () => onPick(v)
+      },
+      label
+    )));
+  }
+  function GoneList({ state: state2, renderKeep }) {
+    if (!state2) return null;
+    if (state2.error) return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-gone" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-line mg-saved-err" }, state2.error));
+    if (!state2.items) return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-gone" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-gone-row" }, "Reading them\u2026"));
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-gone", role: "list" }, state2.items.map((it) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: it.item_id, className: "mg-gone-row", role: "listitem" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-gone-name" }, goneLine(it)), renderKeep ? renderKeep(it) : null)), !state2.items.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-gone-row" }, "None left.") : null);
+  }
+  function OldToggle({ on, onToggle }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-oldtoggle" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", role: "switch", "aria-checked": !!on, onClick: onToggle }, "Show old bookmarks ", /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-oldtoggle-dot" + (on ? " on" : ""), "aria-hidden": "true" }, on ? "\u25CF" : "\u25CB")));
+  }
+
+  // ../gallery/src/recipes/recipesApi.js
+  var _meta = null;
+  var _metaP = null;
+  function bootCsrf() {
+    try {
+      return window.MG_BOOT && window.MG_BOOT.csrf || "";
+    } catch {
+      return "";
+    }
+  }
+  function recipeMeta(force) {
+    if (_meta && !force) return Promise.resolve(_meta);
+    if (_metaP && !force) return _metaP;
+    _metaP = apiGet("/api/recipes/meta").then((d) => {
+      if (d && !d.error) _meta = d;
+      _metaP = null;
+      return d || {};
+    });
+    return _metaP;
+  }
+  async function write(path, body) {
+    const m = await recipeMeta();
+    const csrf = m && m.csrf || bootCsrf();
+    return apiPost(path, { ...body || {}, csrf });
+  }
+  var recipesApi = {
+    market: (q) => apiGet("/api/recipes/market", q),
+    capability: (modelType, modelId) => apiGet("/api/recipes/capability", modelId ? { model_id: modelId } : { model_type: modelType }),
+    batch: (ids) => apiGet("/api/recipes/batch", { ids: (ids || []).join(",") }),
+    recent: (modelType) => apiGet("/api/recipes/recent", { limit: 30, model_type: modelType || "" }),
+    mine: (cursor, sort) => apiGet("/api/recipes/mine", { cursor: cursor || "", sort: sort || "latest" }),
+    styleCode: (code, versionId) => apiGet("/api/recipes/style-code", { code, version_id: versionId }),
+    detail: (id) => apiGet("/api/recipes/" + encodeURIComponent(id)),
+    artworks: (id, page) => apiGet("/api/recipes/" + encodeURIComponent(id) + "/artworks", { page: page || 1, page_size: 12 }),
+    tasks: (id, usage) => apiGet("/api/recipes/" + encodeURIComponent(id) + "/tasks", { usage: usage || "" }),
+    fromImage: (mediaId, check2) => apiGet("/api/recipes/from-image", { media_id: mediaId, check: check2 ? 1 : "" }),
+    sets: () => apiGet("/api/recipes/sets"),
+    setsFor: (id) => apiGet("/api/recipes/sets/for/" + encodeURIComponent(id)),
+    setItems: (sid) => apiGet("/api/recipes/sets/" + encodeURIComponent(sid) + "/items"),
+    publish: (draft, recipeId) => write("/api/recipes/publish", { draft, recipe_id: recipeId || "" }),
+    update: (recipeId, draft, version) => write("/api/recipes/update", { recipe_id: recipeId, draft, version }),
+    transition: (recipeId, to) => write("/api/recipes/transition", { recipe_id: recipeId, to }),
+    setCreate: (title) => write("/api/recipes/sets/create", { title }),
+    setToggle: (setId, recipeId, on, itemId) => write("/api/recipes/sets/toggle", { set_id: setId, recipe_id: recipeId, on: !!on, item_id: itemId || "" })
+  };
+
+  // ../gallery/src/recipes/RecipeSetsMenu.jsx
+  var RECIPE_API = {
+    setsFor: (id) => recipesApi.setsFor(id),
+    setToggle: (setId, id, on, itemId) => recipesApi.setToggle(setId, id, on, itemId),
+    setCreate: (title) => recipesApi.setCreate(title)
+  };
+  function RecipeSetsMenu({
+    recipeId,
+    title,
+    rect,
+    onClose,
+    onChanged,
+    sheet: sheet2,
+    api = RECIPE_API,
+    variant = "sets",
+    heading = "SAVE TO A RECIPE SET",
+    local = null,
+    tag = "",
+    readOnly = "",
+    footLink = null,
+    canCreate = true
+  }) {
+    const keep = variant === "keep";
+    const [sets, setSets] = useState(null);
+    const [err, setErr] = useState("");
+    const [busy, setBusy] = useState("");
+    const [naming, setNaming] = useState(false);
+    const [name, setName] = useState("");
+    const box = useRef(null);
+    const liveRef = useRef(true);
+    const load2 = () => api.setsFor(recipeId).then((d) => {
+      if (!liveRef.current) return;
+      if (!d || d.error) {
+        setErr(d && d.error || "PixAI didn't answer");
+        setSets([]);
+        return;
+      }
+      setSets(d.sets || []);
+      onChanged && onChanged(recipeId, (d.sets || []).some((s) => s.contains), d.sets || [], true);
+    });
+    useEffect(() => {
+      liveRef.current = true;
+      load2();
+      return () => {
+        liveRef.current = false;
+      };
+    }, [recipeId]);
+    useEffect(() => {
+      if (sheet2) return void 0;
+      const onDown2 = (e) => {
+        if (box.current && !box.current.contains(e.target)) onClose();
+      };
+      const t = setTimeout(() => document.addEventListener("mousedown", onDown2), 0);
+      return () => {
+        clearTimeout(t);
+        document.removeEventListener("mousedown", onDown2);
+      };
+    }, [onClose, sheet2]);
+    const apply = (next, settled) => {
+      setSets(next);
+      onChanged && onChanged(recipeId, next.some((s) => s.contains), next, !!settled);
+    };
+    const toggle = (s, list) => {
+      const base = list || sets || [];
+      if (busy && !list || readOnly) return;
+      const on = !s.contains;
+      setBusy(s.id);
+      setErr("");
+      const before = base;
+      apply(base.map((x) => x.id === s.id ? { ...x, contains: on, count: x.count + (on ? 1 : -1) } : x));
+      api.setToggle(s.id, recipeId, on, s.item_id).then((d) => {
+        setBusy("");
+        if (d && typeof d.contains === "boolean") {
+          const landed = d.contains;
+          apply(before.map((x) => x.id === s.id ? {
+            ...x,
+            contains: landed,
+            item_id: landed ? String(d.item_id || "") : "",
+            count: x.count + (landed === !!s.contains ? 0 : landed ? 1 : -1)
+          } : x), true);
+          if (d.error) setErr(d.error);
+          return;
+        }
+        apply(before, true);
+        setErr(d && d.error || "PixAI didn't answer");
+        if (api.reread && d && /^network error/i.test(String(d.error || ""))) load2();
+      });
+    };
+    const create = () => {
+      const t = name.trim();
+      if (!t || busy || readOnly) return;
+      setBusy("new");
+      setErr("");
+      api.setCreate(t).then((d) => {
+        if (!d || d.error || !d.set) {
+          setBusy("");
+          setErr(d && d.error || "PixAI didn't make the set");
+          return;
+        }
+        const made = { ...d.set, contains: false, item_id: "", count: 0 };
+        setNaming(false);
+        setName("");
+        setBusy("");
+        const next = [made, ...sets || []];
+        setSets(next);
+        toggle(made, next);
+      });
+    };
+    const style = !sheet2 && rect ? {
+      // right-aligned under the ⊕ that opened it (it sits at a card's top right)
+      left: Math.max(8, Math.min((rect.right || rect.left) - 300, (typeof window !== "undefined" ? window.innerWidth : 1200) - 312)),
+      top: Math.min(rect.top, (typeof window !== "undefined" ? window.innerHeight : 800) - 260)
+    } : void 0;
+    const newSet = naming ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-new" }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        autoFocus: true,
+        value: name,
+        maxLength: 100,
+        placeholder: "Name the set",
+        onChange: (e) => setName(e.target.value),
+        onKeyDown: (e) => {
+          if (e.key === "Enter") create();
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setNaming(false);
+          }
+        }
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "rcp-primary", onClick: create, disabled: !name.trim() || busy === "new" }, "Make")) : null;
+    const body = keep ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: box,
+        className: (sheet2 ? "rcp-sets rcp-sets-sheet" : "rcp-sets") + " rcp-keep",
+        style,
+        role: "dialog",
+        "aria-label": heading + ": " + (title || ""),
+        onClick: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-head" }, heading),
+      local ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "rcp-sets-row" + (local.on ? " on" : ""),
+          "aria-pressed": !!local.on,
+          onClick: local.onToggle
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-keep-box", "aria-hidden": "true" }, local.on ? "\u2611" : "\u2610"),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-sets-name" }, local.label),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-mono rcp-keep-tag" }, local.tag)
+      ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-keep-div", role: "separator" })) : null,
+      readOnly ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-err" }, readOnly) : null,
+      sets === null && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-empty" }, "Reading your sets\u2026"),
+      (sets || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: s.id,
+          type: "button",
+          className: "rcp-sets-row" + (s.contains ? " on" : ""),
+          onClick: () => toggle(s),
+          disabled: !!readOnly || busy === s.id,
+          title: readOnly || void 0,
+          "aria-pressed": !!s.contains
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-keep-box", "aria-hidden": "true" }, s.contains ? "\u2611" : "\u2610"),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-sets-name" }, s.title),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-mono rcp-keep-tag" }, tag)
+      )),
+      err && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-err" }, err),
+      newSet,
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-keep-foot" }, canCreate && !naming ? /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "rcp-keep-link",
+          disabled: !!readOnly,
+          title: readOnly || void 0,
+          onClick: () => setNaming(true)
+        },
+        "+ New set"
+      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", null), footLink ? /* @__PURE__ */ react_global_shim_default.createElement("a", { className: "rcp-keep-link", href: footLink.href, target: "_blank", rel: "noopener noreferrer" }, footLink.label) : null)
+    ) : /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: box,
+        className: sheet2 ? "rcp-sets rcp-sets-sheet" : "rcp-sets",
+        style,
+        role: "dialog",
+        "aria-label": "Save " + (title || "recipe") + " to a recipe set",
+        onClick: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-head" }, heading),
+      sets === null && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-empty" }, "Reading your sets\u2026"),
+      sets && !sets.length && !err && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-empty" }, "No sets yet."),
+      (sets || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          key: s.id,
+          type: "button",
+          className: "rcp-sets-row" + (s.contains ? " on" : ""),
+          onClick: () => toggle(s),
+          disabled: busy === s.id,
+          "aria-pressed": !!s.contains
+        },
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-sets-name" }, s.title),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-mono rcp-muted" }, s.count),
+        /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "rcp-sets-check" }, s.contains ? "\u2713" : "")
+      )),
+      err && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-sets-err" }, err),
+      newSet || /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "rcp-sets-add", onClick: () => setNaming(true) }, "+ New set")
+    );
+    if (!sheet2) return body;
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m-scrim", onClick: onClose, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m-sheet rcp-m-sheet-short" }, body));
+  }
+
+  // ../gallery/src/picker/savedApi.js
+  async function write2(path, body) {
+    await accountPrefs().ensureLoaded();
+    return apiPost(path, { ...body || {}, csrf: accountCsrf() });
+  }
+  var savedApi = {
+    state: (modelId) => apiGet("/api/model-saved/state", { model_id: modelId }),
+    save: (modelId) => write2("/api/model-saved/save", { model_id: modelId }),
+    tick: (setId, modelId, on, itemId) => write2(
+      "/api/model-saved/tick",
+      { set_id: setId, model_id: modelId, on: !!on, item_id: itemId || "" }
+    ),
+    remove: (itemId) => write2("/api/model-saved/remove", { item_id: itemId }),
+    createSet: (title) => write2("/api/model-saved/sets/create", { title })
+  };
+  var savedStore = createSavedStore();
+  function useSavedVersion() {
+    return useSyncExternalStore(savedStore.subscribe, savedStore.version, savedStore.version);
+  }
+
+  // ../gallery/src/picker/KeepControls.jsx
+  function SaveSplit({ saved, busy, readOnly, onSave, onMenu, onBlocked }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-split" + (saved ? " saved" : ""), onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mg-split-body" + (readOnly && !saved ? " dim" : ""),
+        "aria-busy": busy || void 0,
+        disabled: busy,
+        title: readOnly && !saved ? READ_ONLY_LINE : saved ? "Saved on PixAI. More in the menu." : "Save to PixAI",
+        onClick: (e) => {
+          e.stopPropagation();
+          if (saved) {
+            onMenu(e.currentTarget.parentNode);
+            return;
+          }
+          if (readOnly) {
+            onBlocked && onBlocked();
+            return;
+          }
+          onSave();
+        }
+      },
+      saved ? "\u2713 Saved" : "\u2295 Save"
+    ), /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mg-split-menu",
+        "aria-haspopup": "dialog",
+        "aria-label": "More ways to keep it",
+        title: "Keep it: quick-pick, Saved and your sets",
+        onClick: (e) => {
+          e.stopPropagation();
+          onMenu(e.currentTarget.parentNode);
+        }
+      },
+      "\u25BE"
+    ));
+  }
+  function KeepRow({ m, quick, saved, busy, readOnly, note: note3, onSave, onMenu, onBlocked }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-keep" }, m.old ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-old" }, "old") : null, quick ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-star", title: "In your quick picks", "aria-label": "In your quick picks" }, "\u2605") : null, /* @__PURE__ */ react_global_shim_default.createElement(
+      SaveSplit,
+      {
+        saved,
+        busy,
+        readOnly,
+        onSave,
+        onMenu,
+        onBlocked
+      }
+    )), note3 ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-keepnote " + note3.kind, role: "status" }, note3.text) : null);
+  }
+  function keepRect(el) {
+    const r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    return r ? { left: r.left, right: r.right, top: r.bottom + 4 } : null;
+  }
+  function KeepMenu({ m, kind, rect, sheet: sheet2, readOnly, quick, onQuick, onSets, onClose }) {
+    const [ro, setRo] = useState(!!readOnly);
+    const id = String(m.model_id);
+    const api = {
+      reread: true,
+      setsFor: (mid) => savedApi.state(mid).then((d) => {
+        if (d && typeof d.read_only === "boolean") setRo(d.read_only);
+        return d;
+      }),
+      setToggle: (setId, mid, on, itemId) => savedApi.tick(setId, mid, on, itemId),
+      setCreate: (title) => savedApi.createSet(title)
+    };
+    const menu = /* @__PURE__ */ react_global_shim_default.createElement(
+      RecipeSetsMenu,
+      {
+        variant: "keep",
+        recipeId: id,
+        title: m.title,
+        heading: keepTitle(kind),
+        api,
+        rect,
+        sheet: sheet2,
+        onClose,
+        tag: "PixAI",
+        readOnly: ro ? READ_ONLY_LINE : "",
+        local: onQuick ? { label: "\u2605 Quick-pick", tag: "this app", on: !!quick, onToggle: onQuick } : null,
+        footLink: { label: "Open on PixAI \u2197", href: "https://pixai.art/model/" + encodeURIComponent(id) },
+        onChanged: (_, __, sets, settled) => settled && onSets && onSets(sets)
+      }
+    );
+    if (typeof document === "undefined") return null;
+    return createPortal(sheet2 ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m mg-keep-sheet", "data-keeps-dock": "" }, menu) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-keep-layer", "data-keeps-dock": "" }, menu), document.body);
+  }
+  function GoneMenu({ item, defaultId, rect, sheet: sheet2, readOnly, onGone, onClose }) {
+    const api = {
+      setsFor: () => Promise.resolve({ sets: [{
+        id: defaultId || "saved",
+        title: "Saved",
+        count: 0,
+        reserved: true,
+        contains: true,
+        item_id: item.item_id
+      }] }),
+      setToggle: (setId, _id, on) => on ? Promise.resolve({ error: "This entry can't be saved again from here" }) : savedApi.remove(item.item_id).then((d) => {
+        if (d && d.removed === true) {
+          onGone && onGone(item);
+          return { contains: false, item_id: "" };
+        }
+        if (d && d.removed === false) return { contains: true, item_id: item.item_id, error: d.error || "PixAI didn't take it out" };
+        return { error: d && d.error || "PixAI didn't answer" };
+      }),
+      setCreate: () => Promise.resolve({ error: "This entry can't go in a set" })
+    };
+    const menu = /* @__PURE__ */ react_global_shim_default.createElement(
+      RecipeSetsMenu,
+      {
+        variant: "keep",
+        recipeId: item.item_id,
+        title: goneLabel(item),
+        heading: "Keep this model",
+        api,
+        rect,
+        sheet: sheet2,
+        onClose,
+        tag: "PixAI",
+        canCreate: false,
+        readOnly: readOnly ? READ_ONLY_LINE : ""
+      }
+    );
+    if (typeof document === "undefined") return null;
+    return createPortal(sheet2 ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "rcp-m mg-keep-sheet", "data-keeps-dock": "" }, menu) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-keep-layer", "data-keeps-dock": "" }, menu), document.body);
+  }
+
+  // ../gallery/src/components/ModelPicker.jsx
+  function fmt2(n) {
     return (Number(n) || 0).toLocaleString();
   }
   function fmtCompact(n) {
@@ -3990,7 +4793,8 @@ ${"=".repeat(48)}
     visible = true,
     style,
     favs = null,
-    onFav = null
+    onFav = null,
+    phone = false
   }) {
     const [q, setQ] = useState("");
     const [qDebounced, setQDebounced] = useState("");
@@ -4006,6 +4810,24 @@ ${"=".repeat(48)}
     const [posted, setPosted] = useState("");
     const [license, setLicense] = useState("");
     const [preview, setPreview] = useState(null);
+    const [setId, setSetId] = useState("");
+    const [savedBase, setSavedBase] = useState("");
+    const [savedSets, setSavedSets] = useState(null);
+    const [setsErr, setSetsErr] = useState("");
+    const [wide, setWide] = useState(false);
+    const [chooser, setChooser] = useState(false);
+    const [gone, setGone] = useState(null);
+    const [atEnd, setAtEnd] = useState(false);
+    const [settled, setSettled] = useState(false);
+    const [oldRows, setOldRows] = useState(null);
+    const [oldErr, setOldErr] = useState("");
+    const prefs = useAccountPrefs();
+    const showOld = prefs.get(OLD_PREF, true) !== false;
+    const [readOnly, setReadOnly] = useState(false);
+    const [keep, setKeep] = useState(null);
+    const [busyIds, setBusyIds] = useState([]);
+    const [notes, setNotes] = useState({});
+    useSavedVersion();
     const seqRef = useRef(0);
     const cursorRef = useRef("");
     const hasMoreRef = useRef(false);
@@ -4017,6 +4839,15 @@ ${"=".repeat(48)}
     const scrollRafRef = useRef(null);
     const selectedRef = useRef(selected);
     selectedRef.current = selected;
+    const rootRef = useRef(null);
+    const setsAskedRef = useRef(false);
+    const oldAskedRef = useRef(false);
+    const savedOn = market && src === "saved";
+    const busyRef = useRef(/* @__PURE__ */ new Set());
+    const noteTimers = useRef({});
+    const rowsRef = useRef([]);
+    const longRef = useRef({ t: 0, fired: false });
+    const oldAsideRef = useRef(/* @__PURE__ */ new Map());
     useEffect(() => {
       const t = setTimeout(() => setQDebounced(q), 250);
       return () => clearTimeout(t);
@@ -4025,7 +4856,10 @@ ${"=".repeat(48)}
       let u = "/api/model-search?kind=" + encodeURIComponent(kind) + "&size=24&q=" + encodeURIComponent(qDebounced || "");
       if (market) {
         u += "&src=" + encodeURIComponent(src);
-        if (src !== "bookmark") {
+        if (src === "saved") {
+          if (setId) u += "&set=" + encodeURIComponent(setId);
+          if (kind === "lora" && savedBase) u += "&base=" + encodeURIComponent(savedBase);
+        } else {
           u += "&sort=" + encodeURIComponent(sort) + "&category=" + encodeURIComponent(category) + "&posted=" + encodeURIComponent(posted) + "&source=" + encodeURIComponent(source) + "&license=" + encodeURIComponent(license);
           modelTypes.forEach((t) => typeTokens(t).forEach((tok) => {
             u += "&model_type=" + encodeURIComponent(tok);
@@ -4035,24 +4869,29 @@ ${"=".repeat(48)}
       if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);
       if (cursor) u += "&cursor=" + encodeURIComponent(cursor);
       return u;
-    }, [kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType]);
+    }, [kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase]);
     const doSearch = useCallback(() => {
       const mine = ++seqRef.current;
       cursorRef.current = "";
       hasMoreRef.current = false;
       setDim(true);
+      setSettled(false);
       apiGet(searchUrl()).then((d) => {
         if (mine !== seqRef.current) return;
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
         setErr(d && d.error ? d.error : "");
         setRows(uniqueRows(d && d.results || []));
+        if (d && typeof d.read_only === "boolean") setReadOnly(d.read_only);
         setDim(false);
+        setSettled(true);
+        setAtEnd(!hasMoreRef.current);
       }).catch(() => {
         if (mine !== seqRef.current) return;
         setErr("network error");
         setRows([]);
         setDim(false);
+        setSettled(true);
       });
     }, [searchUrl]);
     const loadMore = useCallback(() => {
@@ -4067,6 +4906,7 @@ ${"=".repeat(48)}
         if (d && d.error) return;
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
+        setAtEnd(!hasMoreRef.current);
         setRows((old) => appendRows(old, d && d.results || []));
       }).catch(() => {
         loadingMoreRef.current = false;
@@ -4090,6 +4930,160 @@ ${"=".repeat(48)}
       lastKeyRef.current = key;
       doSearch();
     }, [visible, searchUrl, doSearch]);
+    const readSets = useCallback(() => {
+      setsAskedRef.current = true;
+      setSetsErr("");
+      apiGet("/api/model-saved/sets", { kind }).then((d) => {
+        if (!d || d.error) {
+          setSetsErr(d && d.error || "PixAI didn't answer");
+          return;
+        }
+        setSavedSets(d);
+        if (typeof d.read_only === "boolean") setReadOnly(d.read_only);
+      });
+    }, [kind]);
+    useEffect(() => {
+      if (!visible || !market || src !== "saved" || setsAskedRef.current) return;
+      readSets();
+    }, [visible, market, src, readSets]);
+    const readOld = useCallback(() => {
+      oldAskedRef.current = true;
+      setOldErr("");
+      apiGet("/api/model-saved/old", { kind }).then((d) => {
+        if (!d || d.error) {
+          setOldErr(d && d.error || "PixAI didn't answer");
+          return;
+        }
+        setOldRows(d.rows || []);
+      });
+    }, [kind]);
+    useEffect(() => {
+      if (!visible || !(savedOn && !setId && showOld) || oldAskedRef.current) return;
+      readOld();
+    }, [visible, savedOn, setId, showOld, readOld]);
+    useEffect(() => {
+      const el = rootRef.current;
+      if (!el || typeof ResizeObserver === "undefined") return void 0;
+      const measure = () => setWide(!phone && el.clientWidth >= NARROW_PX);
+      measure();
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, [phone]);
+    useEffect(() => {
+      if (!savedOn || setId) return;
+      const live = rows.filter((r) => r.item_id && !r.old);
+      if (live.length) savedStore.setMany(live.map((r) => [r.model_id, { saved: true, item_id: r.item_id }]));
+    }, [savedOn, setId, rows]);
+    const note3 = (id, n) => {
+      clearTimeout(noteTimers.current[id]);
+      setNotes((o) => ({ ...o, [id]: n }));
+      if (n && n.kind === "ok") {
+        noteTimers.current[id] = setTimeout(() => setNotes((o) => ({ ...o, [id]: null })), 3200);
+      }
+    };
+    useEffect(() => () => Object.values(noteTimers.current).forEach(clearTimeout), []);
+    rowsRef.current = rows;
+    const applySets = (m, sets) => {
+      const id = String(m.model_id);
+      const list = sets || [];
+      const def = list.find((x) => x.reserved);
+      if (def) savedStore.set(id, { saved: !!def.contains, item_id: def.contains ? def.item_id || "" : "" });
+      if (!savedOn) return;
+      const viewId = setId || savedSets && savedSets.default_id || def && def.id || "";
+      const here = list.find((x) => x.id === viewId);
+      if (!here) return;
+      const inList = rowsRef.current.some((r) => String(r.model_id) === id);
+      const bump = (n) => setSavedSets((ss) => ss && { ...ss, sets: ss.sets.map((x) => x.id === viewId ? { ...x, count: Math.max(0, x.count + n) } : x) });
+      if (!here.contains && inList) {
+        rowsRef.current = rowsRef.current.filter((r) => String(r.model_id) !== id);
+        setRows((old) => old.filter((r) => String(r.model_id) !== id));
+        bump(-1);
+        const back = !setId && oldAsideRef.current.get(id);
+        if (back) {
+          oldAsideRef.current.delete(id);
+          setOldRows((o) => (o || []).concat(back));
+        }
+      } else if (here.contains && !inList) {
+        const row = { ...m, old: false, item_id: here.item_id || "" };
+        rowsRef.current = [row, ...rowsRef.current];
+        setRows((old) => [row, ...old.filter((r) => String(r.model_id) !== id)]);
+        if (m.old) {
+          oldAsideRef.current.set(id, m);
+          setOldRows((o) => (o || []).filter((r) => String(r.model_id) !== id));
+        }
+        bump(1);
+      }
+    };
+    const saveModel = async (m) => {
+      const id = String(m.model_id);
+      if (readOnly || busyRef.current.has(id)) return;
+      busyRef.current.add(id);
+      setBusyIds([...busyRef.current]);
+      note3(id, null);
+      const d0 = await savedApi.save(id);
+      let d = d0;
+      if (isTransportError(d0)) {
+        const st = await savedApi.state(id);
+        d = st && !st.error ? {
+          contains: !!st.saved,
+          item_id: st.item_id || "",
+          sets: st.sets,
+          error: st.saved ? "" : "The answer was lost on the way and PixAI doesn't show it saved, so it isn't confirmed."
+        } : { error: "The answer was lost on the way, and the check failed too. Look on PixAI before trying again." };
+      }
+      busyRef.current.delete(id);
+      setBusyIds([...busyRef.current]);
+      if (d && typeof d.read_only === "boolean") setReadOnly(d.read_only);
+      const next = afterWrite(savedStore.get(id), d, true);
+      savedStore.set(id, { saved: next.saved, item_id: next.item_id });
+      if (d && d.sets) applySets(m, d.sets);
+      note3(id, next.ok ? { kind: "ok", text: SAVED_NOTE } : { kind: "err", text: next.error });
+    };
+    const openKeep = (m, el) => {
+      hidePreview();
+      setKeep({ m, rect: keepRect(el) });
+    };
+    const longPress = (m) => phone && market ? {
+      onTouchStart: () => {
+        longRef.current.fired = false;
+        clearTimeout(longRef.current.t);
+        longRef.current.t = setTimeout(() => {
+          longRef.current.fired = true;
+          setKeep({ m, rect: null });
+        }, 500);
+      },
+      onTouchEnd: () => clearTimeout(longRef.current.t),
+      onTouchMove: () => clearTimeout(longRef.current.t),
+      onContextMenu: (e) => e.preventDefault()
+    } : null;
+    useEffect(() => () => clearTimeout(longRef.current.t), []);
+    const pickSrc = (v) => {
+      if (v === "saved" && src === "saved" && !wide) {
+        setChooser((o) => !o);
+        return;
+      }
+      setChooser(false);
+      setGone(null);
+      setSrc(v);
+    };
+    const pickSet = (s) => {
+      setChooser(false);
+      setGone(null);
+      setSetId(s.reserved ? "" : s.id);
+    };
+    const retrySaved = () => {
+      if (setsErr) readSets();
+      if (err) doSearch();
+    };
+    const toggleGone = () => {
+      if (gone) {
+        setGone(null);
+        return;
+      }
+      setGone({ items: null });
+      apiGet("/api/model-saved/unavailable", { expect: savedSets && savedSets.unavailable || 0 }).then((d) => setGone((g) => !g ? g : !d || d.error ? { error: d && d.error || "PixAI didn't answer" } : { items: d.items || [] }));
+    };
     const onScroll = () => {
       if (scrollRafRef.current) return;
       scrollRafRef.current = requestAnimationFrame(() => {
@@ -4100,10 +5094,10 @@ ${"=".repeat(48)}
     };
     const isSelected = useCallback((m) => multi ? selected.some((e) => e.model_id === m.model_id) : !!(value && value.model_id === m.model_id), [multi, selected, value]);
     const toggleMulti = (m) => {
-      const cur2 = selectedRef.current;
-      const at = cur2.findIndex((e) => e.model_id === m.model_id);
+      const cur3 = selectedRef.current;
+      const at = cur3.findIndex((e) => e.model_id === m.model_id);
       if (at >= 0) {
-        onToggle && onToggle(cur2[at], false);
+        onToggle && onToggle(cur3[at], false);
         return;
       }
       const entry = {
@@ -4134,6 +5128,10 @@ ${"=".repeat(48)}
       });
     };
     const pick = (m) => {
+      if (longRef.current.fired) {
+        longRef.current.fired = false;
+        return;
+      }
       hidePreview();
       if (multi) {
         toggleMulti(m);
@@ -4161,31 +5159,39 @@ ${"=".repeat(48)}
       clearTimeout(previewTimerRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     }, []);
-    const filtersHidden = market && src === "bookmark";
+    const filtersHidden = market && src === "saved";
     const p = preview && preview.m;
     const baseFilterLabel = kind === "lora" && baseType ? archLabel({ lora_base_model_type: baseType }, kind) : "";
     const emptyLine = kind === "lora" && qDebounced ? "No LoRAs match \u201C" + qDebounced + "\u201D \u2014 try other words." : baseFilterLabel && !qDebounced ? "No LoRAs for " + baseFilterLabel + " here \u2014 pick another base or search by name." : "No results \u2014 try another search.";
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style }, /* @__PURE__ */ react_global_shim_default.createElement(
+    const cur2 = savedOn ? currentSet(savedSets && savedSets.sets, setId) : null;
+    const curTitle = cur2 ? cur2.title : "Saved";
+    const railShown = savedOn && wide && !!savedSets && savedSets.sets.length > 0;
+    const oldAll = savedOn && !setId && showOld ? mergeOld(rows, oldRows) : [];
+    const oldShown = savedOn && !setId && showOld && atEnd && !err ? mergeOld(rows, oldRows, { q: qDebounced, base: kind === "lora" ? savedBase : "" }) : [];
+    const listRows = oldShown.length ? rows.concat(oldShown) : rows;
+    const savedLine = !savedOn ? null : err || setsErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-line mg-saved-err" }, savedErrorLine(curTitle), " ", /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mg-saved-retry", onClick: retrySaved }, "Retry")) : settled && !rows.length && !oldShown.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-line" }, savedEmptyLine(kind, qDebounced, kind === "lora" && savedBase ? (SAVED_BASES.find((b) => b[0] === savedBase) || [])[1] : "")) : null;
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker" + (phone ? " phone" : ""), style, ref: rootRef }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
         className: "mg-q",
         type: "text",
-        placeholder: "Search",
+        placeholder: savedOn ? "Search saved\u2026" : "Search",
         "aria-label": "Search models",
         value: q,
         onChange: (e) => setQ(e.target.value)
       }
-    ), market && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsrc" }, [["market", "Market"], ["bookmark", "Bookmarked"], ...kind === "lora" ? [["mine", "Mine"]] : []].map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+    ), market && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-srcwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsrc" }, [["market", "Market"], ["saved", savedTabLabel(wide)], ...kind === "lora" ? [["mine", "Mine"]] : []].map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
         type: "button",
         key: v,
         className: src === v ? "on" : "",
         "data-src": v,
-        onClick: () => setSrc(v)
+        "aria-haspopup": v === "saved" && !wide ? "menu" : void 0,
+        onClick: () => pickSrc(v)
       },
       label
-    ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktfilters", style: filtersHidden ? { display: "none" } : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsort" }, SORTS.map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
+    ))), savedOn && chooser && !wide && savedSets ? phone ? /* @__PURE__ */ react_global_shim_default.createElement(SavedSetsSheet, { sets: savedSets.sets, current: cur2, onPick: pickSet, onClose: () => setChooser(false) }) : /* @__PURE__ */ react_global_shim_default.createElement(SavedChooser, { sets: savedSets.sets, current: cur2, onPick: pickSet }) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktfilters", style: filtersHidden ? { display: "none" } : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-mktsort" }, SORTS.map(([v, label]) => /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
         type: "button",
@@ -4251,7 +5257,25 @@ ${"=".repeat(48)}
       },
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any licence"),
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "COMMERCIAL" }, "Commercial use OK")
-    )))), err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "\u26A0 ", err) : !rows.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, emptyLine) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty" }), /* @__PURE__ */ react_global_shim_default.createElement(
+    )))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-body" + (railShown ? " has-rail" : "") }, railShown ? /* @__PURE__ */ react_global_shim_default.createElement(SavedRail, { sets: savedSets.sets, current: cur2, onPick: pickSet }) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-body-main" }, savedOn ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
+      SavedHead,
+      {
+        title: curTitle,
+        count: cur2 ? cur2.count : 0,
+        old: oldAll.length,
+        gone: !setId && savedSets ? savedSets.unavailable : 0,
+        goneOpen: !!gone,
+        onGone: toggleGone
+      }
+    ), !setId ? /* @__PURE__ */ react_global_shim_default.createElement(GoneList, { state: gone, renderKeep: (it) => /* @__PURE__ */ react_global_shim_default.createElement(
+      SaveSplit,
+      {
+        saved: true,
+        busy: false,
+        readOnly,
+        onMenu: (el) => setKeep({ gone: it, rect: keepRect(el) })
+      }
+    ) }) : null, kind === "lora" ? /* @__PURE__ */ react_global_shim_default.createElement(SavedChips, { value: savedBase, onPick: setSavedBase }) : null, savedLine) : err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "\u26A0 ", err) : !rows.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, emptyLine) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty" }), /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         className: "mg-grid",
@@ -4260,7 +5284,7 @@ ${"=".repeat(48)}
         onScroll,
         style: { opacity: dim ? 0.45 : 1 }
       },
-      rows.map((m, i) => {
+      listRows.map((m, i) => {
         const incompat = m.compat === "no";
         const arch = archLabel(m, kind);
         const sel = isSelected(m);
@@ -4283,25 +5307,54 @@ ${"=".repeat(48)}
             title: tip || void 0,
             onClick: clickable ? () => pick(m) : void 0,
             onMouseEnter: (e) => schedulePreview(m, e.currentTarget),
-            onMouseLeave: hidePreview
+            onMouseLeave: hidePreview,
+            ...longPress(m)
           },
-          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-cov" }, m.preview_url && /* @__PURE__ */ react_global_shim_default.createElement("img", { className: m.should_blur ? "blur" : void 0, loading: "lazy", src: m.preview_url, alt: "" }), m.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pill" }, "Official"), onFav ? /* @__PURE__ */ react_global_shim_default.createElement(
-            "button",
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-cov" }, m.preview_url && /* @__PURE__ */ react_global_shim_default.createElement("img", { className: m.should_blur ? "blur" : void 0, loading: "lazy", src: m.preview_url, alt: "" }), m.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pill" }, "Official"), incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost), market ? /* @__PURE__ */ react_global_shim_default.createElement(
+            KeepRow,
             {
-              type: "button",
-              className: "mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : ""),
-              "aria-pressed": (favs || []).includes(String(m.model_id)),
-              title: (favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks",
-              onClick: (e) => {
-                e.stopPropagation();
-                onFav(m);
-              }
+              m,
+              quick: !!onFav && (favs || []).includes(String(m.model_id)),
+              saved: !m.old && !!(savedStore.get(m.model_id) || {}).saved,
+              busy: busyIds.includes(String(m.model_id)),
+              readOnly,
+              note: notes[String(m.model_id)],
+              onSave: () => saveModel(m),
+              onMenu: (el) => openKeep(m, el),
+              onBlocked: () => note3(String(m.model_id), { kind: "err", text: READ_ONLY_LINE })
             }
-          ) : null, incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
-          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
+          ) : null)
         );
       })
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: sentinelRef, className: "mg-sentinel", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), typeof document !== "undefined" ? createPortal(
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: sentinelRef, className: "mg-sentinel", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), savedOn && atEnd && listRows.length > 0 && !loadingMore && !err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-end" }, SAVED_END_LINE) : null, savedOn && !setId && oldErr && showOld ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-saved-line mg-saved-err" }, "Couldn't read the old bookmarks.", " ", /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mg-saved-retry", onClick: readOld }, "Retry")) : null, savedOn && !setId && !err && (oldAll.length > 0 || !showOld) ? /* @__PURE__ */ react_global_shim_default.createElement(OldToggle, { on: showOld, onToggle: () => prefs.set(OLD_PREF, !showOld) }) : null)), keep && keep.m ? /* @__PURE__ */ react_global_shim_default.createElement(
+      KeepMenu,
+      {
+        m: keep.m,
+        kind,
+        rect: keep.rect,
+        sheet: phone,
+        readOnly,
+        quick: !!onFav && (favs || []).includes(String(keep.m.model_id)),
+        onQuick: onFav ? () => onFav(keep.m) : null,
+        onSets: (sets) => applySets(keep.m, sets),
+        onClose: () => setKeep(null)
+      }
+    ) : null, keep && keep.gone ? /* @__PURE__ */ react_global_shim_default.createElement(
+      GoneMenu,
+      {
+        item: keep.gone,
+        defaultId: savedSets && savedSets.default_id,
+        rect: keep.rect,
+        sheet: phone,
+        readOnly,
+        onClose: () => setKeep(null),
+        onGone: (it) => {
+          setGone((g) => g && g.items ? { items: g.items.filter((x) => x.item_id !== it.item_id) } : g);
+          setSavedSets((ss) => ss && { ...ss, unavailable: Math.max(0, (ss.unavailable || 0) - 1) });
+        }
+      }
+    ) : null, typeof document !== "undefined" ? createPortal(
       /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style: { display: "contents" } }, /* @__PURE__ */ react_global_shim_default.createElement(
         "div",
         {
@@ -4309,7 +5362,7 @@ ${"=".repeat(48)}
           "aria-hidden": p ? "false" : "true",
           style: p ? { left: preview.x, top: preview.y } : void 0
         },
-        p && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, (p.cover_url || p.preview_url) && /* @__PURE__ */ react_global_shim_default.createElement("img", { src: p.cover_url || p.preview_url, className: p.should_blur ? "blur" : void 0, alt: "" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-nm" }, p.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, tyShort(p.type)), p.ref_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "uses" }), " ", fmtCompact(p.ref_count), " uses") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u2665 ", fmt(p.liked_count)), p.comment_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u{1F4AC} ", fmt(p.comment_count)) : null), (baseLabel(p.base_model) || p.official) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-badges" }, baseLabel(p.base_model) && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg base" }, baseLabel(p.base_model)), p.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg official", title: "In-house / official model" }, "\u2713 Official")), p.description && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-desc" }, p.description)))
+        p && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, (p.cover_url || p.preview_url) && /* @__PURE__ */ react_global_shim_default.createElement("img", { src: p.cover_url || p.preview_url, className: p.should_blur ? "blur" : void 0, alt: "" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-nm" }, p.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, tyShort(p.type)), p.ref_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, /* @__PURE__ */ react_global_shim_default.createElement(Icon, { name: "uses" }), " ", fmtCompact(p.ref_count), " uses") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u2665 ", fmt2(p.liked_count)), p.comment_count ? /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\u{1F4AC} ", fmt2(p.comment_count)) : null), (baseLabel(p.base_model) || p.official) && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-badges" }, baseLabel(p.base_model) && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg base" }, baseLabel(p.base_model)), p.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "bdg official", title: "In-house / official model" }, "\u2713 Official")), p.description && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mp-desc" }, p.description)))
       )),
       document.body
     ) : null);
@@ -4374,7 +5427,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/components/CostBadge.jsx
-  function fmt2(n) {
+  function fmt3(n) {
     return Number(n).toLocaleString();
   }
   var DEFAULT_HINT = "No cost yet \u2014 nothing to price.";
@@ -4426,9 +5479,9 @@ ${"=".repeat(48)}
       tip = title;
     } else if (state2 === "free") {
       const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
-      const leftN = heldN != null ? fmt2(heldN) + " left" : "";
-      const usesN = needN != null && needN > 1 ? "uses " + fmt2(needN) + " of " + (heldN != null ? fmt2(heldN) : "your") + " cards" : "";
-      const savesN = d.cost != null && isFinite(Number(d.cost)) ? fmt2(d.cost) : "";
+      const leftN = heldN != null ? fmt3(heldN) + " left" : "";
+      const usesN = needN != null && needN > 1 ? "uses " + fmt3(needN) + " of " + (heldN != null ? fmt3(heldN) : "your") + " cards" : "";
+      const savesN = d.cost != null && isFinite(Number(d.cost)) ? fmt3(d.cost) : "";
       main = "\u{1F3AB} FREE \u2014 " + card + " covers this" + (usesN ? " \u2014 " + usesN : leftN ? " (" + leftN + ")" : "") + (savesN ? " \xB7 saves ~" + savesN + " credits" : "");
       sub = expiryNote(d.card_expires);
       title = usesN ? "A free card is applied automatically at submit \u2014 this generation spends 0 credits and " + usesN + "." : "A free card is applied automatically at submit \u2014 this generation spends 0 credits.";
@@ -4443,11 +5496,11 @@ ${"=".repeat(48)}
       const n = Number(d.cost);
       const total = n * sendsN;
       short = n !== 0 && isShort(d);
-      const shortNote = short ? "You hold " + (heldN != null ? fmt2(heldN) : "?") + " of the " + (needN != null ? fmt2(needN) : "?") + " cards this needs \u2014 not enough, so no card is used. Costs the full ~" + fmt2(n) + " credits." : "";
-      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : short ? "\u26A0 " : "") + "\u2248 " + fmt2(total) + " credits";
-      title = n === 0 ? "Priced at zero credits. No free card was involved." : short ? shortNote : "No free card covers this \u2014 generating spends credits." + (sendsN > 1 ? " \u2248 " + fmt2(n) + " each \xD7 " + fmt2(sendsN) + "." : "");
+      const shortNote = short ? "You hold " + (heldN != null ? fmt3(heldN) : "?") + " of the " + (needN != null ? fmt3(needN) : "?") + " cards this needs \u2014 not enough, so no card is used. Costs the full ~" + fmt3(n) + " credits." : "";
+      main = n === 0 ? "0 credits \u2014 this spends nothing" : (warn ? "\u26A0 " + warn + " \xB7 " : short ? "\u26A0 " : "") + "\u2248 " + fmt3(total) + " credits";
+      title = n === 0 ? "Priced at zero credits. No free card was involved." : short ? shortNote : "No free card covers this \u2014 generating spends credits." + (sendsN > 1 ? " \u2248 " + fmt3(n) + " each \xD7 " + fmt3(sendsN) + "." : "");
       if (short && !compact) sub = { text: shortNote, title: shortNote, days: null };
-      val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt2(total);
+      val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt3(total);
       lab = n === 0 ? "credits \u2014 spends nothing" : short ? "credits \xB7 card short" : "credits";
       tip = n !== 0 && warn ? "\u26A0 " + warn + ". " + title : title;
     } else if (state2 === "error") {
@@ -4464,10 +5517,10 @@ ${"=".repeat(48)}
     const brk = [];
     if (state2 === "paid" && Number(d.context_images) > 0) {
       const n = Number(d.context_images);
-      brk.push(fmt2(n) + (n === 1 ? " context image" : " context images") + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt2(d.context_charge) : "") + (props.laneHeld ? " \xB7 not Unlimited" : ""));
+      brk.push(fmt3(n) + (n === 1 ? " context image" : " context images") + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt3(d.context_charge) : "") + (props.laneHeld ? " \xB7 not Unlimited" : ""));
     }
     if (state2 === "paid" && d.profile && Number(d.profile_extra) > 0) {
-      brk.push("profile " + d.profile + " +" + fmt2(d.profile_extra));
+      brk.push("profile " + d.profile + " +" + fmt3(d.profile_extra));
     }
     const adj = [brk.join(" \xB7 "), adj0].filter(Boolean).join(" \xB7 ");
     if (adj) tip = (tip ? tip + " " : "") + adj + ".";
@@ -4482,16 +5535,16 @@ ${"=".repeat(48)}
       } else if (state2 === "free") {
         const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
         parts.push(/\bcard\b/i.test(card) ? card : card + " card");
-        if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
+        if (countN != null && countN > 1) parts.push(fmt3(countN) + " images");
         if (sub) parts.push(sub.text);
       } else if (state2 === "paid" && sendsN > 1) {
-        parts.push(fmt2(sendsN) + " images", "\u2248 " + fmt2(Number(d.cost)) + " each");
+        parts.push(fmt3(sendsN) + " images", "\u2248 " + fmt3(Number(d.cost)) + " each");
       } else if (state2 === "paid" && countN != null && countN > 1) {
-        parts.push(fmt2(countN) + " images");
+        parts.push(fmt3(countN) + " images");
       }
       const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
       if (adj) parts.push(adj);
-      if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
+      if (balanceN != null) parts.push(fmt3(balanceN) + " credits");
       line = parts.join(" \xB7 ");
     }
     return { state: state2, warn, compact, stack: stack2, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
@@ -6046,6 +7099,8 @@ ${"=".repeat(48)}
       action: o.action && typeof o.action.run === "function" ? { label: String(o.action.label || ""), run: o.action.run } : null,
       actions: !o.action && Array.isArray(o.actions) ? o.actions.filter((a) => a && typeof a.run === "function").slice(0, 2).map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" })) : [],
       foot: o.foot ? String(o.foot) : "",
+      quote: o.quote ? String(o.quote) : "",
+      wide: !!o.wide,
       sticky: !!o.sticky,
       out: false
     }]);
@@ -6056,11 +7111,11 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/hooks/swrStore.js
-  var _store = /* @__PURE__ */ new Map();
+  var _store2 = /* @__PURE__ */ new Map();
   var _isPlainPayload = (d) => !!d && typeof d === "object" && !Array.isArray(d);
   function peek(path) {
     if (!path) return null;
-    const hit = _store.get(String(path));
+    const hit = _store2.get(String(path));
     return hit === void 0 ? null : hit;
   }
   function put(path, data2) {
@@ -6070,16 +7125,16 @@ ${"=".repeat(48)}
       keep = { ...data2 };
       delete keep.csrf;
     }
-    _store.set(String(path), keep);
+    _store2.set(String(path), keep);
     return true;
   }
   function invalidate(prefix) {
     const list = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean).map(String);
     if (!list.length) return 0;
     let n = 0;
-    for (const key of [..._store.keys()]) {
+    for (const key of [..._store2.keys()]) {
       if (list.some((p) => key.startsWith(p))) {
-        _store.delete(key);
+        _store2.delete(key);
         n += 1;
       }
     }
@@ -6327,7 +7382,15 @@ ${"=".repeat(48)}
         last[j.job_id] = st;
         return;
       }
+      if (j.type === "integrity") {
+        last[j.job_id] = st;
+        return;
+      }
       if (j.scheduled) {
+        last[j.job_id] = st;
+        return;
+      }
+      if (j.via === "inbox") {
         last[j.job_id] = st;
         return;
       }
@@ -6374,6 +7437,12 @@ ${"=".repeat(48)}
       const rows = d && d.jobs || [];
       toastTransitions(rows);
       if (d && !d.error) note(d.update);
+      if (d && !d.error && d.inbox) pollListeners.forEach((fn) => {
+        try {
+          fn(d.inbox);
+        } catch {
+        }
+      });
       jobs = rows;
       emit4();
     }).catch(() => {
@@ -6390,6 +7459,7 @@ ${"=".repeat(48)}
       refresh().then(schedule);
     }, busy ? 2500 : 7e3);
   }
+  var pollListeners = /* @__PURE__ */ new Set();
   function dismiss2(id) {
     apiPost("/api/jobs/dismiss", { job_id: id }).then(() => {
       delete last[id];
@@ -7226,188 +8296,6 @@ ${"=".repeat(48)}
     return _driver(e);
   }
 
-  // ../gallery/src/hooks/accountPrefsStore.js
-  var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
-  var PREF_KEY_MAX = 64;
-  var _isPlainObject = (d) => !!d && typeof d === "object" && !Array.isArray(d);
-  var _has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-  function prefKeyProblem(key) {
-    if (typeof key !== "string" || !key) return "Preference keys must be non-empty strings.";
-    if (key.length > PREF_KEY_MAX) return "Preference keys are at most " + PREF_KEY_MAX + " characters.";
-    if (!PREF_KEY_RE.test(key)) {
-      return "'" + key + "' is not a valid preference key: use lowercase dotted names like guide.library.";
-    }
-    return "";
-  }
-  function applyOps(base, ops) {
-    const out = { ...base };
-    for (const op of ops) {
-      for (const k of Object.keys(op.set)) out[k] = op.set[k];
-      for (const k of op.unset) delete out[k];
-    }
-    return out;
-  }
-  function readPref(prefs, key, fallback) {
-    return prefs && _has(prefs, key) ? prefs[key] : fallback;
-  }
-  function _jsonValue(value) {
-    let enc;
-    try {
-      enc = JSON.stringify(value);
-    } catch {
-      return void 0;
-    }
-    return enc === void 0 ? void 0 : JSON.parse(enc);
-  }
-  function createPrefsStore({ load: load2, save }) {
-    let base = {};
-    let pending2 = [];
-    let status = "idle";
-    let error = "";
-    let loadRun = null;
-    let queue = Promise.resolve();
-    let snap = { status, error, prefs: base };
-    const subs8 = /* @__PURE__ */ new Set();
-    function publish() {
-      snap = { status, error, prefs: applyOps(base, pending2) };
-      for (const fn of [...subs8]) {
-        try {
-          fn();
-        } catch {
-        }
-      }
-    }
-    function enqueue(job) {
-      const run = queue.then(job);
-      queue = run.then(() => void 0, () => void 0);
-      return run;
-    }
-    function ensureLoaded() {
-      if (status === "ready") return Promise.resolve(true);
-      if (loadRun) return loadRun;
-      status = "loading";
-      error = "";
-      publish();
-      loadRun = enqueue(async () => {
-        let d;
-        try {
-          d = await load2();
-        } catch (e) {
-          d = { error: "network error: " + (e && e.message || "unreachable") };
-        }
-        loadRun = null;
-        if (status === "ready") return true;
-        if (d && !d.error && _isPlainObject(d.prefs)) {
-          base = d.prefs;
-          status = "ready";
-          error = "";
-        } else {
-          status = "error";
-          error = d && d.error || "could not load preferences";
-        }
-        publish();
-        return status === "ready";
-      });
-      return loadRun;
-    }
-    function write(setObj, unsetList) {
-      const op = { set: setObj, unset: unsetList };
-      pending2 = [...pending2, op];
-      publish();
-      ensureLoaded();
-      return enqueue(async () => {
-        let d;
-        try {
-          d = await save({ set: op.set, unset: op.unset });
-        } catch (e) {
-          d = { error: "network error: " + (e && e.message || "unreachable") };
-        }
-        pending2 = pending2.filter((o) => o !== op);
-        if (d && !d.error && _isPlainObject(d.prefs)) {
-          base = d.prefs;
-          status = "ready";
-          error = "";
-          publish();
-          return { ok: true };
-        }
-        publish();
-        return { error: d && d.error || "could not save preferences" };
-      });
-    }
-    function set2(key, value) {
-      const problem = prefKeyProblem(key);
-      if (problem) return Promise.resolve({ error: problem });
-      const v = _jsonValue(value);
-      if (v === void 0) {
-        return Promise.resolve({ error: "The value for '" + key + "' is not plain JSON (use unset to remove a key)." });
-      }
-      return write({ [key]: v }, []);
-    }
-    function unset(key) {
-      const problem = prefKeyProblem(key);
-      if (problem) return Promise.resolve({ error: problem });
-      return write({}, [key]);
-    }
-    return {
-      ensureLoaded,
-      set: set2,
-      unset,
-      get: (key, fallback) => readPref(snap.prefs, key, fallback),
-      getSnapshot: () => snap,
-      subscribe(fn) {
-        subs8.add(fn);
-        return () => {
-          subs8.delete(fn);
-        };
-      }
-    };
-  }
-
-  // ../gallery/src/hooks/useAccountPrefs.js
-  var PATH = "/api/account/prefs";
-  var _csrf = "";
-  var _store2 = null;
-  function _bootCsrf() {
-    try {
-      return typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.csrf || "";
-    } catch {
-      return "";
-    }
-  }
-  function accountCsrf() {
-    return _csrf || _bootCsrf();
-  }
-  function accountPrefs() {
-    if (!_store2) {
-      _store2 = createPrefsStore({
-        load: async () => {
-          const d = await apiGet(PATH);
-          if (d && d.csrf) _csrf = d.csrf;
-          return d;
-        },
-        save: (patch) => apiPost(PATH, { ...patch, csrf: _csrf || _bootCsrf() })
-      });
-    }
-    return _store2;
-  }
-  function useAccountPrefs() {
-    const store = accountPrefs();
-    const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-    useEffect(() => {
-      store.ensureLoaded();
-    }, [store]);
-    const get = useCallback((key, fallback) => readPref(snap.prefs, key, fallback), [snap]);
-    return {
-      prefs: snap.prefs,
-      status: snap.status,
-      ready: snap.status === "ready",
-      error: snap.error,
-      get,
-      set: store.set,
-      unset: store.unset
-    };
-  }
-
   // ../gallery/src/folio/unleashPref.js
   var UNLEASH_KEY = "unleash";
   var LEGACY_KEY = "unleash";
@@ -7540,14 +8428,14 @@ ${"=".repeat(48)}
     const [toasts2, setToasts] = useState([]);
     useEffect(() => subscribe(setToasts), []);
     return createPortal(
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "mg-toasts", "aria-live": "polite" }, toasts2.map((t) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, className: "mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "") }, t.avatar ? /* @__PURE__ */ react_global_shim_default.createElement(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "mg-toasts", "aria-live": "polite" }, toasts2.map((t) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, className: "mg-toast" + (t.kind ? " " + t.kind : "") + (t.wide ? " wide" : "") + (t.out ? " out" : "") }, t.avatar ? /* @__PURE__ */ react_global_shim_default.createElement(
         "span",
         {
           className: "mt-avatar",
           "aria-hidden": "true",
           style: { backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }
         }
-      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title, t.code ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " ", /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mt-code" }, t.code)) : null), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null, t.actions && t.actions.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-acts" }, t.actions.map((a, i) => /* @__PURE__ */ react_global_shim_default.createElement(
+      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title, t.code ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " ", /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mt-code" }, t.code)) : null), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null, t.quote ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-quote" + (t.quote.length > 320 || t.quote.split(/\n/).length > 6 ? " long" : "") }, t.quote) : null, t.actions && t.actions.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-acts" }, t.actions.map((a, i) => /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
           key: i,
@@ -10861,7 +11749,7 @@ ${"=".repeat(48)}
     }, [phaseKey]);
     const watch = !!guide && ready && top && !paused && !helpUp && (st.phase === "welcome" || st.phase === "notes" && !notesOff);
     const layerUp = useLayerOver(guide, watch);
-    const write = useCallback((v) => {
+    const write3 = useCallback((v) => {
       set2(guideKey(surface), v);
     }, [set2, surface]);
     if (!guide || !ready || !top || paused || helpUp || !settled || watch && layerUp) return null;
@@ -10872,14 +11760,14 @@ ${"=".repeat(48)}
         {
           guide,
           phone: ph,
-          onTour: () => write(afterWelcome("tour")),
-          onDone: () => write(afterWelcome("gotit"))
+          onTour: () => write3(afterWelcome("tour")),
+          onDone: () => write3(afterWelcome("gotit"))
         }
       );
     } else if (st.phase === "tour") {
-      layer = /* @__PURE__ */ react_global_shim_default.createElement(Tour, { guide, phone: ph, onEnd: write, restartKey: restart });
+      layer = /* @__PURE__ */ react_global_shim_default.createElement(Tour, { guide, phone: ph, onEnd: write3, restartKey: restart });
     } else if (st.phase === "notes" && !notesOff) {
-      layer = /* @__PURE__ */ react_global_shim_default.createElement(Notes, { guide, phone: ph, n: st.n, onAdvance: write });
+      layer = /* @__PURE__ */ react_global_shim_default.createElement(Notes, { guide, phone: ph, n: st.n, onAdvance: write3 });
     }
     if (!layer) return null;
     return createPortal(/* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-root", "data-surface": surface, "data-keeps-dock": "1" }, layer), document.body);
@@ -11262,7 +12150,9 @@ ${"=".repeat(48)}
     import: "Import",
     // A claimed daily reward. Without an entry here the fallback renders the raw enum --
     // the exact "Cli" non-word this table exists to prevent.
-    claim: "Rewards"
+    claim: "Rewards",
+    // Health's Broken files fix run (Session W).
+    integrity: "Health"
   };
   function kindLabel(t) {
     return KIND_LABEL[t] || t || "Job";
@@ -11290,14 +12180,32 @@ ${"=".repeat(48)}
     return grp;
   }
 
+  // ../gallery/src/lib/brokenFilesNav.js
+  var opener = null;
+  var pending2 = null;
+  var subs8 = /* @__PURE__ */ new Set();
+  function openBrokenFiles(chip) {
+    pending2 = chip || "all";
+    subs8.forEach((fn) => {
+      try {
+        fn(pending2);
+      } catch {
+      }
+    });
+    if (opener) opener(pending2);
+  }
+
   // ../gallery/src/notify/ActivityRow.jsx
-  function ActivityRow({ job: j, expanded, onToggle, onDismiss, compact }) {
+  function ActivityRow({ job: j, expanded, onToggle: toggle, onDismiss, compact }) {
+    const integrity = j.type === "integrity";
+    const onToggle = (id) => integrity ? openBrokenFiles("all") : toggle(id);
     const st = j.status || "running";
     const queued = st === "running" && j.started === false;
     const fin = st === "done" || st === "failed" || st === "done_with_errors" || st === "stale";
     const mid = (j.media_ids || [])[0] || "";
     const pct = st === "running" && j.total ? Math.min(100, Math.round((j.done || 0) / j.total * 100)) : null;
     const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
+    const runMoon = integrity && st === "running" ? fractionOf(j.done, j.total) : null;
     const cls = st === "failed" ? " at-failed" : st === "done_with_errors" || st === "stale" ? " at-warn" : "";
     const icon = st === "done" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-ok at-glyph" }, "\u2713"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "done_with_errors" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_done.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "failed" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-err at-glyph" }, "\u26A0"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : st === "stale" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-warn at-glyph" }, "?"), /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/mascots/trk_fail.png", alt: "", onError: (e) => e.currentTarget.remove() })) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-spin" + (queued ? " at-queued" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("img", { className: "at-nel", src: "/branding/nel_spinner.png", alt: "", onError: (e) => e.currentTarget.remove() }), /* @__PURE__ */ react_global_shim_default.createElement("i", { className: "at-ring" }));
     const [, tick] = useState(0);
@@ -11343,7 +12251,7 @@ ${"=".repeat(48)}
           onToggle(j.job_id);
         }
       },
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-line" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-ic" }, icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-kind" }, kindLabel(j.type)), j.source === "pixai" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-src", title: "Started on the PixAI website, not in this app." }, "website") : null, queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-when" }, ago(j.ts)))), st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-line" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-ic" }, icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-lab" }, labelFor(j, fin), runMoon != null ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " \xB7 " + (j.done || 0) + " / " + j.total, " ", /* @__PURE__ */ react_global_shim_default.createElement(MoonGauge, { fraction: runMoon, size: 16, bar: false, label: labelFor(j, fin) })) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-kind" }, kindLabel(j.type)), j.source === "pixai" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-src", title: j.via === "inbox" ? "Started on the PixAI website; PixAI's inbox told the app it finished." : "Started on the PixAI website, not in this app." }, "website") : null, queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-when" }, ago(j.ts)))), st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
         "a",
         {
           className: "at-thumb",
@@ -11359,6 +12267,7 @@ ${"=".repeat(48)}
       ) : null),
       pct != null ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-bar" }, /* @__PURE__ */ react_global_shim_default.createElement("i", { style: { width: pct + "%" } })) : null,
       showErr ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-errmsg" }, j.error) : null,
+      j.pixai_says ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-says" }, "PixAI says: ", j.pixai_says) : null,
       expanded ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-detail" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "STATUS"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" + (st === "failed" ? " bad" : st === "done_with_errors" || st === "stale" ? " warn" : st === "done" ? " good" : "") }, fin ? st === "done" ? "Done" : st === "failed" ? "Failed" : st === "stale" ? "Stalled" : "Done, with errors" : queued ? "Queued" : "Running")), typeof j.paid_credit === "number" && isFinite(j.paid_credit) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "COST"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv" }, groupThousands(j.paid_credit), " credits")) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "TASK"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, j.job_id || "\u2014"), /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-copy" + (copied ? " copied" : ""), title: "Copy task ID", onClick: copy }, copied ? "copied!" : "\u29C9")), !compact ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow at-divider" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "SENT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtClock(startedAt))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "SPENT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(spent), running ? " so far" : ""))) : null, typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-drow" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dk" }, "EST. WAIT"), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-dv at-mono" }, fmtDuration(j.eta_seconds), " (PixAI, when queued)")) : null) : null,
       fin ? /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x", title: "Dismiss", onClick: stopTracking }, "\xD7") : /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "at-x at-forcex", title: "Stop tracking this job -- does not cancel it on PixAI", onClick: stopTracking }, "Stop tracking")
     );
@@ -11508,7 +12417,7 @@ ${"=".repeat(48)}
   var errUnknownList = (t) => "No list named " + t + ".";
   var errEmptyList = (t) => "The list " + t + " is empty.";
   var errLongList = (t) => "The list " + t + " is too long \u2014 up to " + MAX_LIST_ITEMS + " items of up to " + LIST_ITEM_MAX + " characters.";
-  function fmt3(n) {
+  function fmt4(n) {
     const s = String(Math.trunc(Number(n) || 0));
     const neg = s.startsWith("-");
     const d = neg ? s.slice(1) : s;
@@ -11715,11 +12624,11 @@ ${"=".repeat(48)}
     const title = "Send " + n + " generations?" + (matrix ? " (matrix, queued)" : "");
     let credits;
     if (p.unlimited) credits = "free \xB7 Unlimited Mode";
-    else if (p.mode === "batch") credits = "\u2248 " + fmt3(p.total) + " credits in total \xB7 one task of " + n + " images";
-    else credits = "\u2248 " + fmt3(p.total) + " credits in total \xB7 " + fmt3(p.each) + " each \xD7 " + (jobs2 - (Number(p.covered) || 0));
+    else if (p.mode === "batch") credits = "\u2248 " + fmt4(p.total) + " credits in total \xB7 one task of " + n + " images";
+    else credits = "\u2248 " + fmt4(p.total) + " credits in total \xB7 " + fmt4(p.each) + " each \xD7 " + (jobs2 - (Number(p.covered) || 0));
     let cards;
     const covered = Number(p.covered) || 0;
-    const left = p.card && p.card.left_after != null ? " \xB7 " + fmt3(p.card.left_after) + " left after" : "";
+    const left = p.card && p.card.left_after != null ? " \xB7 " + fmt4(p.card.left_after) + " left after" : "";
     if (p.unlimited) cards = "No free card is used in Unlimited Mode.";
     else if (matrix) cards = "Free cards don\u2019t cover queued matrix runs.";
     else if (covered && p.mode === "batch") cards = "A free card covers this batch" + left;
@@ -12171,7 +13080,7 @@ ${"=".repeat(48)}
     }));
   };
   var uid = () => Math.random().toString(36).slice(2, 9);
-  var fmt4 = (s) => {
+  var fmt5 = (s) => {
     s = Math.max(0, Math.round(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
@@ -13867,15 +14776,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       if (!el || tab !== "Video") return;
       if (lastActiveIdRef.current !== active.c.id) {
         if (lastActiveIdRef.current) {
-          const pending2 = el.flushPromptEdit();
-          if (pending2 != null) {
+          const pending3 = el.flushPromptEdit();
+          if (pending3 != null) {
             const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
             const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
             if (outEntry) {
               const already = !!outEntry.c.promptOverride;
               const composed = already ? null : shotText(outEntry, project, imgSrc);
-              if (already || pending2 !== composed) {
-                const apply = (c) => setPromptOverride(c, pending2);
+              if (already || pending3 !== composed) {
+                const apply = (c) => setPromptOverride(c, pending3);
                 isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
               }
             }
@@ -15112,14 +16021,14 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       {
         className: "lv-genall",
         onClick: () => {
-          const pending2 = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
+          const pending3 = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
           let liveEntries = entries;
-          if (pending2 != null && activeRef.current) {
+          if (pending3 != null && activeRef.current) {
             const a = activeRef.current;
             const already = !!a.c.promptOverride;
             const composed = already ? null : shotText(a, project, imgSrc);
-            if (already || pending2 !== composed) {
-              const patchedCard = setPromptOverride(a.c, pending2);
+            if (already || pending3 !== composed) {
+              const patchedCard = setPromptOverride(a.c, pending3);
               liveEntries = entries.map((e) => e.c.id === a.c.id ? { ...e, c: patchedCard } : e);
               a.c.id === "__draft__" ? setDraftCard(() => patchedCard) : setCard(a.a.id, a.c.id, () => patchedCard);
             }
@@ -20055,7 +20964,7 @@ Generate anyway?`)) return { go: false };
       return () => clearTimeout(priceDebounceRef.current);
     }, [notDoneFp]);
     const refreshEstimate = useCallback2(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
-    const pending2 = notDone.filter((e) => {
+    const pending3 = notDone.filter((e) => {
       const r = priceCache[e.c.id];
       return !r || r.loading;
     }).length;
@@ -20063,7 +20972,7 @@ Generate anyway?`)) return { go: false };
       const r = priceCache[e.c.id];
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
-    const costEstimate = { ...tallyPrices(settled), pending: pending2, notDoneCount: notDone.length };
+    const costEstimate = { ...tallyPrices(settled), pending: pending3, notDoneCount: notDone.length };
     const [spendRows, setSpendRows] = useState2({});
     const [spendStatus, setSpendStatus] = useState2("loading");
     const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
@@ -20180,7 +21089,7 @@ Generate anyway?`)) return { go: false };
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     };
     const exportAll = () => download(
-      buildShotListText(project, fmt4, actLetter, shotText),
+      buildShotListText(project, fmt5, actLetter, shotText),
       `${project.name.replace(/\s+/g, "_")}_shotlist.txt`,
       "text/plain"
     );
