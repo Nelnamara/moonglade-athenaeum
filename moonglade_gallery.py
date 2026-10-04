@@ -27937,6 +27937,60 @@ __DESIGN_TOKENS__
             return bad
         return _inbox_write(_inbox().mark_all_read, str(body.get("tab") or "all"))
 
+    def _own_work(artwork_id):
+        """True when `artwork_id` is one of the owner's own published works -- a row in this
+        library. Replies are for those alone (v1), and the thread is read only for them."""
+        aid = str(artwork_id or "").strip()
+        return bool(aid.isdigit() and artwork_media_ids(db_path, [aid]))
+
+    @app.route("/api/comments/<artwork_id>")
+    @tier(LOGIN)
+    def api_comments(artwork_id):
+        """A published work's comment thread (?page=N, 50 a page, newest first): read live when
+        Details' comments section scrolls into view, kept five minutes in memory, never
+        archived. Also: who "you" are (the account's id and display name, for the reply's
+        question), read_only (the reply box shows disabled with the reason) and the CSRF token."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        extra = {"csrf": session["csrf"], "read_only": _inbox_read_only()}
+        if not _own_work(artwork_id):
+            return _inbox_fail("Comments show for your own published works only.",
+                               items=[], **extra)
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            out = dict(ib.read_thread(gsession, artwork_id, request.args.get("page") or 1))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[], **extra)
+        out.update(extra, my_name=ib.display_name(gsession))
+        return jsonify(out)
+
+    @app.route("/api/comments/<artwork_id>/reply", methods=["POST"])
+    @tier(LOGIN)
+    def api_comments_reply(artwork_id):
+        """[Post publicly] in the reply's question: {csrf, reply_to, content}. One POST and its
+        read-back (moonglade_inbox.post_reply). Your own works only."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        if not _own_work(artwork_id):
+            return jsonify({"state": "refused", "message": "Replies are for your own published "
+                                                           "works only. Nothing was posted."})
+        return _inbox_write(_inbox().post_reply, artwork_id, body.get("reply_to"),
+                            body.get("content"))
+
+    @app.route("/api/comments/<artwork_id>/delete", methods=["POST"])
+    @tier(LOGIN)
+    def api_comments_delete(artwork_id):
+        """[Delete] in "Delete my reply"'s question: {csrf, message_id}. One DELETE and its
+        read-back (moonglade_inbox.delete_reply). Your own reply on your own work only."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        if not _own_work(artwork_id):
+            return jsonify({"state": "refused", "message": "Only your own replies on your own "
+                                                           "works. Nothing was deleted."})
+        return _inbox_write(_inbox().delete_reply, artwork_id, body.get("message_id"))
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are

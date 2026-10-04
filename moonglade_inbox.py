@@ -377,6 +377,8 @@ def clear_caches():
     with _events_lock:
         _events_cache.update(at=0.0, items=None)
     _me_cache.update(name=None, at=0.0)
+    with _thread_lock:
+        _thread_cache.clear()
 
 
 # ---------------------------------------------------------------------------------------
@@ -523,3 +525,281 @@ def mark_all_read(session, tab="all"):
         return _answer("unclear", "Couldn't confirm everything was marked read: {} still "
                                   "unread on PixAI. Nothing was sent twice.".format(left))
     return _answer("done", "Marked read on PixAI.")
+
+
+# ---------------------------------------------------------------------------------------
+# A work's comment thread (R5b): live, newest first, 50 a page, five minutes in memory
+# ---------------------------------------------------------------------------------------
+
+THREAD_TTL = 300.0
+THREAD_PAGE = 50
+_thread_cache = {}               # (artwork_id, page) -> (at, payload); this process only
+_thread_lock = threading.Lock()
+_ID = re.compile(r"^[0-9]{1,24}$")
+
+
+def _checked_id(v, what="id"):
+    v = str(v or "").strip()
+    if not _ID.match(v):
+        raise core.PixAIError("That isn't a PixAI {}".format(what))
+    return v
+
+
+def _reaction_count(reactions):
+    n = 0
+    for r in reactions or []:
+        if isinstance(r, dict):
+            try:
+                n += max(1, int(r.get("count") or 1))
+            except (TypeError, ValueError):
+                n += 1
+        else:
+            n += 1
+    return n
+
+
+def _sticker_url(s):
+    if isinstance(s, dict):
+        return str(s.get("url") or s.get("imageUrl") or s.get("mediaUrl") or "")
+    return str(s) if isinstance(s, str) and s.startswith("https://") else ""
+
+
+def comment_of(raw, me):
+    """One message, in the shape the thread draws. `you` marks the account's own."""
+    raw = raw or {}
+    a = raw.get("author") or {}
+    author_id = str(raw.get("authorId") or a.get("id") or "")
+    return {"id": str(raw.get("id") or ""),
+            "topic_id": str(raw.get("topicId") or ""),
+            "author": {"id": author_id,
+                       "name": str(a.get("displayName") or a.get("username") or "someone"),
+                       "avatar": str(a.get("avatarUrl") or "")},
+            "you": bool(me) and author_id == str(me),
+            "created_at": str(raw.get("createdAt") or ""),
+            "content": str(raw.get("content") or ""),
+            "reply_to": str(raw.get("replyToMessageId") or ""),
+            "reactions": _reaction_count(raw.get("reactions")),
+            "sticker": _sticker_url(raw.get("sticker")),
+            "flagged": bool(raw.get("contentFlags"))}
+
+
+def _drop_thread(artwork_id):
+    with _thread_lock:
+        for k in [k for k in _thread_cache if k[0] == artwork_id]:
+            _thread_cache.pop(k, None)
+
+
+def _fetch_thread(session, artwork_id, page):
+    data = core._rest_get(session, "/messages/", params={
+        "topicId": artwork_id, "page": int(page), "pageSize": THREAD_PAGE}) or {}
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        raise core.PixAIError("PixAI's comments answered without a list")
+    return data, rows
+
+
+def read_thread(session, artwork_id, page=1):
+    """One page of a work's comments: GET /v2/messages/?topicId=<artwork id>&page&pageSize=50,
+    newest first. Kept five minutes in THIS process's memory and nowhere else -- never the
+    catalog, a file or a log. Raises on a failed read (the thread then says so; it is never
+    drawn as "no comments")."""
+    artwork_id = _checked_id(artwork_id, "work")
+    page = max(1, int(page or 1))
+    key = (artwork_id, page)
+    with _thread_lock:
+        hit = _thread_cache.get(key)
+        if hit and time.time() - hit[0] < THREAD_TTL:
+            return hit[1]
+    me = _user_id(session)
+    data, rows = _fetch_thread(session, artwork_id, page)
+    try:
+        total = int(data.get("totalCount"))
+    except (TypeError, ValueError):
+        total = None
+    try:
+        pages = int(data.get("totalPage") or 1)
+    except (TypeError, ValueError):
+        pages = 1
+    out = {"items": [comment_of(r, me) for r in rows if isinstance(r, dict)],
+           "page": page, "total": total, "has_more": page < pages, "me": me}
+    with _thread_lock:
+        _thread_cache[key] = (time.time(), out)
+    return out
+
+
+# ---------------------------------------------------------------------------------------
+# Write 2 of 4: a reply (R6c)
+# ---------------------------------------------------------------------------------------
+
+REPLY_MAX = 4095                 # PixAI's limit, counted as JavaScript counts: UTF-16 units
+REPLY_NOT_FOUND = ("No clear answer from PixAI. Read the thread back: not found. Check on "
+                   "PixAI before trying again.")
+_REPLY_REFUSALS = {
+    "EMAIL_NOT_VERIFIED": "PixAI needs your email verified before you can reply. Nothing was "
+                          "posted.",
+    "USER_BLOCKED": "PixAI says one of you has blocked the other. Nothing was posted.",
+    "FORBIDDEN": "PixAI says this account isn't eligible to comment. Nothing was posted.",
+    "SPAMMING_RESTRICTED": "PixAI has restricted commenting on this account for now. Nothing "
+                           "was posted.",
+    "TOO_MANY_REQUESTS": "Nothing was posted. Try again in a few minutes.",
+}
+
+
+def utf16_length(text):
+    """The length PixAI checks: JavaScript's String.length, which counts UTF-16 units."""
+    return len(str(text or "").encode("utf-16-le")) // 2
+
+
+def _reply_refusal(e):
+    code = _code_of(e)
+    if code in _REPLY_REFUSALS:
+        return _REPLY_REFUSALS[code]
+    status = _status_of(e)
+    if status == 429:
+        return _REPLY_REFUSALS["TOO_MANY_REQUESTS"]
+    if status == 401:
+        return "PixAI didn't accept this account's key. Nothing was posted."
+    return "PixAI refused the reply. Nothing was posted."
+
+
+def _read_message(session, message_id):
+    """("found", raw) / ("gone", None) on a 404 / ("unread", None) when the read failed."""
+    try:
+        raw = core._rest_get(session, "/messages/" + message_id)
+    except core.PixAIRestError as e:
+        if _status_of(e) == 404:
+            return "gone", None
+        return "unread", None
+    except Exception:                                        # noqa: BLE001
+        return "unread", None
+    return ("found", raw) if isinstance(raw, dict) and raw.get("id") else ("unread", None)
+
+
+def _find_reply(session, artwork_id, posted_id, me, reply_to, text):
+    """The reply's read-back: ("found", raw) / ("absent", None) / ("unread", None). With an id
+    from PixAI's answer it reads that message; without one (an unclear send) it reads the
+    thread's newest page fresh -- never the cache -- for the account's own reply to that
+    comment with exactly that text."""
+    if posted_id:
+        state, raw = _read_message(session, posted_id)
+        if state == "found" and str(raw.get("topicId") or "") == artwork_id:
+            return "found", raw
+        return ("absent", None) if state in ("found", "gone") else ("unread", None)
+    try:
+        _data, rows = _fetch_thread(session, artwork_id, 1)
+    except Exception:                                        # noqa: BLE001
+        return "unread", None
+    for r in rows:
+        if (isinstance(r, dict) and str(r.get("authorId") or "") == str(me)
+                and str(r.get("replyToMessageId") or "") == reply_to
+                and str(r.get("content") or "") == text):
+            return "found", r
+    return "absent", None
+
+
+def post_reply(session, artwork_id, reply_to, content):
+    """Post the owner's reply to a comment on one of their own works: ONE
+    POST /v2/messages/ {topicId, topicRefType: "ARTWORK", content, replyToMessageId}, then a
+    read-back that decides what is said.
+
+    Order: READ_ONLY (nothing is asked of PixAI) -> the text's own checks (empty, over 4,095)
+    -> the comment being answered must be on this work -> the one POST -> the read-back. The
+    caller (the route) has already checked the work is in the owner's library. "done" only
+    when the read-back finds the reply; an unclear send that reads back nothing is the peach
+    "not found, check on PixAI", and the client keeps Send off until the text changes."""
+    try:
+        core._check_read_only("post a reply on PixAI")
+    except core.PixAIError:
+        return _read_only_answer("replies are off")
+    text = str(content or "").strip()
+    if not text:
+        return _answer("refused", "Write something first. Nothing was posted.")
+    over = utf16_length(text) - REPLY_MAX
+    if over > 0:
+        return _answer("refused", "Too long by {:,}. Nothing was posted.".format(over))
+    try:
+        artwork_id = _checked_id(artwork_id, "work")
+        reply_to = _checked_id(reply_to, "comment")
+    except core.PixAIError as e:
+        return _answer("refused", str(e) + ". Nothing was posted.")
+    state, target = _read_message(session, reply_to)
+    if state == "gone":
+        return _answer("refused", "That comment is gone from PixAI. Nothing was posted.")
+    if state != "found":
+        return _answer("refused", "Couldn't check the comment you're replying to, so nothing "
+                                  "was posted.")
+    if str(target.get("topicId") or "") != artwork_id:
+        return _answer("refused", "That comment isn't on this work. Nothing was posted.")
+    me = _user_id(session)
+    body = {"topicId": artwork_id, "topicRefType": "ARTWORK", "content": text,
+            "replyToMessageId": reply_to}
+    posted_id = ""
+    try:
+        r = core._rest_post(session, "/messages/", body)
+        posted_id = str((r or {}).get("id") or "") if isinstance(r, dict) else ""
+    except Exception as e:                                   # noqa: BLE001
+        if core.definite_refusal(e):
+            return _answer("refused", _reply_refusal(e))
+    _drop_thread(artwork_id)
+    found, raw = _find_reply(session, artwork_id, posted_id, me, reply_to, text)
+    if found == "found":
+        return _answer("done", "Posted · found in the thread.", comment=comment_of(raw, me))
+    if found == "unread" and posted_id:
+        return _answer("unclear", "PixAI said it posted, but reading the thread back failed. "
+                                  "Check on PixAI before trying again.")
+    return _answer("unclear", REPLY_NOT_FOUND)
+
+
+# ---------------------------------------------------------------------------------------
+# Write 3 of 4: delete the owner's own reply (there is no edit on PixAI)
+# ---------------------------------------------------------------------------------------
+
+def _rest_delete(session, path, params=None, timeout=30):
+    """DELETE a /v2 route. Single attempt (no loop; pinned by
+    tests/test_inbox_comments.py); raises like the transport's other verbs on a non-2xx.
+    Blocked in tests by conftest."""
+    client = core._client_of(session)
+    r = client.session.delete(core.REST_API_BASE + path, params=params, timeout=timeout)
+    if not r.ok:
+        raise core._rest_error("DELETE", path, r)
+    try:
+        return r.json()
+    except ValueError:
+        return {}
+
+
+def delete_reply(session, artwork_id, message_id):
+    """"Delete my reply": ONE DELETE /v2/messages/{id}?topicRefType=ARTWORK, then a read-back of
+    that message. READ_ONLY first; only the account's own reply on this work; "done" only when
+    the read-back finds it gone (a 404). It can't be undone -- the client asks first."""
+    try:
+        core._check_read_only("delete a reply on PixAI")
+    except core.PixAIError:
+        return _read_only_answer("nothing was deleted")
+    try:
+        artwork_id = _checked_id(artwork_id, "work")
+        message_id = _checked_id(message_id, "reply")
+    except core.PixAIError as e:
+        return _answer("refused", str(e) + ". Nothing was deleted.")
+    state, raw = _read_message(session, message_id)
+    if state == "gone":
+        _drop_thread(artwork_id)
+        return _answer("done", "Deleted from PixAI.")
+    if state != "found":
+        return _answer("refused", "Couldn't check the reply, so nothing was deleted.")
+    me = _user_id(session)
+    if str(raw.get("authorId") or "") != me or str(raw.get("topicId") or "") != artwork_id:
+        return _answer("refused", "Only your own replies on this work can be deleted here. "
+                                  "Nothing was deleted.")
+    try:
+        _rest_delete(session, "/messages/" + message_id, params={"topicRefType": "ARTWORK"})
+    except Exception as e:                                   # noqa: BLE001
+        if core.definite_refusal(e):
+            return _answer("refused", "PixAI refused it. Nothing was deleted.")
+    _drop_thread(artwork_id)
+    after, _raw = _read_message(session, message_id)
+    if after == "gone":
+        return _answer("done", "Deleted from PixAI.")
+    if after == "found":
+        return _answer("unclear", "It's still on PixAI: it wasn't deleted. Check on PixAI.")
+    return _answer("unclear", "No clear answer from PixAI. Check on PixAI before trying again.")

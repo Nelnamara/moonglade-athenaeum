@@ -151,6 +151,9 @@ TIER_SNAPSHOT = [
     # wave 5, Session P (P6): a hand-picked collection's manual order
     "/api/collections/order [GET] LOGIN",
     "/api/collections/order [POST] LOGIN",
+    "/api/comments/<artwork_id> [GET] LOGIN",
+    "/api/comments/<artwork_id>/delete [POST] LOGIN",
+    "/api/comments/<artwork_id>/reply [POST] LOGIN",
     "/api/contact-sheet [GET] LOGIN",
     "/api/contest/<slug>/artworks [GET] LOGIN",
     "/api/contest/<slug>/winners [GET] LOGIN",
