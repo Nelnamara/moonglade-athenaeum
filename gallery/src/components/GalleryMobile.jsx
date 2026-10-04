@@ -8,10 +8,13 @@ import ActionsMenu from "./ActionsMenu.jsx";
 import SimilarResults from "./SimilarResults.jsx";
 import CurationSheetMobile from "./CurationSheetMobile.jsx";
 import PullToRefresh from "./PullToRefresh.jsx";
-import useDataSaver, { useFeedLayout } from "../hooks/usePhonePrefs.js";
+import LayoutPagingSheet from "./LayoutPagingSheet.jsx";
+import useDataSaver, { useFeedLayout, usePaging, usePagingHint } from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useScrollAnchor from "../hooks/useScrollAnchor.js";
-import { newSince, newSinceLabel, newestLabel, pagerInView, showNewest } from "../lib/phoneCore.js";
+import {
+  KEY_LONG_PRESS_MS, newSince, newSinceLabel, newestLabel, pagerInView, showNewest,
+} from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
 import "../styles/gallery-mobile.css";
@@ -75,7 +78,15 @@ import "../styles/phone-q.css";
      Q4  landscape: the grid deals its pictures across 4 columns (3 under 700 px wide) and a turn of the
          phone keeps your place -- the picture at the top of the view is scrolled back to the same spot
          once the columns have re-flowed (hooks/useScrollAnchor.js). The rail, the side panels and the
-         rest of the layout are CSS (styles/phone-landscape.css). */
+         rest of the layout are CSS (styles/phone-landscape.css).
+
+   SESSION U, PHONE PAGING (2026-10-03; Phone Paging and Nudge Handoff.dc.html), additive:
+     U1  a long-press (500 ms) on either ▦ / ▭ key opens LayoutPagingSheet -- Layout and Paging (Pages |
+         Continuous), per device -- while a tap on a key still only switches the layout. A hairline dot
+         under the keys until the first long-press, so the gesture is found once. */
+
+/* A long-press that moves further than this is a scroll or a drag, not a hold. */
+const KEY_MOVE_CANCEL_PX = 10;
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -114,6 +125,42 @@ export default function GalleryMobile({
   const sortOpts = handShelf || adv.sort === "manual" ? SORT_OPTS.concat([["manual", "Manual order"]]) : SORT_OPTS;
   const hasCuration = !!curation;
   const [layout, setLayout] = useFeedLayout();
+  const [paging, setPaging] = usePaging();
+  const [hintSeen, markHintSeen] = usePagingHint();
+  /* U1: the layout keys' long-press. A tap that outlasts KEY_LONG_PRESS_MS opens the sheet instead of
+     switching, and the click the browser may still deliver after it is swallowed once. */
+  const keyTimer = useRef(null);
+  const keyLong = useRef(false);
+  const keyStart = useRef(null);
+  const cancelKey = () => { clearTimeout(keyTimer.current); keyTimer.current = null; keyStart.current = null; };
+  useEffect(() => () => clearTimeout(keyTimer.current), []);
+  const keyPress = {
+    onPointerDown: (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      cancelKey();
+      keyLong.current = false;
+      keyStart.current = { x: e.clientX, y: e.clientY };
+      keyTimer.current = setTimeout(() => {
+        keyTimer.current = null;
+        keyLong.current = true;
+        markHintSeen();
+        openSheet("paging");
+        if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
+      }, KEY_LONG_PRESS_MS);
+    },
+    onPointerMove: (e) => {
+      const s = keyStart.current;
+      if (s && (Math.abs(e.clientX - s.x) > KEY_MOVE_CANCEL_PX || Math.abs(e.clientY - s.y) > KEY_MOVE_CANCEL_PX)) cancelKey();
+    },
+    onPointerUp: cancelKey,
+    onPointerLeave: cancelKey,
+    onPointerCancel: cancelKey,
+    onContextMenu: (e) => e.preventDefault(),
+  };
+  const tapKey = (v) => {
+    if (keyLong.current) { keyLong.current = false; return; }
+    setLayout(v);
+  };
   const saver = useDataSaver().active;
   const rootRef = useRef(null);
   const { landscape, cols } = usePhoneLandscape();
@@ -301,12 +348,14 @@ export default function GalleryMobile({
           </>
         ) : (
           <>
-            {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. */}
+            {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. U1: a long-press on
+                either key opens the Layout + Paging sheet; the dot under them shows until the first. */}
             <div className="glm-layout" role="group" aria-label="Layout" style={{ marginLeft: "auto" }}>
               <button type="button" className={layout === "grid" ? "on" : ""} aria-pressed={layout === "grid"}
-                aria-label="Grid" onClick={() => setLayout("grid")}>{"▦"}<span className="lbl"> Grid</span></button>
+                aria-label="Grid" {...keyPress} onClick={() => tapKey("grid")}>{"▦"}<span className="lbl"> Grid</span></button>
               <button type="button" className={layout === "feed" ? "on" : ""} aria-pressed={layout === "feed"}
-                aria-label="Feed" onClick={() => setLayout("feed")}>{"▭"}<span className="lbl"> Feed</span></button>
+                aria-label="Feed" {...keyPress} onClick={() => tapKey("feed")}>{"▭"}<span className="lbl"> Feed</span></button>
+              {!hintSeen ? <span className="glm-layout-dot" aria-hidden="true" /> : null}
             </div>
             <button type="button" className="glm-metal" onClick={() => openSheet("sort")}>
               Sort ▾
@@ -452,6 +501,9 @@ export default function GalleryMobile({
           <button type="button" className="glm-primary" onClick={applyDraft}>Apply</button>
         </div>
       </MobileSheet>
+
+      <LayoutPagingSheet open={sheet === "paging"} closing={closing} onClose={closeSheet}
+        layout={layout} setLayout={setLayout} paging={paging} setPaging={setPaging} />
 
       <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
         <div className="glm-sheet-list">

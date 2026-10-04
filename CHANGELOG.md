@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Phone paging and the Home Screen nudge
+- **On the phone, a long-press on ▦ or ▭ opens a Layout and Paging sheet.** Layout is Grid or Feed, as the keys already were; Paging is **Pages** (the default, ‹ Prev · Next › as before) or **Continuous**. A tap on a key still only switches the layout. The choice is kept on that phone, and the Control screen has the same **Library paging** row beside Data saver. A small dot under the keys shows the gesture until you first use it. (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

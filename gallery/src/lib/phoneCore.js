@@ -20,6 +20,22 @@ export function parseLayout(v) {
 }
 
 /* ---------------------------------------------------------------------------------------------
+   Paging (Session U, Phone Paging and Nudge Handoff.dc.html U1b)
+   --------------------------------------------------------------------------------------------- */
+
+/* Pages is the phone as shipped (‹ Prev · Next ›); Continuous loads as you scroll. Per device, beside
+   the layout; a long-press on either layout key opens the sheet that holds both. */
+export const PAGINGS = Object.freeze(["pages", "continuous"]);
+export const DEFAULT_PAGING = "pages";
+export const PAGING_LABELS = Object.freeze({ pages: "Pages", continuous: "Continuous" });
+export const KEY_LONG_PRESS_MS = 500;
+
+/* Anything that is not exactly "continuous" is Pages: the phone as built. */
+export function parsePaging(v) {
+  return v === "continuous" ? "continuous" : "pages";
+}
+
+/* ---------------------------------------------------------------------------------------------
    Data saver (Q7)
    --------------------------------------------------------------------------------------------- */
 

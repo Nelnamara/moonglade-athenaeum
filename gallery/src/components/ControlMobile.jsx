@@ -6,6 +6,7 @@ import {
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import DataSaverRow from "./DataSaverRow.jsx";
+import PagingRow from "./PagingRow.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -579,6 +580,11 @@ export default function ControlMobile({ account, brandRequest }) {
       {/* Session Q (Q7): the Data saver row -- Off / Auto on metered / Always, per device. */}
       <div className="ctm-sec">
         <DataSaverRow />
+      </div>
+      {/* Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the gallery's
+          long-press sheet on its layout keys sets. */}
+      <div className="ctm-sec">
+        <PagingRow />
       </div>
 
       <div className="ctm-sec">

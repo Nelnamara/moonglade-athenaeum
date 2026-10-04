@@ -1,0 +1,37 @@
+/* ============================================================================
+   Session U, "Phone paging, and the Home Screen nudge" -- Phone Paging and Nudge Handoff.dc.html.
+   ADDITIVE to Moonglade Mobile and Session Q, which stay as built: every rule here is a new class
+   (glm-pg*, glm-layout-dot, ctm-paging) or a modifier on an existing one. Sizes are the page's own;
+   every colour is an app token (the page's literals stand in for the same tokens).
+   ============================================================================ */
+
+/* ---- U1 the long-press sheet: grab handle, two 44 px segmented rows, the dim note ---------- */
+.glm-pgsheet { display: flex; flex-direction: column; touch-action: none; }
+.glm-pgsheet-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--surface1);
+  margin: 0 auto 6px; }
+.glm-pgrow { display: flex; align-items: center; gap: 6px; height: 44px; }
+.glm-pgrow-lbl { flex: none; width: 64px; font-size: 10.5px; color: var(--subtext); }
+.glm-pgrow button { flex: 1; min-width: 0; height: 32px; font: inherit; font-size: 10.5px; border-radius: 8px;
+  cursor: pointer; background: none; border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap; }
+.glm-pgrow button.on { border-color: var(--lavender); color: var(--text); font-weight: 700;
+  background: color-mix(in srgb, var(--lavender) 16%, transparent); }
+.glm-pgsheet-note { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); padding-top: 6px; }
+
+/* ---- U1 the layout keys: long-pressable, and the one-time hairline dot under them --------- */
+.glm-layout { position: relative; }
+.glm-layout button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.glm-layout-dot { position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--lavender); pointer-events: none; }
+
+/* ---- U1 Control's Library paging row: Data saver's card (phone-q.css .ctm-saver), two choices -- */
+.ctm-paging { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 13px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 6%, transparent); }
+.ctm-paging-head { display: flex; align-items: center; gap: 10px; }
+.ctm-paging-title { flex: 1; min-width: 0; }
+.ctm-paging-title b { display: block; font-size: 12.5px; font-weight: 600; }
+.ctm-paging-title span { display: block; font-size: 10px; color: var(--overlay0); line-height: 1.4; }
+.ctm-paging-modes { display: flex; gap: 4px; }
+.ctm-paging-modes button { flex: 1; text-align: center; font: inherit; font-size: 10.5px; font-weight: 600;
+  padding: 8px 4px; min-height: 36px; border-radius: 7px; cursor: pointer; color: var(--subtext);
+  background: none; border: 1px solid var(--surface1); }
+.ctm-paging-modes button.on { background: var(--lavender); color: var(--base); }

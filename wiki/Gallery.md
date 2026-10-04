@@ -395,6 +395,15 @@ filter does not contain shows no number on its record.
 appears for any picture that came from a generation, not only ones filed in an old batch folder.
 To get your whole library back, press **Clear** in **Advanced search**.
 
+### Pages or Continuous on the phone
+
+**Long-press ▦ or ▭** (the Grid | Feed keys) and a small sheet opens with two rows: **Layout** (Grid ·
+Feed) and **Paging** (**Pages** · **Continuous**). A plain tap on a key still just switches the layout. A
+choice applies at once; tap outside the sheet or swipe it down to close it. **Pages** is the default and is
+the phone as before, with **‹ Prev · Next ›**. Both are remembered **on that phone**, and the same Paging
+choice is on the **Control** screen as **Library paging**. Until you first long-press, a small dot under
+the keys shows the gesture is there.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

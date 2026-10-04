@@ -7984,3 +7984,163 @@ def test_the_phone_lightbox_buttons_wrap_onto_lines_with_room_to_tap(phone_q_ser
         assert len(lefts) == 1 and got["lines"] == len(got["chips"]), "sideways: one column in the rail %r" % got
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# Session U, phone paging and the Home Screen nudge (Phone Paging and Nudge Handoff.dc.html, U1b-U7b).
+# A library deep enough to stack pages: 620 pictures, newest first, so Continuous at 100 a page has seven
+# pages to load and the mounted window (five) has pages to drop. Its own server, like phone_q_server.
+# PixAI is never reached; the pull's Sync now job is answered in the page.
+# ---------------------------------------------------------------------------
+
+_U_ROWS = 620
+_U_BASE_MID = 20000
+
+
+def _u_mid(i):
+    """The media id of the i-th newest picture."""
+    return str(_U_BASE_MID + _U_ROWS - 1 - i)
+
+
+def _u_row(i, created):
+    w, h = [(832, 1216), (1216, 832), (1024, 1024)][i % 3]
+    return {f: "" for f in CATALOG_FIELDS} | {
+        "media_id": str(_U_BASE_MID + i), "filename": "u_%04d.png" % i, "task_id": str(70000 + i),
+        "prompt_preview": "stacked page %d" % i, "rating": str(1 + (i % 5)),
+        "width": str(w), "height": str(h), "model_name": "Probe Model",
+        "created_at": created.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+
+
+@pytest.fixture()
+def phone_u_server(tmp_path_factory, monkeypatch):
+    import datetime as _dt
+    import logging
+    from types import SimpleNamespace
+
+    from PIL import Image
+    from werkzeug.serving import make_server
+
+    from tests.conftest import pin_daytime_clock
+
+    wz_log = logging.getLogger("werkzeug")
+    wz_level = wz_log.level
+    wz_log.setLevel(logging.ERROR)
+
+    root = tmp_path_factory.mktemp("render-harness-phone-u")
+    config_path = root / "config.json"
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+    monkeypatch.setattr(core, "_config_path", lambda: config_path)
+    monkeypatch.setattr(core, "_cfg", {})
+    pin_daytime_clock(monkeypatch)
+    (root / "gallery" / "thumbs").mkdir(parents=True, exist_ok=True)
+    base = _dt.datetime(2026, 9, 28, 20, 0, 0)
+    rows = []
+    for i in range(_U_ROWS):
+        # row i is the (ROWS-1-i)-th newest: the highest id is the newest picture
+        rows.append(_u_row(i, base - _dt.timedelta(minutes=11 * (_U_ROWS - 1 - i))))
+        w, h = [(832, 1216), (1216, 832), (1024, 1024)][i % 3]
+        th = Image.new("RGB", (w // 16, h // 16), (40 + (i * 7) % 90, 44 + (i * 3) % 70, 90 + (i * 5) % 80))
+        th.save(root / "gallery" / "thumbs" / ("%d.jpg" % (_U_BASE_MID + i)), "JPEG")
+    save_catalog(root / "catalog.db", rows)
+    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
+    cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
+    config_path.write_text(json.dumps(cfg))
+    _seed_guide_seen(root)
+    _telem = load_telemetry(root)
+    _metrics = achievement_metrics(root / "catalog.db")
+    _metrics.update(telemetry_metrics(root))
+    _ach = compute_achievements(_metrics, sets=_telem.get("sets", {}))
+    _today = _dt.date.today().isoformat()
+    _earned = [a["id"] for a in _ach["achievements"] if a["earned"]]
+    save_ach_state(root, {"seen": _earned, "earned_at": {i: _today for i in _earned}})
+
+    def add_newest(n):
+        """n pictures newer than everything, as a sync would bring in. Returns their ids, newest first."""
+        extra = [_u_row(_U_ROWS + k, base + _dt.timedelta(minutes=5 * (k + 1))) for k in range(n)]
+        save_catalog(root / "catalog.db", extra)
+        return [r["media_id"] for r in reversed(extra)]
+
+    server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="render-harness-phone-u")
+    thread.start()
+    try:
+        yield SimpleNamespace(base_url="http://127.0.0.1:%d" % server.server_port,
+                              config_path=config_path, root=root, add_newest=add_newest)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        wz_log.setLevel(wz_level)
+
+
+def _u_long_press(page, selector, ms=650):
+    """Hold the pointer on an element past the 500 ms long-press, then let go."""
+    box = page.locator(selector).first.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.wait_for_timeout(ms)
+    page.mouse.up()
+
+
+def _u_store(page, key):
+    return page.evaluate("(k) => localStorage.getItem(k)", key)
+
+
+def test_the_phone_layout_keys_long_press_opens_layout_and_paging_and_a_tap_still_switches(
+        phone_u_server, render_browser, monkeypatch):
+    """U1b. A tap on ▦ / ▭ still only switches the layout. A 500 ms long-press on either opens one bottom
+    sheet with two 44 px segmented rows, Layout (Grid · Feed) and Paging (Pages · Continuous); Pages is
+    the default; a choice applies at once and is kept per device; the sheet closes on a tap outside. A
+    hairline dot sits under the keys until the first long-press. Control's Library paging row mirrors the
+    same value. Opening the phone writes none of it."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        writes = page.evaluate("window.__qWrites")
+        assert not [k for k in writes if k.startswith("mg_phone_paging")], writes
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the one-time dot under the keys"
+
+        # a tap switches the layout and opens nothing
+        page.click(".glm-layout button[aria-label=Feed]")
+        page.wait_for_selector(".glm-feed")
+        _settle(page)
+        assert page.locator(".glm-pgsheet").count() == 0
+        assert _u_store(page, "mg_phone_layout") == "feed"
+
+        # a long-press opens the sheet and does not switch
+        _u_long_press(page, ".glm-layout button[aria-label=Grid]")
+        page.wait_for_selector(".glm-pgsheet")
+        _settle(page)
+        assert _u_store(page, "mg_phone_layout") == "feed", "the long-press is not a tap"
+        assert page.locator(".glm-layout-dot").count() == 0, "the dot goes after the first long-press"
+        assert _u_store(page, "mg_phone_paging_hint") == "1"
+        geo = page.evaluate("""() => [...document.querySelectorAll('.glm-pgrow')].map((r) => ({
+            label: r.getAttribute('aria-label'), h: r.getBoundingClientRect().height,
+            opts: [...r.querySelectorAll('button')].map((b) => ({t: b.textContent.trim(),
+              on: b.getAttribute('aria-checked') === 'true', h: b.getBoundingClientRect().height}))}))""")
+        assert [g["label"] for g in geo] == ["Layout", "Paging"], geo
+        assert all(abs(g["h"] - 44) < 1 for g in geo), geo
+        assert [o["t"] for o in geo[0]["opts"]] == ["▦ Grid", "▭ Feed"], geo
+        assert [o["t"] for o in geo[1]["opts"]] == ["Pages", "Continuous"], geo
+        assert [o["on"] for o in geo[0]["opts"]] == [False, True], geo
+        assert [o["on"] for o in geo[1]["opts"]] == [True, False], geo
+        assert all(abs(o["h"] - 32) < 1 for g in geo for o in g["opts"]), geo
+
+        # a choice applies at once, and the sheet stays until a tap outside
+        page.click(".glm-pgrow[aria-label=Paging] button:has-text('Continuous')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging') === 'continuous'")
+        assert page.locator(".glm-pgsheet").count() == 1
+        page.click(".glm-pgrow[aria-label=Layout] button:has-text('Grid')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_layout') === 'grid'")
+        page.mouse.click(195, 60)
+        page.wait_for_selector(".glm-pgsheet", state="detached")
+
+        # Control's row mirrors the same value, and sets it
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-paging")
+        assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Continuous"
+        page.click(".ctm-paging button:has-text('Pages')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging') === 'pages'")
+        assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Pages"
+    finally:
+        ctx.close()
