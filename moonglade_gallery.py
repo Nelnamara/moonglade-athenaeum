@@ -7304,7 +7304,12 @@ def _badge_thumb(out_dir, aid, size=256):
     badge masters are 2000px (~300 MB total); the Folio of Honors renders these thumbs so
     a full open doesn't pull the masters. Masters stay the source of truth; the cache
     self-heals when a master is re-cut (mtime check). Falls back to the master on any
-    trouble, so a tile always resolves to *something*. Cache home: badge_cache_dir()."""
+    trouble, so a tile always resolves to *something*. Cache home: badge_cache_dir().
+
+    NEVER LARGER THAN THE SOURCE: `size` is a ceiling, not a target. Pillow's thumbnail()
+    only ever shrinks, so a master smaller than the size asked (the toast's 384 against a
+    smaller drop-in) is served at its own size, never blown up; keep it that way in both
+    cuts below rather than resizing to `size` (tests/test_badge_anim.py holds it)."""
     rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None

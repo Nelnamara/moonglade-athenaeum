@@ -240,3 +240,67 @@ def test_badge_anim_reads_through_the_container_path(tmp_path, monkeypatch):
 def test_badge_anim_is_none_when_there_is_no_animation(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_branding_exists", lambda rel: False)
     assert g._badge_anim("first-light") is None
+
+
+# ---- nothing is ever served larger than its source --------------------------
+# Pack v7 re-encodes every animation at 360 px tall, smaller than the 384 px the celebration
+# toast asks for. A request larger than the source serves the source size: the still is cut
+# with Pillow's thumbnail(), which only ever shrinks, and the animation is passed through
+# whole whatever was asked. These pin that, so a later "resize to the asked size" cannot
+# quietly start blowing small art up.
+
+def _only_badges(monkeypatch, *ids):
+    """A roster of exactly these visible ids, so no donor is needed."""
+    monkeypatch.setattr(g, "_ach_ids", lambda: frozenset(ids))
+    monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())
+
+
+def _served_size(resp):
+    assert resp.status_code == 200
+    return Image.open(io.BytesIO(resp.data)).size
+
+
+def test_a_384_request_for_a_smaller_still_serves_the_still_size(tmp_path, monkeypatch):
+    cli = _client(tmp_path)
+    _only_badges(monkeypatch, "syn-small")
+    _still("syn-small", size=360)
+    assert _served_size(cli.get("/badge-thumb/syn-small.png?size=384")) == (360, 360)
+    assert _served_size(cli.get("/badge-thumb/syn-small.png")) == (256, 256)   # still shrinks
+
+
+def test_a_larger_still_is_cut_down_to_the_size_asked(tmp_path, monkeypatch):
+    cli = _client(tmp_path)
+    _only_badges(monkeypatch, "syn-big")
+    _still("syn-big", size=960)
+    assert _served_size(cli.get("/badge-thumb/syn-big.png?size=384")) == (384, 384)
+
+
+def test_the_in_memory_cut_never_upscales_either(tmp_path, monkeypatch):
+    """A pack-only master and a cache folder that cannot be written: the cut is made in
+    memory and handed back as bytes -- under the same never-larger rule."""
+    import moonglade_container as mc
+    cli = _client(tmp_path)
+    _only_badges(monkeypatch, "syn-small")
+    buf = io.BytesIO()
+    Image.new("RGBA", (300, 300), (10, 20, 30, 255)).save(buf, format="PNG")
+    mc.write_container(g._container_path(),
+                       {g._role_rel("badges", "syn-small.png"): buf.getvalue()}, {})
+    g._container_cache.update(path=None, mtime=None, box=None)
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_bytes(b"x")                               # mkdir under a file fails
+    monkeypatch.setattr(g, "badge_cache_dir", lambda out_dir: blocker / "_badges")
+    assert isinstance(g._badge_thumb(tmp_path, "syn-small", 384), bytes)
+    assert _served_size(cli.get("/badge-thumb/syn-small.png?size=384")) == (300, 300)
+
+
+def test_the_toasts_request_for_a_360px_animation_serves_it_whole(tmp_path, monkeypatch):
+    """The toast's animated rung, the 384-size hint and all: a 360 px animation comes back
+    byte-for-byte at 360 px, every frame, never resized up to the size the toast draws."""
+    cli = _client(tmp_path)
+    _only_badges(monkeypatch, "syn-anim")
+    raw = _anim("syn-anim", frames=3, size=360)
+    for url in ("/badge-thumb/syn-anim.webp", "/badge-thumb/syn-anim.webp?size=384"):
+        r = cli.get(url)
+        assert r.data == raw
+        served = Image.open(io.BytesIO(r.data))
+        assert served.size == (360, 360) and served.n_frames == 3
