@@ -90,8 +90,9 @@ describe("Problem 3: baseType prop drives architecture-aware LoRA sort/badging",
     // contract -- the user behaviour it protected is unchanged.
     assert.match(jsx, /kind = "base", multi = false, market = false, baseType = "",/,
       "baseType must be a declared prop so a host can drive it (setAttribute -> JSX prop)");
+    // CHANGED ON PURPOSE (Session S): the Saved tab's set and LoRA base chip joined the deps.
     assert.match(jsx,
-      /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType\]\);/,
+      /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase\]\);/,
       "searchUrl must depend on baseType so a base-type change re-derives the request URL");
     // AUDIT_2026-07-21 follow-up: a HIDDEN instance defers instead of fetching + building ~24
     // cards into a display:none element. The element's style.display==='none' guard is now the

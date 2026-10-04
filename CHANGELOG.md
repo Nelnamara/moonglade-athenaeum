@@ -17,6 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### The pickers' Saved tab
+- **Saved replaces Bookmarked in the model and LoRA pickers.** Bookmarked read PixAI's old bookmarks list, which has taken no new save since mid-August; Saved reads the list pixai.art's own Save button adds to, newest saved first, so a save made on their site shows up. On the desktop a narrow list beside it holds your named sets from PixAI, counting only models (or only LoRAs), and a narrower picker opens the same list from Saved ▾. The line above counts what is there and how many saved models PixAI no longer has, LoRAs filter by base, and a list that fails to load says so with Retry instead of looking empty. Opening it only reads. (2026-10-03)
 - **Recipe sets can be opened and ticked.** Since recipe Sets shipped, opening a set, or ticking one under Save to a recipe set, stopped at "That isn't a valid id" before anything reached PixAI: PixAI's set ids are a different shape from recipe ids, and the app checked them with the recipe rule. They are accepted now. (#78) (2026-10-03)
 
 ### Under the hood

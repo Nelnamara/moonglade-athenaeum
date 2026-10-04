@@ -3,7 +3,12 @@ import { createPortal } from "react-dom";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
+import { SavedRail, SavedChooser, SavedHead, SavedChips, GoneList } from "../picker/SavedTab.jsx";
+import {
+  NARROW_PX, SAVED_END_LINE, currentSet, savedEmptyLine, savedErrorLine, savedTabLabel,
+} from "../picker/savedCore.js";
 import "../styles/model-picker.css";
+import "../styles/saved-tab.css";
 
 /* Faithful React port of static/mg-model-picker.js (2026-08-08, the vanilla static/ -> React
    campaign): the model/LoRA picker (search + cover cards + hover preview), with the opt-in
@@ -20,7 +25,13 @@ import "../styles/model-picker.css";
                   and on remove (selected:false). Host upserts/removes by model_id.
    `visible` replaces the element's display:none + ensureSearched() dance: the search fires on
    first reveal and whenever the filters/query/baseType change while visible, but NOT on a plain
-   re-reveal (each instance keeps its own last search), matching the element's contract. */
+   re-reveal (each instance keeps its own last search), matching the element's contract.
+
+   SAVED (Session S, Saved Tab Handoff; drift 134-139) replaced the frozen Bookmarked tab: PixAI's
+   model collections, read live -- Saved (the reserved default) unless the rail or the "Saved ▾"
+   chooser picked a named set -- paged through the same search route (src=saved), with the LoRA
+   base chips and the search box as its filters. Nothing writes when it opens. `phone` says the
+   host is the phone's Model/LoRA sheet (ModelFlyout passes it). */
 
 // ---- formatters, verbatim from mg-model-picker.js ----
 function fmt(n) { return (Number(n) || 0).toLocaleString(); }
@@ -88,7 +99,7 @@ const SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most
 export default function ModelPicker({
   kind = "base", multi = false, market = false, baseType = "",
   value = null, selected = [], onPick, onToggle, visible = true, style,
-  favs = null, onFav = null,
+  favs = null, onFav = null, phone = false,
 }) {
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
@@ -105,6 +116,16 @@ export default function ModelPicker({
   const [posted, setPosted] = useState("");
   const [license, setLicense] = useState("");
   const [preview, setPreview] = useState(null);   // {m, x, y}
+  // Session S: the Saved tab
+  const [setId, setSetId] = useState("");           // "" = Saved, the reserved default
+  const [savedBase, setSavedBase] = useState("");   // the LoRA base chip ("" = All)
+  const [savedSets, setSavedSets] = useState(null); // {sets, default_id, unavailable, read_only}
+  const [setsErr, setSetsErr] = useState("");
+  const [wide, setWide] = useState(false);          // picker >= NARROW_PX: the rail, not the chooser
+  const [chooser, setChooser] = useState(false);
+  const [gone, setGone] = useState(null);           // "K not available ▸": null = closed
+  const [atEnd, setAtEnd] = useState(false);
+  const [settled, setSettled] = useState(false);    // the latest fresh search has answered
 
   const seqRef = useRef(0);
   const cursorRef = useRef("");
@@ -117,6 +138,8 @@ export default function ModelPicker({
   const scrollRafRef = useRef(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const rootRef = useRef(null);
+  const setsAskedRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q), 250);
@@ -128,7 +151,10 @@ export default function ModelPicker({
     let u = "/api/model-search?kind=" + encodeURIComponent(kind) + "&size=24&q=" + encodeURIComponent(qDebounced || "");
     if (market) {
       u += "&src=" + encodeURIComponent(src);
-      if (src !== "bookmark") {
+      if (src === "saved") {
+        if (setId) u += "&set=" + encodeURIComponent(setId);
+        if (kind === "lora" && savedBase) u += "&base=" + encodeURIComponent(savedBase);
+      } else {
         u += "&sort=" + encodeURIComponent(sort) + "&category=" + encodeURIComponent(category) +
              "&posted=" + encodeURIComponent(posted) + "&source=" + encodeURIComponent(source) +
              "&license=" + encodeURIComponent(license);
@@ -141,22 +167,22 @@ export default function ModelPicker({
     if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);
     if (cursor) u += "&cursor=" + encodeURIComponent(cursor);
     return u;
-  }, [kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType]);
+  }, [kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase]);
 
   const doSearch = useCallback(() => {
     const mine = ++seqRef.current;
     cursorRef.current = ""; hasMoreRef.current = false;
-    setDim(true);
+    setDim(true); setSettled(false);
     apiGet(searchUrl()).then((d) => {
       if (mine !== seqRef.current) return;
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
       setErr(d && d.error ? d.error : "");
       setRows(uniqueRows((d && d.results) || []));
-      setDim(false);
+      setDim(false); setSettled(true); setAtEnd(!hasMoreRef.current);
     }).catch(() => {
       if (mine !== seqRef.current) return;
-      setErr("network error"); setRows([]); setDim(false);
+      setErr("network error"); setRows([]); setDim(false); setSettled(true);
     });
   }, [searchUrl]);
 
@@ -170,6 +196,7 @@ export default function ModelPicker({
       if (d && d.error) return;              // transient: leave hasMore/cursor, next scroll retries
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
+      setAtEnd(!hasMoreRef.current);
       // One row per model (picker/mergeRows.js): the feeds repeat a model across pages, and a
       // repeated key leaves React a card it can never remove again -- the "always the SAME
       // LoRA" pile at the top of every later list (owner, 2026-09-07).
@@ -211,6 +238,55 @@ export default function ModelPicker({
     lastKeyRef.current = key;
     doSearch();
   }, [visible, searchUrl, doSearch]);
+
+  // Saved's rail: read once, the first time Saved shows in this picker (a read only -- nothing
+  // writes on open). Retry clears the error and asks again.
+  const readSets = useCallback(() => {
+    setsAskedRef.current = true;
+    setSetsErr("");
+    apiGet("/api/model-saved/sets", { kind }).then((d) => {
+      if (!d || d.error) { setSetsErr((d && d.error) || "PixAI didn't answer"); return; }
+      setSavedSets(d);
+    });
+  }, [kind]);
+  useEffect(() => {
+    if (!visible || !market || src !== "saved" || setsAskedRef.current) return;
+    readSets();
+  }, [visible, market, src, readSets]);
+
+  // The rail shows only where the picker is at least NARROW_PX wide (the desktop dock); a
+  // narrower picker, and the phone's sheet, fold it into the "Saved ▾" chooser.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setWide(!phone && el.clientWidth >= NARROW_PX);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [phone]);
+
+  const pickSrc = (v) => {
+    // Saved ▾ tapped while Saved is already on: the chooser (where the rail is folded)
+    if (v === "saved" && src === "saved" && !wide) { setChooser((o) => !o); return; }
+    setChooser(false); setGone(null);
+    setSrc(v);
+  };
+  const pickSet = (s) => {
+    setChooser(false); setGone(null);
+    setSetId(s.reserved ? "" : s.id);
+  };
+  const retrySaved = () => {
+    if (setsErr) readSets();
+    if (err) doSearch();
+  };
+  const toggleGone = () => {
+    if (gone) { setGone(null); return; }
+    setGone({ items: null });
+    apiGet("/api/model-saved/unavailable", { expect: (savedSets && savedSets.unavailable) || 0 })
+      .then((d) => setGone((g) => (!g ? g : (!d || d.error)
+        ? { error: (d && d.error) || "PixAI didn't answer" } : { items: d.items || [] })));
+  };
 
   const onScroll = () => {
     if (scrollRafRef.current) return;
@@ -277,7 +353,7 @@ export default function ModelPicker({
 
   useEffect(() => () => { clearTimeout(previewTimerRef.current); if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current); }, []);
 
-  const filtersHidden = market && src === "bookmark";
+  const filtersHidden = market && src === "saved";
   const p = preview && preview.m;
 
   // A keyword search under a base filter has TWO ways to come back empty -- nothing is called
@@ -297,18 +373,38 @@ export default function ModelPicker({
         ? "No LoRAs for " + baseFilterLabel + " here — pick another base or search by name."
         : "No results — try another search.");
 
+  // ---- Saved (Session S) ----
+  const savedOn = market && src === "saved";
+  const cur = savedOn ? currentSet(savedSets && savedSets.sets, setId) : null;
+  const curTitle = cur ? cur.title : "Saved";
+  const railShown = savedOn && wide && !!savedSets && savedSets.sets.length > 0;
+  const savedLine = !savedOn ? null
+    : (err || setsErr) ? (
+      <div className="mg-saved-line mg-saved-err">
+        {savedErrorLine(curTitle)}{" "}
+        <button type="button" className="mg-saved-retry" onClick={retrySaved}>Retry</button>
+      </div>)
+    : (settled && !rows.length) ? <div className="mg-saved-line">{savedEmptyLine(kind, qDebounced)}</div>
+    : null;
+
   return (
-    <div className="model-picker" style={style}>
-      <input className="mg-q" type="text" placeholder="Search" aria-label="Search models"
+    <div className={"model-picker" + (phone ? " phone" : "")} style={style} ref={rootRef}>
+      <input className="mg-q" type="text" placeholder={savedOn ? "Search saved…" : "Search"} aria-label="Search models"
         value={q} onChange={(e) => setQ(e.target.value)} />
 
       {market && (
         <>
-          <div className="mg-mktsrc">
-            {[["market", "Market"], ["bookmark", "Bookmarked"], ...(kind === "lora" ? [["mine", "Mine"]] : [])].map(([v, label]) => (
-              <button type="button" key={v} className={src === v ? "on" : ""} data-src={v}
-                onClick={() => setSrc(v)}>{label}</button>
-            ))}
+          <div className="mg-srcwrap">
+            <div className="mg-mktsrc">
+              {[["market", "Market"], ["saved", savedTabLabel(wide)], ...(kind === "lora" ? [["mine", "Mine"]] : [])].map(([v, label]) => (
+                <button type="button" key={v} className={src === v ? "on" : ""} data-src={v}
+                  aria-haspopup={v === "saved" && !wide ? "menu" : undefined}
+                  onClick={() => pickSrc(v)}>{label}</button>
+              ))}
+            </div>
+            {savedOn && chooser && !wide && savedSets ? (
+              <SavedChooser sets={savedSets.sets} current={cur} onPick={pickSet} />
+            ) : null}
           </div>
           <div className="mg-mktfilters" style={filtersHidden ? { display: "none" } : undefined}>
             <div className="mg-mktsort">
@@ -361,61 +457,77 @@ export default function ModelPicker({
         </>
       )}
 
-      {err ? <div className="mg-empty" style={{ display: "block" }}>⚠ {err}</div>
-        : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>{emptyLine}</div>
-        : <div className="mg-empty" />}
+      <div className={"mg-body" + (railShown ? " has-rail" : "")}>
+        {railShown ? <SavedRail sets={savedSets.sets} current={cur} onPick={pickSet} /> : null}
+        <div className="mg-body-main">
+          {savedOn ? (
+            <>
+              <SavedHead title={curTitle} count={cur ? cur.count : 0}
+                gone={!setId && savedSets ? savedSets.unavailable : 0}
+                goneOpen={!!gone} onGone={toggleGone} />
+              {!setId ? <GoneList state={gone} /> : null}
+              {kind === "lora" ? <SavedChips value={savedBase} onPick={setSavedBase} /> : null}
+              {savedLine}
+            </>
+          ) : err ? <div className="mg-empty" style={{ display: "block" }}>⚠ {err}</div>
+            : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>{emptyLine}</div>
+            : <div className="mg-empty" />}
 
-      <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
-        style={{ opacity: dim ? 0.45 : 1 }}>
-        {rows.map((m, i) => {
-          const incompat = m.compat === "no";
-          const arch = archLabel(m, kind);
-          const sel = isSelected(m);
-          let tip = m.description || m.title || "";
-          if (incompat && arch) tip += (tip ? " " : "") + "Needs a " + arch + " base.";
-          const cost = kind !== "lora" ? "" : incompat ? (arch ? "needs " + arch : "")
-            : (() => {
-                const L = typeof window !== "undefined" ? window.MG_LORA : null;
-                if (!L) return "";
-                const r = (L.ranges && L.ranges[(baseType || "").toUpperCase()]) || L.fallback;
-                if (!r || r.length < 2 || !isFinite(r[0]) || !isFinite(r[1])) return "";
-                return "weight " + Number(r[0]).toFixed(2) + "–" + Number(r[1]).toFixed(2);
-              })();
-          const clickable = !incompat || sel;   // an already-selected incompatible LoRA can still be removed
-          return (
-            <div key={rowKey(m) || "row-" + i} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
-              data-mid={m.model_id} title={tip || undefined}
-              onClick={clickable ? () => pick(m) : undefined}
-              onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}
-              onMouseLeave={hidePreview}>
-              <div className="mg-cov">
-                {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
-                {m.official && <span className="mg-pill">Official</span>}
-                {/* Session M (NOTES 6): the ☆ that puts this model / LoRA on the dock's quick-pick
-                    row. Only where the host handles it (the dock and the phone's Create tab). */}
-                {onFav ? (
-                  <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
-                    aria-pressed={(favs || []).includes(String(m.model_id))}
-                    title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
-                    onClick={(e) => { e.stopPropagation(); onFav(m); }} />
-                ) : null}
-                {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
-              </div>
-              <div className="mg-meta">
-                <div className="mg-nm">{m.title}</div>
-                <div className="mg-sub">
-                  {arch && <span>{arch}</span>}
-                  <span>{fmtCompact(m.liked_count)} likes</span>
+          <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
+            style={{ opacity: dim ? 0.45 : 1 }}>
+            {rows.map((m, i) => {
+              const incompat = m.compat === "no";
+              const arch = archLabel(m, kind);
+              const sel = isSelected(m);
+              let tip = m.description || m.title || "";
+              if (incompat && arch) tip += (tip ? " " : "") + "Needs a " + arch + " base.";
+              const cost = kind !== "lora" ? "" : incompat ? (arch ? "needs " + arch : "")
+                : (() => {
+                    const L = typeof window !== "undefined" ? window.MG_LORA : null;
+                    if (!L) return "";
+                    const r = (L.ranges && L.ranges[(baseType || "").toUpperCase()]) || L.fallback;
+                    if (!r || r.length < 2 || !isFinite(r[0]) || !isFinite(r[1])) return "";
+                    return "weight " + Number(r[0]).toFixed(2) + "–" + Number(r[1]).toFixed(2);
+                  })();
+              const clickable = !incompat || sel;   // an already-selected incompatible LoRA can still be removed
+              return (
+                <div key={rowKey(m) || "row-" + i} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
+                  data-mid={m.model_id} title={tip || undefined}
+                  onClick={clickable ? () => pick(m) : undefined}
+                  onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}
+                  onMouseLeave={hidePreview}>
+                  <div className="mg-cov">
+                    {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
+                    {m.official && <span className="mg-pill">Official</span>}
+                    {/* Session M (NOTES 6): the ☆ that puts this model / LoRA on the dock's quick-pick
+                        row. Only where the host handles it (the dock and the phone's Create tab). */}
+                    {onFav ? (
+                      <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
+                        aria-pressed={(favs || []).includes(String(m.model_id))}
+                        title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
+                        onClick={(e) => { e.stopPropagation(); onFav(m); }} />
+                    ) : null}
+                    {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
+                  </div>
+                  <div className="mg-meta">
+                    <div className="mg-nm">{m.title}</div>
+                    <div className="mg-sub">
+                      {arch && <span>{arch}</span>}
+                      <span>{fmtCompact(m.liked_count)} likes</span>
+                    </div>
+                    {cost && <div className="mg-costline">{cost}</div>}
+                  </div>
                 </div>
-                {cost && <div className="mg-costline">{cost}</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
 
-      <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
-      <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
+          <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
+          <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
+          {savedOn && atEnd && rows.length > 0 && !loadingMore && !err
+            ? <div className="mg-saved-end">{SAVED_END_LINE}</div> : null}
+        </div>
+      </div>
 
       {/* PORTALED to <body> (owner walk 2026-09-29: hovering a card on the desktop showed
           nothing). The preview is position:fixed at viewport coordinates, but the dock's model

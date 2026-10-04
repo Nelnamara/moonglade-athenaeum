@@ -332,9 +332,17 @@ a recipe gives you the prompt that actually made the picture, word for word.
 The picker opens on **Market** — everything on PixAI. Two other places to look sit next
 to it:
 
-- **Bookmarked** — whatever you have bookmarked on pixai.art. It reads your live
-  bookmarks, so anything you bookmark on their site shows up here.
+- **Saved** — the models and LoRAs you have saved on PixAI, newest saved first: the list
+  pixai.art's own Save button adds to, read live, so a save on their site shows up here.
+  On the desktop a narrow list beside it holds **Saved** and your named **sets** from
+  PixAI, each with how many models (or LoRAs) it holds, and a set holding none of them is
+  left out; pick one to see it. Where the picker is narrow, and on the phone, the same list
+  opens from **Saved ▾**. Sets are made and renamed on pixai.art.
 - **Mine** — LoRAs you trained yourself. LoRAs only; you don't author base models.
+
+The line above Saved counts what is in it. When PixAI has removed models you once saved,
+it ends in **N not available ▸**: they are left out of the list, and that opens the list
+of them. Opening Saved only reads; nothing is changed on PixAI by looking.
 
 On Market you can also narrow by **category** (character, animal, style, realistic, pose,
 clothing, background, detail, other), by **when it was posted**, by **source**
@@ -345,14 +353,13 @@ returns the same rows pixai.art returns for your account — including LoRAs the
 shows a signed-in adult account. If a search that fills pages on the site comes back empty
 here, that is a bug, not a setting.
 
-The filter row disappears on **Bookmarked**, and that is deliberate rather than an
-oversight: PixAI's bookmark list only supports a search term, so a category or date
-control there would look like it worked and quietly do nothing. Search still works, and if
-you have a base model selected the list is still limited to LoRAs that fit it.
-
-**If Bookmarked looks emptier than you expect**, that is usually the compatibility filter
-rather than a fault — with a base model selected, only LoRAs matching its architecture are
-shown. Clear the base model to see all of them.
+The filter row disappears on **Saved**, and that is deliberate rather than an oversight:
+PixAI's saved lists take a search term and, for LoRAs, one base, so a category or date
+control there would look like it worked and quietly do nothing. Search looks through what
+you saved, and the LoRA picker has its own row of base chips (**All**, **DiT.3**,
+**DiT.2**, **DiT.1**, **SDXL**, **SD 1.5**). A LoRA that doesn't fit the base model you
+have picked shows greyed with what it needs, as it does on Market. If Saved can't be read,
+it says so, with **Retry** — it is never shown as an empty list.
 
 ### Training your own LoRA
 
