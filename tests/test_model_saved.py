@@ -585,3 +585,22 @@ def test_the_picker_search_says_whether_read_only_is_on(tmp_path, monkeypatch):
     for url in ("/api/model-search?kind=lora&size=24&q=&src=market&sort=trending",
                 "/api/model-search?kind=lora&size=24&q=&src=saved&set=" + DEFAULT_ID):
         assert cli.get(url).get_json()["read_only"] is True, url
+
+
+def test_an_old_row_saved_then_taken_out_of_saved_is_old_again(monkeypatch):
+    """S2c + S5c: "M old" must not drift. Saving an old bookmark drops it from the merge; taking
+    it back out of Saved puts it back (it is still in the old list and no longer in Saved)."""
+    f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_bookmarks_gql",
+                        _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
+    assert len(rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]) == 1
+    w = _Writes(_selector(True, ITEM_1))
+    _wire(monkeypatch, w)
+    rec.model_save(object(), OWNER, LORA_ID)
+    w = _Writes(_selector(False))
+    _wire(monkeypatch, w)
+    assert rec.model_tick(object(), DEFAULT_ID, LORA_ID, False, ITEM_1)["contains"] is False
+    monkeypatch.setattr(core, "_rest_get", _boom)
+    rows = rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]
+    assert [r["model_id"] for r in rows] == [LORA_ID] and rows[0]["old"] is True

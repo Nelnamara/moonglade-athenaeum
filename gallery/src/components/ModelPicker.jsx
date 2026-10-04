@@ -10,7 +10,7 @@ import {
 import { KeepRow, KeepMenu, GoneMenu, SaveSplit, keepRect } from "../picker/KeepControls.jsx";
 import { savedApi, savedStore, useSavedVersion } from "../picker/savedApi.js";
 import {
-  NARROW_PX, OLD_PREF, READ_ONLY_LINE, SAVED_END_LINE, SAVED_NOTE, afterWrite, currentSet,
+  NARROW_PX, OLD_PREF, READ_ONLY_LINE, SAVED_BASES, SAVED_END_LINE, SAVED_NOTE, afterWrite, currentSet,
   isTransportError, mergeOld, savedEmptyLine, savedErrorLine, savedTabLabel,
 } from "../picker/savedCore.js";
 import "../styles/model-picker.css";
@@ -168,6 +168,7 @@ export default function ModelPicker({
   const noteTimers = useRef({});
   const rowsRef = useRef([]);       // the rows as the last applySets left them (see there)
   const longRef = useRef({ t: 0, fired: false });   // the phone's long-press (S6a, Session K)
+  const oldAsideRef = useRef(new Map());            // old bookmarks saved here, until unsaved again
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q), 250);
@@ -348,11 +349,20 @@ export default function ModelPicker({
       rowsRef.current = rowsRef.current.filter((r) => String(r.model_id) !== id);
       setRows((old) => old.filter((r) => String(r.model_id) !== id));
       bump(-1);
+      // an old bookmark saved here and now taken back out of Saved is old again
+      const back = !setId && oldAsideRef.current.get(id);
+      if (back) {
+        oldAsideRef.current.delete(id);
+        setOldRows((o) => (o || []).concat(back));
+      }
     } else if (here.contains && !inList) {
       const row = { ...m, old: false, item_id: here.item_id || "" };
       rowsRef.current = [row, ...rowsRef.current];
       setRows((old) => [row, ...old.filter((r) => String(r.model_id) !== id)]);
-      if (m.old) setOldRows((o) => (o || []).filter((r) => String(r.model_id) !== id));
+      if (m.old) {
+        oldAsideRef.current.set(id, m);
+        setOldRows((o) => (o || []).filter((r) => String(r.model_id) !== id));
+      }
       bump(1);
     }
   };
@@ -371,8 +381,9 @@ export default function ModelPicker({
     if (isTransportError(d0)) {
       const st = await savedApi.state(id);
       d = st && !st.error
-        ? { contains: !!st.saved, item_id: st.item_id || "", sets: st.sets, error: st.saved ? "" : d0.error }
-        : d0;
+        ? { contains: !!st.saved, item_id: st.item_id || "", sets: st.sets,
+            error: st.saved ? "" : "The answer was lost on the way, and PixAI doesn't show it saved." }
+        : { error: "The answer was lost on the way, and the check failed too. Look on PixAI before trying again." };
     }
     busyRef.current.delete(id);
     setBusyIds([...busyRef.current]);
@@ -523,7 +534,10 @@ export default function ModelPicker({
         {savedErrorLine(curTitle)}{" "}
         <button type="button" className="mg-saved-retry" onClick={retrySaved}>Retry</button>
       </div>)
-    : (settled && !rows.length && !oldShown.length) ? <div className="mg-saved-line">{savedEmptyLine(kind, qDebounced)}</div>
+    : (settled && !rows.length && !oldShown.length) ? (
+      <div className="mg-saved-line">
+        {savedEmptyLine(kind, qDebounced, kind === "lora" && savedBase ? (SAVED_BASES.find((b) => b[0] === savedBase) || [])[1] : "")}
+      </div>)
     : null;
 
   return (
@@ -677,7 +691,7 @@ export default function ModelPicker({
               Couldn't read the old bookmarks.{" "}
               <button type="button" className="mg-saved-retry" onClick={readOld}>Retry</button>
             </div>) : null}
-          {savedOn && !setId && (oldAll.length > 0 || !showOld)
+          {savedOn && !setId && !err && (oldAll.length > 0 || !showOld)
             ? <OldToggle on={showOld} onToggle={() => prefs.set(OLD_PREF, !showOld)} /> : null}
         </div>
       </div>

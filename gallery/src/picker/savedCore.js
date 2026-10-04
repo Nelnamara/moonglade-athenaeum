@@ -35,10 +35,12 @@ export function countClauses({ count = 0, old = 0, gone = 0 } = {}) {
   return out;
 }
 
-/* Empty is one line pointing at Market; a keyword that matches nothing says so instead. */
-export function savedEmptyLine(kind, q) {
+/* Empty is one line pointing at Market; a keyword that matches nothing says so instead, and so
+   does a base chip that leaves nothing (its label is `baseLabel`). */
+export function savedEmptyLine(kind, q, baseLabel) {
   const many = kind === "lora" ? "LoRAs" : "models";
-  if (q) return "No saved " + many + " match “" + q + "”.";
+  if (q) return "No saved " + many + " match “" + q + "”" + (baseLabel ? " for " + baseLabel : "") + ".";
+  if (baseLabel) return "No saved " + many + " for " + baseLabel + ".";
   return "Nothing saved for " + many + " yet. Use ⊕ Save on any " + (kind === "lora" ? "LoRA" : "model")
     + " in Market.";
 }

@@ -35,6 +35,9 @@ test("empty points at Market, a keyword miss says so, and a failure is never emp
   assert.equal(savedEmptyLine("lora", ""), "Nothing saved for LoRAs yet. Use ⊕ Save on any LoRA in Market.");
   assert.equal(savedEmptyLine("base", ""), "Nothing saved for models yet. Use ⊕ Save on any model in Market.");
   assert.equal(savedEmptyLine("lora", "glass"), "No saved LoRAs match “glass”.");
+  // a base chip that leaves nothing names the base, rather than claiming nothing is saved
+  assert.equal(savedEmptyLine("lora", "", "DiT.1"), "No saved LoRAs for DiT.1.");
+  assert.equal(savedEmptyLine("lora", "glass", "SDXL"), "No saved LoRAs match “glass” for SDXL.");
   assert.equal(savedErrorLine("Saved"), "Couldn't load Saved.");
   assert.equal(savedErrorLine("Faces"), "Couldn't load Faces.");
   assert.equal(SAVED_END_LINE, "That's everything");
@@ -89,7 +92,7 @@ test("the rail is read once when Saved opens, and nothing is written on open", (
 test("an error is peach with Retry, empty is one line, and the end of the list says so", () => {
   assert.match(picker, /savedErrorLine\(/);
   assert.match(picker, /className="mg-saved-retry"/);
-  assert.match(picker, /savedEmptyLine\(kind, qDebounced\)/);
+  assert.match(picker, /savedEmptyLine\(kind, qDebounced, /);
   assert.match(picker, /SAVED_END_LINE/);
   assert.match(css, /\.mg-saved-err \{[^}]*var\(--peach\)/);
 });
@@ -136,6 +139,12 @@ test("the merge is read only on Saved itself, and only while the toggle is on", 
   assert.match(picker, /const oldShown = savedOn && !setId && showOld && atEnd && !err/);
   assert.match(picker, /const listRows = oldShown\.length \? rows\.concat\(oldShown\) : rows;/);
   assert.match(picker, /\{listRows\.map\(\(m, i\) => \{/);
+});
+
+test("an old row saved here joins the list untagged, and is old again if taken back out", () => {
+  assert.match(picker, /oldAsideRef\.current\.set\(id, m\);/);
+  assert.match(picker, /const back = !setId && oldAsideRef\.current\.get\(id\);/);
+  assert.match(picker, /setOldRows\(\(o\) => \(o \|\| \[\]\)\.concat\(back\)\);/);
 });
 
 test("an old row carries a mono old tag, 8.5 px and neutral", () => {

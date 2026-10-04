@@ -1270,16 +1270,34 @@ def model_old_bookmarks(session, web_session, owner_id, kind):
             return {"rows": [], "partial": True}
         return {"rows": rows, "partial": False}
 
-    return _cached(("m-old", uid, kind), _OLD_TTL, walk)
+    kept = _cached(("m-old", uid, kind), _OLD_TTL, walk)
+    return {"rows": list(kept.get("rows") or []), "partial": bool(kept.get("partial"))}
 
 
 def _old_forget(model_id):
-    """A model just saved is no longer "old": take it out of every kept merge at once."""
+    """A model just saved is no longer "old": take it out of every kept merge at once, and keep
+    its row aside in case it is taken back out of Saved (_old_restore)."""
     with _cache_lock:
         for key, (stamp, val) in list(_cache.items()):
             if isinstance(key, tuple) and key[:1] == ("m-old",) and isinstance(val, dict):
-                rows = [r for r in val.get("rows") or [] if r.get("model_id") != model_id]
-                _cache[key] = (stamp, dict(val, rows=rows))
+                rows = val.get("rows") or []
+                gone = [r for r in rows if r.get("model_id") == model_id]
+                if gone:
+                    aside = dict(val.get("aside") or {}, **{model_id: gone[0]})
+                    _cache[key] = (stamp, dict(val, aside=aside,
+                                               rows=[r for r in rows if r not in gone]))
+
+
+def _old_restore(model_id):
+    """A model set aside by _old_forget was just taken back out of Saved: it is old again."""
+    with _cache_lock:
+        for key, (stamp, val) in list(_cache.items()):
+            if isinstance(key, tuple) and key[:1] == ("m-old",) and isinstance(val, dict):
+                aside = dict(val.get("aside") or {})
+                row = aside.pop(model_id, None)
+                if row is not None:
+                    _cache[key] = (stamp, dict(val, aside=aside,
+                                               rows=list(val.get("rows") or []) + [row]))
 
 
 def model_state(session, model_id):
@@ -1366,6 +1384,8 @@ def model_tick(session, set_id, model_id, on, item_id=""):
            "sets": state["sets"], "saved": state["saved"]}
     if state["saved"]:
         _old_forget(mid)
+    else:
+        _old_restore(mid)
     if out["contains"] != bool(on):
         out["error"] = refusal or ("PixAI didn't save it" if on else "PixAI didn't take it out")
     return out
