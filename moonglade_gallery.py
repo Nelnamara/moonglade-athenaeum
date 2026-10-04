@@ -14674,6 +14674,21 @@ def create_app(out_dir: Path):
     # Test seam (#60): the sweep adds a task here only after a collect that worked.
     app.extensions["mg_watch_backed"] = _watch_backed
 
+    def _watch_inbox(ev):
+        """Sessions R + Y (R4b): the socket's `newNotification` bumps the gift box's badge, and
+        a (re)subscribe is when the client re-reads the count. Counted in moonglade_inbox's
+        memory -- a push by its id only, never its title -- and carried to every open tab by
+        /api/jobs. No network here (this runs on the socket's event loop), and it can never
+        be the mirror's problem."""
+        try:
+            import moonglade_inbox
+            if ev.get("__meta__") == "subscribed":
+                moonglade_inbox.note_connected()
+            elif ev.get("newNotification"):
+                moonglade_inbox.note_push(ev.get("newNotification"))
+        except Exception:                                  # noqa: BLE001
+            pass
+
     def _watch_on_event(ev):
         """Everything the live mirror does with ONE frame off the socket.
 
@@ -14690,6 +14705,7 @@ def create_app(out_dir: Path):
         import time as _time
         import moonglade_backup as core
         _log = _logging.getLogger(__name__)
+        _watch_inbox(ev)
         if ev.get("__meta__") == "subscribed":
             with _watch_lock:
                 _watch_status["connected"] = True
@@ -27406,7 +27422,20 @@ __DESIGN_TOKENS__
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
-        return jsonify({"jobs": jobs, "update": update_notice()})
+        # Sessions R + Y: the gift box's live count (R4b) rides this same poll, and a job this
+        # log holds as failed or stalled that PixAI's inbox says finished carries the note
+        # (R2c). Both read process memory only -- this poll never asks PixAI for them.
+        inbox_live = None
+        try:
+            import moonglade_inbox
+            inbox_live = moonglade_inbox.live_state()
+            for j in jobs:
+                says = moonglade_inbox.pixai_says(j.get("job_id"))
+                if says and j.get("status") in ("failed", "stale"):
+                    j["pixai_says"] = says
+        except Exception:                                  # noqa: BLE001
+            pass
+        return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)
@@ -27864,6 +27893,37 @@ __DESIGN_TOKENS__
                 i["artwork"]["media_id"] = found.get(i["artwork"]["id"], "")
         return items
 
+    def _inbox_tasks_to_activity(tasks):
+        """R2c: TASK is never an inbox row -- Activity tells a job. A recent finished generation
+        PixAI names that Activity never saw joins it as an ordinary done row, source "pixai"
+        (the website mark) and via "inbox"; a row Activity holds as failed or stalled that PixAI
+        says finished gets the "PixAI says: done" note through /api/jobs. A local log line only:
+        nothing is sent to PixAI. Fails soft -- the inbox read must never break over it."""
+        if not tasks:
+            return
+        try:
+            import moonglade_backup as core
+            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            for add in _inbox().task_activity(tasks, jobs_by_id):
+                _log_job(add["job_id"], status="done", type="generate", label=add["label"],
+                         source="pixai", via="inbox")
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    @app.route("/api/inbox/pushed")
+    @tier(LOGIN)
+    def api_inbox_pushed():
+        """What the socket pushed since ?after=<seq>, as full inbox rows (the comment toast
+        names who and which work). One read of the newest rows, none when nothing is new;
+        nothing is marked read."""
+        try:
+            ib = _inbox()
+            out = ib.pushed_since(ib.pixai_session(), request.args.get("after") or 0)
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[])
+        out["items"] = _inbox_local_media(out["items"])
+        return jsonify(out)
+
     @app.route("/api/inbox")
     @tier(LOGIN)
     def api_inbox():
@@ -27878,6 +27938,7 @@ __DESIGN_TOKENS__
         except Exception as e:                                   # noqa: BLE001
             return _inbox_fail(e, items=[], csrf=session["csrf"],
                                read_only=_inbox_read_only())
+        _inbox_tasks_to_activity(page["tasks"])
         return jsonify({"items": _inbox_local_media(page["items"]), "cursor": page["cursor"],
                         "has_more": page["has_more"], "csrf": session["csrf"],
                         "read_only": _inbox_read_only()})

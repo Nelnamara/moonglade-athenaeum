@@ -34,6 +34,7 @@ Each returns a plain dict, {"state": ..., "message": ...}, where state is one of
   "unclear"   -- no clear answer, and the read-back could not show it happened;
   "read_only" -- READ_ONLY is on, so nothing was sent.
 """
+import collections
 import datetime as _dt
 import re
 import threading
@@ -379,6 +380,106 @@ def clear_caches():
     _me_cache.update(name=None, at=0.0)
     with _thread_lock:
         _thread_cache.clear()
+    with _live_lock:
+        _live.update(seq=0, connects=0)
+        _live["pushed"].clear()
+        _pixai_says.clear()
+
+
+# ---------------------------------------------------------------------------------------
+# Delivery (R4b): the live mirror's newNotification, counted in memory
+# ---------------------------------------------------------------------------------------
+# PixAI's socket already carries `newNotification` (the live mirror subscribes to it). The
+# mirror hands each one here; the count rides /api/jobs -- the poll every open tab already runs
+# -- so the badge moves live with no loop of its own. Only the notification's id is kept, never
+# its title: a title can carry a stranger's name or words.
+
+PUSH_KEEP = 50
+_live_lock = threading.Lock()
+_live = {"seq": 0, "connects": 0, "pushed": collections.deque(maxlen=PUSH_KEEP)}
+_pixai_says = {}                 # job id -> "done": PixAI's TASK row says it finished
+
+
+def note_push(frame):
+    """The live mirror saw `newNotification`. Count it and keep its id. No network: this runs on
+    the socket's own event loop."""
+    nid = str((frame or {}).get("id") or "")[:64]
+    with _live_lock:
+        _live["seq"] += 1
+        _live["pushed"].append((_live["seq"], nid))
+
+
+def note_connected():
+    """The live mirror (re)subscribed: the client reads the count again (R4b's backstop)."""
+    with _live_lock:
+        _live["connects"] += 1
+
+
+def live_state():
+    """{seq, connects} for /api/jobs: how many pushes and how many (re)connects so far."""
+    with _live_lock:
+        return {"seq": _live["seq"], "connects": _live["connects"]}
+
+
+def pushed_since(session, after):
+    """The pushed notifications newer than `after`, as full inbox items (the toast names who
+    commented on which work): ONE read of the newest rows, and none at all when nothing new was
+    pushed. Nothing is written -- a push never marks anything read."""
+    try:
+        after = int(after or 0)
+    except (TypeError, ValueError):
+        after = 0
+    with _live_lock:
+        seq = _live["seq"]
+        ids = [nid for s, nid in _live["pushed"] if s > after and nid]
+    if not ids:
+        return {"items": [], "seq": seq}
+    page = list_notifications(session, page=PAGE)
+    by = {i["id"]: i for i in page["items"]}
+    return {"items": [by[i] for i in ids if i in by], "seq": seq}
+
+
+# ---------------------------------------------------------------------------------------
+# TASK, told once (R2c): Activity tells a job; the inbox only fills its gaps
+# ---------------------------------------------------------------------------------------
+
+TASK_RECENT_S = 24 * 3600        # older than a day is history, not news: never resurrected
+_SAYS_KEEP = 200
+
+
+def _now_ts():
+    return time.time()
+
+
+def task_activity(tasks, jobs_by_id):
+    """What the inbox's TASK rows mean for Activity. Returns the jobs to ADD -- a finished
+    generation PixAI names that Activity has never seen (one started on PixAI's site while the
+    app was closed), recent only -- and records, in memory, the jobs Activity holds as failed or
+    stalled that PixAI says finished ("PixAI says: done", a dim note on that row). Training rows
+    are left to Train's own tracker."""
+    add = []
+    now = _now_ts()
+    for t in tasks or []:
+        tid = str(t.get("ref_id") or "")
+        if t.get("type") != "GENERATION_TASK_COMPLETED" or not tid.isdigit():
+            continue
+        when = _when(t.get("created_at"))
+        if when is None or now - when.timestamp() > TASK_RECENT_S:
+            continue
+        j = (jobs_by_id or {}).get(tid)
+        if j is None:
+            add.append({"job_id": tid, "label": t.get("ref_title") or "Generation"})
+        elif j.get("status") in ("failed", "stale"):
+            with _live_lock:
+                if len(_pixai_says) >= _SAYS_KEEP:
+                    _pixai_says.pop(next(iter(_pixai_says)))
+                _pixai_says[tid] = "done"
+    return add
+
+
+def pixai_says(job_id):
+    with _live_lock:
+        return _pixai_says.get(str(job_id or ""))
 
 
 # ---------------------------------------------------------------------------------------
