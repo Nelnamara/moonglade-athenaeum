@@ -11,7 +11,7 @@ import moonglade_inbox as inbox
 from moonglade_gallery import create_app
 from tests.conftest import login_test_client
 
-GIFT = "3001"
+GIFT = "01a0ef92-5e73-7a47-8c83-8ed07d723f66"      # official-DM ids are UUIDs (contract: q())
 CLAIM = "/user/me/official-dm/messages/%s/claim" % GIFT
 
 
@@ -32,7 +32,7 @@ def _thread(*msgs, thread=True):
             "messages": list(msgs), "hasMore": False}
 
 
-def _text(mid="3002"):
+def _text(mid="01a0ef92-5e73-7a47-8c83-8ed07d723f02"):
     return {"id": mid, "senderType": "OFFICIAL", "content": "hello", "media": [], "unread": False,
             "createdAt": "2026-10-01T00:00:00Z", "kind": "TEXT"}
 
@@ -57,12 +57,12 @@ def test_reward_messages_become_gift_rows_and_text_does_not(pixai):
 def test_done_gifts_drop_out_after_seven_days(pixai):
     now = inbox._dt.datetime(2026, 10, 20, tzinfo=inbox._dt.timezone.utc)
     pixai.on("/user/me/official-dm/", _thread(
-        _reward("3001", status="CLAIMED", claimed="2026-10-10T00:00:00Z"),
-        _reward("3003", status="CLAIMED", claimed="2026-10-16T00:00:00Z"),
-        _reward("3004", status="EXPIRED", expires="2026-10-05T00:00:00Z"),
-        _reward("3005", status="PENDING", expires="2026-12-01T00:00:00Z")))
+        _reward("01a0ef92-0000-7a47-8c83-000000003001", status="CLAIMED", claimed="2026-10-10T00:00:00Z"),
+        _reward("01a0ef92-0000-7a47-8c83-000000003003", status="CLAIMED", claimed="2026-10-16T00:00:00Z"),
+        _reward("01a0ef92-0000-7a47-8c83-000000003004", status="EXPIRED", expires="2026-10-05T00:00:00Z"),
+        _reward("01a0ef92-0000-7a47-8c83-000000003005", status="PENDING", expires="2026-12-01T00:00:00Z")))
     out = inbox.list_gifts(pixai, now=now)
-    assert [g["id"] for g in out["gifts"]] == ["3003", "3005"]
+    assert [g["id"] for g in out["gifts"]] == ["01a0ef92-0000-7a47-8c83-000000003003", "01a0ef92-0000-7a47-8c83-000000003005"]
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +71,20 @@ def test_done_gifts_drop_out_after_seven_days(pixai):
 
 def _posts(pixai):
     return [c for c in pixai.calls if c.verb == "rest_post"]
+
+
+@pytest.mark.parametrize("bad", ["3001", "", "not-a-uuid", GIFT + "x", "../" + GIFT,
+                                 "01a0ef92-5e73-7a47-8c83-8ed07d723f6"])
+def test_a_gift_id_that_is_not_a_uuid_is_refused_before_pixai(pixai, bad):
+    out = inbox.claim_gift(pixai, bad)
+    assert out["state"] == "refused" and pixai.calls == []
+
+
+def test_an_uppercase_uuid_is_a_gift_id_too(pixai):
+    """UUIDs are case-insensitive: the claim and its read-back use one spelling."""
+    pixai.on(CLAIM, {"rewards": {}, "message": {}})
+    pixai.on("/user/me/official-dm/", _thread(_reward(status="CLAIMED", claimed="2026-10-03T09:00:00Z")))
+    assert inbox.claim_gift(pixai, GIFT.upper())["state"] == "done"
 
 
 def test_read_only_claims_nothing_and_asks_nothing(pixai, monkeypatch):

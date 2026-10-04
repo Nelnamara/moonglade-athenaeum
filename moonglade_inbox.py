@@ -639,6 +639,18 @@ _thread_lock = threading.Lock()
 _ID = re.compile(r"^[0-9]{1,24}$")
 
 
+# An official-DM message id (a gift) is a UUID -- the contract's q(), the same type as a
+# kaisuuken card's id -- never a number. Anchored and case-insensitive.
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _checked_uuid(v, what="id"):
+    v = str(v or "").strip()
+    if not _UUID.match(v):
+        raise core.PixAIError("That isn't a PixAI {}".format(what))
+    return v
+
+
 def _checked_id(v, what="id"):
     v = str(v or "").strip()
     if not _ID.match(v):
@@ -1030,7 +1042,7 @@ def claim_gift(session, message_id):
     except core.PixAIError:
         return _read_only_answer("nothing was claimed")
     try:
-        message_id = _checked_id(message_id, "gift")
+        message_id = _checked_uuid(message_id, "gift").lower()
     except core.PixAIError as e:
         return _answer("refused", str(e) + ". Nothing changed.")
     try:
@@ -1042,7 +1054,7 @@ def claim_gift(session, message_id):
     try:
         d = _read_dm_thread(session)
         mine = next((gift_of(m) for m in d.get("messages") or []
-                     if isinstance(m, dict) and str(m.get("id") or "") == message_id), None)
+                     if isinstance(m, dict) and str(m.get("id") or "").lower() == message_id), None)
     except Exception:                                        # noqa: BLE001
         mine = None
     if mine and mine["status"] == "CLAIMED":
