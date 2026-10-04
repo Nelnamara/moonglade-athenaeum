@@ -98,6 +98,7 @@ export default function CommentsThread({ row, phone }) {
   const arrived = useRef(false);
   useEffect(() => {
     current.current = artworkId;
+    askToken.current += 1;                      // a question still standing from the last work is void
     setData(null); setError(""); setPage(1); setOpen({}); setBox(null); setAsk(null);
     setDeleting(null); setSeen(false); setPosted([]); setDelLocked([]);
     const f = takeFocus(artworkId);
@@ -161,9 +162,12 @@ export default function CommentsThread({ row, phone }) {
     if (tok !== askToken.current || inFlight.current || !b) return;
     askToken.current += 1;
     inFlight.current = true;
+    const aid = artworkId;
     setBox({ ...b, sending: true, state: "", message: "" });
-    apiPost("/api/comments/" + encodeURIComponent(artworkId) + "/reply",
+    apiPost("/api/comments/" + encodeURIComponent(aid) + "/reply",
       { csrf: data.csrf, reply_to: b.to.id, content: b.text }).then((d) => {
+      inFlight.current = false;
+      if (current.current !== aid) return;      // another picture is open now: not its answer
       const state = (d && d.state) || "unclear";
       const message = (d && (d.message || d.error)) || "No clear answer from PixAI. Check on PixAI before trying again.";
       if (state === "done" && d.comment) {
@@ -175,7 +179,6 @@ export default function CommentsThread({ row, phone }) {
       } else {
         setBox({ ...b, sending: false, state, message, lastSent: state === "unclear" ? b.text : null });
       }
-      inFlight.current = false;
     });
   };
 
@@ -203,11 +206,13 @@ export default function CommentsThread({ row, phone }) {
     if (tok !== askToken.current || inFlight.current) return;
     askToken.current += 1;
     inFlight.current = true;
+    const aid = artworkId;
     setDeleting({ id: c.id, state: "sending", message: "" });
-    apiPost("/api/comments/" + encodeURIComponent(artworkId) + "/delete",
+    apiPost("/api/comments/" + encodeURIComponent(aid) + "/delete",
       { csrf: data.csrf, message_id: c.id }).then((d) => {
-      const state = (d && d.state) || "unclear";
       inFlight.current = false;
+      if (current.current !== aid) return;      // another picture is open now: not its answer
+      const state = (d && d.state) || "unclear";
       setDeleting({ id: c.id, state, message: (d && (d.message || d.error)) || "" });
       if (state === "unclear") setDelLocked((ids) => ids.concat([c.id]));
       if (state === "done") {

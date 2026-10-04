@@ -81,6 +81,13 @@ describe("the reply (R6c): one question, one press, one POST", () => {
     assert.match(thread, /e\.key === "Escape"\) \{ e\.preventDefault\(\); setBox\(null\); \}/);
   });
 
+  test("a reply's or a delete's answer is dropped if another picture is open by then (review item 6)", () => {
+    const sends = thread.match(/const aid = artworkId;/g) || [];
+    assert.equal(sends.length, 2, "both writes remember which work they were sent for");
+    const drops = thread.match(/inFlight\.current = false;\n\s*if \(current\.current !== aid\) return;/g) || [];
+    assert.equal(drops.length, 2, "both answers release the lock, then drop themselves when the work changed");
+  });
+
   test("an unclear delete keeps that reply's Delete off until the thread is read again (review item 3)", () => {
     assert.match(thread, /if \(state === "unclear"\) setDelLocked\(\(ids\) => ids\.concat\(\[c\.id\]\)\);/);
     assert.match(thread, /if \(p === 1\) setDelLocked\(\[\]\);/);
