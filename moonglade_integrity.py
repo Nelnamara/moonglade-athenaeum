@@ -630,10 +630,13 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #                   whatever the caller asked -- it is the only copy anywhere, and this
 #                   function never touches it. READ_ONLY comes next, before any network.
 #                   Then the app's own single-media path (moonglade_backup.resolve_media +
-#                   download), ONE attempt, into a staging file under gallery/. Only when the
-#                   new bytes are a whole file of the same kind as the broken one (a format
-#                   this module recognises from its first bytes, and the structural check
-#                   passes) does an atomic replace put them over it, keeping its name -- and
+#                   download), ONE attempt, of the FULL-SIZE file only (never resolve_media's
+#                   thumbnail fallback), into a staging file under gallery/. Only when the new
+#                   bytes are a whole file of the same kind as the broken one (a format this
+#                   module recognises from its first bytes, and the structural check passes),
+#                   the size the catalog records for the picture, and -- for a cut-short file --
+#                   at least as big as what is there, does an atomic replace put them over it,
+#                   keeping its name -- and
 #                   only when that file's own name carries this row's media id, so an odd
 #                   catalog row can never put one picture over another's file. A
 #                   MISSING file has no broken file to replace: its destination is the
@@ -667,6 +670,9 @@ WORDS = {
     "file_broken": "The file itself is broken, so its thumbnail can't be rebuilt from it.",
     "not_this_picture": "The file the catalog names for this picture belongs to another picture, so nothing was changed.",
     "changed": "This file has changed since the check. Run the check again.",
+    "small_copy": "PixAI only has a small copy; nothing changed.",
+    "size_differs": "Couldn't re-download. PixAI's copy isn't this picture's size, so the old file was left as it is.",
+    "smaller": "Couldn't re-download. PixAI's copy is smaller than the cut-short file here, so the old file was left as it is.",
     "rebuild_failed": "Couldn't rebuild the thumbnail.",
 }
 
@@ -758,6 +764,45 @@ def missing_target(out_dir, row):
     return target, ""
 
 
+# The variants resolve_media can pick that ARE the picture at full size. Its THUMBNAIL and
+# STILL_THUMBNAIL fallbacks are small copies and never replace an original (review finding 4).
+FULL_SIZE_VARIANTS = ("PUBLIC", "ORIGINAL", "ORIG", "FULL")
+
+
+def _full_size_url(core, session, row, mid):
+    """(url, "") for the picture's full-size file, or (None, reason): "no_file" when PixAI
+    returns nothing, "small_copy" when all it lists is a thumbnail."""
+    url, info = core.resolve_media(session, mid)
+    if not url:
+        return None, "no_file"
+    if (info or {}).get("variant") not in FULL_SIZE_VARIANTS:
+        return None, "small_copy"
+    return url, ""
+
+
+def _pixel_size_ok(path, row):
+    """False when the catalog knows this picture's width and height and the new file is a
+    different size. Pictures only (a video's frame size would need ffprobe); with no size in
+    the catalog, or no Pillow, there is nothing to compare and the other checks stand."""
+    if str(row.get("is_video") or "") == "1":
+        return True
+    try:
+        w, h = int(str(row.get("width") or "0")), int(str(row.get("height") or "0"))
+    except ValueError:
+        return True
+    if w <= 0 or h <= 0:
+        return True
+    try:
+        from PIL import Image
+    except ImportError:
+        return True
+    try:
+        with Image.open(path) as im:
+            return tuple(im.size) == (w, h)
+    except Exception:                                  # noqa: BLE001 -- unreadable is not a match
+        return False
+
+
 def _live_check(out, row, index, g):
     return _row_check(row, index or _index(out, g), True, g.GALLERY_DIRNAME)
 
@@ -803,9 +848,9 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     try:
         stage.mkdir(parents=True, exist_ok=True)
         session = (session_factory or (lambda: core._make_session(None)))()
-        url, _info = core.resolve_media(session, mid)
+        url, why = _full_size_url(core, session, row, mid)
         if not url:
-            return _result(mid, "redownload", ok=False, refused="no_file")
+            return _result(mid, "redownload", ok=False, refused=why)
         import uuid
         stem = stage / "{}-{}".format(mid if _safe_id(mid) else "media", uuid.uuid4().hex[:10])
         status, got = core.download(session, url, stem, retries=0, progress=on_bytes)
@@ -816,6 +861,10 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         if _format_of(got) != want:
             return _result(mid, "redownload", ok=False, refused="type_differs")
         nbytes = os.path.getsize(got)
+        if problem == P_SUSPECT and nbytes < int(best.size or 0):
+            return _result(mid, "redownload", ok=False, refused="smaller")
+        if not _pixel_size_ok(got, row):
+            return _result(mid, "redownload", ok=False, refused="size_differs")
         if missing:
             # Re-asked at the last moment: nothing may have appeared there while it downloaded.
             target, why = missing_target(out, row)

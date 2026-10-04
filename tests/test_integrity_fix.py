@@ -55,17 +55,20 @@ class _Resp:
 
 
 class FakeMediaSession:
-    """What resolve_media and download see: a media object per id, and the file at its url."""
+    """What resolve_media and download see: a media object per id, and the file at its url.
+    A file may name the variant PixAI lists it under (PUBLIC, the full size, by default)."""
 
     def __init__(self, files):
-        self.files = files                                # media id -> (bytes, content type)
+        self.files = files                    # media id -> (bytes, content type[, variant])
         self.calls = []
 
     def get(self, url, stream=False, timeout=None):
         self.calls.append(url)
-        for mid, (body, ctype) in self.files.items():
+        for mid, spec in self.files.items():
+            body, ctype = spec[0], spec[1]
+            variant = spec[2] if len(spec) > 2 else "PUBLIC"
             if url == core.MEDIA_BASE.format(id=mid):
-                return _Resp(obj={"urls": [{"variant": "PUBLIC", "url": "https://cdn.test/" + mid}]})
+                return _Resp(obj={"urls": [{"variant": variant, "url": "https://cdn.test/" + mid}]})
             if url == "https://cdn.test/" + mid:
                 return _Resp(body=body, ctype=ctype)
         return _Resp(status=404)
@@ -278,6 +281,44 @@ def test_the_route_wants_the_action_shown_with_every_file(tmp_path):
         r = cli.post("/api/integrity/fix", json=with_csrf(cli, body))
         assert r.status_code == 400, body
     assert not (out / "gallery" / "thumbs" / "106.jpg").exists()
+
+
+def test_a_thumbnail_is_never_taken_for_the_picture(tmp_path):
+    """Review finding 4. resolve_media falls back to a THUMBNAIL variant when PixAI lists no
+    full-size one; that small copy must never replace an original. Refused before the file
+    is fetched, and the broken file is left as it is."""
+    out = _broken_library(tmp_path)
+    for variant in ("THUMBNAIL", "STILL_THUMBNAIL"):
+        session = FakeMediaSession({"102": (_png(4, 4), "image/png", variant)})
+        res = integ.redownload_one(out, out / "catalog.db", "102", session_factory=lambda: session)
+        assert res["ok"] is False and res["refused"] == "small_copy", variant
+        assert res["error"] == "PixAI only has a small copy; nothing changed."
+        assert session.calls == [core.MEDIA_BASE.format(id="102")]   # the file itself never fetched
+        assert _bytes(out, "images/p_t1_102.png") == b""
+
+
+def test_the_new_picture_must_be_the_size_the_catalog_says(tmp_path):
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="102", filename="p_t1_102.png",
+                                           width="8", height="8")])
+    session = FakeMediaSession({"102": (_png(4, 4), "image/png")})
+    res = integ.redownload_one(out, out / "catalog.db", "102", session_factory=lambda: session)
+    assert res["ok"] is False and res["refused"] == "size_differs"
+    assert _bytes(out, "images/p_t1_102.png") == b""
+    session = FakeMediaSession({"102": (_png(8, 8), "image/png")})
+    res = integ.redownload_one(out, out / "catalog.db", "102", session_factory=lambda: session)
+    assert res["ok"] is True and _bytes(out, "images/p_t1_102.png") == _png(8, 8)
+
+
+def test_a_cut_short_file_is_only_replaced_by_one_at_least_as_big(tmp_path):
+    out = _broken_library(tmp_path)
+    torn = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 20          # no IEND: suspect, ~5 KB
+    (out / "images" / "p_t1_103.png").write_bytes(torn)
+    session = FakeMediaSession({"103": (_png(2, 2), "image/png")})    # whole, but far smaller
+    res = integ.redownload_one(out, out / "catalog.db", "103", session_factory=lambda: session)
+    assert res["ok"] is False and res["refused"] == "smaller"
+    assert _bytes(out, "images/p_t1_103.png") == torn
 
 
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):

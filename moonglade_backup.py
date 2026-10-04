@@ -2279,15 +2279,17 @@ def resolve_media(session, mid):
     for u in urls:
         if isinstance(u, dict) and u.get("url"):
             by_variant[str(u.get("variant", "")).upper()] = u["url"]
-    chosen = None
+    chosen, variant = None, ""
     for pref in URL_VARIANT_PREFERENCE:
         if pref in by_variant:
-            chosen = by_variant[pref]
+            chosen, variant = by_variant[pref], pref
             break
     if not chosen and by_variant:
-        chosen = next(iter(by_variant.values()))
+        variant, chosen = next(iter(by_variant.items()))
+    # `variant` says which copy `chosen` is: the Broken files re-download (moonglade_integrity)
+    # must never take a THUMBNAIL fallback for an original. Every other caller ignores it.
     info = {"width": obj.get("width"), "height": obj.get("height"),
-            "type": obj.get("type", "")}
+            "type": obj.get("type", ""), "variant": variant}
     vlog("resolve_media {} -> {} {}x{} in {:.2f}s".format(
         mid, "url" if chosen else "NO-URL",
         info.get("width"), info.get("height"), time.monotonic() - _t))
