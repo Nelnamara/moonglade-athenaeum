@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchLibrary } from "../api.js";
-import { appendUnique } from "../lib/phoneCore.js";
+import { PREPEND_MAX_PAGES, appendUnique, newestAbove, prependUnique } from "../lib/phoneCore.js";
 
 /* All of App.jsx's library browse/search/filter/sort/pagination state and logic,
    mechanically lifted out (2026-08-02) into its own hook -- media/shelf/perPage/
@@ -133,30 +133,34 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   const sizeRef = useRef(0);
   const setPageSize = useCallback((n) => { sizeRef.current = Math.max(0, Math.floor(Number(n)) || 0); }, []);
 
+  /* The one parameter list every read of the walk sends: load's, and the phone's prepend below. Built
+     from this render's filters -- the values load's dependency list names. */
+  const pageQuery = (p, pageSize) => ({
+    q: applied, media, collection: shelf,
+    page: p, page_size: pageSize,
+    sort: adv.sort !== "newest" ? adv.sort : "",
+    rating_min: adv.ratingMin || "",
+    model: adv.model, lora: adv.lora,
+    from: adv.dateFrom, to: adv.dateTo,
+    source: adv.source, tag: adv.tag,
+    published: adv.publishedOnly ? "1" : "",
+    batch: adv.batch,
+    // #34 direction B: the series drill-down (?series=<sid>) always rides;
+    // grouping (?group=series) rides ONLY when the toggle is on AND no
+    // drill-down is active -- opening a stack (series OR batch) is exactly
+    // the ungrouped members view, so a live drill-down suppresses the fold
+    // (the backend ignores ?series while grouping anyway) and the "Stack
+    // sessions" toggle can stay lit, ready to snap back when the filter clears.
+    series: adv.series,
+    group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
+  });
+
   const load = useCallback(
     async (p, replace, size) => {
       const seq = ++reqSeq.current;
       setLoading(true);
       try {
-        const data = await fetchLibrary({
-          q: applied, media, collection: shelf,
-          page: p, page_size: size || sizeRef.current || perPage,
-          sort: adv.sort !== "newest" ? adv.sort : "",
-          rating_min: adv.ratingMin || "",
-          model: adv.model, lora: adv.lora,
-          from: adv.dateFrom, to: adv.dateTo,
-          source: adv.source, tag: adv.tag,
-          published: adv.publishedOnly ? "1" : "",
-          batch: adv.batch,
-          // #34 direction B: the series drill-down (?series=<sid>) always rides;
-          // grouping (?group=series) rides ONLY when the toggle is on AND no
-          // drill-down is active -- opening a stack (series OR batch) is exactly
-          // the ungrouped members view, so a live drill-down suppresses the fold
-          // (the backend ignores ?series while grouping anyway) and the "Stack
-          // sessions" toggle can stay lit, ready to snap back when the filter clears.
-          series: adv.series,
-          group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
-        });
+        const data = await fetchLibrary(pageQuery(p, size || sizeRef.current || perPage));
         if (seq !== reqSeq.current) return; // a newer request superseded this one
         setItems((old) => (replace ? data.items : appendUnique(old, data.items)));
         setTotal(data.total);
@@ -172,6 +176,42 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     // exactly like changing media/sort/rating (the toggle re-groups from the top).
     [applied, media, shelf, perPage, adv, group]
   );
+
+  /* Session U, U3a: a pull over the phone's stacked (Continuous) list. It reads the top of the same
+     walk a page at a time, at the size of the moment, and puts the run of new pictures ABOVE everything
+     loaded -- every loaded page is kept -- reading on only while a whole page is new. The total (M)
+     refreshes. A run longer than PREPEND_MAX_PAGES pages is too much to splice in, and the list starts
+     over from page 1 instead; so does an empty list. It does not dim the grid: the pull's own moon is
+     what spins. Resolves {added, reset}, or undefined when a newer read superseded it. */
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const prependNewest = useCallback(async () => {
+    const have = new Set(itemsRef.current.map((it) => it.media_id));
+    if (!have.size) {
+      const d = await load(1, true);
+      return d ? { added: (d.items || []).length, reset: true } : undefined;
+    }
+    const seq = ++reqSeq.current;
+    const size = sizeRef.current || perPage;
+    const fresh = [];
+    let data = null;
+    let met = false;
+    for (let p = 1; p <= PREPEND_MAX_PAGES && !met; p += 1) {
+      data = await fetchLibrary(pageQuery(p, size));
+      if (seq !== reqSeq.current) return undefined;
+      const run = newestAbove(data.items, have);
+      fresh.push(...run.fresh);
+      met = run.met || p >= (Number(data.pages) || 1);
+    }
+    if (!met) {
+      const d = await load(1, true);
+      return d ? { added: fresh.length, reset: true } : undefined;
+    }
+    setItems((old) => prependUnique(fresh, old));
+    setTotal(data.total);
+    setPages(data.pages);
+    return { added: fresh.length, reset: false };
+  }, [applied, media, shelf, perPage, adv, group, load]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // The flyout commits a patch: advanced fields always; q/media/shelf/perPage
   // only when a saved view carries them.
@@ -226,7 +266,7 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     media, setMedia, shelf, setShelf, perPage, setPerPage,
     query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
     items, setItems, total, page, pages, loading,
-    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize,
+    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize, prependNewest,
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
   };
 }

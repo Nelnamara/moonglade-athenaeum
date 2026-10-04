@@ -514,6 +514,8 @@ export default function AppMobile({ boot }) {
   const saver = useDataSaver();
   const [paging] = usePaging();
   const continuous = paging === "continuous";
+  const continuousRef = useRef(continuous);
+  continuousRef.current = continuous;
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
   lib.setPageSize(continuous ? continuousPageSize(saver.active, saver.info) : 0);
   /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
@@ -767,7 +769,7 @@ export default function AppMobile({ boot }) {
   libNowRef.current = lib;
   const frontPage = isFrontPage({
     page: lib.page, advCount: lib.advCount, applied: lib.applied, media: lib.media, shelf: lib.shelf,
-    similar: !!similarFor, loaded: lib.total != null,
+    similar: !!similarFor, loaded: lib.total != null, continuous,
   });
   const frontRef = useRef(false);
   frontRef.current = frontPage;
@@ -1014,8 +1016,14 @@ export default function AppMobile({ boot }) {
     const out = await syncNow({ post: apiPost, get: apiGet });
     if (out.state !== "error") {
       invalidate(["/api/health", "/api/achievements", "/api/your-art", DETAIL_PREFIX]);
-      const d = await userLoad(shownPageRef.current, true);
-      if (d) pruneSelected(setLibSelected, d.items);
+      /* Continuous (Session U, U3a): what is new goes above everything loaded, every loaded page is
+         kept and nothing is unselected -- nothing left the list. */
+      if (continuousRef.current) {
+        await libNowRef.current.prependNewest();
+      } else {
+        const d = await userLoad(shownPageRef.current, true);
+        if (d) pruneSelected(setLibSelected, d.items);
+      }
     }
     const msg = syncOutcomeText(out);
     if (msg && window.Toast) window.Toast.show({ title: "Sync", msg });
@@ -1048,8 +1056,6 @@ export default function AppMobile({ boot }) {
       moreBusy.current = false;
     }
   }, []);
-  const continuousRef = useRef(continuous);
-  continuousRef.current = continuous;
   /* A switch between Pages and Continuous starts the library over from page 1 at the top: a stacked list
      always runs from the top of the walk, and a page picked out of the middle is not one. The footer's
      retry line belongs to the list it failed on, so a new list (a switch, a filter) clears it. */

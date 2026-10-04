@@ -413,6 +413,12 @@ Retry** in peach; nothing retries on its own, and tapping **Retry** asks once. A
 connection it loads 50 at a time instead of 100. On a narrow phone the count, the ▦ ▭ keys and **Sort** sit
 together on a second line under the media pills, so nothing has to scroll sideways.
 
+**New since, ↑ Newest and pull to refresh in Continuous.** The **N new since HH:MM** line stays where it
+is in the stacked list, however far down you have loaded. **↑ Newest** scrolls back to the top and keeps
+everything loaded. A pull at the very top runs **Sync now** and then puts what is new **above** the line,
+keeping every page you had loaded; the count grows by the new ones. A finished generation does not
+reload the list while you are reading it; pull when you want the new pictures in.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

@@ -8267,3 +8267,66 @@ def test_continuous_pages_are_50_under_data_saver_on_a_metered_connection_and_a_
         assert _u_libs(seen)[-1] == (2, 50), _u_libs(seen)
     finally:
         ctx.close()
+
+
+def _u_marker_init(mid):
+    """Seed the 'last seen' marker on the NEXT document (see _q_seed_marker) at a picture of this library,
+    left at 21:40 UTC."""
+    import datetime as _dt
+    at = int(_dt.datetime(2026, 9, 28, 21, 40, tzinfo=_dt.timezone.utc).timestamp() * 1000)
+    return ("if (sessionStorage.getItem('__qSeedNext') === '1') {"
+            " sessionStorage.removeItem('__qSeedNext');"
+            " localStorage.setItem('mg_phone_seen', JSON.stringify({id: '%s', ts: 0, at: %d})); }" % (mid, at))
+
+
+def test_a_pull_over_continuous_prepends_above_the_rule_and_keeps_every_loaded_page(
+        phone_u_server, render_browser, monkeypatch):
+    """U3a. Over a stacked list: ↑ Newest scrolls to the top and unloads nothing; a pull (at the top) runs
+    Sync now once, then puts the new pictures ABOVE the rule -- which stays with the marker picture --
+    and keeps every page already loaded; N grows by the new count and M refreshes. It reads the top of
+    the walk once (the new run meets the loaded list on page 1), and leaves the marker where it was."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch,
+                              init=_U_CONTINUOUS_JS + "\n" + _u_marker_init(_u_mid(0)))
+    runs = []
+    try:
+        _q_seed_marker(page)
+        _q_open(page)
+        page.route("**/api/panel/run", lambda r: (runs.append(1), _q_json(r, {"ok": True, "action": "sync"}))[1])
+        page.route("**/api/panel/status", lambda r: _q_json(r, {"status": "done", "lines": []}))
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        assert page.locator(".glm-newrule").count() == 0, "nothing is new since the marker yet"
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '200 of 620'")
+
+        # ↑ Newest: back to the top, nothing unloaded
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 3000")
+        page.wait_for_selector(".glm-newest")
+        page.click(".glm-newest")
+        page.wait_for_function("() => document.querySelector('.glm-body').scrollTop === 0", timeout=5000)
+        assert _u_count(page) == "200 of 620"
+        assert page.evaluate("document.querySelectorAll('.glm-tile').length") >= 200
+
+        # three arrive; the pull prepends them above the rule and keeps both pages
+        fresh = phone_u_server.add_newest(3)
+        page.evaluate("window.__qWrites.length = 0")
+        reads = len(_u_libs(seen))
+        _settle(page)
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        release()
+        page.wait_for_function("() => !!document.querySelector('.ptr.syncing')")
+        page.wait_for_function("() => !document.querySelector('.ptr.syncing')", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '203 of 623'")
+        assert runs == [1], runs
+        assert _u_libs(seen)[reads:] == [(1, 100)], "one read of the top: %r" % _u_libs(seen)[reads:]
+        got = page.evaluate("""() => { const rule = document.querySelector('.glm-newrule');
+            const above = rule.previousElementSibling;
+            return {rule: rule.textContent.trim(),
+                    above: [...above.querySelectorAll('.glm-tile')].map((t) => t.getAttribute('data-mid')).sort(),
+                    tiles: document.querySelectorAll('.glm-tile').length}; }""")
+        assert got["rule"] == "3 new since 21:40", got
+        assert got["above"] == sorted(fresh), got
+        assert got["tiles"] >= 203, "every page already loaded is kept: %r" % got
+        assert "mg_phone_seen" not in page.evaluate("window.__qWrites"), "a pull leaves the marker where it was"
+    finally:
+        ctx.close()

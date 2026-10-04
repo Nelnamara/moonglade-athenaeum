@@ -6,8 +6,9 @@ import path from "node:path";
 
 import {
   CONTINUOUS_PAGE, CONTINUOUS_PAGE_METERED, DEFAULT_PAGING, KEY_LONG_PRESS_MS, PAGINGS, PAGING_LABELS,
-  PREFETCH_SCREENS, appendUnique, connectionInfo, continuousDone, continuousPageSize, countLabel, endLabel,
-  footerState, nearEnd, nextContinuousPage, parsePaging,
+  PREFETCH_SCREENS, PREPEND_MAX_PAGES, appendUnique, connectionInfo, continuousDone, continuousPageSize,
+  countLabel, endLabel, footerState, isFrontPage, nearEnd, newSince, newestAbove, nextContinuousPage,
+  parsePaging, prependUnique,
 } from "../../gallery/src/lib/phoneCore.js";
 import {
   PAGING_HINT_KEY, PAGING_KEY, readPaging, readPagingHintSeen, writePaging, writePagingHintSeen,
@@ -179,7 +180,7 @@ describe("U2 continuous loading: the wiring", () => {
   test("useLibrary's append keeps only new pictures and a load can name its page size", () => {
     const lib = code("hooks/useLibrary.js");
     assert.match(lib, /setItems\(\(old\) => \(replace \? data\.items : appendUnique\(old, data\.items\)\)\)/);
-    assert.match(lib, /page_size: size \|\| sizeRef\.current \|\| perPage/);
+    assert.match(lib, /pageQuery\(p, size \|\| sizeRef\.current \|\| perPage\)/);
     // the size is a ref the shell sets, so it never changes load's identity (no refetch on its own)
     assert.match(lib, /const setPageSize = useCallback\(/);
     assert.doesNotMatch(lib, /\[applied, media, shelf, perPage, adv, group, [^\]]*size/);
@@ -207,5 +208,63 @@ describe("U2 continuous loading: the wiring", () => {
     assert.ok(g.indexOf('className="glm-pgcount"') < g.indexOf('className="glm-layout"'), "the count sits before the keys");
     // the jump steps aside for the footer as it does for the pager
     assert.match(g, /host\.querySelector\("\.glm-pager, \.glm-cfoot"\)/);
+  });
+});
+
+describe("U3 new since over stacked pages: the rules", () => {
+  const ids = (list) => list.map((x) => x.media_id);
+  const mk = (...a) => a.map((m) => ({ media_id: String(m) }));
+
+  test("a stacked list is the library's front page whatever page it has loaded down to", () => {
+    const base = { advCount: 0, applied: "", media: "", shelf: "", similar: false, loaded: true };
+    assert.equal(isFrontPage({ ...base, page: 4, continuous: true }), true);
+    assert.equal(isFrontPage({ ...base, page: 4 }), false, "Pages: page 4 is not the front page");
+    assert.equal(isFrontPage({ ...base, page: 1 }), true);
+    assert.equal(isFrontPage({ ...base, page: 2, continuous: true, media: "video" }), false, "a filter is never the front page");
+    assert.equal(isFrontPage({ ...base, page: 1, continuous: true, similar: true }), false);
+  });
+
+  test("what is new at the top is the run before the first picture already loaded", () => {
+    const have = new Set(["5", "6", "7"]);
+    assert.deepEqual(newestAbove(mk(9, 8, 5, 6), have), { fresh: mk(9, 8), met: true });
+    assert.deepEqual(newestAbove(mk(5, 6), have), { fresh: [], met: true }, "nothing new");
+    assert.deepEqual(newestAbove(mk(12, 11, 10), have), { fresh: mk(12, 11, 10), met: false }, "a whole page new: read on");
+    assert.equal(PREPEND_MAX_PAGES, 5);
+  });
+
+  test("a pull prepends the new ones above everything loaded and keeps every page", () => {
+    const old = mk(5, 6, 7, 8);
+    assert.deepEqual(ids(prependUnique(mk(9, 8), old)), ["9", "5", "6", "7", "8"], "8 was already loaded: once, where it was");
+    assert.equal(prependUnique([], old), old, "nothing new: the same list");
+  });
+
+  test("the rule stays with the marker picture: new ones prepended above it push it down, nothing else moves it", () => {
+    const marker = { id: "5", ts: 0, at: 0 };
+    const before = mk(5, 6, 7);
+    assert.equal(newSince(before, marker).count, 0, "nothing new yet: no rule");
+    const after = prependUnique(mk(9, 8), before);
+    assert.equal(newSince(after, marker).count, 2, "the two prepended sit above the rule");
+  });
+});
+
+describe("U3 new since over stacked pages: the wiring", () => {
+  test("a pull in Continuous prepends through useLibrary and never replaces the stacked list", () => {
+    const app = code("components/AppMobile.jsx");
+    const pull = app.slice(app.indexOf("const refreshFromPull = useCallback("));
+    const body = pull.slice(0, pull.indexOf("}, [userLoad]);"));
+    assert.match(body, /if \(continuousRef\.current\) \{\s*await libNowRef\.current\.prependNewest\(\);/);
+    assert.match(app, /isFrontPage\(\{[\s\S]{0,240}continuous,?\s/);
+    const lib = code("hooks/useLibrary.js");
+    assert.match(lib, /const prependNewest = useCallback\(/);
+    assert.match(lib, /setItems\(\(old\) => prependUnique\(fresh, old\)\)/);
+    assert.match(lib, /newestAbove\(/);
+  });
+
+  test("↑ Newest only scrolls: it never reloads or unloads", () => {
+    const g = code("components/GalleryMobile.jsx");
+    const fn = g.slice(g.indexOf("const toNewest = () => {"));
+    const body = fn.slice(0, fn.indexOf("};") + 2);
+    assert.match(body, /host\.scrollTo\(/);
+    assert.doesNotMatch(body, /load|setItems|onLoadMore/);
   });
 });

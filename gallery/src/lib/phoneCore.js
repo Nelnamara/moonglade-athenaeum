@@ -345,12 +345,41 @@ export function lightboxCount(index, offset, total, loaded) {
 }
 
 /* The rule only means something for the library's own front page: page 1, newest first, nothing
-   filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone. */
-export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded }) {
+   filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone.
+   Continuous (Session U, U3a): a stacked list always runs from the top of the walk, so it is the front
+   page however far down it has loaded; the rule stays at its place in it. */
+export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded, continuous }) {
   if (similar || !loaded) return false;
-  if ((page || 1) !== 1) return false;
+  if (!continuous && (page || 1) !== 1) return false;
   if (advCount) return false;                 // any Advanced Search field, the sort included
   return !(String(applied || "").trim() || media || shelf);
+}
+
+/* A pull over a stacked list (Session U, U3a): what is new goes ABOVE everything loaded, every loaded
+   page is kept, and the rule -- which follows the marker picture -- is pushed down only by what was
+   prepended above it. The shell reads the top of the walk a page at a time; the new run is everything
+   before the first picture already loaded (`met`: the run reached the loaded list, so nothing between is
+   missing). A run longer than PREPEND_MAX_PAGES pages is too much to splice in, and the list starts
+   over from the top instead (useLibrary.prependNewest). */
+export const PREPEND_MAX_PAGES = 5;
+
+export function newestAbove(page, loadedIds) {
+  const fresh = [];
+  const list = page || [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (loadedIds.has(list[i].media_id)) return { fresh, met: true };
+    fresh.push(list[i]);
+  }
+  return { fresh, met: false };
+}
+
+/* The new ones first, then the list as it was; a picture already loaded stays once, where it was.
+   Nothing new answers the SAME list. */
+export function prependUnique(fresh, old) {
+  const list = old || [];
+  const have = new Set(list.map((it) => it.media_id));
+  const add = (fresh || []).filter((it) => it && !have.has(it.media_id) && (have.add(it.media_id), true));
+  return add.length ? add.concat(list) : list;
 }
 
 /* "↑ Newest" shows after one screen of scrolling. */
