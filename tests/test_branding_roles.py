@@ -669,3 +669,109 @@ def test_the_shape_rule_is_not_vacuous_on_the_packs_own_art(pack_art):
         facts, _ = g.role_measure(buf.getvalue())
         rules = [f["rule"] for f in g.role_spec_failures(g.role_image_spec(slot, key), facts)]
         assert rules == ["aspect"], (slot, key, rules)
+
+
+# ---- a WebP's declared canvas is read from its header, before anything opens it ---------------------
+# libwebp commits the whole declared canvas when Pillow OPENS a WebP (a 138-byte file claiming
+# 16383 x 16383 took ~2 GB before the size check ran). The header is read first, by hand, and a
+# WebP over the limit, or whose header cannot be read, is refused without ever being opened.
+
+def _riff(chunk_fourcc, chunk_payload):
+    body = b"WEBP" + chunk_fourcc + len(chunk_payload).to_bytes(4, "little") + chunk_payload
+    return b"RIFF" + len(body).to_bytes(4, "little") + body
+
+
+def _webp_claiming(kind, w, h, pad=0):
+    """A WebP header that DECLARES a w x h canvas and holds no picture (the crafted file)."""
+    if kind == "VP8X":
+        payload = bytes(4) + (w - 1).to_bytes(3, "little") + (h - 1).to_bytes(3, "little")
+    elif kind == "VP8 ":
+        payload = bytes([0x10, 0, 0]) + b"\x9d\x01\x2a" + w.to_bytes(2, "little") + h.to_bytes(2, "little")
+    else:                                  # VP8L: signature, then width-1 and height-1 in 14 bits each
+        payload = b"\x2f" + ((w - 1) | ((h - 1) << 14)).to_bytes(4, "little")
+    return _riff(kind.encode("ascii"), payload + bytes(pad))
+
+
+@pytest.fixture()
+def no_open(monkeypatch):
+    """Image.open that fails the test if it is reached, and counts the calls."""
+    calls = []
+
+    def _open(*a, **k):
+        calls.append((a, k))
+        raise AssertionError("Image.open was called on a file that should have been refused first")
+    monkeypatch.setattr(Image, "open", _open)
+    return calls
+
+
+def test_the_header_reader_gets_the_same_canvas_as_pillow_for_every_webp_encoding():
+    for mode, kw, kind in (("RGB", {"lossless": False, "quality": 80}, b"VP8 "), ("RGB", {"lossless": True}, b"VP8L"),
+                           ("RGBA", {"lossless": False}, b"VP8X")):
+        buf = io.BytesIO()
+        Image.new(mode, (321, 123), (9, 8, 7) + ((200,) if mode == "RGBA" else ())).save(buf, "WEBP", **kw)
+        raw = buf.getvalue()
+        assert raw[12:16] == kind, (mode, raw[12:16])
+        assert g.webp_declared_size(raw[:64]) == (321, 123), kind
+    assert g.webp_declared_size(_anim_webp((50, 40), frames=2)[:64]) == (50, 40)
+    assert g.webp_declared_size(b"\x89PNG\r\n\x1a\n" + bytes(40)) is None, "not a WebP: nothing to say"
+
+
+@pytest.mark.parametrize("kind", ["VP8X", "VP8 ", "VP8L"])
+def test_a_tiny_webp_declaring_a_huge_canvas_is_refused_before_it_is_opened(tmp_path, no_open, kind):
+    cli = _client(tmp_path)
+    crafted = _webp_claiming(kind, 16383, 16383, pad=100)          # ~140 bytes, claims a ~1 GB canvas
+    assert len(crafted) < 200
+    r = _post(cli, "login_companion", "companion", crafted, "x.webp")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "That picture is larger than 4,096 px on a side."
+    assert not _override_path("login_companion", "companion").exists()
+    assert no_open == [], "refused from the header alone"
+    # the check-only road (a library picture) reads the same header
+    (tmp_path / "evil_1.webp").write_bytes(crafted)
+    save_catalog(tmp_path / "catalog.db", [
+        {f: "" for f in CATALOG_FIELDS} | {"media_id": "1", "filename": "evil_1.webp", "created_at": "2025-01-01T00:00:00"}])
+    r = cli.post("/api/branding/role", data={"csrf": session_csrf(cli), "slot": "login_companion",
+                                             "key": "companion", "media_id": "1", "check": "1"})
+    assert r.status_code == 400 and no_open == []
+
+
+def test_a_webp_canvas_at_the_limit_is_not_refused_by_the_header_reader():
+    g.guard_webp_canvas(_webp_claiming("VP8X", 4096, 4096), 4096)               # exactly the limit: allowed
+    with pytest.raises(g.ImageRefused):
+        g.guard_webp_canvas(_webp_claiming("VP8X", 4097, 10), 4096)
+    with pytest.raises(g.ImageRefused):
+        g.guard_webp_canvas(_webp_claiming("VP8X", 10, 4097), 4096)
+
+
+@pytest.mark.parametrize("header", [
+    b"RIFF\x10\x00\x00\x00WEBPVP8X\x0a\x00\x00\x00",                       # a VP8X cut off before its canvas
+    b"RIFF\x20\x00\x00\x00WEBPJUNK" + bytes(30),                               # no picture chunk a WebP may start with
+    b"RIFF\x20\x00\x00\x00WEBPVP8 " + bytes(30),                               # a lossy header without its start code
+    b"RIFF\x20\x00\x00\x00WEBPVP8L" + bytes(30),                               # a lossless header without its signature
+], ids=["cut", "junk", "no-start-code", "no-signature"])
+def test_a_webp_whose_header_cannot_be_read_is_refused_without_being_opened(tmp_path, no_open, header):
+    cli = _client(tmp_path)
+    r = _post(cli, "power_poses", "restart", header, "x.webp")
+    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image"
+    assert no_open == []
+
+
+def test_the_banner_upload_reads_the_same_header_first(tmp_path, no_open):
+    """/api/branding/slot decodes the same way, so it asks the same question first (its own, larger
+    limit: banners are wide). Its CSRF debt is the security review's, untouched here."""
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main",
+                 "file": (io.BytesIO(_webp_claiming("VP8X", 16383, 16383, pad=100)), "b.webp")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 400 and r.get_json()["error"] == "That picture is larger than 8,192 px on a side."
+    assert no_open == []
+    assert g.list_slot_assets(tmp_path, "banner_main") == []
+
+
+def test_an_ordinary_banner_webp_still_uploads(tmp_path):
+    cli = _client(tmp_path)
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 150), (30, 20, 90)).save(buf, "WEBP")
+    r = cli.post("/api/branding/slot", data={"slot": "banner_main", "file": (io.BytesIO(buf.getvalue()), "b.webp")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200 and r.get_json()["item"]["id"]

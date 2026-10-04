@@ -4668,6 +4668,9 @@ ROLE_ASPECT_TOLERANCE = 0.08
 ROLE_SEE_THROUGH_MIN = 0.01
 ROLE_MAX_FRAMES = 300
 ROLE_MAX_ANIM_PIXELS = 64_000_000
+# The same question asked of a banner upload (/api/branding/slot decodes the same way): banners are
+# wide, so the ceiling is higher, but a WebP may not declare a canvas past it.
+BANNER_MAX_SIDE = 8192
 
 
 def _slot_dir(slot):
@@ -5150,12 +5153,51 @@ def role_refusal_text(role_name, failed):
     return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
 
 
+class ImageRefused(ValueError):
+    """A picture the app turns away in its own plain words (the message IS the sentence to show)."""
+
+
+def webp_declared_size(head):
+    """The canvas a WebP's own header declares, as (width, height), read by hand from its first ~30
+    bytes; None when `head` is not a WebP at all. Raises ImageRefused when it IS a WebP whose header
+    cannot be read: no picture chunk a WebP may start with, or a lossy / lossless header missing its
+    start code / signature, or a header cut short.
+
+    WHY BY HAND: libwebp commits the whole declared canvas when Pillow merely OPENS a WebP, so a
+    138-byte file claiming 16383 x 16383 costs ~2 GB before any size check Pillow offers has run.
+      VP8X (animated, or with alpha / metadata): 24-bit width-1 at offset 24, height-1 at 27.
+      VP8  (lossy): after the frame tag and the 9d 01 2a start code, 14-bit width at 26, height at 28.
+      VP8L (lossless): after the 0x2f signature, 14-bit width-1 and 14-bit height-1 packed at 21."""
+    if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
+        return None
+    kind = head[12:16]
+    if kind == b"VP8X" and len(head) >= 30:
+        return (int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1)
+    if kind == b"VP8 " and len(head) >= 30 and head[23:26] == b"\x9d\x01\x2a":
+        return (int.from_bytes(head[26:28], "little") & 0x3FFF, int.from_bytes(head[28:30], "little") & 0x3FFF)
+    if kind == b"VP8L" and len(head) >= 25 and head[20] == 0x2F:
+        bits = int.from_bytes(head[21:25], "little")
+        return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+    raise ImageRefused("not a readable image")
+
+
+def guard_webp_canvas(head, max_side):
+    """Refuse, BEFORE anything opens the file, a WebP whose declared canvas is past `max_side` on a
+    side (or whose header cannot be read). Pass the file's first 64 bytes or more. One helper for every
+    upload that decodes user pictures: the named roles (role_measure) and the banner slots."""
+    size = webp_declared_size(head)
+    if size is not None and max(size) > max_side:
+        raise ImageRefused("That picture is larger than {:,} px on a side.".format(max_side))
+
+
 def role_measure(raw):
     """Open one picture's bytes and measure it: (facts, rgba) with facts as role_spec_failures reads
-    them. The size comes from the header and is refused past ROLE_MAX_SIDE before a pixel is decoded;
-    an animation is refused past its frame and pixel budget before any frame is. Raises ValueError
-    with the plain-words message when the picture cannot be used at all."""
+    them. A WebP's declared canvas is read from its header first (guard_webp_canvas); the size of
+    anything else comes from its header too and is refused past ROLE_MAX_SIDE before a pixel is
+    decoded; an animation is refused past its frame and pixel budget before any frame is. Raises
+    ValueError with the plain-words message when the picture cannot be used at all."""
     import io
+    guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
     try:
         from PIL import Image
         im = Image.open(io.BytesIO(raw))
@@ -22575,6 +22617,9 @@ def create_app(out_dir: Path):
             import io
             from PIL import Image
             if f is not None and f.filename:
+                head = f.stream.read(64)
+                f.stream.seek(0)
+                guard_webp_canvas(head, BANNER_MAX_SIDE)       # before libwebp commits a declared canvas
                 im = Image.open(f.stream)
             else:
                 # "From the gallery..." (Control Panel.dc.html:342) -- source the asset
@@ -22585,10 +22630,14 @@ def create_app(out_dir: Path):
                 img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
                 if img_hit is None:
                     return jsonify({"error": "no local image for that media id"}), 400
+                with open(img_hit, "rb") as fh:
+                    guard_webp_canvas(fh.read(64), BANNER_MAX_SIDE)
                 im = Image.open(img_hit)
             im.load()
             buf = io.BytesIO()
             im.convert("RGBA").save(buf, format="PNG")
+        except ImageRefused as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
         item = add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
