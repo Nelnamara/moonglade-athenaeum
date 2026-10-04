@@ -3798,6 +3798,9 @@ ROLE_CODE = {
     "mascots":        _GOODS_MID + "/A02",
     "mascots_ach":    _GOODS_MID + "/A02/ach",
     "earned_banners": _GOODS_MID + "/B0N",
+    # Basic training's goal pictures (pack v7): /branding/training/goal_<goal>.png, the
+    # address gallery/src/lib/goalTileCore.js asks before the bundle's own copy. Open chrome.
+    "training":       _GOODS_MID + "/0x747261696e",
     "starfall":       "ABBA/a2c/0x53746172",
     "breadcrumb":     "ABBA/a2c/0x53746172/GONK",
     # A sibling of starfall, NOT nested under it: starfall's seal is a prefix
@@ -3886,7 +3889,8 @@ def _public_rel_to_coded(rel):
             return _role_rel("mascots_ach", f[4:])
         return _role_rel("mascots", f)
     for role in ("marks", "badges", "rewards", "mystery", "banner_main",
-                 "banner_login", "banner_loom", "earned_banners"):  # rule 6
+                 "banner_login", "banner_loom", "earned_banners",
+                 "training"):                                     # rule 6
         if rel.startswith(role + "/"):
             return _role_rel(role, rel[len(role) + 1:])
     return rel                                                    # rule 7

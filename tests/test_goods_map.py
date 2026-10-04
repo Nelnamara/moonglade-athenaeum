@@ -122,10 +122,36 @@ def test_translation_single_segment_roles():
     """Rule 6: each single-segment role prefix maps to its coded folder, with
     the remainder (nested or not) carried through verbatim."""
     for role in ("marks", "badges", "rewards", "mystery", "banner_main",
-                 "banner_login", "banner_loom", "earned_banners"):
+                 "banner_login", "banner_loom", "earned_banners", "training"):
         assert (g._public_rel_to_coded(role + "/f.png")
                 == g._role_rel(role, "f.png")), role
     assert g._public_rel_to_coded("marks/sub/f.png") == g._role_rel("marks", "sub/f.png")
+
+
+def test_training_is_a_coded_folder_of_its_own():
+    """Pack v7's Basic-training goal pictures get their own coded folder beside the others:
+    under the shared middle like every chrome role, nested in no other role's folder and
+    holding none (a prefix-judged seal would hand a nested folder its parent's gate), and
+    named apart from every other code even case-blind (the tree lives on Windows)."""
+    code = g.ROLE_CODE["training"]
+    assert code.startswith(g._GOODS_MID + "/") and code.count("/") == g._GOODS_MID.count("/") + 1
+    for role, other in g.ROLE_CODE.items():
+        if role == "training":
+            continue
+        assert code.lower() != other.lower(), role
+        assert not code.lower().startswith(other.lower() + "/"), role
+        assert not other.lower().startswith(code.lower() + "/"), role
+
+
+def test_the_packs_goal_pictures_serve_from_training(tmp_path):
+    """/branding/training/goal_<goal>.png -- the address goalTileCore.js asks first -- serves
+    the pack's copy from the training folder, to any signed-in screen; absent, it 404s and the
+    tile falls through to the app's own picture."""
+    cli = _client(tmp_path)
+    assert cli.get("/branding/training/goal_character.png").status_code == 404
+    _build_box({g._role_rel("training", "goal_character.png"): PNG_1PX})
+    r = cli.get("/branding/training/goal_character.png")
+    assert r.status_code == 200 and r.data == PNG_1PX
 
 
 def test_translation_unmatched_pass_through():
@@ -220,6 +246,8 @@ def test_seal_table_round_trip(monkeypatch):
         (rr("emotion", "happy.png"), ("open", None)),
         (rr("marks", "mark_4.png"), ("open", None)),
         (rr("banner_main", "deadbeef.png"), ("open", None)),
+        # Basic training's goal pictures (pack v7): chrome, open to every install
+        (rr("training", "goal_character.png"), ("open", None)),
         ("banner.png", ("open", None)),
     ]
     for rel, want in cases:
