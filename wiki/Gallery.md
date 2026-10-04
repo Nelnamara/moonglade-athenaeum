@@ -114,9 +114,11 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
     nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
     gift icon.
-  - **ON PIXAI NOW** shows PixAI's live event banners as cards; pressing one opens PixAI's page in
-    a new tab. The app never checks in, claims or plays an event for you, and the banner list is
-    read without your API key (PixAI only answers it that way), at most once an hour.
+  - **ON PIXAI NOW** shows PixAI's live event banners as cards, one per row across the panel's
+    full width, each at its own shape with the event's name and *event ↗* underneath; pressing one
+    opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
+    the banner list is read without your API key (PixAI only answers it that way), at most once an
+    hour.
 - **On a phone** the header stays as it was: the **☰** Menu button carries one badge (unread
   notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
   each opening a full-height sheet. Inbox is the same list as the desktop's ✉ panel. Gift box is

@@ -9285,3 +9285,62 @@ def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(lo
     assert page.locator(".ib-sheet .ib-expiry-line").count() == 1
     assert page.locator(".ib-sheet .ib-gift .ib-btn").inner_text() == "Claim ▸"
     assert posts == []
+
+
+# Owner's walk, ruling 2: "Badges look cramped but also too small" -- the ON PIXAI NOW banner cards.
+
+_RF_BANNERS_JS = """(host) => {
+  const box = document.querySelector(host);
+  const scroll = box.querySelector('.ib-scroll');
+  const sw = scroll.getBoundingClientRect();
+  return [...box.querySelectorAll('.ib-event')].map((e) => {
+    const b = e.getBoundingClientRect();
+    const art = e.querySelector('.ib-event-art').getBoundingClientRect();
+    const t = e.querySelector('.ib-event-t');
+    const tb = t.getBoundingClientRect();
+    return {w: b.width, l: b.left, top: b.top, bottom: b.bottom, scrollW: scroll.clientWidth, scrollL: sw.left,
+            artW: art.width, artH: art.height, artBottom: art.bottom, labelTop: tb.top,
+            font: parseFloat(getComputedStyle(t).fontSize), text: t.innerText};
+  });
+}"""
+
+
+def _rf_assert_banners(cards):
+    assert len(cards) == 2, cards
+    zeta, missing = cards
+    for c in cards:
+        assert abs(c["w"] - c["scrollW"]) < 1 and abs(c["l"] - c["scrollL"]) < 1, ("full width", c)
+        assert c["labelTop"] >= c["artBottom"] - 0.5, ("the label sits below the art, not on it", c)
+        assert c["font"] >= 13, ("readable at 13 px or more", c)
+    assert missing["top"] >= zeta["bottom"], ("one per row", cards)
+    w, h = _RF_BANNER_SIZE
+    assert abs(zeta["artH"] - zeta["artW"] * h / w) < 1, ("the banner's own aspect", zeta)
+    assert abs(missing["artH"] - missing["artW"] / 3) < 1, ("a failed image falls back to 3:1", missing)
+    assert zeta["text"].split("\n") == ["Zeta", "event ↗"], zeta
+
+
+def test_the_event_banners_are_one_per_row_at_their_own_aspect_with_room_for_the_label(logged_in_page):
+    """Owner's walk, ruling 2. In the gift box the ON PIXAI NOW banners are one per row at the panel's full
+    width, at the banner image's own aspect (a wide 3:1 box while it loads or when it fails); the title
+    and "event ↗" are 13 px or more, in a strip of their own under the art so they never sit on it. The
+    phone's Gift box sheet draws the same card."""
+    page, posts = _rf_desktop(logged_in_page)
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-event")
+    w, h = _RF_BANNER_SIZE
+    page.wait_for_function("(r) => { const a = document.querySelector('.ib-panel .ib-event-art');"
+                           " return a && Math.abs(a.getBoundingClientRect().height * r - a.getBoundingClientRect().width) < 1; }",
+                           arg=w / h)
+    _settle(page)
+    _rf_assert_banners(page.evaluate(_RF_BANNERS_JS, ".ib-panel"))
+
+    page = _rf_phone(logged_in_page)[0]
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".ib-sheet .ib-event")
+    page.wait_for_function("(r) => { const a = document.querySelector('.ib-sheet .ib-event-art');"
+                           " return a && Math.abs(a.getBoundingClientRect().height * r - a.getBoundingClientRect().width) < 1; }",
+                           arg=w / h)
+    _settle(page)
+    _rf_assert_banners(page.evaluate(_RF_BANNERS_JS, ".glm-sheet.ib-sheet"))
+    assert posts == []

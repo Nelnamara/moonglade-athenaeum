@@ -252,7 +252,23 @@ describe("gifts (R9c) and the current event (Y3a)", () => {
   test("an event card opens PixAI in a new tab and the app never requests the link", () => {
     assert.match(list, /window\.open\(e\.link, "_blank", "noopener"\)/);
     assert.ok(!/apiGet\(e\.link|fetch\(e\.link/.test(list));
-    assert.match(css, /\.ib-event \{[^}]*height: 58px;[^}]*border-radius: 9px;/);
+  });
+
+  test("the banners are one per row at full width, at the image's own aspect, the label under the art (owner's walk)", () => {
+    const cards = fnBody(list, "EventCards");
+    assert.ok(!/phone|many/.test(cards), "one card for the desktop panel and the phone sheet alike");
+    assert.match(css, /\.ib-events \{[^}]*flex-direction: column;/);
+    assert.match(css, /\.ib-event \{[^}]*width: 100%;[^}]*border-radius: 9px;[^}]*overflow: hidden;/);
+    // the art keeps the image's own shape, read off the probe; a wide 3:1 box until then or if it fails
+    assert.match(cards, /probe\.onload = \(\) => \{/);
+    assert.match(cards, /probe\.naturalWidth/);
+    assert.match(cards, /aspectRatio: /);
+    assert.match(css, /\.ib-event-art \{[^}]*aspect-ratio: 3 \/ 1;/);
+    // the label: its own strip under the art, 13 px, the scrim's tone
+    assert.match(cards, /<span className="ib-event-art"/);
+    assert.match(cards, /<span className="ib-event-t">\{e\.title\}<br \/>event ↗<\/span>/);
+    assert.match(css, /\.ib-event-t \{[^}]*font-size: 13px;[^}]*font-weight: 700;/);
+    assert.ok(!/height: 58px/.test(css), "the cramped 58 px card is gone");
   });
 });
 

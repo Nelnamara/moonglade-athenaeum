@@ -77,7 +77,7 @@ export function GiftSheetBody({ st, account }) {
   if (!st) return null;
   return (
     <div className="ib-sheetbody">
-      <GiftBoxBody st={st} account={account} now={Date.now()} phone />
+      <GiftBoxBody st={st} account={account} now={Date.now()} />
     </div>
   );
 }
