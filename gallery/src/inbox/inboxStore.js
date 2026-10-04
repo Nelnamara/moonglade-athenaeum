@@ -1,7 +1,8 @@
-/* inbox/inboxStore.js -- the gift box's state (Sessions R + Y, lane R): the badge count, the
-   loaded inbox, the gifts and the events, and the one write a row's open makes. A MODULE
-   SINGLETON like notify/jobsStore.js: the desktop gift box and the phone's two Menu rows read
-   the SAME state, and the count must not be re-read once per mount.
+/* inbox/inboxStore.js -- the inbox's and the gift box's state (Sessions R + Y, lane R): the
+   badge counts, the loaded inbox, the gifts and the events, and the one write a row's open makes.
+   A MODULE SINGLETON like notify/jobsStore.js: the desktop's two header doors (✉ Inbox and
+   🎁 Gift box, owner's walk 2026-10-04) and the phone's two Menu rows read the SAME state, and
+   the count must not be re-read once per mount.
 
    WHAT READS, AND WHEN (R4b, drift 126):
      - the count (/api/inbox/count): once on app open, on window focus (no more than once in
@@ -25,8 +26,9 @@ import { toasts, commentToast } from "./inboxCore.js";
 const FOCUS_GAP_MS = 30000;
 
 let state = {
-  count: null,          // the badge: PixAI's unread (TASK excluded) + pending gifts; null = unknown
-  gifts: null,          // pending gifts PixAI counts
+  count: null,          // the phone Menu's badge: PixAI's unread (TASK excluded) + pending gifts; null = unknown
+  unread: null,         // the ✉ inbox's badge: PixAI's unread notifications (TASK excluded)
+  gifts: null,          // the 🎁 gift box's badge: the pending gifts PixAI counts
   items: [], cursor: null, hasMore: false, loaded: false, loading: false, error: "",
   csrf: "", readOnly: false,
   notice: null,         // {key, text}: the peach line under a row whose mark-read was unclear
@@ -60,7 +62,7 @@ export function getState() { return state; }
 export function readCount() {
   return apiGet("/api/inbox/count").then((d) => {
     if (d && d.csrf) set({ csrf: d.csrf || state.csrf });
-    if (d && !d.error && d.total != null) set({ count: d.total, gifts: d.gifts });
+    if (d && !d.error && d.total != null) set({ count: d.total, unread: d.unread, gifts: d.gifts });
   });
 }
 
@@ -71,7 +73,7 @@ export function ensureCsrf() {
   if (state.csrf) return Promise.resolve(state.csrf);
   return apiGet("/api/inbox/count").then((d) => {
     if (d && d.csrf) set({ csrf: d.csrf });
-    if (d && !d.error && d.total != null) set({ count: d.total, gifts: d.gifts });
+    if (d && !d.error && d.total != null) set({ count: d.total, unread: d.unread, gifts: d.gifts });
     return state.csrf;
   });
 }
@@ -100,7 +102,11 @@ export function noteLive(inbox) {
   if (!prev) return;                                   // the first answer is the baseline
   if (live.connects > prev.connects) readCount();       // a reconnect: the read count wins
   if (live.seq > prev.seq) {
-    if (state.count != null) set({ count: state.count + (live.seq - prev.seq) });
+    // a push is a notification: the total and the unread rise, the gifts do not
+    if (state.count != null) {
+      set({ count: state.count + (live.seq - prev.seq),
+        unread: state.unread != null ? state.unread + (live.seq - prev.seq) : state.unread });
+    }
     pullPushed(prev.seq);
   }
 }
@@ -224,6 +230,7 @@ export function openItem(row) {
       const was = state.items.filter((x) => gone.has(x.id) && x.unread).length;
       set({ items: state.items.map((x) => (gone.has(x.id) ? { ...x, unread: false } : x)),
         count: state.count != null ? Math.max(0, state.count - was) : state.count,
+        unread: state.unread != null ? Math.max(0, state.unread - was) : state.unread,
         notice: state.notice && state.notice.key === row.key ? null : state.notice });
     } else if (d && d.state === "read_only") {
       set({ readOnly: true });

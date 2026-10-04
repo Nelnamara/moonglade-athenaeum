@@ -4,15 +4,21 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-/* THE GIFT BOX, WIRED (Sessions R + Y, lane R; Inbox and Event Handoff §1-4, §7, §9). Source
-   guards in the way details-actions.test.js reads its components: the door's place and gate,
-   what the panel's opening may and may not do, the live count's road, and how Activity tells a
-   job PixAI's inbox named. The pure rules are inbox-core.test.js; the server, tests/test_inbox*.py. */
+/* THE INBOX AND THE GIFT BOX, WIRED (Sessions R + Y, lane R; Inbox and Event Handoff §1-4, §7,
+   §9). Source guards in the way details-actions.test.js reads its components: the two doors'
+   place and gate, what each panel's opening may and may not do, the live count's road, and how
+   Activity tells a job PixAI's inbox named. The pure rules are inbox-core.test.js; the server,
+   tests/test_inbox*.py.
+
+   TWO DOORS (owner's walk, 2026-10-04): the gift box is for rewards only. The inbox has its own
+   ✉ button beside it, and the two panels are separate -- opening one closes the other. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
 const bar = src("gallery/src/components/SeparatorBar.jsx");
 const box = src("gallery/src/inbox/GiftBox.jsx");
+const inboxDoor = src("gallery/src/inbox/InboxDoor.jsx");
+const door = src("gallery/src/inbox/useHeaderDoor.js");
 const store = src("gallery/src/inbox/inboxStore.js");
 const list = src("gallery/src/inbox/InboxList.jsx");
 const css = src("gallery/src/styles/inbox.css");
@@ -25,51 +31,114 @@ const fnBody = (text, name) => {
   const i = text.indexOf("export function " + name + "(");
   assert.ok(i >= 0, name + " is exported");
   let depth = 0;
-  for (let k = text.indexOf("{", i); k < text.length; k++) {
+  // the body's brace, after the parameter list (which may destructure: "({ st, tab }) {")
+  for (let k = text.indexOf(") {", i) + 2; k < text.length; k++) {
     if (text[k] === "{") depth++;
     else if (text[k] === "}" && --depth === 0) return text.slice(i, k + 1);
   }
   throw new Error(name + " never closes");
 };
 
-describe("the door (R1a)", () => {
-  test("it sits in the header's right group just before the credits chip, only with a linked account", () => {
-    const door = bar.indexOf("<GiftBox ");
+describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner's walk 2026-10-04)", () => {
+  test("both sit in the header's right group before the credits chip, only with a linked account", () => {
+    const inbox = bar.indexOf("<InboxDoor ");
+    const gift = bar.indexOf("<GiftBox ");
     const chip = bar.indexOf('className="mgx-cred" data-expiring');
-    assert.ok(door > 0 && chip > door, "the gift box renders before the credits chip");
+    assert.ok(inbox > 0 && gift > inbox && chip > gift, "✉ Inbox, then 🎁 Gift box, then the credits chip");
+    assert.match(bar, /\{linked \? <InboxDoor /);
     assert.match(bar, /\{linked \? <GiftBox /);
     assert.match(bar, /const linked = !!\(account && !account\.error && account\.credits != null\)/);
   });
 
-  test("30 x 30, radius 9, the pack's gift art at 22 px, a lavender badge, a ring while open", () => {
+  test("twins: 30 x 30, radius 9, a lavender badge, a ring while open; the gift art only on the gift box", () => {
     assert.match(css, /\.ib-door \{[^}]*width: 30px; height: 30px;[^}]*border-radius: 9px;/);
-    assert.match(css, /url\(\/branding\/rewards\/gift\.png\) center \/ 22px auto no-repeat/);
+    assert.ok(!/\.ib-door \{[^}]*gift\.png/.test(css), "the shared door carries no gift art");
+    assert.match(css, /\.ib-door\.gift \{[^}]*url\(\/branding\/rewards\/gift\.png\) center \/ 22px auto no-repeat/);
     assert.match(css, /\.ib-badge \{[^}]*background: var\(--lavender\)/);
     assert.match(css, /\.ib-door\.lift \{ box-shadow: 0 0 0 2px var\(--lavender\); \}/);
-    assert.match(box, /title="PixAI inbox"/);
+    assert.match(inboxDoor, /className=\{"ib-door inbox"/);
+    assert.match(box, /className=\{"ib-door gift"/);
   });
 
-  test("the panel: 380 px, z 300, scrolls inside, .42 s in and .35 s out with a 350 ms unmount", () => {
+  test("✉ wears the phone Menu's envelope and the title \"PixAI inbox\"; 🎁 is the \"Gift box\"", () => {
+    assert.match(inboxDoor, /title="PixAI inbox"/);
+    assert.match(inboxDoor, /<span className="ib-door-glyph" aria-hidden="true">✉<\/span>/);
+    assert.match(src("gallery/src/inbox/InboxSheets.jsx"), /aria-hidden="true">✉<\/span>Inbox/);
+    assert.match(box, /title="Gift box"/);
+    assert.ok(!/PixAI inbox/.test(box), "the gift box is not the inbox");
+  });
+
+  test("✉ counts unread notifications; 🎁 counts only the pending gifts", () => {
+    assert.match(inboxDoor, /const badge = badgeText\(st\.unread\);/);
+    assert.match(box, /const badge = badgeText\(st\.gifts\);/);
+    assert.ok(!/st\.count/.test(inboxDoor + box), "neither header door shows the combined count");
+  });
+
+  test("each panel: 380 px, z 300, scrolls inside, .42 s in and .35 s out with a 350 ms unmount", () => {
     assert.match(css, /\.ib-panel \{[^}]*z-index: 300;[^}]*width: 380px;[^}]*max-height: calc\(100dvh - 96px\)/);
     assert.match(css, /animation: ibIn \.42s/);
     assert.match(css, /\.ib-panel\.closing \{ animation: ibOut \.35s/);
-    assert.match(box, /const CLOSE_MS = 350;/);
+    assert.match(door, /export const CLOSE_MS = 350;/);
     assert.match(css, /prefers-reduced-motion: reduce\)[^]*\.ib-panel \{ animation: none; \}/);
+    for (const d of [inboxDoor, box]) {
+      assert.match(d, /useHeaderDoor\("/);
+      assert.match(d, /className=\{"ib-panel" \+ \(door\.closing \? " closing" : ""\)\}/);
+    }
   });
 
-  test("Esc, an outside click or the button closes it", () => {
-    assert.match(box, /e\.key === "Escape"\) close\(\)/);
-    assert.match(box, /addEventListener\("mousedown", onDoc\)/);
+  test("Esc, an outside click or the button closes a panel; opening one closes the other", () => {
+    assert.match(door, /e\.key === "Escape"\) close\(\)/);
+    assert.match(door, /addEventListener\("mousedown", onDoc\)/);
+    assert.match(door, /others\.forEach\(\(fn\) => fn\(name\)\)/);
+    assert.match(door, /if \(who !== name\) close\(\);/);
+    assert.notEqual(inboxDoor.match(/useHeaderDoor\("(\w+)"/)[1], box.match(/useHeaderDoor\("(\w+)"/)[1]);
+  });
+});
+
+describe("what each panel holds (owner's walk 2026-10-04)", () => {
+  test("the inbox: Inbox + N new, the tabs, the work cards and everything else -- no gifts, no events", () => {
+    assert.match(inboxDoor, /<span className="ib-title">Inbox<\/span>/);
+    assert.match(inboxDoor, /<KindTabs tab=\{tab\} onTab=\{setTab\} \/>/);
+    assert.match(inboxDoor, /<MarkAllMenu tab=\{tab\} \/>/);
+    assert.match(inboxDoor, /<InboxBody st=\{st\} tab=\{tab\}/);
+    const body = fnBody(list, "InboxBody");
+    assert.ok(!/EventCards|GiftRows|giftData|"gifts"/.test(body), "the inbox carries no gifts and no events");
+    assert.ok(!/EventCards|GiftRows|loadGifts|loadEvents/.test(inboxDoor));
+  });
+
+  test("the gift box: Gift box, then ON PIXAI NOW, the expiring cards in peach, then the gifts", () => {
+    assert.match(box, /<span className="ib-title">Gift box<\/span>/);
+    assert.match(box, /<GiftBoxBody st=\{st\} account=\{account\}/);
+    const body = fnBody(list, "GiftBoxBody");
+    const ev = body.indexOf("<EventCards ");
+    const exp = body.indexOf('className="ib-expiry-line"');
+    const gifts = body.indexOf("<GiftRows ");
+    assert.ok(ev > 0 && exp > ev && gifts > exp, "events, then the expiring cards, then the gifts");
+    assert.match(body, /expiringLines\(cardsBy, now\)/);
+    assert.match(body, /expiryText\(l\)/);
+    assert.match(css, /\.ib-expiry-line \{[^}]*color: var\(--peach\); \}/);
+    assert.ok(!/KindTabs|MarkAllMenu|InboxBody/.test(box), "no tabs, no Mark all read, no inbox rows");
+  });
+
+  test("with nothing in any of the three, one quiet line", () => {
+    const body = fnBody(list, "GiftBoxBody");
+    assert.match(body, /Nothing waiting\. Gifts from PixAI and cards about to expire show here\./);
   });
 });
 
 describe("opening writes nothing (R3b)", () => {
-  test("the panel's reads are GETs: the first page, the gifts, the events", () => {
+  test("the panels' reads are GETs: the first page, the gifts, the events", () => {
     for (const name of ["loadFirst", "loadMore", "loadEvents", "loadGifts", "readCount"]) {
       const body = fnBody(store, name);
       assert.ok(!/apiPost/.test(body), name + " must not write");
       assert.match(body, /apiGet\(/);
     }
+  });
+
+  test("opening the inbox reads its first page; opening the gift box reads the gifts and the events", () => {
+    assert.match(inboxDoor, /useHeaderDoor\("inbox", \(\) => \{ loadFirst\(\); \}\)/);
+    assert.match(box, /useHeaderDoor\("gifts", \(\) => \{ loadGifts\(\); loadEvents\(\); \}\)/);
+    assert.ok(!/apiPost|claimGift|markAllRead|openItem/.test(box + door), "opening the gift box writes nothing");
   });
 
   test("the only writes are a row's open, Mark all read and a gift's Claim", () => {
@@ -98,9 +167,9 @@ describe("opening writes nothing (R3b)", () => {
 });
 
 describe("Mark all read names its own tab (review item 2)", () => {
-  test("the Gifts tab has no Mark all read, and no tab is ever turned into All", () => {
-    assert.match(list, /export function MarkAllMenu\(\{ tab \}\) \{\n  const \[menu, setMenu\] = useState\(false\);\n  if \(tab === "gifts"\) return null;/);
-    assert.ok(!/"gifts" \? "all"/.test(list + box + src("gallery/src/inbox/InboxSheets.jsx")));
+  test("there is no Gifts tab to mark, and no tab is ever turned into All", () => {
+    assert.ok(!/"gifts"/.test(fnBody(list, "MarkAllMenu")), "gifts clear on claim, and they are not in the inbox");
+    assert.ok(!/"gifts" \? "all"/.test(list + box + inboxDoor + src("gallery/src/inbox/InboxSheets.jsx")));
     assert.match(fnBody(store, "markAllRead"), /\{ csrf, tab \}|tab \}\)/);
     assert.ok(!/tab \|\| "all"/.test(fnBody(store, "markAllRead")), "the store must not default a tab to all");
   });
@@ -139,6 +208,19 @@ describe("one mark-read per open, with a token (review nit 9)", () => {
 });
 
 describe("delivery (R4b)", () => {
+  test("the count read keeps the unread notifications and the pending gifts apart from the total", () => {
+    assert.match(fnBody(store, "readCount"), /set\(\{ count: d\.total, unread: d\.unread, gifts: d\.gifts \}\)/);
+    assert.match(fnBody(store, "ensureCsrf"), /set\(\{ count: d\.total, unread: d\.unread, gifts: d\.gifts \}\)/);
+    // a push is a notification: it bumps the total and the unread, never the gifts
+    const live = fnBody(store, "noteLive");
+    assert.match(live, /count: state\.count \+ \(live\.seq - prev\.seq\)/);
+    assert.match(live, /unread: state\.unread != null \? state\.unread \+ \(live\.seq - prev\.seq\) : state\.unread/);
+    // a row read comes off both
+    const open = fnBody(store, "openItem");
+    assert.match(open, /count: state\.count != null \? Math\.max\(0, state\.count - was\) : state\.count/);
+    assert.match(open, /unread: state\.unread != null \? Math\.max\(0, state\.unread - was\) : state\.unread/);
+  });
+
   test("the live count rides the Activity poll; a reconnect re-reads the count; focus at most every 30 s", () => {
     assert.match(jobs, /if \(d && !d\.error && d\.inbox\) pollListeners\.forEach/);
     assert.match(jobs, /export function onInboxLive\(fn\)/);
@@ -170,7 +252,23 @@ describe("gifts (R9c) and the current event (Y3a)", () => {
   test("an event card opens PixAI in a new tab and the app never requests the link", () => {
     assert.match(list, /window\.open\(e\.link, "_blank", "noopener"\)/);
     assert.ok(!/apiGet\(e\.link|fetch\(e\.link/.test(list));
-    assert.match(css, /\.ib-event \{[^}]*height: 58px;[^}]*border-radius: 9px;/);
+  });
+
+  test("the banners are one per row at full width, at the image's own aspect, the label under the art (owner's walk)", () => {
+    const cards = fnBody(list, "EventCards");
+    assert.ok(!/phone|many/.test(cards), "one card for the desktop panel and the phone sheet alike");
+    assert.match(css, /\.ib-events \{[^}]*flex-direction: column;/);
+    assert.match(css, /\.ib-event \{[^}]*width: 100%;[^}]*border-radius: 9px;[^}]*overflow: hidden;/);
+    // the art keeps the image's own shape, read off the probe; a wide 3:1 box until then or if it fails
+    assert.match(cards, /probe\.onload = \(\) => \{/);
+    assert.match(cards, /probe\.naturalWidth/);
+    assert.match(cards, /aspectRatio: /);
+    assert.match(css, /\.ib-event-art \{[^}]*aspect-ratio: 3 \/ 1;/);
+    // the label: its own strip under the art, 13 px, the scrim's tone
+    assert.match(cards, /<span className="ib-event-art"/);
+    assert.match(cards, /<span className="ib-event-t">\{e\.title\}<br \/>event ↗<\/span>/);
+    assert.match(css, /\.ib-event-t \{[^}]*font-size: 13px;[^}]*font-weight: 700;/);
+    assert.ok(!/height: 58px/.test(css), "the cramped 58 px card is gone");
   });
 });
 

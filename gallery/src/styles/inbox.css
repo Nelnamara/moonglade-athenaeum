@@ -1,18 +1,23 @@
-/* inbox.css -- Sessions R + Y (lane R, 2026-10-03): the gift box, its inbox panel, the gifts,
-   the current event, and the phone's Inbox and Gift box sheets. The pixel source is
-   `Inbox and Event Handoff.dc.html` (moonglade-internal/design/handoff-2026-09-04/), sections
-   1-3, 7, 9 and 10; every size, colour and spacing below is read off its mock.
+/* inbox.css -- Sessions R + Y (lane R, 2026-10-03): the header's ✉ Inbox and 🎁 Gift box doors
+   and their panels, the gifts, the current event, and the phone's Inbox and Gift box sheets. The
+   pixel source is `Inbox and Event Handoff.dc.html` (moonglade-internal/design/handoff-2026-09-04/),
+   sections 1-3, 7, 9 and 10; every size, colour and spacing below is read off its mock. The owner's
+   walk (2026-10-04) split the one door into two twins: the gift box is for rewards only and the
+   inbox has its own ✉ button beside it, the same size, ring and badge.
 
    Hues: lavender is action and unread; peach is a held or unclear state (never ruby); emerald
    is a confirmed write; a gift is not billing, so there is no gold anywhere here.
    Z: the panel is 300, the floor of the overlays-and-modals band (300-500). */
 
-/* ---- the door (§1): 30 x 30, radius 9, gift.png at 22 px ----------------------------------- */
+/* ---- the doors (§1): 30 x 30, radius 9, 8 px apart; the gift box wears gift.png at 22 px, the
+   inbox the phone Menu row's envelope ---------------------------------------------------------- */
 .ib-wrap { position: static; display: flex; align-items: center; margin-right: -4px; }
 .ib-door { position: relative; width: 30px; height: 30px; flex: none; box-sizing: border-box; padding: 0;
   border-radius: 9px; border: 1px solid rgba(255, 255, 255, .18); cursor: pointer;
-  background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6);
+  display: grid; place-items: center; color: var(--text); font: inherit; background: rgba(33, 31, 58, .6);
   transition: box-shadow .18s, filter .18s; }
+.ib-door.gift { background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
+.ib-door-glyph { font-size: 15px; line-height: 1; font-variant-emoji: text; pointer-events: none; }
 .ib-door:hover { filter: brightness(1.12); }
 .ib-door.lift { box-shadow: 0 0 0 2px var(--lavender); }
 .ib-door:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
@@ -115,22 +120,20 @@
 .ib-link { font-size: 10.5px; color: var(--lavender); white-space: nowrap; flex: none; text-decoration: none; }
 .ib-link:hover { color: var(--mauve); text-decoration: underline; }
 
-/* ---- the current event (§9): 2 across, 58 tall, radius 9, a bottom scrim ----------------- */
-.ib-events { display: flex; gap: 6px; flex-wrap: nowrap; }
-.ib-events.many { overflow-x: auto; scrollbar-width: thin; }
-.ib-events.many .ib-event { flex: 0 0 calc(50% - 3px); }
-.ib-event { flex: 1; min-width: 0; height: 58px; box-sizing: border-box; display: flex; align-items: flex-end;
-  padding: 6px 8px; border: 0; border-radius: 9px; cursor: pointer; text-align: left; font: inherit;
-  font-size: 10px; font-weight: 700; line-height: 1.3; color: var(--text);
-  background-color: var(--surface0); background-size: cover; background-position: center; }
-.ib-event:not(.noimg) { position: relative; }
-.ib-event:not(.noimg)::before { content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: linear-gradient(180deg, transparent 30%, rgba(5, 4, 13, .85)); pointer-events: none; }
-.ib-event.noimg { background-image: none; background-color: var(--surface0); }
-.ib-event-t { position: relative; }
+/* ---- the current event (§9, resized on the owner's walk 2026-10-04): one banner per row at full
+   width, the art at its own aspect (3:1 until it loads or if it fails), radius 9, and the label in
+   a strip of its own under the art in the scrim's dark, at 13 px. The desktop panel and the phone
+   sheet draw the same card. ------------------------------------------------------------------ */
+.ib-events { display: flex; flex-direction: column; gap: 8px; }
+.ib-event { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 0; border: 0;
+  border-radius: 9px; overflow: hidden; cursor: pointer; text-align: left; font: inherit; color: var(--text);
+  background: var(--surface0); flex: none; }
+.ib-event-art { display: block; width: 100%; aspect-ratio: 3 / 1; background-color: var(--surface0);
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.ib-event-t { display: block; padding: 7px 10px 8px; font-size: 13px; font-weight: 700; line-height: 1.35;
+  color: var(--text); background: rgba(5, 4, 13, .85); overflow-wrap: anywhere; }
 .ib-event:hover { filter: brightness(1.1); }
-.ib-events.phone { flex-direction: column; }
-.ib-events.phone .ib-event { flex: none; width: 100%; min-height: 58px; }
+.ib-event:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 
 /* ---- the phone (§10) ---------------------------------------------------------------------- */
 .glm-sheet.ib-sheet { height: calc(100dvh - 40px); max-height: none; display: flex; flex-direction: column; }

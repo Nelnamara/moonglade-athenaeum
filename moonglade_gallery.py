@@ -28758,8 +28758,8 @@ __DESIGN_TOKENS__
     @app.route("/api/inbox/count")
     @tier(LOGIN)
     def api_inbox_count():
-        """The gift box's badge: PixAI's unread count (TASK excluded) plus pending gifts.
-        Read on app open, on focus (the client debounces 30 s) and on a socket reconnect.
+        """The doors' badges: PixAI's unread count (TASK excluded) for the inbox, the pending
+        gifts for the gift box, and their total for the phone's Menu. Read on app open, on focus (the client debounces 30 s) and on a socket reconnect.
         Carries the CSRF token too, so a write that comes before the panel ever opened (a
         comment toast's Open thread) never goes out with an empty one."""
         session.setdefault("csrf", secrets.token_hex(16))

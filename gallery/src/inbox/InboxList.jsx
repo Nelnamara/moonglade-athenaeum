@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText,
+  TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText, expiringLines, expiryText,
 } from "./inboxCore.js";
 import { openItem, loadMore, claimGift, clearClaim, markAllRead } from "./inboxStore.js";
 
-/* The inbox's body, shared by the desktop gift box's panel and the phone's Inbox and Gift box
-   sheets (Inbox and Event Handoff §1-3, §7, §9, §10). The doors differ; the rows do not.
+/* The bodies behind the doors (Inbox and Event Handoff §1-3, §7, §9, §10): the inbox's, shared by
+   the desktop's ✉ panel and the phone's Inbox sheet, and the gift box's, shared by the desktop's
+   🎁 panel and the phone's Gift box sheet. The doors differ; the rows do not.
 
-   From the top (R1a): the kind tabs, ON PIXAI NOW (only when an event is live), the work cards,
-   then EVERYTHING ELSE. Opening a row or a card navigates and marks what it gathers read on
-   PixAI (one write -- inboxStore.openItem); nothing here writes on open, scroll or tab. */
+   The inbox, from the top (R1a, less the gifts and the event since the owner's walk 2026-10-04):
+   the kind tabs, the work cards, then EVERYTHING ELSE. Opening a row or a card navigates and marks
+   what it gathers read on PixAI (one write -- inboxStore.openItem); nothing here writes on open,
+   scroll or tab. The gift box: ON PIXAI NOW, the free cards about to expire, then the gifts. */
 
 const TIP_DELAY_MS = 600;
 
@@ -28,7 +30,6 @@ function thumbOf(art) {
    then a read-back of the count. */
 export function MarkAllMenu({ tab }) {
   const [menu, setMenu] = useState(false);
-  if (tab === "gifts") return null;      // gifts clear on claim, never by a watermark
   return (
     <span className="ib-menuwrap">
       <button type="button" className="ib-more" aria-label="More" aria-expanded={menu}
@@ -56,15 +57,25 @@ export function KindTabs({ tab, onTab, phone }) {
   );
 }
 
-/* ON PIXAI NOW (Y3a): up to two banner cards across, a third and more scroll sideways; the
-   phone stacks them full width. A press opens PixAI's own page in a new tab -- the app never
-   requests the link itself. An image that fails falls back to the label on a surface tint. */
-export function EventCards({ events, phone }) {
+/* ON PIXAI NOW (Y3a; resized on the owner's walk 2026-10-04: "cramped but also too small"): one
+   banner per row at the full width of the gift box's panel or the phone's sheet, at the banner
+   image's own aspect -- read off the probe that also catches a failure -- and a wide 3:1 box while
+   it loads or if it fails. The label keeps its treatment (the title, then "event ↗", bold, on the
+   scrim's dark) but has a strip of its own under the art at 13 px, so it never sits on the art's
+   busy part. A press opens PixAI's own page in a new tab -- the app never requests the link itself.
+   An image that fails leaves the box on a surface tint, never an <img> hole. */
+export function EventCards({ events }) {
   const [failed, setFailed] = useState({});
+  const [shape, setShape] = useState({});
   useEffect(() => {
     (events || []).forEach((e) => {
-      if (!e.image || failed[e.link]) return;
+      if (!e.image || failed[e.link] || shape[e.link]) return;
       const probe = new Image();
+      probe.onload = () => {
+        if (probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+          setShape((m) => ({ ...m, [e.link]: probe.naturalWidth + " / " + probe.naturalHeight }));
+        }
+      };
       probe.onerror = () => setFailed((f) => ({ ...f, [e.link]: true }));
       probe.src = e.image;
     });
@@ -73,14 +84,18 @@ export function EventCards({ events, phone }) {
   return (
     <>
       <div className="ib-lab">ON PIXAI NOW</div>
-      <div className={"ib-events" + (phone ? " phone" : "") + (events.length > 2 ? " many" : "")}>
-        {events.map((e) => (
-          <button key={e.link} type="button" className={"ib-event" + (failed[e.link] || !e.image ? " noimg" : "")}
-            style={failed[e.link] ? undefined : bg(e.image)} title={e.title + " on PixAI"}
-            onClick={() => window.open(e.link, "_blank", "noopener")}>
-            <span className="ib-event-t">{e.title}<br />event ↗</span>
-          </button>
-        ))}
+      <div className="ib-events">
+        {events.map((e) => {
+          const art = failed[e.link] || !e.image ? null : e.image;
+          return (
+            <button key={e.link} type="button" className={"ib-event" + (art ? "" : " noimg")}
+              title={e.title + " on PixAI"} onClick={() => window.open(e.link, "_blank", "noopener")}>
+              <span className="ib-event-art" aria-hidden="true"
+                style={{ ...(art ? bg(art) : {}), ...(art && shape[e.link] ? { aspectRatio: shape[e.link] } : {}) }} />
+              <span className="ib-event-t">{e.title}<br />event ↗</span>
+            </button>
+          );
+        })}
       </div>
     </>
   );
@@ -144,16 +159,15 @@ function GiftIcon({ small }) {
 /* Gifts (R9c): a PENDING REWARD message gets Claim ▸, which swaps the row's detail for a
    preview (what, which account, expiry, "One attempt.") with [Back] [Claim]: one write and a
    status read-back. 409 / 410 come back as peach words. A done gift dims with "claimed" /
-   "expired". Credit-pack bonuses open PixAI and send nothing. Gifts are not billing: no gold. */
-export function GiftRows({ data, error, claim, claimLocked, readOnly, pendingOnly }) {
+   "expired". Credit-pack bonuses open PixAI and send nothing. Gifts are not billing: no gold.
+   With none, the section is absent (the gift box's one quiet line covers an empty box). */
+export function GiftRows({ data, error, claim, claimLocked, readOnly }) {
   const [preview, setPreview] = useState("");
   if (error) return <div className="ib-warn">{"Couldn't read your gifts from PixAI: " + error}</div>;
   if (!data) return <div className="ib-dim">Reading your gifts…</div>;
-  const gifts = (data.gifts || []).filter((g) => !pendingOnly || g.status === "PENDING");
-  const bonuses = pendingOnly ? [] : (data.bonuses || []);
-  if (!gifts.length && !bonuses.length) {
-    return pendingOnly ? null : <div className="ib-dim">No gifts from PixAI right now.</div>;
-  }
+  const gifts = data.gifts || [];
+  const bonuses = data.bonuses || [];
+  if (!gifts.length && !bonuses.length) return null;
   return (
     <>
       {gifts.map((g) => {
@@ -212,8 +226,8 @@ export function GiftRows({ data, error, claim, claimLocked, readOnly, pendingOnl
   );
 }
 
-/* The list: work cards, then everything else (and, in All, the pending gifts). */
-export function InboxBody({ st, tab, phone, now }) {
+/* The inbox: work cards, then everything else. */
+export function InboxBody({ st, tab, now }) {
   const tip = useTip();
   const scrollRef = useRef(null);
   const g = groupInbox(st.items, tab);
@@ -221,18 +235,9 @@ export function InboxBody({ st, tab, phone, now }) {
     const el = e.currentTarget;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
   };
-  const pendingGifts = st.giftData && (st.giftData.gifts || []).some((x) => x.status === "PENDING");
-  if (tab === "gifts") {
-    return (
-      <div className="ib-scroll" ref={scrollRef}>
-        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} />
-      </div>
-    );
-  }
-  const empty = st.loaded && !g.works.length && !g.rest.length && !(tab === "all" && pendingGifts);
+  const empty = st.loaded && !g.works.length && !g.rest.length;
   return (
     <div className="ib-scroll" ref={scrollRef} onScroll={onScroll}>
-      {tab === "all" && !phone ? <EventCards events={st.events} /> : null}
       {st.error ? <div className="ib-warn">{"Couldn't read your PixAI inbox: " + st.error}</div> : null}
       {!st.loaded && !st.error ? <div className="ib-dim">Reading your PixAI inbox…</div> : null}
       {g.works.map((w) => (
@@ -249,18 +254,36 @@ export function InboxBody({ st, tab, phone, now }) {
           ) : null}
         </React.Fragment>
       ))}
-      {g.rest.length || (tab === "all" && pendingGifts) ? <div className="ib-lab">EVERYTHING ELSE</div> : null}
+      {g.rest.length ? <div className="ib-lab">EVERYTHING ELSE</div> : null}
       {g.rest.map((r) => (
         <Row key={r.key} row={r} now={now} tip={tip} readOnly={st.readOnly} notice={st.notice} onOpen={openItem}>
           <span className="ib-glyph" aria-hidden="true">{GLYPH[r.kind] || GLYPH.news}</span>
           <span className="ib-text">{r.text}</span>
         </Row>
       ))}
-      {tab === "all" ? (
-        <GiftRows data={st.giftData} error="" claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} pendingOnly />
-      ) : null}
       {empty ? <div className="ib-dim">Nothing here from PixAI yet.</div> : null}
       {st.loading && st.loaded ? <div className="ib-dim">Reading older notifications…</div> : null}
+    </div>
+  );
+}
+
+/* THE GIFT BOX (owner's walk, 2026-10-04), the desktop's 🎁 panel and the phone's Gift box sheet:
+   ON PIXAI NOW (absent with nothing live), one peach line per kind of free card that lapses within
+   three days -- the credits chip's hover lines, word for word (absent with none) -- then the gifts
+   with Claim ▸. With nothing in any of the three, one quiet line. Reads only: what it shows was
+   read when the door opened. */
+export function GiftBoxBody({ st, account, now }) {
+  const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
+  const expiry = expiringLines(cardsBy, now);
+  const data = st.giftData;
+  const noGifts = !!data && !st.giftError && !(data.gifts || []).length && !(data.bonuses || []).length;
+  const empty = st.events != null && !st.events.length && !expiry.lines.length && noGifts;
+  return (
+    <div className="ib-scroll">
+      <EventCards events={st.events} />
+      {expiry.lines.map((l) => <div className="ib-expiry-line" key={l.kind + l.at}>{expiryText(l)}</div>)}
+      <GiftRows data={data} error={st.giftError} claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} />
+      {empty ? <div className="ib-dim">Nothing waiting. Gifts from PixAI and cards about to expire show here.</div> : null}
     </div>
   );
 }

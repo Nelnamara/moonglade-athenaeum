@@ -31,8 +31,8 @@ describe("the badge", () => {
     assert.equal(badgeText(100), "99+");
   });
 
-  test("the tabs are the handoff's six, in its order", () => {
-    assert.deepEqual(TABS.map((t) => t[1]), ["All", "Comments", "Likes", "Follows", "Gifts", "PixAI"]);
+  test("the tabs are the handoff's, in its order, less Gifts: gifts live in the gift box (owner's walk 2026-10-04)", () => {
+    assert.deepEqual(TABS.map((t) => t[1]), ["All", "Comments", "Likes", "Follows", "PixAI"]);
   });
 });
 
@@ -84,7 +84,6 @@ describe("the inbox, by work (R2c)", () => {
     assert.equal(groupInbox(items, "follows").works.length, 0);
     assert.equal(groupInbox(items, "likes").works[0].ids.join(), "l1");
     assert.equal(groupInbox(items, "pixai").rest.length, 1);
-    assert.equal(groupInbox(items, "gifts").rest.length, 0);
   });
 
   test("a news row says PixAI and its first line", () => {

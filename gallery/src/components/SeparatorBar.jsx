@@ -8,6 +8,7 @@ import GoalChips from "./GoalChips.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
 import { expiringLines, expiryText } from "../inbox/inboxCore.js";
+import InboxDoor from "../inbox/InboxDoor.jsx";
 import GiftBox from "../inbox/GiftBox.jsx";
 import "../styles/shell.css";
 
@@ -81,8 +82,9 @@ export default function SeparatorBar({
      shipped. Read off the same /api/account answer the chip already draws from. */
   const expiry = expiringLines(cardsBy, Date.now());
   const expiring = expiry.lines.length > 0;
-  /* The gift box (Session R, R1a) is drawn only when a PixAI account is linked: the same
-     /api/account read answered a balance. A contest row in it opens the Contests overlay. */
+  /* The inbox and the gift box (Session R, R1a; two doors since the owner's walk 2026-10-04) are
+     drawn only when a PixAI account is linked: the same /api/account read answered a balance. A
+     contest row in the inbox opens the Contests overlay. */
   const linked = !!(account && !account.error && account.credits != null);
   const openContests = useCallback(() => onOverlay && onOverlay("contests"), [onOverlay]);
 
@@ -227,9 +229,11 @@ export default function SeparatorBar({
           </span>
         ) : null}
 
-        {/* THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1): the inbox's door, one
-            8 px gap before the credits chip. Shown only with a linked account. */}
-        {linked ? <GiftBox onOpenContests={openContests} /> : null}
+        {/* ✉ THE INBOX and 🎁 THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1; two doors
+            since the owner's walk 2026-10-04: the gift box is for rewards only). Twins, 8 px
+            apart and one 8 px gap before the credits chip, shown only with a linked account. */}
+        {linked ? <InboxDoor onOpenContests={openContests} /> : null}
+        {linked ? <GiftBox account={account} /> : null}
 
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
         <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
