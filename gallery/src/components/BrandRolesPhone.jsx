@@ -55,7 +55,7 @@ function RoleScreen({ role, csrf, onSaved }) {
       <div className="mgcp-rlm-btns">
         <button type="button" className="mgcp-rl-ghost" disabled={ed.busy}
           onClick={() => fileRef.current && fileRef.current.click()}>Choose photo</button>
-        <button type="button" className="mgcp-rl-ghost" disabled={ed.busy || !img.yours}
+        <button type="button" className="mgcp-rl-ghost" disabled={ed.busy || !img.yours || !img.default_url}
           onClick={() => setAsking(true)}>Use default</button>
       </div>
     </div>

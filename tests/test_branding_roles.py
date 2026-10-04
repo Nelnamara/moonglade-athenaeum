@@ -817,3 +817,44 @@ def test_the_everyday_formats_still_open_and_a_jpeg_is_refused_by_name(tmp_path)
     r = _post(cli, "power_poses", "restart", _img((256, 256), mode="RGBA", fmt="GIF"), "x.gif")
     assert r.get_json()["failed"][0]["got"] == "GIF"
     assert _post(cli, "power_poses", "restart", _img((256, 256)), "x.png").status_code == 200
+
+
+# ---- restore never deletes the only copy ------------------------------------------------------------
+# The legacy branding migration moved an old install's loose files into these exact paths, and
+# moonglade.dat may be absent. With no pack default to go back to, the install's file IS the only
+# copy: restore refuses (409) and leaves it.
+
+def test_restore_keeps_the_only_copy_when_the_pack_holds_no_default(tmp_path):
+    cli = _client(tmp_path)                         # no pack art beside branding/ here
+    assert _post(cli, "reward_icons", "gift", _img((128, 119))).status_code == 200
+    path = _override_path("reward_icons", "gift")
+    before = path.read_bytes()
+    r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "gift"})
+    assert r.status_code == 409
+    assert r.get_json()["error"] == "There's no default to go back to, so your file is kept."
+    assert path.read_bytes() == before, "the file is still there, untouched"
+    img = next(i for i in _role(cli, "reward_icons")["images"] if i["key"] == "gift")
+    assert img["yours"] is True and img["default_url"] is None
+
+
+def test_restore_keeps_an_unreadable_file_too_when_there_is_no_default(tmp_path):
+    cli = _client(tmp_path)
+    assert _post(cli, "reward_icons", "claim", _img((128, 128))).status_code == 200
+    _override_path("reward_icons", "claim").write_bytes(b"old loose file the migration left")
+    r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "claim"})
+    assert r.status_code == 409 and _override_path("reward_icons", "claim").exists()
+
+
+def test_restore_with_nothing_to_remove_is_still_a_quiet_no_op_whatever_the_pack_holds(tmp_path):
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "claim"})
+    assert r.status_code == 200 and r.get_json()["removed"] is False
+
+
+def test_restore_still_removes_the_file_when_the_pack_does_hold_the_default(tmp_path):
+    cli = _client(tmp_path)
+    _pack({g._public_rel_to_coded("rewards/gift.png"): _img((128, 119), color=(9, 9, 9))})
+    assert _post(cli, "reward_icons", "gift", _img((128, 119))).status_code == 200
+    r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "gift"})
+    assert r.status_code == 200 and r.get_json()["removed"] is True
+    assert not _override_path("reward_icons", "gift").exists()

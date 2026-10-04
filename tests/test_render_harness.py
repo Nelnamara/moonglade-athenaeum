@@ -6413,6 +6413,30 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
     assert not _g._role_override_path("power_poses", "restart").exists()
 
 
+def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_to(
+        logged_in_page, tmp_path, sealed_donor_present):
+    """No pack art beside this install (the container carries only the roster): an overridden role's
+    file is the only copy, so the phone's Use default stays disabled, as the desktop shows no
+    dimmed default to tap."""
+    page = logged_in_page(width=390, height=844, device_scale_factor=1, is_mobile=True, has_touch=True)
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+    page.click('button:has-text("Control")')
+    page.wait_for_selector(".mgcp-tile.click")
+    page.locator('.mgcp-tile.click:has-text("Branding")').click()
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rlm-row")
+    page.locator(".mgcp-rlm-row", has_text="Reward icons").click()
+    page.wait_for_selector(".mgcp-rlm-screen")
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "ok.png", (128, 128)))
+    page.wait_for_function("() => document.querySelector('.mgcp-rlm-pair .mgcp-rl-art.yours')")
+    use_default = page.locator(".mgcp-rlm-btns button:has-text('Use default')")
+    assert use_default.is_disabled(), "an overridden image with no pack default cannot be restored"
+    assert page.locator(".mgcp-rlm-pair .mgcp-rl-art.def").count() == 0, "and shows no default beside yours"
+
+
 def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
         logged_in_page, tmp_path, sealed_donor_present):
     _dress_role_pack()

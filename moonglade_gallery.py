@@ -5406,16 +5406,24 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
 
 
 def branding_role_restore(out_dir, slot, key):
-    """POST /api/branding/slot/restore: remove the install's override of one role image, so the
+    """POST /api/branding/role/restore: remove the install's override of one role image, so the
     pack's default answers again. Returns (body, status). It unlinks ONE file under the coded
     tree and nothing else; the pack (the container) is never opened for writing, and removing
-    an override that is not there is a quiet {"removed": false}, never an error."""
+    an override that is not there is a quiet {"removed": false}, never an error.
+
+    It refuses (409) when the pack holds no default for that image: then the file under the coded
+    tree is the only copy of that art (the legacy branding migration moved an old install's loose
+    files into these very paths, and moonglade.dat may be absent), and deleting it would leave the
+    role with nothing at all."""
     if key not in ROLE_SLOTS[slot]["images"]:
         return {"error": "unknown image"}, 400
     path = _role_override_path(slot, key)
     removed = False
     try:
         if path.is_file():
+            box = _get_container()
+            if box is None or not box.has(_role_coded_rel(slot, key)):
+                return {"error": "There's no default to go back to, so your file is kept."}, 409
             path.unlink()
             removed = True
     except OSError:

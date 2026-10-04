@@ -183,6 +183,9 @@ describe("the phone's role screen has exactly two buttons, and a passing pick up
     assert.match(phone, />Choose photo<\/button>/);
     assert.match(phone, />Use default<\/button>/);
   });
+  test("Use default is enabled only where there is a default to go back to, as on the desktop", () => {
+    assert.match(phone, /disabled=\{ed\.busy \|\| !img\.yours \|\| !img\.default_url\}/);
+  });
   test("the photo picker commits the pick: it uploads itself when every rule passes", () => {
     assert.match(phone, /ed\.pickFile\(f, \{ commit: true \}\)/);
     assert.match(hook, /if \(commit && !failed\.length\) await send\(source\);/);
