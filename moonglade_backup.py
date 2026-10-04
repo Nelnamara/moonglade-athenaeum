@@ -15210,7 +15210,25 @@ def _normalize_kaisuuken(raw):
         "template_code": raw.get("templateCode") or "",
         "template_id": raw.get("templateId") or "",
         "expires": raw.get("soonestExpireAt") or "",
+        # Every expiry date the type holds, with how many expire then (Session Y, #69): the
+        # credits chip's "N <kind> expire <date>" lines. A dateless or unreadable entry is
+        # dropped -- it can never expire soon.
+        "expiry_counts": _expiry_counts(raw.get("expiryCounts")),
     }
+
+
+def _expiry_counts(rows):
+    out = []
+    for e in rows or []:
+        if not isinstance(e, dict) or not e.get("expiresAt"):
+            continue
+        try:
+            n = int(e.get("count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out.append({"expires_at": str(e["expiresAt"]), "count": n})
+    return out
 
 
 def list_kaisuukens(session):

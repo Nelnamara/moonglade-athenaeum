@@ -15,7 +15,7 @@ export default function ToastHost() {
   return createPortal(
     <div id="mg-toasts" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={"mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "")}>
+        <div key={t.id} className={"mg-toast" + (t.kind ? " " + t.kind : "") + (t.wide ? " wide" : "") + (t.out ? " out" : "")}>
           {t.avatar ? (
             <span className="mt-avatar" aria-hidden="true"
               style={{ backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }} />
@@ -25,6 +25,11 @@ export default function ToastHost() {
           <div className="mt-main">
             <div className="mt-title">{t.title}{t.code ? <> <b className="mt-code">{t.code}</b></> : null}</div>
             {t.msg ? <div className="mt-msg">{t.msg}</div> : null}
+            {t.quote ? (
+              <div className={"mt-quote" + (t.quote.length > 320 || t.quote.split(/\n/).length > 6 ? " long" : "")}>
+                {t.quote}
+              </div>
+            ) : null}
             {t.actions && t.actions.length ? (
               <div className="mt-acts">
                 {t.actions.map((a, i) => (

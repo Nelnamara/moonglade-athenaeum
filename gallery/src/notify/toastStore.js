@@ -20,6 +20,9 @@
                dismisses the toast; `tone: "ruby"` draws it in the destructive/spicy red.
                Ignored when `action` is given.
        foot: a small line under the buttons (the choice's "you can change this later")
+       quote: a block of quoted text under the title, clamped at six lines with a fade (the
+              reply's question quotes the reply in full -- Sessions R + Y, R6c)
+       wide: the toast widens to 420 px (a question carrying a quote)
        code: a short mono tail on the title ("Updated to" + "3.14")
    The two-phase exit (add .out, unmount 340ms later) matches the exit-animation duration. */
 
@@ -68,6 +71,8 @@ export function show(o) {
         .map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" }))
       : [],
     foot: o.foot ? String(o.foot) : "",
+    quote: o.quote ? String(o.quote) : "",
+    wide: !!o.wide,
     sticky: !!o.sticky,
     out: false,
   }]);

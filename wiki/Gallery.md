@@ -81,7 +81,48 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   moved, and the page you are reading stays exactly where it is.
 - **Followers and following** sit beside the credits figure in the header, and again in the
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
-  never follows, unfollows, likes or comments on your behalf.
+  never follows, unfollows or likes on your behalf, and it comments only when you write a
+  reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
+- **The gift box** (just left of the credits chip, shown once a PixAI account is linked) is your
+  **PixAI inbox**. Its lavender badge is how many of PixAI's notifications you haven't read, plus
+  any gift waiting to be claimed. Click it for the panel: tabs for **All · Comments · Likes ·
+  Follows · Gifts · PixAI**, then **ON PIXAI NOW** (the event PixAI is running, when there is
+  one), then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
+  quoted), then everything else — new followers folded per day, contest results, PixAI's news.
+  Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
+  app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
+  **website** run, and a job Activity holds as failed that PixAI says finished gets a dim
+  *PixAI says: done* under it).
+  - **Opening a row marks it read on PixAI** — one write, for exactly what that row or card
+    gathers. Opening the panel, scrolling, switching tabs and new arrivals never mark anything.
+    **⋯ → Mark all read** marks the tab's kinds read. With `READ_ONLY` set, rows still open and
+    nothing is marked. If PixAI doesn't answer clearly, the row stays unread with a peach line
+    saying so, and nothing is sent twice.
+  - **It updates live.** A new notification bumps the badge as it arrives (the live mirror hears
+    it), and the count is re-read when the app opens, when the window comes back to the front
+    (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
+    notice in the corner, with **Later** and **Open thread**.
+  - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
+    holds, which account it goes to and when it expires before a **Claim** button: one attempt,
+    then the app reads the gift back and says *Claimed*, or in peach *Already claimed* /
+    *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
+    nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
+    gift icon.
+  - **ON PIXAI NOW** shows PixAI's live event banners as cards; pressing one opens PixAI's page in
+    a new tab. The app never checks in, claims or plays an event for you, and the banner list is
+    read without your API key (PixAI only answers it that way), at most once an hour.
+  - **On a phone** the header stays as it was: the **☰** Menu button carries the badge, and
+    **Inbox** and **Gift box** are the Menu's first two rows, each opening a full-height sheet.
+    Inbox is the same list as the desktop panel. Gift box holds the event cards, the free cards
+    about to expire (in peach — the phone has no hover) and your gifts; its row shows the soonest
+    expiry, or how many gifts are waiting.
+- **Free cards about to expire.** When any free card you hold expires within three days, the
+  **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
+  them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
+  *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
+  the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
+  The dates come from the same card summary the chip already reads. On a phone, where there is
+  no hover, the **Menu**'s **Gift box** row shows the soonest one.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
 - **Health** — the [collection health](Health) dashboard, with the storage bars.
@@ -352,6 +393,32 @@ and the library is still deep when you come back. Turning the page with **‹ Pr
 media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
+
+### Comments on your published work
+
+A picture you have published on PixAI shows its **COMMENTS** in Details, on the desktop and the
+phone, where the ♥ / 💬 count used to carry them. They are read live from PixAI when you scroll
+to them — never when Details merely opens — newest first, 50 at a time with **Load older** at
+the end, and kept in memory for five minutes. They are never saved to your library, a file or a
+log: they are other people's words.
+
+- Each comment shows with its replies folded under **N replies ▸**; a chain you've replied in
+  opens by itself, and so does the one you reached from a quote in the gift box. Your own
+  comments wear a **you** badge. Reactions show as a count and stickers as small pictures —
+  there is no like, react or report button. A comment PixAI has flagged is hidden, and one line
+  at the end says how many.
+- **Reply** opens a box under that comment with a counter (PixAI's limit is 4,095 characters;
+  past it the counter turns peach and Send says how far over you are). **Send** asks first —
+  a notice that names your PixAI name, the person and the work and quotes your text in full
+  (on a phone, a sheet with two big buttons): **Back** or **Post publicly**. Only Post publicly
+  sends it, once. The app then reads the thread back and says **Posted · found in the thread**,
+  or — if PixAI's answer was unclear and the reply isn't there — tells you to check on PixAI,
+  and keeps Send off until you change the text, so the same words are never posted twice.
+  PixAI's refusals (email not verified, blocked, not eligible, restricted, too many) are shown
+  in plain words.
+- PixAI has no edit, so a reply you've just posted offers **Delete my reply** while the thread
+  is open; it asks first (*This can't be undone*), sends once and reads back.
+- With `READ_ONLY` set, the reply box shows, greyed, with the reason, and nothing is sent.
 
 ### The phone's reading feed, the new-since line, and pull to refresh
 

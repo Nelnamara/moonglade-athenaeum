@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import NavSpine from "./NavSpine.jsx";
 import CostBadge from "./CostBadge.jsx";
 import CustomSlider from "./CustomSlider.jsx";
@@ -7,6 +7,8 @@ import HelpButton from "../help/HelpButton.jsx";
 import GoalChips from "./GoalChips.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
+import { expiringLines, expiryText } from "../inbox/inboxCore.js";
+import GiftBox from "../inbox/GiftBox.jsx";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -71,6 +73,18 @@ export default function SeparatorBar({
   const hasSplit = typeof paid === "number" && typeof freeCr === "number";
   const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
   const cardExpiry = account && account.card_expiry;
+  /* EXPIRING FREE CARDS (Session Y, Y1c + Y2a; drift 130): any held card that lapses within
+     72 h puts a 2 px peach underline on the CARDS half and leads the tooltip with one line per
+     kind -- "5 Tsubaki.3 expire Oct 6 · in 3 days". Peach, never ruby (an expiry is not
+     destructive) and never gold (free cards are not billing): the tooltip's border goes
+     lavender while it carries them. Nothing expiring means no mark and the tooltip as
+     shipped. Read off the same /api/account answer the chip already draws from. */
+  const expiry = expiringLines(cardsBy, Date.now());
+  const expiring = expiry.lines.length > 0;
+  /* The gift box (Session R, R1a) is drawn only when a PixAI account is linked: the same
+     /api/account read answered a balance. A contest row in it opens the Contests overlay. */
+  const linked = !!(account && !account.error && account.credits != null);
+  const openContests = useCallback(() => onOverlay && onOverlay("contests"), [onOverlay]);
 
   const claimCredits = account && Number(account.claim_credits) > 0 ? account.claim_credits : 0;
 
@@ -213,17 +227,38 @@ export default function SeparatorBar({
           </span>
         ) : null}
 
+        {/* THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1): the inbox's door, one
+            8 px gap before the credits chip. Shown only with a linked account. */}
+        {linked ? <GiftBox onOpenContests={openContests} /> : null}
+
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
-        <button type="button" className="mgx-cred"
+        <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
           onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
-          aria-label={"Credits " + credits + ", cards " + cards + ". Buy credits or cards on PixAI."}>
+          aria-label={"Credits " + credits + ", cards " + cards + "." +
+            (expiring ? " " + expiry.lines.map(expiryText).join(". ") + "." : "") +
+            " Buy credits or cards on PixAI."}>
           {warn ? <span className="mgx-warndot" aria-hidden="true">!</span> : null}
           <span className="mgx-credval">{credits}</span>
           <span className="mgx-credlab">CREDITS</span>
           <span className="mgx-creddiv" aria-hidden="true" />
-          <span className="mgx-credval cards">{cards}</span>
-          <span className="mgx-credlab cards">CARDS</span>
+          <span className="mgx-credcards">
+            <span className="mgx-credval cards">{cards}</span>
+            <span className="mgx-credlab cards">CARDS</span>
+          </span>
           <span className="mgx-credtip" role="tooltip">
+            {expiring ? (
+              <span className="mgx-tipexpiry">
+                <span className="mgx-tipexphead">{cards} cards</span>
+                {expiry.lines.map((l) => (
+                  <span className="mgx-tipexp" key={l.kind + l.at}>{expiryText(l)}</span>
+                ))}
+                {expiry.other ? (
+                  <span className="mgx-tipdim">
+                    {expiry.other.toLocaleString()} other card{expiry.other === 1 ? "" : "s"}, no expiry soon
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
             {warn ? <span className="mgx-tipwarn">{warn}</span> : null}
             <span className="mgx-tiprow">
               <span className="mgx-tipk">Credits</span><b className="mgx-tipv">{credits}</b>

@@ -14674,6 +14674,21 @@ def create_app(out_dir: Path):
     # Test seam (#60): the sweep adds a task here only after a collect that worked.
     app.extensions["mg_watch_backed"] = _watch_backed
 
+    def _watch_inbox(ev):
+        """Sessions R + Y (R4b): the socket's `newNotification` bumps the gift box's badge, and
+        a (re)subscribe is when the client re-reads the count. Counted in moonglade_inbox's
+        memory -- a push by its id only, never its title -- and carried to every open tab by
+        /api/jobs. No network here (this runs on the socket's event loop), and it can never
+        be the mirror's problem."""
+        try:
+            import moonglade_inbox
+            if ev.get("__meta__") == "subscribed":
+                moonglade_inbox.note_connected()
+            elif ev.get("newNotification"):
+                moonglade_inbox.note_push(ev.get("newNotification"))
+        except Exception:                                  # noqa: BLE001
+            pass
+
     def _watch_on_event(ev):
         """Everything the live mirror does with ONE frame off the socket.
 
@@ -14690,6 +14705,7 @@ def create_app(out_dir: Path):
         import time as _time
         import moonglade_backup as core
         _log = _logging.getLogger(__name__)
+        _watch_inbox(ev)
         if ev.get("__meta__") == "subscribed":
             with _watch_lock:
                 _watch_status["connected"] = True
@@ -19141,7 +19157,10 @@ def create_app(out_dir: Path):
                 # to "" (not None) so the JS `k.category ? ... : ""` check always compares a
                 # string. (Carried by hand from the card-coupon-ledger branch, 2026-08-07.)
                 cards_by.append({"name": k.get("name"), "count": n, "expires": exp,
-                                 "category": k.get("category") or ""})
+                                 "category": k.get("category") or "",
+                                 # Session Y (#69): each expiry date and its count, for the
+                                 # chip's peach underline and "N <kind> expire <date>" lines.
+                                 "expiry_counts": k.get("expiry_counts") or []})
                 if exp and n:
                     expiries.append(exp)
             card_expiry = min(expiries) if expiries else None
@@ -27428,7 +27447,20 @@ __DESIGN_TOKENS__
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
-        return jsonify({"jobs": jobs, "update": update_notice()})
+        # Sessions R + Y: the gift box's live count (R4b) rides this same poll, and a job this
+        # log holds as failed or stalled that PixAI's inbox says finished carries the note
+        # (R2c). Both read process memory only -- this poll never asks PixAI for them.
+        inbox_live = None
+        try:
+            import moonglade_inbox
+            inbox_live = moonglade_inbox.live_state()
+            for j in jobs:
+                says = moonglade_inbox.pixai_says(j.get("job_id"))
+                if says and j.get("status") in ("failed", "stale"):
+                    j["pixai_says"] = says
+        except Exception:                                  # noqa: BLE001
+            pass
+        return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)
@@ -27971,6 +28003,229 @@ __DESIGN_TOKENS__
             return jsonify({"set": made})
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e)
+
+    # --- The inbox, comments, gifts and the current event (Sessions R + Y, lane R) -------
+    # Over moonglade_inbox (its docstring has the contract and the four write rules). Reads
+    # are LOGIN, like every other read of PixAI here. A write is a deliberate press: LOGIN,
+    # explicit-token CSRF (_check_csrf), then moonglade_inbox's own function -- READ_ONLY
+    # first, one attempt, a read-back that decides the answer. Nothing here writes when the
+    # panel opens, a list scrolls or a push arrives. Strangers' words pass through to the
+    # browser and are never written to the catalog, a file or a log line.
+
+    def _inbox():
+        import moonglade_inbox
+        return moonglade_inbox
+
+    def _inbox_fail(e, **extra):
+        """A read that failed, as the house's {error} answer (HTTP 200: the body is the
+        answer, api.js's one rule). PixAI's own message only -- never the words of a comment."""
+        out = {"error": _redact_host_paths(str(e))[:240]}
+        out.update(extra)
+        return jsonify(out), 200
+
+    def _inbox_read_only():
+        import moonglade_backup as core
+        return bool(core.READ_ONLY or core._read_only_now())
+
+    def _inbox_local_media(items):
+        """Fill each work's local media id (Details opens on it), from the catalog."""
+        ids = [i["artwork"]["id"] for i in items if i.get("artwork")]
+        found = artwork_media_ids(db_path, ids) if ids else {}
+        for i in items:
+            if i.get("artwork"):
+                i["artwork"]["media_id"] = found.get(i["artwork"]["id"], "")
+        return items
+
+    def _inbox_tasks_to_activity(tasks):
+        """R2c: TASK is never an inbox row -- Activity tells a job. A recent finished generation
+        PixAI names that Activity never saw joins it as an ordinary done row, source "pixai"
+        (the website mark) and via "inbox"; a row Activity holds as failed or stalled that PixAI
+        says finished gets the "PixAI says: done" note through /api/jobs. A local log line only:
+        nothing is sent to PixAI. Fails soft -- the inbox read must never break over it."""
+        if not tasks:
+            return
+        try:
+            import moonglade_backup as core
+            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            for add in _inbox().task_activity(tasks, jobs_by_id):
+                _log_job(add["job_id"], status="done", type="generate", label=add["label"],
+                         source="pixai", via="inbox")
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    @app.route("/api/inbox/pushed")
+    @tier(LOGIN)
+    def api_inbox_pushed():
+        """What the socket pushed since ?after=<seq>, as full inbox rows (the comment toast
+        names who and which work). One read of the newest rows, none when nothing is new;
+        nothing is marked read."""
+        try:
+            ib = _inbox()
+            out = ib.pushed_since(ib.pixai_session(), request.args.get("after") or 0)
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[])
+        out["items"] = _inbox_local_media(out["items"])
+        return jsonify(out)
+
+    @app.route("/api/inbox")
+    @tier(LOGIN)
+    def api_inbox():
+        """One page of PixAI's inbox, newest first (?before=<cursor> pages older). Opening the
+        panel is this one read and nothing else: no mark-read, no count write. Also answers
+        read_only (the rows say why nothing gets marked) and the CSRF token its writes carry."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            page = ib.list_notifications(gsession, before=request.args.get("before") or None)
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[], csrf=session["csrf"],
+                               read_only=_inbox_read_only())
+        _inbox_tasks_to_activity(page["tasks"])
+        return jsonify({"items": _inbox_local_media(page["items"]), "cursor": page["cursor"],
+                        "has_more": page["has_more"], "csrf": session["csrf"],
+                        "read_only": _inbox_read_only()})
+
+    @app.route("/api/inbox/count")
+    @tier(LOGIN)
+    def api_inbox_count():
+        """The gift box's badge: PixAI's unread count (TASK excluded) plus pending gifts.
+        Read on app open, on focus (the client debounces 30 s) and on a socket reconnect.
+        Carries the CSRF token too, so a write that comes before the panel ever opened (a
+        comment toast's Open thread) never goes out with an empty one."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        try:
+            out = dict(_inbox().unread_total(_inbox().pixai_session()))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, total=None, csrf=session["csrf"])
+        out["csrf"] = session["csrf"]
+        return jsonify(out)
+
+    @app.route("/api/inbox/events")
+    @tier(LOGIN)
+    def api_inbox_events():
+        """ON PIXAI NOW: the banners PixAI runs whose link is under /event/. Public and sent
+        with no credential; cached an hour. The app never follows a link -- a press opens it."""
+        return jsonify({"events": _inbox().current_events()})
+
+    def _inbox_write_body():
+        """The JSON body of an inbox write, or a refusal: CSRF before anything else."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return body, (jsonify({"error": "Your session expired. Reload the page and try "
+                                            "again."}), 400)
+        return body, None
+
+    def _inbox_write(fn, *args):
+        """Run one of moonglade_inbox's writes and hand back its answer. A crash past its own
+        handling is an unclear answer, never a success."""
+        ib = _inbox()
+        try:
+            return jsonify(fn(ib.pixai_session(), *args))
+        except Exception as e:                                   # noqa: BLE001
+            return jsonify({"state": "unclear", "error": _redact_host_paths(str(e))[:200],
+                            "message": "No clear answer. Nothing was sent twice; check on "
+                                       "PixAI."})
+
+    @app.route("/api/inbox/read", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_read():
+        """Opening a row or a work card: {csrf, ids}. One mark-read write and its read-back."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        return _inbox_write(_inbox().mark_read, ids)
+
+    @app.route("/api/inbox/read-all", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_read_all():
+        """⋯ Mark all read: {csrf, tab}. One watermark write for the tab's unread types."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        return _inbox_write(_inbox().mark_all_read, str(body.get("tab") or ""))
+
+    def _own_work(artwork_id):
+        """True when `artwork_id` is one of the owner's own published works -- a row in this
+        library. Replies are for those alone (v1), and the thread is read only for them."""
+        aid = str(artwork_id or "").strip()
+        return bool(aid.isdigit() and artwork_media_ids(db_path, [aid]))
+
+    @app.route("/api/comments/<artwork_id>")
+    @tier(LOGIN)
+    def api_comments(artwork_id):
+        """A published work's comment thread (?page=N, 50 a page, newest first): read live when
+        Details' comments section scrolls into view, kept five minutes in memory, never
+        archived. Also: who "you" are (the account's id and display name, for the reply's
+        question), read_only (the reply box shows disabled with the reason) and the CSRF token."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        extra = {"csrf": session["csrf"], "read_only": _inbox_read_only()}
+        if not _own_work(artwork_id):
+            return _inbox_fail("Comments show for your own published works only.",
+                               items=[], **extra)
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            out = dict(ib.read_thread(gsession, artwork_id, request.args.get("page") or 1))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[], **extra)
+        out.update(extra, my_name=ib.display_name(gsession))
+        return jsonify(out)
+
+    @app.route("/api/comments/<artwork_id>/reply", methods=["POST"])
+    @tier(LOGIN)
+    def api_comments_reply(artwork_id):
+        """[Post publicly] in the reply's question: {csrf, reply_to, content}. One POST and its
+        read-back (moonglade_inbox.post_reply). Your own works only."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        if not _own_work(artwork_id):
+            return jsonify({"state": "refused", "message": "Replies are for your own published "
+                                                           "works only. Nothing was posted."})
+        return _inbox_write(_inbox().post_reply, artwork_id, body.get("reply_to"),
+                            body.get("content"))
+
+    @app.route("/api/comments/<artwork_id>/delete", methods=["POST"])
+    @tier(LOGIN)
+    def api_comments_delete(artwork_id):
+        """[Delete] in "Delete my reply"'s question: {csrf, message_id}. One DELETE and its
+        read-back (moonglade_inbox.delete_reply). Your own reply on your own work only."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        if not _own_work(artwork_id):
+            return jsonify({"state": "refused", "message": "Only your own replies on your own "
+                                                           "works. Nothing was deleted."})
+        return _inbox_write(_inbox().delete_reply, artwork_id, body.get("message_id"))
+
+    @app.route("/api/inbox/gifts")
+    @tier(LOGIN)
+    def api_inbox_gifts():
+        """The Gifts tab and the phone's Gift box: PixAI's REWARD messages (the side-effect-free
+        thread read -- never the DM mark-read) and the credit-pack bonuses on hand, which open
+        PixAI. No thread at all is the real empty state."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        extra = {"csrf": session["csrf"], "read_only": _inbox_read_only()}
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            out = dict(ib.list_gifts(gsession))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, gifts=[], bonuses=[], **extra)
+        out.update(extra, bonuses=ib.credit_bonuses(gsession),
+                   my_name=ib.display_name(gsession))      # the claim preview names the account
+        return jsonify(out)
+
+    @app.route("/api/inbox/gifts/claim", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_gifts_claim():
+        """[Claim] in a gift's preview: {csrf, id}. One claim write and its status read-back."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        return _inbox_write(_inbox().claim_gift, body.get("id"))
 
     @app.after_request
     def _gzip_html(resp):

@@ -1,0 +1,266 @@
+import React, { useEffect, useRef, useState } from "react";
+import {
+  TABS, GLYPH, groupInbox, workDelta, timeAgo, giftMeta, giftPreview, bonusText,
+} from "./inboxCore.js";
+import { openItem, loadMore, claimGift, clearClaim, markAllRead } from "./inboxStore.js";
+
+/* The inbox's body, shared by the desktop gift box's panel and the phone's Inbox and Gift box
+   sheets (Inbox and Event Handoff §1-3, §7, §9, §10). The doors differ; the rows do not.
+
+   From the top (R1a): the kind tabs, ON PIXAI NOW (only when an event is live), the work cards,
+   then EVERYTHING ELSE. Opening a row or a card navigates and marks what it gathers read on
+   PixAI (one write -- inboxStore.openItem); nothing here writes on open, scroll or tab. */
+
+const TIP_DELAY_MS = 600;
+
+/* A thumb, an avatar, a banner: a computed background, never an <img> hole. */
+function bg(url) {
+  return url ? { backgroundImage: "url('" + String(url).replace(/'/g, "%27") + "')" } : undefined;
+}
+
+function thumbOf(art) {
+  if (!art) return "";
+  if (art.media_id) return "/thumbs/" + encodeURIComponent(art.media_id) + ".jpg";
+  return art.thumb || "";
+}
+
+/* ⋯ in the title row: "Mark all read" (R3b) -- one watermark write for the tab's unread kinds,
+   then a read-back of the count. */
+export function MarkAllMenu({ tab }) {
+  const [menu, setMenu] = useState(false);
+  if (tab === "gifts") return null;      // gifts clear on claim, never by a watermark
+  return (
+    <span className="ib-menuwrap">
+      <button type="button" className="ib-more" aria-label="More" aria-expanded={menu}
+        onClick={() => setMenu((v) => !v)}>⋯</button>
+      {menu ? (
+        <span className="ib-menu" role="menu">
+          <button type="button" role="menuitem" className="ib-menuitem"
+            onClick={() => { setMenu(false); markAllRead(tab); }}>
+            Mark all read
+          </button>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+export function KindTabs({ tab, onTab, phone }) {
+  return (
+    <div className={"ib-tabs" + (phone ? " phone" : "")} role="tablist" aria-label="Kinds">
+      {TABS.map(([k, label]) => (
+        <button key={k} type="button" role="tab" aria-selected={tab === k}
+          className={"ib-chip" + (tab === k ? " on" : "")} onClick={() => onTab(k)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+/* ON PIXAI NOW (Y3a): up to two banner cards across, a third and more scroll sideways; the
+   phone stacks them full width. A press opens PixAI's own page in a new tab -- the app never
+   requests the link itself. An image that fails falls back to the label on a surface tint. */
+export function EventCards({ events, phone }) {
+  const [failed, setFailed] = useState({});
+  useEffect(() => {
+    (events || []).forEach((e) => {
+      if (!e.image || failed[e.link]) return;
+      const probe = new Image();
+      probe.onerror = () => setFailed((f) => ({ ...f, [e.link]: true }));
+      probe.src = e.image;
+    });
+  }, [events]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!events || !events.length) return null;
+  return (
+    <>
+      <div className="ib-lab">ON PIXAI NOW</div>
+      <div className={"ib-events" + (phone ? " phone" : "") + (events.length > 2 ? " many" : "")}>
+        {events.map((e) => (
+          <button key={e.link} type="button" className={"ib-event" + (failed[e.link] || !e.image ? " noimg" : "")}
+            style={failed[e.link] ? undefined : bg(e.image)} title={e.title + " on PixAI"}
+            onClick={() => window.open(e.link, "_blank", "noopener")}>
+            <span className="ib-event-t">{e.title}<br />event ↗</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function Tip({ readOnly }) {
+  return (
+    <span className="ib-tip" role="tooltip">
+      {readOnly ? "Read-only mode is on, so this stays unread on PixAI." : "Opening this marks it read on PixAI."}
+    </span>
+  );
+}
+
+/* The 600 ms hover tip on an unread row (R3b), popping toward open space. */
+function useTip() {
+  const [tip, setTip] = useState(null);
+  const timer = useRef(0);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const on = (key, el) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      let above = false;
+      try {
+        const r = el.getBoundingClientRect();
+        const box = el.closest(".ib-scroll");
+        const b = box ? box.getBoundingClientRect() : { bottom: window.innerHeight };
+        above = r.bottom + 44 > b.bottom;
+      } catch { /* geometry is best-effort */ }
+      setTip({ key, above });
+    }, TIP_DELAY_MS);
+  };
+  const off = () => { clearTimeout(timer.current); setTip(null); };
+  return { tip, on, off };
+}
+
+function Row({ row, now, tip, readOnly, notice, children, onOpen }) {
+  const hover = row.unread ? {
+    onMouseEnter: (e) => tip.on(row.key, e.currentTarget),
+    onMouseLeave: tip.off,
+  } : {};
+  return (
+    <>
+      <button type="button" className={"ib-row" + (row.unread ? " unread" : "")} {...hover}
+        onClick={() => { tip.off(); onOpen(row); }}>
+        <span className="ib-dot" aria-hidden="true" />
+        {children}
+        <span className="ib-meta">{timeAgo(row.at, now)}</span>
+        {tip.tip && tip.tip.key === row.key ? (
+          <span className={"ib-tipwrap" + (tip.tip.above ? " above" : "")}><Tip readOnly={readOnly} /></span>
+        ) : null}
+      </button>
+      {notice && notice.key === row.key ? <div className="ib-warn">{notice.text}</div> : null}
+    </>
+  );
+}
+
+function GiftIcon({ small }) {
+  return <span className={"ib-giftic" + (small ? " small" : "")} aria-hidden="true" />;
+}
+
+/* Gifts (R9c): a PENDING REWARD message gets Claim ▸, which swaps the row's detail for a
+   preview (what, which account, expiry, "One attempt.") with [Back] [Claim]: one write and a
+   status read-back. 409 / 410 come back as peach words. A done gift dims with "claimed" /
+   "expired". Credit-pack bonuses open PixAI and send nothing. Gifts are not billing: no gold. */
+export function GiftRows({ data, error, claim, claimLocked, readOnly, pendingOnly }) {
+  const [preview, setPreview] = useState("");
+  if (error) return <div className="ib-warn">{"Couldn't read your gifts from PixAI: " + error}</div>;
+  if (!data) return <div className="ib-dim">Reading your gifts…</div>;
+  const gifts = (data.gifts || []).filter((g) => !pendingOnly || g.status === "PENDING");
+  const bonuses = pendingOnly ? [] : (data.bonuses || []);
+  if (!gifts.length && !bonuses.length) {
+    return pendingOnly ? null : <div className="ib-dim">No gifts from PixAI right now.</div>;
+  }
+  return (
+    <>
+      {gifts.map((g) => {
+        const pending = g.status === "PENDING";
+        const mine = claim && claim.id === g.id ? claim : null;
+        const locked = !!(claimLocked && claimLocked[g.id]);
+        return (
+          <React.Fragment key={g.id}>
+            <div className={"ib-gift" + (pending ? "" : " done")}>
+              <GiftIcon />
+              <span className="ib-gift-t">Gift from PixAI · {g.what}</span>
+              {pending ? (
+                <>
+                  <span className="ib-meta">{giftMeta(g)}</span>
+                  {preview !== g.id ? (
+                    <button type="button" className="ib-btn" disabled={readOnly || locked}
+                      title={readOnly ? "Read-only mode is on, so nothing can be claimed."
+                        : locked ? "The last claim had no clear answer. Check on PixAI; this unlocks when the gifts are read again."
+                          : "Claim this gift"}
+                      onClick={() => { clearClaim(); setPreview(g.id); }}>Claim ▸</button>
+                  ) : null}
+                </>
+              ) : (
+                <span className="ib-meta">{giftMeta(g)}</span>
+              )}
+            </div>
+            {preview === g.id && pending ? (
+              <>
+                <div className="ib-quote">{giftPreview(g, data.my_name)}</div>
+                <div className="ib-acts">
+                  <button type="button" className="ib-ghost" onClick={() => setPreview("")}>Back</button>
+                  <button type="button" className="ib-btn"
+                    disabled={!!(mine && mine.state === "sending") || readOnly || locked}
+                    onClick={() => claimGift(g.id).then((d) => { if (d && d.state === "done") setPreview(""); })}>
+                    {mine && mine.state === "sending" ? "Claiming…" : "Claim"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {mine && mine.state === "done" ? <div className="ib-ok">{mine.message}</div> : null}
+            {mine && mine.state !== "done" && mine.state !== "sending" ? (
+              <div className="ib-peachbox">{mine.message}</div>
+            ) : null}
+          </React.Fragment>
+        );
+      })}
+      {bonuses.map((b) => (
+        <div className="ib-gift" key={"b" + b.code}>
+          <GiftIcon />
+          <span className="ib-gift-t">{bonusText(b)}</span>
+          <a className="ib-link" href="https://pixai.art/en/membership/credit-packs" target="_blank"
+            rel="noopener noreferrer">Open on PixAI ↗</a>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/* The list: work cards, then everything else (and, in All, the pending gifts). */
+export function InboxBody({ st, tab, phone, now }) {
+  const tip = useTip();
+  const scrollRef = useRef(null);
+  const g = groupInbox(st.items, tab);
+  const onScroll = (e) => {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
+  };
+  const pendingGifts = st.giftData && (st.giftData.gifts || []).some((x) => x.status === "PENDING");
+  if (tab === "gifts") {
+    return (
+      <div className="ib-scroll" ref={scrollRef}>
+        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} />
+      </div>
+    );
+  }
+  const empty = st.loaded && !g.works.length && !g.rest.length && !(tab === "all" && pendingGifts);
+  return (
+    <div className="ib-scroll" ref={scrollRef} onScroll={onScroll}>
+      {tab === "all" && !phone ? <EventCards events={st.events} /> : null}
+      {st.error ? <div className="ib-warn">{"Couldn't read your PixAI inbox: " + st.error}</div> : null}
+      {!st.loaded && !st.error ? <div className="ib-dim">Reading your PixAI inbox…</div> : null}
+      {g.works.map((w) => (
+        <React.Fragment key={w.key}>
+          <Row row={w} now={now} tip={tip} readOnly={st.readOnly} notice={st.notice} onOpen={openItem}>
+            <span className="ib-thumb" style={bg(thumbOf(w.artwork))} aria-hidden="true" />
+            <span className="ib-text">{w.artwork.title || "Untitled"}<br />{workDelta(w)}</span>
+          </Row>
+          {w.quote ? (
+            <button type="button" className="ib-quote ib-quotebtn"
+              onClick={() => openItem({ ...w, focusId: w.quote.id })}>
+              {w.quote.name}: {"“"}{w.quote.text}{"”"}
+            </button>
+          ) : null}
+        </React.Fragment>
+      ))}
+      {g.rest.length || (tab === "all" && pendingGifts) ? <div className="ib-lab">EVERYTHING ELSE</div> : null}
+      {g.rest.map((r) => (
+        <Row key={r.key} row={r} now={now} tip={tip} readOnly={st.readOnly} notice={st.notice} onOpen={openItem}>
+          <span className="ib-glyph" aria-hidden="true">{GLYPH[r.kind] || GLYPH.news}</span>
+          <span className="ib-text">{r.text}</span>
+        </Row>
+      ))}
+      {tab === "all" ? (
+        <GiftRows data={st.giftData} error="" claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} pendingOnly />
+      ) : null}
+      {empty ? <div className="ib-dim">Nothing here from PixAI yet.</div> : null}
+      {st.loading && st.loaded ? <div className="ib-dim">Reading older notifications…</div> : null}
+    </div>
+  );
+}

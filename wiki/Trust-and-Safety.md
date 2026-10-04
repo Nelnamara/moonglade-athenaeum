@@ -39,12 +39,28 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   PixAI: its own description of that delete says the published artwork goes with it.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
   that costs you anything, but it's still a real account change, so it's covered by the same
-  guarantees below.
+  guarantees below. The same goes for a **gift** PixAI sends you in a message, claimed from the
+  gift box: it shows what it holds, the account and its expiry first, and **Claim** is one
+  attempt that the app then reads back.
+- **Reply to a comment on your own published work, and delete your own reply.** These are your
+  words, in public, under your PixAI name — so the app never writes one for you. You type it;
+  **Send** asks once, quoting the full text and naming the account, the person and the work;
+  only **Post publicly** sends it, once, never re-sent; and the app reads the thread back before
+  it says *Posted*. If PixAI's answer is unclear and the reply isn't found, you are told to check
+  on PixAI, and Send stays off until you change the text. PixAI has no edit, so **Delete my
+  reply** is offered under a reply you just posted, behind the same kind of question. Other
+  people's comments are read live and kept in memory for five minutes — never saved to your
+  library, a file or a log.
+- **Mark your PixAI notifications read** when you open one in the gift box (one write for what
+  that row gathers) or press **Mark all read**. Opening the inbox, scrolling it and new arrivals
+  never mark anything.
 - **Read** your generation history, account/credit balance, and free-card status (including
   how many video tickets each card holds — `--cards`).
 
 ## What it will never do
 
+- **Like, bookmark, follow, react or report** on anyone's behalf, and never **check in to,
+  claim from or play** one of PixAI's events: the gift box only shows them and opens PixAI.
 - **Move money.** There is no payment or subscription code path in this tool at all — not
   behind a flag, not commented out, not planned. `--account` only ever *reads* your
   credits/membership status.
@@ -168,7 +184,8 @@ With it set, every path that can actually mutate your account — submitting a g
 and each Loom render), submitting a hand/face fix, starting, describing, publishing or retrying
 a LoRA training run, deleting a task, claiming a reward, publishing an artwork, publishing or
 changing a recipe or a recipe set, saving a model or LoRA to PixAI or changing its sets (the
-pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor), or
+pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor),
+posting or deleting a reply to a comment, claiming a gift, marking a PixAI notification read, or
 **entering a contest** — refuses itself with a clear error, **regardless of `--confirm`,
 `--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
