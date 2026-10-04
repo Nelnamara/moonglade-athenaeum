@@ -12,7 +12,8 @@ import { SHEEN_STOP_MS, goalArtName, resolveGoalArt } from "../../lib/goalTileCo
    loads the square stays a flat tint: no glyph, no error text. Reduced motion: no sheen, no fade
    (train.css). Which picture wins (pack, then the app's own module, then the tint) is
    lib/goalTileCore.js's. Desktop (TrainBasic.jsx) and phone (TrainMobile.jsx) draw the same piece;
-   the CSS sets the size (34 px on the desktop, 44 px on the phone). */
+   the CSS sets the size: the picture area of the desktop's square tile (frame 01 of the handoff, the
+   top 78 % of the tile) and 44 px on the phone row. The tint is one flat colour per goal. */
 
 // Resolved once per name per page: the second goal tile of a name (a trip back to step 1, or the
 // other screen) paints its picture on the first frame instead of probing and fading again.
@@ -27,7 +28,7 @@ function loadImage(src) {
   });
 }
 
-export default function GoalTile({ goal, tint }) {
+export default function GoalTile({ goal }) {
   const name = goalArtName(goal.value);
   // Decided once, at mount: a tile that finds its picture already settled paints it at once and
   // never fades; a tile that has to ask fades the picture in when it lands.
@@ -49,7 +50,7 @@ export default function GoalTile({ goal, tint }) {
   }, [name]);
 
   return (
-    <span className={"mgtr-goal-tint " + tint + (sheen && art === undefined ? " sheen" : "")}
+    <span className={"mgtr-goal-tint g-" + goal.value + (sheen && art === undefined ? " sheen" : "")}
       aria-hidden="true">
       {art ? (
         <span className={"mgtr-goal-pic" + (fresh ? "" : " still")}

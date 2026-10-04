@@ -112,12 +112,77 @@ describe("the tile draws the picture and no glyph (T1a, T2b)", () => {
     for (const file of ["components/train/TrainBasic.jsx", "components/TrainMobile.jsx"]) {
       const s = src(file);
       assert.doesNotMatch(s, /g\.mark/, file + " must not draw the glyph");
-      assert.match(s, /<GoalTile\s+goal=\{g\}\s+tint=\{GOAL_TINT\[i\]\}\s*\/>/, file);
+      assert.match(s, /<GoalTile\s+goal=\{g\}\s*\/>/, file);
     }
   });
-  test("the phone row's picture is 44 px; the desktop tile keeps the 34 px it shipped with", () => {
-    assert.match(block(".mgtr-goal-tint"), /width:\s*34px;\s*height:\s*34px/);
+  test("the fallback tint is frame 02's: one colour per goal, flat", () => {
+    const want = { character: "#3a2e5a", style: "#2e4a5a", clothing: "#5a3a4a", other: "#2e5a46" };
+    for (const [goal, hex] of Object.entries(want)) {
+      assert.match(block(".mgtr-goal-tint.g-" + goal), new RegExp("background:\\s*" + hex + ";"), goal);
+    }
+    assert.match(src("components/train/GoalTile.jsx"), /"mgtr-goal-tint g-" \+ goal\.value/);
+  });
+  test("the phone row's picture is 44 px, beside its name and description", () => {
     const phone = readFileSync(path.join(SRC, "styles", "train-mobile.css"), "utf8");
     assert.match(phone, /\.trm-row\.goal \.mgtr-goal-tint\s*\{[^}]*width:\s*44px;\s*height:\s*44px/);
+    const m = src("components/TrainMobile.jsx");
+    assert.match(m, /<span className="trm-row-sub">\{g\.desc\}<\/span>/, "the phone row keeps the description");
+  });
+});
+
+/* Frame 01 of the Goal Tile Art Handoff, as DRAWN (the owner picked T1a from the options page, which
+   draws the same big squares): step 1's desktop goals are four square picture tiles in one row, the
+   picture edge to edge under the slot radius, the label in a strip beneath it, and only the label.
+   Every number below is the frame's own (tiles() in Goal Tile Art Handoff.dc.html). */
+describe("the desktop goal tile, as frame 01 draws it", () => {
+  const css = src("styles/train.css");
+  const block = (sel) => {
+    const at = css.indexOf("\n" + sel + " {");
+    assert.ok(at >= 0, "no rule for " + sel);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  test("four tiles in one row, 8 px apart", () => {
+    const row = block(".mgtr-goals");
+    assert.match(row, /display:\s*grid/);
+    assert.match(row, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(row, /gap:\s*8px/);
+  });
+  test("the tile: .82 tall-to-wide, 6 px inside a 1 px border, radius 12, the label at the foot", () => {
+    const t = block(".mgtr-goal");
+    assert.match(t, /aspect-ratio:\s*\.82/);
+    assert.match(t, /padding:\s*6px/);
+    assert.match(t, /border-radius:\s*12px/);
+    assert.match(t, /border:\s*1px solid var\(--surface1\)/);
+    assert.match(t, /flex-direction:\s*column/);
+    assert.match(t, /justify-content:\s*flex-end/);
+    assert.match(t, /font-size:\s*10px/);
+    assert.match(t, /font-weight:\s*700/);
+    assert.match(t, /background:\s*rgba\(33,\s*31,\s*58,\s*\.45\)/);
+  });
+  test("the picture fills the top 78 % edge to edge, cover; the rest is the label's strip", () => {
+    const pic = block(".mgtr-goal .mgtr-goal-tint");
+    assert.match(pic, /position:\s*absolute/);
+    assert.match(pic, /top:\s*0/);
+    assert.match(pic, /left:\s*0/);
+    assert.match(pic, /width:\s*100%/);
+    assert.match(pic, /height:\s*78%/);
+    assert.match(pic, /border-radius:\s*0/);
+  });
+  test("selected keeps the lavender border and nothing else; the picture is never tinted by selection", () => {
+    const on = block(".mgtr-goal.on");
+    assert.match(on, /border-color:\s*var\(--lavender\)/);
+    assert.doesNotMatch(on, /background/);
+  });
+  test("the tile shows only the label; the description is the tooltip and the accessible description", () => {
+    const s = src("components/train/TrainBasic.jsx");
+    const goals = s.slice(s.indexOf('<div className="mgtr-goals">'), s.indexOf("Need to edit descriptions"));
+    assert.match(goals, /title=\{g\.desc\}/);
+    assert.match(goals, /<span className="n">\{g\.label\}<\/span>/);
+    assert.doesNotMatch(goals, /className="d"/, "no description text drawn in the tile");
+    assert.doesNotMatch(css, /\.mgtr-goal \.d\b/);
+  });
+  test("the module's pictures are big enough for a 2x screen at that tile", async () => {
+    const mod = await import("../../gallery/src/art/goalTiles.js");
+    assert.ok(mod.GOAL_TILE_PX >= 264, "a ~132 px tile on a 2x screen needs 264 px or more: " + mod.GOAL_TILE_PX);
   });
 });

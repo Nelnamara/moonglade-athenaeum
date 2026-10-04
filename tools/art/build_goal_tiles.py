@@ -17,9 +17,10 @@ The names are gen/trainCore.js's GOALS values behind a goal_ prefix, in GOALS' o
 goal_character, goal_style, goal_clothing, goal_other.
 
 SIZE
-The tile is drawn 34 px on the desktop and 44 px on the phone. TILE_PX = 160 is 3.6x the phone
-slot and 4.7x the desktop one: sharp on a 2x phone and a 3x phone alike, and one file serves
-both. Quality 86 at method 6 keeps each picture near 10 KB.
+The desktop tile's picture is about 130 css px across at a 1400 px window (four tiles in a row
+inside the Train card) and the phone row's is 44. TILE_PX = 288 is 2.2x the desktop picture, so it
+stays sharp on a 2x screen, and 6.5x the phone row's (3x phones included): one file serves both.
+Quality 86 at method 6 keeps each picture to a few tens of KB.
 
 A source that is not square is cropped to cover (centred), never stretched. A missing or
 unreadable picture stops the build with a message naming it and writes nothing: a module with
@@ -39,7 +40,7 @@ from PIL import Image, ImageOps
 # and fails if these ever drift from it).
 GOAL_VALUES = ("character", "style", "clothing", "other")
 NAMES = tuple("goal_" + v for v in GOAL_VALUES)
-TILE_PX = 160
+TILE_PX = 288
 QUALITY = 86
 
 HEADER = (

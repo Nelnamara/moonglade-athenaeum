@@ -5266,9 +5266,31 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
         for t in tiles:
             assert t["text"] == "", "a goal tile draws no glyph (Session T): %r" % t
             assert t["picture"].startswith("url("), "each goal tile paints its picture: %r" % t
-            assert (t["w"], t["h"]) == (34, 34), "the desktop tile keeps its 34 px square: %r" % t
             assert t["imgs"] == 0, "the picture is a computed background, never an <img>: %r" % t
         assert len({t["picture"] for t in tiles}) == 4, "four goals, four different pictures"
+        # Frame 01 of the Goal Tile Art Handoff, as drawn: four square picture tiles in ONE row,
+        # the picture edge to edge over the top 78 %, only the label in the strip beneath it.
+        geo = page.evaluate("""() => [...document.querySelectorAll('.mgtr-goal')].map(b => {
+            const r = b.getBoundingClientRect(), p = b.querySelector('.mgtr-goal-tint').getBoundingClientRect(),
+                  n = b.querySelector('.n').getBoundingClientRect(), cs = getComputedStyle(b);
+            return {x: r.x, y: r.y, w: r.width, h: r.height, px: p.x, py: p.y, pw: p.width, ph: p.height,
+                    ny: n.y, text: b.innerText.trim(), title: b.title, desc: !!b.querySelector('.d'),
+                    radius: cs.borderTopLeftRadius, pad: cs.paddingLeft, font: cs.fontSize + '/' + cs.fontWeight};
+        })""")
+        assert [g["text"] for g in geo] == ["Character", "Art style", "Outfit", "Something else"], geo
+        assert len({round(g["y"]) for g in geo}) == 1, "the four tiles share one row: %r" % geo
+        assert [round(b["x"] - a["x"] - a["w"]) for a, b in zip(geo, geo[1:])] == [8, 8, 8], "8 px apart"
+        for g in geo:
+            assert abs(g["w"] / g["h"] - .82) < .01, "the tile is .82 wide-to-tall: %r" % g
+            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/700"), g
+            assert abs(g["pw"] - (g["w"] - 2)) < 1 and abs(g["px"] - (g["x"] + 1)) < 1, "edge to edge: %r" % g
+            assert abs(g["ph"] - .78 * (g["h"] - 2)) < 1.5, "the picture is the top 78 %%: %r" % g
+            assert 0.95 < g["pw"] / g["ph"] < 1.15, "a square-ish picture: %r" % g
+            assert g["ny"] >= g["py"] + g["ph"] - 1, "the label sits in the strip under the picture: %r" % g
+            assert not g["desc"], "no description text in the tile (it is the tooltip): %r" % g
+        assert [g["title"] for g in geo] == [
+            "One specific person or character", "One set of linework and colours",
+            "One outfit, on any character", "Animals, poses, backgrounds and more"]
         page.click(".mgtr-goal:has-text('Character')")
         page.click(".mgtr-src:has-text('From history')")
         # Grouped pages 18 tasks at a time and its sentinel keeps asking while it is within
