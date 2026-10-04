@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### The pickers' Saved tab
+- **Recipe sets can be opened and ticked.** Since recipe Sets shipped, opening a set, or ticking one under Save to a recipe set, stopped at "That isn't a valid id" before anything reached PixAI: PixAI's set ids are a different shape from recipe ids, and the app checked them with the recipe rule. They are accepted now. (#78) (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

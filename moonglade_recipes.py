@@ -57,6 +57,10 @@ USER_SORTS = ("latest", "oldest", "most-liked", "most-used", "liked")
 # ---------------------------------------------------------------------------------------
 
 _ID_RE = re.compile(r"^[1-9][0-9]{0,19}$")
+# PixAI's collection ids and collection-item ids are UUID strings (probe 2026-10-03), not the
+# numeric ids recipes, users and models carry -- strictly the 8-4-4-4-12 hex shape (#78).
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{12}$")
 HELD_WITH_CONTEXT = ("Recipes are held while context images are on — switch back to "
                      "LoRAs to send them")
 NOT_WITH_UPSCALE = "Recipes don't apply to an upscale"
@@ -731,6 +735,15 @@ def _checked_id(v):
     return s
 
 
+def _checked_uuid(v):
+    """A collection (set) id or a collection-item id: PixAI sends both as UUID strings. Until
+    #78 they went through `_checked_id`'s numeric rule, which refused every real one."""
+    s = str(v or "").strip()
+    if not _UUID_RE.match(s):
+        raise core.PixAIError("That isn't a valid id")
+    return s
+
+
 # ---------------------------------------------------------------------------------------
 # Sets (PixAI's collections, contentType "recipe") -- reads
 # ---------------------------------------------------------------------------------------
@@ -759,7 +772,7 @@ def sets_for(session, recipe_id):
 
 
 def set_items(session, set_id, cursor=""):
-    sid = _checked_id(set_id)
+    sid = _checked_uuid(set_id)
     q = {"limit": 24}
     if cursor:
         q["cursor"] = str(cursor)
@@ -1018,7 +1031,7 @@ def set_create(session, title):
 
 def set_toggle(session, set_id, recipe_id, on, item_id=""):
     """Put a recipe in a set or take it out. Returns {contains, item_id}."""
-    sid = _checked_id(set_id)
+    sid = _checked_uuid(set_id)
     rid = _checked_id(recipe_id)
     core._check_read_only("change a recipe set on PixAI")
     try:
@@ -1026,7 +1039,7 @@ def set_toggle(session, set_id, recipe_id, on, item_id=""):
             d = core._rest_post(session, "/collection/{}/items".format(sid),
                                 {"refType": "recipe", "refId": rid}) or {}
             return {"contains": bool(d.get("saved", True)), "item_id": str(d.get("itemId") or "")}
-        iid = _checked_id(item_id)
+        iid = _checked_uuid(item_id)
         d = _rest_delete(session, "/collection/{}/items/{}".format(sid, iid)) or {}
         return {"contains": bool(d.get("saved", False)), "item_id": ""}
     except core.PixAIError as e:

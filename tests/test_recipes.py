@@ -20,6 +20,10 @@ from tests.fake_pixai import FakePixAI
 
 RID = "2046394714775712134"
 RID2 = "2046394714775712135"
+# PixAI's collection ids and collection-item ids are UUID strings (probe 2026-10-03, #78), not
+# the numeric ids every other recipe route takes. Made-up values in the live shape.
+SET_ID = "01a0c2f4-6e88-7b10-9c3d-5e7f8a9b0c1d"
+ITEM_ID = "01a0c2f4-7a21-7c44-8d55-6e7f8091a2b3"
 
 
 def _refused(code, reason, ids):
@@ -512,8 +516,8 @@ def test_every_write_refuses_under_read_only_before_any_call(monkeypatch):
                  lambda: rec.update(object(), RID, DRAFT, version=3),
                  lambda: rec.transition(object(), RID, "archived"),
                  lambda: rec.set_create(object(), "Portrait looks"),
-                 lambda: rec.set_toggle(object(), "31", RID, True),
-                 lambda: rec.set_toggle(object(), "31", RID, False, "41")):
+                 lambda: rec.set_toggle(object(), SET_ID, RID, True),
+                 lambda: rec.set_toggle(object(), SET_ID, RID, False, ITEM_ID)):
         with pytest.raises(core.PixAIError, match="READ_ONLY"):
             call()
 
@@ -538,19 +542,53 @@ def test_sets_add_and_remove_ride_the_collections_contract(monkeypatch):
     posts, deletes = [], []
     monkeypatch.setattr(core, "_rest_post",
                         lambda s, path, body, **k: posts.append((path, body)) or
-                        {"collectionId": "31", "itemId": "41", "saved": True})
+                        {"collectionId": SET_ID, "itemId": ITEM_ID, "saved": True})
     monkeypatch.setattr(rec, "_rest_delete",
                         lambda s, path, **k: deletes.append(path) or
-                        {"collectionId": "31", "itemId": None, "saved": False})
-    assert rec.set_toggle(object(), "31", RID, True) == {"contains": True, "item_id": "41"}
-    assert posts == [("/collection/31/items", {"refType": "recipe", "refId": RID})]
-    assert rec.set_toggle(object(), "31", RID, False, "41") == {"contains": False,
-                                                                 "item_id": ""}
-    assert deletes == ["/collection/31/items/41"]
+                        {"collectionId": SET_ID, "itemId": None, "saved": False})
+    assert rec.set_toggle(object(), SET_ID, RID, True) == {"contains": True, "item_id": ITEM_ID}
+    assert posts == [("/collection/%s/items" % SET_ID, {"refType": "recipe", "refId": RID})]
+    assert rec.set_toggle(object(), SET_ID, RID, False, ITEM_ID) == {"contains": False,
+                                                                     "item_id": ""}
+    assert deletes == ["/collection/%s/items/%s" % (SET_ID, ITEM_ID)]
     rec.set_create(object(), "Portrait looks")
     assert posts[-1] == ("/collection/", {"title": "Portrait looks", "description": "",
                                           "contentType": "recipe", "visibility": "private",
                                           "coverMode": "single"})
+
+
+def test_a_real_set_opens_with_pixais_uuid_ids(monkeypatch):
+    """#78: every live collection id and item id is a UUID string, and the Sets code checked
+    them with the numeric recipe-id rule, so opening a set or ticking one refused with "That
+    isn't a valid id" before anything was sent."""
+    gets = []
+
+    def fake_get(s, path, params=None, **k):
+        gets.append(path)
+        return {"data": [{"id": ITEM_ID, "refId": RID, "refType": "recipe",
+                          "recipe": dict(MARKET_CARD, id=RID)}], "nextCursor": None}
+    monkeypatch.setattr(core, "_rest_get", fake_get)
+    out = rec.set_items(object(), SET_ID)
+    assert gets == ["/collection/%s/items" % SET_ID]
+    assert [(c["id"], c["item_id"]) for c in out["items"]] == [(RID, ITEM_ID)]
+
+
+@pytest.mark.parametrize("bad", ["31", "", "../31", SET_ID + "/x", SET_ID.replace("-", ""),
+                                 "zzzzzzzz-e558-73a8-94a5-a66e390f8443"])
+def test_set_and_item_ids_must_be_uuid_shaped(monkeypatch, bad):
+    def boom(*a, **k):
+        raise AssertionError("a refused id must reach nothing")
+    monkeypatch.setattr(core, "_rest_get", boom)
+    monkeypatch.setattr(core, "_rest_post", boom)
+    monkeypatch.setattr(rec, "_rest_delete", boom)
+    for call in (lambda: rec.set_items(object(), bad),
+                 lambda: rec.set_toggle(object(), bad, RID, True),
+                 lambda: rec.set_toggle(object(), SET_ID, RID, False, bad)):
+        with pytest.raises(core.PixAIError, match="valid id"):
+            call()
+    # the recipe id keeps its numeric rule: a UUID is not a recipe id
+    with pytest.raises(core.PixAIError, match="valid id"):
+        rec.set_toggle(object(), SET_ID, ITEM_ID, True)
 
 
 # ---------------------------------------------------------------------------
