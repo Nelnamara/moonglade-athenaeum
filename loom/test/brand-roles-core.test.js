@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 /* The Branding tab's named roles (Session X, Branding Roles Handoff), client side: the rules the
    editor ticks live before anything is uploaded. The server decides (tests/test_branding_roles.py
@@ -111,6 +112,24 @@ describe("measuring on the device", () => {
     assert.equal(seeThroughFraction(data), 0.5);
     assert.equal(seeThroughFraction(new Uint8ClampedArray(0)), 0);
     assert.equal(seeThroughFraction(Uint8ClampedArray.from([...px(255), ...px(255)])), 0);
+  });
+});
+
+describe("the phone's role screen has exactly two buttons, and a passing pick uploads at once", () => {
+  // code only: the header comment says why there is no Use this, and names it
+  const phone = readFileSync(new URL("../../gallery/src/components/BrandRolesPhone.jsx", import.meta.url), "utf8")
+    .split("\r\n").join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  const hook = readFileSync(new URL("../../gallery/src/components/brandroles/useRoleEditor.js", import.meta.url), "utf8")
+    .split("\r\n").join("\n");
+  test("no Use this on the phone; only Choose photo and Use default", () => {
+    assert.doesNotMatch(phone, /Use this/);
+    assert.doesNotMatch(phone, /mgcp-rlm-use/);
+    assert.match(phone, />Choose photo<\/button>/);
+    assert.match(phone, />Use default<\/button>/);
+  });
+  test("the photo picker commits the pick: it uploads itself when every rule passes", () => {
+    assert.match(phone, /ed\.pickFile\(f, \{ commit: true \}\)/);
+    assert.match(hook, /if \(commit && !failed\.length\) await send\(source\);/);
   });
 });
 

@@ -11,13 +11,11 @@ import "../styles/brand-roles.css";
    as the desktop's, each showing its first image at 28 px, the name, "yours" / "default" /
    "N of M yours" and a chevron. A row pushes the role's own screen (MobileScreen.jsx):
    the pack's default -> yours (44 -> 64 px), the gold spec line, the live checks after a pick, the
-   loud refusal, the role in its home, and two 44 px buttons, Choose photo and Use default (with the
-   same one-time ask). The system photo picker is the only source here; the file is measured on
-   the device first, with the desktop's rules and words.
-
-   One thing beyond the two drawn buttons: once a pick has passed every check, a 44 px "Use this"
-   appears above them. The preview shows the picture before anything is written, so something has to
-   commit it, and the desktop's Use this is that step. */
+   loud refusal, the role in its home, and exactly two 44 px buttons, Choose photo and Use default
+   (with the same one-time ask). The system photo picker is the only source here; the file is measured
+   on the device first, with the desktop's rules and words. A pick that passes every check uploads at
+   once and the screen shows default -> yours; one that fails shows the live ticks and the loud
+   refusal and uploads nothing. There is no Use this on the phone (the desktop keeps its drawn one). */
 
 function RoleScreen({ role, csrf, onSaved }) {
   const ed = useRoleEditor({ role, csrf, onSaved });
@@ -41,7 +39,7 @@ function RoleScreen({ role, csrf, onSaved }) {
       <div className="mgcp-rlm-pair"><RolePair img={img} big /></div>
       {note && <div className="mgcp-rl-note">{note}</div>}
       <div className="mgcp-rl-spec">{specLine(role.spec, { phone: true })}</div>
-      {ed.measuring && <div className="mgcp-rlm-checks">Checking…</div>}
+      {(ed.measuring || ed.busy) && <div className="mgcp-rlm-checks">{ed.busy ? "Saving…" : "Checking…"}</div>}
       {ed.cand && !ed.measuring && !ed.cand.unreadable && (
         <div className="mgcp-rlm-checks"><RoleTicks list={ed.cand.ticks} /></div>
       )}
@@ -52,12 +50,8 @@ function RoleScreen({ role, csrf, onSaved }) {
           onKeep={() => setAsking(false)}
           onUse={async () => { setAsking(false); await ed.restore(img.key); }} />
       )}
-      {ed.ok && (
-        <button type="button" className="mgcp-rl-primary mgcp-rlm-use" disabled={ed.busy}
-          onClick={() => ed.useThis()}>Use this</button>
-      )}
       <input ref={fileRef} type="file" hidden accept="image/*"
-        onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; ed.pickFile(f); }} />
+        onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; ed.pickFile(f, { commit: true }); }} />
       <div className="mgcp-rlm-btns">
         <button type="button" className="mgcp-rl-ghost" disabled={ed.busy}
           onClick={() => fileRef.current && fileRef.current.click()}>Choose photo</button>

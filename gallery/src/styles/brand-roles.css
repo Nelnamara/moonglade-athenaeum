@@ -114,8 +114,6 @@ button.mgcp-rl-art:hover { opacity: .8; }
 .mgcp-rlm-pair { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0; }
 .mgcp-rlm-btns { display: flex; gap: 8px; }
 .mgcp-rlm-btns > * { flex: 1; min-height: 44px; font-size: 12px; border-radius: 10px; }
-.mgcp-rlm-btns .mgcp-rl-primary { font-size: 12px; }
-.mgcp-rlm-use { width: 100%; min-height: 44px; font-size: 12px; border-radius: 10px; }
 .mgcp-rlm-seg { display: flex; gap: 6px; flex-wrap: wrap; }
 .mgcp-rlm-seg .mgcp-rl-tab { min-height: 44px; padding: 0 14px; font-size: 11px; }
 .mgcp-rlm-checks { font-size: 11px; }

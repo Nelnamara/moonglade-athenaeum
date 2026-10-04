@@ -6370,6 +6370,8 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
         logged_in_page, tmp_path, sealed_donor_present):
     _dress_role_pack()
     page = logged_in_page(width=390, height=844, device_scale_factor=1, is_mobile=True, has_touch=True)
+    sent = []
+    page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and "/api/branding/role" in r.url else None)
     _visit(page, "/")
     _settle(page)
     _dismiss_any_achievement_toast(page)
@@ -6400,12 +6402,18 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     page.wait_for_selector(".mgcp-rl-loud")
     assert page.locator(".mgcp-rl-loud").inner_text() == (
         "Refused: the Reward icons must be square. This one is 2:1. Your current art is unchanged.")
-    assert not page.locator(".mgcp-rlm-use").count()
+    # a pick that fails shows the live ticks and the refusal and uploads nothing
+    assert page.locator(".mgcp-rl-ticks .bad").count() == 1 and page.locator(".mgcp-rl-ticks .ok").count() == 3
+    assert sent == [], "a refused pick sends nothing: %r" % sent
 
+    # the screen draws exactly two buttons, Choose photo and Use default: no Use this on the phone
     page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "ok.png", (128, 128)))
-    page.wait_for_selector(".mgcp-rlm-use")
-    page.click(".mgcp-rlm-use")
+    # a pick that passes every check uploads at once: default -> yours, with nothing to press
     page.wait_for_function("() => document.querySelector('.mgcp-rlm-pair .mgcp-rl-art.yours')")
+    assert len(sent) == 1, "one upload, sent by the pick itself: %r" % sent
+    assert not page.locator(".mgcp-rlm-use").count()
+    assert page.locator(".mgcp-rlm-screen button", has_text="Use this").count() == 0
+    assert page.locator(".mgcp-rlm-btns button").all_inner_texts() == ["Choose photo", "Use default"]
     pair = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-pair .mgcp-rl-art')].map(a => Math.round(a.getBoundingClientRect().width))")
     assert pair == [44, 64], pair
     assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
