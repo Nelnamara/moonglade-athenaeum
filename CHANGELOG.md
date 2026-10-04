@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Broken files
+- **Health lists the broken files the integrity check found, and fixes them one at a time.** A **Broken files** section under Health's tiles (absent on a clean library) shows each empty, cut-short ("suspect") or thumbnail-less picture with its pill — RECOVERABLE, SUSPECT, or LOST for one PixAI no longer has (with ARCHIVE and the date it went) — and only the fix that applies: **Re-download** (one attempt; the new copy must check out before it replaces the broken one) or **Rebuild** (the thumbnail, made here). **Mark lost** and **Keep as is** are a local note with a 10-second Undo. Nothing is deleted, and a picture PixAI no longer has is never re-downloaded. The problem tiles and the Control Panel's Verify row ("N broken · Review ▸") open the list. (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 

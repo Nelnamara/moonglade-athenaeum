@@ -125,9 +125,55 @@ at the library root, `integrity_report.csv` (one line per problem: media id, pro
 size, recoverable) and `integrity_report.json` (the counts and when it ran), and the Panel's log
 shows the summary and the first lines. A broken picture that PixAI no longer has says
 **recoverable: no** — there is nothing left to download it from again. The check itself
-repairs nothing. What already does: **Sync now** builds thumbnails that are missing (not
-empty ones), and the Advanced **Full re-walk** downloads a missing or empty file again. A file
-that is cut short but not empty is skipped by both, so for now it stays on the report.
+repairs nothing; the **Broken files** list below is where you act on what it found.
+
+### Broken files
+
+When the last check found broken files, Health shows a **Broken files** section under the tiles
+and above the storage bars. It is absent on a clean library. The **Zero-byte files** and
+**Missing thumbs** tiles turn peach while the list has rows under them, and clicking one jumps
+to the list with that kind picked. **Control Panel → Check — read-only → Verify library
+integrity** says "N broken · Review ▸" after a check that found some; that opens Health at the
+list too.
+
+The chips across the top are **All**, **Zero-byte**, **Thumbnail**, **Suspect** and **Lost**,
+each with its count (a chip with nothing under it is hidden). Each row shows the picture's
+thumbnail (or a "?"), its id, the problem and where the file is, its size, and a pill:
+
+- **RECOVERABLE** — an empty file PixAI still has, or a missing or empty thumbnail.
+- **SUSPECT** (peach) — a file that stops before its end. "Suspect", never "corrupt": the
+  check reads two small pieces of the file and decodes nothing.
+- **LOST** (dashed) — a broken file PixAI no longer has, or one you marked lost. A picture
+  PixAI no longer has also wears **ARCHIVE**, the same word the gallery uses, and its row says
+  "Broken here, and gone from your PixAI history as of <date>. There's no copy left to
+  re-download." The date is when the archive-only flag was last rewritten by a sync. If a
+  later sync finds the picture on PixAI again, the row turns back into **RECOVERABLE**.
+
+A row offers only the fix that applies to it (**Re-download** or **Rebuild**, see below) and a
+**⋯** menu with **Open details**, **Mark lost** and **Copy path**. A LOST row never offers a
+re-download; it offers **Open details** and **Keep as is**, which quiets it.
+
+**Mark lost** and **Keep as is** are a note this app keeps for itself, in
+`integrity_marks.json` at the library root beside the two reports. They delete nothing and
+change nothing else, a lost row stops being counted for **Fix all**, and the toast that
+confirms either one has an **Undo** for ten seconds.
+
+#### Fixing a row
+
+A row's own button runs straight away, with no confirm, because it is one file:
+
+- **Re-download** asks PixAI for the picture again, once, the same way a backup does. The new
+  copy is checked before it goes anywhere: it has to be a whole file of the same kind as the
+  broken one. Only then does it replace the broken file, under the same name. If PixAI sends
+  nothing, or what it sends doesn't check out, the old file is left exactly as it was and the
+  row says so in peach.
+- **Rebuild** makes the thumbnail again from the file on your disk. Nothing reaches PixAI.
+
+Nothing in the list deletes or quarantines a file. A picture PixAI no longer has is never
+re-downloaded — the app refuses it on the server whatever the screen asks — and with
+`READ_ONLY` on, re-downloads are off (thumbnails can still be rebuilt). When a fix finishes, the
+row shows **✓ FIXED** for two seconds and leaves the list, and the rows that were fixed are
+checked again so the tiles and the report follow.
 
 ## Thumbnails & health accuracy
 

@@ -62,6 +62,7 @@ import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/vi
 import { pageOffset } from "./lib/phoneCore.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
 import { registerFolioOpener } from "./notify/ach.js";
+import { registerBrokenFilesOpener } from "./lib/brokenFilesNav.js";
 import { readFolioHash, setFolioRow } from "./folio/folioFocus.js";
 import GuideHost from "./help/GuideHost.jsx";
 import { openHelp, OPEN_SURFACE_EVENT, isHelpUp, isAboutUp, isWhatsNewUp } from "./help/helpStore.js";
@@ -298,6 +299,9 @@ export default function App({ boot }) {
   /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. The feat to
      scroll to is left for the Folio itself (folio/folioFocus.js). */
   useEffect(() => registerFolioOpener(() => setOverlay("folio")), []);
+  /* Health's Broken files list (Session W): the Control Panel's "Review ▸" and a fix run's Activity
+     row bring Health up; the list itself scrolls to its section (lib/brokenFilesNav.js). */
+  useEffect(() => registerBrokenFilesOpener(() => setOverlay("health")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection
@@ -1926,6 +1930,8 @@ export default function App({ boot }) {
           /* N6: a Storage segment closes Health and opens the library filtered to it; the whole
              filter set starts over, because the bars measure the whole library */
           onStoragePick={(f) => { setOverlay(null); applyAdvanced({ ...ADV_DEFAULTS, ...storageFilterPatch(f) }); }}
+          /* Session W: a broken row's Open details closes Health and opens the record */
+          onOpenDetails={(mid) => { setOverlay(null); openDetails(mid); }}
         />
       )}
       {overlay === "duprev" && (
