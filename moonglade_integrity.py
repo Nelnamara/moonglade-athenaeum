@@ -666,6 +666,7 @@ WORDS = {
     "unknown_type": "This kind of file can't be re-downloaded here.",
     "file_broken": "The file itself is broken, so its thumbnail can't be rebuilt from it.",
     "not_this_picture": "The file the catalog names for this picture belongs to another picture, so nothing was changed.",
+    "changed": "This file has changed since the check. Run the check again.",
     "rebuild_failed": "Couldn't rebuild the thumbnail.",
 }
 
@@ -868,10 +869,18 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
     return _result(mid, "rebuild")
 
 
+FIX_ACTIONS = ("redownload", "rebuild")
+
+
 def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_bytes=None,
-            marks=None):
-    """The fix one row needs NOW: a re-download for an empty or cut-short file, a rebuild for
-    a thumbnail. A row the owner marked lost is left alone."""
+            marks=None, expect=None):
+    """The fix one row needs NOW: a re-download for a missing, empty or cut-short file, a
+    rebuild for a thumbnail. A row the owner marked lost is left alone.
+
+    `expect` is the action the list SHOWED for this row (the client sends it with the id).
+    When the file has changed since the check so that today's fix is a different one, nothing
+    runs: a Rebuild the owner pressed never turns into a network re-download, nor the other
+    way round (review finding 3)."""
     import moonglade_gallery as g
     mid = str(media_id or "").strip()
     marks = read_marks(out_dir) if marks is None else marks
@@ -882,6 +891,8 @@ def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_byt
     action = "redownload" if problem in _FILE_PROBLEMS else "rebuild"
     if (marks.get(mid) or {}).get("mark") == "lost":
         return _result(mid, action, ok=False, refused="marked_lost")
+    if problem is not None and expect is not None and expect != action:
+        return _result(mid, expect, ok=False, refused="changed")
     if problem in _FILE_PROBLEMS:
         return redownload_one(out_dir, db_path, mid, session_factory=session_factory,
                               index=index, on_bytes=on_bytes)
@@ -940,10 +951,12 @@ def run_summary(fixed, total, results, stopped=False):
 class FixRunner:
     """One fix run at a time, on a thread of the server, so closing Health never stops it.
 
-    start(ids)  takes the chosen ids, keeps the ones on the Broken files list (the rest come
-                back as `refused`), and fixes them in order: fix_one per id, so every row
-                goes through the same checks as a single click -- the archive-only refusal
-                included. Answers the run's status, or None while a run is going.
+    start(items) takes the chosen rows, each {"media_id", "action"} with the action the list
+                showed, keeps the ones on the Broken files list with an action it knows (the
+                rest come back as `refused`), and fixes them in order: fix_one per row, with
+                its shown action as `expect`, so every row goes through the same checks as a
+                single click -- the archive-only refusal included. Answers the run's status,
+                or None while a run is going.
     stop()      finishes the current file and stops. Nothing is rolled back.
     status()    a copy of the run: total, done, fixed, failed, the current row with its
                 bytes (a true fraction for the byte bar), and every result so far.
@@ -982,12 +995,22 @@ class FixRunner:
         if t is not None:
             t.join(timeout)
 
-    def start(self, ids):
+    def start(self, items):
         import uuid
-        wanted = list(dict.fromkeys(str(i).strip() for i in (ids or []) if str(i).strip()))
+        shown = {}                                     # media_id -> the action the list showed
+        refused = []
+        for it in items or []:
+            mid = str((it or {}).get("media_id") or "").strip() if isinstance(it, dict) else ""
+            act = (it or {}).get("action") if isinstance(it, dict) else None
+            if not mid:
+                continue
+            if act not in FIX_ACTIONS:
+                refused.append(mid)
+            elif mid not in shown:
+                shown[mid] = act
         listed = listed_ids(self.out)
-        take = [m for m in wanted if m in listed]
-        refused = [m for m in wanted if m not in listed]
+        take = [(m, a) for m, a in shown.items() if m in listed]
+        refused += [m for m in shown if m not in listed]
         with self._lock:
             if self._state["running"]:
                 return None
@@ -1012,14 +1035,14 @@ class FixRunner:
             if cur is not None:
                 cur["bytes"], cur["expect"] = int(n), int(total or 0)
 
-    def _run(self, job_id, ids):
+    def _run(self, job_id, items):
         import moonglade_gallery as g
         touched = []
         err = ""
         try:
             index = _index(self.out, g)
             marks = read_marks(self.out)
-            for mid in ids:
+            for mid, shown in items:
                 with self._lock:
                     if self._state["stop"]:
                         self._state["stopped"] = True
@@ -1027,7 +1050,8 @@ class FixRunner:
                     self._state["current"] = {"media_id": mid, "bytes": 0, "expect": 0}
                 try:
                     res = self._fix(self.out, self.db, mid, session_factory=self._session_factory,
-                                    index=index, on_bytes=self._on_bytes, marks=marks)
+                                    index=index, on_bytes=self._on_bytes, marks=marks,
+                                    expect=shown)
                 except Exception:                      # noqa: BLE001 -- one row, never the run
                     res = _result(mid, "", ok=False, error="Couldn't fix this file.")
                 touched.append(mid)

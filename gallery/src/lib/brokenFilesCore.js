@@ -176,7 +176,10 @@ export function fixPlan(doc, readOnly, done) {
   const bytes = typeof est === "number" && est > 0 && base > 0 && redownload.length
     ? Math.round(est * (redownload.length / base)) : null;
   const lost = rows.filter((r) => r.state === "lost").length;
-  return { redownload, rebuild, ids: redownload.concat(rebuild), total: redownload.length + rebuild.length, lost, bytes };
+  // what the client sends: each id with the action the list showed (the server holds it to that)
+  const items = redownload.map((m) => ({ media_id: m, action: "redownload" }))
+    .concat(rebuild.map((m) => ({ media_id: m, action: "rebuild" })));
+  return { redownload, rebuild, ids: redownload.concat(rebuild), items, total: redownload.length + rebuild.length, lost, bytes };
 }
 
 /* "9 MB", "850 KB": the confirm's size, always an estimate (the caller adds the "~"). */

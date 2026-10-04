@@ -15307,16 +15307,21 @@ def create_app(out_dir: Path):
     @app.route("/api/integrity/fix", methods=["POST"])
     @tier(LOGIN)
     def api_integrity_fix():
-        """Start a fix run over the chosen ids: one per-row Re-download / Rebuild, or Fix all
-        recoverable. Body: {csrf, ids: [...]}. Ids not on the Broken files list come back in
-        `refused`; 409 while a run is going. Answers the run's status with `started`."""
+        """Start a fix run over the chosen rows: one per-row Re-download / Rebuild, or Fix all
+        recoverable. Body: {csrf, items: [{media_id, action}, ...]} -- every row with the action
+        the list SHOWED ("redownload" or "rebuild"), which the runner holds it to: a file that
+        changed since the check runs nothing (review finding 3). Rows not on the Broken files
+        list come back in `refused`; 409 while a run is going. Answers the run's status with
+        `started`."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        ids = body.get("ids")
-        if not isinstance(ids, list) or not ids:
+        items = body.get("items")
+        if (not isinstance(items, list) or not items
+                or not all(isinstance(it, dict) and str(it.get("media_id") or "").strip()
+                           and it.get("action") in _integ.FIX_ACTIONS for it in items)):
             return jsonify({"error": "No files were chosen."}), 400
-        st = _fix_runner.start([str(i) for i in ids[:5000]])
+        st = _fix_runner.start(items[:5000])
         if st is None:
             return jsonify({"error": "A fix is already running.", "busy": True}), 409
         st["started"] = bool(st["running"])

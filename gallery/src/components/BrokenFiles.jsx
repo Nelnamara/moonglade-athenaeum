@@ -83,7 +83,7 @@ function BrokenRow({ row, bf, menuOpen, setMenu, onOpenDetails, maxPath }) {
         <Pill label={pill.label} tone={pill.tone} />
         {row.archive_only && !active && !fixed ? <Pill label={ARCHIVE_WORD} title={ARCHIVE_TIP} /> : null}
         {act && !fixed && !active ? (
-          <button type="button" className="mgbf-ghost" onClick={() => bf.fix([mid])}>{ACTION_LABEL[act]}</button>
+          <button type="button" className="mgbf-ghost" onClick={() => bf.fix([{ media_id: mid, action: act }])}>{ACTION_LABEL[act]}</button>
         ) : null}
         {showMenu ? (
           <button type="button" className="mgbf-ghost mgbf-more" aria-label="More" aria-expanded={menuOpen}
@@ -155,7 +155,7 @@ export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionR
   const shown = chipOrAll(chips, chip);
   const rows = rowsFor(doc, shown, bf.gone);
   const plan = fixPlan(doc, bf.readOnly, bf.done);
-  const go = () => { setAsking(false); if (plan.total) bf.fix(plan.ids); };
+  const go = () => { setAsking(false); if (plan.total) bf.fix(plan.items); };
   return (
     <section className="mgbf" ref={sectionRef} aria-label="Broken files">
       <div className="mgbf-head">

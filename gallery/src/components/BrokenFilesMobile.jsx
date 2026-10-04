@@ -124,7 +124,7 @@ export default function BrokenFilesMobile({ bf, chip, setChip, onOpenDetails }) 
           return (
             <div className="mgbf-m-sheet">
               {line ? <div className="mgbf-lostline">{line}</div> : null}
-              {a ? <button type="button" onClick={() => act(() => bf.fix([sheetRow.media_id]))}>{ACTION_LABEL[a]}</button> : null}
+              {a ? <button type="button" onClick={() => act(() => bf.fix([{ media_id: sheetRow.media_id, action: a }]))}>{ACTION_LABEL[a]}</button> : null}
               <button type="button" onClick={() => act(() => onOpenDetails && onOpenDetails(sheetRow.media_id))}>Open details</button>
               {line ? (
                 <button type="button" onClick={() => act(() => bf.mark(sheetRow.media_id, "kept", "Kept as it is."))}>Keep as is</button>
@@ -143,7 +143,7 @@ export default function BrokenFilesMobile({ bf, chip, setChip, onOpenDetails }) 
         </div>
         <div className="glm-sheet-actions mgbf-m-cacts">
           <button type="button" className="mgbf-ghost" onClick={unask}>Cancel</button>
-          <button type="button" className="mgbf-btn" onClick={() => { unask(); if (plan.total) bf.fix(plan.ids); }}>{c.go}</button>
+          <button type="button" className="mgbf-btn" onClick={() => { unask(); if (plan.total) bf.fix(plan.items); }}>{c.go}</button>
         </div>
       </MobileSheet>
 

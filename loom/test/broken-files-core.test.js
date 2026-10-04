@@ -148,6 +148,9 @@ describe("Fix all recoverable (W3c)", () => {
     const p = fixPlan(DOC, false);
     assert.deepEqual(p.redownload, ["a", "c"]);
     assert.deepEqual(p.rebuild, ["b"]);
+    // review finding 3: each id goes with the action the list showed
+    assert.deepEqual(p.items, [{ media_id: "a", action: "redownload" }, { media_id: "c", action: "redownload" },
+      { media_id: "b", action: "rebuild" }]);
     assert.equal(p.total, 3);
     assert.equal(p.lost, 1);
     assert.equal(p.bytes, 6000000);

@@ -14,7 +14,9 @@ import * as fixRun from "../lib/brokenFixRun.js";
    run     the fix run (lib/brokenFixRun.js): {status, fixedAt}. The list reloads when it ends.
    mark    Mark lost / Keep as is: a local flag on the server (integrity_marks.json), then the
            Session N toast with a 10 s Undo, which puts back the mark the row had before.
-   fix     start a run over ids (a row's own Re-download / Rebuild, or Fix all).
+   fix     start a run over [{media_id, action}] (a row's own Re-download / Rebuild, or Fix all),
+           each with the action the list showed -- the server runs nothing for a row whose fix
+           changed since the check.
 
    Nothing here deletes anything, and nothing reaches PixAI except the run's re-downloads, which
    the server's own runner gates. */
@@ -99,8 +101,8 @@ export default function useBrokenFiles() {
     reload();
   }, [toast, dismiss, reload, show]);
 
-  const fix = useCallback(async (ids) => {
-    const d = await fixRun.startFix(ids);
+  const fix = useCallback(async (items) => {
+    const d = await fixRun.startFix(items);
     if (d && d.error) show(d.error, null, "peach");
     return d;
   }, [show]);

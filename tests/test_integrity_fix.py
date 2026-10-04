@@ -75,6 +75,18 @@ def _no_network():
     raise AssertionError("this path must not reach the network")
 
 
+# What the list showed for each row of the fixture library -- the action a client sends with
+# each id (review finding 3). 109 and 112 are LOST and show none; a test that sends them anyway
+# is a client ignoring the missing button, which the runner must refuse by itself.
+_SHOWN = {"102": "redownload", "103": "redownload", "105": "redownload", "106": "rebuild",
+          "107": "rebuild", "108": "rebuild", "109": "redownload", "112": "redownload",
+          "101": "redownload", "999": "redownload"}
+
+
+def _items(ids):
+    return [{"media_id": m, "action": _SHOWN[m]} for m in ids]
+
+
 def _bytes(out, rel):
     return (out / rel).read_bytes()
 
@@ -109,7 +121,7 @@ def test_fix_all_through_the_route_refuses_it_too(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: session)
     app = create_app(out)
     cli = login_test_client(app)
-    d = cli.post("/api/integrity/fix", json=with_csrf(cli, {"ids": ["109"]})).get_json()
+    d = cli.post("/api/integrity/fix", json=with_csrf(cli, {"items": _items(["109"])})).get_json()
     assert d["started"] is True
     app.extensions["mg_integrity_fix"].wait(10)
     st = cli.get("/api/integrity/fix/status").get_json()
@@ -244,6 +256,30 @@ def test_a_rebuild_never_draws_another_pictures_thumbnail(tmp_path):
     assert not (out / "gallery" / "thumbs" / "121.jpg").exists()
 
 
+def test_a_shown_rebuild_never_becomes_a_re_download_and_back(tmp_path):
+    """Review finding 3. The client sends the action the list showed; when the file has changed
+    since the check so that the live fix differs, nothing runs and the row says so."""
+    out = _broken_library(tmp_path)
+    res = integ.fix_one(out, out / "catalog.db", "102", session_factory=_no_network,
+                        expect="rebuild")                   # 102 is an empty file now
+    assert res["ok"] is False and res["refused"] == "changed"
+    assert res["error"] == "This file has changed since the check. Run the check again."
+    res = integ.fix_one(out, out / "catalog.db", "106", session_factory=_no_network,
+                        expect="redownload")                # 106 only lacks a thumbnail
+    assert res["ok"] is False and res["refused"] == "changed"
+    assert not (out / "gallery" / "thumbs" / "106.jpg").exists()
+
+
+def test_the_route_wants_the_action_shown_with_every_file(tmp_path):
+    out = _broken_library(tmp_path)
+    cli = login_test_client(create_app(out))
+    for body in ({"ids": ["106"]}, {"items": [{"media_id": "106"}]},
+                 {"items": [{"media_id": "106", "action": "delete"}]}, {"items": []}):
+        r = cli.post("/api/integrity/fix", json=with_csrf(cli, body))
+        assert r.status_code == 400, body
+    assert not (out / "gallery" / "thumbs" / "106.jpg").exists()
+
+
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):
     out = _broken_library(tmp_path)
     before = _bytes(out, "images/p_t1_103.png")
@@ -358,7 +394,7 @@ def test_a_run_fixes_what_it_can_and_rechecks_only_those_rows(tmp_path):
     session = FakeMediaSession({"102": (_png(4, 4), "image/png")})
     events = []
     run = _runner(out, session, events)
-    st = run.start(["102", "106", "109"])
+    st = run.start(_items(["102", "106", "109"]))
     assert st["running"] is True and st["total"] == 3
     run.wait(10)
     st = run.status()
@@ -387,7 +423,7 @@ def test_nothing_is_deleted_by_a_run(tmp_path):
     before = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
     session = FakeMediaSession({"102": (_png(4, 4), "image/png"), "103": (_png(2, 3), "image/png")})
     run = _runner(out, session)
-    run.start(["102", "103", "106", "107", "108", "109", "112"])
+    run.start(_items(["102", "103", "106", "107", "108", "109", "112"]))
     run.wait(20)
     after = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
     assert before <= after, sorted(before - after)
@@ -407,7 +443,7 @@ def test_stop_finishes_the_current_file_and_stops(tmp_path):
         return real(*a, **k)
 
     run._fix = slow_fix
-    run.start(["102", "106", "107"])
+    run.start(_items(["102", "106", "107"]))
     run.wait(10)
     st = run.status()
     assert st["stopped"] is True and st["done"] == 1
@@ -427,10 +463,10 @@ def test_one_run_at_a_time_and_only_ids_on_the_list(tmp_path):
                 "note": ""}
 
     run._fix = held
-    st = run.start(["106", "101", "999"])
+    st = run.start(_items(["106", "101", "999"]))
     assert st["total"] == 1                               # a sound row and a stranger are not on it
     assert sorted(st["refused"]) == ["101", "999"]
-    assert run.start(["107"]) is None                     # busy
+    assert run.start(_items(["107"])) is None                     # busy
     hold["go"] = True
     run.wait(10)
 
@@ -445,10 +481,10 @@ def test_the_fix_routes(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: session)
     app = create_app(out)
     cli = login_test_client(app)
-    r = cli.post("/api/integrity/fix", json={"ids": ["102"]})
+    r = cli.post("/api/integrity/fix", json={"items": _items(["102"])})
     assert r.status_code == 400 and "session expired" in r.get_json()["error"]
     assert cli.get("/api/integrity/broken").get_json()["run"]["running"] is False
-    d = cli.post("/api/integrity/fix", json=with_csrf(cli, {"ids": ["102", "106"]})).get_json()
+    d = cli.post("/api/integrity/fix", json=with_csrf(cli, {"items": _items(["102", "106"])})).get_json()
     assert d["started"] is True and d["total"] == 2
     app.extensions["mg_integrity_fix"].wait(10)
     st = cli.get("/api/integrity/fix/status").get_json()
@@ -474,8 +510,8 @@ def test_the_fix_route_answers_busy(tmp_path, monkeypatch):
                 "note": ""}
 
     run._fix = held
-    assert cli.post("/api/integrity/fix", json=with_csrf(cli, {"ids": ["106"]})).get_json()["started"]
-    r = cli.post("/api/integrity/fix", json=with_csrf(cli, {"ids": ["107"]}))
+    assert cli.post("/api/integrity/fix", json=with_csrf(cli, {"items": _items(["106"])})).get_json()["started"]
+    r = cli.post("/api/integrity/fix", json=with_csrf(cli, {"items": _items(["107"])}))
     assert r.status_code == 409
     hold["go"] = True
     run.wait(10)

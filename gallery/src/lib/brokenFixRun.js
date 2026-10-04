@@ -4,7 +4,8 @@
    any component, and the section and the phone screen only subscribe.
 
    What it does:
-     startFix(ids)  POST /api/integrity/fix (one row's Re-download / Rebuild, or Fix all) and poll
+     startFix(items) POST /api/integrity/fix (one row's Re-download / Rebuild, or Fix all) -- each
+                    row as {media_id, action} with the action the list showed -- and poll
                     GET /api/integrity/fix/status until the run ends. The server decides what each
                     row gets and refuses an archive-only row by itself; nothing here can override it.
      stopFix()      Stop: the current file finishes, then the run ends.
@@ -97,9 +98,10 @@ function poll() {
   setTimeout(tick, POLL_MS);
 }
 
-/* Start a run over `ids`. Resolves to the server's answer ({error} on a refusal, 409 busy). */
-export async function startFix(ids) {
-  const d = await apiPost("/api/integrity/fix", { csrf: csrf(), ids });
+/* Start a run over `items` ([{media_id, action}], the action as the list showed it). Resolves to
+   the server's answer ({error} on a refusal, 409 busy). */
+export async function startFix(items) {
+  const d = await apiPost("/api/integrity/fix", { csrf: csrf(), items });
   if (!d || d.error) return d || { error: "Couldn't start the fix." };
   fixedAt = {};
   seen = 0;

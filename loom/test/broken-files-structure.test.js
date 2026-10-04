@@ -75,6 +75,15 @@ describe("Fix all and its progress (W3c / W4c)", () => {
     assert.match(b, /plan\.total > 0 \?/);
     assert.match(b, /"Fix all recoverable \(" \+ plan\.total \+ "\)"/);
   });
+  test("every fix sends the action the list showed with each id", () => {
+    const b = code("components/BrokenFiles.jsx");
+    assert.match(b, /bf\.fix\(\[\{ media_id: mid, action: act \}\]\)/);
+    assert.match(b, /bf\.fix\(plan\.items\)/);
+    const m = code("components/BrokenFilesMobile.jsx");
+    assert.match(m, /bf\.fix\(\[\{ media_id: sheetRow\.media_id, action: a \}\]\)/);
+    assert.match(m, /bf\.fix\(plan\.items\)/);
+    assert.match(code("lib/brokenFixRun.js"), /apiPost\("\/api\/integrity\/fix", \{ csrf: csrf\(\), items \}\)/);
+  });
   test("one confirm, with the handoff's lines and Data saver's metered line", () => {
     const b = code("components/BrokenFiles.jsx");
     assert.match(b, /confirmLines\(plan, metered\)/);
