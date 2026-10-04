@@ -15268,6 +15268,7 @@ def create_app(out_dir: Path):
         doc = moonglade_integrity.broken_list(out_dir, db_path,
                                               avg_bytes=health_avg_file_bytes())
         doc["read_only"] = bool(core.READ_ONLY or core._read_only_now())
+        doc["run"] = _fix_runner.status()
         return jsonify(doc)
 
     @app.route("/api/integrity/mark", methods=["POST"])
@@ -15294,6 +15295,48 @@ def create_app(out_dir: Path):
         except (ValueError, OSError) as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "media_id": mid, "mark": mark, "prev": prev})
+
+    # The fix run: moonglade_integrity.FixRunner, one per server, on its own thread so closing
+    # Health never stops it. It refuses an archive-only row BY ITSELF (redownload_one reads the
+    # catalog, whatever the client sent), READ_ONLY blocks its re-downloads but not its local
+    # thumbnail rebuilds, and it deletes nothing. Test seam: app.extensions["mg_integrity_fix"].
+    import moonglade_integrity as _integ
+    _fix_runner = _integ.FixRunner(out_dir, db_path, log_job=_log_job)
+    app.extensions["mg_integrity_fix"] = _fix_runner
+
+    @app.route("/api/integrity/fix", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_fix():
+        """Start a fix run over the chosen ids: one per-row Re-download / Rebuild, or Fix all
+        recoverable. Body: {csrf, ids: [...]}. Ids not on the Broken files list come back in
+        `refused`; 409 while a run is going. Answers the run's status with `started`."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"error": "No files were chosen."}), 400
+        st = _fix_runner.start([str(i) for i in ids[:5000]])
+        if st is None:
+            return jsonify({"error": "A fix is already running.", "busy": True}), 409
+        st["started"] = bool(st["running"])
+        return jsonify(st)
+
+    @app.route("/api/integrity/fix/status")
+    @tier(LOGIN)
+    def api_integrity_fix_status():
+        """The fix run as it stands: n / N, the current row's bytes, every result so far."""
+        return jsonify(_fix_runner.status())
+
+    @app.route("/api/integrity/fix/stop", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_fix_stop():
+        """Stop: the current file finishes, then the run ends. Nothing is rolled back."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        _fix_runner.stop()
+        return jsonify({"ok": True})
 
     @app.route("/api/panel/summary")
     @tier(LOGIN)

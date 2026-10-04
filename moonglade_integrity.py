@@ -45,8 +45,10 @@ a file name cannot forge a Control Panel progress line or a terminal escape.
 PHASE B (Session W, the Archive Integrity Handoff) is the Broken files list in Health, built on
 the report above and kept in its own section at the foot of this file: broken_list() reads the
 report back for the list, and the owner's local marks (Mark lost, Keep as is) live in
-integrity_marks.json beside the reports. The list is still read-only; the fixes it offers run
-elsewhere and are described where they are written.
+integrity_marks.json beside the reports. The list itself is read-only. The fixes it offers (a
+targeted re-download, a thumbnail rebuild) are the two writes at the very foot, one function
+each, with the rules they keep: an archive-only row is refused by the re-download itself, and
+nothing is ever deleted or quarantined.
 """
 import csv
 import io
@@ -210,13 +212,10 @@ def _trash_ids(out, g):
     return ids
 
 
-def verify_library(out_dir, db_path, deep=False, progress=None):
-    """Run the pass, write both reports, return the summary (the JSON document) with the
-    report lines under "lines" as (media_id, problem, path, size, recoverable) tuples."""
-    import moonglade_gallery as g                     # lazy: the catalog verbs and the walk
-    out = Path(out_dir)
-    rows = g.integrity_rows(db_path) if Path(db_path).exists() else []
-
+def _index(out, g):
+    """The walk the pass decides from: ONE scan_library() of the library and ONE scandir of
+    gallery/thumbs/. (by_rel, by_mid, thumbs): every media file by its relative path and by
+    (kind, media_id), and every thumbnail's size by media id."""
     by_rel = {}
     by_mid = defaultdict(list)                         # (kind, media_id) -> [MediaEntry]
     for e in g.scan_library(out, kinds=("image", "video"), exclude=g.HEALTH_EXCLUDE):
@@ -235,6 +234,60 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
                         continue
     except OSError:
         pass
+    return by_rel, by_mid, thumbs
+
+
+def _row_check(r, index, deep, gallery_dirname):
+    """One catalog row against the index: (problem, path, size, best). `problem` is None
+    for a sound row; `best` is the file the row was judged on (its largest copy), or None
+    when there is none. The one decision both the full pass and a re-check of a few rows
+    make, so the two can never disagree about what "broken" means."""
+    by_rel, by_mid, thumbs = index
+    mid = str(r.get("media_id") or "")
+    fn = str(r.get("filename") or "").replace("\\", "/")
+    is_video = str(r.get("is_video") or "") == "1"
+    kind = "video" if is_video else "image"
+    cands = [by_rel[fn]] if fn in by_rel else []
+    for c in by_mid.get((kind, mid), ()):
+        if c not in cands:
+            cands.append(c)
+    sized = [c for c in cands if c.size is not None]
+    problem, path, size, best = None, fn, "", None
+    if not cands:
+        problem = P_MISSING
+    elif sized:
+        best = max(sized, key=lambda c: c.size)
+        path, size = str(best.rel).replace("\\", "/"), best.size
+        if best.size == 0:
+            problem = P_ZERO
+        elif deep and structural_problem(best.path):
+            problem = P_SUSPECT
+        elif mid not in thumbs:
+            problem = P_NO_POSTER if is_video else P_NO_THUMB
+            path, size = "{}/thumbs/{}.jpg".format(gallery_dirname, mid), ""
+        elif thumbs[mid] == 0:
+            problem = P_ZERO_THUMB
+            path, size = "{}/thumbs/{}.jpg".format(gallery_dirname, mid), 0
+    return problem, path, size, best
+
+
+def _line_for(r, check, g):
+    """A report line for a row whose check found a problem, or None for a sound row."""
+    problem, path, size, _best = check
+    if not problem:
+        return None
+    gone = problem in _FILE_PROBLEMS and g.is_archive_only(r)
+    return (str(r.get("media_id") or ""), problem, path, size, "no" if gone else "yes")
+
+
+def verify_library(out_dir, db_path, deep=False, progress=None):
+    """Run the pass, write both reports, return the summary (the JSON document) with the
+    report lines under "lines" as (media_id, problem, path, size, recoverable) tuples."""
+    import moonglade_gallery as g                     # lazy: the catalog verbs and the walk
+    out = Path(out_dir)
+    rows = g.integrity_rows(db_path) if Path(db_path).exists() else []
+    index = _index(out, g)
+    by_rel, by_mid, thumbs = index
 
     lines = []
     catalog_ids = set()
@@ -246,35 +299,10 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
         if r.get("media_id"):
             catalog_ids.add(str(r["media_id"]))
     for done, r in enumerate(with_file, 1):
-        mid = str(r.get("media_id") or "")
-        fn = str(r.get("filename") or "").replace("\\", "/")
-        is_video = str(r.get("is_video") or "") == "1"
-        kind = "video" if is_video else "image"
-        cands = [by_rel[fn]] if fn in by_rel else []
-        for c in by_mid.get((kind, mid), ()):
-            if c not in cands:
-                cands.append(c)
-        sized = [c for c in cands if c.size is not None]
-        problem, path, size = None, fn, ""
-        if not cands:
-            problem = P_MISSING
-        elif sized:
-            best = max(sized, key=lambda c: c.size)
-            path, size = str(best.rel).replace("\\", "/"), best.size
-            if best.size == 0:
-                problem = P_ZERO
-            elif deep and structural_problem(best.path):
-                problem = P_SUSPECT
-            elif mid not in thumbs:
-                problem = P_NO_POSTER if is_video else P_NO_THUMB
-                path, size = "{}/thumbs/{}.jpg".format(g.GALLERY_DIRNAME, mid), ""
-            elif thumbs[mid] == 0:
-                problem = P_ZERO_THUMB
-                path, size = "{}/thumbs/{}.jpg".format(g.GALLERY_DIRNAME, mid), 0
-        if problem:
-            gone = problem in _FILE_PROBLEMS and g.is_archive_only(r)
-            lost += 1 if gone else 0
-            lines.append((mid, problem, path, size, "no" if gone else "yes"))
+        line = _line_for(r, _row_check(r, index, deep, g.GALLERY_DIRNAME), g)
+        if line:
+            lost += 1 if line[4] == "no" else 0
+            lines.append(line)
         if progress and (done % step == 0 or done == total):
             progress(done, total)
 
@@ -295,24 +323,32 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
                       thumbs[m], "yes"))
 
     lines.sort(key=lambda ln: (_SEVERITY[ln[1]], ln[0], ln[2]))
+    summary = {
+        "format": REPORT_FORMAT, "version": REPORT_VERSION,
+        "verified_at": _utc_now(), "deep": bool(deep),
+        "rows": total, "files": len(by_rel),
+        "counts": _counts(lines), "lost": lost, "report": REPORT_CSV,
+    }
+    _write_reports(out, lines, summary)
+    return dict(summary, lines=lines)
+
+
+def _counts(lines):
     counts = {k: 0 for k in COUNT_KEYS}
     for ln in lines:
         counts[_COUNT_KEY[ln[1]]] += 1
+    return counts
 
+
+def _write_reports(out, lines, summary):
+    """Both reports, each replaced atomically: the CSV of `lines`, then the JSON summary."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(["media_id", "problem", "path", "size", "recoverable"])
     for mid, problem, path, size, rec in lines:
         w.writerow([csv_safe(mid), problem, csv_safe(path), size, rec])
-    summary = {
-        "format": REPORT_FORMAT, "version": REPORT_VERSION,
-        "verified_at": _utc_now(), "deep": bool(deep),
-        "rows": total, "files": len(by_rel),
-        "counts": counts, "lost": lost, "report": REPORT_CSV,
-    }
     _write_atomic(out / REPORT_CSV, buf.getvalue().encode("utf-8"))
     _write_atomic(out / REPORT_JSON, json.dumps(summary, indent=2, sort_keys=True).encode("utf-8"))
-    return dict(summary, lines=lines)
 
 
 def read_summary(out_dir):
@@ -577,3 +613,373 @@ def broken_list(out_dir, db_path, avg_bytes=None):
                 "rebuild": [x["media_id"] for x in fixable if x["action"] == "rebuild"],
                 "lost": counts["lost"], "redownload_bytes": est},
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase B: the fixes (the targeted runner)
+# ---------------------------------------------------------------------------
+#
+# Two writes, one function each, so a reader can audit them on their own:
+#
+#   redownload_one  an empty or cut-short file PixAI still has. THE RULE comes first: a row
+#                   PixAI no longer has (archive-only) is refused here, from the catalog,
+#                   whatever the caller asked -- it is the only copy anywhere, and this
+#                   function never touches it. READ_ONLY comes next, before any network.
+#                   Then the app's own single-media path (moonglade_backup.resolve_media +
+#                   download), ONE attempt, into a staging file under gallery/. Only when the
+#                   new bytes are a whole file of the same kind as the broken one (a format
+#                   this module recognises from its first bytes, and the structural check
+#                   passes) does an atomic replace put them over it, keeping its name.
+#   rebuild_one     a missing or empty thumbnail: the gallery's own make_thumbnail (a video's
+#                   poster: make_video_thumbnail), local only, no network, READ_ONLY or not.
+#
+# NOTHING IS DELETED OR QUARANTINED. The broken file is only ever replaced by a verified
+# whole one; a re-download that fails or does not check out leaves it exactly as it was. The
+# one thing removed is this module's own staging file, which nothing else ever saw.
+
+STAGING_DIRNAME = "refetch-staging"        # under gallery/, which every library walk prunes
+
+_FORMAT_OF_EXT = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp",
+                  ".gif": "gif", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mp4"}
+
+# The plain words a refused or failed row shows (peach, never ruby).
+WORDS = {
+    "archive_only": "PixAI no longer has this picture, so there's no copy left to re-download.",
+    "read_only": "Read-only mode is on, so files won't be re-downloaded.",
+    "not_in_catalog": "This picture isn't in the catalog any more.",
+    "missing": "The file isn't on disk any more.",
+    "marked_lost": "You marked this file lost.",
+    "not_listed": "This file isn't on the Broken files list.",
+    "no_file": "Couldn't re-download. PixAI didn't return the file.",
+    "unverified": "Couldn't re-download. The new copy didn't check out, so the old file was left as it is.",
+    "type_differs": "Couldn't re-download. PixAI sent a different kind of file, so the old one was left as it is.",
+    "unknown_type": "This kind of file can't be re-downloaded here.",
+    "file_broken": "The file itself is broken, so its thumbnail can't be rebuilt from it.",
+    "rebuild_failed": "Couldn't rebuild the thumbnail.",
+}
+
+
+def _result(mid, action, ok=True, refused="", error="", note="", nbytes=0):
+    return {"media_id": mid, "action": action, "ok": ok, "refused": refused,
+            "error": error or (WORDS.get(refused, "") if refused else ""),
+            "note": note, "bytes": nbytes}
+
+
+def _format_of(path):
+    """The media format a file's own first bytes say it is, or None."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8"):
+        return "jpeg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if head[:4] == b"GIF8":
+        return "gif"
+    if head[4:8] == b"ftyp":
+        return "mp4"
+    return None
+
+
+def verified_whole(path):
+    """True only for a file that is not empty, is a format recognised from its own first
+    bytes, and passes the structural check. Stricter than structural_problem(), which lets an
+    unknown format through: new bytes have to prove they are a picture before they replace
+    anything (a 200 that is an error page is not "unknown, so fine")."""
+    try:
+        if os.path.getsize(path) <= 0:
+            return False
+    except OSError:
+        return False
+    return _format_of(path) is not None and structural_problem(path) is None
+
+
+def _live_check(out, row, index, g):
+    return _row_check(row, index or _index(out, g), True, g.GALLERY_DIRNAME)
+
+
+def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None, on_bytes=None):
+    """Re-download ONE broken file over itself. Returns a result dict (media_id, action, ok,
+    refused, error, note, bytes). See the section comment for the order of the checks."""
+    import moonglade_backup as core
+    import moonglade_gallery as g
+    out = Path(out_dir)
+    mid = str(media_id or "").strip()
+    row = g.get_row(db_path, mid) if mid else None
+    if not row:
+        return _result(mid, "redownload", ok=False, refused="not_in_catalog")
+    # THE RULE. Read from the catalog here, never from the caller.
+    if g.is_archive_only(row):
+        return _result(mid, "redownload", ok=False, refused="archive_only")
+    try:
+        core._check_read_only("re-download a broken file")
+    except core.PixAIError:
+        return _result(mid, "redownload", ok=False, refused="read_only")
+
+    problem, _path, _size, best = _live_check(out, row, index, g)
+    if problem == P_MISSING:
+        return _result(mid, "redownload", ok=False, refused="missing")
+    if problem not in REFETCH_PROBLEMS or best is None:
+        return _result(mid, "redownload", note="already sound")   # never overwrite a sound file
+    target = Path(best.path)
+    want = _FORMAT_OF_EXT.get(target.suffix.lower())
+    if not want:
+        return _result(mid, "redownload", ok=False, refused="unknown_type")
+
+    stage = out / g.GALLERY_DIRNAME / STAGING_DIRNAME
+    got = None
+    try:
+        stage.mkdir(parents=True, exist_ok=True)
+        session = (session_factory or (lambda: core._make_session(None)))()
+        url, _info = core.resolve_media(session, mid)
+        if not url:
+            return _result(mid, "redownload", ok=False, refused="no_file")
+        import uuid
+        stem = stage / "{}-{}".format(mid if _safe_id(mid) else "media", uuid.uuid4().hex[:10])
+        status, got = core.download(session, url, stem, retries=0, progress=on_bytes)
+        if status != "ok" or not got:
+            return _result(mid, "redownload", ok=False, refused="no_file")
+        if not verified_whole(got):
+            return _result(mid, "redownload", ok=False, refused="unverified")
+        if _format_of(got) != want:
+            return _result(mid, "redownload", ok=False, refused="type_differs")
+        nbytes = os.path.getsize(got)
+        core._atomic_replace(got, target)              # the verified file, over the broken one
+        got = None
+    except Exception:                                  # noqa: BLE001 -- one row, said plainly
+        return _result(mid, "redownload", ok=False, refused="no_file")
+    finally:
+        if got is not None:
+            try:
+                Path(got).unlink()                     # our own staging file, nothing else
+            except OSError:
+                pass
+
+    # The fresh file deserves its thumbnail. An image's is remade from it; a video keeps a
+    # poster it already has (that one came from PixAI and cannot be remade from the file).
+    thumb = out / g.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
+    if _safe_id(mid):
+        if str(row.get("is_video") or "") == "1":
+            if not thumb.exists() or thumb.stat().st_size == 0:
+                g.make_video_thumbnail(target, thumb)
+        else:
+            g.make_thumbnail(target, thumb)
+    return _result(mid, "redownload", nbytes=nbytes)
+
+
+def rebuild_one(out_dir, db_path, media_id, index=None):
+    """Rebuild ONE missing or empty thumbnail from the file on disk. Local only: no network,
+    and READ_ONLY does not stop it. Refuses when the file itself is broken."""
+    import moonglade_gallery as g
+    out = Path(out_dir)
+    mid = str(media_id or "").strip()
+    row = g.get_row(db_path, mid) if mid else None
+    if not row or not _safe_id(mid):
+        return _result(mid, "rebuild", ok=False, refused="not_in_catalog")
+    problem, _path, _size, best = _live_check(out, row, index, g)
+    if problem in _FILE_PROBLEMS or best is None:
+        return _result(mid, "rebuild", ok=False, refused="file_broken")
+    if problem not in REBUILD_PROBLEMS:
+        return _result(mid, "rebuild", note="already sound")
+    thumb = out / g.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
+    made = (g.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
+            else g.make_thumbnail(best.path, thumb))
+    if not made:
+        return _result(mid, "rebuild", ok=False, refused="rebuild_failed")
+    return _result(mid, "rebuild")
+
+
+def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_bytes=None,
+            marks=None):
+    """The fix one row needs NOW: a re-download for an empty or cut-short file, a rebuild for
+    a thumbnail. A row the owner marked lost is left alone."""
+    import moonglade_gallery as g
+    mid = str(media_id or "").strip()
+    marks = read_marks(out_dir) if marks is None else marks
+    row = g.get_row(db_path, mid) if mid else None
+    if not row:
+        return _result(mid, "", ok=False, refused="not_in_catalog")
+    problem = _live_check(Path(out_dir), row, index, g)[0]
+    action = "redownload" if problem in _FILE_PROBLEMS else "rebuild"
+    if (marks.get(mid) or {}).get("mark") == "lost":
+        return _result(mid, action, ok=False, refused="marked_lost")
+    if problem in _FILE_PROBLEMS:
+        return redownload_one(out_dir, db_path, mid, session_factory=session_factory,
+                              index=index, on_bytes=on_bytes)
+    if problem in REBUILD_PROBLEMS:
+        return rebuild_one(out_dir, db_path, mid, index=index)
+    return _result(mid, action, note="already sound")
+
+
+def reverify(out_dir, db_path, media_ids):
+    """Check THESE catalog rows again (read-only) and rewrite both reports in place: their
+    old row lines go, the lines a fresh check finds come in, and the counts follow. Every
+    other line stays as the full check wrote it, and so does its `verified_at`; this run is
+    stamped `reverified_at`. Returns the new summary, or None when there is no report."""
+    import moonglade_gallery as g
+    out = Path(out_dir)
+    summary = read_summary(out)
+    if summary is None:
+        return None
+    ids = {str(m) for m in media_ids if str(m).strip()}
+    row_problems = set(_SEVERITY) - {P_UNCATALOGED, P_ORPHAN_THUMB}
+    lines = [ln for ln in read_lines(out) if not (ln[0] in ids and ln[1] in row_problems)]
+    index = _index(out, g)
+    deep = bool(summary.get("deep"))
+    for r in g.rows_for_media_ids(db_path, sorted(ids)):
+        if not str(r.get("filename") or "").strip():
+            continue
+        line = _line_for(r, _row_check(r, index, deep, g.GALLERY_DIRNAME), g)
+        if line:
+            lines.append(line)
+    lines.sort(key=lambda ln: (_SEVERITY.get(ln[1], 9), ln[0], ln[2]))
+    summary = dict(summary, counts=_counts(lines),
+                   lost=sum(1 for ln in lines if ln[4] == "no"), reverified_at=_utc_now())
+    _write_reports(out, lines, summary)
+    return summary
+
+
+def run_summary(fixed, total, results, stopped=False):
+    """The run's last line, for its Activity row: "Fixed 11 of 12 · 1 couldn't be
+    re-downloaded". Failures are counted by what was being tried."""
+    failed = [r for r in results if not r.get("ok")]
+    redl = sum(1 for r in failed if r.get("action") == "redownload")
+    reb = sum(1 for r in failed if r.get("action") == "rebuild")
+    other = len(failed) - redl - reb
+    parts = ["Fixed {} of {}".format(fixed, total)]
+    if redl:
+        parts.append("{} couldn't be re-downloaded".format(redl))
+    if reb:
+        parts.append("{} thumbnail{} couldn't be rebuilt".format(reb, "" if reb == 1 else "s"))
+    if other:
+        parts.append("{} couldn't be fixed".format(other))
+    if stopped:
+        parts.append("stopped")
+    return " · ".join(parts)
+
+
+class FixRunner:
+    """One fix run at a time, on a thread of the server, so closing Health never stops it.
+
+    start(ids)  takes the chosen ids, keeps the ones on the Broken files list (the rest come
+                back as `refused`), and fixes them in order: fix_one per id, so every row
+                goes through the same checks as a single click -- the archive-only refusal
+                included. Answers the run's status, or None while a run is going.
+    stop()      finishes the current file and stops. Nothing is rolled back.
+    status()    a copy of the run: total, done, fixed, failed, the current row with its
+                bytes (a true fraction for the byte bar), and every result so far.
+
+    The run mirrors itself to the Activity tray through `log_job` (type "integrity"), and
+    when it ends the rows it touched are checked again (reverify) so Health's tiles and the
+    list read the result."""
+
+    def __init__(self, out_dir, db_path, log_job=None, session_factory=None):
+        self.out = Path(out_dir)
+        self.db = Path(db_path)
+        self._log = log_job or (lambda *a, **k: None)
+        self._session_factory = session_factory
+        self._fix = fix_one
+        self._lock = threading.Lock()
+        self._thread = None
+        self._state = {"running": False, "job_id": "", "total": 0, "done": 0, "fixed": 0,
+                       "failed": 0, "current": None, "results": [], "stopped": False,
+                       "stop": False, "refused": [], "finished_at": None, "summary": ""}
+
+    def status(self):
+        with self._lock:
+            st = dict(self._state)
+            st["results"] = [dict(r) for r in self._state["results"]]
+            st["current"] = dict(self._state["current"]) if self._state["current"] else None
+            st.pop("stop", None)
+        return st
+
+    def stop(self):
+        with self._lock:
+            if self._state["running"]:
+                self._state["stop"] = True
+
+    def wait(self, timeout=None):
+        t = self._thread
+        if t is not None:
+            t.join(timeout)
+
+    def start(self, ids):
+        import uuid
+        wanted = list(dict.fromkeys(str(i).strip() for i in (ids or []) if str(i).strip()))
+        listed = listed_ids(self.out)
+        take = [m for m in wanted if m in listed]
+        refused = [m for m in wanted if m not in listed]
+        with self._lock:
+            if self._state["running"]:
+                return None
+            job_id = "integrity-" + uuid.uuid4().hex[:12]
+            self._state = {"running": bool(take), "job_id": job_id if take else "",
+                           "total": len(take), "done": 0, "fixed": 0, "failed": 0,
+                           "current": None, "results": [], "stopped": False, "stop": False,
+                           "refused": refused, "finished_at": None, "summary": ""}
+        if not take:
+            return self.status()
+        label = "Fixing {} file{}".format(len(take), "" if len(take) == 1 else "s")
+        self._log(job_id, status="running", type="integrity", label=label, done=0,
+                  total=len(take))
+        self._thread = threading.Thread(target=self._run, args=(job_id, take), daemon=True,
+                                        name="moonglade-integrity-fix")
+        self._thread.start()
+        return self.status()
+
+    def _on_bytes(self, n, total):
+        with self._lock:
+            cur = self._state["current"]
+            if cur is not None:
+                cur["bytes"], cur["expect"] = int(n), int(total or 0)
+
+    def _run(self, job_id, ids):
+        import moonglade_gallery as g
+        touched = []
+        err = ""
+        try:
+            index = _index(self.out, g)
+            marks = read_marks(self.out)
+            for mid in ids:
+                with self._lock:
+                    if self._state["stop"]:
+                        self._state["stopped"] = True
+                        break
+                    self._state["current"] = {"media_id": mid, "bytes": 0, "expect": 0}
+                try:
+                    res = self._fix(self.out, self.db, mid, session_factory=self._session_factory,
+                                    index=index, on_bytes=self._on_bytes, marks=marks)
+                except Exception:                      # noqa: BLE001 -- one row, never the run
+                    res = _result(mid, "", ok=False, error="Couldn't fix this file.")
+                touched.append(mid)
+                with self._lock:
+                    st = self._state
+                    st["results"].append(res)
+                    st["done"] += 1
+                    st["fixed" if res.get("ok") else "failed"] += 1
+                    st["current"] = None
+                    done, total = st["done"], st["total"]
+                self._log(job_id, status="running", done=done, total=total)
+            else:
+                with self._lock:
+                    self._state["stopped"] = bool(self._state["stop"]) and \
+                        self._state["done"] < self._state["total"]
+            if touched:
+                reverify(self.out, self.db, touched)
+        except Exception as e:                         # noqa: BLE001 -- the run ends, said
+            err = "The fix run stopped: {}".format(str(e)[:120])
+        finally:
+            with self._lock:
+                st = self._state
+                st["running"] = False
+                st["current"] = None
+                st["finished_at"] = _utc_now()
+                st["summary"] = run_summary(st["fixed"], st["total"], st["results"],
+                                            stopped=st["stopped"])
+                summary, failed, done, total = st["summary"], st["failed"], st["done"], st["total"]
+            self._log(job_id, status="done_with_errors" if (failed or err) else "done",
+                      label=summary, done=done, total=total, error=(err or None))

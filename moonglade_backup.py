@@ -1361,8 +1361,9 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
 # will ever report them finished. Deliberately EXCLUDES "cli-": a CLI job belongs to a separate
 # process with its own lifetime that the server knows nothing about, so sweeping one would mark a
 # genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
-# resolve_orphan_jobs() instead.
-_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-")
+# resolve_orphan_jobs() instead. "integrity-" is the Broken files list's fix run (a thread in
+# the server, moonglade_integrity.FixRunner).
+_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-", "integrity-")
 
 
 def resolve_interrupted_local_jobs(out_dir, now=None):
@@ -2432,8 +2433,12 @@ def _atomic_replace(tmp, dest, attempts=6, base_delay=0.15):
 
 
 def download(session, url, stem, retries=3, convert=None,
-             jpeg_quality=92, jpeg_bg="white", keep_webp=False):
-    """stem is a Path WITHOUT extension. Returns (status, final_path_or_None)."""
+             jpeg_quality=92, jpeg_bg="white", keep_webp=False, progress=None):
+    """stem is a Path WITHOUT extension. Returns (status, final_path_or_None).
+
+    `progress`, when given, is called as progress(bytes_so_far, content_length) after each
+    chunk is written (content_length 0 when the response sends none): the Broken files list's
+    byte bar (Session W) rides it. It only watches; it changes nothing about the download."""
     existing = [p for p in stem.parent.glob(stem.name + ".*")
                 if not p.name.endswith(".part") and p.stat().st_size > 0]
     if existing:
@@ -2462,6 +2467,8 @@ def download(session, url, stem, retries=3, convert=None,
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
                         nbytes += len(chunk)
+                        if progress:
+                            progress(nbytes, expect if enc == "identity" else 0)
                 if nbytes == 0:
                     # A 200 with an empty body -- a truncated connection, not a real
                     # image. Promoting this to `dest` would create a permanent,
