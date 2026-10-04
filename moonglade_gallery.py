@@ -6659,28 +6659,38 @@ def _ps_quote(s):
     return "'" + str(s).replace("'", "''") + "'"
 
 
+def _mark_ico_path(mark_id):
+    """The app icon for `mark_id` as a REAL file on disk, or None when the mark has no .ico
+    cut. The Desktop launcher (make_launcher_shortcut) and the pack's Explorer file type
+    (register_pack_file_type) both point Windows at it, and Windows reads an icon only off
+    disk: a loose cut in the coded tree wins; a pack-shipped one is materialized into a
+    git-ignored, regenerable cache. (The cache subfolder keeps its plain 'marks' name -- it
+    lives outside the goods root, so it is not part of the coded tree.)"""
+    ico = _role_dir("marks") / (str(mark_id) + ".ico")
+    if ico.exists():
+        return ico
+    raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
+    if raw is None:
+        return None
+    cache = branding_root().parent / "_container_cache" / "marks"
+    try:
+        cache.mkdir(parents=True, exist_ok=True)
+        ico = cache / (str(mark_id) + ".ico")
+        ico.write_bytes(raw)
+    except OSError:
+        return None
+    return ico
+
+
 def make_launcher_shortcut(out_dir, mark_id):
     """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
     chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
-    ico = _role_dir("marks") / (str(mark_id) + ".ico")
-    if not ico.exists():
-        # A container-shipped .ico must become a REAL file: PowerShell's
-        # CreateShortcut reads IconLocation straight off disk, servable bytes
-        # aren't enough. Materialized into a git-ignored cache, regenerable.
-        # (The cache subfolder keeps its plain 'marks' name -- it lives outside
-        # the goods root, so it is not part of the coded tree.)
-        raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
-        if raw is not None:
-            cache = branding_root().parent / "_container_cache" / "marks"
-            try:
-                cache.mkdir(parents=True, exist_ok=True)
-                ico = cache / (str(mark_id) + ".ico")
-                ico.write_bytes(raw)
-            except OSError:
-                raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
-    if not ico.exists():
+    # PowerShell's CreateShortcut reads IconLocation straight off disk, so a
+    # pack-shipped .ico is materialized first (_mark_ico_path).
+    ico = _mark_ico_path(mark_id)
+    if ico is None:
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     repo = Path(__file__).resolve().parent
     pyw = repo / "Serve Gallery.pyw"
@@ -6704,6 +6714,76 @@ def make_launcher_shortcut(out_dir, mark_id):
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "PowerShell failed").strip()[:200])
     return str(lnk)
+
+
+# The art pack's own file type in Explorer (pack v7; the owner approved the per-user registry
+# entry 2026-10-02). The app's first registry write, so it is kept to this one function.
+PACK_PROGID = "MoongladeAthenaeum.ArtPack"
+PACK_TYPE_NAME = "Moonglade art pack"
+
+
+def register_pack_file_type(out_dir, winreg=None, platform=None):
+    """Give the art pack a type of its own in Explorer -- the name "Moonglade art pack" and the
+    app's icon, instead of a blank Type column and a generic icon. A real start runs this
+    (main()) once the pack is present. Current user only, under HKEY_CURRENT_USER\\Software\\
+    Classes: no admin rights, no other account touched, nothing machine-wide:
+
+        .mgpack                                 (default)          MoongladeAthenaeum.ArtPack
+        MoongladeAthenaeum.ArtPack              (default)          Moonglade art pack
+                                                FriendlyTypeName   Moonglade art pack
+        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <the launcher's .ico>,0
+
+    The icon is the current mark's, the same file the Desktop shortcut uses (_mark_ico_path);
+    with no .ico cut the type is written without one. There is deliberately NO open command:
+    the pack is data the app reads, not a document, so double-clicking one does nothing.
+
+    Each value is read first and written only when it differs, so a start that finds them in
+    place writes nothing (and only a start that wrote asks Explorer to refresh). A no-op off
+    Windows. Any error logs one warning and returns: a missing file type is cosmetic and must
+    never stop the server. `winreg` and `platform` are seams for the tests, which always pass a
+    fake registry. Returns True when something was written."""
+    if (platform or sys.platform) != "win32" or not _container_path().is_file():
+        return False
+    try:
+        if winreg is None:
+            import winreg
+        classes = "Software\\Classes\\"
+        want = [(classes + _container_path().suffix, "", PACK_PROGID),
+                (classes + PACK_PROGID, "", PACK_TYPE_NAME),
+                (classes + PACK_PROGID, "FriendlyTypeName", PACK_TYPE_NAME)]
+        icon = _mark_ico_path(load_branding(out_dir)["mark"])
+        if icon is not None:
+            want.append((classes + PACK_PROGID + "\\DefaultIcon", "", str(icon) + ",0"))
+        wrote = False
+        for key_path, name, value in want:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                    if winreg.QueryValueEx(key, name)[0] == value:
+                        continue                   # already right: leave it alone
+            except OSError:
+                pass                               # not there yet: write it below
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key_path, 0,
+                                    winreg.KEY_WRITE) as key:
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+            wrote = True
+        if wrote:
+            _tell_explorer_file_types_changed()
+        return wrote
+    except Exception as e:                         # noqa: BLE001 -- cosmetic, never fatal
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "art pack: could not register its Explorer file type (%s); carrying on.", e)
+        return False
+
+
+def _tell_explorer_file_types_changed():
+    """SHChangeNotify(SHCNE_ASSOCCHANGED): Explorer picks up the new type name and icon now
+    instead of at the next sign-in. Best-effort; it changes nothing by itself."""
+    try:
+        import ctypes
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+    except Exception:                              # noqa: BLE001 -- a refresh hint only
+        pass
 
 
 # Prompt word-cloud vocabulary, shared by the /health word cloud and the Watchword
@@ -29140,6 +29220,9 @@ def main():
     # assets are already in the coded dirs to resolve against, and before
     # create_app(), so its ensure pass stamps renders with a recorded pick.
     _record_slot_resolution(out_dir)
+    # The pack's Explorer file type, per-user and fail-soft (register_pack_file_type). After
+    # the rename and the scaffold, so the pack and a custom mark's .ico are where it looks.
+    register_pack_file_type(out_dir)
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)
