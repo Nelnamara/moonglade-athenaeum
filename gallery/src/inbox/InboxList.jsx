@@ -28,6 +28,7 @@ function thumbOf(art) {
    then a read-back of the count. */
 export function MarkAllMenu({ tab }) {
   const [menu, setMenu] = useState(false);
+  if (tab === "gifts") return null;      // gifts clear on claim, never by a watermark
   return (
     <span className="ib-menuwrap">
       <button type="button" className="ib-more" aria-label="More" aria-expanded={menu}
@@ -35,7 +36,7 @@ export function MarkAllMenu({ tab }) {
       {menu ? (
         <span className="ib-menu" role="menu">
           <button type="button" role="menuitem" className="ib-menuitem"
-            onClick={() => { setMenu(false); markAllRead(tab === "gifts" ? "all" : tab); }}>
+            onClick={() => { setMenu(false); markAllRead(tab); }}>
             Mark all read
           </button>
         </span>

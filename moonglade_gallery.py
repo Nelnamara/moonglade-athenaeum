@@ -27999,7 +27999,7 @@ __DESIGN_TOKENS__
         body, bad = _inbox_write_body()
         if bad:
             return bad
-        return _inbox_write(_inbox().mark_all_read, str(body.get("tab") or "all"))
+        return _inbox_write(_inbox().mark_all_read, str(body.get("tab") or ""))
 
     def _own_work(artwork_id):
         """True when `artwork_id` is one of the owner's own published works -- a row in this

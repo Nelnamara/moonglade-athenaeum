@@ -589,7 +589,7 @@ def mark_read(session, ids):
     return _answer("done", "Marked read on PixAI.")
 
 
-def mark_all_read(session, tab="all"):
+def mark_all_read(session, tab):
     """⋯ Mark all read: ONE PUT /v2/user/me/notifications/read-marks {"types": [...]} --
     PixAI's watermark, "everything of these types up to now counts as read" -- for the types
     the tab shows that PixAI counts unread right now (never TASK, never a type PixAI's enum
@@ -598,7 +598,11 @@ def mark_all_read(session, tab="all"):
         core._check_read_only("mark everything read on PixAI")
     except core.PixAIError:
         return _read_only_answer("nothing is marked read on PixAI")
-    cats = TABS.get(str(tab or "all"), TABS["all"])
+    # The tab names exactly which kinds are marked. One it doesn't know (Gifts has no
+    # watermark; a missing or misspelt tab) is refused -- never quietly widened to All.
+    cats = TABS.get(tab) if isinstance(tab, str) else None
+    if not cats:
+        return _answer("refused", "That isn't an inbox tab, so nothing was marked read.")
     try:
         counts = unread_counts(session)
     except Exception:                                        # noqa: BLE001

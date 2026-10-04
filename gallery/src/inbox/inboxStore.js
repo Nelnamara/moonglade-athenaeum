@@ -220,7 +220,7 @@ export function markAllRead(tab) {
     set({ allNotice: "Read-only mode is on, so nothing is marked read on PixAI." });
     return Promise.resolve(null);
   }
-  return apiPost("/api/inbox/read-all", { csrf: state.csrf, tab: tab || "all" }).then((d) => {
+  return apiPost("/api/inbox/read-all", { csrf: state.csrf, tab }).then((d) => {
     if (d && d.state === "done") {
       set({ allNotice: "", items: state.items.map((x) => ({ ...x, unread: false })) });
       readCount();

@@ -97,6 +97,15 @@ describe("opening writes nothing (R3b)", () => {
   });
 });
 
+describe("Mark all read names its own tab (review item 2)", () => {
+  test("the Gifts tab has no Mark all read, and no tab is ever turned into All", () => {
+    assert.match(list, /export function MarkAllMenu\(\{ tab \}\) \{\n  const \[menu, setMenu\] = useState\(false\);\n  if \(tab === "gifts"\) return null;/);
+    assert.ok(!/"gifts" \? "all"/.test(list + box + src("gallery/src/inbox/InboxSheets.jsx")));
+    assert.match(fnBody(store, "markAllRead"), /\{ csrf, tab \}|tab \}\)/);
+    assert.ok(!/tab \|\| "all"/.test(fnBody(store, "markAllRead")), "the store must not default a tab to all");
+  });
+});
+
 describe("delivery (R4b)", () => {
   test("the live count rides the Activity poll; a reconnect re-reads the count; focus at most every 30 s", () => {
     assert.match(jobs, /if \(d && !d\.error && d\.inbox\) pollListeners\.forEach/);

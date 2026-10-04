@@ -363,3 +363,18 @@ def test_the_mark_read_route_answers_the_write(tmp_path, pixai):
     csrf = cli.get("/api/inbox").get_json()["csrf"]
     d = cli.post("/api/inbox/read", json={"csrf": csrf, "ids": ["n1"]}).get_json()
     assert d["state"] == "done"
+
+
+@pytest.mark.parametrize("tab", ["gifts", "", None, "everything", "ALL"])
+def test_mark_all_read_refuses_a_tab_it_does_not_know_and_never_falls_back_to_all(pixai, tab):
+    out = inbox.mark_all_read(pixai, tab)
+    assert out["state"] == "refused" and pixai.calls == []
+
+
+def test_the_mark_all_route_sends_no_tab_as_no_tab(tmp_path, pixai):
+    pixai.on("/user/me/notifications/", _page([]))
+    cli = login_test_client(_app_with_work(tmp_path))
+    csrf = cli.get("/api/inbox").get_json()["csrf"]
+    pixai.calls.clear()
+    d = cli.post("/api/inbox/read-all", json={"csrf": csrf}).get_json()
+    assert d["state"] == "refused" and pixai.calls == []
