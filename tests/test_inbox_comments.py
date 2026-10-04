@@ -75,6 +75,39 @@ def test_the_thread_is_cached_five_minutes_in_memory(pixai, monkeypatch):
     assert len(pixai.calls_for("/messages/")) == 2
 
 
+def test_an_expired_thread_is_swept_out_of_memory_on_the_next_insert(pixai, monkeypatch):
+    """Review item 5: strangers' words must not outlive the five minutes, even for a work
+    nobody opens again."""
+    pixai.on("/messages/", lambda call: _thread(_msg("1001")) if call.params["topicId"] == ART
+             else _thread(_msg("1002", content="another work's words")))
+    now = [1000.0]
+    monkeypatch.setattr(inbox.time, "time", lambda: now[0])
+    inbox.read_thread(pixai, ART)
+    now[0] += inbox.THREAD_TTL + 1
+    inbox.read_thread(pixai, "1788621522581677000")
+    assert (ART, 1) not in inbox._thread_cache
+    assert WORDS not in repr(inbox._thread_cache)
+
+
+def test_the_thread_cache_holds_a_bounded_number_of_pages_oldest_out(pixai, monkeypatch):
+    pixai.on("/messages/", _thread(_msg("1001")))
+    now = [1000.0]
+    monkeypatch.setattr(inbox.time, "time", lambda: now[0])
+    for i in range(inbox.THREAD_CACHE_MAX + 5):
+        now[0] += 1
+        inbox.read_thread(pixai, str(1788621522581677000 + i))
+    assert len(inbox._thread_cache) == inbox.THREAD_CACHE_MAX
+    assert (str(1788621522581677000), 1) not in inbox._thread_cache          # the oldest went first
+
+
+@pytest.mark.parametrize("page,sent", [(10 ** 9, None), (0, 1), (-3, 1), ("abc", 1), (None, 1)])
+def test_the_page_is_bounded(pixai, page, sent):
+    pixai.on("/messages/", _thread(_msg("1001")))
+    inbox.read_thread(pixai, ART, page=page)
+    asked = pixai.calls_for("/messages/")[0].params["page"]
+    assert asked == (inbox.THREAD_MAX_PAGE if sent is None else sent)
+
+
 # ---------------------------------------------------------------------------
 # The reply (R6c)
 # ---------------------------------------------------------------------------

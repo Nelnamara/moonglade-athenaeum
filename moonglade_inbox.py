@@ -638,6 +638,8 @@ def mark_all_read(session, tab):
 
 THREAD_TTL = 300.0
 THREAD_PAGE = 50
+THREAD_MAX_PAGE = 100            # 5,000 comments deep is as far as "Load older" goes
+THREAD_CACHE_MAX = 40            # pages held at once; the oldest goes first
 _thread_cache = {}               # (artwork_id, page) -> (at, payload); this process only
 _thread_lock = threading.Lock()
 _ID = re.compile(r"^[0-9]{1,24}$")
@@ -721,7 +723,11 @@ def read_thread(session, artwork_id, page=1):
     catalog, a file or a log. Raises on a failed read (the thread then says so; it is never
     drawn as "no comments")."""
     artwork_id = _checked_id(artwork_id, "work")
-    page = max(1, int(page or 1))
+    try:
+        page = int(page or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, min(page, THREAD_MAX_PAGE))
     key = (artwork_id, page)
     with _thread_lock:
         hit = _thread_cache.get(key)
@@ -739,9 +745,23 @@ def read_thread(session, artwork_id, page=1):
         pages = 1
     out = {"items": [comment_of(r, me) for r in rows if isinstance(r, dict)],
            "page": page, "total": total, "has_more": page < pages, "me": me}
-    with _thread_lock:
-        _thread_cache[key] = (time.time(), out)
+    _cache_thread(key, out)
     return out
+
+
+def _cache_thread(key, page):
+    """Keep one page of a thread for THREAD_TTL. Every insert first sweeps out the pages
+    whose five minutes are up -- for every work, not only this one, so another person's words
+    never sit in memory past their time just because nobody opened that work again -- and
+    then holds the cache to THREAD_CACHE_MAX pages, oldest out."""
+    now = time.time()
+    with _thread_lock:
+        for k in [k for k, (at, _v) in _thread_cache.items() if now - at >= THREAD_TTL]:
+            _thread_cache.pop(k, None)
+        _thread_cache[key] = (now, page)
+        while len(_thread_cache) > THREAD_CACHE_MAX:
+            oldest = min(_thread_cache, key=lambda k: _thread_cache[k][0])
+            _thread_cache.pop(oldest, None)
 
 
 # ---------------------------------------------------------------------------------------
