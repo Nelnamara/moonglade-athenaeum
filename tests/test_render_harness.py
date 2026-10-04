@@ -9023,3 +9023,265 @@ def test_the_home_screen_nudge_fires_the_browsers_own_install_prompt_where_one_i
         assert page.evaluate("window.__prompted") == 1
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# The owner's walk of the R-Y build (2026-10-04): two doors in the header. The gift box is for
+# rewards only; the inbox has its own ✉ button beside it. Each opens its own panel, and opening
+# one closes the other. On the phone the Inbox sheet loses its Gifts tab. PixAI is never reached:
+# the account read and every /api/inbox read are answered in the page.
+# ---------------------------------------------------------------------------
+
+def _rf_iso(days):
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _rf_account(expiring=True):
+    """A linked account: 13 free cards, 5 of them lapsing in two days unless `expiring` is off."""
+    return {"credits": 46200, "cards": 13, "cards_by": [
+        {"name": "Tsubaki.3", "count": 5, "category": "image", "expires": "",
+         "expiry_counts": [{"expires_at": _rf_iso(2), "count": 5}] if expiring else []},
+        {"name": "Daily recipe", "count": 8, "category": "image", "expires": "", "expiry_counts": []}]}
+
+
+def _rf_items():
+    art = {"id": "17886", "title": "Moonwell Vigil", "thumb": "", "media_id": "100"}
+    return [
+        {"id": "n1", "type": "COMMENT", "cat": "comment", "unread": True, "created_at": _rf_iso(-0.1),
+         "users": [{"id": "u1", "name": "kurone"}], "artwork": art, "content": "the hair light is unreal"},
+        {"id": "n2", "type": "LIKE", "cat": "like", "unread": True, "created_at": _rf_iso(-0.2),
+         "users": [{"id": "u2", "name": "Aster"}], "artwork": art, "content": ""},
+        {"id": "n3", "type": "FOLLOW", "cat": "follow", "unread": True, "created_at": _rf_iso(-1),
+         "users": [{"id": "u3", "name": "Ilya"}], "artwork": None, "content": ""},
+        {"id": "n4", "type": "NEWS", "cat": "news", "unread": False, "created_at": _rf_iso(-2),
+         "users": [], "artwork": None, "content": "Tsubaki.3 now supports 4K"},
+    ]
+
+
+_RF_GIFTS = {"gifts": [{"id": "g1", "what": "3 Tsubaki.3 cards", "status": "PENDING", "expires_at": ""}],
+             "bonuses": [], "has_thread": True, "my_name": "Harness", "read_only": False}
+_RF_EVENTS = [
+    {"label": "zeta", "title": "Zeta", "link": "https://pixai.art/en/event/zeta",
+     "image": "https://banners.test/zeta.png", "end": ""},
+    {"label": "anniversary", "title": "4th anniversary", "link": "https://pixai.art/en/event/4th-anniversary",
+     "image": "https://banners.test/missing.png", "end": ""},
+]
+_RF_BANNER_SIZE = (1200, 300)          # a 4:1 banner, so "its own aspect" is not the 3:1 fallback
+
+
+def _rf_routes(page, count=None, events=None, gifts=None, account=None):
+    """Answer the account read and every inbox read in the page. Returns the inbox POSTs seen."""
+    from io import BytesIO
+
+    from PIL import Image
+    count = count if count is not None else {"total": 7, "unread": 5, "gifts": 2}
+    buf = BytesIO()
+    Image.new("RGB", _RF_BANNER_SIZE, (90, 60, 150)).save(buf, "PNG")
+    png = buf.getvalue()
+    page.route(re.compile(r"/api/account(\?|$)"), lambda r: _q_json(r, account or _rf_account()))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(r, dict(count, csrf="harness")))
+    page.route(re.compile(r"/api/inbox(\?|$)"), lambda r: _q_json(r, {
+        "items": _rf_items(), "cursor": None, "has_more": False, "csrf": "harness", "read_only": False}))
+    page.route(re.compile(r"/api/inbox/gifts(\?|$)"), lambda r: _q_json(r, dict(gifts or _RF_GIFTS, csrf="harness")))
+    page.route(re.compile(r"/api/inbox/events(\?|$)"), lambda r: _q_json(
+        r, {"events": _RF_EVENTS if events is None else events}))
+    page.route("https://banners.test/zeta.png", lambda r: r.fulfill(status=200, content_type="image/png", body=png))
+    page.route("https://banners.test/missing.png", lambda r: r.fulfill(status=404, body=b""))
+    posts = []
+    page.on("request", lambda rq: posts.append(rq.url) if rq.method == "POST" and "/api/inbox" in rq.url else None)
+    return posts
+
+
+def _rf_desktop(logged_in_page, **routes):
+    page = logged_in_page(width=1400, height=1000)
+    posts = _rf_routes(page, **routes)
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox")
+    page.wait_for_selector(".ib-door.gift")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    return page, posts
+
+
+_RF_DOORS_JS = """() => {
+  const r = (el) => { const b = el.getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, w: b.width, h: b.height}; };
+  const inbox = document.querySelector('.ib-door.inbox'), gift = document.querySelector('.ib-door.gift');
+  const chip = document.querySelector('.mgx-sepright button.mgx-cred');
+  const badge = (el) => { const b = el.querySelector('.ib-badge'); return b ? b.textContent : null; };
+  return {inbox: r(inbox), gift: r(gift), chip: r(chip), inboxBadge: badge(inbox), giftBadge: badge(gift),
+          inboxTitle: inbox.title, giftTitle: gift.title,
+          glyph: (inbox.querySelector('.ib-door-glyph') || {}).textContent || '',
+          inboxBadgeBg: inbox.querySelector('.ib-badge') && getComputedStyle(inbox.querySelector('.ib-badge')).backgroundColor,
+          giftBadgeBg: gift.querySelector('.ib-badge') && getComputedStyle(gift.querySelector('.ib-badge')).backgroundColor,
+          giftArt: getComputedStyle(gift).backgroundImage, inboxArt: getComputedStyle(inbox).backgroundImage};
+}"""
+
+
+def test_the_header_has_an_inbox_door_then_the_gift_box_then_the_credits_chip(logged_in_page):
+    """Owner's walk, ruling 1. Left of the credits chip: ✉ Inbox, then 🎁 Gift box, twins at 30 x 30
+    with an 8 px gap between each. ✉ carries the unread notifications, 🎁 only the pending gifts, each
+    with the lavender badge and nothing at 0; ✉ caps at 99+."""
+    page, _ = _rf_desktop(logged_in_page)
+    g = page.evaluate(_RF_DOORS_JS)
+    for k in ("inbox", "gift"):
+        assert abs(g[k]["w"] - 30) < 0.5 and abs(g[k]["h"] - 30) < 0.5, g
+    assert abs(g["gift"]["l"] - g["inbox"]["r"] - 8) < 1, ("8 px from ✉ to 🎁", g)
+    assert abs(g["chip"]["l"] - g["gift"]["r"] - 8) < 1, ("8 px from 🎁 to the credits chip", g)
+    assert (g["inboxBadge"], g["giftBadge"]) == ("5", "2"), g
+    assert g["inboxBadgeBg"] == g["giftBadgeBg"], g
+    assert (g["inboxTitle"], g["giftTitle"]) == ("PixAI inbox", "Gift box"), g
+    assert g["glyph"] == "✉", g
+    assert "gift.png" in g["giftArt"] and "gift.png" not in g["inboxArt"], g
+
+    page.unroute(re.compile(r"/api/inbox/count(\?|$)"))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(
+        r, {"total": 0, "unread": 0, "gifts": 0, "csrf": "harness"}))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.gift")
+    _settle(page)
+    g = page.evaluate(_RF_DOORS_JS)
+    assert (g["inboxBadge"], g["giftBadge"]) == (None, None), ("no badge at 0", g)
+
+    page.unroute(re.compile(r"/api/inbox/count(\?|$)"))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(
+        r, {"total": 120, "unread": 120, "gifts": 0, "csrf": "harness"}))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox .ib-badge")
+    g = page.evaluate(_RF_DOORS_JS)
+    assert (g["inboxBadge"], g["giftBadge"]) == ("99+", None), g
+
+
+_RF_PANEL_JS = """() => {
+  const p = document.querySelector('.ib-panel');
+  if (!p) return null;
+  const b = p.getBoundingClientRect();
+  return {label: p.getAttribute('aria-label'), title: (p.querySelector('.ib-title') || {}).textContent || '',
+          w: b.width, z: getComputedStyle(p).zIndex,
+          tabs: [...p.querySelectorAll('.ib-chip')].map((c) => c.textContent),
+          labs: [...p.querySelectorAll('.ib-lab')].map((c) => c.textContent),
+          rows: p.querySelectorAll('.ib-row').length, events: p.querySelectorAll('.ib-event').length,
+          gifts: [...p.querySelectorAll('.ib-gift-t')].map((c) => c.textContent),
+          claim: [...p.querySelectorAll('.ib-gift .ib-btn')].map((c) => c.textContent),
+          expiry: [...p.querySelectorAll('.ib-expiry-line')].map((c) => ({t: c.textContent, color: getComputedStyle(c).color})),
+          dim: [...p.querySelectorAll('.ib-dim')].map((c) => c.textContent),
+          more: p.querySelectorAll('.ib-more').length,
+          count: document.querySelectorAll('.ib-panel').length};
+}"""
+
+_RF_PEACH_JS = ("() => { const s = document.createElement('span'); s.style.color = 'var(--peach)'; document.body.appendChild(s);"
+                " const c = getComputedStyle(s).color; s.remove(); return c; }")
+
+
+def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_other(logged_in_page):
+    """Owner's walk, ruling 1. ✉ opens the inbox without anything gift- or event-related: "Inbox" and its
+    new count, the tabs All · Comments · Likes · Follows · PixAI, the work cards then everything else, ⋯.
+    🎁 opens "Gift box": ON PIXAI NOW, the cards about to expire in peach (the chip hover's own lines),
+    then the gifts with Claim ▸. Same 380 px, z 300 panel; opening one closes the other, by click or by
+    keyboard; Esc closes. Opening either writes nothing."""
+    page, posts = _rf_desktop(logged_in_page)
+
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox'] .ib-row")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["title"] == "Inbox" and abs(p["w"] - 380) < 1 and p["z"] == "300", p
+    assert p["tabs"] == ["All", "Comments", "Likes", "Follows", "PixAI"], p
+    assert "ON PIXAI NOW" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
+    assert p["gifts"] == [] and p["expiry"] == [], ("no gifts and no expiring cards in the inbox", p)
+    assert p["rows"] >= 3 and p["more"] == 1, p
+    assert page.locator(".ib-panel .ib-new").inner_text() == "5 new"
+
+    # the gift box, by a click: the inbox closes
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-event")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["count"] == 1 and p["title"] == "Gift box", p
+    assert abs(p["w"] - 380) < 1 and p["z"] == "300", p
+    assert p["tabs"] == [] and p["rows"] == 0 and p["more"] == 0, ("no tabs, no inbox rows, no ⋯", p)
+    assert p["labs"][:1] == ["ON PIXAI NOW"] and p["events"] == 2, p
+    peach = page.evaluate(_RF_PEACH_JS)
+    assert len(p["expiry"]) == 1, p
+    assert re.match(r"^5 Tsubaki\.3 expire [A-Z][a-z]{2} \d{1,2} · (today|tomorrow|in \d days)$",
+                    p["expiry"][0]["t"]), p
+    assert p["expiry"][0]["color"] == peach, p
+    assert p["gifts"] == ["Gift from PixAI · 3 Tsubaki.3 cards"] and p["claim"] == ["Claim ▸"], p
+    order = page.evaluate("""() => { const p = document.querySelector('.ib-panel');
+      const y = (s) => p.querySelector(s).getBoundingClientRect().top;
+      return [y('.ib-event'), y('.ib-expiry-line'), y('.ib-gift')]; }""")
+    assert order == sorted(order), ("events, then the expiring cards, then the gifts", order)
+
+    # the inbox again, by the keyboard: no mousedown reaches the document, the gift box still closes
+    page.focus(".ib-door.inbox")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box']", state="detached")
+    assert page.locator(".ib-door.inbox.lift").count() == 1 and page.locator(".ib-door.gift.lift").count() == 0
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".ib-panel", state="detached")
+    assert posts == [], ("opening, switching and closing the panels writes nothing", posts)
+
+
+def test_an_empty_gift_box_says_so_in_one_quiet_line(logged_in_page):
+    """Owner's walk, ruling 1. No event live, no card about to expire and no gift: one line, and none of
+    the three sections."""
+    page, posts = _rf_desktop(logged_in_page, events=[], account=_rf_account(expiring=False),
+                              gifts={"gifts": [], "bonuses": [], "has_thread": False, "my_name": "", "read_only": False},
+                              count={"total": 0, "unread": 0, "gifts": 0})
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-dim")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["dim"] == ["Nothing waiting. Gifts from PixAI and cards about to expire show here."], p
+    assert p["labs"] == [] and p["events"] == 0 and p["expiry"] == [] and p["gifts"] == [], p
+    assert posts == []
+
+
+def _rf_phone(logged_in_page, **routes):
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    posts = _rf_routes(page, **routes)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    return page, posts
+
+
+def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(logged_in_page):
+    """Owner's walk, ruling 1, on the phone. The Menu's first two rows stay Inbox and Gift box and the ☰
+    badge stays unread plus pending gifts; the Inbox row counts the unread. The Inbox sheet has no Gifts
+    tab and no gift rows; gifts live only in the Gift box sheet, beside the events and the expiring
+    cards."""
+    page, posts = _rf_phone(logged_in_page)
+    assert page.locator(".glm-iconbtn[title=More] .ib-menubadge").inner_text() == "7"
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-list .glm-menu-item")
+    _settle(page)
+    rows = page.evaluate("() => [...document.querySelectorAll('.glm-menu-list .glm-menu-item')].slice(0, 2)"
+                         ".map((b) => b.textContent)")
+    assert rows[0].startswith("✉Inbox") and rows[0].endswith("5 new ›"), rows
+    assert rows[1].startswith("Gift box"), rows
+
+    page.click(".glm-menu-item:has-text('Inbox')")
+    page.wait_for_selector(".ib-sheet .ib-row")
+    _settle(page)
+    tabs = page.evaluate("() => [...document.querySelectorAll('.ib-sheet .ib-chip')].map((c) => c.textContent)")
+    assert tabs == ["All", "Comments", "Likes", "Follows", "PixAI"], tabs
+    assert page.locator(".ib-sheet .ib-gift").count() == 0 and page.locator(".ib-sheet .ib-event").count() == 0
+    assert page.locator(".ib-sheet .ib-new").inner_text() == "5 new"
+
+    page.mouse.click(195, 12)                 # the scrim above the full-height sheet
+    page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".ib-sheet .ib-gift")
+    page.wait_for_selector(".ib-sheet .ib-event")
+    _settle(page)
+    assert page.locator(".ib-sheet .ib-chip").count() == 0
+    assert page.locator(".ib-sheet .ib-expiry-line").count() == 1
+    assert page.locator(".ib-sheet .ib-gift .ib-btn").inner_text() == "Claim ▸"
+    assert posts == []

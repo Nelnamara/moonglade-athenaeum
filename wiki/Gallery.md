@@ -83,12 +83,13 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows or likes on your behalf, and it comments only when you write a
   reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
-- **The gift box** (just left of the credits chip, shown once a PixAI account is linked) is your
-  **PixAI inbox**. Its lavender badge is how many of PixAI's notifications you haven't read, plus
-  any gift waiting to be claimed. Click it for the panel: tabs for **All · Comments · Likes ·
-  Follows · Gifts · PixAI**, then **ON PIXAI NOW** (the event PixAI is running, when there is
-  one), then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
-  quoted), then everything else — new followers folded per day, contest results, PixAI's news.
+- **✉ Inbox** and **🎁 Gift box** — two buttons just left of the credits chip, shown once a PixAI
+  account is linked. The inbox is everything PixAI tells you; the gift box is only what you can
+  collect.
+- **✉ Inbox** is your **PixAI inbox**. Its lavender badge is how many of PixAI's notifications you
+  haven't read. Click it for the panel: tabs for **All · Comments · Likes · Follows · PixAI**, then
+  one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment quoted), then
+  everything else — new followers folded per day, contest results, PixAI's news.
   Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
   app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
   **website** run, and a job Activity holds as failed that PixAI says finished gets a dim
@@ -102,6 +103,11 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     it), and the count is re-read when the app opens, when the window comes back to the front
     (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
     notice in the corner, with **Later** and **Open thread**.
+- **🎁 Gift box** is for rewards. Its lavender badge is how many gifts are waiting to be claimed.
+  Click it for its own panel (opening one panel closes the other): **ON PIXAI NOW** (the events
+  PixAI is running, when there are any), then the free cards about to expire (in peach, the same
+  lines the credits chip's hover shows), then your gifts. With none of the three, it says
+  *Nothing waiting*. Opening it only reads.
   - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
     holds, which account it goes to and when it expires before a **Claim** button: one attempt,
     then the app reads the gift back and says *Claimed*, or in peach *Already claimed* /
@@ -111,18 +117,19 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   - **ON PIXAI NOW** shows PixAI's live event banners as cards; pressing one opens PixAI's page in
     a new tab. The app never checks in, claims or plays an event for you, and the banner list is
     read without your API key (PixAI only answers it that way), at most once an hour.
-  - **On a phone** the header stays as it was: the **☰** Menu button carries the badge, and
-    **Inbox** and **Gift box** are the Menu's first two rows, each opening a full-height sheet.
-    Inbox is the same list as the desktop panel. Gift box holds the event cards, the free cards
-    about to expire (in peach — the phone has no hover) and your gifts; its row shows the soonest
-    expiry, or how many gifts are waiting.
+- **On a phone** the header stays as it was: the **☰** Menu button carries one badge (unread
+  notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
+  each opening a full-height sheet. Inbox is the same list as the desktop's ✉ panel. Gift box is
+  the desktop's 🎁 panel: the event cards, the free cards about to expire and your gifts; its row
+  shows the soonest expiry, or how many gifts are waiting.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
   **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
   them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
   *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
   the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
-  The dates come from the same card summary the chip already reads. On a phone, where there is
-  no hover, the **Menu**'s **Gift box** row shows the soonest one.
+  The dates come from the same card summary the chip already reads. The **🎁 Gift box** lists
+  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** row shows the
+  soonest one.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
 - **Health** — the [collection health](Health) dashboard, with the storage bars.
@@ -403,7 +410,7 @@ the end, and kept in memory for five minutes. They are never saved to your libra
 log: they are other people's words.
 
 - Each comment shows with its replies folded under **N replies ▸**; a chain you've replied in
-  opens by itself, and so does the one you reached from a quote in the gift box. Your own
+  opens by itself, and so does the one you reached from a quote in the inbox. Your own
   comments wear a **you** badge. Reactions show as a count and stickers as small pictures —
   there is no like, react or report button. A comment PixAI has flagged is hidden, and one line
   at the end says how many.

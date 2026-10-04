@@ -167,7 +167,7 @@ export function refresh() {
       // `update` field -- passing that on would read as "nothing is out" and blank a standing
       // notice over one blip, exactly the way the release check refuses to cache a failure.
       if (d && !d.error) noteUpdate(d.update);
-      // The gift box's live count rides this same poll for the same reason (Sessions R + Y,
+      // The inbox's live count rides this same poll for the same reason (Sessions R + Y,
       // R4b): the live mirror counts PixAI's newNotification and this payload carries it.
       // Handed to whoever listens (inbox/inboxStore.js, in the gallery's shells only).
       if (d && !d.error && d.inbox) pollListeners.forEach((fn) => { try { fn(d.inbox); } catch { /* its own */ } });

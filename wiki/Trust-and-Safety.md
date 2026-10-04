@@ -51,9 +51,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   reply** is offered under a reply you just posted, behind the same kind of question. Other
   people's comments are read live and kept in memory for five minutes — never saved to your
   library, a file or a log.
-- **Mark your PixAI notifications read** when you open one in the gift box (one write for what
+- **Mark your PixAI notifications read** when you open one in the ✉ inbox (one write for what
   that row gathers) or press **Mark all read**. Opening the inbox, scrolling it and new arrivals
-  never mark anything.
+  never mark anything, and opening the gift box writes nothing at all.
 - **Read** your generation history, account/credit balance, and free-card status (including
   how many video tickets each card holds — `--cards`).
 

@@ -1,5 +1,5 @@
-/* inbox/inboxCore.js -- the PURE half of Sessions R + Y (lane R, 2026-10-03): the gift box's
-   badge, how the inbox reads (one card per work, follows folded per day, TASK never told twice),
+/* inbox/inboxCore.js -- the PURE half of Sessions R + Y (lane R, 2026-10-03): the doors'
+   badges, how the inbox reads (one card per work, follows folded per day, TASK never told twice),
    the comment thread's chains, the reply's counter, the free cards about to expire, and the
    gift rows' words. No DOM, no fetch, no clock of its own (every function that needs "now" takes
    it), so `node --test` drives it directly (loom/test/inbox-core.test.js).
@@ -7,15 +7,17 @@
    The design: `Inbox and Event Handoff.dc.html` (picks R1a R2c R3b R4b R5b R6c R9c Y1c Y2a Y3a
    RYPc), notes/inbox-event/NOTES.md, drift 123-133. The server half is moonglade_inbox.py. */
 
+/* The inbox's kind tabs. No Gifts tab: since the owner's walk (2026-10-04) gifts live only in
+   the gift box, the inbox's twin door beside it. */
 export const TABS = [
   ["all", "All"], ["comments", "Comments"], ["likes", "Likes"],
-  ["follows", "Follows"], ["gifts", "Gifts"], ["pixai", "PixAI"],
+  ["follows", "Follows"], ["pixai", "PixAI"],
 ];
 
 const TAB_CATS = {
   all: ["like", "comment", "follow", "contest", "news"],
   comments: ["comment"], likes: ["like"], follows: ["follow"],
-  pixai: ["contest", "news"], gifts: [],
+  pixai: ["contest", "news"],
 };
 
 // The glyph each kind wears: ♥ like · ❝ comment · + follow · ✦ contest · ◆ PixAI news.
@@ -24,7 +26,8 @@ export const GLYPH = { like: "♥", comment: "❝", follow: "+", contest: "✦",
 export const REPLY_MAX = 4095;
 export const EXPIRY_WINDOW_H = 72;
 
-/* The badge on the gift box (and the phone's Menu door): nothing at 0 or unknown, "99+" past 99. */
+/* A door's badge -- the inbox's unread, the gift box's pending gifts, the phone Menu's sum of the
+   two: nothing at 0 or unknown, "99+" past 99. */
 export function badgeText(n) {
   const v = Number(n);
   if (n == null || !isFinite(v) || v <= 0) return "";
