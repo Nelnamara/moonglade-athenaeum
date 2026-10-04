@@ -88,6 +88,11 @@ function toastTransitions(rows) {
     // falls through to the sticky "see the activity card" toast like any other job, and
     // the tracker line stays either way.
     if (j.type === "update" && st === "done") { last[j.job_id] = st; return; }
+    // HEALTH'S FIX RUN SAYS ITS OWN END (Session W, W4c): "Fixed 11 of 12. 1 couldn't be
+    // re-downloaded." with [Show], from lib/brokenFixRun.js, which watches the run itself. The
+    // generic line below would add a second toast, call it "done / Added to your gallery.", and
+    // turn a run with one refused file into a red error. The tracker line stays.
+    if (j.type === "integrity") { last[j.job_id] = st; return; }
     // NOBODY CLICKED IT, SO NOBODY IS TOLD (owner's walk, 2026-09-07: "The automated tasks
     // in the living library stack up completion toasts in the corner -- with the new
     // tracking window I would like to remove the notice toasts completely").

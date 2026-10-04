@@ -414,6 +414,7 @@ html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov,
 html.mg-updbanner-on .mghelp-scrim, html.mg-updbanner-on .mghelp-host,
 html.mg-updbanner-on .mgab-scrim, html.mg-updbanner-on .mgab-host,
 html.mg-updbanner-on .mgwn-scrim, html.mg-updbanner-on .mgwn-host,
+html.mg-updbanner-on .mgbf-scrim, html.mg-updbanner-on .mgbf-host,
 html.mg-updbanner-on .mgguide-block{top:var(--mg-updbanner-h,0px);}
 /* The details page is the one layer above with an explicit height (styles.css, 100dvh for
    drift 122); pushed down without this it would run off the bottom by exactly the strip,

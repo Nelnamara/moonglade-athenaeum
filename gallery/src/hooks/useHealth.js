@@ -39,8 +39,12 @@ export const lastVerified = (integrity) => {
 // REFRESH no longer reports an error over numbers that are seconds old (HealthMobile.jsx
 // returns early on `err` and would have replaced a full screen of good stats with one
 // error line). Nothing cached still surfaces the error exactly as before.
-export default function useHealth() {
-  const { data: h, err } = useSwrGet("/api/health");
+//
+// `refresh` (Session W): a number that moves when something the caller did changed the library
+// under an open Health -- a Broken files fix run -- so the tiles re-measure (?fresh=1, the same
+// walk an explicit refresh asks for). 0, the default, is the plain open it has always been.
+export default function useHealth(refresh = 0) {
+  const { data: h, err } = useSwrGet(refresh ? "/api/health?fresh=1&run=" + refresh : "/api/health");
 
   // Stats tiles: real fields from collection_health(), the full 12-tile set
   // HealthOverlay.jsx already shows on desktop (gold = the celebration

@@ -44,6 +44,8 @@ export const KIND_LABEL = {
   // A claimed daily reward. Without an entry here the fallback renders the raw enum --
   // the exact "Cli" non-word this table exists to prevent.
   claim: "Rewards",
+  // Health's Broken files fix run (Session W).
+  integrity: "Health",
 };
 export function kindLabel(t) { return KIND_LABEL[t] || t || "Job"; }
 

@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import CurateToast from "./CurateToast.jsx";
+import MoonGauge from "./MoonGauge.jsx";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { fractionOf } from "../lib/moonGaugeCore.js";
+import { setBrokenFilesModalUp } from "../lib/brokenFilesNav.js";
 import {
-  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, headerSummary, lostLine,
-  middleEllipsis, pillFor, problemWords, rowAction, rowsFor, shortId, visibleChips,
+  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, confirmLines, fixPlan,
+  headerSummary, lostLine, middleEllipsis, pillFor, problemWords, rowAction, rowsFor, runHeader,
+  shortId, visibleChips,
 } from "../lib/brokenFilesCore.js";
 import "../styles/broken-files.css";
 
@@ -118,18 +123,71 @@ function BrokenRow({ row, bf, menuOpen, setMenu, onOpenDetails, maxPath }) {
   );
 }
 
-export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionRef, headerExtra }) {
+/* "Fix all recoverable" confirms ONCE (W3c): the total, the re-downloads with their estimated
+   size, the local rebuilds, the lost files left alone, "Nothing is deleted." -- and on a metered
+   connection Data saver's line. No "don't ask again". Its own rung above Health's slab
+   (broken-files.css, 428/429; tests/test_z_ladder.py). Exported for the phone's bottom sheet,
+   which shows the same lines. */
+export function FixConfirm({ plan, metered, onCancel, onGo }) {
+  const c = confirmLines(plan, metered);
+  useEffect(() => {
+    setBrokenFilesModalUp(true);
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey, true);
+    return () => { setBrokenFilesModalUp(false); window.removeEventListener("keydown", onKey, true); };
+  }, [onCancel]);
+  return (
+    <>
+      <div className="mgbf-scrim" onClick={onCancel} aria-hidden="true" />
+      <div className="mgbf-host">
+        <div className="mgbf-confirm" role="alertdialog" aria-label={c.title}>
+          <div className="mgbf-ctitle">{c.title}</div>
+          {c.lines.map((l) => <div className="mgbf-cline" key={l}>{l}</div>)}
+          <div className="mgbf-cacts">
+            <button type="button" className="mgbf-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="mgbf-btn" onClick={onGo} autoFocus>{c.go}</button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionRef }) {
   const [menu, setMenu] = useState(null);
+  const [asking, setAsking] = useState(false);
+  const saver = useDataSaver();
+  const metered = !!(saver.active && saver.info && saver.info.metered);
   const doc = bf.doc;
   const chips = visibleChips(doc && doc.counts);
   const rows = rowsFor(doc, chip, bf.gone);
+  const plan = fixPlan(doc, bf.readOnly, bf.done);
+  const go = () => { setAsking(false); if (plan.total) bf.fix(plan.ids); };
   return (
     <section className="mgbf" ref={sectionRef} aria-label="Broken files">
       <div className="mgbf-head">
         <div className="mgbf-title">Broken files</div>
-        <span className="mgbf-sum">{headerSummary(doc)}</span>
-        {headerExtra}
+        {bf.running && bf.status ? (
+          <>
+            <span className="mgbf-run">{runHeader(bf.status)}</span>
+            <MoonGauge fraction={fractionOf(bf.status.done, bf.status.total)} size={16} bar={false}
+              label="Fixing broken files" />
+            <button type="button" className="mgbf-ghost" onClick={() => bf.stop()}>Stop</button>
+          </>
+        ) : (
+          <>
+            <span className="mgbf-sum">{headerSummary(doc)}</span>
+            {plan.total > 0 ? (
+              <button type="button" className="mgbf-btn" onClick={() => setAsking(true)}>
+                {"Fix all recoverable (" + plan.total + ")"}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
+      {asking ? (
+        <FixConfirm plan={plan} metered={metered} onCancel={() => setAsking(false)} onGo={go} />
+      ) : null}
       {bf.readOnly ? (
         <div className="mgbf-warn">Read-only mode is on, so files won{"’"}t be re-downloaded. Thumbnails can still be rebuilt.</div>
       ) : null}

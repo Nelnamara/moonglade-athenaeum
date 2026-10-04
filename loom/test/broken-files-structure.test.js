@@ -67,3 +67,48 @@ describe("rows (W2a) and LOST (W5a)", () => {
     }
   });
 });
+
+describe("Fix all and its progress (W3c / W4c)", () => {
+  test("the header's Fix all counts the plan and is hidden at zero", () => {
+    const b = code("components/BrokenFiles.jsx");
+    assert.match(b, /fixPlan\(doc, bf\.readOnly, bf\.done\)/);
+    assert.match(b, /plan\.total > 0 \?/);
+    assert.match(b, /"Fix all recoverable \(" \+ plan\.total \+ "\)"/);
+  });
+  test("one confirm, with the handoff's lines and Data saver's metered line", () => {
+    const b = code("components/BrokenFiles.jsx");
+    assert.match(b, /confirmLines\(plan, metered\)/);
+    assert.match(b, /saver\.active && saver\.info && saver\.info\.metered/);
+    assert.match(b, /className="mgbf-scrim"/);
+    assert.match(b, /className="mgbf-host"/);
+    assert.match(b, />Cancel</);
+  });
+  test("while a run goes the header is n / N fixed, the moon on its true fraction, and Stop", () => {
+    const b = code("components/BrokenFiles.jsx");
+    assert.match(b, /runHeader\(bf\.status\)/);
+    assert.match(b, /<MoonGauge fraction=\{fractionOf\(bf\.status\.done, bf\.status\.total\)\} size=\{16\} bar=\{false\}/);
+    assert.match(b, /onClick=\{\(\) => bf\.stop\(\)\}>Stop</);
+  });
+  test("when a run ends Health's tiles re-measure (the touched rows were re-checked on the server)", () => {
+    const h = code("components/HealthOverlay.jsx");
+    assert.match(h, /onRunEnd\(\(\) => setRunsEnded/);
+    assert.match(h, /useHealth\(runsEnded\)/);
+    assert.match(code("hooks/useHealth.js"), /refresh \? "\/api\/health\?fresh=1&run=" \+ refresh : "\/api\/health"/);
+  });
+  test("an Activity row mirrors the run with the moon and opens the list", () => {
+    const r = code("notify/ActivityRow.jsx");
+    assert.match(r, /j\.type === "integrity"/);
+    assert.match(r, /openBrokenFiles\("all"\)/);
+    assert.match(r, /<MoonGauge fraction=\{runMoon\}/);
+    assert.match(code("notify/format.js"), /integrity: "Health"/);
+  });
+  test("the run's end says the counts once: the run's own toast, not the tray's generic one", () => {
+    const s = code("notify/jobsStore.js");
+    assert.match(s, /j\.type === "integrity"\) \{ last\[j\.job_id\] = st; return; \}/);
+    const run = code("lib/brokenFixRun.js");
+    assert.match(run, /toastShow\(/);
+    assert.match(run, /endToast\(st\)/);
+    assert.match(run, /label: "Show"/);
+    assert.doesNotMatch(run, /kind: "err"/, "no ruby: a run with failures is not an error toast");
+  });
+});

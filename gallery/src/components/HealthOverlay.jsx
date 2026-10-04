@@ -5,6 +5,7 @@ import StorageBars from "./StorageBars.jsx";
 import BrokenFiles from "./BrokenFiles.jsx";
 import { TILE_CHIP } from "../lib/brokenFilesCore.js";
 import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
+import { onRunEnd } from "../lib/brokenFixRun.js";
 import "../styles/overlays.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -67,7 +68,10 @@ function donutData(models) {
 
 export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates, onStoragePick, onOpenDetails }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
-  const { h, err, stats, monthMax, modelMax, tier, buckets, storage } = useHealth();
+  // A Broken files fix run changed the library under this panel: the tiles re-measure when it ends.
+  const [runsEnded, setRunsEnded] = React.useState(0);
+  React.useEffect(() => onRunEnd(() => setRunsEnded((n) => n + 1)), []);
+  const { h, err, stats, monthMax, modelMax, tier, buckets, storage } = useHealth(runsEnded);
   const [monthView, setMonthView] = React.useState("trend");   // DC default
   const [modelView, setModelView] = React.useState("bars");    // DC default
 

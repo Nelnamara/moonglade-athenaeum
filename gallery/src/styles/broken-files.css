@@ -55,6 +55,20 @@
 .mgbf-bar { height: 3px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
 .mgbf-bar i { display: block; height: 100%; background: var(--lavender); transition: width .25s; }
 .mgbf-empty { font-size: 10.5px; color: var(--overlay0); padding: 4px 2px; }
+/* W4c: "5 / 12 fixed" + the moon (MoonGauge, 16 px, the moon alone) + Stop, in the header */
+.mgbf-run { font-size: 10.5px; color: var(--text); white-space: nowrap; }
+
+/* W3c: the one confirm. Its own rung on the overlay ladder (overlays.css's THE OVERLAY LADDER):
+   above Health's slab (411) and the curation undo toast (427), under the power modal (430). */
+.mgbf-scrim { position: fixed; inset: 0; z-index: 428; background: rgba(5, 4, 13, .55); }
+.mgbf-host { position: fixed; inset: 0; z-index: 429; display: grid; place-items: center; pointer-events: none; }
+.mgbf-confirm { pointer-events: auto; box-sizing: border-box; width: min(440px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 5px; padding: 14px 16px 12px; border-radius: 12px;
+  border: 1px solid var(--lavender); background: #0c0a1c; box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 10.5px; line-height: 1.5; color: var(--text); }
+.mgbf-ctitle { font-size: 12px; font-weight: 700; }
+.mgbf-cline { color: var(--text); }
+.mgbf-cacts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
 
 /* Health's problem tiles, flagged while the list has rows under them (the handoff draws them
    peach; a clean library reads 0 with no peach). On the desktop's open tiles that is the value and

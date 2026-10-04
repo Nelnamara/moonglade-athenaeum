@@ -175,6 +175,22 @@ re-downloaded — the app refuses it on the server whatever the screen asks — 
 row shows **✓ FIXED** for two seconds and leaves the list, and the rows that were fixed are
 checked again so the tiles and the report follow.
 
+#### Fix all recoverable
+
+The section's **Fix all recoverable (N)** button counts the empty, cut-short and thumbnail rows
+that can be fixed — never a LOST row, never a picture PixAI no longer has — and asks once:
+how many files it will re-download from PixAI and about how much that is, how many thumbnails
+it will rebuild here, how many lost files it leaves alone, and "Nothing is deleted." On a phone
+whose Data saver is on over a metered connection, it says that too. With `READ_ONLY` on it
+counts only the thumbnails.
+
+While it runs, the section's header reads "5 / 12 fixed" with the moon filling as files finish,
+and a **Stop** that lets the current file finish and then stops (nothing is rolled back). The
+file being downloaded shows how many of its bytes have arrived. You can close Health: the run
+carries on, the Activity window shows it as "Fixing 12 files · 5 / 12", and clicking that line
+brings you back to the list. When it ends a note says what happened ("Fixed 11 of 12. 1
+couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
+
 ## Thumbnails & health accuracy
 
 Thumbnails are 768px JPEGs cached under `gallery/thumbs/` (videos get an

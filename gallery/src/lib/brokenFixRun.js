@@ -17,6 +17,9 @@
 
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrStore.js";
+import { show as toastShow } from "../notify/toastStore.js";
+import { endToast } from "./brokenFilesCore.js";
+import { openBrokenFiles } from "./brokenFilesNav.js";
 
 const STATUS = "/api/integrity/fix/status";
 export const FIXED_MS = 2000;             // how long a finished row shows ✓ FIXED
@@ -56,6 +59,14 @@ export function isRunning() { return !!(status && status.running); }
 function ended(st) {
   invalidate(["/api/health", "/api/integrity/broken", "/api/panel/summary"]);
   enders.forEach((fn) => { try { fn(st); } catch { /* a listener's own */ } });
+  /* The end toast (W4c): the counts, with [Show] back to the list. A run of more than one file
+     (Fix all); a single row's own button answers on the row itself. Emerald when every file was
+     fixed, the plain lavender otherwise -- a refused file is not an error, and nothing here is
+     ruby. It fires from this module, so it still says it after Health has been closed. */
+  if ((st.total || 0) > 1) {
+    const clean = (st.failed || 0) === 0 && !st.stopped;
+    toastShow({ kind: clean ? "ok" : "", title: endToast(st), action: { label: "Show", run: () => openBrokenFiles("all") } });
+  }
 }
 
 function absorb(st) {

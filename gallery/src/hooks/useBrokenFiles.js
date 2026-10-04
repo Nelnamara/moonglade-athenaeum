@@ -112,6 +112,7 @@ export default function useBrokenFiles() {
     doc, err, reload, toast, dismiss, undo, mark, fix, stop: fixRun.stopFix, say: show,
     status: run.status, running: !!(run.status && run.status.running),
     current: run.status && run.status.current, results, fixedNow, gone,
+    done: { ...gone, ...fixedNow },   // every row this run already fixed: Fix all never counts it again
     readOnly: !!(doc && doc.read_only),
   };
 }

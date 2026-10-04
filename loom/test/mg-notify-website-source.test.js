@@ -141,7 +141,9 @@ describe("the completion toast follows the app's own generate rule", () => {
   test("nothing in the toast path singles a website run out", () => {
     // "these are his own runs": a website run's row is type 'generate', so jobsStore's
     // existing non-terminal -> terminal transition toasts it exactly like a dock run. The
-    // two type-based abstentions there are claim and update, and neither may grow a third.
+    // three type-based abstentions there are claim, update and integrity (Health's Broken files
+    // fix run, Session W, which says its own end from lib/brokenFixRun.js), and none may grow a
+    // fourth.
     const store = readFileSync(
       path.join(__dirname, "../../gallery/src/notify/jobsStore.js"), "utf8");
     assert.doesNotMatch(store, /source/,
@@ -149,13 +151,14 @@ describe("the completion toast follows the app's own generate rule", () => {
       "same rule as any other generation the owner started");
     assert.match(store, /if \(j\.type === "claim"\)/);
     assert.match(store, /if \(j\.type === "update" && st === "done"\)/);
+    assert.match(store, /if \(j\.type === "integrity"\)/);
     // Count ABSTENTIONS -- a type test that returns before toasting -- not every type test:
     // since 2026-09-07 a delete row's toast reads the row's type to pick its words ("Gone from
     // PixAI." instead of "Added to your gallery."), which is copy, not silence.
     // Both abstentions are one-liners of the shape `if (j.type === "x" ...) { last[...] = st; return; }`.
     const abstentions = (store.match(/^\s*if \(j\.type === "[a-z]+".*\{ last\[j\.job_id\] = st; return; \}/gm) || []).length;
-    assert.equal(abstentions, 2,
-      "a third type-based toast abstention appeared -- if it is 'generate' or a website run, " +
+    assert.equal(abstentions, 3,
+      "a fourth type-based toast abstention appeared -- if it is 'generate' or a website run, " +
       "the owner's own runs just went silent");
     assert.doesNotMatch(store, /j\.type === "generate"/, "a generate row must never be singled out");
   });

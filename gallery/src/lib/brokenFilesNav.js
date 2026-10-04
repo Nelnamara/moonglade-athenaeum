@@ -37,3 +37,9 @@ export function subscribeBrokenFilesIntent(fn) {
   subs.add(fn);
   return () => subs.delete(fn);
 }
+
+/* The Fix all confirm is up: Escape closes IT first, not Health under it (App.jsx's Escape
+   ladder asks, the way it asks the picker and the recipes overlay). */
+let modalUp = false;
+export function setBrokenFilesModalUp(v) { modalUp = !!v; }
+export function isBrokenFilesModalUp() { return modalUp; }
