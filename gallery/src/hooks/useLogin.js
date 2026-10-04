@@ -2,6 +2,9 @@ import { useRef, useState } from "react";
 import useFlavour from "./useFlavour.js";
 import { apiPost } from "../api.js";
 import { LOGIN_NEL, LOGIN_BANNER } from "../art/loginArt.js";
+/* Session U: a successful sign-in marks this tab, so the phone's one-time Home Screen nudge shows on the
+   visit the sign-in lands on (lib/installNudge.js; the mark is read once and taken away). */
+import { markSignedIn } from "../lib/installNudge.js";
 
 /* All of LoginPage.jsx's state/handlers/validation/API-call logic, mechanically
    lifted out (2026-08-02) so LoginPageMobile.jsx can reuse it verbatim instead
@@ -126,6 +129,7 @@ export default function useLogin(boot) {
       return;
     }
     setPhase("welcome");
+    markSignedIn();
     window.location.href = d.next || "/";
   };
 

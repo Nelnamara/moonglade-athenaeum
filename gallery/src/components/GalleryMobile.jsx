@@ -3,15 +3,21 @@ import Icon from "../icons/Icons.jsx";
 import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
+import ContinuousGridMobile from "./ContinuousGridMobile.jsx";
+import { NudgeStrip } from "./InstallNudge.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import SimilarResults from "./SimilarResults.jsx";
 import CurationSheetMobile from "./CurationSheetMobile.jsx";
 import PullToRefresh from "./PullToRefresh.jsx";
-import useDataSaver, { useFeedLayout } from "../hooks/usePhonePrefs.js";
+import LayoutPagingSheet from "./LayoutPagingSheet.jsx";
+import useDataSaver, { useFeedLayout, usePaging, usePagingHint } from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useScrollAnchor from "../hooks/useScrollAnchor.js";
-import { newSince, newSinceLabel, newestLabel, pagerInView, showNewest } from "../lib/phoneCore.js";
+import {
+  KEY_LONG_PRESS_MS, RANGE_CARD_MS, allLoadedLabel, continuousDone, countLabel, endLabel, footerState, nearEnd,
+  newSince, newSinceLabel, newestLabel, pageOffset, pagerInView, rangeCardText, rangeOf, showNewest, splitRange,
+} from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
 import "../styles/gallery-mobile.css";
@@ -75,7 +81,34 @@ import "../styles/phone-q.css";
      Q4  landscape: the grid deals its pictures across 4 columns (3 under 700 px wide) and a turn of the
          phone keeps your place -- the picture at the top of the view is scrolled back to the same spot
          once the columns have re-flowed (hooks/useScrollAnchor.js). The rail, the side panels and the
-         rest of the layout are CSS (styles/phone-landscape.css). */
+         rest of the layout are CSS (styles/phone-landscape.css).
+
+   SESSION U, PHONE PAGING (2026-10-03; Phone Paging and Nudge Handoff.dc.html), additive:
+     U1  a long-press (500 ms) on either ▦ / ▭ key opens LayoutPagingSheet -- Layout and Paging (Pages |
+         Continuous), per device -- while a tap on a key still only switches the layout. A hairline dot
+         under the keys until the first long-press, so the gesture is found once.
+     U2  Continuous (`continuous`): "N of M" in mono before the layout keys; no pager; a quiet footer
+         instead -- the spinner line while the next page is in flight, the peach "Couldn't load more.
+         Retry" after a failure (Retry is one request; nothing retries by itself), "That's all M." at the
+         end. The next page is asked for (`onLoadMore`, the shell's) when the footer comes within 1.5
+         screens of the bottom of the view, one request at a time; `more` is that request's state.
+     U4  the stacked list is ContinuousGridMobile: at most five pages of 100 in the DOM, exact-height
+         spacers for the rest. `reveal` is the shell's ask to bring a picture back into view after the
+         viewer closes on it.
+     U5  selection across pages (Session N's select mode, kept): ticks are kept by id. In select mode a
+         second long-press selects every place between the last ticked tile and the pressed one, by
+         absolute index in the filtered walk, loaded or not; when some are not loaded a card says
+         "Selected N, including K not loaded yet." for 4 s and their ids are read (useLibrary.idsAt) --
+         Actions waits for that read, so every confirm states the full count. Continuous's bar adds
+         "All loaded (L)", and there a filter change clears the selection with a 10 s Undo.
+
+   SESSION U, THE HOME SCREEN NUDGE (U6c): `nudge` is the shell's useInstallNudge. Once, after a sign-in,
+   on a phone browser that can add the app to its Home Screen, its 36 px strip sits under the pill row
+   and pushes the grid down; its tap opens the steps (the shell draws the iOS bubble), its ✕ waves it
+   off for good on this phone. */
+
+/* A long-press that moves further than this is a scroll or a drag, not a hold. */
+const KEY_MOVE_CANCEL_PX = 10;
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -91,15 +124,18 @@ const PER_PAGE_OPTS = [50, 100, 200];
 export default function GalleryMobile({
   boot, collections, refreshCollections,
   media, shelf, perPage,
-  query, setQuery, submitQuery,
+  query, setQuery, submitQuery, applied,
   adv, applyAdvanced,
-  items, total, page, pages, loading, load,
+  /* `pages` is renamed on the way in: in Continuous there is no pager, so the pager's own reads see 1. */
+  items, total, page, pages: pageCount, loading, load,
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
   onOpenDetails, onOpenLightbox, onOpenContactSheet,
   similar, similarState, similarSource, onSimilar, onClearSimilar,
   /* Session Q: the shell's marker (what "new since" measures from), whether the view is the library's
      own front page, and what a pull runs. */
   marker, frontPage, onPullRefresh,
+  /* Session U: Continuous paging, the shell's next-page request and its state ({busy, failed}). */
+  continuous = false, onLoadMore, more, reveal, idsAt, nudge,
   /* Session N: what curation hands this tab -- {smart, curate, saveSmart, composeView, strip}.
      smart is the saved searches ({name, query}) listed in the Collection field with the refresh
      mark; curate is the shell's useCurate (the bulk verbs and their undo toast); saveSmart and
@@ -114,6 +150,43 @@ export default function GalleryMobile({
   const sortOpts = handShelf || adv.sort === "manual" ? SORT_OPTS.concat([["manual", "Manual order"]]) : SORT_OPTS;
   const hasCuration = !!curation;
   const [layout, setLayout] = useFeedLayout();
+  const [paging, setPaging] = usePaging();
+  const pages = continuous ? 1 : pageCount;
+  const [hintSeen, markHintSeen] = usePagingHint();
+  /* U1: the layout keys' long-press. A tap that outlasts KEY_LONG_PRESS_MS opens the sheet instead of
+     switching, and the click the browser may still deliver after it is swallowed once. */
+  const keyTimer = useRef(null);
+  const keyLong = useRef(false);
+  const keyStart = useRef(null);
+  const cancelKey = () => { clearTimeout(keyTimer.current); keyTimer.current = null; keyStart.current = null; };
+  useEffect(() => () => clearTimeout(keyTimer.current), []);
+  const keyPress = {
+    onPointerDown: (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      cancelKey();
+      keyLong.current = false;
+      keyStart.current = { x: e.clientX, y: e.clientY };
+      keyTimer.current = setTimeout(() => {
+        keyTimer.current = null;
+        keyLong.current = true;
+        markHintSeen();
+        openSheet("paging");
+        if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
+      }, KEY_LONG_PRESS_MS);
+    },
+    onPointerMove: (e) => {
+      const s = keyStart.current;
+      if (s && (Math.abs(e.clientX - s.x) > KEY_MOVE_CANCEL_PX || Math.abs(e.clientY - s.y) > KEY_MOVE_CANCEL_PX)) cancelKey();
+    },
+    onPointerUp: cancelKey,
+    onPointerLeave: cancelKey,
+    onPointerCancel: cancelKey,
+    onContextMenu: (e) => e.preventDefault(),
+  };
+  const tapKey = (v) => {
+    if (keyLong.current) { keyLong.current = false; return; }
+    setLayout(v);
+  };
   const saver = useDataSaver().active;
   const rootRef = useRef(null);
   const { landscape, cols } = usePhoneLandscape();
@@ -129,7 +202,7 @@ export default function GalleryMobile({
     if (!host) return undefined;
     let on = false;
     const onScroll = () => {
-      const pager = host.querySelector(".glm-pager");
+      const pager = host.querySelector(".glm-pager, .glm-cfoot");
       const v = showNewest(host.scrollTop, host.clientHeight)
         && !pagerInView(pager && pager.getBoundingClientRect(), host.getBoundingClientRect());
       if (v !== on) { on = v; setJump(v); }
@@ -145,6 +218,43 @@ export default function GalleryMobile({
     const calm = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     host.scrollTo({ top: 0, behavior: calm ? "auto" : "smooth" });
   };
+  /* U2: the footer's state, and the trigger that asks for the next page. A scroll (and a page landing,
+     which may leave the footer still in reach) checks once per frame whether the footer is within 1.5
+     screens of the view; nothing asks while a page is in flight, after a failure (until Retry), at the
+     end, or before the first page has landed. */
+  const moreBusy = !!(more && more.busy);
+  const moreFailed = !!(more && more.failed);
+  const done = continuousDone(items.length, total);
+  const foot = footerState({ busy: moreBusy, failed: moreFailed, done });
+  const want = useRef(null);
+  want.current = continuous && !similar && !loading && total != null && foot === "idle" ? onLoadMore : null;
+  const checkMore = useRef(() => {});
+  useEffect(() => {
+    if (!continuous) return undefined;
+    const host = rootRef.current && rootRef.current.closest(".glm-body");
+    if (!host) return undefined;
+    let raf = 0;
+    const check = () => {
+      raf = 0;
+      const ask = want.current;
+      const footEl = host.querySelector(".glm-cfoot");
+      if (!ask || !footEl) return;
+      if (nearEnd(footEl.getBoundingClientRect().top, host.getBoundingClientRect().bottom, host.clientHeight)) ask();
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(check); };
+    checkMore.current = onScroll;
+    host.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    onScroll();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      checkMore.current = () => {};
+      host.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [continuous]);
+  useEffect(() => { checkMore.current(); }, [items.length, foot, loading, similar]);
+  const count = continuous ? countLabel(items.length, total) : "";
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
   const actionsHostRef = useRef(null);
 
@@ -188,7 +298,71 @@ export default function GalleryMobile({
     closeSheet();
   };
 
-  const toggleSelectMode = () => { setSelectMode(!selectMode); setSelected(new Set()); };
+  /* U5: the last ticked tile, at its absolute place in the walk (`offset` is the place of the loaded
+     list's first picture: 0 for a stacked list). A range read that lands after the list changed adds
+     nothing (`listToken`). */
+  const anchor = useRef(null);
+  const listToken = useRef(0);
+  const offset = continuous ? 0 : pageOffset(page, perPage);
+  const placeOf = (mid) => { const i = items.findIndex((it) => it.media_id === mid); return i < 0 ? -1 : offset + i; };
+  const [card, setCard] = useState("");
+  const [resolving, setResolving] = useState(0);
+  useEffect(() => {
+    if (!card) return undefined;
+    const t = setTimeout(() => setCard(""), RANGE_CARD_MS);
+    return () => clearTimeout(t);
+  }, [card]);
+  const addIds = (ids) => setSelected((old) => {
+    const s = new Set(old);
+    ids.forEach((m) => s.add(m));
+    return s;
+  });
+  const selectRange = (mid) => {
+    const b = placeOf(mid);
+    const a = anchor.current;
+    if (b < 0 || !a || a.at < 0) return false;
+    const { lo, hi } = rangeOf(a.at, b);
+    const part = splitRange(lo, hi, offset, items.length);
+    if (part.to >= part.from) addIds(items.slice(part.from - offset, part.to - offset + 1).map((it) => it.media_id));
+    anchor.current = { mid, at: b };
+    if (!part.k) return true;
+    setCard(rangeCardText(part.n, part.k));
+    const gaps = part.to < part.from ? [[lo, hi]] : [[lo, part.from - 1], [part.to + 1, hi]].filter(([x, y]) => y >= x);
+    const token = listToken.current;
+    gaps.forEach(([x, y]) => {
+      setResolving((r) => r + 1);
+      idsAt(x, y).then((ids) => {
+        if (token !== listToken.current) return;
+        if (ids) addIds(ids);
+        else if (curation) curation.curate.say("Couldn't read the pictures that are not loaded, so they are not selected.", null, "peach");
+      }).finally(() => setResolving((r) => Math.max(0, r - 1)));
+    });
+    return true;
+  };
+  const tapToggle = (mid) => {
+    if (!selected.has(mid)) anchor.current = { mid, at: placeOf(mid) };
+    else if (anchor.current && anchor.current.mid === mid) anchor.current = null;
+    toggleSelected(mid);
+  };
+  const clearSelection = () => { anchor.current = null; setSelected(new Set()); };
+  const selectAllLoaded = () => addIds(items.map((it) => it.media_id));
+  /* Continuous: a filter change starts a new list, and a selection is a promise about pictures you can
+     still see, so it is cleared -- with a 10 s Undo that hands it back. (Pages keeps it, as shipped.) */
+  const listKey = [applied, media, shelf, JSON.stringify(adv)].join("|");
+  const seenKey = useRef(listKey);
+  useEffect(() => {
+    if (seenKey.current === listKey) return;
+    seenKey.current = listKey;
+    listToken.current += 1;
+    anchor.current = null;
+    if (!continuous || !selected.size || !curation) return;
+    const prev = selected;
+    setSelected(new Set());
+    curation.curate.say("The filter changed, so the selection was cleared.", null, "", () => setSelected(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey]);
+
+  const toggleSelectMode = () => { anchor.current = null; setSelectMode(!selectMode); setSelected(new Set()); };
   const selIds = [...selected];
 
   // The Actions sheet only ever opens with a selection; if a mutation (or the
@@ -233,8 +407,14 @@ export default function GalleryMobile({
   } : null;
 
   const armSelect = (mid) => {
+    // U5c: already selecting, with a tile ticked -- the second long-press selects the range
+    if (selectMode && anchor.current && selectRange(mid)) {
+      if (navigator.vibrate) { try { navigator.vibrate([8, 40, 8]); } catch { /* unsupported/blocked */ } }
+      return;
+    }
     setSelectMode(true);
     setSelected((old) => { const s = new Set(old); s.add(mid); return s; });
+    anchor.current = { mid, at: placeOf(mid) };
     if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
   };
   // #35 (owner: "That was NOT the design"): a plain tap opens the LIGHTBOX, matching
@@ -282,7 +462,7 @@ export default function GalleryMobile({
         ) : null}
       </div>
 
-      <div className="glm-bar2">
+      <div className={"glm-bar2" + (continuous ? " cont" : "")}>
         {MEDIA_PILLS.map(([v, label]) => (
           <button key={label} type="button" className={"glm-metal" + (media === v ? " on" : "")}
             onClick={() => applyAdvanced({ media: v })}>
@@ -290,32 +470,47 @@ export default function GalleryMobile({
           </button>
         ))}
         {selectMode ? (
-          <>
-            <button type="button" className="glm-metal" onClick={() => setSelected(new Set())}>Clear</button>
+          /* U5: the same select bar; in Continuous it also offers "All loaded (L)" and travels as one group
+             (display: contents in Pages, as shipped). Actions waits while a range's ids are being read. */
+          <div className={"glm-bar2-end" + (continuous ? " cont" : "")}>
+            <button type="button" className="glm-metal" onClick={clearSelection}>Clear</button>
             <span className="glm-selcount"><b>{selected.size}</b> selected</span>
+            {continuous ? (
+              <button type="button" className="glm-allloaded" onClick={selectAllLoaded}>{allLoadedLabel(items.length)}</button>
+            ) : null}
             {selected.size > 0 && (
-              <button type="button" className="glm-metal glm-pill-accent" onClick={() => openSheet("actions")}>
+              <button type="button" className="glm-metal glm-pill-accent" disabled={resolving > 0} onClick={() => openSheet("actions")}>
                 Actions
               </button>
             )}
-          </>
+          </div>
         ) : (
-          <>
-            {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. */}
-            <div className="glm-layout" role="group" aria-label="Layout" style={{ marginLeft: "auto" }}>
+          /* U2: in Continuous the count, the layout keys and Sort travel as one group, the keys drawn as
+             the page draws them there (▦ ▭, no words), and the group drops under the media pills when a
+             narrow phone has no room for all of it on one line -- the row never scrolls sideways. In
+             Pages the wrapper is display: contents and the row is exactly as shipped. */
+          <div className={"glm-bar2-end" + (continuous ? " cont" : "")}>
+            {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. U1: a long-press on
+                either key opens the Layout + Paging sheet; the dot under them shows until the first. */}
+            {/* U2: "N of M" in mono before the layout keys, Continuous only. */}
+            {count ? <span className="glm-pgcount">{count}</span> : null}
+            <div className="glm-layout" role="group" aria-label="Layout" style={continuous ? undefined : { marginLeft: "auto" }}>
               <button type="button" className={layout === "grid" ? "on" : ""} aria-pressed={layout === "grid"}
-                aria-label="Grid" onClick={() => setLayout("grid")}>{"▦"}<span className="lbl"> Grid</span></button>
+                aria-label="Grid" {...keyPress} onClick={() => tapKey("grid")}>{"▦"}<span className="lbl"> Grid</span></button>
               <button type="button" className={layout === "feed" ? "on" : ""} aria-pressed={layout === "feed"}
-                aria-label="Feed" onClick={() => setLayout("feed")}>{"▭"}<span className="lbl"> Feed</span></button>
+                aria-label="Feed" {...keyPress} onClick={() => tapKey("feed")}>{"▭"}<span className="lbl"> Feed</span></button>
+              {!hintSeen ? <span className="glm-layout-dot" aria-hidden="true" /> : null}
             </div>
             <button type="button" className="glm-metal" onClick={() => openSheet("sort")}>
               Sort ▾
             </button>
-          </>
+          </div>
         )}
       </div>
 
       {!similar && curation && curation.strip ? curation.strip : null}
+
+      {nudge ? <NudgeStrip show={nudge.show} onOpen={nudge.open} onDismiss={nudge.dismiss} /> : null}
 
       {similar ? (
         /* The lookalikes take the GRID's place, in the same column, under the same
@@ -330,10 +525,16 @@ export default function GalleryMobile({
           onSimilar={onSimilar}
           onClear={onClearSimilar}
         />
+      ) : continuous ? (
+        <ContinuousGridMobile
+          items={items} loading={loading && !moreBusy} selectMode={selectMode} selected={selected}
+          toggleSelected={tapToggle} onArmSelect={armSelect} onTapView={tapView}
+          layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols} reveal={reveal}
+        />
       ) : (
         <GalleryGridMobile
           items={items} loading={loading} selectMode={selectMode} selected={selected}
-          toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+          toggleSelected={tapToggle} onArmSelect={armSelect} onTapView={tapView}
           layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols}
         />
       )}
@@ -353,9 +554,29 @@ export default function GalleryMobile({
         </nav>
       )}
 
+      {/* U2: Continuous's quiet footer, in the pager's place. */}
+      {continuous && !similar ? (
+        <div className="glm-cfoot" role="status" aria-live="polite">
+          {foot === "loading" ? (
+            <div className="glm-cfoot-line"><i className="glm-cfoot-spin" aria-hidden="true" /><span className="glm-cfoot-dim">loading…</span></div>
+          ) : foot === "failed" ? (
+            <button type="button" className="glm-cfoot-retry" onClick={() => onLoadMore && onLoadMore()}>
+              Couldn't load more. Retry
+            </button>
+          ) : foot === "end" && items.length ? (
+            <div className="glm-cfoot-line"><span className="glm-cfoot-dim">{endLabel(total)}</span></div>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Q5: the jump rides the scroller once you are a screen down. It sits in a zero-height sticky
           wrapper so it floats over the list, above the tab bar, without a fixed layer of its own. */}
-      {jump && !similar ? (
+      {/* U5c: the range card, for 4 s, where the jump sits (and in its place while it is up). */}
+      {card ? (
+        <div className="glm-newest-wrap glm-rangecard-wrap">
+          <div className="glm-rangecard" role="status">{card}</div>
+        </div>
+      ) : jump && !similar ? (
         <div className="glm-newest-wrap">
           <button type="button" className="glm-newest" onClick={toNewest}>{newestLabel(ns.count)}</button>
         </div>
@@ -452,6 +673,9 @@ export default function GalleryMobile({
           <button type="button" className="glm-primary" onClick={applyDraft}>Apply</button>
         </div>
       </MobileSheet>
+
+      <LayoutPagingSheet open={sheet === "paging"} closing={closing} onClose={closeSheet}
+        layout={layout} setLayout={setLayout} paging={paging} setPaging={setPaging} />
 
       <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
         <div className="glm-sheet-list">

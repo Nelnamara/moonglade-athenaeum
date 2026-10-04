@@ -43,6 +43,13 @@ Nothing phones home.
 Yes — launch the gallery with `--host 0.0.0.0 --https` and open it on your device
 (installable as a PWA). [Select mode](Collections) is touch-friendly.
 
+Right after you sign in on a phone browser that can add the app to its Home Screen, a thin line under
+the gallery's buttons says **Add to Home Screen for full screen ›**. On an iPhone, in Safari, tapping it
+shows a small bubble pointing at Safari's **Share** button (tap it, then **Add to Home Screen**); on
+Android it opens the browser's own install prompt. **✕** hides it on that phone for good, and it does
+not come back on a reload. It only explains adding the app to the Home Screen, and the QR code in the
+Control Panel is still just the address — you sign in the normal way when you get there.
+
 A phone gets its own layout: three tabs along the bottom — **Gallery**, **Create** (the Generate
 dock as a screen of its own) and **Control** — and a row of icons at the top for the Folio,
 The Loom, Activity, the **?** guide and the **☰ Menu** (My Art, Collections, Publish, Train a LoRA,

@@ -1,0 +1,110 @@
+/* ============================================================================
+   Session U, "Phone paging, and the Home Screen nudge" -- Phone Paging and Nudge Handoff.dc.html.
+   ADDITIVE to Moonglade Mobile and Session Q, which stay as built: every rule here is a new class
+   (glm-pg*, glm-layout-dot, ctm-paging) or a modifier on an existing one. Sizes are the page's own;
+   every colour is an app token (the page's literals stand in for the same tokens).
+   ============================================================================ */
+
+/* ---- U1 the long-press sheet: grab handle, two 44 px segmented rows, the dim note ---------- */
+.glm-pgsheet { display: flex; flex-direction: column; touch-action: none; }
+.glm-pgsheet-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--surface1);
+  margin: 0 auto 6px; }
+.glm-pgrow { display: flex; align-items: center; gap: 6px; height: 44px; }
+.glm-pgrow-lbl { flex: none; width: 64px; font-size: 10.5px; color: var(--subtext); }
+.glm-pgrow button { flex: 1; min-width: 0; height: 32px; font: inherit; font-size: 10.5px; border-radius: 8px;
+  cursor: pointer; background: none; border: 1px solid var(--surface1); color: var(--subtext); white-space: nowrap; }
+.glm-pgrow button.on { border-color: var(--lavender); color: var(--text); font-weight: 700;
+  background: color-mix(in srgb, var(--lavender) 16%, transparent); }
+.glm-pgsheet-note { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); padding-top: 6px; }
+
+/* ---- U1 the layout keys: long-pressable, and the one-time hairline dot under them --------- */
+.glm-layout { position: relative; }
+.glm-layout button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.glm-layout-dot { position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--lavender); pointer-events: none; }
+
+/* ---- U1 Control's Library paging row: Data saver's card (phone-q.css .ctm-saver), two choices -- */
+.ctm-paging { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 13px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 6%, transparent); }
+.ctm-paging-head { display: flex; align-items: center; gap: 10px; }
+.ctm-paging-title { flex: 1; min-width: 0; }
+.ctm-paging-title b { display: block; font-size: 12.5px; font-weight: 600; }
+.ctm-paging-title span { display: block; font-size: 10px; color: var(--overlay0); line-height: 1.4; }
+.ctm-paging-modes { display: flex; gap: 4px; }
+.ctm-paging-modes button { flex: 1; text-align: center; font: inherit; font-size: 10.5px; font-weight: 600;
+  padding: 8px 4px; min-height: 36px; border-radius: 7px; cursor: pointer; color: var(--subtext);
+  background: none; border: 1px solid var(--surface1); }
+.ctm-paging-modes button.on { background: var(--lavender); color: var(--base); }
+
+/* ---- U2 the header count ("300 of 3,240", mono 9.5 px before the layout keys) and the footer ------- */
+.glm-pgcount { margin-left: auto; flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+/* Continuous's end of the pill row: the count, the layout keys (glyphs only, as the page draws them) and
+   Sort as one group that wraps under the pills when the phone is too narrow for one line. Pages keeps the
+   row as shipped: the wrapper is display: contents there. */
+.glm-bar2-end { display: contents; }
+.glm-bar2.cont { flex-wrap: wrap; row-gap: 6px; overflow-x: visible; }
+.glm-bar2-end.cont { display: flex; align-items: center; gap: inherit; margin-left: auto; flex: none; }
+.glm-bar2-end.cont .glm-layout button .lbl { display: none; }
+.glm-bar2-end.cont .glm-layout button { min-width: 32px; padding-left: 7px; padding-right: 7px; }
+.glm-cfoot { padding: 4px 11px 20px; min-height: 24px; }
+.glm-cfoot-line { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 24px; }
+.glm-cfoot-dim { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px;
+  color: var(--overlay0); white-space: nowrap; }
+@keyframes glmCfootSpin { to { transform: rotate(360deg); } }
+.glm-cfoot-spin { flex: none; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%;
+  border: 2px solid var(--surface1); border-top-color: var(--lavender); animation: glmCfootSpin .9s linear infinite; }
+/* The page draws the retry as one peach line; the whole line is the button, 44 px tall to hit. */
+.glm-cfoot-retry { display: block; width: 100%; min-height: 44px; padding: 0; text-align: left; font: inherit;
+  font-size: 10.5px; line-height: 1.5; color: var(--peach); background: none; border: 0; cursor: pointer; }
+
+/* ---- U4 the mounted window: pages stacked one under the next, spacers for the dropped ones -------- */
+.glm-cpage-spacer { pointer-events: none; }
+/* A page after the first starts right under the one before it: no second top pad, no fresh stagger
+   (the feed keeps its own 10 px between pictures). Padding, not margin, so a page's measured height is
+   all of it and its spacer is exact. */
+.glm-cpage:not([data-page="0"]) > .glm-grid:first-child { padding-top: 0; }
+.glm-cpage:not([data-page="0"]) > .glm-grid:first-child > .glm-col-off { margin-top: 0; }
+.glm-cpage:not([data-page="0"]) > .glm-grid.glm-feed:first-child { padding-top: 10px; }
+
+/* ---- U5 "All loaded (L)" in Continuous's select bar, and the 4 s range card ------------------------- */
+.glm-allloaded { flex: none; font: inherit; font-size: 10px; color: var(--lavender); background: none; border: 0;
+  padding: 0 4px; min-height: 30px; cursor: pointer; white-space: nowrap; }
+/* The card floats where ↑ Newest does (the same zero-height sticky wrapper), the page's card: a lavender
+   hairline, the base colour at 96%, a soft drop. */
+.glm-rangecard { pointer-events: auto; align-self: flex-end; width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px 12px; border-radius: 14px; border: 1px solid var(--lavender);
+  background: color-mix(in srgb, var(--base) 96%, transparent); box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 10.5px; line-height: 1.5; color: var(--text); }
+
+/* ---- U6 the Home Screen strip: 36 px under the pill row, pushing the grid down (in .42 s, out .34 s) -- */
+@keyframes glmNudgeIn { from { height: 0; opacity: 0; } to { height: 36px; opacity: 1; } }
+@keyframes glmNudgeOut { from { height: 36px; opacity: 1; } to { height: 0; opacity: 0; margin-bottom: 0; } }
+.glm-nudge { display: flex; align-items: center; box-sizing: border-box; height: 36px; margin: 0 11px 6px;
+  padding-left: 10px; border-radius: 9px; border: 1px solid var(--surface1); overflow: hidden;
+  animation: glmNudgeIn .42s cubic-bezier(.2, .9, .24, 1) both; }
+/* Grown in: the ✕'s 44 px hit area may reach past the 36 px strip. */
+.glm-nudge.settled { overflow: visible; }
+.glm-nudge.leaving { overflow: hidden; animation: glmNudgeOut .34s cubic-bezier(.4, 0, .2, 1) both; }
+.glm-nudge-go { flex: 1; min-width: 0; height: 100%; padding: 0; text-align: left; font: inherit; font-size: 10px;
+  color: var(--lavender); background: none; border: 0; cursor: pointer; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.glm-nudge-x { flex: none; width: 44px; height: 44px; margin: -4px 0; padding: 0; font: inherit; font-size: 11px;
+  line-height: 1; color: var(--overlay0); background: none; border: 0; cursor: pointer; }
+
+/* ---- U7 the iOS bubble at Safari's Share button: 12 px above the toolbar (▼), or under the top (▲) --- */
+@keyframes mgNudgeBubbleIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.mgnudge-bubble { position: fixed; left: 12px; right: 12px; z-index: 446; display: flex; flex-direction: column;
+  align-items: center; gap: 3px; pointer-events: none; animation: mgNudgeBubbleIn .28s ease both; }
+.mgnudge-bubble.bottom { bottom: calc(12px + env(safe-area-inset-bottom)); }
+.mgnudge-bubble.top { top: calc(12px + env(safe-area-inset-top)); }
+.mgnudge-card { box-sizing: border-box; width: 100%; max-width: 380px; padding: 10px 12px; border-radius: 14px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--base) 96%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .5); font-size: 10.5px; line-height: 1.5; color: var(--text); }
+.mgnudge-arrow { font-size: 12px; line-height: 1; color: var(--lavender); }
+
+@media (prefers-reduced-motion: reduce) {
+  .glm-cfoot-spin { animation: none; }
+  .glm-nudge, .glm-nudge.leaving, .mgnudge-bubble { animation: none; }
+  .glm-nudge { overflow: visible; }
+}

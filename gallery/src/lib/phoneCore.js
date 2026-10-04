@@ -20,6 +20,173 @@ export function parseLayout(v) {
 }
 
 /* ---------------------------------------------------------------------------------------------
+   Paging (Session U, Phone Paging and Nudge Handoff.dc.html U1b)
+   --------------------------------------------------------------------------------------------- */
+
+/* Pages is the phone as shipped (‹ Prev · Next ›); Continuous loads as you scroll. Per device, beside
+   the layout; a long-press on either layout key opens the sheet that holds both. */
+export const PAGINGS = Object.freeze(["pages", "continuous"]);
+export const DEFAULT_PAGING = "pages";
+export const PAGING_LABELS = Object.freeze({ pages: "Pages", continuous: "Continuous" });
+export const KEY_LONG_PRESS_MS = 500;
+
+/* Anything that is not exactly "continuous" is Pages: the phone as built. */
+export function parsePaging(v) {
+  return v === "continuous" ? "continuous" : "pages";
+}
+
+/* Continuous loading (U2a). The next 100 are asked for when the last row comes within 1.5 screens of
+   view, one request at a time; while Data saver acts on a metered connection a page is 50 instead. */
+export const CONTINUOUS_PAGE = 100;
+export const CONTINUOUS_PAGE_METERED = 50;
+export const PREFETCH_SCREENS = 1.5;
+
+export function continuousPageSize(saverIsActive, info) {
+  const i = info || connectionInfo(null);
+  return saverIsActive && i.known && i.metered ? CONTINUOUS_PAGE_METERED : CONTINUOUS_PAGE;
+}
+
+/* The stacked list is always a run from the top of the filtered walk, so the next page is the one that
+   starts at or just before its end -- whatever size cut the pages before it. After a pull has prepended
+   K new pictures, or the size changed from 100 to 50, the page asked for overlaps what is loaded by
+   fewer than one page; appendUnique drops the overlap. It can never leave a gap. */
+export function nextContinuousPage(loaded, size) {
+  const s = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number(size)) || CONTINUOUS_PAGE));
+  return Math.floor(Math.max(0, Number(loaded) || 0) / s) + 1;
+}
+
+/* Append the pictures not already loaded, in order. Nothing new answers the SAME list (no re-render). */
+export function appendUnique(old, fresh) {
+  const list = old || [];
+  const have = new Set(list.map((it) => it.media_id));
+  const add = (fresh || []).filter((it) => it && !have.has(it.media_id) && (have.add(it.media_id), true));
+  return add.length ? list.concat(add) : list;
+}
+
+/* The end: everything the filter matches is loaded. No total yet is not the end. */
+export function continuousDone(loaded, total) {
+  if (total == null || total === "") return false;
+  const t = Number(total);
+  return Number.isFinite(t) && Number(loaded) >= t;
+}
+
+/* Is the last row within 1.5 screens of the bottom of the view? `footTop` is the footer's top (the
+   last row's foot), `viewBottom` the scroller's visible bottom, `viewHeight` its height. */
+export function nearEnd(footTop, viewBottom, viewHeight) {
+  const vh = Number(viewHeight) > 0 ? Number(viewHeight) : 560;
+  return Number(footTop) - Number(viewBottom) <= PREFETCH_SCREENS * vh;
+}
+
+/* "300 of 3,240" -- loaded of the filtered total, in the header (mono). Nothing until a total is known. */
+export function countLabel(loaded, total) {
+  if (total == null || total === "" || !Number.isFinite(Number(total))) return "";
+  return Number(loaded || 0).toLocaleString() + " of " + Number(total).toLocaleString();
+}
+
+export function endLabel(total) {
+  return "That's all " + Number(total || 0).toLocaleString() + ".";
+}
+
+/* The mounted window (U4a). A stacked list keeps every picture's data in memory but puts at most five
+   pages of 100 in the DOM; a page scrolled out of the window leaves a spacer of its exact measured
+   height, and scrolling back mounts it again from memory (each tile paints its tint, then its picture --
+   its box is its aspect ratio, so nothing shifts). A window page is 100 pictures by its place in the
+   list, whatever size the requests were cut at. */
+export const WINDOW_PAGE = 100;
+export const WINDOW_PAGES = 5;
+
+export function windowPageCount(n) {
+  return Math.ceil(Math.max(0, Number(n) || 0) / WINDOW_PAGE);
+}
+
+export function windowPageOf(index) {
+  return Math.floor(Math.max(0, Number(index) || 0) / WINDOW_PAGE);
+}
+
+/* The pages to mount: centred on the page in view, held inside the list, at most `max`. `end` is
+   inclusive; an empty list mounts nothing. */
+export function mountWindow(center, count, max = WINDOW_PAGES) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0);
+  if (!n) return { start: 0, end: -1 };
+  const m = Math.max(1, Math.floor(Number(max)) || WINDOW_PAGES);
+  const c = Math.min(n - 1, Math.max(0, Math.floor(Number(center)) || 0));
+  const start = Math.max(0, Math.min(c - Math.floor(m / 2), n - m));
+  return { start, end: Math.min(n - 1, start + m - 1) };
+}
+
+/* The window page the "N new since" rule closes: the page of the last new picture (none at zero). */
+export function rulePage(newCount) {
+  const k = Math.floor(Number(newCount) || 0);
+  return k > 0 ? Math.floor((k - 1) / WINDOW_PAGE) : -1;
+}
+
+/* A page whose height changed between two frames -- mounted again over a spacer that was an estimate
+   (after a turn of the phone, say), or an estimate refined: when the WHOLE page was above the top of the
+   view (its bottom, before the change, at or above it) the view follows it by the difference, so nothing
+   in view moves. A page the view is in, or one below it, is never corrected: a page that grows at its
+   foot (the next pictures appended into it) moves nothing in view. */
+export function remountShift(spacerHeight, realHeight, bottomBefore, viewTop) {
+  if (!(Number(bottomBefore) <= Number(viewTop))) return 0;
+  const d = Number(realHeight) - Number(spacerHeight);
+  return Number.isFinite(d) ? d : 0;
+}
+
+/* The viewer's film strip in Continuous: the window page the picture is on ([start, end) of the list). */
+export function stripRange(index, count) {
+  const start = windowPageOf(index) * WINDOW_PAGE;
+  return { start, end: Math.min(Math.max(0, Number(count) || 0), start + WINDOW_PAGE) };
+}
+
+/* Selection across pages (U5a + U5c). Ticks are kept by id. In select mode a second long-press selects
+   every place between the last ticked tile and the pressed one, by absolute index in the filtered walk,
+   loaded or not; when some are not loaded, a card says so for 4 s and their ids are read (ids only,
+   at the route's largest page) before Actions opens, so every confirm states the full count. */
+export const RANGE_CARD_MS = 4000;
+export const RANGE_READ_SIZE = 200;      // the library route's own ceiling (MAX_PAGE_SIZE below)
+
+export function rangeOf(a, b) {
+  const x = Math.floor(Number(a)) || 0;
+  const y = Math.floor(Number(b)) || 0;
+  return { lo: Math.min(x, y), hi: Math.max(x, y) };
+}
+
+/* Which places of [lo, hi] the loaded list covers. `offset` is the place of the list's first picture in
+   the walk (0 for a stacked list), `count` how many are loaded. Returns {n, k, from, to}: n places, k of
+   them not loaded, and the loaded run from..to (inclusive; to < from when none of it is loaded). */
+export function splitRange(lo, hi, offset, count) {
+  const n = Math.max(0, hi - lo + 1);
+  const from = Math.max(lo, Number(offset) || 0);
+  const to = Math.min(hi, (Number(offset) || 0) + Math.max(0, Number(count) || 0) - 1);
+  if (to < from) return { n, k: n, from: -1, to: -2 };
+  return { n, k: n - (to - from + 1), from, to };
+}
+
+export function rangeCardText(n, k) {
+  return "Selected " + Number(n).toLocaleString() + ", including " + Number(k).toLocaleString() + " not loaded yet.";
+}
+
+export function allLoadedLabel(n) {
+  return "All loaded (" + Number(n || 0).toLocaleString() + ")";
+}
+
+/* The pages, at `size` a page, that hold the places lo..hi. */
+export function readPagesFor(lo, hi, size) {
+  const s = Math.max(1, Math.floor(Number(size)) || 1);
+  const out = [];
+  for (let p = Math.floor(Math.max(0, lo) / s) + 1; p <= Math.floor(Math.max(0, hi) / s) + 1; p += 1) out.push(p);
+  return out;
+}
+
+/* The footer says one thing at a time: the spinner line while a page is in flight, the peach retry
+   after a failed one (until Retry is tapped -- there is no automatic retry), the end line, or nothing. */
+export function footerState({ busy, failed, done }) {
+  if (busy) return "loading";
+  if (failed) return "failed";
+  if (done) return "end";
+  return "idle";
+}
+
+/* ---------------------------------------------------------------------------------------------
    Data saver (Q7)
    --------------------------------------------------------------------------------------------- */
 
@@ -268,12 +435,41 @@ export function lightboxCount(index, offset, total, loaded) {
 }
 
 /* The rule only means something for the library's own front page: page 1, newest first, nothing
-   filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone. */
-export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded }) {
+   filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone.
+   Continuous (Session U, U3a): a stacked list always runs from the top of the walk, so it is the front
+   page however far down it has loaded; the rule stays at its place in it. */
+export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded, continuous }) {
   if (similar || !loaded) return false;
-  if ((page || 1) !== 1) return false;
+  if (!continuous && (page || 1) !== 1) return false;
   if (advCount) return false;                 // any Advanced Search field, the sort included
   return !(String(applied || "").trim() || media || shelf);
+}
+
+/* A pull over a stacked list (Session U, U3a): what is new goes ABOVE everything loaded, every loaded
+   page is kept, and the rule -- which follows the marker picture -- is pushed down only by what was
+   prepended above it. The shell reads the top of the walk a page at a time; the new run is everything
+   before the first picture already loaded (`met`: the run reached the loaded list, so nothing between is
+   missing). A run longer than PREPEND_MAX_PAGES pages is too much to splice in, and the list starts
+   over from the top instead (useLibrary.prependNewest). */
+export const PREPEND_MAX_PAGES = 5;
+
+export function newestAbove(page, loadedIds) {
+  const fresh = [];
+  const list = page || [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (loadedIds.has(list[i].media_id)) return { fresh, met: true };
+    fresh.push(list[i]);
+  }
+  return { fresh, met: false };
+}
+
+/* The new ones first, then the list as it was; a picture already loaded stays once, where it was.
+   Nothing new answers the SAME list. */
+export function prependUnique(fresh, old) {
+  const list = old || [];
+  const have = new Set(list.map((it) => it.media_id));
+  const add = (fresh || []).filter((it) => it && !have.has(it.media_id) && (have.add(it.media_id), true));
+  return add.length ? add.concat(list) : list;
 }
 
 /* "↑ Newest" shows after one screen of scrolling. */

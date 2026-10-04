@@ -395,6 +395,45 @@ filter does not contain shows no number on its record.
 appears for any picture that came from a generation, not only ones filed in an old batch folder.
 To get your whole library back, press **Clear** in **Advanced search**.
 
+### Pages or Continuous on the phone
+
+**Long-press ▦ or ▭** (the Grid | Feed keys) and a small sheet opens with two rows: **Layout** (Grid ·
+Feed) and **Paging** (**Pages** · **Continuous**). A plain tap on a key still just switches the layout. A
+choice applies at once; tap outside the sheet or swipe it down to close it. **Pages** is the default and is
+the phone as before, with **‹ Prev · Next ›**. Both are remembered **on that phone**, and the same Paging
+choice is on the **Control** screen as **Library paging**. Until you first long-press, a small dot under
+the keys shows the gesture is there.
+
+**Continuous** loads the next 100 pictures by itself as you near the end of what is loaded, and stacks
+them under the ones you have. There is no pager: the pill row shows how many are loaded of everything
+your search and filters match (*300 of 3,240*), and at the foot of the list a small spinner says
+*loading…* while the next lot is on its way. If a page fails to load, the foot says **Couldn't load more.
+Retry** in peach; nothing retries on its own, and tapping **Retry** asks once. At the very end it says
+*That's all 3,240.* A new search or filter starts the count over. With **Data saver** on and a metered
+connection it loads 50 at a time instead of 100. On a narrow phone the count, the ▦ ▭ keys and **Sort** sit
+together on a second line under the media pills, so nothing has to scroll sideways.
+
+**New since, ↑ Newest and pull to refresh in Continuous.** The **N new since HH:MM** line stays where it
+is in the stacked list, however far down you have loaded. **↑ Newest** scrolls back to the top and keeps
+everything loaded. A pull at the very top runs **Sync now** and then puts what is new **above** the line,
+keeping every page you had loaded; the count grows by the new ones. A finished generation does not
+reload the list while you are reading it; pull when you want the new pictures in.
+
+**A long list stays light.** However far you scroll, the phone only draws about five hundred pictures
+at a time (five lots of 100) around where you are; the rest keep their place as empty space of exactly
+their height, so nothing jumps, and they are drawn again — a colour first, then the picture — when you
+scroll back to them. In the full-screen viewer, **‹ ›** carry on past the last picture loaded, loading
+the next lot as they go, and the number at the top is the picture's place in everything your search
+matches. Close the viewer and the list is back at the picture you were on, even one far from where you
+opened it.
+
+**Selecting a run of pictures.** While selecting, long-press a second picture and everything between the
+last one you ticked and it is selected — in **Pages** too, even across pages you are not on. When some of
+them are not loaded, a card says so for a few seconds (*Selected 140, including 40 not loaded yet.*) and
+**Actions** waits a moment while the phone looks them up, so every confirm counts all of them. In
+**Continuous** the select bar also has **All loaded (L)**, which ticks every picture loaded so far, and your
+ticks stay put as more load; changing a filter there clears the selection, with **Undo** for ten seconds.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

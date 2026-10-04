@@ -8,7 +8,7 @@ import useDataSaver from "../hooks/usePhonePrefs.js";
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useFullGate from "../hooks/useFullGate.js";
 import { apiGet, fetchSiblings } from "../api.js";
-import { lightboxCount, taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
+import { continuousDone, lightboxCount, stripRange, taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
 import "../styles/lightbox-mobile.css";
 import "../styles/curation-mobile.css";
 import "../styles/phone-q.css";
@@ -109,6 +109,12 @@ import { detail } from "../apiRoutes.js";
          size" line (the size from a HEAD), a video does not autoplay and does not preload, and the
          film strip draws 256 px thumbnails. A picture loaded once stays loaded for the session.
 
+   SESSION U, CONTINUOUS (U4a), additive: with `continuous` the viewer walks the phone's whole stacked
+   list (the index is the picture's place in the walk). ‹ › past the last loaded picture asks the shell
+   for the next page (`loadMore`) and lands on the picture after the one it was on, found by id; at the
+   very end it wraps to the first, as Pages' last page does. The film strip and the placard's one
+   batched siblings read cover the window page (100) the picture is on, not the whole list.
+
    ◈ SIMILAR IS REAL NOW (2026-09-05). It was the third of those stubs -- a
    toast saying its own mobile pass was coming. It is a DOOR: `onSimilar` is
    the same one verb every Similar entry point on the phone calls (AppMobile's
@@ -127,7 +133,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest, member, onSendToVideo, offset, total,
+  onEnterContest, member, onSendToVideo, offset, total, continuous = false, loadMore,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -172,12 +178,28 @@ export default function LightboxMobile({
      fresh page's items synchronously for this). Wraps in place only when
      there's no adjacent page. Also hard-closes the prompt slab and resets
      drag, matching the design file's own go() exactly. */
+  const pendingFrom = useRef(null);       // Continuous: {from} -- land on the picture after this id
+  const itemsNow = useRef(items);
+  itemsNow.current = items;
   const step = useCallback(async (d) => {
     closeUpscale();
     setDragDX(0);
     setPromptOpen(false);
+    pendingFrom.current = null;
     const ni = index + d;
     if (ni >= 0 && ni < items.length) { setIndex(ni); return; }
+    if (continuous) {
+      const all = continuousDone(items.length, total);
+      if (d > 0) {
+        if (all) { setIndex(0); return; }
+        const cur = itemsNow.current[index];
+        pendingFrom.current = { from: cur ? cur.media_id : null };
+        await loadMore();
+      } else if (all) {
+        setIndex(items.length - 1);
+      }
+      return;
+    }
     if (d > 0) {
       if (page < pages) { await loadPage(page + 1, true); setIndex(0); }
       else setIndex(0);
@@ -185,7 +207,14 @@ export default function LightboxMobile({
       if (page > 1) { const data = await loadPage(page - 1, true); setIndex(((data && data.items) || []).length - 1); }
       else setIndex(items.length - 1);
     }
-  }, [index, items.length, page, pages, loadPage, setIndex, closeUpscale]);
+  }, [index, items.length, page, pages, loadPage, setIndex, closeUpscale, continuous, loadMore, total]);
+  /* ...and when the next page has landed, the picture after the one the step started from. */
+  useEffect(() => {
+    const want = pendingFrom.current;
+    if (!want) return;
+    const at = items.findIndex((x) => x.media_id === want.from);
+    if (at >= 0 && at + 1 < items.length) { pendingFrom.current = null; setIndex(at + 1); }
+  }, [items, setIndex]);
 
   const close = useCallback(() => {
     if (closingRef.current) return;
@@ -242,7 +271,8 @@ export default function LightboxMobile({
 
   /* Q1: the placard's siblings, ONE batched read for the page of pictures (keyed on the task ids, so a
      star tap that rebuilds the array does not ask again). Fail-soft: no answer means "single image". */
-  const taskKey = taskIdsOf(items).join(",");
+  const strip = continuous ? stripRange(index, items.length) : { start: 0, end: items.length };
+  const taskKey = taskIdsOf(continuous ? items.slice(strip.start, strip.end) : items).join(",");
   useEffect(() => {
     if (!taskKey) { setSibMap({}); return undefined; }
     let dead = false;
@@ -412,7 +442,8 @@ export default function LightboxMobile({
         </div>
 
         <div className="lbm-strip" ref={stripRef}>
-          {items.map((sh, k) => {
+          {items.slice(strip.start, strip.end).map((sh, j) => {
+            const k = strip.start + j;
             const sw = parseInt(sh.w, 10) || 0;
             const shh = parseInt(sh.h, 10) || 0;
             const wpx = sw > 0 && shh > 0 ? Math.round(44 * (sw / shh)) : 44;
@@ -420,7 +451,7 @@ export default function LightboxMobile({
               <button key={sh.media_id} type="button" className={"lbm-thumb" + (k === index ? " on" : "")}
                 style={{ width: wpx + "px" }}
                 title={(k + 1) + " / " + items.length}
-                onClick={() => { setDragDX(0); setPromptOpen(false); setIndex(k); }}>
+                onClick={() => { pendingFrom.current = null; setDragDX(0); setPromptOpen(false); setIndex(k); }}>
                 <img src={thumbSrc(sh.thumb, saver)} alt="" loading="lazy" draggable={false} />
               </button>
             );

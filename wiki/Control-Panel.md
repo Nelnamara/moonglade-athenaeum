@@ -271,6 +271,11 @@ you are on cellular — and where it cannot, which is every iPhone browser, Auto
 so; choose **Always** there. The server's own scheduled sync runs on the machine it is on and is not
 affected.
 
+**Library paging** (phone). Data saver's neighbour on the phone's **Control** screen: **Pages** (the
+default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library loads as you scroll). It is
+the same choice the gallery's long-press sheet makes (see [Gallery](Gallery)), kept in the phone's
+browser like the blur.
+
 ## Identity
 
 The **mark** beside the title and the **skin** the whole suite wears, in one strip at the
