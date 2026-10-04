@@ -27899,6 +27899,44 @@ __DESIGN_TOKENS__
         with no credential; cached an hour. The app never follows a link -- a press opens it."""
         return jsonify({"events": _inbox().current_events()})
 
+    def _inbox_write_body():
+        """The JSON body of an inbox write, or a refusal: CSRF before anything else."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return body, (jsonify({"error": "Your session expired. Reload the page and try "
+                                            "again."}), 400)
+        return body, None
+
+    def _inbox_write(fn, *args):
+        """Run one of moonglade_inbox's writes and hand back its answer. A crash past its own
+        handling is an unclear answer, never a success."""
+        ib = _inbox()
+        try:
+            return jsonify(fn(ib.pixai_session(), *args))
+        except Exception as e:                                   # noqa: BLE001
+            return jsonify({"state": "unclear", "error": _redact_host_paths(str(e))[:200],
+                            "message": "No clear answer. Nothing was sent twice; check on "
+                                       "PixAI."})
+
+    @app.route("/api/inbox/read", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_read():
+        """Opening a row or a work card: {csrf, ids}. One mark-read write and its read-back."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        return _inbox_write(_inbox().mark_read, ids)
+
+    @app.route("/api/inbox/read-all", methods=["POST"])
+    @tier(LOGIN)
+    def api_inbox_read_all():
+        """⋯ Mark all read: {csrf, tab}. One watermark write for the tab's unread types."""
+        body, bad = _inbox_write_body()
+        if bad:
+            return bad
+        return _inbox_write(_inbox().mark_all_read, str(body.get("tab") or "all"))
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are

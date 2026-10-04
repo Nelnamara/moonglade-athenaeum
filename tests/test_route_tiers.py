@@ -193,6 +193,8 @@ TIER_SNAPSHOT = [
     "/api/inbox [GET] LOGIN",
     "/api/inbox/count [GET] LOGIN",
     "/api/inbox/events [GET] LOGIN",
+    "/api/inbox/read [POST] LOGIN",
+    "/api/inbox/read-all [POST] LOGIN",
     "/api/jobs [GET] LOGIN",
     "/api/jobs [POST] LOGIN",
     "/api/jobs/dismiss [POST] LOGIN",

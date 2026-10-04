@@ -251,3 +251,115 @@ def test_the_events_route_answers_the_live_events(tmp_path, monkeypatch, pixai):
     cli = login_test_client(_app_with_work(tmp_path))
     d = cli.get("/api/inbox/events").get_json()
     assert [e["label"] for e in d["events"]] == ["zeta", "4th-anniversary"]
+
+
+# ---------------------------------------------------------------------------
+# Mark read (R3b): one write per open, READ_ONLY first, one attempt, a read-back
+# ---------------------------------------------------------------------------
+
+def _set_read_only(monkeypatch, on=True):
+    monkeypatch.setattr(core, "READ_ONLY", on)
+
+
+def _listing(*rows):
+    return lambda call: _page(list(rows))
+
+
+def test_read_only_marks_nothing_and_asks_pixai_nothing(pixai, monkeypatch):
+    _set_read_only(monkeypatch)
+    out = inbox.mark_read(pixai, ["n1"])
+    assert out["state"] == "read_only" and "Read-only mode is on" in out["message"]
+    assert pixai.calls == []                       # not even a read: the guard comes first
+
+
+def test_opening_a_row_is_one_post_then_a_read_back(pixai):
+    pixai.on("/user/me/notifications/read", {"success": True})
+    pixai.on("/user/me/notifications/", _page([_like("n1", unread=False), _comment("n2", unread=False)]))
+    out = inbox.mark_read(pixai, ["n1", "n2", "n1", 7, ""])
+    assert out["state"] == "done"
+    posts = [c for c in pixai.calls if c.verb == "rest_post"]
+    assert len(posts) == 1 and posts[0].body == {"ids": ["n1", "n2"]}
+    assert pixai.calls[-1].verb == "rest_get"      # the read-back comes after the write
+
+
+def test_an_unclear_answer_that_reads_back_unread_stays_unread(pixai):
+    pixai.fail("/user/me/notifications/read", core.requests.ConnectionError("dropped"))
+    pixai.on("/user/me/notifications/", _page([_like("n1", unread=True)]))
+    out = inbox.mark_read(pixai, ["n1"])
+    assert out["state"] == "unclear"
+    assert out["message"] == ("Couldn't confirm it was marked read. It stays unread here; "
+                              "nothing was sent twice.")
+    assert len([c for c in pixai.calls if c.verb == "rest_post"]) == 1   # never a retry
+
+
+def test_an_unclear_answer_that_reads_back_read_is_done(pixai):
+    pixai.fail("/user/me/notifications/read", core.PixAIRestError("REST POST -> 502", status=502))
+    pixai.on("/user/me/notifications/", _page([_like("n1", unread=False)]))
+    assert inbox.mark_read(pixai, ["n1"])["state"] == "done"
+
+
+def test_a_refusal_is_plain_and_peach(pixai):
+    pixai.fail("/user/me/notifications/read",
+               core.PixAIRestError("REST POST -> 401", status=401, body={"code": "UNAUTHORIZED"}))
+    pixai.on("/user/me/notifications/", _page([_like("n1", unread=True)]))
+    out = inbox.mark_read(pixai, ["n1"])
+    assert out["state"] == "refused" and "nothing was marked" in out["message"].lower()
+
+
+def test_more_than_two_hundred_ids_is_capped_not_split(pixai):
+    pixai.on("/user/me/notifications/read", {"success": True})
+    pixai.on("/user/me/notifications/", _page([]))
+    inbox.mark_read(pixai, ["n%d" % i for i in range(250)])
+    posts = [c for c in pixai.calls if c.verb == "rest_post"]
+    assert len(posts) == 1 and len(posts[0].body["ids"]) == 200
+
+
+def test_mark_all_read_sends_the_tabs_unread_types_and_never_task(pixai):
+    counts = iter([
+        [{"type": "LIKE", "count": 2}, {"type": "COMMENT", "count": 1},
+         {"type": "GENERATION_TASK_COMPLETED", "count": 4}, {"type": "NOT_A_TYPE", "count": 1}],
+        [{"type": "GENERATION_TASK_COMPLETED", "count": 4}],
+    ])
+    pixai.on("/user/me/notifications/unread-counts", lambda call: next(counts))
+    pixai.on("PUT /user/me/notifications/read-marks", {"success": True})
+    out = inbox.mark_all_read(pixai, "all")
+    assert out["state"] == "done"
+    puts = [c for c in pixai.calls if c.verb == "rest_put"]
+    assert len(puts) == 1 and sorted(puts[0].body["types"]) == ["COMMENT", "LIKE"]
+
+
+def test_mark_all_read_that_reads_back_unread_says_so(pixai):
+    pixai.on("/user/me/notifications/unread-counts", [{"type": "LIKE", "count": 2}])
+    pixai.on("PUT /user/me/notifications/read-marks", {"success": True})
+    out = inbox.mark_all_read(pixai, "likes")
+    assert out["state"] == "unclear"
+
+
+def test_mark_all_read_with_nothing_unread_sends_nothing(pixai):
+    pixai.on("/user/me/notifications/unread-counts", [])
+    assert inbox.mark_all_read(pixai, "all")["state"] == "done"
+    assert not [c for c in pixai.calls if c.verb == "rest_put"]
+
+
+def test_mark_all_read_under_read_only_reads_nothing(pixai, monkeypatch):
+    _set_read_only(monkeypatch)
+    assert inbox.mark_all_read(pixai, "all")["state"] == "read_only"
+    assert pixai.calls == []
+
+
+@pytest.mark.parametrize("path", ["/api/inbox/read", "/api/inbox/read-all"])
+def test_the_mark_read_routes_need_the_session_token(tmp_path, pixai, path):
+    cli = login_test_client(_app_with_work(tmp_path))
+    for body in ({}, {"csrf": "wrong", "ids": ["n1"], "tab": "all"}):
+        r = cli.post(path, json=body)
+        assert r.status_code == 400 and "session expired" in r.get_json()["error"]
+    assert pixai.calls == []
+
+
+def test_the_mark_read_route_answers_the_write(tmp_path, pixai):
+    pixai.on("/user/me/notifications/", _page([_like("n1", unread=False)]))
+    pixai.on("/user/me/notifications/read", {"success": True})
+    cli = login_test_client(_app_with_work(tmp_path))
+    csrf = cli.get("/api/inbox").get_json()["csrf"]
+    d = cli.post("/api/inbox/read", json={"csrf": csrf, "ids": ["n1"]}).get_json()
+    assert d["state"] == "done"

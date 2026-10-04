@@ -377,3 +377,149 @@ def clear_caches():
     with _events_lock:
         _events_cache.update(at=0.0, items=None)
     _me_cache.update(name=None, at=0.0)
+
+
+# ---------------------------------------------------------------------------------------
+# The writes' shared answers
+# ---------------------------------------------------------------------------------------
+
+def _answer(state, message, **extra):
+    out = {"state": state, "message": message}
+    out.update(extra)
+    return out
+
+
+def _read_only_answer(what):
+    return _answer("read_only", "Read-only mode is on (READ_ONLY in config.json), so "
+                   + what + ".")
+
+
+def _code_of(exc):
+    """PixAI's error code for a refused /v2 call ("" when there is none)."""
+    code = getattr(exc, "code", "") or ""
+    if not code:
+        m = re.search(r'"code"\s*:\s*"([A-Z_]+)"', str(exc))
+        code = m.group(1) if m else ""
+    return str(code)
+
+
+def _status_of(exc):
+    try:
+        return int(getattr(exc, "status", None) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ---------------------------------------------------------------------------------------
+# Write 1 of 4: mark read (R3b)
+# ---------------------------------------------------------------------------------------
+
+MARK_MAX = 200                   # PixAI's markRead takes 1 to 200 ids per call
+NOT_MARKED = ("Couldn't confirm it was marked read. It stays unread here; nothing was "
+              "sent twice.")
+
+
+def _clean_ids(ids, cap):
+    out, seen = [], set()
+    for i in ids or []:
+        if not isinstance(i, str):
+            continue
+        i = i.strip()
+        if i and i not in seen and len(i) <= 64:
+            seen.add(i)
+            out.append(i)
+    return out[:cap]
+
+
+def _still_unread(session, ids):
+    """The read-back for a mark-read: which of `ids` PixAI still calls unread, read off the
+    newest 50 rows. None when the read failed or none of the ids are on that page -- the
+    caller then has only the write's own answer to go on."""
+    try:
+        page = list_notifications(session, page=50)
+    except Exception:                                        # noqa: BLE001
+        return None
+    rows = {i["id"]: i for i in page["items"] + page["tasks"]}
+    seen = [i for i in ids if i in rows]
+    if not seen:
+        return None
+    return [i for i in seen if rows[i]["unread"]]
+
+
+def _mark_refusal(e):
+    if _status_of(e) == 401:
+        return "PixAI didn't accept this account's key, so nothing was marked read."
+    if _status_of(e) == 429:
+        return "PixAI said too many requests, so nothing was marked read. Try again in a minute."
+    return "PixAI refused it, so nothing was marked read."
+
+
+def mark_read(session, ids):
+    """Opening a row or a work card marks the notifications it gathers as read on PixAI: ONE
+    POST /v2/user/me/notifications/read {"ids": [...]} (PixAI takes 1-200 and is idempotent),
+    then a read-back of the newest rows. Never called on panel open, scroll or push.
+
+    READ_ONLY first (nothing is asked of PixAI at all); one attempt; "done" only when the
+    read-back shows the rows read, or -- when they are too old to be on the read-back page --
+    when PixAI's own answer was a clear success. An unclear answer that reads back unread stays
+    unread, with the peach line."""
+    try:
+        core._check_read_only("mark notifications read on PixAI")
+    except core.PixAIError:
+        return _read_only_answer("this stays unread on PixAI")
+    ids = _clean_ids(ids, MARK_MAX)
+    if not ids:
+        return _answer("refused", "Nothing to mark read.")
+    answered = False
+    try:
+        r = core._rest_post(session, "/user/me/notifications/read", {"ids": ids})
+        answered = isinstance(r, dict) and r.get("success") is True
+    except Exception as e:                                   # noqa: BLE001
+        if core.definite_refusal(e):
+            return _answer("refused", _mark_refusal(e))
+    still = _still_unread(session, ids)
+    if still is None:
+        return _answer("done", "Marked read on PixAI.") if answered else \
+            _answer("unclear", NOT_MARKED)
+    if still:
+        return _answer("unclear", NOT_MARKED, still_unread=still)
+    return _answer("done", "Marked read on PixAI.")
+
+
+def mark_all_read(session, tab="all"):
+    """⋯ Mark all read: ONE PUT /v2/user/me/notifications/read-marks {"types": [...]} --
+    PixAI's watermark, "everything of these types up to now counts as read" -- for the types
+    the tab shows that PixAI counts unread right now (never TASK, never a type PixAI's enum
+    lacks), then a read-back of the count. Nothing unread means nothing is sent."""
+    try:
+        core._check_read_only("mark everything read on PixAI")
+    except core.PixAIError:
+        return _read_only_answer("nothing is marked read on PixAI")
+    cats = TABS.get(str(tab or "all"), TABS["all"])
+    try:
+        counts = unread_counts(session)
+    except Exception:                                        # noqa: BLE001
+        return _answer("refused", "Couldn't read what's unread on PixAI, so nothing was sent.")
+    types = sorted(t for t, n in counts.items()
+                   if n > 0 and t in NOTIFICATION_TYPES and t not in TASK_TYPES
+                   and category_of(t) in cats)
+    if not types:
+        return _answer("done", "Nothing unread.")
+    answered = False
+    try:
+        r = core._rest_put(session, "/user/me/notifications/read-marks", {"types": types})
+        answered = isinstance(r, dict) and r.get("success") is True
+    except Exception as e:                                   # noqa: BLE001
+        if core.definite_refusal(e):
+            return _answer("refused", _mark_refusal(e))
+    try:
+        after = unread_counts(session)
+    except Exception:                                        # noqa: BLE001
+        return _answer("done", "Marked read on PixAI.") if answered else \
+            _answer("unclear", "Couldn't confirm everything was marked read. Nothing was sent "
+                               "twice; check on PixAI.")
+    left = sum(after.get(t, 0) for t in types)
+    if left:
+        return _answer("unclear", "Couldn't confirm everything was marked read: {} still "
+                                  "unread on PixAI. Nothing was sent twice.".format(left))
+    return _answer("done", "Marked read on PixAI.")
