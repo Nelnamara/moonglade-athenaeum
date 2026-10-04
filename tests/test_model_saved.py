@@ -617,3 +617,21 @@ def test_a_write_pixai_took_but_could_not_be_checked_is_not_claimed(monkeypatch)
     monkeypatch.setattr(core, "_rest_get", get)
     out = rec.model_save(object(), OWNER, LORA_ID)
     assert out["contains"] is None and "isn't confirmed" in out["error"] and len(w.posts) == 1
+
+
+@pytest.mark.parametrize("failure", [
+    requests.exceptions.ReadTimeout("read timed out"),
+    core.PixAIRestError("REST POST -> 502: bad gateway", status=502, body=None),
+])
+def test_no_clear_answer_and_not_seen_saved_is_not_confirmed_rather_than_refused(monkeypatch,
+                                                                                failure):
+    """Review nit 3: with no clear answer the write may still land later, so "PixAI didn't save
+    it" would claim more than is known. A clear yes the check contradicts keeps that wording."""
+    w = _Writes(_selector(False), post=failure)
+    _wire(monkeypatch, w)
+    out = rec.model_save(object(), OWNER, LORA_ID)
+    assert out["contains"] is False and "isn't confirmed" in out["error"]
+    assert "didn't save" not in out["error"] and len(w.posts) == 1
+    w = _Writes(_selector(False))
+    _wire(monkeypatch, w)
+    assert rec.model_save(object(), OWNER, LORA_ID)["error"] == "PixAI didn't save it"

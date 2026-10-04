@@ -1116,6 +1116,12 @@ _UNCLEAR = ("PixAI's answer was unclear and the check after it failed too, so no
             "known. Look on PixAI before trying again.")
 _UNCONFIRMED = ("PixAI took it, but the check after it failed, so it isn't confirmed. Look on "
                 "PixAI before trying again.")
+# No clear answer (a timeout, a dropped connection, a 5xx) and the check does not show the change:
+# the write may still land, so it is "not confirmed", never "PixAI didn't".
+_NOT_CONFIRMED_ADD = ("PixAI gave no clear answer and the check doesn't show it saved, so it "
+                      "isn't confirmed. Look on PixAI before trying again.")
+_NOT_CONFIRMED_REMOVE = ("PixAI gave no clear answer and the check still shows it there, so it "
+                         "isn't confirmed. Look on PixAI before trying again.")
 
 
 def _model_kind(kind):
@@ -1391,7 +1397,12 @@ def model_tick(session, set_id, model_id, on, item_id=""):
     else:
         _old_restore(mid)
     if out["contains"] != bool(on):
-        out["error"] = refusal or ("PixAI didn't save it" if on else "PixAI didn't take it out")
+        if refusal:
+            out["error"] = refusal
+        elif not answered:
+            out["error"] = _NOT_CONFIRMED_ADD if on else _NOT_CONFIRMED_REMOVE
+        else:
+            out["error"] = "PixAI didn't save it" if on else "PixAI didn't take it out"
     return out
 
 

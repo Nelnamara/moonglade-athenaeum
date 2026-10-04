@@ -382,7 +382,7 @@ export default function ModelPicker({
       const st = await savedApi.state(id);
       d = st && !st.error
         ? { contains: !!st.saved, item_id: st.item_id || "", sets: st.sets,
-            error: st.saved ? "" : "The answer was lost on the way, and PixAI doesn't show it saved." }
+            error: st.saved ? "" : "The answer was lost on the way and PixAI doesn't show it saved, so it isn't confirmed." }
         : { error: "The answer was lost on the way, and the check failed too. Look on PixAI before trying again." };
     }
     busyRef.current.delete(id);
