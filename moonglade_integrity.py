@@ -42,8 +42,11 @@ Hostile file names: a cell that a spreadsheet would read as a formula is prefixe
 quote (csv_safe), and every printed line has its control characters replaced (printable), so
 a file name cannot forge a Control Panel progress line or a terminal escape.
 
-Phase B (a broken-file list with per-row actions, a targeted re-download) is a design session
-of its own and is not here.
+PHASE B (Session W, the Archive Integrity Handoff) is the Broken files list in Health, built on
+the report above and kept in its own section at the foot of this file: broken_list() reads the
+report back for the list, and the owner's local marks (Mark lost, Keep as is) live in
+integrity_marks.json beside the reports. The list is still read-only; the fixes it offers run
+elsewhere and are described where they are written.
 """
 import csv
 import io
@@ -51,6 +54,7 @@ import json
 import os
 import struct
 import sys
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -365,3 +369,211 @@ def run_cli(out_dir, db_path, deep=False, progress=None):
         print("  ... {} more in {}".format(len(lines) - PRINT_LINES, REPORT_CSV))
     print("Nothing was changed: this pass only reads.")
     return rep
+
+
+# ---------------------------------------------------------------------------
+# Phase B: the Broken files list (Session W, Archive Integrity Handoff)
+# ---------------------------------------------------------------------------
+#
+# The list is the report above, read back, with what a row needs to draw and act:
+#   kind    the chip it sits under -- "zero" (Zero-byte), "thumb" (Thumbnail: no thumbnail,
+#           no poster, an empty thumbnail) or "suspect" (Suspect). Lost cuts across them.
+#   state   the pill: "recoverable", "suspect" (still recoverable, drawn peach) or "lost".
+#   action  the one fix that applies: "redownload" (an empty or cut-short file PixAI still
+#           has), "rebuild" (a thumbnail, local work), or None (a LOST row has none).
+#
+# LOST is decided from the catalog NOW, not from the report's recoverable column: the
+# archive-only flag is rewritten at every reconcile, so a file PixAI lists again becomes
+# RECOVERABLE without a new check. A row the owner marked lost is LOST whatever PixAI says.
+#
+# A MISSING file (a catalog row whose file is nowhere on disk) is not on the list: the
+# handoff's chips (All, Zero-byte, Thumbnail, Suspect, Lost) and its counts have no place
+# for one, and Health's own Missing files tile already counts them.
+
+MARKS_FILE = "integrity_marks.json"
+MARKS_FORMAT = "moonglade-integrity-marks"
+# Mark lost: "this one is gone, stop counting it" (any broken row).
+# Keep as is: "I've seen it" on a LOST row; it lapses if PixAI lists the file again.
+MARKS = ("lost", "kept")
+
+KIND_ZERO, KIND_THUMB, KIND_SUSPECT = "zero", "thumb", "suspect"
+LIST_KIND = {P_ZERO: KIND_ZERO, P_SUSPECT: KIND_SUSPECT, P_NO_THUMB: KIND_THUMB,
+             P_NO_POSTER: KIND_THUMB, P_ZERO_THUMB: KIND_THUMB}
+REFETCH_PROBLEMS = (P_ZERO, P_SUSPECT)
+REBUILD_PROBLEMS = (P_NO_THUMB, P_NO_POSTER, P_ZERO_THUMB)
+_STATE_RANK = {"recoverable": 0, "suspect": 1, "lost": 2}
+_REPORT_HEAD = ["media_id", "problem", "path", "size", "recoverable"]
+
+_marks_lock = threading.Lock()
+
+
+def _csv_unsafe(text):
+    """csv_safe() undone: the quote it put in front of a formula-looking cell comes off."""
+    s = str(text)
+    return s[1:] if s[:1] == "'" and s[1:2] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
+def read_lines(out_dir):
+    """The last check's report lines, as (media_id, problem, path, size, recoverable) with
+    size an int ("" when the report has none). [] when there is no report."""
+    try:
+        text = (Path(out_dir) / REPORT_CSV).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows or rows[0] != _REPORT_HEAD:
+        return []
+    lines = []
+    for r in rows[1:]:
+        if len(r) != 5:
+            continue
+        mid, problem, path, size, rec = r
+        lines.append((_csv_unsafe(mid), problem, _csv_unsafe(path),
+                      int(size) if size.isdigit() else "", rec))
+    return lines
+
+
+def read_marks(out_dir):
+    """{media_id: {"mark": "lost" | "kept", "at": utc}} -- the owner's local flags."""
+    try:
+        doc = json.loads((Path(out_dir) / MARKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    marks = doc.get("marks") if isinstance(doc, dict) else None
+    if not isinstance(marks, dict):
+        return {}
+    return {str(k): v for k, v in marks.items()
+            if isinstance(v, dict) and v.get("mark") in MARKS}
+
+
+def set_mark(out_dir, media_id, mark):
+    """Set (or with "" clear) one row's local mark and return the mark it had before ("" for
+    none), which is what Undo sends back. Writes integrity_marks.json atomically and touches
+    nothing else: no file, no catalog row, no report."""
+    mid = str(media_id or "").strip()
+    if not mid:
+        raise ValueError("no media id")
+    if mark not in ("",) + MARKS:
+        raise ValueError("unknown mark {!r}".format(mark))
+    with _marks_lock:
+        marks = read_marks(out_dir)
+        prev = (marks.get(mid) or {}).get("mark", "")
+        if mark:
+            marks[mid] = {"mark": mark, "at": _utc_now()}
+        else:
+            marks.pop(mid, None)
+        doc = {"format": MARKS_FORMAT, "marks": marks}
+        _write_atomic(Path(out_dir) / MARKS_FILE,
+                      json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
+    return prev
+
+
+def reconciled_at(out_dir):
+    """When the last reconcile (moonglade_backup.run_reconcile_deleted) rewrote the
+    archive-only flags, or None before the first stamped one."""
+    import moonglade_backup as core                  # lazy, like _write_atomic's
+    try:
+        doc = json.loads((Path(out_dir) / core.RECONCILE_STAMP).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    at = doc.get("reconciled_at") if isinstance(doc, dict) else None
+    return at if isinstance(at, str) and at else None
+
+
+def listed_ids(out_dir):
+    """The media ids the Broken files list can show (the report's list-kind lines)."""
+    return {ln[0] for ln in read_lines(out_dir) if ln[1] in LIST_KIND}
+
+
+def _gone_as_of(row, rec_at):
+    """The date a LOST row's line names: PixAI's own date when it dropped this one image,
+    else the last reconcile that found its task gone. None when neither is known."""
+    cd = str(row.get("cloud_deleted_at") or "").strip()
+    if cd:
+        return cd[:10]
+    if str(row.get("deleted_remote") or "").strip() == "1" and rec_at:
+        return rec_at[:10]
+    return None
+
+
+def _safe_id(mid):
+    """A media id that can be a file name (a thumbnail's): no separators, no dot names."""
+    return bool(mid) and mid not in (".", "..") and not any(c in mid for c in "/\\:")
+
+
+def _thumb_present(thumbs_dir, mid):
+    if not _safe_id(mid):
+        return False
+    try:
+        return (thumbs_dir / (mid + ".jpg")).stat().st_size > 0
+    except OSError:
+        return False
+
+
+def broken_list(out_dir, db_path, avg_bytes=None):
+    """Health's Broken files list, from the last check's report. Read-only.
+
+    Returns {verified_at, deep, rows, counts, broken, lost, fix}:
+      rows    one dict per row, in the handoff's order (recoverable, then suspect, then
+              lost; newest first within each): media_id, problem, kind, path, size, state,
+              action, archive_only, mark, thumb, is_video, created_at, gone_as_of.
+      counts  per chip: all, zero, thumb, suspect, lost.
+      broken  rows that are not LOST; lost: rows that are.
+      fix     what "Fix all recoverable" would do: the redownload and rebuild ids (never a
+              LOST row, never an archive-only one), the lost count it leaves alone, and
+              redownload_bytes, an estimate (the cut-short file's own size or the library's
+              average file size, `avg_bytes`, whichever is larger), None without an average.
+    """
+    import moonglade_gallery as g                     # lazy: the catalog verbs
+    out = Path(out_dir)
+    summary = read_summary(out)
+    lines = [ln for ln in read_lines(out) if ln[1] in LIST_KIND]
+    ids = list(dict.fromkeys(ln[0] for ln in lines))
+    catalog = ({str(r["media_id"]): r for r in g.rows_for_media_ids(db_path, ids)}
+               if ids and Path(db_path).exists() else {})
+    marks = read_marks(out)
+    rec_at = reconciled_at(out)
+    thumbs_dir = out / g.GALLERY_DIRNAME / "thumbs"
+
+    rows = []
+    for mid, problem, path, size, _rec in lines:
+        r = catalog.get(mid)
+        if r is None:
+            continue                                  # gone from the catalog since the check
+        archive = g.is_archive_only(r)
+        mark = (marks.get(mid) or {}).get("mark", "")
+        refetch = problem in REFETCH_PROBLEMS
+        lost = (refetch and archive) or mark == "lost"
+        state = "lost" if lost else ("suspect" if problem == P_SUSPECT else "recoverable")
+        rows.append({
+            "media_id": mid, "problem": problem, "kind": LIST_KIND[problem],
+            "path": path, "size": size, "state": state,
+            "action": None if lost else ("redownload" if refetch else "rebuild"),
+            "archive_only": archive,
+            # "kept" only means something while the row is LOST; it lapses with the flag
+            "mark": mark if (mark == "lost" or (mark == "kept" and lost)) else "",
+            "thumb": _thumb_present(thumbs_dir, mid),
+            "is_video": str(r.get("is_video") or "") == "1",
+            "created_at": str(r.get("created_at") or ""),
+            "gone_as_of": _gone_as_of(r, rec_at) if (archive and refetch) else None,
+        })
+    rows.sort(key=lambda x: (x["created_at"], x["media_id"]), reverse=True)
+    rows.sort(key=lambda x: _STATE_RANK[x["state"]])  # stable: newest first inside each
+
+    counts = {"all": len(rows), KIND_ZERO: 0, KIND_THUMB: 0, KIND_SUSPECT: 0, "lost": 0}
+    for x in rows:
+        counts[x["kind"]] += 1
+        counts["lost"] += 1 if x["state"] == "lost" else 0
+    fixable = [x for x in rows if x["action"] and not x["archive_only"]]
+    redl = [x for x in fixable if x["action"] == "redownload"]
+    est = (sum(max(int(x["size"] or 0), int(avg_bytes)) for x in redl)
+           if avg_bytes else None)
+    return {
+        "verified_at": (summary or {}).get("verified_at"),
+        "deep": bool((summary or {}).get("deep")),
+        "rows": rows, "counts": counts,
+        "broken": counts["all"] - counts["lost"], "lost": counts["lost"],
+        "fix": {"redownload": [x["media_id"] for x in redl],
+                "rebuild": [x["media_id"] for x in fixable if x["action"] == "rebuild"],
+                "lost": counts["lost"], "redownload_bytes": est},
+    }

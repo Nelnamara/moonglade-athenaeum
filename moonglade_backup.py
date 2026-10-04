@@ -16254,6 +16254,25 @@ def run_credit_log(args):
     return {"entries": len(entries)}
 
 
+# When the archive-only flags were last rewritten: the Broken files list's LOST line says "gone
+# from your PixAI history as of <date>", and this is that date (Session W, W5a).
+RECONCILE_STAMP = "reconcile_stamp.json"
+
+
+def _stamp_reconcile(out, flagged, cleared):
+    """Write reconcile_stamp.json at the library root, atomically. Advisory, like the
+    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
+    doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "flagged": flagged, "cleared": cleared}
+    dest = Path(out) / RECONCILE_STAMP
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        _atomic_replace(tmp, dest)
+    except OSError:
+        pass
+
+
 def run_reconcile_deleted(args):
     """Find catalog rows whose PixAI task no longer exists in your live feed -- i.e.
     generations you deleted on the website -- and flag them (deleted_remote='1') so
@@ -16306,6 +16325,7 @@ def run_reconcile_deleted(args):
         else:
             r["deleted_remote"] = "1" if gone else ""
     save_catalog(db_path, rows)
+    _stamp_reconcile(out, flagged, cleared)
     print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
         flagged, cleared))
     print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")

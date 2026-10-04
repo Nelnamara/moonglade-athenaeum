@@ -9232,6 +9232,18 @@ def health_cached(out_dir, db_path, fresh=False):
     return payload
 
 
+def health_avg_file_bytes():
+    """The library's average image size from the LAST Health measurement, or None before
+    there is one. A memory read, never a walk: the Broken files list sizes its re-download
+    estimate with it ("~9 MB"), and a cut-short file says nothing about how big it should be."""
+    with _HEALTH_LOCK:
+        payload = _HEALTH_CACHE["payload"]
+    if not payload:
+        return None
+    n, total = payload.get("total_files"), payload.get("total_bytes")
+    return int(total / n) if n and total else None
+
+
 def _health_prime(out_dir, db_path):
     """Warm the memo off-thread at boot so the first Health open of a session is a memory
     read too. Daemon, so it can never hold up an exit; fail-soft, so a broken library still
@@ -15239,6 +15251,49 @@ def create_app(out_dir: Path):
         sends it on an explicit user refresh, never on a plain open."""
         return jsonify(health_cached(out_dir, db_path,
                                      fresh=bool(request.args.get("fresh"))))
+
+    # ---- Health's Broken files list (Session W, the Archive Integrity Handoff) ----
+    # The list reads the last integrity check's report (moonglade_integrity.broken_list);
+    # the owner's Mark lost / Keep as is are a local flag beside it (integrity_marks.json).
+    # Neither touches a file, a catalog row or PixAI.
+
+    @app.route("/api/integrity/broken")
+    @tier(LOGIN)
+    def api_integrity_broken():
+        """The Broken files list: the last check's broken rows with each one's pill, the one
+        action that applies, its chip and its local mark, plus what Fix all would do.
+        `read_only` says whether re-downloads are off (READ_ONLY in config.json)."""
+        import moonglade_backup as core
+        import moonglade_integrity
+        doc = moonglade_integrity.broken_list(out_dir, db_path,
+                                              avg_bytes=health_avg_file_bytes())
+        doc["read_only"] = bool(core.READ_ONLY or core._read_only_now())
+        return jsonify(doc)
+
+    @app.route("/api/integrity/mark", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_mark():
+        """Mark lost / Keep as is / Undo: set one broken row's local mark ("lost", "kept",
+        or "" to clear it) and answer the mark it had before, which Undo sends back. Only a
+        row on the list can take a mark; clearing is allowed for any row that has one.
+        Body: {csrf, media_id, mark}."""
+        import moonglade_integrity
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        mid = str(body.get("media_id") or "").strip()
+        mark = str(body.get("mark") or "")
+        if mark not in ("",) + moonglade_integrity.MARKS:
+            return jsonify({"error": "That isn't a mark this list keeps."}), 400
+        if mark and mid not in moonglade_integrity.listed_ids(out_dir):
+            return jsonify({"error": "That file isn't on the Broken files list."}), 400
+        if not mark and mid not in moonglade_integrity.read_marks(out_dir):
+            return jsonify({"ok": True, "media_id": mid, "mark": "", "prev": ""})
+        try:
+            prev = moonglade_integrity.set_mark(out_dir, mid, mark)
+        except (ValueError, OSError) as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
+        return jsonify({"ok": True, "media_id": mid, "mark": mark, "prev": prev})
 
     @app.route("/api/panel/summary")
     @tier(LOGIN)

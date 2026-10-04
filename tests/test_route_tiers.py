@@ -190,6 +190,8 @@ TIER_SNAPSHOT = [
     "/api/image-meta/<media_id> [GET] LOGIN",
     "/api/import-local [POST] LOCALHOST",
     "/api/import-task [POST] LOGIN",
+    "/api/integrity/broken [GET] LOGIN",
+    "/api/integrity/mark [POST] LOGIN",
     "/api/jobs [GET] LOGIN",
     "/api/jobs [POST] LOGIN",
     "/api/jobs/dismiss [POST] LOGIN",
