@@ -182,6 +182,12 @@ def test_a_missing_file_with_a_folder_in_its_path_goes_back_there(tmp_path):
     "_deleted/p_t1_105.png",                # the Trash
     "images/p_t1_999.png",                  # a name that is another picture's
     "images/p_t1_105.exe",                  # not a picture
+    # Review finding 2: Windows strips a trailing dot or space from a path part, so these
+    # would land in branding/ (a pruned tree) or a folder other than the one checked.
+    "branding./105.png",                    # the reviewer's probe
+    "images./p_t1_105.png",
+    "images /p_t1_105.png",
+    "images/p_t1_105.png.",
 ])
 def test_a_crafted_path_is_refused_before_anything_is_fetched(tmp_path, crafted):
     out = _broken_library(tmp_path / "lib")

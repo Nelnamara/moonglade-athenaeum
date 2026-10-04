@@ -717,7 +717,9 @@ def missing_target(out_dir, row):
     The destination is the catalog row's own `filename`. The backup records most pictures by
     bare file name and keeps them in images/ (a video in videos/), so a bare name goes back
     there; a name with folders keeps its folders. It is refused unless every rule holds:
-      1. a relative path: no drive or ':' anywhere, no leading '/', no '..' part, no NUL;
+      1. a relative path: no drive or ':' anywhere, no leading '/', no '..' part, no NUL,
+         and no part that ends in a dot or a space (Windows strips those, so "branding./x" would
+         be checked as one folder and written into another);
       2. resolved (links followed), strictly inside the library root;
       3. not inside a tree every library walk prunes (gallery/, _duplicates/, _deleted/,
          branding/) -- a file put there would never be found again;
@@ -731,7 +733,7 @@ def missing_target(out_dir, row):
     if not mid or not raw or "\x00" in raw or ":" in raw or raw.startswith("/"):
         return None, "bad_path"                                        # rule 1
     parts = [p for p in raw.split("/") if p not in ("", ".")]
-    if not parts or ".." in parts:
+    if not parts or ".." in parts or any(p.endswith((".", " ")) for p in parts):
         return None, "bad_path"                                        # rule 1
     if len(parts) == 1:
         parts = ["videos" if str(row.get("is_video") or "") == "1" else "images"] + parts
