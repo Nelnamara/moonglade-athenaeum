@@ -65,3 +65,23 @@ export function goneLine(item) {
   const d = String((item && item.saved_at) || "").slice(0, 10);
   return "Removed from PixAI" + (d ? " · saved " + d : "");
 }
+
+/* ---- S2c: the old bookmarks ---- */
+
+/* The per-account switch behind "Show old bookmarks" (hooks/useAccountPrefs.js). Absent = on. */
+export const OLD_PREF = "picker.old_bookmarks";
+
+/* The old bookmarks list has taken no save since mid-August. Saved shows the ones it does not
+   hold (the server already left out every one Saved holds; `live` covers what this session
+   saved since), after its own rows, in the old list's order, each tagged `old`. The search
+   box and the LoRA base chip narrow them as they narrow the live list. */
+export function mergeOld(live, old, { q = "", base = "" } = {}) {
+  const held = new Set((live || []).map((r) => String(r.model_id)));
+  const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return (old || []).filter((r) => {
+    if (held.has(String(r.model_id))) return false;
+    if (base && r.lora_base_model_type !== base) return false;
+    const hay = ((r.title || "") + " " + (r.description || "")).toLowerCase();
+    return words.every((w) => hay.includes(w));
+  }).map((r) => (r.old ? r : { ...r, old: true }));
+}

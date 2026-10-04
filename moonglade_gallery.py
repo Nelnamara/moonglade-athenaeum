@@ -27888,6 +27888,19 @@ __DESIGN_TOKENS__
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e, sets=[])
 
+    @app.route("/api/model-saved/old")
+    @tier(LOGIN)
+    def api_model_saved_old():
+        """S2c: the old bookmarks Saved does not hold (?kind=base|lora), tagged "old". The old
+        list is read as the Bookmarked tab read it (the website's identity)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().model_old_bookmarks(
+                gsession, core.present_as_web(gsession), _recipe_user_id(core, gsession),
+                _saved_kind()))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, rows=[])
+
     @app.route("/api/model-saved/unavailable")
     @tier(LOGIN)
     def api_model_saved_unavailable():

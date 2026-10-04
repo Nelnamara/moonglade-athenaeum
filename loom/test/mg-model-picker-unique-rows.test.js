@@ -72,6 +72,9 @@ describe("the picker assembles its rows through the helpers, at both places rows
     assert.match(src, /<div key=\{rowKey\(m\) \|\| "row-" \+ i\} className=\{"mg-card"/,
       "the card key must come from rowKey (a string, so 42 and \"42\" cannot become two keys) " +
       "with a positional fallback so an id-less row never yields key=\"\" twice");
-    assert.match(src, /\{rows\.map\(\(m, i\) => \{/, "the map must expose the index for that fallback");
+    // CHANGED ON PURPOSE (Session S, S2c): the grid maps `listRows` -- the rows, plus on Saved
+    // the old bookmarks after the list's end, which never repeat a live row's id (mergeOld).
+    assert.match(src, /const listRows = oldShown\.length \? rows\.concat\(oldShown\) : rows;/);
+    assert.match(src, /\{listRows\.map\(\(m, i\) => \{/, "the map must expose the index for that fallback");
   });
 });

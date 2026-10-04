@@ -102,3 +102,43 @@ test("the rail is 112 px of mono 10 px at line-height 2, marked with a lavender 
   // the header's count is mono 9.5 px in overlay0
   assert.match(css, /\.mg-saved-count \{[^}]*font: 9\.5px\/1\.45 ui-monospace[^}]*color: var\(--overlay0\)/);
 });
+
+/* ---- S2c: the old bookmarks, merged into Saved after its own rows ---- */
+
+import { mergeOld, OLD_PREF } from "../../gallery/src/picker/savedCore.js";
+import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
+
+test("old bookmarks merge after the live rows, minus anything already live, tagged old", () => {
+  const live = [{ model_id: "1", title: "Moonwell v3" }];
+  const old = [{ model_id: "1", title: "Moonwell v3" }, { model_id: "2", title: "Glasswing", lora_base_model_type: "SDXL_MODEL" },
+    { model_id: "3", title: "Kurone Ink", lora_base_model_type: "MMDIT26B_MODEL", description: "inky lines" }];
+  assert.deepEqual(mergeOld(live, old).map((r) => [r.model_id, r.old]), [["2", true], ["3", true]]);
+  // the search box and the base chip narrow them as they narrow the live list
+  assert.deepEqual(mergeOld(live, old, { q: "ink" }).map((r) => r.model_id), ["3"]);
+  assert.deepEqual(mergeOld(live, old, { q: "inky LINES" }).map((r) => r.model_id), ["3"]);
+  assert.deepEqual(mergeOld(live, old, { base: "SDXL_MODEL" }).map((r) => r.model_id), ["2"]);
+  assert.deepEqual(mergeOld(live, null), []);
+});
+
+test("Show old bookmarks is a per-account preference, on unless turned off", () => {
+  assert.equal(OLD_PREF, "picker.old_bookmarks");
+  assert.equal(prefKeyProblem(OLD_PREF), "");
+  assert.match(picker, /import useAccountPrefs from "\.\.\/hooks\/useAccountPrefs\.js";/);
+  assert.match(picker, /prefs\.get\(OLD_PREF, true\) !== false/);
+  assert.match(picker, /prefs\.set\(OLD_PREF, !showOld\)/);
+  assert.match(tab, /Show old bookmarks/);
+});
+
+test("the merge is read only on Saved itself, and only while the toggle is on", () => {
+  assert.match(picker, /apiGet\("\/api\/model-saved\/old", \{ kind \}\)/);
+  assert.match(picker, /savedOn && !setId && showOld/);
+  // after the live list's end, never before it
+  assert.match(picker, /const oldShown = savedOn && !setId && showOld && atEnd && !err/);
+  assert.match(picker, /const listRows = oldShown\.length \? rows\.concat\(oldShown\) : rows;/);
+  assert.match(picker, /\{listRows\.map\(\(m, i\) => \{/);
+});
+
+test("an old row carries a mono old tag, 8.5 px and neutral", () => {
+  assert.match(picker, /m\.old \? <span className="mg-old">old<\/span>/);
+  assert.match(css, /\.mg-old \{[^}]*font: 700 8\.5px\/1\.3 ui-monospace[^}]*color: var\(--overlay0\)/);
+});

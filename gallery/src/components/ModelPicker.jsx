@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
+import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
-import { SavedRail, SavedChooser, SavedHead, SavedChips, GoneList } from "../picker/SavedTab.jsx";
+import { SavedRail, SavedChooser, SavedHead, SavedChips, GoneList, OldToggle } from "../picker/SavedTab.jsx";
 import {
-  NARROW_PX, SAVED_END_LINE, currentSet, savedEmptyLine, savedErrorLine, savedTabLabel,
+  NARROW_PX, OLD_PREF, SAVED_END_LINE, currentSet, mergeOld, savedEmptyLine, savedErrorLine,
+  savedTabLabel,
 } from "../picker/savedCore.js";
 import "../styles/model-picker.css";
 import "../styles/saved-tab.css";
@@ -126,6 +128,10 @@ export default function ModelPicker({
   const [gone, setGone] = useState(null);           // "K not available ▸": null = closed
   const [atEnd, setAtEnd] = useState(false);
   const [settled, setSettled] = useState(false);    // the latest fresh search has answered
+  const [oldRows, setOldRows] = useState(null);     // S2c: old bookmarks Saved does not hold
+  const [oldErr, setOldErr] = useState("");
+  const prefs = useAccountPrefs();
+  const showOld = prefs.get(OLD_PREF, true) !== false;
 
   const seqRef = useRef(0);
   const cursorRef = useRef("");
@@ -140,6 +146,8 @@ export default function ModelPicker({
   selectedRef.current = selected;
   const rootRef = useRef(null);
   const setsAskedRef = useRef(false);
+  const oldAskedRef = useRef(false);
+  const savedOn = market && src === "saved";
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q), 250);
@@ -253,6 +261,21 @@ export default function ModelPicker({
     if (!visible || !market || src !== "saved" || setsAskedRef.current) return;
     readSets();
   }, [visible, market, src, readSets]);
+
+  // S2c: the old bookmarks Saved does not hold -- read once, on Saved itself, while "Show old
+  // bookmarks" is on. They are drawn after the live list's end (oldShown, below).
+  const readOld = useCallback(() => {
+    oldAskedRef.current = true;
+    setOldErr("");
+    apiGet("/api/model-saved/old", { kind }).then((d) => {
+      if (!d || d.error) { setOldErr((d && d.error) || "PixAI didn't answer"); return; }
+      setOldRows(d.rows || []);
+    });
+  }, [kind]);
+  useEffect(() => {
+    if (!visible || !(savedOn && !setId && showOld) || oldAskedRef.current) return;
+    readOld();
+  }, [visible, savedOn, setId, showOld, readOld]);
 
   // The rail shows only where the picker is at least NARROW_PX wide (the desktop dock); a
   // narrower picker, and the phone's sheet, fold it into the "Saved ▾" chooser.
@@ -374,17 +397,21 @@ export default function ModelPicker({
         : "No results — try another search.");
 
   // ---- Saved (Session S) ----
-  const savedOn = market && src === "saved";
   const cur = savedOn ? currentSet(savedSets && savedSets.sets, setId) : null;
   const curTitle = cur ? cur.title : "Saved";
   const railShown = savedOn && wide && !!savedSets && savedSets.sets.length > 0;
+  // S2c: after the live list's end, the old bookmarks it does not hold, tagged "old"
+  const oldAll = savedOn && !setId && showOld ? mergeOld(rows, oldRows) : [];
+  const oldShown = savedOn && !setId && showOld && atEnd && !err
+    ? mergeOld(rows, oldRows, { q: qDebounced, base: kind === "lora" ? savedBase : "" }) : [];
+  const listRows = oldShown.length ? rows.concat(oldShown) : rows;
   const savedLine = !savedOn ? null
     : (err || setsErr) ? (
       <div className="mg-saved-line mg-saved-err">
         {savedErrorLine(curTitle)}{" "}
         <button type="button" className="mg-saved-retry" onClick={retrySaved}>Retry</button>
       </div>)
-    : (settled && !rows.length) ? <div className="mg-saved-line">{savedEmptyLine(kind, qDebounced)}</div>
+    : (settled && !rows.length && !oldShown.length) ? <div className="mg-saved-line">{savedEmptyLine(kind, qDebounced)}</div>
     : null;
 
   return (
@@ -462,7 +489,7 @@ export default function ModelPicker({
         <div className="mg-body-main">
           {savedOn ? (
             <>
-              <SavedHead title={curTitle} count={cur ? cur.count : 0}
+              <SavedHead title={curTitle} count={cur ? cur.count : 0} old={oldAll.length}
                 gone={!setId && savedSets ? savedSets.unavailable : 0}
                 goneOpen={!!gone} onGone={toggleGone} />
               {!setId ? <GoneList state={gone} /> : null}
@@ -475,7 +502,7 @@ export default function ModelPicker({
 
           <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
             style={{ opacity: dim ? 0.45 : 1 }}>
-            {rows.map((m, i) => {
+            {listRows.map((m, i) => {
               const incompat = m.compat === "no";
               const arch = archLabel(m, kind);
               const sel = isSelected(m);
@@ -516,6 +543,11 @@ export default function ModelPicker({
                       <span>{fmtCompact(m.liked_count)} likes</span>
                     </div>
                     {cost && <div className="mg-costline">{cost}</div>}
+                    {market && m.old ? (
+                      <div className="mg-keep">
+                        {m.old ? <span className="mg-old">old</span> : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -524,8 +556,15 @@ export default function ModelPicker({
 
           <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
           <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
-          {savedOn && atEnd && rows.length > 0 && !loadingMore && !err
+          {savedOn && atEnd && listRows.length > 0 && !loadingMore && !err
             ? <div className="mg-saved-end">{SAVED_END_LINE}</div> : null}
+          {savedOn && !setId && oldErr && showOld ? (
+            <div className="mg-saved-line mg-saved-err">
+              Couldn't read the old bookmarks.{" "}
+              <button type="button" className="mg-saved-retry" onClick={readOld}>Retry</button>
+            </div>) : null}
+          {savedOn && !setId && (oldAll.length > 0 || !showOld)
+            ? <OldToggle on={showOld} onToggle={() => prefs.set(OLD_PREF, !showOld)} /> : null}
         </div>
       </div>
 

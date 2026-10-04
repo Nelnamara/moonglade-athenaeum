@@ -228,6 +228,7 @@ TIER_SNAPSHOT = [
     "/api/mirror/connect [POST] LOGIN",
     "/api/mirror/enable [POST] LOCALHOST",
     "/api/mirror/status [GET] LOGIN",
+    "/api/model-saved/old [GET] LOGIN",
     "/api/model-saved/remove [POST] LOGIN",
     "/api/model-saved/save [POST] LOGIN",
     "/api/model-saved/sets [GET] LOGIN",

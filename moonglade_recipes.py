@@ -1223,6 +1223,65 @@ def model_unavailable(session, owner_id, expect=0):
     return {"items": found, "complete": False}
 
 
+# S2c: the old bookmarks list (core.model_bookmarks_gql) has taken no save since mid-August;
+# every one of its 463 entries was found in Saved by the 2026-10-03 probe. Saved shows the ones
+# it does not hold, tagged "old", after its own rows. Working that out reads all of Saved for
+# this kind and all of the old list, so the answer is kept for _OLD_TTL (the old list never
+# changes; Saved changes through this app's own saves, which drop the row at once).
+_OLD_WALK_PAGES = 60           # 60 x 24 live saves, or 60 x 50 old bookmarks, before giving up
+_OLD_TTL = 6 * 3600.0
+
+
+def model_old_bookmarks(session, web_session, owner_id, kind):
+    """{rows, partial}: the old bookmarks of this picker's kind that Saved does not hold, in the
+    old list's own order, each tagged `old`. `web_session` reads the old list as the Bookmarked
+    tab did (core.present_as_web). If either list cannot be read to its end, `partial` is True
+    and no row is offered: an unread page might hold it, and a row wrongly tagged "old" would
+    be a lie about what is saved."""
+    kind = _model_kind(kind)
+    uid = _checked_id(owner_id)
+
+    def walk():
+        default = model_default(session, uid)
+        held, cursor = set(), ""
+        for _ in range(_OLD_WALK_PAGES):
+            d = set_items(session, default["id"], cursor, ref_type="model",
+                          model_types=MODEL_KINDS[kind]) if default else {"items": [],
+                                                                          "next_cursor": ""}
+            held.update(r["model_id"] for r in d["items"])
+            cursor = d["next_cursor"]
+            if not cursor:
+                break
+        else:
+            return {"rows": [], "partial": True}
+        rows, seen, after = [], set(), None
+        usage = "LORA" if kind == "lora" else "MODEL"
+        for _ in range(_OLD_WALK_PAGES):
+            page = core.model_bookmarks_gql(web_session, usage=usage, limit=50, after=after) or {}
+            for r in page.get("results") or []:
+                mid = str(r.get("model_id") or "")
+                if mid and mid not in held and mid not in seen and _pickable(r, kind):
+                    seen.add(mid)
+                    rows.append(dict(r, old=True))
+            after = page.get("next_cursor") or ""
+            if not page.get("has_more") or not after:
+                break
+        else:
+            return {"rows": [], "partial": True}
+        return {"rows": rows, "partial": False}
+
+    return _cached(("m-old", uid, kind), _OLD_TTL, walk)
+
+
+def _old_forget(model_id):
+    """A model just saved is no longer "old": take it out of every kept merge at once."""
+    with _cache_lock:
+        for key, (stamp, val) in list(_cache.items()):
+            if isinstance(key, tuple) and key[:1] == ("m-old",) and isinstance(val, dict):
+                rows = [r for r in val.get("rows") or [] if r.get("model_id") != model_id]
+                _cache[key] = (stamp, dict(val, rows=rows))
+
+
 def model_state(session, model_id):
     """The "Keep this model" menu's read, and every model write's read-back: the selector for
     one model. {saved, item_id, default_id, sets}: Saved first, then the named sets A-Z, each
@@ -1305,6 +1364,8 @@ def model_tick(session, set_id, model_id, on, item_id=""):
                                      "on PixAI before trying again.")}
     out = {"contains": bool(row["contains"]), "item_id": row["item_id"] or "",
            "sets": state["sets"], "saved": state["saved"]}
+    if state["saved"]:
+        _old_forget(mid)
     if out["contains"] != bool(on):
         out["error"] = refusal or ("PixAI didn't save it" if on else "PixAI didn't take it out")
     return out

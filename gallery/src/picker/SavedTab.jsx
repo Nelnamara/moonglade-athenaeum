@@ -93,3 +93,15 @@ export function GoneList({ state, renderKeep }) {
     </div>
   );
 }
+
+/* "Show old bookmarks" at the end of Saved (S2c): on by default, per account. It is there
+   while old rows remain, and while it is off (so it can be turned back on). */
+export function OldToggle({ on, onToggle }) {
+  return (
+    <div className="mg-oldtoggle">
+      <button type="button" role="switch" aria-checked={!!on} onClick={onToggle}>
+        Show old bookmarks <span className={"mg-oldtoggle-dot" + (on ? " on" : "")} aria-hidden="true">{on ? "●" : "○"}</span>
+      </button>
+    </div>
+  );
+}

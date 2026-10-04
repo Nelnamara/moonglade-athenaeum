@@ -482,3 +482,89 @@ def test_opening_the_menu_only_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(rec, "_rest_delete", _boom)
     d = cli.get("/api/model-saved/state?model_id=" + LORA_ID).get_json()
     assert d["saved"] is False and d["sets"][0]["title"] == "Saved" and d["read_only"] is False
+
+
+# ---------------------------------------------------------------------------
+# S2c: the old bookmarks merged into Saved
+# ---------------------------------------------------------------------------
+
+def _old_row(mid, title, base="SDXL_MODEL"):
+    """A row of the frozen old bookmarks list as core.model_bookmarks_gql answers it."""
+    return {"model_id": mid, "title": title, "type": "MULTI_LORA", "preview_url": "",
+            "lora_base_model_type": base, "liked_count": 1, "description": ""}
+
+
+class _OldList:
+    def __init__(self, pages):
+        self.pages, self.calls = pages, []
+
+    def __call__(self, session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
+        self.calls.append((usage, limit, after))
+        rows, nxt = self.pages[after or ""]
+        return {"results": rows, "has_more": bool(nxt), "next_cursor": nxt or "", "total": None}
+
+
+def test_old_bookmarks_merge_only_what_saved_does_not_hold(monkeypatch):
+    saved = _model(LORA_ID, "Glasswing")
+    f = _Reads(pages={(DEFAULT_ID, ""): ([_item(ITEM_1, saved)], "c2"),
+                      (DEFAULT_ID, "c2"): ([_gone(ITEM_GONE)], None)})
+    old = _OldList({"": ([_old_row(LORA_ID, "Glasswing"), _old_row("1873306400000000009", "Moth")],
+                         "o2"),
+                    "o2": ([_old_row("1873306400000000010", "Kurone Ink", "MMDIT26B_MODEL")], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_bookmarks_gql", old)
+    out = rec.model_old_bookmarks(object(), object(), OWNER, "lora")
+    assert [r["title"] for r in out["rows"]] == ["Moth", "Kurone Ink"]
+    assert all(r["old"] is True for r in out["rows"]) and out["partial"] is False
+    # the live list is walked for this kind only; the old list a page of 50 at a time
+    assert all(p.get("modelTypes") == "ANY_LORA" for path, p in f.gets if path.endswith("/items"))
+    assert [c[0] for c in old.calls] == ["LORA", "LORA"] and old.calls[0][1] == 50
+    # read once: a second open within the hour costs nothing
+    monkeypatch.setattr(core, "_rest_get", _boom)
+    monkeypatch.setattr(core, "model_bookmarks_gql", _boom)
+    assert rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"] == out["rows"]
+
+
+def test_saving_an_old_row_takes_it_out_of_the_merge(monkeypatch):
+    f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_bookmarks_gql",
+                        _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
+    assert [r["model_id"] for r in rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]] \
+        == [LORA_ID]
+    w = _Writes(_selector(True, ITEM_1))
+    _wire(monkeypatch, w)
+    assert rec.model_save(object(), OWNER, LORA_ID)["contains"] is True
+    monkeypatch.setattr(core, "_rest_get", _boom)
+    assert rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"] == []
+
+
+def test_an_unfinished_walk_merges_nothing_rather_than_guess(monkeypatch):
+    """If Saved cannot be read to its end, an old row may be saved after all: tag none."""
+    monkeypatch.setattr(rec, "_OLD_WALK_PAGES", 2)
+    f = _Reads(pages={(DEFAULT_ID, ""): ([], "c2"), (DEFAULT_ID, "c2"): ([], "c3")})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_bookmarks_gql",
+                        _OldList({"": ([_old_row("1873306400000000009", "Moth")], None)}))
+    assert rec.model_old_bookmarks(object(), object(), OWNER, "lora") == {"rows": [],
+                                                                         "partial": True}
+
+
+def test_the_model_picker_merges_no_chat_or_video_rows(monkeypatch):
+    f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    rows = [dict(_old_row("1873306400000000011", "Chatty"), type="CHAT"),
+            dict(_old_row("1873306400000000012", "Haze Mix"), type="SDXL_MODEL")]
+    monkeypatch.setattr(core, "model_bookmarks_gql", _OldList({"": (rows, None)}))
+    out = rec.model_old_bookmarks(object(), object(), OWNER, "base")
+    assert [r["title"] for r in out["rows"]] == ["Haze Mix"]
+
+
+def test_the_old_route_reads_the_merge(tmp_path, monkeypatch):
+    cli, _ = _logged_in(tmp_path, monkeypatch)
+    f = _Reads(pages={(DEFAULT_ID, ""): ([], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_bookmarks_gql",
+                        _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
+    d = cli.get("/api/model-saved/old?kind=lora").get_json()
+    assert [r["model_id"] for r in d["rows"]] == [LORA_ID] and d["partial"] is False

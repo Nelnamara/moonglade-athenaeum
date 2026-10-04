@@ -344,6 +344,12 @@ The line above Saved counts what is in it. When PixAI has removed models you onc
 it ends in **N not available ▸**: they are left out of the list, and that opens the list
 of them. Opening Saved only reads; nothing is changed on PixAI by looking.
 
+**Old bookmarks.** PixAI's old bookmarks list stopped taking new saves in mid-August, and
+almost everything in it is in Saved too. Any old bookmark that isn't shows after the end of
+Saved with a small **old** tag, and the count line says how many (**M old**). **Show old
+bookmarks**, at the end of the list, hides or shows them and is remembered for your
+account; it goes away once no old bookmark is left over.
+
 On Market you can also narrow by **category** (character, animal, style, realistic, pose,
 clothing, background, detail, other), by **when it was posted**, by **source**
 (PixAI-trained or brought in from elsewhere), and to models that **allow commercial use**.
