@@ -232,7 +232,7 @@ export default function SeparatorBar({
         {linked ? <GiftBox onOpenContests={openContests} /> : null}
 
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
-        <button type="button" className={"mgx-cred" + (expiring ? " expiring" : "")}
+        <button type="button" className="mgx-cred" data-expiring={expiring ? "1" : undefined}
           onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
           aria-label={"Credits " + credits + ", cards " + cards + "." +
             (expiring ? " " + expiry.lines.map(expiryText).join(". ") + "." : "") +

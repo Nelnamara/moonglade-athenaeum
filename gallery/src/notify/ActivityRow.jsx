@@ -111,14 +111,11 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
                 already lives on -- a source is not a state, and inventing a second visual
                 language for it would make a website run look like a different KIND of job
                 rather than the same job from somewhere else. */}
+            {/* Sessions R + Y (R2c): a finished job the app learned of only from PixAI's inbox is
+                a website run too, so it wears this same mark; its hover says where the app
+                heard of it. */}
             {j.source === "pixai" ? (
-              j.via === "inbox" ? (
-                /* Sessions R + Y (R2c): a finished job the app learned of only from PixAI's
-                   inbox -- the same quiet mark, saying where it came from. */
-                <span className="at-src" title="A finished job PixAI's inbox told the app about.">from PixAI</span>
-              ) : (
-                <span className="at-src" title="Started on the PixAI website, not in this app.">website</span>
-              )
+              <span className="at-src" title={j.via === "inbox" ? "Started on the PixAI website; PixAI's inbox told the app it finished." : "Started on the PixAI website, not in this app."}>website</span>
             ) : null}
             {queued ? (
               <span className="at-phase" title="PixAI has accepted this generation and no worker has picked it up yet — it has not started rendering.">queued</span>

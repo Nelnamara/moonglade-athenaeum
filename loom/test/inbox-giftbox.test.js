@@ -35,7 +35,7 @@ const fnBody = (text, name) => {
 describe("the door (R1a)", () => {
   test("it sits in the header's right group just before the credits chip, only with a linked account", () => {
     const door = bar.indexOf("<GiftBox ");
-    const chip = bar.indexOf('className={"mgx-cred" + (expiring');
+    const chip = bar.indexOf('className="mgx-cred" data-expiring');
     assert.ok(door > 0 && chip > door, "the gift box renders before the credits chip");
     assert.match(bar, /\{linked \? <GiftBox /);
     assert.match(bar, /const linked = !!\(account && !account\.error && account\.credits != null\)/);
@@ -114,7 +114,7 @@ describe("delivery (R4b)", () => {
 
   test("a job only PixAI's inbox told the app about is a quiet Activity line marked as PixAI's", () => {
     assert.match(jobs, /if \(j\.via === "inbox"\) \{ last\[j\.job_id\] = st; return; \}/);
-    assert.match(row, /j\.via === "inbox" \? \([^]*>from PixAI</);
+    assert.match(row, /title=\{j\.via === "inbox" \? "Started on the PixAI website; PixAI's inbox told the app it finished\."/);
     assert.match(row, /PixAI says: \{j\.pixai_says\}/);
   });
 });

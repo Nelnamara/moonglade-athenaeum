@@ -90,8 +90,9 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   one), then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
   quoted), then everything else — new followers folded per day, contest results, PixAI's news.
   Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
-  app never saw — one started on PixAI's own site while the app was closed — joins Activity marked
-  **from PixAI**).
+  app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
+  **website** run, and a job Activity holds as failed that PixAI says finished gets a dim
+  *PixAI says: done* under it).
   - **Opening a row marks it read on PixAI** — one write, for exactly what that row or card
     gathers. Opening the panel, scrolling, switching tabs and new arrivals never mark anything.
     **⋯ → Mark all read** marks the tab's kinds read. With `READ_ONLY` set, rows still open and

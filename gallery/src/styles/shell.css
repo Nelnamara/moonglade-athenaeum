@@ -506,9 +506,9 @@
    (bottom: -6px is the chip's own 6px vertical padding). Peach, never ruby; free cards are not
    billing, so while the tooltip carries the expiry lines its border is lavender, not gold. */
 .mgx-credcards { position: relative; display: flex; align-items: center; gap: 9px; }
-.mgx-cred.expiring .mgx-credcards::after { content: ""; position: absolute; left: -4px; right: -6px;
+.mgx-cred[data-expiring] .mgx-credcards::after { content: ""; position: absolute; left: -4px; right: -6px;
   bottom: -6px; height: 2px; border-radius: 2px; background: var(--peach); pointer-events: none; }
-.mgx-cred.expiring .mgx-credtip { border-color: var(--lavender); }
+.mgx-cred[data-expiring] .mgx-credtip { border-color: var(--lavender); }
 .mgx-tipexpiry { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px;
   padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
 .mgx-tipexp { font-size: 10.5px; line-height: 1.5; color: var(--peach); }

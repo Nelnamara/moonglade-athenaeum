@@ -193,7 +193,10 @@ function navigate(row) {
 export function openItem(row) {
   navigate(row);
   if (!row.unread || state.readOnly) return Promise.resolve(null);
-  const ids = row.ids || [];
+  // Only what is still unread: a work card gathers read rows too. A row the panel never
+  // loaded (a pushed comment's toast) sends its own ids.
+  const loaded = new Map(state.items.map((x) => [x.id, x]));
+  const ids = (row.ids || []).filter((id) => !loaded.has(id) || loaded.get(id).unread);
   if (!ids.length) return Promise.resolve(null);
   return apiPost("/api/inbox/read", { csrf: state.csrf, ids }).then((d) => {
     if (d && d.state === "done") {

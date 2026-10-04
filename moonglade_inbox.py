@@ -73,15 +73,15 @@ def display_name(session):
     """The account's public display name -- what a reply posts under, named in the question
     before Send. Cached for the process; "" when PixAI would not say (the question then says
     "your PixAI name" rather than guessing)."""
-    if _me_cache["name"] is not None and time.time() - _me_cache["at"] < 3600:
+    ttl = 3600 if _me_cache["name"] else 600     # an unanswered read is asked again sooner
+    if _me_cache["name"] is not None and time.time() - _me_cache["at"] < ttl:
         return _me_cache["name"]
     try:
         d = core.gql_adhoc(session, "query{ me{ id displayName } }") or {}
         name = str(((d.get("me") or {}).get("displayName")) or "")
     except Exception:                                        # noqa: BLE001 -- fails soft
         name = ""
-    if name:
-        _me_cache.update(name=name, at=time.time())
+    _me_cache.update(name=name, at=time.time())
     return name
 
 
