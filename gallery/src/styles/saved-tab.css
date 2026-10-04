@@ -63,3 +63,40 @@
   font: inherit; font-size: 10px; color: var(--subtext); cursor: pointer; }
 .model-picker .mg-oldtoggle-dot { font-size: 10px; color: var(--overlay0); }
 .model-picker .mg-oldtoggle-dot.on { color: var(--lavender); }
+
+/* ---- section 2: the card's split control, quick-pick's ★, and the write's answer ---- */
+.model-picker .mg-keep { flex-wrap: wrap; }
+.model-picker .mg-star { font-size: 12px; line-height: 1; color: var(--lavender); }
+.model-picker .mg-split { display: inline-flex; align-items: stretch; flex: none; }
+.model-picker .mg-split-body { font: inherit; font-size: 10px; line-height: 1.3; padding: 4px 8px; border-radius: 6px 0 0 6px;
+  white-space: nowrap; color: var(--subtext); background: none; border: 1px solid var(--surface1); cursor: pointer; }
+.model-picker .mg-split-menu { font: inherit; font-size: 10px; line-height: 1.3; padding: 4px 6px; border-radius: 0 6px 6px 0;
+  border: 1px solid var(--surface1); border-left: 0; color: var(--subtext); background: none; cursor: pointer; }
+.model-picker .mg-split.saved .mg-split-body { color: var(--lavender); background: color-mix(in srgb, var(--lavender) 14%, transparent);
+  border-color: color-mix(in srgb, var(--lavender) 45%, transparent); }
+.model-picker .mg-split.saved .mg-split-menu { color: var(--lavender); border-color: color-mix(in srgb, var(--lavender) 45%, transparent); }
+.model-picker .mg-split-body:hover, .model-picker .mg-split-menu:hover { color: var(--text); }
+.model-picker .mg-split.saved .mg-split-body:hover, .model-picker .mg-split.saved .mg-split-menu:hover { color: var(--lavender); }
+.model-picker .mg-split-body.dim { opacity: .45; cursor: not-allowed; }
+.model-picker .mg-split-body[aria-busy="true"] { opacity: .6; cursor: progress; }
+.model-picker .mg-keepnote { margin-top: 3px; font-size: 10.5px; line-height: 1.5; }
+.model-picker .mg-keepnote.ok { color: var(--emerald); }
+.model-picker .mg-keepnote.err { color: var(--peach); }
+
+/* ---- section 3: "Keep this model" -- the recipe Sets menu (RecipeSetsMenu variant="keep") ---- */
+.mg-keep-layer .rcp-sets { z-index: 420; }
+.rcp-keep { max-height: min(72vh, 440px); overflow-y: auto; }
+.rcp-keep .rcp-sets-head { font-size: 10.5px; font-weight: 600; letter-spacing: 0; color: var(--text); padding: 4px 8px 6px; }
+.rcp-keep .rcp-sets-row { font-size: 10.5px; gap: 8px; }
+.rcp-keep .rcp-sets-row.on { background: none; }
+.rcp-keep .rcp-sets-row:hover { background: var(--surface0); }
+.rcp-keep .rcp-sets-row:disabled { opacity: .5; cursor: not-allowed; }
+.rcp-keep-box { width: 14px; font-size: 12px; color: var(--overlay0); }
+.rcp-keep .rcp-sets-row.on .rcp-keep-box { color: var(--lavender); }
+.rcp-keep-tag { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.rcp-keep-div { height: 1px; margin: 2px 8px; background: var(--surface1); flex: none; }
+.rcp-keep-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 2px; }
+.rcp-keep-link { padding: 0; border: 0; background: none; font: inherit; font-size: 10.5px; color: var(--lavender);
+  white-space: nowrap; text-decoration: none; cursor: pointer; }
+.rcp-keep-link:hover { color: var(--mauve); text-decoration: underline; }
+.rcp-keep-link:disabled { color: var(--overlay0); cursor: not-allowed; text-decoration: none; }

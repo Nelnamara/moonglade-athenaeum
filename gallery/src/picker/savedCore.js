@@ -85,3 +85,47 @@ export function mergeOld(live, old, { q = "", base = "" } = {}) {
     return words.every((w) => hay.includes(w));
   }).map((r) => (r.old ? r : { ...r, old: true }));
 }
+
+/* ---- S3b + S4c: saving, and the "Keep this model" menu ---- */
+
+export const SAVED_NOTE = "Saved · read back from PixAI.";
+export const READ_ONLY_LINE = "Read-only mode is on, so saving to PixAI is off.";
+
+export function keepTitle(kind) {
+  return kind === "lora" ? "Keep this LoRA" : "Keep this model";
+}
+
+/* An answer that never reached the page (api.js's transport failure). The write may have
+   landed, so it is read back -- never sent again. */
+export function isTransportError(d) {
+  return !!(d && typeof d.error === "string" && /^network error/i.test(d.error));
+}
+
+/* How a write's answer becomes a card. The server's answer carries what its read-back found
+   (`contains`); that decides. `contains` null or absent means nothing is known: the card keeps
+   what it showed and the words say why. `ok` is "PixAI now says what was asked for". */
+export function afterWrite(prev, d, want) {
+  const p = prev || { saved: false, item_id: "" };
+  if (d && typeof d.contains === "boolean") {
+    return { saved: d.contains, item_id: d.contains ? String(d.item_id || "") : "",
+             error: d.error || "", ok: d.contains === want && !d.error };
+  }
+  return { saved: !!p.saved, item_id: p.item_id || "", error: (d && d.error) || "PixAI didn't answer",
+           ok: false };
+}
+
+/* What the page knows about each model's place in Saved: model id -> {saved, item_id}. Filled
+   by Saved's own rows, the menu's reads and every write's read-back; every card reads it. */
+export function createSavedStore() {
+  const state = new Map();
+  const subs = new Set();
+  let ver = 0;
+  const publish = () => { ver += 1; subs.forEach((f) => f()); };
+  return {
+    get: (id) => state.get(String(id)),
+    set: (id, v) => { state.set(String(id), v); publish(); },
+    setMany: (entries) => { for (const [id, v] of entries) state.set(String(id), v); publish(); },
+    subscribe: (f) => { subs.add(f); return () => { subs.delete(f); }; },
+    version: () => ver,
+  };
+}

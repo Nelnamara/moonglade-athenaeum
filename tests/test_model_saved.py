@@ -568,3 +568,20 @@ def test_the_old_route_reads_the_merge(tmp_path, monkeypatch):
                         _OldList({"": ([_old_row(LORA_ID, "Glasswing")], None)}))
     d = cli.get("/api/model-saved/old?kind=lora").get_json()
     assert [r["model_id"] for r in d["rows"]] == [LORA_ID] and d["partial"] is False
+
+
+def test_the_picker_search_says_whether_read_only_is_on(tmp_path, monkeypatch):
+    """S3b: the card's ⊕ Save dims under READ_ONLY before any tap, so every page of the picker
+    answers the flag (a local check: no PixAI call is added for it)."""
+    cli, _ = _logged_in(tmp_path, monkeypatch)
+    f = _Reads(pages={(DEFAULT_ID, ""): ([_item(ITEM_1, _model(LORA_ID, "Glasswing"))], None)})
+    monkeypatch.setattr(core, "_rest_get", f.get)
+    monkeypatch.setattr(core, "model_search_market_gql",
+                        lambda *a, **k: {"results": [], "has_more": False, "next_cursor": ""})
+    for url in ("/api/model-search?kind=lora&size=24&q=&src=market&sort=trending",
+                "/api/model-search?kind=lora&size=24&q=&src=saved&set=" + DEFAULT_ID):
+        assert cli.get(url).get_json()["read_only"] is False, url
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    for url in ("/api/model-search?kind=lora&size=24&q=&src=market&sort=trending",
+                "/api/model-search?kind=lora&size=24&q=&src=saved&set=" + DEFAULT_ID):
+        assert cli.get(url).get_json()["read_only"] is True, url

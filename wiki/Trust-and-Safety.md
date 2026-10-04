@@ -167,7 +167,8 @@ With it set, every path that can actually mutate your account — submitting a g
 (image, video, reference video, or an edit, including each picture of a Random or Matrix run
 and each Loom render), submitting a hand/face fix, starting, describing, publishing or retrying
 a LoRA training run, deleting a task, claiming a reward, publishing an artwork, publishing or
-changing a recipe or a recipe set, uploading a frame from The Loom (splice and Re-anchor), or
+changing a recipe or a recipe set, saving a model or LoRA to PixAI or changing its sets (the
+pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor), or
 **entering a contest** — refuses itself with a clear error, **regardless of `--confirm`,
 `--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to

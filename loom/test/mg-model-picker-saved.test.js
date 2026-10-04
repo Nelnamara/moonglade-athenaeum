@@ -139,6 +139,120 @@ test("the merge is read only on Saved itself, and only while the toggle is on", 
 });
 
 test("an old row carries a mono old tag, 8.5 px and neutral", () => {
-  assert.match(picker, /m\.old \? <span className="mg-old">old<\/span>/);
+  assert.match(read("picker/KeepControls.jsx"), /m\.old \? <span className="mg-old">old<\/span>/);
   assert.match(css, /\.mg-old \{[^}]*font: 700 8\.5px\/1\.3 ui-monospace[^}]*color: var\(--overlay0\)/);
+});
+
+/* ---- S3b + S4c: the split control and the "Keep this model" menu ---- */
+
+import { afterWrite, createSavedStore, isTransportError, keepTitle, READ_ONLY_LINE, SAVED_NOTE } from "../../gallery/src/picker/savedCore.js";
+
+const keepSrc = read("picker/KeepControls.jsx");
+const apiSrc = read("picker/savedApi.js");
+const menuSrc = read("recipes/RecipeSetsMenu.jsx");
+const powerCss = read("styles/power.css");
+
+test("the read-back decides the card: saved only when PixAI says so", () => {
+  assert.deepEqual(afterWrite({ saved: false, item_id: "" }, { contains: true, item_id: "i1" }, true),
+    { saved: true, item_id: "i1", error: "", ok: true });
+  // a refusal the check confirms: back to ⊕ Save, the plain words shown
+  assert.deepEqual(afterWrite({ saved: false, item_id: "" }, { contains: false, item_id: "", error: "This model is private, so PixAI won't save it" }, true),
+    { saved: false, item_id: "", error: "This model is private, so PixAI won't save it", ok: false });
+  // nothing known (the check failed too): the card keeps what it showed, and says so
+  const unknown = afterWrite({ saved: false, item_id: "" }, { contains: null, error: "unclear" }, true);
+  assert.equal(unknown.saved, false); assert.equal(unknown.ok, false); assert.equal(unknown.error, "unclear");
+  assert.equal(afterWrite({ saved: true, item_id: "i1" }, { error: "network error: x" }, false).saved, true);
+  assert.ok(isTransportError({ error: "network error: Failed to fetch" }));
+  assert.ok(!isTransportError({ error: "READ_ONLY is set in config.json -- refusing" }));
+  assert.equal(SAVED_NOTE, "Saved · read back from PixAI.");
+  assert.equal(READ_ONLY_LINE, "Read-only mode is on, so saving to PixAI is off.");
+  assert.equal(keepTitle("base"), "Keep this model");
+  assert.equal(keepTitle("lora"), "Keep this LoRA");
+});
+
+test("the saved-state store tells every card at once", () => {
+  const st = createSavedStore();
+  let calls = 0;
+  const off = st.subscribe(() => { calls++; });
+  const v0 = st.version();
+  st.set("1", { saved: true, item_id: "i1" });
+  st.setMany([["2", { saved: true, item_id: "i2" }], ["3", { saved: false, item_id: "" }]]);
+  assert.equal(calls, 2);
+  assert.ok(st.version() > v0);
+  assert.deepEqual(st.get(1), { saved: true, item_id: "i1" });
+  off(); st.set("1", { saved: false, item_id: "" });
+  assert.equal(calls, 2);
+});
+
+test("the card's ☆ is retired: ★ shows state only, and quick-pick moves into the menu", () => {
+  assert.doesNotMatch(picker, /mg-fav/);
+  assert.doesNotMatch(powerCss, /\.mg-fav/);
+  assert.match(keepSrc, /className="mg-star"/);
+  assert.match(keepSrc, /label: "★ Quick-pick", tag: "this app"/);
+  assert.match(picker, /onQuick=\{onFav \? \(\) => onFav\(keep\.m\) : null\}/);
+});
+
+test("the split control: one save write per tap, ✓ Saved opens the menu and never unsaves", () => {
+  assert.match(keepSrc, /saved \? "✓ Saved" : "⊕ Save"/);
+  assert.match(keepSrc, /if \(saved\) \{ onMenu\(e\.currentTarget\.parentNode\); return; \}/);
+  assert.match(picker, /const d0 = await savedApi\.save\(id\);/);
+  assert.equal((picker.match(/savedApi\.save\(/g) || []).length, 1, "one write, never re-sent");
+  // an answer that never reached the page is read back, never re-sent
+  assert.match(picker, /if \(isTransportError\(d0\)\) \{[\s\S]{0,200}savedApi\.state\(id\)/);
+  // one write in flight per card
+  assert.match(picker, /if \(readOnly \|\| busyRef\.current\.has\(id\)\) return;/);
+  // where: picker cards in the dock and the phone sheet (the market mounts), always visible
+  assert.match(picker, /\{market \? \(\s*<KeepRow/);
+});
+
+test("READ_ONLY is known before a tap: the search answers it, the body dims and says why", () => {
+  assert.match(picker, /if \(d && typeof d\.read_only === "boolean"\) setReadOnly\(d\.read_only\);/);
+  assert.match(keepSrc, /title=\{readOnly && !saved \? READ_ONLY_LINE/);
+  assert.match(keepSrc, /"mg-split-body" \+ \(readOnly && !saved \? " dim" : ""\)/);
+});
+
+test("the menu is the recipe Sets menu, titled Keep this model, quick-pick first", () => {
+  assert.match(keepSrc, /import RecipeSetsMenu from "\.\.\/recipes\/RecipeSetsMenu\.jsx";/);
+  assert.match(keepSrc, /variant="keep"/);
+  assert.match(keepSrc, /heading=\{keepTitle\(kind\)\}/);
+  assert.match(keepSrc, /tag="PixAI"/);
+  assert.match(keepSrc, /label: "Open on PixAI ↗", href: "https:\/\/pixai\.art\/model\/"/);
+  // the local row, then a divider, then PixAI's sets
+  const i = menuSrc.indexOf("local.label"), j = menuSrc.indexOf('className="rcp-keep-div"'), k = menuSrc.indexOf("(sets || []).map");
+  assert.ok(i > 0 && j > i && k > j, "quick-pick, divider, sets -- in that order");
+  // under READ_ONLY the PixAI rows are disabled with the reason; quick-pick is not
+  assert.match(menuSrc, /disabled=\{!!readOnly \|\| busy === s\.id\} title=\{readOnly \|\| undefined\}/);
+  // the recipe menu itself is unchanged by default
+  assert.match(menuSrc, /heading = "SAVE TO A RECIPE SET"/);
+  assert.match(menuSrc, /variant = "sets"/);
+});
+
+test("a tick's answer decides the row, a failed one reverts, an unreached one is read back", () => {
+  assert.match(menuSrc, /if \(d && typeof d\.contains === "boolean"\) \{/);
+  assert.match(menuSrc, /apply\(before, true\);/);
+  // only an answer moves the list behind the menu: the at-once display is not PixAI's word
+  assert.match(keepSrc, /onChanged=\{\(_, __, sets, settled\) => settled && onSets && onSets\(sets\)\}/);
+  assert.match(menuSrc, /if \(api\.reread && d && \/\^network error\/i\.test\(String\(d\.error \|\| ""\)\)\) load\(\);/);
+});
+
+test("the menu floats over the dock's palette in the overlay band, and is a sheet on the phone", () => {
+  assert.match(keepSrc, /createPortal\(/);
+  assert.match(css, /\.mg-keep-layer \.rcp-sets \{[^}]*z-index: 420/);
+  assert.match(keepSrc, /<div className="rcp-m mg-keep-sheet" data-keeps-dock="">/);
+  // a click in the menu never closes the dock behind it (App.jsx's outside-click closer)
+  assert.match(keepSrc, /<div className="mg-keep-layer" data-keeps-dock="">/);
+});
+
+test("the writes ride the model-saved routes with the session's CSRF token", () => {
+  assert.match(apiSrc, /await accountPrefs\(\)\.ensureLoaded\(\);/);
+  assert.match(apiSrc, /csrf: accountCsrf\(\)/);
+  ["/api/model-saved/save", "/api/model-saved/tick", "/api/model-saved/remove", "/api/model-saved/sets/create",
+    "/api/model-saved/state"].forEach((r) => assert.ok(apiSrc.includes('"' + r + '"'), r));
+});
+
+test("the split control matches the handoff: 10 px, lavender once saved", () => {
+  assert.match(css, /\.mg-split-body \{[^}]*font-size: 10px[^}]*padding: 4px 8px[^}]*border-radius: 6px 0 0 6px/);
+  assert.match(css, /\.mg-split\.saved \.mg-split-body \{[^}]*color: var\(--lavender\)/);
+  assert.match(css, /\.mg-split-menu \{[^}]*padding: 4px 6px[^}]*border-radius: 0 6px 6px 0[^}]*border-left: 0/);
+  assert.match(css, /\.mg-star \{[^}]*font-size: 12px[^}]*color: var\(--lavender\)/);
 });

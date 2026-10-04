@@ -245,8 +245,8 @@ PixAI accepted.
   hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
   presets open as a sheet.
 - **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
-  and LoRAs plus the ones you ★ (the ☆ in the corner of a card in the model and LoRA pickers),
-  six to a row, then **+ more** into the picker. A model chip switches the model the same way
+  and LoRAs plus the ones you mark **★ Quick-pick** (in the **▾** menu on a card in the model
+  and LoRA pickers; a small ★ on the card shows it is one), six to a row, then **+ more** into the picker. A model chip switches the model the same way
   the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
   removes it; a LoRA for another model family is dimmed, with the reason in its tooltip. On the
   phone they are one scrolling row of large chips, models then LoRAs.
@@ -344,11 +344,30 @@ The line above Saved counts what is in it. When PixAI has removed models you onc
 it ends in **N not available ▸**: they are left out of the list, and that opens the list
 of them. Opening Saved only reads; nothing is changed on PixAI by looking.
 
+**Saving a model or LoRA to PixAI.** Every card in the pickers has **⊕ Save | ▾**. **⊕ Save**
+puts it in your Saved on PixAI — the same list pixai.art's own Save button adds to — and the
+app then asks PixAI whether it landed: only when PixAI says yes does the card read **✓ Saved**
+(with a short "Saved · read back from PixAI." under it). If PixAI refuses (a private model,
+say), the card stays **⊕ Save** and says why underneath. A tap sends one request and is never
+re-sent by itself; if the answer is lost on the way, the app asks PixAI what happened instead
+of sending again. **✓ Saved** never unsaves on a tap — it opens the menu.
+
+**▾ opens "Keep this model"** (or "Keep this LoRA"): **★ Quick-pick** first, which is this app's
+own and changes at once, then your PixAI lists — **Saved** and your named sets — each ticked
+if the model is in it. Ticking or unticking one changes it on PixAI and checks back the same
+way; a change PixAI refuses goes back and says why. Unticking **Saved** takes the model out of
+your Saved, and in the Saved tab it leaves the list. **+ New set** makes a private set on PixAI
+and puts the model in it; **Open on PixAI ↗** opens the model's page there. With `READ_ONLY` on,
+**⊕ Save** is dimmed and says why, and the menu's PixAI rows are greyed with the reason —
+**★ Quick-pick** still works, since it never touches PixAI. In **N not available ▸**, each
+removed model has the same **✓ Saved ▾**, whose one row takes it out of Saved.
+
 **Old bookmarks.** PixAI's old bookmarks list stopped taking new saves in mid-August, and
 almost everything in it is in Saved too. Any old bookmark that isn't shows after the end of
 Saved with a small **old** tag, and the count line says how many (**M old**). **Show old
 bookmarks**, at the end of the list, hides or shows them and is remembered for your
-account; it goes away once no old bookmark is left over.
+account; it goes away once no old bookmark is left over. **⊕ Save** on an old one saves it to
+PixAI, and it loses its tag.
 
 On Market you can also narrow by **category** (character, animal, style, realistic, pose,
 clothing, background, detail, other), by **when it was posted**, by **source**

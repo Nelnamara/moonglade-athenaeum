@@ -5,9 +5,11 @@ import { apiGet } from "../api.js";
 import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
 import { SavedRail, SavedChooser, SavedHead, SavedChips, GoneList, OldToggle } from "../picker/SavedTab.jsx";
+import { KeepRow, KeepMenu, GoneMenu, SaveSplit, keepRect } from "../picker/KeepControls.jsx";
+import { savedApi, savedStore, useSavedVersion } from "../picker/savedApi.js";
 import {
-  NARROW_PX, OLD_PREF, SAVED_END_LINE, currentSet, mergeOld, savedEmptyLine, savedErrorLine,
-  savedTabLabel,
+  NARROW_PX, OLD_PREF, READ_ONLY_LINE, SAVED_END_LINE, SAVED_NOTE, afterWrite, currentSet,
+  isTransportError, mergeOld, savedEmptyLine, savedErrorLine, savedTabLabel,
 } from "../picker/savedCore.js";
 import "../styles/model-picker.css";
 import "../styles/saved-tab.css";
@@ -33,7 +35,13 @@ import "../styles/saved-tab.css";
    model collections, read live -- Saved (the reserved default) unless the rail or the "Saved ▾"
    chooser picked a named set -- paged through the same search route (src=saved), with the LoRA
    base chips and the search box as its filters. Nothing writes when it opens. `phone` says the
-   host is the phone's Model/LoRA sheet (ModelFlyout passes it). */
+   host is the phone's Model/LoRA sheet (ModelFlyout passes it).
+
+   KEEPING (S3b + S4c). Every card in the dock and on the phone sheet (the `market` mounts)
+   carries [⊕ Save | ▾] (picker/KeepControls.jsx). The body is ONE write -- saveModel, below --
+   whose answer is the server's read-back; ▾ (and ✓ Saved) opens "Keep this model". Session M's
+   ☆ on the card is retired (drift 136): ★ Quick-pick is the menu's first row, and the card's
+   small ★ only shows it. `favs` / `onFav` are that quick-pick list and its toggle, as before. */
 
 // ---- formatters, verbatim from mg-model-picker.js ----
 function fmt(n) { return (Number(n) || 0).toLocaleString(); }
@@ -132,6 +140,12 @@ export default function ModelPicker({
   const [oldErr, setOldErr] = useState("");
   const prefs = useAccountPrefs();
   const showOld = prefs.get(OLD_PREF, true) !== false;
+  // S3b + S4c: keeping a model
+  const [readOnly, setReadOnly] = useState(false);  // READ_ONLY, as every search answers it
+  const [keep, setKeep] = useState(null);           // the open menu: {m, rect} or {gone, rect}
+  const [busyIds, setBusyIds] = useState([]);       // cards with a save in flight
+  const [notes, setNotes] = useState({});           // model id -> {kind: ok|err, text}
+  useSavedVersion();                                // re-render when any card's saved state moves
 
   const seqRef = useRef(0);
   const cursorRef = useRef("");
@@ -148,6 +162,9 @@ export default function ModelPicker({
   const setsAskedRef = useRef(false);
   const oldAskedRef = useRef(false);
   const savedOn = market && src === "saved";
+  const busyRef = useRef(new Set());
+  const noteTimers = useRef({});
+  const rowsRef = useRef([]);       // the rows as the last applySets left them (see there)
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q), 250);
@@ -187,6 +204,7 @@ export default function ModelPicker({
       cursorRef.current = (d && d.next_cursor) || "";
       setErr(d && d.error ? d.error : "");
       setRows(uniqueRows((d && d.results) || []));
+      if (d && typeof d.read_only === "boolean") setReadOnly(d.read_only);
       setDim(false); setSettled(true); setAtEnd(!hasMoreRef.current);
     }).catch(() => {
       if (mine !== seqRef.current) return;
@@ -255,6 +273,7 @@ export default function ModelPicker({
     apiGet("/api/model-saved/sets", { kind }).then((d) => {
       if (!d || d.error) { setSetsErr((d && d.error) || "PixAI didn't answer"); return; }
       setSavedSets(d);
+      if (typeof d.read_only === "boolean") setReadOnly(d.read_only);
     });
   }, [kind]);
   useEffect(() => {
@@ -288,6 +307,79 @@ export default function ModelPicker({
     ro.observe(el);
     return () => ro.disconnect();
   }, [phone]);
+
+  // Saved's own rows are saved (in Saved itself, or in the set on screen): tell every card.
+  useEffect(() => {
+    if (!savedOn || setId) return;
+    const live = rows.filter((r) => r.item_id && !r.old);
+    if (live.length) savedStore.setMany(live.map((r) => [r.model_id, { saved: true, item_id: r.item_id }]));
+  }, [savedOn, setId, rows]);
+
+  const note = (id, n) => {
+    clearTimeout(noteTimers.current[id]);
+    setNotes((o) => ({ ...o, [id]: n }));
+    if (n && n.kind === "ok") {
+      noteTimers.current[id] = setTimeout(() => setNotes((o) => ({ ...o, [id]: null })), 3200);
+    }
+  };
+  useEffect(() => () => Object.values(noteTimers.current).forEach(clearTimeout), []);
+
+  // A model's place in PixAI's sets just changed (a save's read-back, or the menu): every card
+  // learns it, and the list on screen follows -- a model taken out of the set on screen leaves
+  // it, a model put into it (an old bookmark saved, say) joins it at the top, untagged.
+  // Decided against rowsRef, not the render's `rows`: a menu's handler can be a render behind,
+  // and two answers in one tick must not move the count twice.
+  rowsRef.current = rows;
+  const applySets = (m, sets) => {
+    const id = String(m.model_id);
+    const list = sets || [];
+    const def = list.find((x) => x.reserved);
+    if (def) savedStore.set(id, { saved: !!def.contains, item_id: def.contains ? def.item_id || "" : "" });
+    if (!savedOn) return;
+    const viewId = setId || (savedSets && savedSets.default_id) || (def && def.id) || "";
+    const here = list.find((x) => x.id === viewId);
+    if (!here) return;
+    const inList = rowsRef.current.some((r) => String(r.model_id) === id);
+    const bump = (n) => setSavedSets((ss) => ss && { ...ss, sets: ss.sets.map((x) => (x.id === viewId ? { ...x, count: Math.max(0, x.count + n) } : x)) });
+    if (!here.contains && inList) {
+      rowsRef.current = rowsRef.current.filter((r) => String(r.model_id) !== id);
+      setRows((old) => old.filter((r) => String(r.model_id) !== id));
+      bump(-1);
+    } else if (here.contains && !inList) {
+      const row = { ...m, old: false, item_id: here.item_id || "" };
+      rowsRef.current = [row, ...rowsRef.current];
+      setRows((old) => [row, ...old.filter((r) => String(r.model_id) !== id)]);
+      if (m.old) setOldRows((o) => (o || []).filter((r) => String(r.model_id) !== id));
+      bump(1);
+    }
+  };
+
+  // ⊕ Save: THE save write. One per tap and one in flight per card; READ_ONLY never sends (the
+  // body is dimmed and says why). The server sends it once and answers its read-back, which
+  // decides the card. An answer that never reached the page is read back, never re-sent.
+  const saveModel = async (m) => {
+    const id = String(m.model_id);
+    if (readOnly || busyRef.current.has(id)) return;
+    busyRef.current.add(id);
+    setBusyIds([...busyRef.current]);
+    note(id, null);
+    const d0 = await savedApi.save(id);
+    let d = d0;
+    if (isTransportError(d0)) {
+      const st = await savedApi.state(id);
+      d = st && !st.error
+        ? { contains: !!st.saved, item_id: st.item_id || "", sets: st.sets, error: st.saved ? "" : d0.error }
+        : d0;
+    }
+    busyRef.current.delete(id);
+    setBusyIds([...busyRef.current]);
+    if (d && typeof d.read_only === "boolean") setReadOnly(d.read_only);
+    const next = afterWrite(savedStore.get(id), d, true);
+    savedStore.set(id, { saved: next.saved, item_id: next.item_id });
+    if (d && d.sets) applySets(m, d.sets);
+    note(id, next.ok ? { kind: "ok", text: SAVED_NOTE } : { kind: "err", text: next.error });
+  };
+  const openKeep = (m, el) => { hidePreview(); setKeep({ m, rect: keepRect(el) }); };
 
   const pickSrc = (v) => {
     // Saved ▾ tapped while Saved is already on: the chooser (where the rail is folded)
@@ -492,7 +584,12 @@ export default function ModelPicker({
               <SavedHead title={curTitle} count={cur ? cur.count : 0} old={oldAll.length}
                 gone={!setId && savedSets ? savedSets.unavailable : 0}
                 goneOpen={!!gone} onGone={toggleGone} />
-              {!setId ? <GoneList state={gone} /> : null}
+              {!setId ? (
+                <GoneList state={gone} renderKeep={(it) => (
+                  <SaveSplit saved busy={false} readOnly={readOnly}
+                    onMenu={(el) => setKeep({ gone: it, rect: keepRect(el) })} />
+                )} />
+              ) : null}
               {kind === "lora" ? <SavedChips value={savedBase} onPick={setSavedBase} /> : null}
               {savedLine}
             </>
@@ -526,14 +623,6 @@ export default function ModelPicker({
                   <div className="mg-cov">
                     {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                     {m.official && <span className="mg-pill">Official</span>}
-                    {/* Session M (NOTES 6): the ☆ that puts this model / LoRA on the dock's quick-pick
-                        row. Only where the host handles it (the dock and the phone's Create tab). */}
-                    {onFav ? (
-                      <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
-                        aria-pressed={(favs || []).includes(String(m.model_id))}
-                        title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
-                        onClick={(e) => { e.stopPropagation(); onFav(m); }} />
-                    ) : null}
                     {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
                   </div>
                   <div className="mg-meta">
@@ -543,10 +632,13 @@ export default function ModelPicker({
                       <span>{fmtCompact(m.liked_count)} likes</span>
                     </div>
                     {cost && <div className="mg-costline">{cost}</div>}
-                    {market && m.old ? (
-                      <div className="mg-keep">
-                        {m.old ? <span className="mg-old">old</span> : null}
-                      </div>
+                    {market ? (
+                      <KeepRow m={m} quick={!!onFav && (favs || []).includes(String(m.model_id))}
+                        saved={!m.old && !!(savedStore.get(m.model_id) || {}).saved}
+                        busy={busyIds.includes(String(m.model_id))} readOnly={readOnly}
+                        note={notes[String(m.model_id)]}
+                        onSave={() => saveModel(m)} onMenu={(el) => openKeep(m, el)}
+                        onBlocked={() => note(String(m.model_id), { kind: "err", text: READ_ONLY_LINE })} />
                     ) : null}
                   </div>
                 </div>
@@ -567,6 +659,21 @@ export default function ModelPicker({
             ? <OldToggle on={showOld} onToggle={() => prefs.set(OLD_PREF, !showOld)} /> : null}
         </div>
       </div>
+
+      {keep && keep.m ? (
+        <KeepMenu m={keep.m} kind={kind} rect={keep.rect} sheet={phone} readOnly={readOnly}
+          quick={!!onFav && (favs || []).includes(String(keep.m.model_id))}
+          onQuick={onFav ? () => onFav(keep.m) : null}
+          onSets={(sets) => applySets(keep.m, sets)} onClose={() => setKeep(null)} />
+      ) : null}
+      {keep && keep.gone ? (
+        <GoneMenu item={keep.gone} defaultId={savedSets && savedSets.default_id} rect={keep.rect} sheet={phone}
+          readOnly={readOnly} onClose={() => setKeep(null)}
+          onGone={(it) => {
+            setGone((g) => (g && g.items ? { items: g.items.filter((x) => x.item_id !== it.item_id) } : g));
+            setSavedSets((ss) => ss && { ...ss, unavailable: Math.max(0, (ss.unavailable || 0) - 1) });
+          }} />
+      ) : null}
 
       {/* PORTALED to <body> (owner walk 2026-09-29: hovering a card on the desktop showed
           nothing). The preview is position:fixed at viewport coordinates, but the dock's model

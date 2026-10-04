@@ -71,16 +71,8 @@
 .mgpow-note { font-size: 10.5px; color: var(--subtext); padding: 6px 9px; margin-top: 8px; border-radius: 8px;
   background: color-mix(in srgb, var(--lavender) 8%, transparent); }
 
-/* ---- the ☆ in the model and LoRA pickers ---- */
-.model-picker .mg-fav { position: absolute; top: 4px; right: 4px; z-index: 2; font: inherit; font-size: 13px;
-  line-height: 1; width: 24px; height: 24px; border-radius: 50%; border: 0; cursor: pointer; padding: 0;
-  display: grid; place-items: center; color: var(--subtext);
-  background: color-mix(in srgb, var(--base) 72%, transparent); }
-.model-picker .mg-fav::before { content: "☆"; }  /* the glyph is drawn, not text, so a card's text stays its name */
-.model-picker .mg-fav.on::before { content: "★"; }
-.model-picker .mg-fav.on { color: var(--gold); }
-.model-picker .mg-fav:hover { color: var(--text); }
-.model-picker .mg-fav.on:hover { color: var(--gold); }
+/* ---- the ☆ in the model and LoRA pickers: retired by Session S (drift 136). Quick-pick is the
+   first row of a card's "Keep this model" menu; its ★ state is styles/saved-tab.css's .mg-star. */
 
 /* ---- the phone (create-mobile's tab): chips above the prompt, the 36 px scrolling row, the
    prompt toolbar, the sheets ---- */

@@ -17955,6 +17955,7 @@ def create_app(out_dir: Path):
                                          lora_base=(request.args.get("base") or "").strip())
                 if usage == "LORA" and base_type:
                     payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                payload["read_only"] = _read_only_flag(core)
                 return jsonify(payload)
             session = core.present_as_web(session)
             if src == "bookmark":
@@ -18001,6 +18002,8 @@ def create_app(out_dir: Path):
                 payload["next_cursor"] = str(offset + size) if payload.get("has_more") else ""
             if usage == "LORA" and base_type:
                 payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+            # Session S: every card's ⊕ Save dims under READ_ONLY before any tap (a local check)
+            payload["read_only"] = _read_only_flag(core)
             return jsonify(payload)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
