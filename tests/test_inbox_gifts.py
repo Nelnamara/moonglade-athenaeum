@@ -126,11 +126,13 @@ def test_the_gifts_route_reads_the_thread_and_the_bonuses_and_writes_nothing(tmp
     pixai.on("/extra-package-boosts", {"data": [
         {"code": "ZETA-2026", "boostRatePercentage": 20, "status": "available",
          "availableUntil": "2026-10-14T00:00:00Z"}], "pageInfo": {}})
+    pixai.on("me", {"me": {"id": "u-test", "displayName": "Nelnamara"}})
     cli = login_test_client(create_app(tmp_path))
     d = cli.get("/api/inbox/gifts").get_json()
     assert [g["id"] for g in d["gifts"]] == [GIFT] and d["csrf"]
     assert d["bonuses"] == [{"code": "ZETA-2026", "percent": 20, "until": "2026-10-14T00:00:00Z"}]
-    assert {c.verb for c in pixai.calls} == {"rest_get"}
+    assert d["my_name"] == "Nelnamara"               # the claim preview names the account
+    assert {c.verb for c in pixai.calls} <= {"rest_get", "query"}, "opening the gifts wrote"
 
 
 def test_the_claim_route_needs_the_session_token(tmp_path, pixai):

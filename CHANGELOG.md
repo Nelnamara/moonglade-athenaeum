@@ -17,6 +17,10 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Inbox, gifts and the current event
+- **The gift box is your PixAI inbox.** A new button left of the credits chip carries a lavender badge (unread notifications plus waiting gifts) and opens a panel: kind tabs, PixAI's live event as banner cards, one card per work of yours ("♥ +12 · ❝ 2 new" with the newest comment quoted), then followers, contests and news. Opening a row marks it read on PixAI, one write per open; opening the panel, scrolling and new arrivals mark nothing, and read-only mode marks nothing at all. (2026-10-03)
+- **New notifications arrive live.** PixAI's own push bumps the badge as it lands, and a new comment raises a notice with Later and Open thread. (2026-10-03)
+- **Gifts can be claimed in the app.** A gift PixAI sends you shows what it holds, the account and its expiry before you press Claim; one attempt, then the app reads it back. Credit-pack bonuses open PixAI. Event-gift rows in the credit ledger show the gift icon. (2026-10-03)
+- **PixAI's current event, one press away.** The gift box shows the events PixAI is running as banner cards that open PixAI's page; the app never checks in or claims. (#69) (2026-10-03)
 - **Free cards about to expire say so.** When a free card you hold expires within three days, the credits chip's CARDS half gets a thin peach underline and its hover lists them first, one line per kind ("5 Tsubaki.3 expire Oct 6 · in 3 days"). (#69) (2026-10-03)
 
 ### Under the hood

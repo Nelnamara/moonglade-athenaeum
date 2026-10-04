@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import NavSpine from "./NavSpine.jsx";
 import CostBadge from "./CostBadge.jsx";
 import CustomSlider from "./CustomSlider.jsx";
@@ -8,6 +8,7 @@ import GoalChips from "./GoalChips.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
 import { expiringLines, expiryText } from "../inbox/inboxCore.js";
+import GiftBox from "../inbox/GiftBox.jsx";
 import "../styles/shell.css";
 
 /* The separator bar (DC "Frontend Gallery", §3 of the build map): nav pills ·
@@ -80,6 +81,10 @@ export default function SeparatorBar({
      shipped. Read off the same /api/account answer the chip already draws from. */
   const expiry = expiringLines(cardsBy, Date.now());
   const expiring = expiry.lines.length > 0;
+  /* The gift box (Session R, R1a) is drawn only when a PixAI account is linked: the same
+     /api/account read answered a balance. A contest row in it opens the Contests overlay. */
+  const linked = !!(account && !account.error && account.credits != null);
+  const openContests = useCallback(() => onOverlay && onOverlay("contests"), [onOverlay]);
 
   const claimCredits = account && Number(account.claim_credits) > 0 ? account.claim_credits : 0;
 
@@ -222,6 +227,10 @@ export default function SeparatorBar({
           </span>
         ) : null}
 
+        {/* THE GIFT BOX (Sessions R + Y, Inbox and Event Handoff §1): the inbox's door, one
+            8 px gap before the credits chip. Shown only with a linked account. */}
+        {linked ? <GiftBox onOpenContests={openContests} /> : null}
+
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
         <button type="button" className={"mgx-cred" + (expiring ? " expiring" : "")}
           onClick={() => window.open("https://pixai.art/en/membership/credit-packs", "_blank", "noopener")}
@@ -239,6 +248,7 @@ export default function SeparatorBar({
           <span className="mgx-credtip" role="tooltip">
             {expiring ? (
               <span className="mgx-tipexpiry">
+                <span className="mgx-tipexphead">{cards} cards</span>
                 {expiry.lines.map((l) => (
                   <span className="mgx-tipexp" key={l.kind + l.at}>{expiryText(l)}</span>
                 ))}

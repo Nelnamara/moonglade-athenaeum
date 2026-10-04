@@ -28069,7 +28069,8 @@ __DESIGN_TOKENS__
             out = dict(ib.list_gifts(gsession))
         except Exception as e:                                   # noqa: BLE001
             return _inbox_fail(e, gifts=[], bonuses=[], **extra)
-        out.update(extra, bonuses=ib.credit_bonuses(gsession))
+        out.update(extra, bonuses=ib.credit_bonuses(gsession),
+                   my_name=ib.display_name(gsession))      # the claim preview names the account
         return jsonify(out)
 
     @app.route("/api/inbox/gifts/claim", methods=["POST"])

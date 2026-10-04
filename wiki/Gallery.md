@@ -83,6 +83,33 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows or likes on your behalf, and it comments only when you write a
   reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
+- **The gift box** (just left of the credits chip, shown once a PixAI account is linked) is your
+  **PixAI inbox**. Its lavender badge is how many of PixAI's notifications you haven't read, plus
+  any gift waiting to be claimed. Click it for the panel: tabs for **All · Comments · Likes ·
+  Follows · Gifts · PixAI**, then **ON PIXAI NOW** (the event PixAI is running, when there is
+  one), then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
+  quoted), then everything else — new followers folded per day, contest results, PixAI's news.
+  Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
+  app never saw — one started on PixAI's own site while the app was closed — joins Activity marked
+  **from PixAI**).
+  - **Opening a row marks it read on PixAI** — one write, for exactly what that row or card
+    gathers. Opening the panel, scrolling, switching tabs and new arrivals never mark anything.
+    **⋯ → Mark all read** marks the tab's kinds read. With `READ_ONLY` set, rows still open and
+    nothing is marked. If PixAI doesn't answer clearly, the row stays unread with a peach line
+    saying so, and nothing is sent twice.
+  - **It updates live.** A new notification bumps the badge as it arrives (the live mirror hears
+    it), and the count is re-read when the app opens, when the window comes back to the front
+    (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
+    notice in the corner, with **Later** and **Open thread**.
+  - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
+    holds, which account it goes to and when it expires before a **Claim** button: one attempt,
+    then the app reads the gift back and says *Claimed*, or in peach *Already claimed* /
+    *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
+    nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
+    gift icon.
+  - **ON PIXAI NOW** shows PixAI's live event banners as cards; pressing one opens PixAI's page in
+    a new tab. The app never checks in, claims or plays an event for you, and the banner list is
+    read without your API key (PixAI only answers it that way), at most once an hour.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
   **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
   them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,

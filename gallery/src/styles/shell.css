@@ -512,6 +512,7 @@
 .mgx-tipexpiry { display: flex; flex-direction: column; gap: 3px; margin-bottom: 5px;
   padding-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
 .mgx-tipexp { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.mgx-tipexphead { font-size: 10.5px; line-height: 1.5; color: var(--text); }
 
 /* claim pill -- classic's own #acct-claim (Acct.claim() in moonglade_gallery.py),
    ported verbatim: hidden until claim_credits > 0, instant claim + toast on

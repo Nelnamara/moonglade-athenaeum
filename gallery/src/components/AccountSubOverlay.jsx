@@ -219,6 +219,9 @@ export default function AccountSubOverlay({ onClose }) {
                   return (
                     <div className="acct-row" key={le.ref_id || i}>
                       <b className={"acct-amt" + (pos ? " pos" : "")}>{pos ? "+" : "−"}{nfmt(Math.abs(le.amount || 0))}</b>
+                      {/* Session R (R9c): an "event gift" row wears the gift icon, 14 px, before
+                          its reason -- the same pack art as the header's gift box. */}
+                      {le.type === "event_gift" ? <span className="acct-gifticon" aria-hidden="true" /> : null}
                       <span className={"acct-dimchip" + (known ? "" : " raw")}>{le.type}</span>
                       <div className="acct-rowmain acct-ellip" style={{ fontSize: 12 }}>{le.label}</div>
                       <span className="acct-monodim">{day(le.created_at)}</span>
