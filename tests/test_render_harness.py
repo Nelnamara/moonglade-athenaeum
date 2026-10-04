@@ -9476,3 +9476,119 @@ def test_the_inbox_picture_falls_back_to_the_envelope_and_the_pack_copy_wins_whe
             first = len(asked)
             assert 1 <= first <= 2, asked
     assert len(asked) == first, ("resolved once a page: a reopened Menu asks nothing more", asked)
+
+
+# Each panel's emblem (owner, 2026-10-04: "a larger version of the icon in the top right of each of
+# their respective frames"): the door's own picture at 48 px in the panel's title row, 40 px in the
+# phone sheet's title row; decorative, and simply absent when its picture fails.
+
+_RF_HEAD_JS = """([sel, row]) => {
+  const p = document.querySelector(sel);
+  const head = p.querySelector(row);
+  const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+    return {l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height, cy: b.top + b.height / 2}; };
+  const em = head.querySelector('.ib-emblem');
+  const pb = p.getBoundingClientRect();
+  return {head: r(head), emblem: r(em), more: r(head.querySelector('.ib-more')), title: r(head.querySelector('.ib-title')),
+          panelR: pb.right, padR: parseFloat(getComputedStyle(p).paddingRight),
+          alt: em ? em.getAttribute('alt') : null, hidden: em ? em.getAttribute('aria-hidden') : null,
+          src: em ? em.getAttribute('src') : '', fit: em ? getComputedStyle(em).objectFit : '',
+          natural: em ? em.naturalWidth : 0, glyph: head.querySelectorAll('.ib-inboxglyph').length};
+}"""
+
+
+def _rf_gift_png():
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGBA", (128, 119), (200, 60, 90, 255)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_each_panel_wears_its_doors_picture_large_in_its_title_row(logged_in_page):
+    """The inbox panel's title row ends in the mailbox and the gift box's in the gift, each 48 px,
+    contained, right-aligned, decorative (alt "", aria-hidden), with the title centred against it. The
+    inbox's ⋯ sits 8 px left of the mailbox, centred on it, wholly inside the panel, and still opens
+    Mark all read. A picture that fails leaves no emblem and no stand-in."""
+    page, posts = _rf_desktop(logged_in_page)
+    gift = _rf_gift_png()
+    page.route("**/branding/rewards/gift.png", lambda r: r.fulfill(status=200, content_type="image/png", body=gift))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox")
+    _dismiss_any_achievement_toast(page)
+
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel .ib-head .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.ib-panel .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    em, more, head = h["emblem"], h["more"], h["head"]
+    assert abs(em["w"] - 48) < 0.5 and abs(em["h"] - 48) < 0.5 and h["fit"] == "contain", h
+    assert (h["alt"], h["hidden"]) == ("", "true"), h
+    assert h["src"].startswith("data:image/webp;base64,"), ("the mailbox, through the door's own lookup", h)
+    assert abs(em["r"] - head["r"]) < 1, ("right-aligned in the title row", h)
+    assert head["h"] >= 48 - 0.5, ("the row grows to fit it", h)
+    assert abs(h["title"]["cy"] - em["cy"]) < 1.5, ("the title stays centred against it", h)
+    assert abs(em["l"] - more["r"] - 8) < 1, ("⋯ sits 8 px left of the mailbox", h)
+    assert abs(more["cy"] - em["cy"]) < 1, ("⋯ is centred on it", h)
+    assert more["w"] >= 28 and more["r"] <= h["panelR"] - h["padR"] + 0.5, ("⋯ has room and is not clipped", h)
+    page.click(".ib-panel .ib-more")
+    page.wait_for_selector(".ib-panel .ib-menuitem")
+    item = page.locator(".ib-panel .ib-menuitem")
+    assert item.inner_text() == "Mark all read"
+    box = item.bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= h["panelR"], ("the menu is not clipped", box, h)
+
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-head .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.ib-panel .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    assert h["src"] == "/branding/rewards/gift.png" and h["natural"] == 128, h
+    assert abs(h["emblem"]["w"] - 48) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
+    assert abs(h["title"]["cy"] - h["emblem"]["cy"]) < 1.5, h
+    assert posts == []
+    page.context.close()
+
+    # the pictures fail: no emblem, no stand-in
+    page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)      # no pack gift.png here either
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel .ib-head .ib-title")
+    page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")          # the lookup has settled on nothing
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    assert h["emblem"] is None and h["glyph"] == 0, h
+    assert h["more"] is not None, "⋯ stays"
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-head")
+    page.wait_for_function("() => !document.querySelector('.ib-panel .ib-emblem')")
+    assert page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])["emblem"] is None
+
+
+def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_page):
+    """The phone's Inbox and Gift box sheets end their title rows in the same pictures at 40 px."""
+    page, _ = _rf_phone(logged_in_page)
+    gift = _rf_gift_png()
+    page.route("**/branding/rewards/gift.png", lambda r: r.fulfill(status=200, content_type="image/png", body=gift))
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Inbox')")
+    page.wait_for_selector(".glm-sheet.ib-sheet .glm-sheet-title .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.glm-sheet-title .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
+    assert abs(h["emblem"]["w"] - 40) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
+    assert h["src"].startswith("data:image/webp;base64,") and h["alt"] == "", h
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "INBOX"
+    page.mouse.click(195, 12)
+    page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".glm-sheet.ib-sheet .glm-sheet-title .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.glm-sheet-title .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
+    assert h["src"] == "/branding/rewards/gift.png" and abs(h["emblem"]["w"] - 40) < 0.5, h
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "GIFT BOX"

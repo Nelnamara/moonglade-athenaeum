@@ -104,9 +104,10 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
     (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
     notice in the corner, with **Later** and **Open thread**.
 - **🎁 Gift box** is for rewards. Its lavender badge is how many gifts are waiting to be claimed.
-  Click it for its own panel (opening one panel closes the other): **ON PIXAI NOW** (the events
-  PixAI is running, when there are any), then the free cards about to expire (in peach, the same
-  lines the credits chip's hover shows), then your gifts. With none of the three, it says
+  Click it for its own panel (opening one panel closes the other; each panel shows its button's
+  picture, large, in its top-right corner): **ON PIXAI NOW** (the events PixAI is running, when
+  there are any), then the free cards about to expire (in peach, the same lines the credits chip's
+  hover shows), then your gifts. With none of the three, it says
   *Nothing waiting*. Opening it only reads.
   - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
     holds, which account it goes to and when it expires before a **Claim** button: one attempt,

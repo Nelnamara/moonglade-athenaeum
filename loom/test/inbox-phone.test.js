@@ -69,9 +69,18 @@ describe("the Menu door and its rows", () => {
 
 describe("the two sheets", () => {
   test("each opens full height with MobileSheet's own 280 ms exit", () => {
-    assert.match(app, /<MobileSheet open=\{sheet === "inbox"\}[^>]*\n?\s*className="ib-sheet">/);
-    assert.match(app, /<MobileSheet open=\{sheet === "gifts"\}[^>]*\n?\s*className="ib-sheet">/);
+    assert.match(app, /<MobileSheet open=\{sheet === "inbox"\}[^\n]*\n?\s*titleEnd=\{<InboxEmblem small \/>\} className="ib-sheet">/);
+    assert.match(app, /<MobileSheet open=\{sheet === "gifts"\}[^\n]*\n?\s*titleEnd=\{<GiftEmblem small \/>\} className="ib-sheet">/);
     assert.match(css, /\.glm-sheet\.ib-sheet \{ height: calc\(100dvh - 40px\);/);
+  });
+
+  test("each sheet's title row ends in its door's picture at 40 px (no title row is invented)", () => {
+    assert.match(app, /<MobileSheet open=\{sheet === "inbox"\}[^>]*titleEnd=\{<InboxEmblem small \/>\}/);
+    assert.match(app, /<MobileSheet open=\{sheet === "gifts"\}[^>]*titleEnd=\{<GiftEmblem small \/>\}/);
+    const ms = src("gallery/src/components/MobileSheet.jsx");
+    assert.match(ms, /export default function MobileSheet\(\{ open, closing, onClose, title, titleEnd, className, children \}\)/);
+    assert.match(ms, /aria-label=\{title \|\| "Sheet"\}/);
+    assert.match(ms, /\{title \? <div className=\{"glm-sheet-title" \+ \(titleEnd \? " has-end" : ""\)\}>\{title\}\{titleEnd\}<\/div> : null\}/);
   });
 
   test("the Inbox sheet has no Gifts tab, reads no gifts, and its N new is the unread count", () => {

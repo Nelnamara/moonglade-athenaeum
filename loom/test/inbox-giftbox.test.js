@@ -21,6 +21,8 @@ const inboxDoor = src("gallery/src/inbox/InboxDoor.jsx");
 const door = src("gallery/src/inbox/useHeaderDoor.js");
 const icon = src("gallery/src/inbox/InboxIcon.jsx");
 const iconModule = src("gallery/src/art/inboxIcon.js");
+const emblem = src("gallery/src/inbox/PanelEmblem.jsx");
+const noComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 const store = src("gallery/src/inbox/inboxStore.js");
 const list = src("gallery/src/inbox/InboxList.jsx");
 const css = src("gallery/src/styles/inbox.css");
@@ -112,6 +114,42 @@ describe("two doors: ✉ Inbox, then 🎁 Gift box, then the credits chip (owner
     assert.match(door, /others\.forEach\(\(fn\) => fn\(name\)\)/);
     assert.match(door, /if \(who !== name\) close\(\);/);
     assert.notEqual(inboxDoor.match(/useHeaderDoor\("(\w+)"/)[1], box.match(/useHeaderDoor\("(\w+)"/)[1]);
+  });
+});
+
+describe("each panel's emblem: its door's picture, large, top right (owner, 2026-10-04)", () => {
+  test("the inbox's title row: Inbox + N new, then ⋯, then the mailbox at the right end", () => {
+    const head = inboxDoor.slice(inboxDoor.indexOf('<div className="ib-head">'), inboxDoor.indexOf("</div>", inboxDoor.indexOf('<div className="ib-head">')));
+    const order = ['className="ib-title">Inbox<', '<span className="ib-new">', "<MarkAllMenu tab={tab} />", "<InboxEmblem />"]
+      .map((k) => head.indexOf(k));
+    assert.ok(order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])), "title, N new, ⋯, then the mailbox: " + order);
+    assert.match(head, /<span className="ib-headtext">/);
+  });
+
+  test("the gift box's title row: Gift box, then the gift at the right end", () => {
+    const head = box.slice(box.indexOf('<div className="ib-head">'), box.indexOf("</div>", box.indexOf('<div className="ib-head">')));
+    assert.ok(head.indexOf("Gift box<") > 0 && head.indexOf("<GiftEmblem />") > head.indexOf("Gift box<"));
+  });
+
+  test("48 px, contained, decorative; the same picture as the door; absent when it fails", () => {
+    const code = noComments(emblem);
+    assert.match(code, /<img className=\{"ib-emblem" \+ \(small \? " small" : ""\)\} src=\{src\} alt="" aria-hidden="true"/);
+    assert.match(code, /onError=\{\(\) => setFailed\(true\)\}/);
+    assert.match(code, /if \(!src \|\| failed\) return null;/);
+    assert.ok(!/onClick/.test(code), "no click action");
+    // the mailbox through the door's own once-a-page lookup; the gift box's pack art
+    assert.match(code, /import \{ inboxIcon, settledInboxIcon \} from "\.\/InboxIcon\.jsx";/);
+    assert.match(code, /export const GIFT_ART = "\/branding\/rewards\/gift\.png";/);
+    assert.ok(!/✉/.test(code), "no glyph stand-in at emblem size");
+    assert.match(css, /\.ib-emblem \{[^}]*width: 48px; height: 48px;[^}]*object-fit: contain;/);
+    assert.match(css, /\.ib-emblem\.small \{ width: 40px; height: 40px; \}/);
+    // the row grows to fit it and keeps the title centred against it
+    assert.match(css, /\.ib-head \{ display: flex; align-items: center; gap: 8px; \}/);
+  });
+
+  test("⋯ sits 8 px left of the emblem, centred, with a real hit area", () => {
+    assert.match(css, /\.ib-more \{[^}]*width: 28px; height: 28px;[^}]*display: grid; place-items: center;/);
+    assert.match(css, /\.ib-menuwrap \{[^}]*display: flex;/);
   });
 });
 

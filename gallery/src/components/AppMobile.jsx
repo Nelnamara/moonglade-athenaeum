@@ -71,6 +71,7 @@ import "../styles/create-mobile.css";
 import "../styles/phone-landscape.css";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
 import { useInbox, MenuBadge, MenuInboxRows, InboxSheetBody, GiftSheetBody } from "../inbox/InboxSheets.jsx";
+import { InboxEmblem, GiftEmblem } from "../inbox/PanelEmblem.jsx";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -1616,13 +1617,14 @@ export default function AppMobile({ boot }) {
       </MobileSheet>
 
       {/* Sessions R + Y (RYPc): the Inbox and Gift box sheets, full height. A work card or a
-          quote opens Details through the shared mg-open-details bus, which closes the sheet. */}
+          quote opens Details through the shared mg-open-details bus, which closes the sheet. Each
+          title row ends in its door's picture at 40 px (owner, 2026-10-04). */}
       <MobileSheet open={sheet === "inbox"} closing={closing} onClose={closeSheet} title="INBOX"
-        className="ib-sheet">
+        titleEnd={<InboxEmblem small />} className="ib-sheet">
         <InboxSheetBody st={inboxSt} onOpenContests={openContestsFromInbox} />
       </MobileSheet>
       <MobileSheet open={sheet === "gifts"} closing={closing} onClose={closeSheet} title="GIFT BOX"
-        className="ib-sheet">
+        titleEnd={<GiftEmblem small />} className="ib-sheet">
         <GiftSheetBody st={inboxSt} account={account} />
       </MobileSheet>
 

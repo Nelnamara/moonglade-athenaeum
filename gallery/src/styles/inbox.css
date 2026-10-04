@@ -42,15 +42,24 @@
   .ib-panel { animation: none; }
   .ib-panel.closing { animation: none; opacity: 0; }
 }
-.ib-head { display: flex; align-items: baseline; gap: 6px; }
+/* the title row: the title (with its "N new") centred against the panel's emblem at the right end,
+   which the row grows to fit; ⋯ sits 8 px left of the emblem (owner, 2026-10-04) */
+.ib-head { display: flex; align-items: center; gap: 8px; }
+.ib-headtext { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ib-emblem { display: block; flex: none; width: 48px; height: 48px; object-fit: contain; pointer-events: none;
+  user-select: none; }
+.ib-emblem.small { width: 40px; height: 40px; }
+.glm-sheet-title.has-end { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ib-title { font-family: Georgia, serif; font-style: italic; font-size: 14px; }
 .ib-new, .ib-meta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px;
   color: var(--overlay0); white-space: nowrap; flex: none; }
 .ib-sp { flex: 1; }
-.ib-menuwrap { position: relative; }
-.ib-more { border: 0; background: none; color: var(--overlay0); cursor: pointer; font-size: 13px;
-  line-height: 1; padding: 0 2px; }
-.ib-more:hover { color: var(--text); }
+.ib-menuwrap { position: relative; display: flex; flex: none; }
+.ib-more { width: 28px; height: 28px; box-sizing: border-box; display: grid; place-items: center; border: 0;
+  border-radius: 8px; background: none; color: var(--overlay0); cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 0; }
+.ib-more:hover, .ib-more[aria-expanded="true"] { color: var(--text); background: rgba(182, 146, 230, .12); }
+.ib-more:focus-visible { outline: 2px solid var(--lavender); outline-offset: -2px; }
 .ib-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 2; display: flex;
   flex-direction: column; min-width: 140px; padding: 4px; border-radius: 10px;
   border: 1px solid var(--surface1); background: var(--base); box-shadow: 0 10px 24px rgba(0, 0, 0, .5); }

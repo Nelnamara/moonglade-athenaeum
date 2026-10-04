@@ -25,7 +25,7 @@ import React from "react";
    -- see contest-mobile.css's `.cmb-choosersheet` rung, and the scrim/host
    pairing discipline tests/test_z_ladder.py already enforces on the desktop
    band for the same reason. */
-export default function MobileSheet({ open, closing, onClose, title, className, children }) {
+export default function MobileSheet({ open, closing, onClose, title, titleEnd, className, children }) {
   if (!open) return null;
   const extra = (className ? " " + className : "") + (closing ? " closing" : "");
   return (
@@ -33,7 +33,9 @@ export default function MobileSheet({ open, closing, onClose, title, className, 
       <div className={"glm-scrim" + extra} onClick={onClose} aria-hidden="true" />
       <div className={"glm-sheet" + extra} role="dialog" aria-modal="true"
         aria-label={title || "Sheet"}>
-        {title ? <div className="glm-sheet-title">{title}</div> : null}
+        {/* titleEnd: an optional node at the right end of the title row (the Inbox and Gift box
+            sheets' pictures), kept out of `title` so the aria-label stays words. */}
+        {title ? <div className={"glm-sheet-title" + (titleEnd ? " has-end" : "")}>{title}{titleEnd}</div> : null}
         {children}
       </div>
     </>

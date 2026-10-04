@@ -24,6 +24,9 @@ function loadImage(src) {
   });
 }
 
+/* What the lookup settled on, without waiting: undefined (still asking), null or {from, src}. */
+export function settledInboxIcon() { return settled; }
+
 export function inboxIcon() {
   if (settled !== undefined) return Promise.resolve(settled);
   if (!asking) asking = resolveInboxIcon(loadImage, inbox_icon).then((got) => { settled = got; return got; });

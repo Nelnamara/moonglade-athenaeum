@@ -60,8 +60,10 @@ export function InboxSheetBody({ st, onOpenContests }) {
   return (
     <div className="ib-sheetbody">
       <div className="ib-head">
-        <span className="ib-title">Inbox</span>
-        <span className="ib-new">{st.unread ? st.unread + " new" : ""}</span>
+        <span className="ib-headtext">
+          <span className="ib-title">Inbox</span>
+          <span className="ib-new">{st.unread ? st.unread + " new" : ""}</span>
+        </span>
         <span className="ib-sp" />
         <MarkAllMenu tab={tab} />
       </div>
