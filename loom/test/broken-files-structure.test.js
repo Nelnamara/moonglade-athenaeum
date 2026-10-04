@@ -112,3 +112,46 @@ describe("Fix all and its progress (W3c / W4c)", () => {
     assert.doesNotMatch(run, /kind: "err"/, "no ruby: a run with failures is not an error toast");
   });
 });
+
+describe("phone (W6a)", () => {
+  test("Collection Health gains peach problem tiles and a 'Broken files ›' row that push the screen", () => {
+    const h = code("components/HealthMobile.jsx");
+    assert.match(h, /TILE_CHIP\[st\.label\]/);
+    assert.match(h, /className="mgbf-m-entry"/);
+    assert.match(h, /entrySummary\(bf\.doc\)/);
+    assert.match(h, /<MobileScreen open=\{bfOpen\} closing=\{bfClosing\} onClose=\{closeBf\} title="Broken files">/);
+    assert.match(h, /useLayerHistory\(bfOpen, closeBf\)/, "Back closes the Broken files screen first");
+    assert.match(h, /useHealth\(runsEnded\)/);
+  });
+  test("the screen: sideways chips, 64 px rows, a row-tap sheet, a sticky Fix all, a sheet confirm", () => {
+    const m = code("components/BrokenFilesMobile.jsx");
+    assert.match(m, /visibleChips\(doc && doc\.counts, true\)/);
+    assert.match(m, /onClick=\{\(\) => \{ if \(!active && !fixed\) openRow\(r\.media_id\); \}\}/);
+    assert.match(m, /className="mgbf-m-foot"/);
+    assert.match(m, /confirmLines\(plan, metered\)/);
+    assert.match(m, /<MobileSheet open=\{!!asking\}/);
+    const css = src("styles/broken-files.css");
+    assert.match(css, /\.mgbf-m-row \{[^}]*min-height: 64px/);
+    assert.match(css, /\.mgbf-m-chips \{[^}]*height: 36px[^}]*overflow-x: auto/);
+    assert.match(css, /\.mgbf-m-foot \{ position: sticky; bottom: -13px/);
+  });
+  test("a LOST row's sheet says why and never offers a re-download", () => {
+    const m = code("components/BrokenFilesMobile.jsx");
+    assert.match(m, /const a = bf\.running \? null : rowAction\(sheetRow, bf\.readOnly\)/);
+    assert.match(m, /lostLine\(sheetRow\)/);
+    assert.match(m, />Keep as is</);
+  });
+  test("progress shows at the screen's head, with the phone's moon", () => {
+    const m = code("components/BrokenFilesMobile.jsx");
+    assert.match(m, /runHeader\(bf\.status\)/);
+    assert.match(m, /size=\{GAUGE_SIZES\.phone\} bar=\{false\}/);
+  });
+  test("the phone's doors: Control's Verify row, and the shell's opener onto Health", () => {
+    const c = code("components/ControlMobile.jsx");
+    assert.match(c, /key === "verify-library" && brokenReview/);
+    assert.match(c, /openBrokenFiles\("all"\)/);
+    const a = code("components/AppMobile.jsx");
+    assert.match(a, /registerBrokenFilesOpener\(/);
+    assert.match(a, /openScreenKey\("health"\)/);
+  });
+});

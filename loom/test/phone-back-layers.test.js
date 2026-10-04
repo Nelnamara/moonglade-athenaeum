@@ -112,6 +112,8 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
       ["Control's Update", control, /useLayerHistory\(updScreen, closeUpdScreen\);/],
       ["the composer's Advanced", create, /useLayerHistory\(advOpen, closeAdv\);/],
       ["Health's Duplicates", health, /useLayerHistory\(dupOpen, closeDup\);/],
+      // Session W (W6a): Health's Broken files screen, a drill-in beside Duplicates
+      ["Health's Broken files", health, /useLayerHistory\(bfOpen, closeBf\);/],
     ]) {
       assert.match(file, re, what + " is not on the Back ledger");
       assert.match(file, /import useLayerHistory from "\.\.\/hooks\/useLayerHistory\.js";/);
@@ -123,7 +125,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     assert.match(mobile, /SHEETS ARE NOT LAYERS, and stay tap-out-only/);
     /* No sheet state is on the ledger, asserted as a CLOSED list rather than by hunting
        for the word: every registration in the whole phone shell, read out of the source,
-       has to be one of the eleven layers above. A sheet quietly joining -- `sheet === "menu"`,
+       has to be one of the twelve layers above. A sheet quietly joining -- `sheet === "menu"`,
        GalleryMobile's own useSheet, anything -- fails here by not being on it. */
     const registered = [];
     for (const f of [mobile, control, create, health, src("components/GalleryMobile.jsx"),
@@ -136,6 +138,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
       "!!detailsFor, closeDetails",
       "!!screen, closeScreen",
       "advOpen, closeAdv",
+      "bfOpen, closeBf",
       "brandOpen, closeBrand",
       "dupOpen, closeDup",
       "folioOpen, closeFolio",

@@ -79,3 +79,44 @@
 @media (prefers-reduced-motion: reduce) {
   .mgbf-bar i { transition: none; }
 }
+
+/* ---- the phone (W6a): Collection Health's tiles and entry row, and the pushed screen ---- */
+.ctm-statcard.mgbf-flag { border-color: rgba(250, 179, 135, .5); background: rgba(250, 179, 135, .06); }
+.ctm-statcard.mgbf-flag .ctm-statnum-btn { color: var(--peach); }
+.mgbf-m-entry { display: flex; align-items: baseline; gap: 8px; width: 100%; box-sizing: border-box; min-height: 44px;
+  padding: 10px 4px; margin: 0 0 14px; border: 0; border-bottom: 1px solid var(--surface1); background: none;
+  font-family: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-entry .mgbf-title { font-size: 13px; }
+.mgbf-m { display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+/* progress lives at the screen's head while a run goes (the screen's own title row stays) */
+.mgbf-m-run { position: sticky; top: -13px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  margin: -13px -13px 0; padding: 9px 13px; background: var(--base); border-bottom: 1px solid var(--surface1); }
+.mgbf-m-chips { flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; height: 36px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.mgbf-m-chips::-webkit-scrollbar { display: none; }
+.mgbf-m-chips .mgbf-chip { flex: none; min-height: 30px; font-size: 11px; }
+.mgbf-m-rows { display: flex; flex-direction: column; gap: 7px; }
+.mgbf-m-item { display: flex; flex-direction: column; gap: 5px; }
+/* 64 px rows: a 44 px thumb inside 10 px of padding */
+.mgbf-m-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 64px; box-sizing: border-box;
+  padding: 9px 10px; border-radius: 10px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .3);
+  font-family: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-row.failed { border-color: rgba(250, 179, 135, .55); }
+.mgbf-m-row.failed .mgbf-prob { color: var(--peach); white-space: normal; }
+.mgbf-m-row .mgbf-thumb { width: 44px; height: 44px; border-radius: 8px; }
+.mgbf-m-row .mgbf-main { display: flex; flex-direction: column; font-size: 11.5px; }
+.mgbf-m-pills { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+/* THE STICKY FIX ALL (drift 122's recipe, on this screen only): it sticks to the scroller's
+   real foot -- the offset is minus the body's own 13 px pad, the same reason the shared sheet's
+   action row uses minus its pad -- and on a short list margin-top:auto rests it there anyway. The
+   tab bar under this screen already keeps the home indicator's safe area. */
+.mgbf-m-foot { position: sticky; bottom: -13px; z-index: 2; display: flex; justify-content: center;
+  margin: auto -13px -13px; padding: 10px 13px 13px; background: var(--base); border-top: 1px solid var(--surface1); }
+.mgbf-m-foot .mgbf-btn { min-height: 44px; padding: 0 18px; font-size: 12px; }
+.mgbf-m-sheet { display: flex; flex-direction: column; }
+.mgbf-m-sheet .mgbf-lostline { padding: 2px 4px 8px; font-size: 12px; }
+.mgbf-m-sheet button { min-height: 44px; padding: 0 4px; border: 0; border-bottom: 1px solid var(--surface0);
+  background: none; font-family: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-confirm { display: flex; flex-direction: column; gap: 5px; padding: 2px 2px 4px; font-size: 12px; line-height: 1.5; }
+.mgbf-m-cacts { display: flex; justify-content: flex-end; gap: 8px; }
+.mgbf-m-cacts button { min-height: 44px; padding: 0 16px; font-size: 12px; }

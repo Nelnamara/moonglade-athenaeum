@@ -117,6 +117,13 @@ export function headerSummary(doc) {
   return l ? b + " broken · " + l + " lost" : b + " broken";
 }
 
+/* The phone's "Broken files ›" row: "12 · 1 lost ›". */
+export function entrySummary(doc) {
+  const b = (doc && doc.broken) || 0;
+  const l = (doc && doc.lost) || 0;
+  return (l ? b + " · " + l + " lost" : String(b)) + " ›";
+}
+
 /* The Control Panel check row's link: "12 broken · Review ▸", or the lost count when every row
    is lost. "" when the last check found nothing. */
 export function reviewLabel(doc) {

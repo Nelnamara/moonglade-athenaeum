@@ -52,6 +52,7 @@ import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
 import { registerFolioOpener } from "../notify/ach.js";
+import { registerBrokenFilesOpener } from "../lib/brokenFilesNav.js";
 import { readFolioHash, setFolioRow } from "../folio/folioFocus.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
@@ -409,6 +410,9 @@ export default function AppMobile({ boot }) {
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
   /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. */
   useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
+  /* Collection Health's Broken files (Session W, W6a): the Control tab's "Review" and a fix run's
+     Activity row push Health; it opens its Broken files screen itself (lib/brokenFilesNav.js). */
+  useEffect(() => registerBrokenFilesOpener(() => { openSheet(null); openScreenKey("health"); }), []);
   /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
      here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
   useEffect(() => {
@@ -1398,6 +1402,7 @@ export default function AppMobile({ boot }) {
               onOpenImport={() => openScreenKey("import")}
               boot={boot}
               onDuplicatesResolved={afterDuplicatesResolved}
+              onOpenDetails={openDetails}
             />
           )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}

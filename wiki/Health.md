@@ -191,6 +191,18 @@ carries on, the Activity window shows it as "Fixing 12 files · 5 / 12", and cli
 brings you back to the list. When it ends a note says what happened ("Fixed 11 of 12. 1
 couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
 
+#### On a phone
+
+In **☰ Menu → Health** the **Zero-byte files** and **Missing thumbs** tiles turn peach the same
+way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
+screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
+opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and
+**Mark lost** (a LOST row's sheet says why, and offers **Keep as is** instead). **Fix all
+recoverable (N)** stays at the foot of the screen and confirms in a sheet with the same lines as
+the desktop. While it runs, the top of the screen shows "n / N fixed" with the moon and **Stop**,
+and the Activity sheet shows the run. The phone's **Control → Check — read-only** row says
+"N broken · Review ▸" too.
+
 ## Thumbnails & health accuracy
 
 Thumbnails are 768px JPEGs cached under `gallery/thumbs/` (videos get an

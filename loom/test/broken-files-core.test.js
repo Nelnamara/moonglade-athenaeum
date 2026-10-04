@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   ARCHIVE_TIP, ARCHIVE_WORD, CHIPS, TILE_CHIP, bytesLine, byteFraction, confirmLines, endToast,
-  fixPlan, fmtDay, headerSummary, inChip, lostLine, middleEllipsis, pillFor, problemWords,
+  entrySummary, fixPlan, fmtDay, headerSummary, inChip, lostLine, middleEllipsis, pillFor, problemWords,
   reviewLabel, rowAction, rowsFor, runHeader, shortId, visibleChips,
 } from "../../gallery/src/lib/brokenFilesCore.js";
 
@@ -110,6 +110,10 @@ describe("the header and the Control Panel row", () => {
   test("'12 broken · 1 lost'", () => {
     assert.equal(headerSummary(DOC), "4 broken · 1 lost");
     assert.equal(headerSummary({ broken: 3, lost: 0 }), "3 broken");
+  });
+  test("the phone's entry row: '12 · 1 lost ›'", () => {
+    assert.equal(entrySummary(DOC), "4 · 1 lost ›");
+    assert.equal(entrySummary({ broken: 3, lost: 0 }), "3 ›");
   });
   test("'N broken · Review ▸', the lost count when all are lost, nothing when clean", () => {
     assert.equal(reviewLabel(DOC), "4 broken · Review ▸");
