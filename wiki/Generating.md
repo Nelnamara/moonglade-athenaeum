@@ -362,6 +362,10 @@ and puts the model in it; **Open on PixAI ↗** opens the model's page there. Wi
 **★ Quick-pick** still works, since it never touches PixAI. In **N not available ▸**, each
 removed model has the same **✓ Saved ▾**, whose one row takes it out of Saved.
 
+**On the phone** the Model/LoRA sheet's row reads **Market | Saved ▾ | Mine**; tap **Saved ▾**
+again to pick Saved or one of your sets from a small sheet. Every card keeps **⊕ Save | ▾**,
+and **▾** — or a long-press on the card — opens "Keep this model" as a sheet.
+
 **Old bookmarks.** PixAI's old bookmarks list stopped taking new saves in mid-August, and
 almost everything in it is in Saved too. Any old bookmark that isn't shows after the end of
 Saved with a small **old** tag, and the count line says how many (**M old**). **Show old

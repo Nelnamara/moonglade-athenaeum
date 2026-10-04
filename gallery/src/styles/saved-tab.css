@@ -100,3 +100,9 @@
   white-space: nowrap; text-decoration: none; cursor: pointer; }
 .rcp-keep-link:hover { color: var(--mauve); text-decoration: underline; }
 .rcp-keep-link:disabled { color: var(--overlay0); cursor: not-allowed; text-decoration: none; }
+
+/* ---- section 6: the phone's Model/LoRA sheet (S6a) -- the same control, a thumb's size ---- */
+.model-picker.phone .mg-split-body { min-width: 44px; min-height: 32px; }
+.model-picker.phone .mg-split-menu { min-width: 32px; min-height: 32px; }
+.model-picker.phone .mg-card { -webkit-touch-callout: none; }
+.mg-sets-sheet .rcp-sets-row .rcp-sets-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

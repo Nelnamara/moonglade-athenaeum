@@ -41,12 +41,12 @@ export default function ModelFlyout({
         )}
       </div>
       <div style={{ display: kind === "base" ? "" : "none" }}>
-        <ModelPicker kind="base" market visible={open && kind === "base"}
+        <ModelPicker kind="base" market visible={open && kind === "base"} phone={phone}
           value={value} onPick={onBasePick}
           favs={favs && favs.base} onFav={onFav ? (row) => onFav("base", row) : null} />
       </div>
       <div style={{ display: kind === "lora" ? "" : "none" }}>
-        <ModelPicker kind="lora" multi market baseType={baseType} visible={open && kind === "lora"}
+        <ModelPicker kind="lora" multi market baseType={baseType} visible={open && kind === "lora"} phone={phone}
           selected={selected || []} onToggle={onLoraPick}
           favs={favs && favs.lora} onFav={onFav ? (row) => onFav("lora", row) : null} />
       </div>

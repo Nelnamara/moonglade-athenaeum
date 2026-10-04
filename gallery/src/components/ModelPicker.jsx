@@ -4,7 +4,9 @@ import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import useAccountPrefs from "../hooks/useAccountPrefs.js";
 import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
-import { SavedRail, SavedChooser, SavedHead, SavedChips, GoneList, OldToggle } from "../picker/SavedTab.jsx";
+import {
+  SavedRail, SavedChooser, SavedSetsSheet, SavedHead, SavedChips, GoneList, OldToggle,
+} from "../picker/SavedTab.jsx";
 import { KeepRow, KeepMenu, GoneMenu, SaveSplit, keepRect } from "../picker/KeepControls.jsx";
 import { savedApi, savedStore, useSavedVersion } from "../picker/savedApi.js";
 import {
@@ -165,6 +167,7 @@ export default function ModelPicker({
   const busyRef = useRef(new Set());
   const noteTimers = useRef({});
   const rowsRef = useRef([]);       // the rows as the last applySets left them (see there)
+  const longRef = useRef({ t: 0, fired: false });   // the phone's long-press (S6a, Session K)
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q), 250);
@@ -380,6 +383,22 @@ export default function ModelPicker({
     note(id, next.ok ? { kind: "ok", text: SAVED_NOTE } : { kind: "err", text: next.error });
   };
   const openKeep = (m, el) => { hidePreview(); setKeep({ m, rect: keepRect(el) }); };
+  // The phone: a long-press on a card opens the same keep sheet ▾ does; the tap that ends it
+  // does not also pick the model (pick() checks `fired`).
+  const longPress = (m) => (phone && market ? {
+    onTouchStart: () => {
+      longRef.current.fired = false;
+      clearTimeout(longRef.current.t);
+      longRef.current.t = setTimeout(() => {
+        longRef.current.fired = true;
+        setKeep({ m, rect: null });
+      }, 500);
+    },
+    onTouchEnd: () => clearTimeout(longRef.current.t),
+    onTouchMove: () => clearTimeout(longRef.current.t),
+    onContextMenu: (e) => e.preventDefault(),
+  } : null);
+  useEffect(() => () => clearTimeout(longRef.current.t), []);
 
   const pickSrc = (v) => {
     // Saved ▾ tapped while Saved is already on: the chooser (where the rail is folded)
@@ -444,6 +463,7 @@ export default function ModelPicker({
   };
 
   const pick = (m) => {
+    if (longRef.current.fired) { longRef.current.fired = false; return; }
     hidePreview();
     if (multi) { toggleMulti(m); return; }
     onPick && onPick(m);
@@ -521,9 +541,11 @@ export default function ModelPicker({
                   onClick={() => pickSrc(v)}>{label}</button>
               ))}
             </div>
-            {savedOn && chooser && !wide && savedSets ? (
+            {savedOn && chooser && !wide && savedSets ? (phone ? (
+              <SavedSetsSheet sets={savedSets.sets} current={cur} onPick={pickSet} onClose={() => setChooser(false)} />
+            ) : (
               <SavedChooser sets={savedSets.sets} current={cur} onPick={pickSet} />
-            ) : null}
+            )) : null}
           </div>
           <div className="mg-mktfilters" style={filtersHidden ? { display: "none" } : undefined}>
             <div className="mg-mktsort">
@@ -619,7 +641,7 @@ export default function ModelPicker({
                   data-mid={m.model_id} title={tip || undefined}
                   onClick={clickable ? () => pick(m) : undefined}
                   onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}
-                  onMouseLeave={hidePreview}>
+                  onMouseLeave={hidePreview} {...longPress(m)}>
                   <div className="mg-cov">
                     {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                     {m.official && <span className="mg-pill">Official</span>}

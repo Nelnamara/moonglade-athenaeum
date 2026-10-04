@@ -256,3 +256,33 @@ test("the split control matches the handoff: 10 px, lavender once saved", () => 
   assert.match(css, /\.mg-split-menu \{[^}]*padding: 4px 6px[^}]*border-radius: 0 6px 6px 0[^}]*border-left: 0/);
   assert.match(css, /\.mg-star \{[^}]*font-size: 12px[^}]*color: var\(--lavender\)/);
 });
+
+/* ---- S6a: the phone's Model/LoRA sheet ---- */
+
+const flyout = read("components/ModelFlyout.jsx");
+
+test("the phone sheet tells its pickers they are on the phone", () => {
+  assert.equal((flyout.match(/phone=\{phone\}/g) || []).length, 2, "both the model and the LoRA picker");
+});
+
+test("Market | Saved ▾ | Mine, and Saved ▾ tapped again opens the sets as a sheet", () => {
+  // the phone is never wide, so its segment reads Saved ▾ and a second tap opens the chooser
+  assert.match(picker, /setWide\(!phone && el\.clientWidth >= NARROW_PX\)/);
+  assert.match(picker, /phone \? \(\s*<SavedSetsSheet/);
+  assert.match(tab, /export function SavedSetsSheet\(/);
+  assert.match(tab, /<div className="rcp-m mg-sets-sheet" data-keeps-dock="">/);
+  // picking one closes it (pickSet clears the chooser)
+  assert.match(picker, /const pickSet = \(s\) => \{\s*setChooser\(false\);/);
+});
+
+test("▾ and a long-press open the keep menu as a bottom sheet on the phone", () => {
+  assert.match(picker, /<KeepMenu m=\{keep\.m\} kind=\{kind\} rect=\{keep\.rect\} sheet=\{phone\}/);
+  assert.match(picker, /longRef\.current\.t = setTimeout\(\(\) => \{[\s\S]{0,120}setKeep\(\{ m, rect: null \}\);[\s\S]{0,40}\}, 500\);/);
+  // the tap that ends a long-press does not also pick the model
+  assert.match(picker, /const pick = \(m\) => \{\s*if \(longRef\.current\.fired\) \{ longRef\.current\.fired = false; return; \}/);
+});
+
+test("rows keep the split control at phone sizes: a 44 x 32 body and a 32 px ▾", () => {
+  assert.match(css, /\.model-picker\.phone \.mg-split-body \{[^}]*min-width: 44px[^}]*min-height: 32px/);
+  assert.match(css, /\.model-picker\.phone \.mg-split-menu \{[^}]*min-width: 32px[^}]*min-height: 32px/);
+});

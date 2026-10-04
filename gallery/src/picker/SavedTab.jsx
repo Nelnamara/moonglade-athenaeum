@@ -1,5 +1,7 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { countClauses, goneLine, SAVED_BASES } from "./savedCore.js";
+import "../styles/recipes.css";
 
 /* The Saved tab's chrome (Session S, Saved Tab Handoff sections 1, 5): the 112 px set rail,
    the "Saved ▾" chooser it folds into below 640 px of picker width, the header with its
@@ -40,6 +42,29 @@ export function SavedChooser({ sets, current, onPick }) {
       ))}
     </div>
   );
+}
+
+/* The phone's form of the same list (S6a): tapping "Saved ▾" while Saved is on opens it as a
+   small bottom sheet with 44 px rows; picking one closes it. Over the Model/LoRA sheet (.rcp-m,
+   417 > 345), and never read as a click outside the dock. */
+export function SavedSetsSheet({ sets, current, onPick, onClose }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="rcp-m mg-sets-sheet" data-keeps-dock="">
+      <div className="rcp-m-scrim" onClick={onClose} aria-hidden="true" />
+      <div className="rcp-m-sheet rcp-m-sheet-short">
+        <div className="rcp-m-grab" aria-hidden="true" />
+        <div className="rcp-sets rcp-sets-sheet" role="menu" aria-label="Saved and your sets">
+          {(sets || []).map((s) => (
+            <button key={s.id} type="button" role="menuitemradio" aria-checked={!!current && current.id === s.id}
+              className={"rcp-sets-row" + (current && current.id === s.id ? " on" : "")} onClick={() => onPick(s)}>
+              <span className="rcp-sets-name">{s.title}</span>
+              <span className="rcp-mono rcp-muted">{s.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>, document.body);
 }
 
 export function SavedHead({ title, count, old, gone, goneOpen, onGone }) {
