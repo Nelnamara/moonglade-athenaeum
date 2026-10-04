@@ -608,31 +608,8 @@ def test_an_animation_past_the_budget_is_refused_before_its_frames_are_decoded(t
 # the tracker's done / failed / empty and the gift icon. A role's rules are now each image's own
 # pack default (shape within 8 %, the drawn minimum unless the default is smaller, animation where
 # the default is animated), so replacing a role with the art it already wears must work. These need
-# the pack's art: the private repo's mirror of it, so they carry the donor gate.
-
-_MIRROR = (Path(__file__).resolve().parents[1].parent / "moonglade-internal" / "design"
-           / "handoff-2026-09-04" / "assets" / "branding")
-_MIRROR_FILE = {
-    ("login_companion", "companion"): "login_nel.webp",
-    ("tracker_mascots", "spinner"): "system/nel_spinner.png",
-    ("tracker_mascots", "done"): "mascots/trk_done.png",
-    ("tracker_mascots", "failed"): "mascots/trk_fail.png",
-    ("tracker_mascots", "empty"): "mascots/trk_empty.png",
-    ("reward_icons", "claim"): "rewards/claim.png",
-    ("reward_icons", "gift"): "rewards/gift.png",
-    ("power_poses", "restart"): "mascots/nel_restart.png",
-    ("power_poses", "shutdown"): "mascots/nel_shutdown.png",
-}
-
-
-@pytest.fixture()
-def pack_art(sealed_donor_present):
-    """{(slot, key): bytes} of the pack's nine role images, from the private repo's mirror of the pack."""
-    missing = [f for f in _MIRROR_FILE.values() if not (_MIRROR / f).is_file()]
-    if missing:
-        pytest.skip("the pack's art (private repo mirror) is not checked out: %s" % missing[:2])
-    return {k: (_MIRROR / f).read_bytes() for k, f in _MIRROR_FILE.items()}
-
+# the pack's art, from the folder MOONGLADE_PACK_ART names (conftest's pack_art fixture; skipped when
+# it is unset).
 
 def test_every_pack_default_passes_its_own_roles_check(pack_art):
     for (slot, key), raw in pack_art.items():
@@ -647,7 +624,7 @@ def test_every_pack_default_passes_its_own_roles_check(pack_art):
 def test_every_pack_default_can_be_uploaded_as_the_override_of_itself(pack_art, tmp_path):
     cli = _client(tmp_path)
     for (slot, key), raw in pack_art.items():
-        r = _post(cli, slot, key, raw, _MIRROR_FILE[(slot, key)].rsplit("/", 1)[-1])
+        r = _post(cli, slot, key, raw, g.ROLE_SLOTS[slot]["images"][key]["public"].rsplit("/", 1)[-1])
         assert r.status_code == 200, (slot, key, r.get_json())
         assert _override_path(slot, key).is_file()
     with Image.open(_override_path("login_companion", "companion")) as im:
@@ -858,3 +835,18 @@ def test_restore_still_removes_the_file_when_the_pack_does_hold_the_default(tmp_
     r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "reward_icons", "key": "gift"})
     assert r.status_code == 200 and r.get_json()["removed"] is True
     assert not _override_path("reward_icons", "gift").exists()
+
+
+# ---- no private path in the public files of this lane --------------------------------------------------
+
+def test_this_lanes_public_files_name_no_private_repo_path():
+    """The pack-art tests read their folder from MOONGLADE_PACK_ART (a conftest fixture that skips when
+    it is unset); no file of the roles / goal-tile work spells out where a private checkout lives."""
+    needle = "moonglade" + "-internal"
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("tests/test_branding_roles.py", "tests/test_build_goal_tiles.py", "tools/art/build_goal_tiles.py",
+                "gallery/src/art/goalTiles.js", "gallery/src/lib/brandRolesCore.js", "gallery/src/lib/goalTileCore.js",
+                "gallery/src/components/BrandRoles.jsx", "gallery/src/components/BrandRolesPhone.jsx",
+                "gallery/src/components/train/GoalTile.jsx", "loom/test/brand-roles-core.test.js",
+                "loom/test/goal-tile-core.test.js"):
+        assert needle not in (root / rel).read_text(encoding="utf-8"), rel
