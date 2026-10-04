@@ -356,29 +356,54 @@ def test_ids_are_checked_before_anything_is_sent(monkeypatch, call):
         call()
 
 
-def test_a_removed_models_row_leaves_saved_by_one_delete_of_its_item(monkeypatch):
-    w = _Writes(None, pages={(DEFAULT_ID, ""): ([_item(ITEM_1, _model(LORA_ID, "Glasswing")),
-                                                 _gone(ITEM_GONE)], None)})
+def _removal_world(monkeypatch, delete, still_there, counts):
+    """Saved before the DELETE holds ITEM_GONE as not available; after it, `still_there` says
+    whether it does. `counts` is Saved's itemCount on each list read -- moved by saves and
+    unsaves made elsewhere, so it must decide nothing."""
+    w = _Writes(None, delete=delete)
+    counts = iter(counts)
+
+    def get(s, path, params=None, **k):
+        w.gets.append((path, params))
+        if path.endswith("/items"):
+            held = not w.deletes or still_there
+            return {"data": [_item(ITEM_1, _model(LORA_ID, "Glasswing"))]
+                    + ([_gone(ITEM_GONE)] if held else []), "nextCursor": None}
+        return {"data": [_collection(DEFAULT_ID, "default-collection", next(counts), "default")],
+                "nextCursor": None}
     _wire(monkeypatch, w)
+    monkeypatch.setattr(core, "_rest_get", get)
+    return w
+
+
+def test_a_removed_models_row_leaves_saved_by_one_delete_of_its_item(monkeypatch):
+    w = _removal_world(monkeypatch, None, still_there=False, counts=[481, 480, 480])
     out = rec.model_remove_gone(object(), OWNER, ITEM_GONE)
     assert w.deletes == ["/collection/%s/items/%s" % (DEFAULT_ID, ITEM_GONE)]
     assert out == {"removed": True}
 
 
-def test_an_unclear_removal_is_read_back_from_saveds_count(monkeypatch):
-    w = _Writes(None, delete=requests.exceptions.ReadTimeout("read timed out"))
-    counts = iter([481, 480])
-
-    def get(s, path, params=None, **k):
-        w.gets.append((path, params))
-        if path.endswith("/items"):
-            return {"data": [_gone(ITEM_GONE)], "nextCursor": None}
-        return {"data": [_collection(DEFAULT_ID, "default-collection", next(counts), "default")],
-                "nextCursor": None}
-    _wire(monkeypatch, w)
-    monkeypatch.setattr(core, "_rest_get", get)
+@pytest.mark.parametrize("delete", [
+    None,                                                     # a clear yes
+    requests.exceptions.ReadTimeout("read timed out"),        # no clear answer
+])
+def test_a_removal_is_read_back_by_its_own_item_id_not_by_saveds_total(monkeypatch, delete):
+    """Review nit 2: the check after the DELETE asks whether that item id is still in Saved.
+    Saved's total moved the wrong way here (a save made elsewhere), and the answer holds."""
+    w = _removal_world(monkeypatch, delete, still_there=False, counts=[481, 482, 482])
     assert rec.model_remove_gone(object(), OWNER, ITEM_GONE) == {"removed": True}
     assert len(w.deletes) == 1
+
+
+def test_an_entry_still_listed_after_the_delete_is_not_called_removed(monkeypatch):
+    """...and Saved's total dropping (an unsave made elsewhere) does not make it so."""
+    w = _removal_world(monkeypatch, requests.exceptions.ReadTimeout("read timed out"),
+                       still_there=True, counts=[481, 480, 480])
+    out = rec.model_remove_gone(object(), OWNER, ITEM_GONE)
+    assert out["removed"] is False and "isn't confirmed" in out["error"] and len(w.deletes) == 1
+    w = _removal_world(monkeypatch, None, still_there=True, counts=[481, 480, 480])
+    out = rec.model_remove_gone(object(), OWNER, ITEM_GONE)
+    assert out == {"removed": False, "error": "PixAI didn't take it out"}
 
 
 def test_a_new_model_set_is_a_private_model_collection(monkeypatch):
