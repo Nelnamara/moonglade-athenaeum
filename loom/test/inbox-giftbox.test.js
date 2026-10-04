@@ -106,6 +106,22 @@ describe("Mark all read names its own tab (review item 2)", () => {
   });
 });
 
+describe("an unclear claim locks that gift's Claim until the gifts are read again (review item 3)", () => {
+  test("the store locks it on any answer that is not a clear done or refusal, and only a fresh read unlocks", () => {
+    const claim = fnBody(store, "claimGift");
+    assert.match(claim, /if \(state\.claimLocked\[id\]\) return Promise\.resolve\(null\);/);
+    assert.match(claim, /claimLocked: \{ \.\.\.state\.claimLocked, \[id\]: true \}/);
+    assert.match(fnBody(store, "loadGifts"), /claimLocked: d\.error \? state\.claimLocked : \{\}/);
+  });
+
+  test("both of the gift's Claim buttons stay off while it is locked", () => {
+    const locked = (list.match(/const locked = !!\(claimLocked && claimLocked\[g\.id\]\);/g) || []).length;
+    assert.equal(locked, 1);
+    assert.equal((list.match(/disabled=\{readOnly \|\| locked\}/g) || []).length, 1, "Claim ▸");
+    assert.match(list, /disabled=\{!!\(mine && mine\.state === "sending"\) \|\| readOnly \|\| locked\}/);
+  });
+});
+
 describe("delivery (R4b)", () => {
   test("the live count rides the Activity poll; a reconnect re-reads the count; focus at most every 30 s", () => {
     assert.match(jobs, /if \(d && !d\.error && d\.inbox\) pollListeners\.forEach/);

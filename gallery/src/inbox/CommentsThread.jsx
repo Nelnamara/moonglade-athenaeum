@@ -32,7 +32,7 @@ function bg(url) {
   return url ? { backgroundImage: "url('" + String(url).replace(/'/g, "%27") + "')" } : undefined;
 }
 
-function Comment({ c, now, replies, open, onToggle, onReply, onDelete, indent }) {
+function Comment({ c, now, replies, open, onToggle, onReply, onDelete, deleteOff, indent }) {
   return (
     <div className={"cm-c" + (indent ? " indent" : "")} data-comment={c.id}>
       <div className="cm-head">
@@ -59,7 +59,10 @@ function Comment({ c, now, replies, open, onToggle, onReply, onDelete, indent })
         </span>
         {onReply ? <button type="button" className="cm-replylink" onClick={onReply}>Reply</button> : null}
         {onDelete ? (
-          <button type="button" className="cm-delete" onClick={onDelete}>Delete my reply</button>
+          <button type="button" className="cm-delete" onClick={onDelete} disabled={!!deleteOff}
+            title={deleteOff ? "The last delete had no clear answer. Check on PixAI; this unlocks when the comments are read again." : undefined}>
+            Delete my reply
+          </button>
         ) : null}
       </div>
     </div>
@@ -80,6 +83,9 @@ export default function CommentsThread({ row, phone }) {
   // Replies posted while this thread is open: "Delete my reply" is offered under these (PixAI
   // has no edit), for as long as the thread stays open.
   const [posted, setPosted] = useState([]);
+  // A reply whose delete had no clear answer may already be gone: its Delete stays off until
+  // the thread is read again (review item 3).
+  const [delLocked, setDelLocked] = useState([]);
   const ref = useRef(null);
   const textRef = useRef(null);
   const askToken = useRef(0);
@@ -93,7 +99,7 @@ export default function CommentsThread({ row, phone }) {
   useEffect(() => {
     current.current = artworkId;
     setData(null); setError(""); setPage(1); setOpen({}); setBox(null); setAsk(null);
-    setDeleting(null); setSeen(false); setPosted([]);
+    setDeleting(null); setSeen(false); setPosted([]); setDelLocked([]);
     const f = takeFocus(artworkId);
     setFocusId(f ? f.commentId : "");
     arrived.current = !!f;
@@ -113,6 +119,7 @@ export default function CommentsThread({ row, phone }) {
     if (current.current !== artworkId) return;
     if (d.error && !(d.items || []).length) { setError(d.error); setData((cur) => cur || { ...d, items: [] }); return; }
     setError("");
+    if (p === 1) setDelLocked([]);
     setData((cur) => (p > 1 && cur ? { ...d, items: cur.items.concat(d.items || []) } : d));
     setPage(p);
   });
@@ -202,6 +209,7 @@ export default function CommentsThread({ row, phone }) {
       const state = (d && d.state) || "unclear";
       inFlight.current = false;
       setDeleting({ id: c.id, state, message: (d && (d.message || d.error)) || "" });
+      if (state === "unclear") setDelLocked((ids) => ids.concat([c.id]));
       if (state === "done") {
         setData((cur) => ({ ...cur, items: cur.items.filter((x) => x.id !== c.id),
           total: cur.total != null ? Math.max(0, cur.total - 1) : cur.total }));
@@ -210,7 +218,7 @@ export default function CommentsThread({ row, phone }) {
   };
 
   const askDelete = (c) => {
-    if (inFlight.current) return;
+    if (inFlight.current || delLocked.indexOf(c.id) >= 0) return;
     const tok = ++askToken.current;
     const q = deleteQuestion(work);
     if (phone) { setAsk({ kind: "delete", q, c, tok }); return; }
@@ -283,13 +291,15 @@ export default function CommentsThread({ row, phone }) {
             <Comment c={ch.root} now={now} replies={ch.replies.length} open={isOpen}
               onToggle={() => setOpen((o) => ({ ...o, [ch.root.id]: !isOpen }))}
               onReply={ch.root.you ? null : () => openBox(ch.root)}
-              onDelete={canDelete(ch.root) ? () => askDelete(ch.root) : null} />
+              onDelete={canDelete(ch.root) ? () => askDelete(ch.root) : null}
+              deleteOff={delLocked.indexOf(ch.root.id) >= 0} />
             {delLine(ch.root)}
             {replyBox(ch.root)}
             {isOpen ? ch.replies.map((r) => (
               <React.Fragment key={r.id}>
                 <Comment c={r} now={now} indent onReply={r.you ? null : () => openBox(r)}
-                  onDelete={canDelete(r) ? () => askDelete(r) : null} />
+                  onDelete={canDelete(r) ? () => askDelete(r) : null}
+                  deleteOff={delLocked.indexOf(r.id) >= 0} />
                 {delLine(r)}
                 {replyBox(r)}
               </React.Fragment>

@@ -78,7 +78,7 @@ export function GiftSheetBody({ st, account }) {
       <div className="ib-scroll">
         <EventCards events={st.events} phone />
         {expiry.lines.map((l) => <div className="ib-expiry-line" key={l.kind + l.at}>{expiryText(l)}</div>)}
-        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} readOnly={st.readOnly} />
+        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} />
       </div>
     </div>
   );

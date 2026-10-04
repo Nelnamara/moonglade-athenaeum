@@ -81,6 +81,13 @@ describe("the reply (R6c): one question, one press, one POST", () => {
     assert.match(thread, /e\.key === "Escape"\) \{ e\.preventDefault\(\); setBox\(null\); \}/);
   });
 
+  test("an unclear delete keeps that reply's Delete off until the thread is read again (review item 3)", () => {
+    assert.match(thread, /if \(state === "unclear"\) setDelLocked\(\(ids\) => ids\.concat\(\[c\.id\]\)\);/);
+    assert.match(thread, /if \(p === 1\) setDelLocked\(\[\]\);/);
+    assert.match(thread, /if \(inFlight\.current \|\| delLocked\.indexOf\(c\.id\) >= 0\) return;/);
+    assert.match(thread, /deleteOff=\{delLocked\.indexOf\(ch\.root\.id\) >= 0\}/);
+  });
+
   test("Delete my reply is ruby, offered under a reply you posted while the thread is open, and asks first", () => {
     assert.match(css, /\.cm-delete \{[^}]*color: var\(--ruby\)/);
     assert.match(thread, /const canDelete = \(c\) => c\.you && !readOnly && posted\.indexOf\(c\.id\) >= 0;/);

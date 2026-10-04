@@ -34,6 +34,7 @@
 .cm-replylink { font-size: 9.5px; color: var(--lavender); }
 .cm-replylink:hover, .cm-link:hover { color: var(--mauve); text-decoration: underline; }
 .cm-delete { font-size: 10px; color: var(--ruby); text-decoration: underline dotted; }
+.cm-delete:disabled { opacity: .45; cursor: default; }
 .cm-older { display: flex; justify-content: flex-end; padding-top: 4px; }
 .cm-link { font-size: 10.5px; color: var(--lavender); }
 

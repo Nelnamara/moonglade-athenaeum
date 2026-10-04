@@ -145,7 +145,7 @@ function GiftIcon({ small }) {
    preview (what, which account, expiry, "One attempt.") with [Back] [Claim]: one write and a
    status read-back. 409 / 410 come back as peach words. A done gift dims with "claimed" /
    "expired". Credit-pack bonuses open PixAI and send nothing. Gifts are not billing: no gold. */
-export function GiftRows({ data, error, claim, readOnly, pendingOnly }) {
+export function GiftRows({ data, error, claim, claimLocked, readOnly, pendingOnly }) {
   const [preview, setPreview] = useState("");
   if (error) return <div className="ib-warn">{"Couldn't read your gifts from PixAI: " + error}</div>;
   if (!data) return <div className="ib-dim">Reading your gifts…</div>;
@@ -159,6 +159,7 @@ export function GiftRows({ data, error, claim, readOnly, pendingOnly }) {
       {gifts.map((g) => {
         const pending = g.status === "PENDING";
         const mine = claim && claim.id === g.id ? claim : null;
+        const locked = !!(claimLocked && claimLocked[g.id]);
         return (
           <React.Fragment key={g.id}>
             <div className={"ib-gift" + (pending ? "" : " done")}>
@@ -168,8 +169,10 @@ export function GiftRows({ data, error, claim, readOnly, pendingOnly }) {
                 <>
                   <span className="ib-meta">{giftMeta(g)}</span>
                   {preview !== g.id ? (
-                    <button type="button" className="ib-btn" disabled={readOnly}
-                      title={readOnly ? "Read-only mode is on, so nothing can be claimed." : "Claim this gift"}
+                    <button type="button" className="ib-btn" disabled={readOnly || locked}
+                      title={readOnly ? "Read-only mode is on, so nothing can be claimed."
+                        : locked ? "The last claim had no clear answer. Check on PixAI; this unlocks when the gifts are read again."
+                          : "Claim this gift"}
                       onClick={() => { clearClaim(); setPreview(g.id); }}>Claim ▸</button>
                   ) : null}
                 </>
@@ -183,7 +186,7 @@ export function GiftRows({ data, error, claim, readOnly, pendingOnly }) {
                 <div className="ib-acts">
                   <button type="button" className="ib-ghost" onClick={() => setPreview("")}>Back</button>
                   <button type="button" className="ib-btn"
-                    disabled={!!(mine && mine.state === "sending") || readOnly}
+                    disabled={!!(mine && mine.state === "sending") || readOnly || locked}
                     onClick={() => claimGift(g.id).then((d) => { if (d && d.state === "done") setPreview(""); })}>
                     {mine && mine.state === "sending" ? "Claiming…" : "Claim"}
                   </button>
@@ -222,7 +225,7 @@ export function InboxBody({ st, tab, phone, now }) {
   if (tab === "gifts") {
     return (
       <div className="ib-scroll" ref={scrollRef}>
-        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} readOnly={st.readOnly} />
+        <GiftRows data={st.giftData} error={st.giftError} claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} />
       </div>
     );
   }
@@ -254,7 +257,7 @@ export function InboxBody({ st, tab, phone, now }) {
         </Row>
       ))}
       {tab === "all" ? (
-        <GiftRows data={st.giftData} error="" claim={st.claim} readOnly={st.readOnly} pendingOnly />
+        <GiftRows data={st.giftData} error="" claim={st.claim} claimLocked={st.claimLocked} readOnly={st.readOnly} pendingOnly />
       ) : null}
       {empty ? <div className="ib-dim">Nothing here from PixAI yet.</div> : null}
       {st.loading && st.loaded ? <div className="ib-dim">Reading older notifications…</div> : null}

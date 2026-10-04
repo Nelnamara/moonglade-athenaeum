@@ -33,6 +33,7 @@ let state = {
   allNotice: "",        // the line under ⋯ Mark all read
   giftData: null,       // {gifts, bonuses, has_thread, my_name} | null
   giftError: "", giftsLoading: false, claim: null,   // claim: {id, state, message}
+  claimLocked: {},      // gift id -> true after an unclear claim, until the gifts are read again
   events: null,
 };
 const subs = new Set();
@@ -141,6 +142,7 @@ export function loadGifts() {
   set({ giftsLoading: true });
   return apiGet("/api/inbox/gifts").then((d) => {
     set({ giftsLoading: false, giftError: d.error || "", csrf: d.csrf || state.csrf,
+      claimLocked: d.error ? state.claimLocked : {},
       readOnly: d.read_only != null ? !!d.read_only : state.readOnly,
       giftData: d.error ? state.giftData : { gifts: d.gifts || [], bonuses: d.bonuses || [],
         has_thread: !!d.has_thread, my_name: d.my_name || "" } });
@@ -233,13 +235,19 @@ export function markAllRead(tab) {
 
 // ---- a gift's claim (one write) -----------------------------------------------------------
 
+/* One claim per gift. A claim whose answer was not clear (no done, no refusal) may still have
+   gone through, so that gift's Claim stays off -- `claimLocked` -- until the gift list is read
+   again (the next panel or sheet open), which is what shows whether it landed. */
 export function claimGift(id) {
   if (state.claim && state.claim.state === "sending") return Promise.resolve(null);
+  if (state.claimLocked[id]) return Promise.resolve(null);
   set({ claim: { id, state: "sending", message: "" } });
   return apiPost("/api/inbox/gifts/claim", { csrf: state.csrf, id }).then((d) => {
-    set({ claim: { id, state: (d && d.state) || "unclear",
+    const answer = (d && d.state) || "unclear";
+    set({ claim: { id, state: answer,
       message: (d && (d.message || d.error)) || "No clear answer from PixAI. Check on PixAI before trying again." } });
-    if (d && (d.state === "done" || d.state === "refused")) { loadGifts(); readCount(); }
+    if (answer === "done" || answer === "refused") { loadGifts(); readCount(); }
+    else if (answer !== "read_only") set({ claimLocked: { ...state.claimLocked, [id]: true } });
     return d;
   });
 }
