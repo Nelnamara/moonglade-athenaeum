@@ -6,7 +6,7 @@ import { Pill } from "./BrokenFiles.jsx";
 import useDataSaver from "../hooks/usePhonePrefs.js";
 import { fractionOf, GAUGE_SIZES } from "../lib/moonGaugeCore.js";
 import {
-  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, confirmLines, fixPlan,
+  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, chipOrAll, confirmLines, fixPlan,
   lostLine, pillFor, problemWords, rowAction, rowsFor, runHeader, shortId, visibleChips,
 } from "../lib/brokenFilesCore.js";
 import "../styles/broken-files.css";
@@ -41,7 +41,8 @@ export default function BrokenFilesMobile({ bf, chip, setChip, onOpenDetails }) 
   const metered = !!(saver.active && saver.info && saver.info.metered);
   const doc = bf.doc;
   const chips = visibleChips(doc && doc.counts, true);
-  const rows = rowsFor(doc, chip, bf.gone);
+  const shown = chipOrAll(chips, chip);
+  const rows = rowsFor(doc, shown, bf.gone);
   const plan = fixPlan(doc, bf.readOnly, bf.done);
   const sheetRow = rowOpen ? ((doc && doc.rows) || []).find((r) => r.media_id === rowOpen) : null;
   const c = confirmLines(plan, metered);
@@ -63,8 +64,8 @@ export default function BrokenFilesMobile({ bf, chip, setChip, onOpenDetails }) 
       ) : null}
       <div className="mgbf-m-chips" role="tablist" aria-label="Problem">
         {chips.map((ch) => (
-          <button type="button" key={ch.key} role="tab" aria-selected={chip === ch.key}
-            className={"mgbf-chip" + (chip === ch.key ? " on" : "")} onClick={() => setChip(ch.key)}>
+          <button type="button" key={ch.key} role="tab" aria-selected={shown === ch.key}
+            className={"mgbf-chip" + (shown === ch.key ? " on" : "")} onClick={() => setChip(ch.key)}>
             {ch.label} {ch.n}
           </button>
         ))}

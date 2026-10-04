@@ -5,7 +5,7 @@ import useDataSaver from "../hooks/usePhonePrefs.js";
 import { fractionOf } from "../lib/moonGaugeCore.js";
 import { setBrokenFilesModalUp } from "../lib/brokenFilesNav.js";
 import {
-  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, confirmLines, fixPlan,
+  ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, chipOrAll, confirmLines, fixPlan,
   headerSummary, lostLine, middleEllipsis, pillFor, problemWords, rowAction, rowsFor, runHeader,
   shortId, visibleChips,
 } from "../lib/brokenFilesCore.js";
@@ -46,7 +46,8 @@ export function Pill({ label, tone, title }) {
 }
 
 /* One row: the 46 px line, then -- for a LOST row PixAI no longer has -- its reason and buttons,
-   and for the row being fixed, the byte bar. Exported for the phone screen's reuse of the parts. */
+   and for the row being fixed, the byte bar. (The phone draws its own 64 px row from the same
+   core helpers; it reuses only Pill from this file.) */
 function BrokenRow({ row, bf, menuOpen, setMenu, onOpenDetails, maxPath }) {
   const ref = useRef(null);
   const mid = row.media_id;
@@ -160,7 +161,8 @@ export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionR
   const metered = !!(saver.active && saver.info && saver.info.metered);
   const doc = bf.doc;
   const chips = visibleChips(doc && doc.counts);
-  const rows = rowsFor(doc, chip, bf.gone);
+  const shown = chipOrAll(chips, chip);
+  const rows = rowsFor(doc, shown, bf.gone);
   const plan = fixPlan(doc, bf.readOnly, bf.done);
   const go = () => { setAsking(false); if (plan.total) bf.fix(plan.ids); };
   return (
@@ -193,8 +195,8 @@ export default function BrokenFiles({ bf, chip, setChip, onOpenDetails, sectionR
       ) : null}
       <div className="mgbf-chips" role="tablist" aria-label="Problem">
         {chips.map((c) => (
-          <button type="button" key={c.key} role="tab" aria-selected={chip === c.key}
-            className={"mgbf-chip" + (chip === c.key ? " on" : "")} onClick={() => setChip(c.key)}>
+          <button type="button" key={c.key} role="tab" aria-selected={shown === c.key}
+            className={"mgbf-chip" + (shown === c.key ? " on" : "")} onClick={() => setChip(c.key)}>
             {c.label} {c.n}
           </button>
         ))}

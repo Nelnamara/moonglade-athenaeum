@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  ARCHIVE_TIP, ARCHIVE_WORD, CHIPS, TILE_CHIP, bytesLine, byteFraction, confirmLines, endToast,
+  ARCHIVE_TIP, ARCHIVE_WORD, CHIPS, TILE_CHIP, bytesLine, byteFraction, chipOrAll, confirmLines, endToast,
   entrySummary, fixPlan, fmtDay, headerSummary, inChip, lostLine, middleEllipsis, pillFor, problemWords,
   reviewLabel, rowAction, rowsFor, runHeader, shortId, visibleChips,
 } from "../../gallery/src/lib/brokenFilesCore.js";
@@ -49,6 +49,11 @@ describe("chips", () => {
     assert.ok(!inChip(DOC.rows[0], "lost"));
     assert.deepEqual(rowsFor(DOC, "thumb").map((r) => r.media_id), ["b", "e"]);
     assert.deepEqual(rowsFor(DOC, "all", { a: true }).map((r) => r.media_id), ["b", "c", "d", "e"]);
+  });
+  test("a chip a fix run emptied falls back to All", () => {
+    const chips = visibleChips({ all: 4, zero: 0, thumb: 4 });
+    assert.equal(chipOrAll(chips, "zero"), "all");
+    assert.equal(chipOrAll(chips, "thumb"), "thumb");
   });
   test("the problem tiles open the list at their chip", () => {
     assert.deepEqual(TILE_CHIP, { "Zero-byte files": "zero", "Missing thumbs": "thumb" });

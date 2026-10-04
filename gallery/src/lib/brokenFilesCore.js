@@ -40,6 +40,12 @@ export function visibleChips(counts, phone) {
     .map((ch) => ({ key: ch.key, label: phone ? ch.phone : ch.label, n: c[ch.key] || 0 }));
 }
 
+/* The chip to show: the one picked while it still has rows, else All (a fix run can empty a
+   chip under the owner's eyes, and its button is hidden at zero). */
+export function chipOrAll(chips, chip) {
+  return (chips || []).some((c) => c.key === chip) ? chip : "all";
+}
+
 /* Whether a row sits under a chip. */
 export function inChip(row, chip) {
   if (!row) return false;
