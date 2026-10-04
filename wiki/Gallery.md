@@ -427,6 +427,13 @@ the next lot as they go, and the number at the top is the picture's place in eve
 matches. Close the viewer and the list is back at the picture you were on, even one far from where you
 opened it.
 
+**Selecting a run of pictures.** While selecting, long-press a second picture and everything between the
+last one you ticked and it is selected — in **Pages** too, even across pages you are not on. When some of
+them are not loaded, a card says so for a few seconds (*Selected 140, including 40 not loaded yet.*) and
+**Actions** waits a moment while the phone looks them up, so every confirm counts all of them. In
+**Continuous** the select bar also has **All loaded (L)**, which ticks every picture loaded so far, and your
+ticks stay put as more load; changing a filter there clears the selection, with **Undo** for ten seconds.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

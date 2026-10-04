@@ -8453,3 +8453,88 @@ def test_continuous_holds_its_window_through_a_turn_and_back(phone_u_server, ren
         assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
     finally:
         ctx.close()
+
+
+def _u_press_tile(page, i):
+    """Long-press the tile of the i-th newest picture (scrolled to the middle of the view first)."""
+    sel = '.glm-tile[data-mid="%s"]' % _u_mid(i)
+    page.evaluate("(s) => document.querySelector(s).scrollIntoView({block: 'center'})", sel)
+    _settle(page)
+    _u_long_press(page, sel)
+
+
+def _u_selected(page):
+    return page.evaluate("() => { const c = document.querySelector('.glm-selcount b'); return c ? Number(c.textContent) : null; }")
+
+
+def test_continuous_selection_survives_loading_ranges_by_long_press_and_a_filter_change_can_be_undone(
+        phone_u_server, render_browser, monkeypatch):
+    """U5a + U5c in Continuous. A long-press arms select mode; in select mode a second long-press selects
+    everything between the last ticked tile and it. "All loaded (L)" ticks every loaded picture, and the
+    ticks are kept by id while the next page loads. A filter change clears the selection with a 10 s Undo
+    that hands it back."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        _u_press_tile(page, 2)
+        page.wait_for_selector(".glm-selcount")
+        assert _u_selected(page) == 1
+        assert page.locator(".glm-allloaded").inner_text() == "All loaded (100)"
+        _u_press_tile(page, 9)
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 8")
+        ticked = page.evaluate("() => [...document.querySelectorAll('.glm-tile.sel')].map((t) => t.getAttribute('data-mid')).sort()")
+        assert ticked == sorted(_u_mid(i) for i in range(2, 10)), ticked
+        assert page.locator(".glm-rangecard").count() == 0, "a range that is all loaded needs no card"
+
+        page.click(".glm-allloaded")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 100")
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-allloaded').textContent === 'All loaded (200)'")
+        assert _u_selected(page) == 100, "ticks are kept by id while the next page loads"
+
+        page.click(".glm-bar2 .glm-metal:has-text('Images')")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 0")
+        toast = page.locator(".mgcu-toast")
+        assert "The filter changed, so the selection was cleared." in toast.inner_text()
+        page.click(".mgcu-toast-undo")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 100")
+    finally:
+        ctx.close()
+
+
+def test_pages_range_select_reaches_pictures_not_loaded_and_the_confirm_counts_them_all(
+        phone_u_server, render_browser, monkeypatch):
+    """U5c across pages. Tick place 11 on page 1, turn to page 3, long-press place 251: places 11-251 are
+    selected -- 51 of them on screen, 190 not loaded. A card says so for 4 s; their ids are read (one read
+    at the route's largest page) before Actions opens, and the Actions sheet counts all 241."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        _u_press_tile(page, 10)
+        page.wait_for_selector(".glm-selcount")
+        for want in (2, 3):
+            page.evaluate("document.querySelector('.glm-pager').scrollIntoView({block: 'center'})")
+            page.click(".glm-pager .glm-metal:has-text('Next')")
+            page.wait_for_function("(n) => new RegExp('Page ' + n + ' of').test((document.querySelector('.glm-pager-info') || {}).textContent || '')", arg=want)
+        reads = len(_u_libs(seen))
+        held = []
+        page.route(_LIBRARY_READ, lambda r: held.append(r))
+        _u_press_tile(page, 250)
+        page.wait_for_selector(".glm-rangecard")
+        assert page.locator(".glm-rangecard").inner_text() == "Selected 241, including 190 not loaded yet."
+        assert page.locator(".glm-pill-accent:has-text('Actions')").is_disabled(), "Actions waits for the read"
+        assert _u_selected(page) == 52, "the place first ticked and the 51 on screen are selected at once"
+        page.wait_for_function("(n) => n > 0", arg=len(held))
+        page.unroute(_LIBRARY_READ)
+        for r in held:
+            r.continue_()
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 241")
+        assert _u_libs(seen)[reads:] == [(1, 200)], _u_libs(seen)[reads:]
+        assert not page.locator(".glm-pill-accent:has-text('Actions')").is_disabled()
+        page.click(".glm-pill-accent:has-text('Actions')")
+        page.wait_for_selector(".glm-sheet")
+        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 SELECTED")
+        page.wait_for_selector(".glm-rangecard", state="detached", timeout=6000)
+    finally:
+        ctx.close()

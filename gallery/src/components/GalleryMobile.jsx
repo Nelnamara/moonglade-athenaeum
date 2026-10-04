@@ -14,8 +14,8 @@ import useDataSaver, { useFeedLayout, usePaging, usePagingHint } from "../hooks/
 import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useScrollAnchor from "../hooks/useScrollAnchor.js";
 import {
-  KEY_LONG_PRESS_MS, continuousDone, countLabel, endLabel, footerState, nearEnd, newSince, newSinceLabel,
-  newestLabel, pagerInView, showNewest,
+  KEY_LONG_PRESS_MS, RANGE_CARD_MS, allLoadedLabel, continuousDone, countLabel, endLabel, footerState, nearEnd,
+  newSince, newSinceLabel, newestLabel, pageOffset, pagerInView, rangeCardText, rangeOf, showNewest, splitRange,
 } from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
@@ -93,7 +93,13 @@ import "../styles/phone-q.css";
          screens of the bottom of the view, one request at a time; `more` is that request's state.
      U4  the stacked list is ContinuousGridMobile: at most five pages of 100 in the DOM, exact-height
          spacers for the rest. `reveal` is the shell's ask to bring a picture back into view after the
-         viewer closes on it. */
+         viewer closes on it.
+     U5  selection across pages (Session N's select mode, kept): ticks are kept by id. In select mode a
+         second long-press selects every place between the last ticked tile and the pressed one, by
+         absolute index in the filtered walk, loaded or not; when some are not loaded a card says
+         "Selected N, including K not loaded yet." for 4 s and their ids are read (useLibrary.idsAt) --
+         Actions waits for that read, so every confirm states the full count. Continuous's bar adds
+         "All loaded (L)", and there a filter change clears the selection with a 10 s Undo. */
 
 /* A long-press that moves further than this is a scroll or a drag, not a hold. */
 const KEY_MOVE_CANCEL_PX = 10;
@@ -112,7 +118,7 @@ const PER_PAGE_OPTS = [50, 100, 200];
 export default function GalleryMobile({
   boot, collections, refreshCollections,
   media, shelf, perPage,
-  query, setQuery, submitQuery,
+  query, setQuery, submitQuery, applied,
   adv, applyAdvanced,
   /* `pages` is renamed on the way in: in Continuous there is no pager, so the pager's own reads see 1. */
   items, total, page, pages: pageCount, loading, load,
@@ -123,7 +129,7 @@ export default function GalleryMobile({
      own front page, and what a pull runs. */
   marker, frontPage, onPullRefresh,
   /* Session U: Continuous paging, the shell's next-page request and its state ({busy, failed}). */
-  continuous = false, onLoadMore, more, reveal,
+  continuous = false, onLoadMore, more, reveal, idsAt,
   /* Session N: what curation hands this tab -- {smart, curate, saveSmart, composeView, strip}.
      smart is the saved searches ({name, query}) listed in the Collection field with the refresh
      mark; curate is the shell's useCurate (the bulk verbs and their undo toast); saveSmart and
@@ -286,7 +292,71 @@ export default function GalleryMobile({
     closeSheet();
   };
 
-  const toggleSelectMode = () => { setSelectMode(!selectMode); setSelected(new Set()); };
+  /* U5: the last ticked tile, at its absolute place in the walk (`offset` is the place of the loaded
+     list's first picture: 0 for a stacked list). A range read that lands after the list changed adds
+     nothing (`listToken`). */
+  const anchor = useRef(null);
+  const listToken = useRef(0);
+  const offset = continuous ? 0 : pageOffset(page, perPage);
+  const placeOf = (mid) => { const i = items.findIndex((it) => it.media_id === mid); return i < 0 ? -1 : offset + i; };
+  const [card, setCard] = useState("");
+  const [resolving, setResolving] = useState(0);
+  useEffect(() => {
+    if (!card) return undefined;
+    const t = setTimeout(() => setCard(""), RANGE_CARD_MS);
+    return () => clearTimeout(t);
+  }, [card]);
+  const addIds = (ids) => setSelected((old) => {
+    const s = new Set(old);
+    ids.forEach((m) => s.add(m));
+    return s;
+  });
+  const selectRange = (mid) => {
+    const b = placeOf(mid);
+    const a = anchor.current;
+    if (b < 0 || !a || a.at < 0) return false;
+    const { lo, hi } = rangeOf(a.at, b);
+    const part = splitRange(lo, hi, offset, items.length);
+    if (part.to >= part.from) addIds(items.slice(part.from - offset, part.to - offset + 1).map((it) => it.media_id));
+    anchor.current = { mid, at: b };
+    if (!part.k) return true;
+    setCard(rangeCardText(part.n, part.k));
+    const gaps = part.to < part.from ? [[lo, hi]] : [[lo, part.from - 1], [part.to + 1, hi]].filter(([x, y]) => y >= x);
+    const token = listToken.current;
+    gaps.forEach(([x, y]) => {
+      setResolving((r) => r + 1);
+      idsAt(x, y).then((ids) => {
+        if (token !== listToken.current) return;
+        if (ids) addIds(ids);
+        else if (curation) curation.curate.say("Couldn't read the pictures that are not loaded, so they are not selected.", null, "peach");
+      }).finally(() => setResolving((r) => Math.max(0, r - 1)));
+    });
+    return true;
+  };
+  const tapToggle = (mid) => {
+    if (!selected.has(mid)) anchor.current = { mid, at: placeOf(mid) };
+    else if (anchor.current && anchor.current.mid === mid) anchor.current = null;
+    toggleSelected(mid);
+  };
+  const clearSelection = () => { anchor.current = null; setSelected(new Set()); };
+  const selectAllLoaded = () => addIds(items.map((it) => it.media_id));
+  /* Continuous: a filter change starts a new list, and a selection is a promise about pictures you can
+     still see, so it is cleared -- with a 10 s Undo that hands it back. (Pages keeps it, as shipped.) */
+  const listKey = [applied, media, shelf, JSON.stringify(adv)].join("|");
+  const seenKey = useRef(listKey);
+  useEffect(() => {
+    if (seenKey.current === listKey) return;
+    seenKey.current = listKey;
+    listToken.current += 1;
+    anchor.current = null;
+    if (!continuous || !selected.size || !curation) return;
+    const prev = selected;
+    setSelected(new Set());
+    curation.curate.say("The filter changed, so the selection was cleared.", null, "", () => setSelected(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey]);
+
+  const toggleSelectMode = () => { anchor.current = null; setSelectMode(!selectMode); setSelected(new Set()); };
   const selIds = [...selected];
 
   // The Actions sheet only ever opens with a selection; if a mutation (or the
@@ -331,8 +401,14 @@ export default function GalleryMobile({
   } : null;
 
   const armSelect = (mid) => {
+    // U5c: already selecting, with a tile ticked -- the second long-press selects the range
+    if (selectMode && anchor.current && selectRange(mid)) {
+      if (navigator.vibrate) { try { navigator.vibrate([8, 40, 8]); } catch { /* unsupported/blocked */ } }
+      return;
+    }
     setSelectMode(true);
     setSelected((old) => { const s = new Set(old); s.add(mid); return s; });
+    anchor.current = { mid, at: placeOf(mid) };
     if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
   };
   // #35 (owner: "That was NOT the design"): a plain tap opens the LIGHTBOX, matching
@@ -388,15 +464,20 @@ export default function GalleryMobile({
           </button>
         ))}
         {selectMode ? (
-          <>
-            <button type="button" className="glm-metal" onClick={() => setSelected(new Set())}>Clear</button>
+          /* U5: the same select bar; in Continuous it also offers "All loaded (L)" and travels as one group
+             (display: contents in Pages, as shipped). Actions waits while a range's ids are being read. */
+          <div className={"glm-bar2-end" + (continuous ? " cont" : "")}>
+            <button type="button" className="glm-metal" onClick={clearSelection}>Clear</button>
             <span className="glm-selcount"><b>{selected.size}</b> selected</span>
+            {continuous ? (
+              <button type="button" className="glm-allloaded" onClick={selectAllLoaded}>{allLoadedLabel(items.length)}</button>
+            ) : null}
             {selected.size > 0 && (
-              <button type="button" className="glm-metal glm-pill-accent" onClick={() => openSheet("actions")}>
+              <button type="button" className="glm-metal glm-pill-accent" disabled={resolving > 0} onClick={() => openSheet("actions")}>
                 Actions
               </button>
             )}
-          </>
+          </div>
         ) : (
           /* U2: in Continuous the count, the layout keys and Sort travel as one group, the keys drawn as
              the page draws them there (▦ ▭, no words), and the group drops under the media pills when a
@@ -439,13 +520,13 @@ export default function GalleryMobile({
       ) : continuous ? (
         <ContinuousGridMobile
           items={items} loading={loading && !moreBusy} selectMode={selectMode} selected={selected}
-          toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+          toggleSelected={tapToggle} onArmSelect={armSelect} onTapView={tapView}
           layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols} reveal={reveal}
         />
       ) : (
         <GalleryGridMobile
           items={items} loading={loading} selectMode={selectMode} selected={selected}
-          toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+          toggleSelected={tapToggle} onArmSelect={armSelect} onTapView={tapView}
           layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols}
         />
       )}
@@ -482,7 +563,12 @@ export default function GalleryMobile({
 
       {/* Q5: the jump rides the scroller once you are a screen down. It sits in a zero-height sticky
           wrapper so it floats over the list, above the tab bar, without a fixed layer of its own. */}
-      {jump && !similar ? (
+      {/* U5c: the range card, for 4 s, where the jump sits (and in its place while it is up). */}
+      {card ? (
+        <div className="glm-newest-wrap glm-rangecard-wrap">
+          <div className="glm-rangecard" role="status">{card}</div>
+        </div>
+      ) : jump && !similar ? (
         <div className="glm-newest-wrap">
           <button type="button" className="glm-newest" onClick={toNewest}>{newestLabel(ns.count)}</button>
         </div>

@@ -19,7 +19,11 @@ import { DETAIL_PREFIX } from "../apiRoutes.js";
    up the next time the owner opens or refreshes it.
 
    The toast is one at a time: a new change replaces the previous toast, and with it that
-   change's Undo. That is the design page's own behaviour. */
+   change's Undo. That is the design page's own behaviour.
+
+   say(text, prev, tone, undoFn) -- `undoFn` (Session U) is an Undo that is not a catalog
+   restore: the phone's Continuous list clearing a selection on a filter change hands back
+   the selection it cleared. Local state only; nothing is sent. */
 export default function useCurate({ csrf, setItems }) {
   const [toast, setToast] = useState(null);   // {text, tone, prev, until, secs}
   const timer = useRef(0);
@@ -29,10 +33,11 @@ export default function useCurate({ csrf, setItems }) {
   const stop = () => { clearInterval(timer.current); timer.current = 0; };
   useEffect(() => stop, []);
 
-  const show = useCallback((text, prev, tone) => {
+  const show = useCallback((text, prev, tone, undoFn) => {
     stop();
     const until = Date.now() + UNDO_MS;
-    setToast({ text, tone: tone || "", prev: prev || null, until, secs: undoSecondsLeft(until, Date.now()) });
+    setToast({ text, tone: tone || "", prev: prev || null, undoFn: typeof undoFn === "function" ? undoFn : null,
+      until, secs: undoSecondsLeft(until, Date.now()) });
     timer.current = setInterval(() => {
       setToast((t) => {
         if (!t) { stop(); return t; }
@@ -65,7 +70,9 @@ export default function useCurate({ csrf, setItems }) {
 
   const undo = useCallback(async () => {
     const t = toast;
-    if (!t || !t.prev) return;
+    if (!t) return;
+    if (t.undoFn) { dismiss(); t.undoFn(); return; }
+    if (!t.prev) return;
     dismiss();
     const res = await curateRestore(csrfRef.current, t.prev);
     if (res.error) { show(res.error, null, "peach"); return; }

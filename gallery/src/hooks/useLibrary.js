@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchLibrary } from "../api.js";
-import { PREPEND_MAX_PAGES, appendUnique, newestAbove, prependUnique } from "../lib/phoneCore.js";
+import {
+  PREPEND_MAX_PAGES, RANGE_READ_SIZE, appendUnique, newestAbove, prependUnique, readPagesFor,
+} from "../lib/phoneCore.js";
 
 /* All of App.jsx's library browse/search/filter/sort/pagination state and logic,
    mechanically lifted out (2026-08-02) into its own hook -- media/shelf/perPage/
@@ -213,6 +215,26 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     return { added: fresh.length, reset: false };
   }, [applied, media, shelf, perPage, adv, group, load]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Session U, U5c: the ids at absolute places lo..hi (inclusive) of the current walk -- what a range
+     selection needs for the places that are not loaded. Read a page at a time at the route's largest
+     size. A read and nothing more: the list, its count and its pages are untouched. Resolves the ids in
+     order (fewer when the walk is shorter), or null when a read failed. */
+  const idsAt = useCallback(async (lo, hi) => {
+    const out = [];
+    try {
+      for (const p of readPagesFor(lo, hi, RANGE_READ_SIZE)) {
+        const d = await fetchLibrary(pageQuery(p, RANGE_READ_SIZE));
+        const got = d.items || [];
+        const base = (p - 1) * RANGE_READ_SIZE;
+        got.forEach((it, j) => { if (base + j >= lo && base + j <= hi) out.push(it.media_id); });
+        if (got.length < RANGE_READ_SIZE) break;
+      }
+    } catch {
+      return null;
+    }
+    return out;
+  }, [applied, media, shelf, perPage, adv, group]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // The flyout commits a patch: advanced fields always; q/media/shelf/perPage
   // only when a saved view carries them.
   const applyAdvanced = (patch) => {
@@ -266,7 +288,7 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     media, setMedia, shelf, setShelf, perPage, setPerPage,
     query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
     items, setItems, total, page, pages, loading,
-    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize, prependNewest,
+    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize, prependNewest, idsAt,
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
   };
 }

@@ -137,6 +137,46 @@ export function stripRange(index, count) {
   return { start, end: Math.min(Math.max(0, Number(count) || 0), start + WINDOW_PAGE) };
 }
 
+/* Selection across pages (U5a + U5c). Ticks are kept by id. In select mode a second long-press selects
+   every place between the last ticked tile and the pressed one, by absolute index in the filtered walk,
+   loaded or not; when some are not loaded, a card says so for 4 s and their ids are read (ids only,
+   at the route's largest page) before Actions opens, so every confirm states the full count. */
+export const RANGE_CARD_MS = 4000;
+export const RANGE_READ_SIZE = 200;      // the library route's own ceiling (MAX_PAGE_SIZE below)
+
+export function rangeOf(a, b) {
+  const x = Math.floor(Number(a)) || 0;
+  const y = Math.floor(Number(b)) || 0;
+  return { lo: Math.min(x, y), hi: Math.max(x, y) };
+}
+
+/* Which places of [lo, hi] the loaded list covers. `offset` is the place of the list's first picture in
+   the walk (0 for a stacked list), `count` how many are loaded. Returns {n, k, from, to}: n places, k of
+   them not loaded, and the loaded run from..to (inclusive; to < from when none of it is loaded). */
+export function splitRange(lo, hi, offset, count) {
+  const n = Math.max(0, hi - lo + 1);
+  const from = Math.max(lo, Number(offset) || 0);
+  const to = Math.min(hi, (Number(offset) || 0) + Math.max(0, Number(count) || 0) - 1);
+  if (to < from) return { n, k: n, from: -1, to: -2 };
+  return { n, k: n - (to - from + 1), from, to };
+}
+
+export function rangeCardText(n, k) {
+  return "Selected " + Number(n).toLocaleString() + ", including " + Number(k).toLocaleString() + " not loaded yet.";
+}
+
+export function allLoadedLabel(n) {
+  return "All loaded (" + Number(n || 0).toLocaleString() + ")";
+}
+
+/* The pages, at `size` a page, that hold the places lo..hi. */
+export function readPagesFor(lo, hi, size) {
+  const s = Math.max(1, Math.floor(Number(size)) || 1);
+  const out = [];
+  for (let p = Math.floor(Math.max(0, lo) / s) + 1; p <= Math.floor(Math.max(0, hi) / s) + 1; p += 1) out.push(p);
+  return out;
+}
+
 /* The footer says one thing at a time: the spinner line while a page is in flight, the peach retry
    after a failed one (until Retry is tapped -- there is no automatic retry), the end line, or nothing. */
 export function footerState({ busy, failed, done }) {

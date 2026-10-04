@@ -67,6 +67,16 @@
 .glm-cpage:not([data-page="0"]) > .glm-grid:first-child > .glm-col-off { margin-top: 0; }
 .glm-cpage:not([data-page="0"]) > .glm-grid.glm-feed:first-child { padding-top: 10px; }
 
+/* ---- U5 "All loaded (L)" in Continuous's select bar, and the 4 s range card ------------------------- */
+.glm-allloaded { flex: none; font: inherit; font-size: 10px; color: var(--lavender); background: none; border: 0;
+  padding: 0 4px; min-height: 30px; cursor: pointer; white-space: nowrap; }
+/* The card floats where ↑ Newest does (the same zero-height sticky wrapper), the page's card: a lavender
+   hairline, the base colour at 96%, a soft drop. */
+.glm-rangecard { pointer-events: auto; align-self: flex-end; width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px 12px; border-radius: 14px; border: 1px solid var(--lavender);
+  background: color-mix(in srgb, var(--base) 96%, transparent); box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 10.5px; line-height: 1.5; color: var(--text); }
+
 @media (prefers-reduced-motion: reduce) {
   .glm-cfoot-spin { animation: none; }
 }

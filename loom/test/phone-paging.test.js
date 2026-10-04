@@ -9,7 +9,8 @@ import {
   PREFETCH_SCREENS, PREPEND_MAX_PAGES, appendUnique, connectionInfo, continuousDone, continuousPageSize,
   countLabel, endLabel, footerState, isFrontPage, nearEnd, newSince, newestAbove, nextContinuousPage,
   parsePaging, prependUnique, WINDOW_PAGE, WINDOW_PAGES, mountWindow, remountShift, rulePage, stripRange,
-  windowPageCount, windowPageOf,
+  windowPageCount, windowPageOf, RANGE_CARD_MS, allLoadedLabel, rangeCardText, rangeOf, readPagesFor,
+  splitRange,
 } from "../../gallery/src/lib/phoneCore.js";
 import {
   PAGING_HINT_KEY, PAGING_KEY, readPaging, readPagingHintSeen, writePaging, writePagingHintSeen,
@@ -346,5 +347,71 @@ describe("U4 the mounted window: the wiring", () => {
     assert.match(app, /reveal=\{reveal\}/);
     const c = code("components/ContinuousGridMobile.jsx");
     assert.match(c, /reveal/);
+  });
+});
+
+describe("U5 selection across pages: the rules", () => {
+  test("a range is every place between the two tiles, inclusive, whichever was pressed first", () => {
+    assert.deepEqual(rangeOf(7, 3), { lo: 3, hi: 7 });
+    assert.deepEqual(rangeOf(3, 7), { lo: 3, hi: 7 });
+    assert.deepEqual(rangeOf(5, 5), { lo: 5, hi: 5 });
+  });
+
+  test("which places of a range are loaded: the run the loaded list covers, by absolute index", () => {
+    // Continuous: the list runs from the top, so a range between two tiles is all loaded
+    assert.deepEqual(splitRange(10, 139, 0, 300), { n: 130, k: 0, from: 10, to: 139 });
+    // Pages: ticked on page 1 (place 10), pressed on page 3 (places 200-299 are loaded)
+    assert.deepEqual(splitRange(10, 250, 200, 100), { n: 241, k: 190, from: 200, to: 250 });
+    // nothing of it loaded
+    assert.deepEqual(splitRange(0, 49, 100, 100), { n: 50, k: 50, from: -1, to: -2 });
+  });
+
+  test("the card and the bar's words, formatted like the pager", () => {
+    assert.equal(rangeCardText(140, 40), "Selected 140, including 40 not loaded yet.");
+    assert.equal(rangeCardText(1400, 1000), "Selected 1,400, including 1,000 not loaded yet.");
+    assert.equal(allLoadedLabel(300), "All loaded (300)");
+    assert.equal(RANGE_CARD_MS, 4000);
+  });
+
+  test("the reads that cover the places not loaded, at the route's largest page", () => {
+    assert.deepEqual(readPagesFor(10, 199, 200), [1]);
+    assert.deepEqual(readPagesFor(10, 450, 200), [1, 2, 3]);
+    assert.deepEqual(readPagesFor(400, 400, 200), [3]);
+  });
+});
+
+describe("U5 selection across pages: the wiring", () => {
+  test("in select mode a second long-press selects the range from the last ticked tile, by absolute index", () => {
+    const g = code("components/GalleryMobile.jsx");
+    assert.match(g, /const armSelect = \(mid\) => \{[\s\S]{0,400}if \(selectMode && anchor\.current/);
+    assert.match(g, /splitRange\(/);
+    assert.match(g, /rangeCardText\(/);
+    assert.match(g, /RANGE_CARD_MS/);
+    // what is not loaded is read (ids only) and added; Actions waits for it, so a confirm counts it all
+    assert.match(g, /idsAt\(/);
+    assert.match(g, /disabled=\{resolving > 0\}/);
+  });
+
+  test("Continuous's select bar offers All loaded (L); Pages keeps the shipped bar", () => {
+    const g = code("components/GalleryMobile.jsx");
+    assert.match(g, /continuous \? \(\s*<button type="button" className="glm-allloaded"/);
+    assert.match(g, /allLoadedLabel\(items\.length\)/);
+  });
+
+  test("in Continuous a filter change clears the selection with a 10 s Undo", () => {
+    const g = code("components/GalleryMobile.jsx");
+    assert.match(g, /curation\.curate\.say\("The filter changed, so the selection was cleared\.", null, "", /);
+    const cur = code("hooks/useCurate.js");
+    assert.match(cur, /if \(t\.undoFn\) \{ dismiss\(\); t\.undoFn\(\); return; \}/);
+    const toast = code("components/CurateToast.jsx");
+    assert.match(toast, /toast\.prev \|\| toast\.undoFn/);
+  });
+
+  test("useLibrary reads the ids at absolute places without touching the list", () => {
+    const lib = code("hooks/useLibrary.js");
+    const fn = lib.slice(lib.indexOf("const idsAt = useCallback("));
+    const body = fn.slice(0, fn.indexOf("}, ["));
+    assert.match(body, /readPagesFor\(/);
+    assert.doesNotMatch(body, /setItems|setTotal|setPage|setLoading|reqSeq/);
   });
 });
