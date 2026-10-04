@@ -574,7 +574,13 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     so a fresh install shows the mascot before its pack arrives. The contract is the same;
     only where it lives changed, so this follows it there: each page's <img> starts on the
     root webp and hands its errors to the shared onMascotError, and the shared ladder holds
-    every later rung IN ORDER with the carried still last, before the final hide."""
+    every later rung IN ORDER with the carried still last, before the final hide.
+
+    Pack v7 (owner's pick): ONE copy of the login art. The pack carried login_nel.webp and
+    .png twice, in the system folder the root names resolve to and byte-identical under
+    mascots/, and the mascots/ pair was read by nothing but two rungs here. Those rungs are
+    gone with the copies, so the ladder goes from the system pair to the narrator, then the
+    carried still."""
     import pathlib
     import re
     hook = pathlib.Path("gallery/src/hooks/useLogin.js").read_text(encoding="utf-8")
@@ -588,10 +594,9 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
     assert m, "hooks/useLogin.js must export the MASCOT_FALLBACKS ladder"
     rungs = [r.strip().strip('"') for r in m.group(1).split(",") if r.strip()]
     assert rungs == ["/branding/login_nel.png",
-                     "/branding/mascots/login_nel.webp",
-                     "/branding/mascots/login_nel.png",
                      "/branding/mascots/nel_narrator.png",
                      "LOGIN_NEL"], rungs
+    assert "mascots/login_nel" not in hook, "the pack no longer carries a mascots/ copy"
     assert re.search(r'import \{[^}]*\bLOGIN_NEL\b[^}]*\} from "\.\./art/loginArt\.js"', hook)
     # It must still END by hiding the element: a broken-image icon is the one
     # thing worse than no mascot at all.
