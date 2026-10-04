@@ -43,6 +43,13 @@ describe("the Menu door and its rows", () => {
     assert.match(rows, /const n = st \? badgeText\(st\.unread\) : "";/);
   });
 
+  test("the Inbox row draws the mailbox at the Gift box row's 18 px, in place of ✉", () => {
+    const rows = fnBody(sheets, "MenuInboxRows");
+    assert.match(rows, /<span className="glm-menu-icon" aria-hidden="true"><InboxIcon small \/><\/span>Inbox/);
+    assert.match(rows, /<span className="glm-menu-icon" aria-hidden="true"><span className="ib-giftic small" \/><\/span>Gift box/);
+    assert.ok(!/✉/.test(rows));
+  });
+
   test("Inbox and Gift box are the Menu's first two rows, with a linked account", () => {
     const menu = app.indexOf('<MobileSheet open={sheet === "menu"}');
     const rows = app.indexOf("<MenuInboxRows ", menu);

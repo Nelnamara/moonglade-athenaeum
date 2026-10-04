@@ -4,6 +4,7 @@ import {
   subscribe, start, loadFirst, loadEvents, loadGifts, registerContestOpener,
 } from "./inboxStore.js";
 import { KindTabs, InboxBody, GiftBoxBody, MarkAllMenu } from "./InboxList.jsx";
+import InboxIcon from "./InboxIcon.jsx";
 import "../styles/inbox.css";
 
 /* THE PHONE'S TWO DOORS (Session R + Y, RYPc; Inbox and Event Handoff §10, drift 132). The
@@ -27,8 +28,9 @@ export function MenuBadge({ st }) {
   return b ? <span className="ib-menubadge" aria-label={b + " new on PixAI"}>{b}</span> : null;
 }
 
-/* The Menu's first two rows: "✉ Inbox  N new ›" (the unread notifications) and
-   "🎁 Gift box  <soonest expiry, peach, else the pending gifts> ›". */
+/* The Menu's first two rows: "Inbox  N new ›" (the unread notifications) and
+   "Gift box  <soonest expiry, peach, else the pending gifts> ›", each led by its picture at 18 px:
+   the owner's mailbox (InboxIcon, the ✉ glyph if it cannot load) and the pack's gift. */
 export function MenuInboxRows({ st, account, onInbox, onGifts }) {
   const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
   const expiry = expiringLines(cardsBy, Date.now());
@@ -37,7 +39,7 @@ export function MenuInboxRows({ st, account, onInbox, onGifts }) {
   return (
     <>
       <button type="button" className="glm-menu-item" onClick={onInbox}>
-        <span className="glm-menu-icon" aria-hidden="true">✉</span>Inbox
+        <span className="glm-menu-icon" aria-hidden="true"><InboxIcon small /></span>Inbox
         <span className="ib-mrow-meta">{n ? n + " new ›" : "›"}</span>
       </button>
       <button type="button" className="glm-menu-item" onClick={onGifts}>

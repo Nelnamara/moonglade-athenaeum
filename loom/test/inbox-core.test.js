@@ -5,6 +5,7 @@ import {
   TABS, badgeText, groupInbox, workDelta, rowText, timeAgo, toasts, commentToast, threadOf,
   hiddenLine, commentMeta, replyCheck, replyQuestion, deleteQuestion, monDay, expiryWhen,
   expiringLines, expiryText, giftMeta, giftPreview, bonusText, giftBoxMeta, REPLY_MAX,
+  INBOX_ICON_PACK, inboxIconSources, resolveInboxIcon,
 } from "../../gallery/src/inbox/inboxCore.js";
 
 /* SESSIONS R + Y, THE PURE HALF (lane R, 2026-10-03): the gift box's badge, the inbox read by
@@ -231,5 +232,30 @@ describe("gifts (R9c)", () => {
   test("a credit-pack bonus reads as one", () => {
     assert.equal(bonusText({ percent: 20, until: "2026-10-14T12:00:00Z" }),
       "Extra bonus: +20% on credit packs · until Oct 14");
+  });
+});
+
+describe("the ✉ inbox's picture (owner's art, 2026-10-04): pack › the app's module › the ✉ glyph", () => {
+  const MOD = "data:image/webp;base64,UklGRg==";
+  const loader = (ok, tried) => async (src) => { tried.push(src); return ok(src); };
+
+  test("the pack's rewards/inbox.png is asked first, through the /branding/ route", () => {
+    assert.equal(INBOX_ICON_PACK, "/branding/rewards/inbox.png");
+    assert.deepEqual(inboxIconSources(MOD), [{ from: "pack", src: INBOX_ICON_PACK }, { from: "module", src: MOD }]);
+    assert.deepEqual(inboxIconSources(""), [{ from: "pack", src: INBOX_ICON_PACK }], "no module copy: pack only");
+  });
+
+  test("a pack that has it wins and costs the module nothing", async () => {
+    const tried = [];
+    assert.deepEqual(await resolveInboxIcon(loader(() => true, tried), MOD), { from: "pack", src: INBOX_ICON_PACK });
+    assert.deepEqual(tried, [INBOX_ICON_PACK]);
+  });
+
+  test("no pack copy: the module's; neither loads (or a load throws): null, which draws ✉", async () => {
+    const tried = [];
+    assert.deepEqual(await resolveInboxIcon(loader((s) => s.startsWith("data:"), tried), MOD), { from: "module", src: MOD });
+    assert.deepEqual(tried, [INBOX_ICON_PACK, MOD]);
+    assert.equal(await resolveInboxIcon(loader(() => false, []), MOD), null);
+    assert.equal(await resolveInboxIcon(async () => { throw new Error("blocked"); }, MOD), null);
   });
 });

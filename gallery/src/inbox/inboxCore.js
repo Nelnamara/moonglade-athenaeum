@@ -351,3 +351,28 @@ export function giftBoxMeta(expiry, pendingGifts) {
   const n = Number(pendingGifts) || 0;
   return { text: n ? n + " gift" + (n === 1 ? "" : "s") : "", peach: false };
 }
+
+// ---- the ✉ inbox's picture (owner's art, 2026-10-04) -------------------------------------------
+
+/* Where the inbox button's mailbox comes from, in this order (the goal tiles' precedence,
+   lib/goalTileCore.js): the pack's own rewards/inbox.png through the /branding/ route (pack v7
+   carries it; until then a plain 404), then the app's own copy (art/inboxIcon.js), then nothing --
+   which inbox/InboxIcon.jsx draws as the ✉ glyph. */
+export const INBOX_ICON_PACK = "/branding/rewards/inbox.png";
+
+export function inboxIconSources(moduleSrc) {
+  const out = [{ from: "pack", src: INBOX_ICON_PACK }];
+  if (typeof moduleSrc === "string" && moduleSrc) out.push({ from: "module", src: moduleSrc });
+  return out;
+}
+
+/** The first source `load(src)` says decodes, or null (the glyph). `load` answers a Promise of a
+    boolean; a rejection counts as "did not load". A pack that has it costs the module nothing. */
+export async function resolveInboxIcon(load, moduleSrc) {
+  for (const cand of inboxIconSources(moduleSrc)) {
+    let ok = false;
+    try { ok = !!(await load(cand.src)); } catch (e) { ok = false; }
+    if (ok) return cand;
+  }
+  return null;
+}

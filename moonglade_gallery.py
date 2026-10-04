@@ -4111,11 +4111,13 @@ def _seal_rule(rel):
     # directly. (bundle-v2 adversarial-review HIGH finding, 2026-08-21.)
     low = rel.lower()
     rew = ROLE_CODE["rewards"].lower()
-    if low in (rew + "/claim.png", rew + "/gift.png"):
+    if low in (rew + "/claim.png", rew + "/gift.png", rew + "/inbox.png"):
         # The D8 exception: the two reward UI icons notify.css fetches for the
         # claim toast/modal -- chrome, not prizes, so they stay open while the
         # rest of the bucket seals (an open pair beats a physical move, which
-        # would change the public URLs and force a dist rebuild).
+        # would change the public URLs and force a dist rebuild). inbox.png is
+        # the same kind of chrome: the header's Inbox button, beside the gift
+        # box (owner's art, 2026-10-04; the pack carries it from v7).
         return ("open", None)
     if low.startswith(rew + "/") or low == rew:
         # rewards/ is pure achievement data with no live front-end consumer (the

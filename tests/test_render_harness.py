@@ -9093,9 +9093,11 @@ def _rf_routes(page, count=None, events=None, gifts=None, account=None):
     return posts
 
 
-def _rf_desktop(logged_in_page, **routes):
+def _rf_desktop(logged_in_page, init=None, **routes):
     page = logged_in_page(width=1400, height=1000)
     posts = _rf_routes(page, **routes)
+    if init:
+        page.add_init_script(init)
     _visit(page, "/")
     page.wait_for_selector(".ib-door.inbox")
     page.wait_for_selector(".ib-door.gift")
@@ -9110,8 +9112,10 @@ _RF_DOORS_JS = """() => {
   const chip = document.querySelector('.mgx-sepright button.mgx-cred');
   const badge = (el) => { const b = el.querySelector('.ib-badge'); return b ? b.textContent : null; };
   return {inbox: r(inbox), gift: r(gift), chip: r(chip), inboxBadge: badge(inbox), giftBadge: badge(gift),
-          inboxTitle: inbox.title, giftTitle: gift.title,
-          glyph: (inbox.querySelector('.ib-door-glyph') || {}).textContent || '',
+          inboxTitle: inbox.title, giftTitle: gift.title, inboxLabel: inbox.getAttribute('aria-label'),
+          icon: (() => { const i = inbox.querySelector('.ib-inboxic'); if (!i) return null;
+            const b = i.getBoundingClientRect(); return {w: b.width, h: b.height, bg: getComputedStyle(i).backgroundImage}; })(),
+          glyph: (inbox.querySelector('.ib-inboxglyph') || {}).textContent || '',
           inboxBadgeBg: inbox.querySelector('.ib-badge') && getComputedStyle(inbox.querySelector('.ib-badge')).backgroundColor,
           giftBadgeBg: gift.querySelector('.ib-badge') && getComputedStyle(gift.querySelector('.ib-badge')).backgroundColor,
           giftArt: getComputedStyle(gift).backgroundImage, inboxArt: getComputedStyle(inbox).backgroundImage};
@@ -9121,8 +9125,10 @@ _RF_DOORS_JS = """() => {
 def test_the_header_has_an_inbox_door_then_the_gift_box_then_the_credits_chip(logged_in_page):
     """Owner's walk, ruling 1. Left of the credits chip: ✉ Inbox, then 🎁 Gift box, twins at 30 x 30
     with an 8 px gap between each. ✉ carries the unread notifications, 🎁 only the pending gifts, each
-    with the lavender badge and nothing at 0; ✉ caps at 99+."""
+    with the lavender badge and nothing at 0; ✉ caps at 99+. ✉ draws the owner's mailbox at the gift
+    box's 22 px -- here the app's own module copy, since this install's pack has none."""
     page, _ = _rf_desktop(logged_in_page)
+    page.wait_for_selector(".ib-door.inbox .ib-inboxic[style*='background-image']")
     g = page.evaluate(_RF_DOORS_JS)
     for k in ("inbox", "gift"):
         assert abs(g[k]["w"] - 30) < 0.5 and abs(g[k]["h"] - 30) < 0.5, g
@@ -9131,7 +9137,10 @@ def test_the_header_has_an_inbox_door_then_the_gift_box_then_the_credits_chip(lo
     assert (g["inboxBadge"], g["giftBadge"]) == ("5", "2"), g
     assert g["inboxBadgeBg"] == g["giftBadgeBg"], g
     assert (g["inboxTitle"], g["giftTitle"]) == ("PixAI inbox", "Gift box"), g
-    assert g["glyph"] == "✉", g
+    assert g["inboxLabel"] == "Inbox, 5 new", g
+    assert g["icon"] and abs(g["icon"]["w"] - 22) < 0.5 and abs(g["icon"]["h"] - 22) < 0.5, g
+    assert g["icon"]["bg"].startswith('url("data:image/webp;base64,'), ("the module's mailbox", g)
+    assert g["glyph"] == "", ("no ✉ glyph while the picture loads", g)
     assert "gift.png" in g["giftArt"] and "gift.png" not in g["inboxArt"], g
 
     page.unroute(re.compile(r"/api/inbox/count(\?|$)"))
@@ -9241,14 +9250,25 @@ def test_an_empty_gift_box_says_so_in_one_quiet_line(logged_in_page):
     assert posts == []
 
 
-def _rf_phone(logged_in_page, **routes):
+def _rf_phone(logged_in_page, init=None, **routes):
     page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
     posts = _rf_routes(page, **routes)
+    if init:
+        page.add_init_script(init)
     _visit(page, "/")
     page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
     _dismiss_any_achievement_toast(page)
     _settle(page)
     return page, posts
+
+
+_RF_ROW_ICON_JS = """() => {
+  const rows = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+    return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
+  return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
+          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || ''};
+}"""
 
 
 def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(logged_in_page):
@@ -9261,10 +9281,14 @@ def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(lo
     page.click(".glm-iconbtn[title=More]")
     page.wait_for_selector(".glm-menu-list .glm-menu-item")
     _settle(page)
+    page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
     rows = page.evaluate("() => [...document.querySelectorAll('.glm-menu-list .glm-menu-item')].slice(0, 2)"
                          ".map((b) => b.textContent)")
-    assert rows[0].startswith("✉Inbox") and rows[0].endswith("5 new ›"), rows
+    assert rows[0].startswith("Inbox") and rows[0].endswith("5 new ›"), rows
     assert rows[1].startswith("Gift box"), rows
+    ic = page.evaluate(_RF_ROW_ICON_JS)
+    assert ic["inbox"]["w"] == ic["gift"]["w"] == 18 and ic["inbox"]["h"] == 18, ("the Gift box row's 18 px", ic)
+    assert ic["inbox"]["bg"].startswith('url("data:image/webp;base64,'), ic
 
     page.click(".glm-menu-item:has-text('Inbox')")
     page.wait_for_selector(".ib-sheet .ib-row")
@@ -9394,3 +9418,61 @@ def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_dat
         assert page.locator(".glm-layout .glm-layout-dot").count() == 0, "found from Control: no dot"
     finally:
         ctx.close()
+
+
+# The ✉ Inbox button's picture (owner's art, 2026-10-04): pack › the app's module › the ✉ glyph.
+
+# Every WebP data URI the page sets on an <img> is swapped for a broken one, so the module's mailbox
+# cannot decode: what the button does when its picture fails.
+_RF_BREAK_WEBP_JS = """(() => {
+  const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+  Object.defineProperty(HTMLImageElement.prototype, 'src', { configurable: true,
+    get() { return d.get.call(this); },
+    set(v) { d.set.call(this, String(v).indexOf('data:image/webp') === 0 ? 'data:image/webp;base64,AAAA' : v); } });
+})();"""
+
+
+def test_the_inbox_picture_falls_back_to_the_envelope_and_the_pack_copy_wins_when_present(logged_in_page):
+    """With no pack copy and a module copy that will not decode, the header button and the phone's Menu
+    row draw today's ✉ glyph. With the pack's rewards/inbox.png present, the pack's copy is drawn instead
+    of the module's, and it is asked for once a page however often the icon is drawn."""
+    page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)
+    page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")
+    g = page.evaluate(_RF_DOORS_JS)
+    assert g["glyph"] == "✉" and g["icon"] is None, g
+    page.context.close()
+
+    page, _ = _rf_phone(logged_in_page, init=_RF_BREAK_WEBP_JS)
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-item .ib-inboxglyph")
+    ic = page.evaluate(_RF_ROW_ICON_JS)
+    assert ic["glyph"] == "✉" and ic["inbox"] is None, ic
+    page.context.close()
+
+    # the pack has it: the pack's copy, asked for once
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGBA", (64, 64), (200, 120, 60, 255)).save(buf, "PNG")
+    asked = []
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    _rf_routes(page)
+    page.route("**/branding/rewards/inbox.png", lambda r: (asked.append(1), r.fulfill(
+        status=200, content_type="image/png", body=buf.getvalue()))[1])
+    _visit(page, "/")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    first = None
+    for _ in range(3):                         # the Menu opened three times: no new ask after the first
+        page.click(".glm-iconbtn[title=More]")
+        page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
+        ic = page.evaluate(_RF_ROW_ICON_JS)
+        assert "/branding/rewards/inbox.png" in ic["inbox"]["bg"], ic
+        page.mouse.click(195, 12)
+        page.wait_for_selector(".glm-sheet", state="detached")
+        if first is None:
+            # the one probe, plus the paint itself (the /branding/ route answers no-cache)
+            first = len(asked)
+            assert 1 <= first <= 2, asked
+    assert len(asked) == first, ("resolved once a page: a reopened Menu asks nothing more", asked)

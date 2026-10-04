@@ -10,14 +10,16 @@
    Z: the panel is 300, the floor of the overlays-and-modals band (300-500). */
 
 /* ---- the doors (§1): 30 x 30, radius 9, 8 px apart; the gift box wears gift.png at 22 px, the
-   inbox the phone Menu row's envelope ---------------------------------------------------------- */
+   inbox the owner's mailbox at the same 22 px (the ✉ glyph if it cannot load) ------------------ */
 .ib-wrap { position: static; display: flex; align-items: center; margin-right: -4px; }
 .ib-door { position: relative; width: 30px; height: 30px; flex: none; box-sizing: border-box; padding: 0;
   border-radius: 9px; border: 1px solid rgba(255, 255, 255, .18); cursor: pointer;
   display: grid; place-items: center; color: var(--text); font: inherit; background: rgba(33, 31, 58, .6);
   transition: box-shadow .18s, filter .18s; }
 .ib-door.gift { background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
-.ib-door-glyph { font-size: 15px; line-height: 1; font-variant-emoji: text; pointer-events: none; }
+.ib-inboxic { display: block; width: 22px; height: 22px; flex: none; pointer-events: none;
+  background-position: center; background-size: contain; background-repeat: no-repeat; }
+.ib-inboxglyph { font-size: 15px; line-height: 1; font-variant-emoji: text; pointer-events: none; }
 .ib-door:hover { filter: brightness(1.12); }
 .ib-door.lift { box-shadow: 0 0 0 2px var(--lavender); }
 .ib-door:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
@@ -109,6 +111,9 @@
   background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
 .ib-giftic.small { display: inline-block; vertical-align: middle; width: 18px; height: 18px; border: 0; border-radius: 0;
   background: url(/branding/rewards/gift.png) center / contain no-repeat; }
+/* the phone Menu's Inbox row: the mailbox at the Gift box row's 18 px, or its ✉ at the row's own size */
+.ib-inboxic.small { display: inline-block; vertical-align: middle; width: 18px; height: 18px; }
+.ib-inboxglyph.small { font-size: inherit; }
 .ib-gift-t { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.45; }
 .ib-acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
 .ib-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px; border: 0;

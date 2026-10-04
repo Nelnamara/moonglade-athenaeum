@@ -86,10 +86,10 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
 - **✉ Inbox** and **🎁 Gift box** — two buttons just left of the credits chip, shown once a PixAI
   account is linked. The inbox is everything PixAI tells you; the gift box is only what you can
   collect.
-- **✉ Inbox** is your **PixAI inbox**. Its lavender badge is how many of PixAI's notifications you
-  haven't read. Click it for the panel: tabs for **All · Comments · Likes · Follows · PixAI**, then
-  one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment quoted), then
-  everything else — new followers folded per day, contest results, PixAI's news.
+- **✉ Inbox** (the mailbox) is your **PixAI inbox**. Its lavender badge is how many of PixAI's
+  notifications you haven't read. Click it for the panel: tabs for **All · Comments · Likes · Follows ·
+  PixAI**, then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
+  quoted), then everything else — new followers folded per day, contest results, PixAI's news.
   Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
   app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
   **website** run, and a job Activity holds as failed that PixAI says finished gets a dim

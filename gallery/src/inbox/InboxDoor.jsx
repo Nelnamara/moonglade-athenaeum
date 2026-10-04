@@ -3,12 +3,14 @@ import { badgeText } from "./inboxCore.js";
 import { subscribe, start, loadFirst, registerContestOpener } from "./inboxStore.js";
 import { KindTabs, InboxBody, MarkAllMenu } from "./InboxList.jsx";
 import useHeaderDoor from "./useHeaderDoor.js";
+import InboxIcon from "./InboxIcon.jsx";
 import "../styles/inbox.css";
 
 /* ✉ THE INBOX (owner's walk, 2026-10-04): the gift box's twin, one 8 px gap before it in the
    header's right group, drawn only when a PixAI account is linked. Until the walk the gift box
    was the inbox's one door; the owner ruled the gift box is for rewards, so the inbox has its own
-   button. 30 x 30, radius 9, the envelope the phone's Inbox Menu row wears. Its lavender badge is
+   button. 30 x 30, radius 9, the owner's mailbox at the gift box's 22 px (InboxIcon.jsx: the pack's
+   copy, else the app's own, else the ✉ glyph). Its lavender badge is
    PixAI's unread notifications (TASK never counts), "99+" past 99, nothing at 0 -- the gifts are
    the gift box's badge.
 
@@ -34,9 +36,9 @@ export default function InboxDoor({ onOpenContests }) {
   return (
     <div className="ib-wrap" ref={door.wrap}>
       <button type="button" className={"ib-door inbox" + (door.lifted ? " lift" : "")}
-        title="PixAI inbox" aria-label={"PixAI inbox" + (badge ? ", " + badge + " new" : "")}
+        title="PixAI inbox" aria-label={"Inbox" + (badge ? ", " + badge + " new" : "")}
         aria-haspopup="dialog" aria-expanded={door.lifted} onClick={door.toggle}>
-        <span className="ib-door-glyph" aria-hidden="true">✉</span>
+        <InboxIcon />
         {badge ? <span className="ib-badge" aria-hidden="true">{badge}</span> : null}
       </button>
       {door.open ? (

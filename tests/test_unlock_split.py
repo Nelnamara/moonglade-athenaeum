@@ -85,12 +85,13 @@ def test_sealed_paths_deny_while_unearned(tmp_path):
 
 def test_reward_ui_icons_open_rest_of_rewards_sealed(tmp_path):
     """The D8 exception: claim.png + gift.png are the claim toast/modal's UI
-    chrome (notify.css fetches them by public URL), so they stay OPEN -- while
-    every other file in the rewards bucket stays sealed shut."""
+    chrome (notify.css fetches them by public URL), and inbox.png is the header's
+    ✉ Inbox button (owner's art, 2026-10-04), so they stay OPEN -- while every
+    other file in the rewards bucket stays sealed shut."""
     cli = _client(tmp_path)
     rdir = g._role_dir("rewards")
     rdir.mkdir(parents=True, exist_ok=True)
-    for name in ("claim.png", "gift.png"):
+    for name in ("claim.png", "gift.png", "inbox.png"):
         (rdir / name).write_bytes(b"\x89PNG fake")
         assert cli.get("/branding/rewards/" + name).status_code == 200, name
     (rdir / "trophy.png").write_bytes(b"\x89PNG fake")
