@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { createPortal } from "react-dom";
 import RecipeSetsMenu from "../recipes/RecipeSetsMenu.jsx";
 import { savedApi } from "./savedApi.js";
-import { READ_ONLY_LINE, keepTitle } from "./savedCore.js";
+import { READ_ONLY_LINE, goneLabel, keepTitle } from "./savedCore.js";
 import "../styles/recipes.css";
 
 /* The card's keep controls (Session S, Saved Tab Handoff sections 2-3; drift 135-136).
@@ -84,23 +84,24 @@ export function KeepMenu({ m, kind, rect, sheet, readOnly, quick, onQuick, onSet
     : <div className="mg-keep-layer" data-keeps-dock="">{menu}</div>, document.body);
 }
 
-/* The same menu for a saved model PixAI no longer has (S5c "K not available ▸"): one row,
-   Saved, ticked; unticking it takes the entry out of Saved by its item id. Nothing else can be
-   done with it -- there is no model to quick-pick, open or put in a set. */
+/* The same menu for a saved model PixAI doesn't make available (S5c "K not available ▸"): one
+   row, Saved, ticked; unticking it takes the entry out of Saved by its item id (the server
+   first checks it is still not available). Nothing else can be done with it -- there is no
+   model to quick-pick, open or put in a set. */
 export function GoneMenu({ item, defaultId, rect, sheet, readOnly, onGone, onClose }) {
   const api = {
     setsFor: () => Promise.resolve({ sets: [{ id: defaultId || "saved", title: "Saved", count: 0, reserved: true,
       contains: true, item_id: item.item_id }] }),
-    setToggle: (setId, _id, on) => (on ? Promise.resolve({ error: "A removed model can't be saved again" })
+    setToggle: (setId, _id, on) => (on ? Promise.resolve({ error: "This entry can't be saved again from here" })
       : savedApi.remove(item.item_id).then((d) => {
         if (d && d.removed === true) { onGone && onGone(item); return { contains: false, item_id: "" }; }
         if (d && d.removed === false) return { contains: true, item_id: item.item_id, error: d.error || "PixAI didn't take it out" };
         return { error: (d && d.error) || "PixAI didn't answer" };
       })),
-    setCreate: () => Promise.resolve({ error: "A removed model can't go in a set" }),
+    setCreate: () => Promise.resolve({ error: "This entry can't go in a set" }),
   };
   const menu = (
-    <RecipeSetsMenu variant="keep" recipeId={item.item_id} title="Removed from PixAI" heading="Keep this model"
+    <RecipeSetsMenu variant="keep" recipeId={item.item_id} title={goneLabel(item)} heading="Keep this model"
       api={api} rect={rect} sheet={sheet} onClose={onClose} tag="PixAI" canCreate={false}
       readOnly={readOnly ? READ_ONLY_LINE : ""} />
   );

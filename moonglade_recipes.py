@@ -1151,7 +1151,8 @@ def model_item(it):
 
 
 def unavailable_item(it):
-    """A saved model PixAI no longer has: nothing says which model it was."""
+    """A saved model PixAI doesn't make available (`reason`: deleted, private, taken down...):
+    nothing says which model it was."""
     return {"item_id": str(it.get("id") or ""), "saved_at": str(it.get("createdAt") or ""),
             "reason": str(it.get("effectiveUnavailableReason") or "")}
 
@@ -1420,9 +1421,25 @@ def model_save(session, owner_id, model_id):
     return model_tick(session, default["id"], mid, True)
 
 
+def _gone_holds(session, set_id, item_id):
+    """Whether `item_id` is one of the set's not-available entries, read fresh: a walk of the
+    whole set (unfiltered -- such an entry has no type), stopping once it is found. True or
+    False, or None when the walk gave up before its end without finding it."""
+    cursor = ""
+    for _ in range(_GONE_WALK_PAGES):
+        d = set_items(session, set_id, cursor, ref_type="model")
+        if any(g["item_id"] == item_id for g in d["unavailable"]):
+            return True
+        cursor = d["next_cursor"]
+        if not cursor:
+            return False
+    return None
+
+
 def model_remove_gone(session, owner_id, item_id):
-    """"K not available ▸" → take a removed model's entry out of Saved. Its item id is all
-    that is left of it, so this is ONE DELETE by that id. A clear answer decides; an unclear
+    """"K not available ▸" → take a not-available model's entry out of Saved. Its item id is
+    all that is left of it, so this is ONE DELETE by that id, sent only once a fresh read shows
+    the id is still one of Saved's not-available entries. A clear answer decides; an unclear
     one is read back from Saved's itemCount, since the selector cannot be asked about a model
     that no longer exists. Returns {removed: True | False | None, error?}."""
     core._check_read_only("change your saved models on PixAI")
@@ -1430,6 +1447,12 @@ def model_remove_gone(session, owner_id, item_id):
     before = model_default(session, owner_id)
     if before is None:
         raise core.PixAIError("PixAI has no Saved list for this account")
+    # Only an entry PixAI lists as not available, read fresh: a model made private and public
+    # again while the list was open is a live save again, and must not lose it.
+    if _gone_holds(session, before["id"], iid) is not True:
+        return {"removed": False,
+                "error": "PixAI doesn't list that entry as not available any more, so nothing "
+                         "was taken out. Reopen the list to see where it stands."}
     try:
         d = _rest_delete(session, "/collection/{}/items/{}".format(before["id"], iid)) or {}
         if d.get("saved") is False:

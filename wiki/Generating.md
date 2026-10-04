@@ -340,9 +340,10 @@ to it:
   opens from **Saved ▾**. Sets are made and renamed on pixai.art.
 - **Mine** — LoRAs you trained yourself. LoRAs only; you don't author base models.
 
-The line above Saved counts what is in it. When PixAI has removed models you once saved,
-it ends in **N not available ▸**: they are left out of the list, and that opens the list
-of them. Opening Saved only reads; nothing is changed on PixAI by looking.
+The line above Saved counts what is in it. When models you once saved are no longer
+available on PixAI (removed, or made private, say), it ends in **N not available ▸**: they
+are left out of the list, and that opens the list of them, each with PixAI's reason where it
+gives one. Opening Saved only reads; nothing is changed on PixAI by looking.
 
 **Saving a model or LoRA to PixAI.** Every card in the pickers has **⊕ Save | ▾**. **⊕ Save**
 puts it in your Saved on PixAI — the same list pixai.art's own Save button adds to — and the
@@ -360,7 +361,8 @@ your Saved, and in the Saved tab it leaves the list. **+ New set** makes a priva
 and puts the model in it; **Open on PixAI ↗** opens the model's page there. With `READ_ONLY` on,
 **⊕ Save** is dimmed and says why, and the menu's PixAI rows are greyed with the reason —
 **★ Quick-pick** still works, since it never touches PixAI. In **N not available ▸**, each
-removed model has the same **✓ Saved ▾**, whose one row takes it out of Saved.
+entry has the same **✓ Saved ▾**, whose one row takes it out of Saved — only while PixAI
+still lists it as not available, so a model that came back in the meantime keeps its save.
 
 **On the phone** the Model/LoRA sheet's row reads **Market | Saved ▾ | Mine**; tap **Saved ▾**
 again to pick Saved or one of your sets from a small sheet. Every card keeps **⊕ Save | ▾**,

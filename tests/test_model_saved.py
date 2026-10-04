@@ -357,7 +357,8 @@ def test_ids_are_checked_before_anything_is_sent(monkeypatch, call):
 
 
 def test_a_removed_models_row_leaves_saved_by_one_delete_of_its_item(monkeypatch):
-    w = _Writes(None)
+    w = _Writes(None, pages={(DEFAULT_ID, ""): ([_item(ITEM_1, _model(LORA_ID, "Glasswing")),
+                                                 _gone(ITEM_GONE)], None)})
     _wire(monkeypatch, w)
     out = rec.model_remove_gone(object(), OWNER, ITEM_GONE)
     assert w.deletes == ["/collection/%s/items/%s" % (DEFAULT_ID, ITEM_GONE)]
@@ -370,6 +371,8 @@ def test_an_unclear_removal_is_read_back_from_saveds_count(monkeypatch):
 
     def get(s, path, params=None, **k):
         w.gets.append((path, params))
+        if path.endswith("/items"):
+            return {"data": [_gone(ITEM_GONE)], "nextCursor": None}
         return {"data": [_collection(DEFAULT_ID, "default-collection", next(counts), "default")],
                 "nextCursor": None}
     _wire(monkeypatch, w)
@@ -635,3 +638,20 @@ def test_no_clear_answer_and_not_seen_saved_is_not_confirmed_rather_than_refused
     w = _Writes(_selector(False))
     _wire(monkeypatch, w)
     assert rec.model_save(object(), OWNER, LORA_ID)["error"] == "PixAI didn't save it"
+
+
+@pytest.mark.parametrize("pages", [
+    # made private, then public again while the list was open: a live save now
+    {(DEFAULT_ID, ""): ([_item(ITEM_GONE, _model(LORA_ID, "Glasswing"))], None)},
+    # not in Saved at all (any more)
+    {(DEFAULT_ID, ""): ([_item(ITEM_1, _model(LORA_ID, "Glasswing"))], "c2"),
+     (DEFAULT_ID, "c2"): ([_gone(ITEM_1.replace("1111", "7777"))], None)},
+])
+def test_removal_sends_nothing_unless_the_entry_is_still_not_available(monkeypatch, pages):
+    """Review nit 1: the DELETE is for an entry PixAI lists as not available, read fresh just
+    before; anything else -- a live save above all -- is refused in plain words and untouched."""
+    w = _Writes(None, pages=pages)
+    _wire(monkeypatch, w)
+    out = rec.model_remove_gone(object(), OWNER, ITEM_GONE)
+    assert w.deletes == [] and w.posts == []
+    assert out["removed"] is False and "nothing was taken out" in out["error"]

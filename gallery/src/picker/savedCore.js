@@ -61,11 +61,19 @@ export function currentSet(sets, setId) {
   return list.find((s) => s.id === setId) || list.find((s) => s.reserved) || null;
 }
 
-/* A removed model's line in "K not available ▸": nothing says which model it was, only when
-   it was saved. */
+/* A line in "K not available ▸": nothing says which model it was, only why PixAI doesn't make
+   it available and when it was saved. "Removed" only when PixAI says it was deleted; its other
+   reasons in plain words; anything else neutral. */
+const GONE_WORDS = {
+  deleted: "Removed from PixAI", private: "Made private on PixAI",
+  taken_down: "Taken down by PixAI", blocked: "Blocked on PixAI",
+};
+export function goneLabel(item) {
+  return GONE_WORDS[String((item && item.reason) || "")] || "Not available";
+}
 export function goneLine(item) {
   const d = String((item && item.saved_at) || "").slice(0, 10);
-  return "Removed from PixAI" + (d ? " · saved " + d : "");
+  return goneLabel(item) + (d ? " · saved " + d : "");
 }
 
 /* ---- S2c: the old bookmarks ---- */

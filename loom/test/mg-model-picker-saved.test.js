@@ -57,6 +57,12 @@ test("the set on screen is Saved unless a named set was picked", () => {
   assert.equal(currentSet(sets, "a").id, "a");
   assert.equal(currentSet([], ""), null);
   assert.match(goneLine({ saved_at: "2024-03-05T00:00:00.000Z" }), /saved 2024-03-05$/);
+  // review nit 1: "Removed" only when PixAI says it was deleted; its other reasons in words; else neutral
+  assert.equal(goneLine({ reason: "deleted", saved_at: "2024-03-05T00:00:00.000Z" }), "Removed from PixAI · saved 2024-03-05");
+  assert.equal(goneLine({ reason: "private" }), "Made private on PixAI");
+  assert.equal(goneLine({ reason: "taken_down" }), "Taken down by PixAI");
+  assert.equal(goneLine({ reason: "opt_out" }), "Not available");
+  assert.equal(goneLine({ reason: "" }), "Not available");
 });
 
 test("the base chips send values the collection accepts, one at a time", () => {
