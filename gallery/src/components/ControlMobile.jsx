@@ -621,7 +621,7 @@ export default function ControlMobile({ account, brandRequest }) {
         paused={!!subOverlay || !!power || updScreen} />
 
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
-        <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
+        <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal} phone
           skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
       </MobileScreen>
 

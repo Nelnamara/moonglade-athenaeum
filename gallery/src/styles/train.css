@@ -121,23 +121,49 @@
 .mgtr-h { font-size: 18px; font-weight: 700; }
 .mgtr-soon .mgtr-h { font-size: 15px; }
 
-.mgtr-goals { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.mgtr-goal { display: flex; gap: 9px; align-items: center; padding: 8px; border-radius: 10px;
-  border: 1px solid var(--surface1); background: none; color: var(--text); text-align: left;
-  cursor: pointer; }
+/* Basic step 1's goals, as frame 01 of the Goal Tile Art Handoff DRAWS them (the owner picked T1a):
+   four square picture tiles in one row, the picture edge to edge over the top 78 % of the tile and
+   the slot radius rounding it, the label alone in the strip beneath. The description is the
+   tile's `title` (tooltip and accessible description), not drawn. Selected is the lavender border
+   and nothing else: the picture is never tinted or dimmed by selection. */
+.mgtr-goals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.mgtr-goal { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end;
+  aspect-ratio: .82; padding: 6px; box-sizing: border-box; border-radius: 12px; font: inherit; font-size: 10px;
+  font-weight: 700; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .45); color: var(--text);
+  text-align: left; cursor: pointer; }
 .mgtr-goal:hover { border-color: color-mix(in srgb, var(--lavender) 60%, var(--surface1)); }
-.mgtr-goal.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 12%, transparent); }
-.mgtr-goal > span:last-child { min-width: 0; display: flex; flex-direction: column; }
-.mgtr-goal .n { font-size: 11.5px; font-weight: 700; }
-.mgtr-goal .d { font-size: 9.5px; line-height: 1.35; color: var(--subtext); }
-/* The goal's square carries its glyph (trainCore GOALS' `mark`): PixAI shows a sample picture
-   here, the app has no such art yet, and the bare tint read as a blank tile (walk 2026-09-29). */
-.mgtr-goal-tint { width: 34px; height: 34px; flex: none; border-radius: 8px; display: grid;
-  place-items: center; font-size: 17px; line-height: 1; color: var(--text); }
-.mgtr-goal-tint.lavender { background: color-mix(in srgb, var(--lavender) 35%, var(--surface0)); }
-.mgtr-goal-tint.mauve { background: color-mix(in srgb, var(--mauve) 30%, var(--surface0)); }
-.mgtr-goal-tint.emerald { background: color-mix(in srgb, var(--emerald) 30%, var(--surface0)); }
-.mgtr-goal-tint.peach { background: color-mix(in srgb, var(--peach) 30%, var(--surface0)); }
+.mgtr-goal.on { border-color: var(--lavender); }
+.mgtr-goal .n { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The goal's square carries its picture (Session T, T1a / T2b; lib/goalTileCore.js, GoalTile.jsx):
+   one opaque full-bleed square, cover, rounded by this radius, with no frame, scrim or tint over
+   it. The tint below paints at once, stays as the loading state and is the whole tile when no
+   picture loads: a flat colour, no glyph. */
+.mgtr-goal-tint { position: relative; overflow: hidden; width: 34px; height: 34px; flex: none;
+  border-radius: 8px; }
+/* One flat colour per goal: frame 02 of the Goal Tile Art Handoff (loading, and the whole tile when
+   no picture loads). */
+.mgtr-goal-tint.g-character { background: #3a2e5a; }
+.mgtr-goal-tint.g-style { background: #2e4a5a; }
+.mgtr-goal-tint.g-clothing { background: #5a3a4a; }
+.mgtr-goal-tint.g-other { background: #2e5a46; }
+/* ...and on the desktop tile the square is the picture area itself: flush to the tile's padding
+   edge, the top 78 %, the tile's own radius clipping its corners. */
+.mgtr-goal .mgtr-goal-tint { position: absolute; top: 0; left: 0; width: 100%; height: 78%; border-radius: 0; }
+/* The picture: a computed background on a child of the square (never an <img>), fading in over
+   .42 s when it lands; `still` is a tile that found it already settled. */
+.mgtr-goal-pic { position: absolute; inset: 0; z-index: 1; background-size: cover;
+  background-position: center; background-repeat: no-repeat; animation: mgtr-pic-in .42s ease both; }
+.mgtr-goal-pic.still { animation: none; }
+@keyframes mgtr-pic-in { from { opacity: 0; } to { opacity: 1; } }
+/* The loading sheen: a slow lavender band across the tint, a layer BENEATH the picture. The
+   component drops the class at 3 s or the moment the picture decodes, whichever is first. */
+.mgtr-goal-tint.sheen::after { content: ""; position: absolute; inset: 0; z-index: 0;
+  background: linear-gradient(110deg, transparent 40%, rgba(182, 146, 230, .35) 50%, transparent 60%);
+  background-size: 250% 100%; animation: mgtr-sheen 1.6s linear infinite; }
+@keyframes mgtr-sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .mgtr-goal-tint.sheen::after { display: none; }
+  .mgtr-goal-pic { animation: none; }
+}
 .mgtr-across { font-size: 10.5px; color: var(--lavender); text-align: center; padding: 0;
   border: 0; background: none; cursor: pointer; }
 .mgtr-across.left { text-align: left; align-self: flex-start; }

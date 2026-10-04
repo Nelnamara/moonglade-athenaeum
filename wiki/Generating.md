@@ -412,7 +412,10 @@ still asks in the **Queue training run** sheet, whose button names the price.
 
 **Basic training** is PixAI's own three steps:
 
-1. **Choose a goal** — Character, Art style, Outfit or Something else.
+1. **Choose a goal** — Character, Art style, Outfit or Something else: four square picture
+   tiles in a row, each named underneath (hover one for its description; on the phone each is a
+   row with the picture beside the name). The pictures come with the app; if one can't load, the
+   square stays a flat colour.
 2. **Add images** — from **Upload** (your device), **From history** (your library, Grouped by
    generation or All pictures, with the library's search; it keeps loading as you scroll) or
    **Import a dataset** (the image sets of your earlier Basic runs, with their counts; a set

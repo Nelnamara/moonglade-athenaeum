@@ -127,13 +127,15 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
        GalleryMobile's own useSheet, anything -- fails here by not being on it. */
     const registered = [];
     for (const f of [mobile, control, create, health, src("components/GalleryMobile.jsx"),
-      src("components/FolioMobile.jsx"), src("components/ContestsMobile.jsx")]) {
+      src("components/FolioMobile.jsx"), src("components/ContestsMobile.jsx"),
+      src("components/BrandRolesPhone.jsx")]) {
       for (const m of f.matchAll(/useLayerHistory\(([^;]*?)\);/g)) registered.push(m[1]);
     }
     assert.deepEqual(registered.sort(), [
       "!!contactSheetTarget, closeContactSheet",
       "!!contestEntry, closeContestEntry",
       "!!detailsFor, closeDetails",
+      "!!openSlot, close",             // the Branding roles' own pushed screen (Session X)
       "!!screen, closeScreen",
       "advOpen, closeAdv",
       "brandOpen, closeBrand",

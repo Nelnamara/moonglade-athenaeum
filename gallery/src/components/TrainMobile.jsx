@@ -8,6 +8,7 @@ import TrainStrip from "./train/TrainStrip.jsx";
 import RunsList, { RetryConfirm } from "./train/RunsList.jsx";
 import PublishSheet from "./train/PublishSheet.jsx";
 import DatasetImport from "./train/DatasetImport.jsx";
+import GoalTile from "./train/GoalTile.jsx";
 import {
   useAdvancedTraining, useBasicTraining, useCsrf, useHistoryPool, usePublish, useRetry,
   useTrainRuns, useTrainSetup,
@@ -50,7 +51,6 @@ import "../styles/train-mobile.css";
    and the runs; every write is a press. The sheets are portalled to .glm-stage (the wave-1
    rule: never a fixed layer inside the scrolling body) on their own rung above the screen. */
 
-const GOAL_TINT = ["lavender", "mauve", "emerald", "peach"];
 
 function useHost(selector) {
   const [host, setHost] = useState(null);
@@ -217,10 +217,10 @@ function BasicPhone({ setup, csrf, stepBack, onChooser, onAdvanced, onRuns, head
     content = (
       <>
         <div className="trm-h">What do you want to train?</div>
-        {GOALS.map((g, i) => (
+        {GOALS.map((g) => (
           <button type="button" key={g.value} className={"trm-row goal" + (b.goal === g.value ? " sel" : "")}
             aria-pressed={b.goal === g.value} onClick={() => b.setGoal(g.value)}>
-            <span className={"mgtr-goal-tint " + GOAL_TINT[i]} aria-hidden="true">{g.mark}</span>
+            <GoalTile goal={g} />
             <span className="trm-row-text"><span className="trm-row-main"><b>{g.label}</b></span>
               <span className="trm-row-sub">{g.desc}</span></span>
           </button>

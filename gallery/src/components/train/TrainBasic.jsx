@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import TrainPool from "./TrainPool.jsx";
 import DatasetImport from "./DatasetImport.jsx";
+import GoalTile from "./GoalTile.jsx";
 import {
   GOALS, MAX_IMAGES, MIN_IMAGES, SOURCE_MARK, credits, etaText, roomLeft, startLabel,
 } from "../../gen/trainCore.js";
@@ -13,7 +14,6 @@ import {
    started (BUILD 7.1). The step lives in the overlay so a trip to Advanced and back keeps it. */
 
 const STEPS = ["Choose a goal", "Add images", "Review and start"];
-const GOAL_TINT = ["lavender", "mauve", "emerald", "peach"];
 
 export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced, onRuns }) {
   const [src, setSrc] = useState("");               // "", "history", "import"
@@ -44,11 +44,11 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
           <div className="mgtr-kick">1 · CHOOSE A GOAL</div>
           <div className="mgtr-h">What do you want to train?</div>
           <div className="mgtr-goals">
-            {GOALS.map((g, i) => (
+            {GOALS.map((g) => (
               <button type="button" key={g.value} className={"mgtr-goal" + (b.goal === g.value ? " on" : "")}
-                onClick={() => { b.setGoal(g.value); setStep(2); }}>
-                <span className={"mgtr-goal-tint " + GOAL_TINT[i]} aria-hidden="true">{g.mark}</span>
-                <span><span className="n">{g.label}</span><span className="d">{g.desc}</span></span>
+                title={g.desc} onClick={() => { b.setGoal(g.value); setStep(2); }}>
+                <GoalTile goal={g} />
+                <span className="n">{g.label}</span>
               </button>
             ))}
           </div>

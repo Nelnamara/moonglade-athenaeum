@@ -4,18 +4,18 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-/* Two things the owner found on screen in Train a LoRA (walk, 2026-09-29), held at the source.
-   tests/test_render_harness.py measures both in a real browser once the bundle is built; these
-   fail first, without one.
+/* A thing the owner found on screen in Train a LoRA (walk, 2026-09-29), held at the source.
+   tests/test_render_harness.py measures it in a real browser once the bundle is built; this
+   fails first, without one.
 
-   1. "From history" drew every picture as a sliver a few pixels tall, in Basic and Advanced,
-      Grouped and All. The pool's grid scrolls inside a max-height, and a tile clips its picture
-      (overflow: hidden), so its automatic minimum height is 0: CSS Grid then grows auto rows
-      only until they fill the cap, sharing 300 px among every row. max-content rows hold each
-      row at the tile's own square height.
-   2. Basic's goal tiles were flat colour squares where PixAI shows a sample picture. The app
-      has no such art, so each square carries its goal's glyph (trainCore GOALS' `mark`), on
-      the desktop and the phone alike. */
+   "From history" drew every picture as a sliver a few pixels tall, in Basic and Advanced,
+   Grouped and All. The pool's grid scrolls inside a max-height, and a tile clips its picture
+   (overflow: hidden), so its automatic minimum height is 0: CSS Grid then grows auto rows
+   only until they fill the cap, sharing 300 px among every row. max-content rows hold each
+   row at the tile's own square height.
+
+   (The same walk found Basic's goal tiles blank; a glyph stood in until Session T put a
+   picture in each. That half of this file moved to goal-tile-core.test.js.) */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "gallery", "src");
@@ -40,19 +40,5 @@ describe("the From history pool draws square tiles", () => {
     const tile = rule(css, ".mgtr-pool-tile");
     assert.match(tile, /aspect-ratio:\s*1/);
     assert.match(tile, /overflow:\s*hidden/);
-  });
-});
-
-describe("the goal tiles carry a glyph, not a blank square", () => {
-  for (const file of ["components/train/TrainBasic.jsx", "components/TrainMobile.jsx"]) {
-    test(file, () => {
-      assert.match(src(file),
-        /<span className=\{"mgtr-goal-tint " \+ GOAL_TINT\[i\]\} aria-hidden="true">\{g\.mark\}<\/span>/);
-    });
-  }
-  test("the square centres its glyph", () => {
-    const tint = rule(src("styles/train.css"), ".mgtr-goal-tint");
-    assert.match(tint, /display:\s*grid/);
-    assert.match(tint, /place-items:\s*center/);
   });
 });

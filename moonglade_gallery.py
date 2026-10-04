@@ -4590,7 +4590,93 @@ def _mark_unlock_for(mid):
 # the full role list. Until then neither is a slot: the payload doesn't list them,
 # the upload/crop/set-active routes refuse them. Their on-disk folders stay
 # (see _BRANDING_DISCOVERY_SLOTS).
-BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
+#
+# That checklist is here now (Session X, 2026-10-03): the four named roles below. The
+# banner-shaped slots keep their own tuple, because every banner function (manifest,
+# active pick, crop, render) is about THAT shape and must not see a role.
+BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
+
+# The named roles: an owner-curated four of the app's own system art (the keep-fixed roles,
+# the easter-egg set, achievement-bound art, the claim popup, the logo, the favicon and the app
+# icons are NOT here and never will be by accident -- adding one means editing this table).
+# Each role is a set of images keyed by a short name; each image owns ONE public /branding/
+# name, the one the app already asks for. An override is a single file written where that name
+# resolves first (the coded tree, loose before the pack), so every screen that shows the art
+# wears it with no change of its own; the pack's default stays in the container and is never
+# written.
+#
+# WHAT AN UPLOAD MUST BE is checked HERE whatever the client said, and it is derived from the
+# art it replaces (role_image_spec): the role's formats and drawn minimum size, plus, per image,
+# `default` -- the pack default's own size (and whether it moves). The shape must lie between square
+# and that default's shape, ROLE_ASPECT_TOLERANCE beyond either (so a tall mascot's slot takes a
+# square picture as well as one shaped like it), the minimum size is the drawn one unless the default
+# is smaller (then the default's own), and an animation is allowed only where the role says its format
+# may (the login companion's default is an animated WebP). Transparency is always required. The
+# stand-in specs drawn first (3:4, square) would have refused the pack's own login companion, the
+# tracker's done / failed / empty and the gift icon; tests/test_branding_roles.py holds that every
+# pack default passes its own role's check.
+ROLE_SLOTS = {
+    "login_companion": {
+        "name": "Login companion", "where": "the sign-in page",
+        "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "animated_formats": ["WEBP"],
+                 "min_axis": "height", "min_px": 600},
+        "images": {"companion": {"label": "Companion", "public": "login_nel.webp",
+                                 "default": {"w": 488, "h": 480, "animated": True}}},
+    },
+    "tracker_mascots": {
+        "name": "Job tracker mascots", "where": "the job tracker",
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
+                 "min_axis": "side", "min_px": 128},
+        "images": {"spinner": {"label": "Spinner", "public": "nel_spinner.png",
+                               "default": {"w": 566, "h": 560}},
+                   "done": {"label": "Done", "public": "mascots/trk_done.png",
+                            "default": {"w": 329, "h": 364}},
+                   "failed": {"label": "Failed", "public": "mascots/trk_fail.png",
+                              "default": {"w": 324, "h": 365}},
+                   "empty": {"label": "Empty", "public": "mascots/trk_empty.png",
+                             "default": {"w": 402, "h": 356}}},
+    },
+    "reward_icons": {
+        "name": "Reward icons", "where": "the claim toast and the header",
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
+                 "min_axis": "side", "min_px": 64},
+        "images": {"claim": {"label": "Claim", "public": "rewards/claim.png",
+                             "default": {"w": 128, "h": 128}},
+                   "gift": {"label": "Gift", "public": "rewards/gift.png",
+                            "default": {"w": 128, "h": 119}}},
+    },
+    "power_poses": {
+        "name": "Power poses", "where": "the restart and shutdown screens",
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
+                 "min_axis": "side", "min_px": 256},
+        "images": {"restart": {"label": "Restart", "public": "mascots/nel_restart.png",
+                               "default": {"w": 406, "h": 401}},
+                   "shutdown": {"label": "Shutdown", "public": "mascots/nel_shutdown.png",
+                                "default": {"w": 401, "h": 398}}},
+    },
+}
+BRANDING_SLOTS = BANNER_SLOTS + tuple(ROLE_SLOTS)
+
+# What an upload to a role must clear besides its spec: a hard ceiling on the bytes read and on
+# the pixels' extent (checked from the header, before any pixel is decoded), the shape tolerance
+# (how far beyond square, or beyond the pack default's shape, a picture's may lie, relative), "transparent"
+# meaning at least 1 % of the pixels are more than half see-through, and the budget for an
+# animation the role allows (its frames are decoded one at a time to prove the file is sound, so
+# the count and the total pixels are capped first).
+ROLE_MAX_BYTES = 12 * 1024 * 1024
+ROLE_MAX_SIDE = 4096
+ROLE_ASPECT_TOLERANCE = 0.08
+ROLE_SEE_THROUGH_MIN = 0.01
+ROLE_MAX_FRAMES = 300
+ROLE_MAX_ANIM_PIXELS = 64_000_000
+# The only formats a role upload ever opens. Pillow identifies dozens, some with decoders that shell
+# out or are old and sprawling (EPS via Ghostscript, TIFF, PSD...); those never reach a decoder here.
+# PNG and WebP are what a role takes; JPEG and GIF are opened only so the editor can refuse them BY
+# NAME ("this one is JPEG") rather than "couldn't read this".
+ROLE_OPEN_FORMATS = ("PNG", "WEBP", "JPEG", "GIF")
+# The same question asked of a banner upload (/api/branding/slot decodes the same way): banners are
+# wide, so the ceiling is higher, but a WebP may not declare a canvas past it.
+BANNER_MAX_SIDE = 8192
 
 
 def _slot_dir(slot):
@@ -4628,7 +4714,7 @@ def list_slot_assets(out_dir, slot):
     entries whose .png actually exists. Empty on a fresh install / until that
     slot's first real upload, exactly like list_marks() above. Each asset carries
     its zoom/cropX/cropY transform (normalized, legacy crop migrated)."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return []
     raw = _branding_bytes(_role_rel(slot, "manifest.json"))
     if raw is None:
@@ -4668,7 +4754,7 @@ def _recorded_slot_active(out_dir):
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
+    return {k: str(v) for k, v in raw.items() if k in BANNER_SLOTS and v}
 
 
 def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
@@ -4690,7 +4776,7 @@ def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
     and re-rendered it to the other, on every other boot.
 
     `recorded` / `assets` let a caller that already has them skip the re-read."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return None
     ids = [a["id"] for a in (list_slot_assets(out_dir, slot) if assets is None else assets)]
     if recorded is None:
@@ -4709,7 +4795,7 @@ def load_slot_active(out_dir):
     where the healing rule -- and its determinism -- lives."""
     recorded = _recorded_slot_active(out_dir)
     return {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-            for slot in BRANDING_SLOTS}
+            for slot in BANNER_SLOTS}
 
 
 def save_slot_active(out_dir, active):
@@ -4724,7 +4810,7 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     real PNG before this is called -- this function just persists it. New
     uploads start at the neutral transform (zoom 100, centered) -- the
     equivalent of the design's own defaults."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return None
     sdir = _slot_dir(slot)
     sdir.mkdir(parents=True, exist_ok=True)
@@ -4757,7 +4843,7 @@ def set_slot_crop(out_dir, slot, item_id, zoom=None, cropx=None, cropy=None):
     Panel.dc.html's three banner sliders -- zoom 100-250, cropX/cropY 0-100).
     Any field left None keeps its stored value. False for an unknown slot/item,
     never a 500. Widened 2026-08-06 from the old 3-value left/center/right crop."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return False
     sdir = _slot_dir(slot)
     # Adjusting a shipped default's crop is a WRITE -- promote the manifest
@@ -4800,7 +4886,7 @@ def set_slot_active(out_dir, slot, item_id):
     own self-heal (falling back to the first real asset when nothing is
     recorded) would silently undo a stored None anyway, since the two cases
     look identical on disk."""
-    if slot not in BRANDING_SLOTS:
+    if slot not in BANNER_SLOTS:
         return False
     if not item_id or item_id not in {a["id"] for a in list_slot_assets(out_dir, slot)}:
         return False
@@ -4972,11 +5058,411 @@ def branding_slots_payload(out_dir):
     and handed to both halves."""
     recorded = _recorded_slot_active(out_dir)
     out = {}
-    for slot in BRANDING_SLOTS:
+    for slot in BANNER_SLOTS:
         assets = list_slot_assets(out_dir, slot)
         out[slot] = {"assets": assets,
                      "active": resolve_slot_active(out_dir, slot, recorded.get(slot), assets)}
     return out
+
+
+# ---------------------------------------------------------------------------
+# The named roles (Session X): what an upload must be, how it is written, how it is undone,
+# and what the app does when an override cannot be read. ROLE_SLOTS (above) is the table.
+# ---------------------------------------------------------------------------
+def _ratio_label(w, h):
+    """A picture's shape in words for a refusal: "1:1", "3:2", "16:9", or "1.71:1" when no small
+    whole-number ratio matches within half a percent."""
+    if w <= 0 or h <= 0:
+        return "0:0"
+    have = w / h
+    for q in range(1, 17):
+        p = round(have * q)
+        if p >= 1 and abs(have - p / q) / have <= 0.005:
+            g = math.gcd(p, q)
+            return "%d:%d" % (p // g, q // g)
+    return "%.2f:1" % have
+
+
+def role_image_spec(slot, key):
+    """What ONE image's override must be: the role's formats, transparency and drawn minimum, with
+    the SHAPE taken from the pack default it replaces (anything between square and that shape,
+    ROLE_ASPECT_TOLERANCE beyond either: see role_spec_failures) and the minimum size lowered to the
+    default's own where the default is smaller than the drawn minimum (the login companion's pack
+    art is 480 px tall, the drawn minimum 600)."""
+    role = ROLE_SLOTS[slot]
+    base, d = role["spec"], role["images"][key]["default"]
+    own = d["h"] if base["min_axis"] == "height" else min(d["w"], d["h"])
+    return {"formats": list(base["formats"]), "transparent": base["transparent"],
+            "animated_formats": list(base["animated_formats"]),
+            "aspect": [d["w"], d["h"]], "aspect_tolerance": ROLE_ASPECT_TOLERANCE,
+            "min_axis": base["min_axis"], "min_px": min(base["min_px"], own)}
+
+
+def _aspect_words(aw, ah, tol):
+    """The shape an image may take, in words for a rule: "about square" when its pack default is
+    square to within the tolerance, else the span from that default's shape to square, "about 9:10
+    to square" (a tall default) or "about square to 9:8" (a wide one)."""
+    a = aw / ah
+    if abs(a - 1.0) <= tol:
+        return "about square"
+    label = _ratio_label(aw, ah)
+    return "about %s to square" % label if a < 1 else "about square to %s" % label
+
+
+def role_spec_failures(spec, facts):
+    """The rules `facts` breaks against one image's spec (role_image_spec), in the order the editor
+    lists them: format, transparency, animation, shape, size. [] means the file is acceptable.
+
+    `facts` is what was MEASURED (role_measure): {"format": "PNG", "w": 256, "h": 256,
+    "see_through": 0.31, "animated": False} (see_through = the share of pixels more than half
+    clear). Each failure is {"rule", "need", "got"}: the words a refusal and the editor's tick
+    line both use. The client runs the same rules over the same measurements
+    (lib/brandRolesCore.js) to tick them live; THIS is the one that decides."""
+    failed = []
+    fmt = str(facts.get("format") or "").upper()
+    if fmt not in spec["formats"]:
+        failed.append({"rule": "format", "need": " or ".join(spec["formats"]), "got": fmt or "unknown"})
+    if spec["transparent"] and facts["see_through"] < ROLE_SEE_THROUGH_MIN:
+        clear = facts["see_through"]
+        failed.append({"rule": "transparent", "need": "a transparent background",
+                       "got": "opaque" if clear <= 0 else "%.1f%% see-through" % (clear * 100)})
+    if facts.get("animated") and fmt not in spec["animated_formats"]:
+        failed.append({"rule": "animation", "need": "a still picture", "got": "animated"})
+    w, h = facts["w"], facts["h"]
+    aw, ah = spec["aspect"]
+    want, tol = aw / ah, spec["aspect_tolerance"]
+    # anything between square and the default's shape, `tol` beyond either edge
+    lo, hi = min(1.0, want) * (1 - tol), max(1.0, want) * (1 + tol)
+    if h <= 0 or not (lo <= w / h <= hi):
+        failed.append({"rule": "aspect", "need": _aspect_words(aw, ah, tol), "got": _ratio_label(w, h)})
+    tall = spec["min_axis"] == "height"
+    have = h if tall else min(w, h)
+    if have < spec["min_px"]:
+        unit = " px tall" if tall else " px"
+        failed.append({"rule": "size", "need": "at least %d%s" % (spec["min_px"], unit),
+                       "got": "%d%s" % (have, unit)})
+    return failed
+
+
+_ROLE_NEED_VERB = {"format": "be", "transparent": "have", "animation": "be", "aspect": "be", "size": "be"}
+
+
+def role_refusal_text(role_name, failed):
+    """The loud refusal, in plain words: the rule and the measured value, ending on the one
+    thing the user most needs to hear. One broken rule reads "...must be about square. This one
+    is 3:4."; several read as pairs, "...must be about 9:10 (this one is 3:2) and at least 128 px
+    (this one is 64 px)."."""
+    if len(failed) == 1:
+        f = failed[0]
+        what = "%s %s. This one is %s." % (_ROLE_NEED_VERB[f["rule"]], f["need"], f["got"])
+    else:
+        parts, last = [], None
+        for f in failed:
+            verb = _ROLE_NEED_VERB[f["rule"]]
+            parts.append(("" if verb == last else verb + " ") + "%s (this one is %s)" % (f["need"], f["got"]))
+            last = verb
+        what = ", ".join(parts[:-1]) + " and " + parts[-1] + "."
+    return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
+
+
+class ImageRefused(Exception):
+    """A picture the app turns away in its own plain words (the message IS the sentence to show). It is
+    deliberately NOT a ValueError: Pillow raises ValueErrors of its own ("tile cannot extend outside
+    image"), and one of those must never pass for a sentence meant for the user."""
+
+
+_UNREADABLE = "Couldn't read this image."
+
+
+def webp_declared_size(head):
+    """The canvas a WebP's own header declares, as (width, height), read by hand from its first ~30
+    bytes; None when `head` is not a WebP at all. Raises ImageRefused when it IS a WebP whose header
+    cannot be read: no picture chunk a WebP may start with, or a lossy / lossless header missing its
+    start code / signature, or a header cut short.
+
+    WHY BY HAND: libwebp commits the whole declared canvas when Pillow merely OPENS a WebP, so a
+    138-byte file claiming 16383 x 16383 costs ~2 GB before any size check Pillow offers has run.
+      VP8X (animated, or with alpha / metadata): 24-bit width-1 at offset 24, height-1 at 27.
+      VP8  (lossy): after the frame tag and the 9d 01 2a start code, 14-bit width at 26, height at 28.
+      VP8L (lossless): after the 0x2f signature, 14-bit width-1 and 14-bit height-1 packed at 21."""
+    if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
+        return None
+    kind = head[12:16]
+    if kind == b"VP8X" and len(head) >= 30:
+        return (int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1)
+    if kind == b"VP8 " and len(head) >= 30 and head[23:26] == b"\x9d\x01\x2a":
+        return (int.from_bytes(head[26:28], "little") & 0x3FFF, int.from_bytes(head[28:30], "little") & 0x3FFF)
+    if kind == b"VP8L" and len(head) >= 25 and head[20] == 0x2F:
+        bits = int.from_bytes(head[21:25], "little")
+        return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+    raise ImageRefused(_UNREADABLE)
+
+
+def guard_webp_canvas(head, max_side):
+    """Refuse, BEFORE anything opens the file, a WebP whose declared canvas is past `max_side` on a
+    side (or whose header cannot be read). Pass the file's first 64 bytes or more. One helper for every
+    upload that decodes user pictures: the named roles (role_measure) and the banner slots."""
+    size = webp_declared_size(head)
+    if size is not None and max(size) > max_side:
+        raise ImageRefused("That picture is larger than {:,} px on a side.".format(max_side))
+
+
+def role_measure(raw):
+    """Open one picture's bytes and measure it: (facts, rgba) with facts as role_spec_failures reads
+    them. A WebP's declared canvas is read from its header first (guard_webp_canvas); the size of
+    anything else comes from its header too and is refused past ROLE_MAX_SIDE before a pixel is
+    decoded; an animation is refused past its frame and pixel budget before any frame is. Raises
+    ImageRefused with the plain-words message when the picture cannot be used at all; anything
+    Pillow itself raises becomes the one plain sentence about not being able to read it."""
+    import io
+    guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
+        fmt, (w, h) = im.format, im.size
+        if max(w, h) > ROLE_MAX_SIDE:
+            raise ImageRefused("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
+        frames = getattr(im, "n_frames", 1)
+        if frames > 1 and (frames > ROLE_MAX_FRAMES or frames * w * h > ROLE_MAX_ANIM_PIXELS):
+            raise ImageRefused("That animation is too long or too big.")
+        im.load()
+        rgba = im.convert("RGBA")
+    except ImageRefused:
+        raise
+    except Exception:                      # noqa: BLE001 -- anything Pillow raises, ValueErrors included
+        raise ImageRefused(_UNREADABLE)
+    clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
+    return {"format": fmt, "w": w, "h": h, "see_through": clear, "animated": frames > 1}, rgba
+
+
+_ROLE_KEEP_CHUNKS = (b"VP8X", b"ICCP", b"ANIM", b"ANMF")
+
+
+def _role_animation_bytes(raw):
+    """An accepted animated WebP, ready to store: rebuilt from only the chunks the picture needs (the
+    VP8X header, a colour profile, the animation's parameters and its frames), so metadata a sender
+    embedded (a camera's EXIF, an editor's XMP) is not served from the sign-in page, with the VP8X
+    header no longer claiming it; cut at the end of its RIFF container so nothing appended after the
+    picture survives; and every frame decoded once to prove the file is sound. Raises ImageRefused for
+    a stream that stops short, has a chunk that overruns, or will not decode."""
+    import io
+    from PIL import Image
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
+        raise ImageRefused(_UNREADABLE)
+    end = 8 + int.from_bytes(raw[4:8], "little")
+    if end > len(raw):
+        raise ImageRefused(_UNREADABLE)
+    body, pos, kept = raw[12:end], 0, []
+    while pos + 8 <= len(body):
+        fourcc = body[pos:pos + 4]
+        size = int.from_bytes(body[pos + 4:pos + 8], "little")
+        if pos + 8 + size > len(body):
+            raise ImageRefused(_UNREADABLE)
+        span = min(8 + size + (size & 1), len(body) - pos)          # a chunk is padded to an even length
+        if fourcc in _ROLE_KEEP_CHUNKS:
+            kept.append(body[pos:pos + span])
+        pos += span
+    if not kept or kept[0][:4] != b"VP8X" or len(kept[0]) < 18:
+        raise ImageRefused(_UNREADABLE)
+    head = bytearray(kept[0])
+    head[8] &= ~0x0C & 0xFF                                         # no EXIF (0x08), no XMP (0x04)
+    kept[0] = bytes(head)
+    data = b"RIFF" + (4 + sum(len(c) for c in kept)).to_bytes(4, "little") + b"WEBP" + b"".join(kept)
+    try:
+        with Image.open(io.BytesIO(data), formats=("WEBP",)) as im:
+            for i in range(getattr(im, "n_frames", 1)):
+                im.seek(i)
+                im.load()
+    except Exception:                      # noqa: BLE001
+        raise ImageRefused(_UNREADABLE)
+    return data
+
+
+def _role_coded_rel(slot, key):
+    return _public_rel_to_coded(ROLE_SLOTS[slot]["images"][key]["public"])
+
+
+def _role_override_path(slot, key):
+    return branding_root() / _role_coded_rel(slot, key)
+
+
+def _role_coded_rels():
+    """Every role image's CODED rel, lowercased (the filesystem the tree lives on is
+    case-insensitive on Windows, so the serve route compares the way the seal does)."""
+    return frozenset(_role_coded_rel(slot, key).lower()
+                     for slot, role in ROLE_SLOTS.items() for key in role["images"])
+
+
+_role_decode_memo = {}
+
+
+def _role_file_decodes(path):
+    """Whether an override file on disk still decodes as a picture. Answered once per
+    (file, mtime, size): the public /branding/ route asks on every request for these names, and a
+    decode per request would be work a stranger on the LAN could schedule. A changed file is a
+    new key, so a repaired override is believed at once."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    hit = _role_decode_memo.get(key)
+    if hit is not None:
+        return hit
+    try:
+        from PIL import Image
+        with Image.open(path, formats=ROLE_OPEN_FORMATS) as im:
+            im.load()
+        ok = True
+    except Exception:                      # noqa: BLE001 -- anything undecodable is "unreadable"
+        ok = False
+    if len(_role_decode_memo) > 128:
+        _role_decode_memo.clear()
+    _role_decode_memo[key] = ok
+    return ok
+
+
+def branding_roles_payload(out_dir):
+    """The Roles section's state for the Branding tab, in the fixed meeting order (the order of
+    ROLE_SLOTS): per role its name and where it shows, and per image its own spec, the URL the app
+    wears now, whether that is the install's own file, whether that file still decodes (a
+    missing or unreadable override is served as the pack's default -- see the /branding/ route
+    -- and the row says so), and a URL for the pack's own art so the row can show default
+    beside yours. Both /api/branding and /api/panel/summary hand it over, so the two cannot
+    disagree."""
+    box = _get_container()
+    roles = []
+    for slot, role in ROLE_SLOTS.items():
+        images = []
+        for key, img in role["images"].items():
+            coded = _public_rel_to_coded(img["public"])
+            path = branding_root() / coded
+            try:
+                yours = path.is_file()
+                stamp = path.stat().st_mtime_ns // 1_000_000 if yours else 0
+            except OSError:
+                yours, stamp = False, 0
+            images.append({
+                "key": key, "label": img["label"], "url": "/branding/" + img["public"],
+                "yours": yours, "unreadable": bool(yours and not _role_file_decodes(path)),
+                "v": stamp,
+                "default_url": ("/api/branding/role/default/%s/%s" % (slot, key))
+                               if box is not None and box.has(coded) else None,
+                # the rule THIS image's override must meet (role_image_spec), for the editor to tick
+                "spec": dict(role_image_spec(slot, key), see_through_min=ROLE_SEE_THROUGH_MIN),
+            })
+        roles.append({"slot": slot, "name": role["name"], "where": role["where"], "images": images})
+    return roles
+
+
+def _role_payload(out_dir, slot):
+    return next(r for r in branding_roles_payload(out_dir) if r["slot"] == slot)
+
+
+def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_only=False):
+    """POST /api/branding/slot for a role slot: one picture becomes the install's override of
+    one role image. Returns (body, status). Read it top to bottom -- it is the whole path:
+
+      1. take the bytes, from the uploaded file or from the user's own library by media id,
+         capped at ROLE_MAX_BYTES;
+      2. open the picture and read its size from the HEADER; refuse anything over ROLE_MAX_SIDE a
+         side before a pixel is decoded (role_measure);
+      3. decode it (first frame), measure format, shape, size, whether it moves and how much of it
+         is see-through, and check those against THIS image's spec (role_image_spec) -- a broken
+         rule is a 400 that names the rule and the measured value, and NOTHING has been written;
+      4. only then write it: a still is re-encoded from the decoded pixels (nothing the sender
+         appended survives; the login companion is stored as WebP, every other role as PNG, under
+         the public name the app already asks for); the one animation a role allows (the login
+         companion's WebP) is decoded frame by frame and stored as sent, cut at its container's end
+         (_role_animation_bytes). The override file is replaced whole.
+
+    `check_only` stops after step 3 and answers with the measurements ({"facts": ...}) instead of
+    judging them: that is how a picture already in the library ("From the gallery") gets its rules
+    ticked in the editor before Use this, with the same numbers the client's rules read. It never
+    writes.
+
+    The pack is read-only here: the file lands in the coded tree, where loose beats the pack."""
+    import io
+    role = ROLE_SLOTS[slot]
+    img = role["images"].get(key)
+    if img is None:
+        return {"error": "unknown image"}, 400
+    if upload is not None and getattr(upload, "filename", ""):
+        raw = upload.stream.read(ROLE_MAX_BYTES + 1)
+    elif media_id:
+        hit = next((p for p in find_files_for_media_id(out_dir, media_id)
+                    if p.suffix.lower() in _IMAGE_EXTS), None)
+        if hit is None:
+            return {"error": "no local image for that media id"}, 400
+        try:
+            if hit.stat().st_size > ROLE_MAX_BYTES:
+                return {"error": "That file is too large."}, 400
+            raw = hit.read_bytes()
+        except OSError:
+            return {"error": _UNREADABLE}, 400
+    else:
+        return {"error": "no file"}, 400
+    if len(raw) > ROLE_MAX_BYTES:
+        return {"error": "That file is too large."}, 400
+    try:
+        facts, rgba = role_measure(raw)
+    except ImageRefused as exc:
+        return {"error": str(exc)}, 400
+    if check_only:
+        return {"facts": facts}, 200
+    failed = role_spec_failures(role_image_spec(slot, key), facts)
+    if failed:
+        return {"error": role_refusal_text(role["name"], failed), "failed": failed}, 400
+    buf = io.BytesIO()
+    if facts["animated"]:
+        try:
+            buf.write(_role_animation_bytes(raw))
+        except ImageRefused as exc:
+            return {"error": str(exc)}, 400
+    elif img["public"].lower().endswith(".webp"):
+        rgba.save(buf, "WEBP", lossless=True, quality=100, method=4)
+    else:
+        rgba.save(buf, "PNG", optimize=True)
+    path = _role_override_path(slot, key)
+    tmp = path.with_name("%s.%s.tmp" % (path.name, secrets.token_hex(4)))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(buf.getvalue())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return {"error": "Couldn't save that file. Your current art is unchanged."}, 500
+    _baseline_note_app_write(out_dir, _role_coded_rel(slot, key))
+    return {"slot": slot, "key": key, "role": _role_payload(out_dir, slot)}, 200
+
+
+def branding_role_restore(out_dir, slot, key):
+    """POST /api/branding/role/restore: remove the install's override of one role image, so the
+    pack's default answers again. Returns (body, status). It unlinks ONE file under the coded
+    tree and nothing else; the pack (the container) is never opened for writing, and removing
+    an override that is not there is a quiet {"removed": false}, never an error.
+
+    It refuses (409) when the pack holds no default for that image: then the file under the coded
+    tree is the only copy of that art (the legacy branding migration moved an old install's loose
+    files into these very paths, and moonglade.dat may be absent), and deleting it would leave the
+    role with nothing at all."""
+    if key not in ROLE_SLOTS[slot]["images"]:
+        return {"error": "unknown image"}, 400
+    path = _role_override_path(slot, key)
+    removed = False
+    try:
+        if path.is_file():
+            box = _get_container()
+            if box is None or not box.has(_role_coded_rel(slot, key)):
+                return {"error": "There's no default to go back to, so your file is kept."}, 409
+            path.unlink()
+            removed = True
+    except OSError:
+        return {"error": "Couldn't remove your file."}, 409
+    return {"slot": slot, "key": key, "removed": removed, "role": _role_payload(out_dir, slot)}, 200
 
 
 # The raw-drop path (docs/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
@@ -4998,7 +5484,7 @@ _BRANDING_README = "Maybe something goes in here.\n"
 # the branding_custom_file flag (2026-09-10), while adoption stays narrow
 # (_SWEEPABLE_SLOTS + marks), so the role-bound files those two folders hold are
 # read but never consumed.
-_BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
+_BRANDING_DISCOVERY_SLOTS = BANNER_SLOTS + ("mascots", "rewards", "marks")
 
 
 def _migrate_legacy_branding_root():
@@ -5891,9 +6377,9 @@ def _record_slot_resolution(out_dir):
     try:
         recorded = _recorded_slot_active(out_dir)
         resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-                    for slot in BRANDING_SLOTS}
+                    for slot in BANNER_SLOTS}
         if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
-                   for slot in BRANDING_SLOTS):
+                   for slot in BANNER_SLOTS):
             return
         save_slot_active(out_dir, resolved)
     except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
@@ -5920,7 +6406,7 @@ def _ensure_banner_renders(out_dir):
     picks stamped into the renders below are picks this install has written
     down, and on a test build there is nothing here that can touch the coded
     tree's own pick file."""
-    for slot in BRANDING_SLOTS:
+    for slot in BANNER_SLOTS:
         try:
             _ensure_banner_flat(out_dir, slot)
         except Exception:                  # noqa: BLE001 -- a banner must never fail a boot
@@ -15307,7 +15793,8 @@ def create_app(out_dir: Path):
                              # mark only fails on click with a raw 403 toast (red team
                              # 2026-09-08). Same gate as the GET route below.
                              marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                             slots=branding_slots_payload(out_dir)),
+                             slots=branding_slots_payload(out_dir),
+                             roles=branding_roles_payload(out_dir)),
         })
 
     def _check_csrf(body):
@@ -18505,6 +18992,14 @@ def create_app(out_dir: Path):
             # -- loose root is never read.
             box = _get_container()
             raw = box.get(coded) if box else None
+        elif (coded.lower() in _role_coded_rels() and (bdir / coded).is_file()
+              and not _role_file_decodes(bdir / coded)
+              and (_get_container() is not None and _get_container().has(coded))):
+            # Fail-soft (Session X): an override of a named role that will not decode is the
+            # pack's default, silently. Container-ONLY, like the flat branch above -- the loose
+            # bytes are exactly what must not be served. With no pack default to fall back to
+            # there is nothing better to say, and the loose file is served as it always was.
+            raw = _get_container().get(coded)
         elif (bdir / coded).is_file():
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
@@ -22131,7 +22626,8 @@ def create_app(out_dir: Path):
                                 mark=cfg["mark"], anim=cfg["anim"],
                                 anims=MARK_ANIMS,
                                 marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
-                                slots=branding_slots_payload(out_dir)))
+                                slots=branding_slots_payload(out_dir),
+                                roles=branding_roles_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         _before = (cfg.get("mark"), cfg.get("anim"))
@@ -22190,8 +22686,8 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_branding_slot_upload():
         """Upload a new asset into one Branding slot (the three banner slots --
-        Control Panel.dc.html's 'From disk' chip; mascots/rewards are NOT slots,
-        see BRANDING_SLOTS' unlock-split note). LOGIN tier,
+        Control Panel.dc.html's 'From disk' chip; the named roles have their own
+        door, /api/branding/role, with a CSRF check this one predates). LOGIN tier,
         matching /api/branding just above: cosmetic, no host-filesystem risk
         beyond writing into branding/, the same machine-local git-ignored tree
         marks already live in (NOT the shortcut route's stricter local-only gate).
@@ -22199,7 +22695,7 @@ def create_app(out_dir: Path):
         extension, the same defense-in-depth this app already applies to real
         library thumbnails (see _thumb_for, above)."""
         slot = request.form.get("slot") or ""
-        if slot not in BRANDING_SLOTS:
+        if slot not in BANNER_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
         f = request.files.get("file")
         media_id = (request.form.get("media_id") or "").strip()
@@ -22209,6 +22705,9 @@ def create_app(out_dir: Path):
             import io
             from PIL import Image
             if f is not None and f.filename:
+                head = f.stream.read(64)
+                f.stream.seek(0)
+                guard_webp_canvas(head, BANNER_MAX_SIDE)       # before libwebp commits a declared canvas
                 im = Image.open(f.stream)
             else:
                 # "From the gallery..." (Control Panel.dc.html:342) -- source the asset
@@ -22219,10 +22718,14 @@ def create_app(out_dir: Path):
                 img_hit = next((p for p in hits if p.suffix.lower() in _IMAGE_EXTS), None)
                 if img_hit is None:
                     return jsonify({"error": "no local image for that media id"}), 400
+                with open(img_hit, "rb") as fh:
+                    guard_webp_canvas(fh.read(64), BANNER_MAX_SIDE)
                 im = Image.open(img_hit)
             im.load()
             buf = io.BytesIO()
             im.convert("RGBA").save(buf, format="PNG")
+        except ImageRefused as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
         item = add_slot_asset(out_dir, slot, buf.getvalue())   # neutral transform to start
@@ -22261,6 +22764,63 @@ def create_app(out_dir: Path):
             return jsonify({"error": "unknown slot or asset"}), 400
         return jsonify({"slots": branding_slots_payload(out_dir)})
 
+    @app.route("/api/branding/role", methods=["POST"])
+    @tier(LOGIN)
+    def api_branding_role_upload():
+        """Make one picture the install's override of one image of a named role (the Branding
+        tab's Roles section; a hidden, unlock-gated surface). Multipart: csrf, slot (a key of
+        ROLE_SLOTS), key (one of that role's images) and either `file` (From disk) or `media_id`
+        (From the gallery). LOGIN tier, with the explicit CSRF token this write class carries.
+        The spec is checked and the file written in branding_role_upload() -- read that, it is the
+        whole path; this handler only reads the request. The cap on the request is set before the
+        form is parsed, so a body far past ROLE_MAX_BYTES is a 413 and is never spooled."""
+        request.max_content_length = ROLE_MAX_BYTES + 64 * 1024     # the file, plus its form fields
+        if not _check_csrf(request.form):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        slot = request.form.get("slot") or ""
+        if slot not in ROLE_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        body, status = branding_role_upload(
+            out_dir, slot, (request.form.get("key") or "").strip(),
+            upload=request.files.get("file"), media_id=(request.form.get("media_id") or "").strip(),
+            check_only=request.form.get("check") == "1")
+        return jsonify(body), status
+
+    @app.route("/api/branding/role/restore", methods=["POST"])
+    @tier(LOGIN)
+    def api_branding_role_restore():
+        """Go back to the pack's default for one role image: removes the install's override
+        (the one file under the coded tree) and nothing else. LOGIN tier, CSRF-checked."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        slot = str(body.get("slot") or "")          # a list or dict is not hashable: coerce before the lookup
+        if slot not in ROLE_SLOTS:
+            return jsonify({"error": "unknown slot"}), 400
+        out, status = branding_role_restore(out_dir, slot, str(body.get("key") or ""))
+        return jsonify(out), status
+
+    @app.route("/api/branding/role/default/<slot>/<key>")
+    @tier(LOGIN)
+    def api_branding_role_default(slot, key):
+        """The pack's own art for one role image, so the Roles row can show default beside
+        yours while an override is in place. Only the nine named role images are reachable
+        here; the bytes come from the container alone (never the loose tree), and an image the
+        pack does not carry is a plain 404."""
+        from flask import abort
+        import mimetypes
+        img = (ROLE_SLOTS.get(slot) or {}).get("images", {}).get(key)
+        if img is None:
+            abort(404)
+        box = _get_container()
+        raw = box.get(_public_rel_to_coded(img["public"])) if box else None
+        if raw is None:
+            abort(404)
+        resp = app.response_class(raw, mimetype=mimetypes.guess_type(img["public"])[0]
+                                  or "application/octet-stream")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
     @app.route("/api/branding/mark/custom", methods=["POST"])
     @tier(LOGIN)
     def api_branding_mark_custom():
@@ -22284,7 +22844,11 @@ def create_app(out_dir: Path):
         try:
             import io
             from PIL import Image
-            im = Image.open(io.BytesIO(raw))
+            # The same two questions every user-picture upload asks first: a WebP's declared canvas
+            # from its header (libwebp commits it all when Pillow merely opens the file), and only
+            # the everyday formats ever opened.
+            guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
+            im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
             im.load()
             if is_webp:
                 art = raw
@@ -22292,6 +22856,8 @@ def create_app(out_dir: Path):
                 buf = io.BytesIO()
                 im.convert("RGBA").save(buf, format="PNG")
                 art = buf.getvalue()
+        except ImageRefused as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
         mark = add_custom_mark(out_dir, art, ext=".webp" if is_webp else ".png")
