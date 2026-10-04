@@ -17937,6 +17937,25 @@ def create_app(out_dir: Path):
             # site came back empty here (owner, 2026-09-07). Same key, same query, website
             # identity: the same rows the site shows.
             core, session = _gen_session()
+            if src == "saved":
+                # The Saved tab (Session S): one of the account's PixAI model collections --
+                # Saved, the reserved default, unless `set` names a set -- 24 a page by cursor,
+                # newest saved first. PixAI's own keyword search (cursor mode) and ONE LoRA
+                # base (`base`, the chips) filter it; the kind is fixed by the picker. The plain
+                # API-key session, as the 2026-10-03 probe read it (no website identity).
+                rec = _recipes()
+                set_id = (request.args.get("set") or "").strip()
+                if not set_id:
+                    found = rec.model_default(session, _recipe_user_id(core, session))
+                    if found is None:
+                        return jsonify({"results": [], "has_more": False, "next_cursor": ""})
+                    set_id = found["id"]
+                payload = rec.model_page(session, set_id, "lora" if usage == "LORA" else "base",
+                                         cursor=cursor, query=q,
+                                         lora_base=(request.args.get("base") or "").strip())
+                if usage == "LORA" and base_type:
+                    payload["results"] = core.annotate_lora_compat(payload["results"], base_type)
+                return jsonify(payload)
             session = core.present_as_web(session)
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
@@ -27829,6 +27848,111 @@ __DESIGN_TOKENS__
             return jsonify(_recipes().set_toggle(gsession, body.get("set_id"),
                                                  body.get("recipe_id"), bool(body.get("on")),
                                                  body.get("item_id") or ""))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    # ---- The model pickers' Saved tab (Session S): PixAI's model collections ----------------
+    # Reads: the rail, a model's state (the "Keep this model" menu opens on it), the removed
+    # models. Writes: ⊕ Save, a menu tick, taking a removed model's entry out, + New set --
+    # each CSRF-checked here and READ_ONLY-checked first in moonglade_recipes, one attempt and
+    # a read-back that decides the answer. A page of a set rides /api/model-search?src=saved.
+
+    def _saved_kind():
+        return "lora" if (request.args.get("kind") or "").lower() == "lora" else "base"
+
+    def _read_only_flag(core):
+        return bool(core.READ_ONLY or core._read_only_now())
+
+    @app.route("/api/model-saved/sets")
+    @tier(LOGIN)
+    def api_model_saved_sets():
+        """The rail: Saved first, then named sets A-Z, counting this picker's kind (?kind=base|
+        lora), plus how many saved models PixAI no longer has, and whether READ_ONLY is on."""
+        try:
+            core, gsession = _gen_session()
+            out = _recipes().model_sets(gsession, _recipe_user_id(core, gsession), _saved_kind())
+            out["read_only"] = _read_only_flag(core)
+            return jsonify(out)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, sets=[])
+
+    @app.route("/api/model-saved/state")
+    @tier(LOGIN)
+    def api_model_saved_state():
+        """One model's place in the account's sets (?model_id=): the selector, a read only."""
+        try:
+            core, gsession = _gen_session()
+            out = _recipes().model_state(gsession, request.args.get("model_id", ""))
+            out["read_only"] = _read_only_flag(core)
+            return jsonify(out)
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, sets=[])
+
+    @app.route("/api/model-saved/unavailable")
+    @tier(LOGIN)
+    def api_model_saved_unavailable():
+        """"K not available ▸": the removed models in Saved (?expect=K stops the walk early)."""
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().model_unavailable(
+                gsession, _recipe_user_id(core, gsession), request.args.get("expect", 0)))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e, items=[])
+
+    @app.route("/api/model-saved/save", methods=["POST"])
+    @tier(LOGIN)
+    def api_model_saved_save():
+        """⊕ Save: {csrf, model_id} -> Saved on PixAI, then the read-back's answer."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().model_save(gsession, _recipe_user_id(core, gsession),
+                                                 body.get("model_id")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/model-saved/tick", methods=["POST"])
+    @tier(LOGIN)
+    def api_model_saved_tick():
+        """A PixAI tick in "Keep this model": {csrf, set_id, model_id, on, item_id?}."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().model_tick(gsession, body.get("set_id"),
+                                                 body.get("model_id"), bool(body.get("on")),
+                                                 body.get("item_id") or ""))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/model-saved/remove", methods=["POST"])
+    @tier(LOGIN)
+    def api_model_saved_remove():
+        """Take a removed model's entry out of Saved: {csrf, item_id}."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            return jsonify(_recipes().model_remove_gone(gsession, _recipe_user_id(core, gsession),
+                                                        body.get("item_id")))
+        except Exception as e:                                   # noqa: BLE001
+            return _recipe_fail(e)
+
+    @app.route("/api/model-saved/sets/create", methods=["POST"])
+    @tier(LOGIN)
+    def api_model_saved_set_create():
+        """+ New set in "Keep this model": {csrf, title}. A private model set on PixAI."""
+        body, bad = _recipe_write_body()
+        if bad:
+            return bad
+        try:
+            core, gsession = _gen_session()
+            made = _recipes().set_create(gsession, body.get("title"), content_type="model")
+            return jsonify({"set": made})
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e)
 
