@@ -1,9 +1,15 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import StorageBars from "./StorageBars.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
+import BrokenFilesMobile from "./BrokenFilesMobile.jsx";
+import useBrokenFiles from "../hooks/useBrokenFiles.js";
+import { entrySummary, tileChip } from "../lib/brokenFilesCore.js";
+import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
+import { onRunEnd } from "../lib/brokenFixRun.js";
+import "../styles/broken-files.css";
 import "../styles/overlays.css";
 import "../styles/control-mobile.css";
 import "../styles/create-mobile.css";
@@ -72,10 +78,40 @@ import "../styles/menu-screens-mobile.css";
    6. UNCATALOGED FOOTER: real count (not the mock's hardcoded "4"), and --
       since Import is a real screen this SAME pass -- tapping it opens the
       Import screen directly, a real destination that didn't exist before
-      this batch, instead of the design's plain static note. */
+      this batch, instead of the design's plain static note.
+   7. BROKEN FILES (Session W, W6a): the Zero-byte files, Missing thumbs and Missing files
+      tiles turn peach (Missing files opens the list at All)
+      while the integrity check's list has rows under them, and tapping one -- or the
+      "Broken files" row under the tiles -- pushes the Broken files screen
+      (BrokenFilesMobile.jsx) with that chip picked: another push-within-a-push, owned here
+      like Duplicates. The Control tab's "N broken · Review" and a fix run's Activity row
+      reach it through lib/brokenFilesNav.js. */
 
-export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved, onStoragePick }) {
-  const { h, err, stats, monthMax, modelMax, buckets, tier, storage } = useHealth();
+export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter, onOpenImport, boot, onDuplicatesResolved, onStoragePick, onOpenDetails }) {
+  // A Broken files fix run changed the library under this screen: the tiles re-measure when it ends.
+  const [runsEnded, setRunsEnded] = useState(0);
+  useEffect(() => onRunEnd(() => setRunsEnded((n) => n + 1)), []);
+  const { h, err, stats, monthMax, modelMax, buckets, tier, storage } = useHealth(runsEnded);
+
+  // Broken files drill-in (point 7): the same open/closing pair and Back gesture as Duplicates.
+  const bf = useBrokenFiles();
+  const bfShown = !!(bf.doc && bf.doc.counts && bf.doc.counts.all > 0);
+  const [bfChip, setBfChip] = useState("all");
+  const [bfOpen, setBfOpen] = useState(false);
+  const [bfClosing, setBfClosing] = useState(false);
+  const openBf = (chip) => { setBfChip(chip || "all"); setBfClosing(false); setBfOpen(true); };
+  const closeBf = () => {
+    setBfClosing(true);
+    setTimeout(() => { setBfOpen(false); setBfClosing(false); }, 220);
+  };
+  useLayerHistory(bfOpen, closeBf);
+  const [bfGo, setBfGo] = useState(() => takeBrokenFilesIntent());
+  useEffect(() => subscribeBrokenFilesIntent(() => setBfGo(takeBrokenFilesIntent())), []);
+  useEffect(() => {
+    if (!bfGo || !bfShown) return;
+    openBf(bf.doc.counts[bfGo] > 0 ? bfGo : "all");
+    setBfGo(null);
+  }, [bfGo, bfShown]);
 
   // Duplicate Review drill-in -- MobileScreen.jsx's ownership contract,
   // mirrored exactly from ControlMobile.jsx's own Branding screen (open/
@@ -102,9 +138,17 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
   return (
     <>
       <div className="ctm-statgrid" style={{ marginBottom: 16 }}>
-        {stats.map((st) => (
-          <div className="ctm-statcard" key={st.label}>
-            {st.dup ? (
+        {stats.map((st) => {
+          const chip = bfShown ? tileChip(st.label, bf.doc.counts) : null;
+          const flag = !!chip;
+          return (
+          <div className={"ctm-statcard" + (flag ? " mgbf-flag" : "")} key={st.label}>
+            {flag ? (
+              <button type="button" className="ctm-statnum ctm-statnum-btn"
+                title="Show these in Broken files" onClick={() => openBf(chip)}>
+                {st.value}
+              </button>
+            ) : st.dup ? (
               <button type="button" className={"ctm-statnum ctm-statnum-btn" + (st.gold ? " gold" : "")}
                 title="Open Duplicate Review" onClick={openDup}>
                 {st.value}
@@ -114,8 +158,16 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
             )}
             <div className="ctm-statlabel">{st.label}</div>
           </div>
-        ))}
+          );
+        })}
       </div>
+
+      {bfShown ? (
+        <button type="button" className="mgbf-m-entry" onClick={() => openBf("all")}>
+          <span className="mgbf-title">Broken files</span>
+          <span className="mgbf-sum">{entrySummary(bf.doc)}</span>
+        </button>
+      ) : null}
 
       {/* Session N6: Storage used, the same three stacked bars the desktop draws. A tap on a
           segment filters the Gallery tab to it (AppMobile's filterFromHealth). */}
@@ -213,6 +265,11 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
           push-within-a-push; see header comment, point 4). */}
       <MobileScreen open={dupOpen} closing={dupClosing} onClose={closeDup} title="Duplicates">
         <DuplicateReviewMobile csrf={(boot && boot.csrf) || ""} onResolved={onDuplicatesResolved} />
+      </MobileScreen>
+
+      {/* Broken files drill-in (point 7) -- a sibling MobileScreen, like Duplicates. */}
+      <MobileScreen open={bfOpen} closing={bfClosing} onClose={closeBf} title="Broken files">
+        <BrokenFilesMobile bf={bf} chip={bfChip} setChip={setBfChip} onOpenDetails={onOpenDetails} />
       </MobileScreen>
     </>
   );

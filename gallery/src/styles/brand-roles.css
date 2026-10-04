@@ -1,0 +1,120 @@
+/* ✦ Branding -> Roles (Session X, Branding Roles Handoff). Desktop rows and the phone's role
+   screen share every piece below; sizes, colours and copy are the handoff's. Tokens only. */
+
+.mgcp-roles { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.mgcp-rl-lede { font-size: 11px; line-height: 1.6; color: var(--subtext); margin: -2px 0 6px; }
+
+.mgcp-rl { display: flex; flex-direction: column; gap: 7px; }
+.mgcp-rl-row { display: flex; align-items: center; gap: 6px; box-sizing: border-box; min-height: 52px;
+  padding: 7px 9px; border-radius: 10px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .3); }
+.mgcp-rl.open > .mgcp-rl-row { border-color: color-mix(in srgb, var(--lavender) 50%, var(--surface1)); }
+
+/* the art tile: contain, on a faint ground; overridden gets the 2 px lavender outline, the pack's
+   default beside it is smaller, dimmed to 45% and desaturated */
+.mgcp-rl-art { flex: none; box-sizing: border-box; border-radius: 8px; display: block; padding: 0;
+  background-color: rgba(33, 31, 58, .5); background-repeat: no-repeat; background-position: center;
+  background-size: contain; border: 0; }
+.mgcp-rl-art.yours { outline: 2px solid var(--lavender); outline-offset: 1px; }
+.mgcp-rl-art.def { opacity: .45; filter: saturate(.6); }
+button.mgcp-rl-art { cursor: pointer; }
+button.mgcp-rl-art:hover { opacity: .8; }
+.mgcp-rl-art.none { border: 1px dashed var(--subtext); background-color: rgba(33, 31, 58, .4); }
+.mgcp-rl-arrow { font-size: 11px; color: var(--overlay0); }
+
+.mgcp-rl-name { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.4; color: var(--text); }
+.mgcp-rl-name > div:nth-child(2) { color: var(--subtext); }
+
+.mgcp-rl-ghost { font: inherit; font-size: 10px; padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
+.mgcp-rl-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--lavender); }
+.mgcp-rl-ghost:disabled { opacity: .5; cursor: default; }
+.mgcp-rl-primary { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px;
+  border: 0; background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; }
+.mgcp-rl-primary:disabled { background: var(--surface0); color: var(--overlay0); cursor: default; }
+.mgcp-rl-spacer { flex: 1; }
+
+.mgcp-rl-note { font-size: 10.5px; font-weight: 600; line-height: 1.5; color: var(--peach); padding: 0 4px; }
+
+/* the one-time ask (a small popover over the row, z 300) */
+.mgcp-rl-ask { position: relative; z-index: 300; display: flex; flex-direction: column; gap: 4px; padding: 9px 11px;
+  border-radius: 10px; border: 1px solid var(--lavender); background: #0c0a1c;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .5); font-size: 10.5px; line-height: 1.5; }
+.mgcp-rl-askbtns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+
+/* the expanded editor: spec line, drop zone, buttons, refusal, preview */
+.mgcp-rl-editor { display: flex; flex-direction: column; gap: 7px; padding: 2px 0 4px;
+  animation: mgcp-rl-in .42s ease both; }
+.mgcp-rl-editor.leaving { animation: mgcp-rl-out .35s ease both; }
+@keyframes mgcp-rl-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes mgcp-rl-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px); } }
+.mgcp-rl-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgcp-rl-tab { font: inherit; font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
+.mgcp-rl-tab.on { border-color: var(--lavender); background: rgba(182, 146, 230, .16); color: var(--text); }
+.mgcp-rl-imgrow { display: flex; align-items: center; gap: 6px; padding: 2px 2px 0; }
+.mgcp-rl-imgname { flex: 1; font-size: 10.5px; }
+.mgcp-rl-imgstate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
+.mgcp-rl-spec { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .04em;
+  color: var(--gold); }
+.mgcp-rl-drop { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 10px; cursor: pointer;
+  border: 1.5px dashed var(--lavender); background: rgba(182, 146, 230, .05);
+  font-size: 10.5px; line-height: 1.6; text-align: center; color: var(--text); }
+.mgcp-rl-drop.over { background: rgba(182, 146, 230, .14); }
+.mgcp-rl-ticks { display: flex; gap: 4px 14px; flex-wrap: wrap; justify-content: center; }
+.mgcp-rl-ticks .ok { color: var(--emerald); }
+.mgcp-rl-ticks .bad { color: var(--peach); }
+.mgcp-rl-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* the loud refusal (the Branding Workshop's): peach, naming the rule and the measured value */
+.mgcp-rl-loud { padding: 9px 11px; border-radius: 10px; border: 1px solid rgba(250, 179, 135, .6);
+  background: rgba(250, 179, 135, .1); font-size: 10.5px; font-weight: 600; line-height: 1.5; color: var(--peach); }
+
+/* the role in its home */
+.mgcp-rl-previewrow { display: flex; gap: 10px; align-items: center; }
+.mgcp-rl-pvnote { flex: 1; white-space: pre-line; font-size: 10px; line-height: 1.5; color: var(--overlay0); }
+.mgcp-rl-pv { flex: none; }
+.mgcp-rl-pv.login { width: 80px; height: 100px; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(160deg, #2a2050, #0c0a1c); }
+.mgcp-rl-pvnel { display: block; width: 100%; height: 100%; background-repeat: no-repeat;
+  background-position: center bottom; background-size: contain; }
+.mgcp-rl-pv.tracker { display: flex; flex-direction: column; gap: 4px; width: 150px; }
+.mgcp-rl-trow { display: flex; align-items: center; gap: 8px; padding: 3px 7px; border-radius: 8px;
+  background: rgba(33, 31, 58, .5); font-size: 10px; color: var(--subtext); }
+.mgcp-rl-tnel { width: 26px; height: 26px; flex: none; background-repeat: no-repeat; background-position: center;
+  background-size: contain; }
+.mgcp-rl-tnel.spin { border-radius: 50%; animation: mgcp-rl-turn 3.2s linear infinite; }
+@keyframes mgcp-rl-turn { to { transform: rotate(360deg); } }
+.mgcp-rl-pv.rewards { display: flex; flex-direction: column; gap: 6px; }
+.mgcp-rl-ribbon, .mgcp-rl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px;
+  border-radius: 999px; font-size: 10.5px; color: var(--text); background: rgba(33, 31, 58, .6);
+  border: 1px solid var(--surface1); align-self: flex-start; }
+.mgcp-rl-ico { width: 15px; height: 15px; flex: none; background-repeat: no-repeat; background-position: center;
+  background-size: contain; }
+.mgcp-rl-pv.power { display: flex; gap: 8px; }
+.mgcp-rl-pcard { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 8px 6px;
+  border-radius: 10px; border: 1px solid var(--surface1); background: #0c0a1c; width: 96px;
+  font-size: 9px; text-align: center; color: var(--subtext); }
+.mgcp-rl-pnel { width: 56px; height: 56px; background-repeat: no-repeat; background-position: center;
+  background-size: contain; }
+.mgcp-rl-pnel.off { filter: grayscale(.9) brightness(.7); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgcp-rl-editor, .mgcp-rl-editor.leaving { animation: none; }
+  .mgcp-rl-tnel.spin { animation: none; }
+}
+
+/* ---- the phone: a Roles group of 52 px rows, each pushing a role screen (X5a) ---- */
+.mgcp-rlm-group { display: flex; flex-direction: column; gap: 8px; }
+.mgcp-rlm-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); padding: 2px 4px 0; }
+.mgcp-rlm-row { display: flex; align-items: center; gap: 10px; box-sizing: border-box; width: 100%; min-height: 52px;
+  padding: 7px 9px; border-radius: 10px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .3);
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.mgcp-rlm-chev { font-size: 14px; color: var(--overlay0); }
+.mgcp-rlm-screen { display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 22px; }
+.mgcp-rlm-pair { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0; }
+.mgcp-rlm-btns { display: flex; gap: 8px; }
+.mgcp-rlm-btns > * { flex: 1; min-height: 44px; font-size: 12px; border-radius: 10px; }
+.mgcp-rlm-seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.mgcp-rlm-seg .mgcp-rl-tab { min-height: 44px; padding: 0 14px; font-size: 11px; }
+.mgcp-rlm-checks { font-size: 11px; }
+.mgcp-rl-ask.big { font-size: 12px; }

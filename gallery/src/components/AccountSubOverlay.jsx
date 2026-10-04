@@ -19,7 +19,10 @@ import { cardLogRow } from "../lib/cardLog.js";
    task-type word ("image"); category is what the real /api/account cards_by carries. */
 
 const TABS = [["cards", "Cards"], ["coupons", "Coupons"], ["ledger", "Credit ledger"]];
-const KNOWN_REASONS = ["task cost", "daily reward", "event gift", "extra package"];
+// PixAI's own type keys, exactly as the server sends them (moonglade_backup.CREDIT_LOG_REASONS;
+// loom/test/ledger-known-reasons.test.js keeps the two in step). Written with spaces until
+// 2026-10-04, which matched nothing and drew every chip "raw".
+const KNOWN_REASONS = ["task_cost", "daily", "event_gift", "extra_package"];
 const nfmt = (n) => (typeof n === "number" ? n.toLocaleString() : n);
 const day = (s) => (s ? String(s).slice(0, 10) : "");
 
@@ -219,6 +222,9 @@ export default function AccountSubOverlay({ onClose }) {
                   return (
                     <div className="acct-row" key={le.ref_id || i}>
                       <b className={"acct-amt" + (pos ? " pos" : "")}>{pos ? "+" : "−"}{nfmt(Math.abs(le.amount || 0))}</b>
+                      {/* Session R (R9c): an "event gift" row wears the gift icon, 14 px, before
+                          its reason -- the same pack art as the header's gift box. */}
+                      {le.type === "event_gift" ? <span className="acct-gifticon" aria-hidden="true" /> : null}
                       <span className={"acct-dimchip" + (known ? "" : " raw")}>{le.type}</span>
                       <div className="acct-rowmain acct-ellip" style={{ fontSize: 12 }}>{le.label}</div>
                       <span className="acct-monodim">{day(le.created_at)}</span>

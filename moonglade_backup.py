@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.16.0"
+__version__ = "3.17.0"
 
 import argparse
 import base64
@@ -1361,8 +1361,9 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
 # will ever report them finished. Deliberately EXCLUDES "cli-": a CLI job belongs to a separate
 # process with its own lifetime that the server knows nothing about, so sweeping one would mark a
 # genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
-# resolve_orphan_jobs() instead.
-_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-")
+# resolve_orphan_jobs() instead. "integrity-" is the Broken files list's fix run (a thread in
+# the server, moonglade_integrity.FixRunner).
+_JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-", "integrity-")
 
 
 def resolve_interrupted_local_jobs(out_dir, now=None):
@@ -2278,15 +2279,17 @@ def resolve_media(session, mid):
     for u in urls:
         if isinstance(u, dict) and u.get("url"):
             by_variant[str(u.get("variant", "")).upper()] = u["url"]
-    chosen = None
+    chosen, variant = None, ""
     for pref in URL_VARIANT_PREFERENCE:
         if pref in by_variant:
-            chosen = by_variant[pref]
+            chosen, variant = by_variant[pref], pref
             break
     if not chosen and by_variant:
-        chosen = next(iter(by_variant.values()))
+        variant, chosen = next(iter(by_variant.items()))
+    # `variant` says which copy `chosen` is: the Broken files re-download (moonglade_integrity)
+    # must never take a THUMBNAIL fallback for an original. Every other caller ignores it.
     info = {"width": obj.get("width"), "height": obj.get("height"),
-            "type": obj.get("type", "")}
+            "type": obj.get("type", ""), "variant": variant}
     vlog("resolve_media {} -> {} {}x{} in {:.2f}s".format(
         mid, "url" if chosen else "NO-URL",
         info.get("width"), info.get("height"), time.monotonic() - _t))
@@ -2432,8 +2435,12 @@ def _atomic_replace(tmp, dest, attempts=6, base_delay=0.15):
 
 
 def download(session, url, stem, retries=3, convert=None,
-             jpeg_quality=92, jpeg_bg="white", keep_webp=False):
-    """stem is a Path WITHOUT extension. Returns (status, final_path_or_None)."""
+             jpeg_quality=92, jpeg_bg="white", keep_webp=False, progress=None):
+    """stem is a Path WITHOUT extension. Returns (status, final_path_or_None).
+
+    `progress`, when given, is called as progress(bytes_so_far, content_length) after each
+    chunk is written (content_length 0 when the response sends none): the Broken files list's
+    byte bar (Session W) rides it. It only watches; it changes nothing about the download."""
     existing = [p for p in stem.parent.glob(stem.name + ".*")
                 if not p.name.endswith(".part") and p.stat().st_size > 0]
     if existing:
@@ -2462,6 +2469,8 @@ def download(session, url, stem, retries=3, convert=None,
                     for chunk in r.iter_content(chunk_size=65536):
                         fh.write(chunk)
                         nbytes += len(chunk)
+                        if progress:
+                            progress(nbytes, expect if enc == "identity" else 0)
                 if nbytes == 0:
                     # A 200 with an empty body -- a truncated connection, not a real
                     # image. Promoting this to `dest` would create a permanent,
@@ -3183,46 +3192,51 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
     if kw:
         params["keyword"] = kw
     data = _rest_get(session, "/generation-model/search", params=params) or {}
-    out = []
-    for m in data.get("data") or []:
-        med = m.get("media") or {}
-        # Real field names (probed 2026-07-04): the rich description lives under
-        # `modelDescription`, base-model family under `category`, and an official
-        # badge under `curations` (e.g. ["inhouse"]). See ../moonglade-internal/private/GENERATOR_SURFACE.md.
-        cur = m.get("curations") or []
-        out.append({
-            "title": m.get("title") or "",
-            "type": m.get("type") or "",
-            "model_id": str(m.get("id") or ""),
-            "liked_count": int(m.get("likedCount") or 0),
-            # Shared with _market_row so both paths blur the same model the same way --
-            # this row keeps its authoritative flag.shouldBlur, and a row that somehow
-            # arrives without one now falls back to isNsfw instead of silently not blurring.
-            "should_blur": _row_should_blur(m),
-            # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
-            # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
-            # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
-            # actually on screen.
-            "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
-            "has_version": bool(m.get("hasLatestAvailableVersion")),
-            # Rich surface for the preview pop-out card.
-            "description": (m.get("modelDescription") or "")[:600],
-            "base_model": m.get("category") or "",
-            "curations": [c for c in cur if isinstance(c, str)],
-            "official": any((c or "").lower() == "inhouse" for c in cur if isinstance(c, str)),
-            "comment_count": int(m.get("commentCount") or 0),
-            "ref_count": int(m.get("refCount") or 0),
-            "author_id": str(m.get("authorId") or ""),
-            "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
-            # GraphQL-only per-viewer state absent here -> False, the mirror of
-            # model_search_market_gql's "REST-only rich fields absent here -> empty so the
-            # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
-            # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
-            # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
-            # missing) so a consumer can read the key off either path's rows.
-            "bookmarked": False, "liked": False,
-        })
+    out = [rest_model_row(m) for m in data.get("data") or [] if isinstance(m, dict)]
     return {"results": out, "has_more": bool(data.get("hasMore"))}
+
+
+def rest_model_row(m):
+    """One model object as /v2 REST hands it (the /generation-model/search row, and the `model`
+    of a model collection's item -- the same object, probe 2026-10-03) -> the picker's row.
+    Shared so the Saved tab's cards and the search's cards can never drift apart."""
+    med = m.get("media") or {}
+    # Real field names (probed 2026-07-04): the rich description lives under
+    # `modelDescription`, base-model family under `category`, and an official
+    # badge under `curations` (e.g. ["inhouse"]). See ../moonglade-internal/private/GENERATOR_SURFACE.md.
+    cur = m.get("curations") or []
+    return {
+        "title": m.get("title") or "",
+        "type": m.get("type") or "",
+        "model_id": str(m.get("id") or ""),
+        "liked_count": int(m.get("likedCount") or 0),
+        # Shared with _market_row so both paths blur the same model the same way --
+        # this row keeps its authoritative flag.shouldBlur, and a row that somehow
+        # arrives without one now falls back to isNsfw instead of silently not blurring.
+        "should_blur": _row_should_blur(m),
+        # publicUrl preferred (matches cover_url below): PixAI's own thumbnailUrl is a
+        # small, often blurry auto-thumb -- fine as a last-resort fallback, poor as the
+        # grid card's main image. loading="lazy" on the <img> bounds the cost to what's
+        # actually on screen.
+        "preview_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+        "has_version": bool(m.get("hasLatestAvailableVersion")),
+        # Rich surface for the preview pop-out card.
+        "description": (m.get("modelDescription") or "")[:600],
+        "base_model": m.get("category") or "",
+        "curations": [c for c in cur if isinstance(c, str)],
+        "official": any((c or "").lower() == "inhouse" for c in cur if isinstance(c, str)),
+        "comment_count": int(m.get("commentCount") or 0),
+        "ref_count": int(m.get("refCount") or 0),
+        "author_id": str(m.get("authorId") or ""),
+        "cover_url": med.get("publicUrl") or med.get("thumbnailUrl") or "",
+        # GraphQL-only per-viewer state absent here -> False, the mirror of
+        # model_search_market_gql's "REST-only rich fields absent here -> empty so the
+        # card hides them". This endpoint carries no bookmarked/liked equivalent at all,
+        # so False means "this path can't tell you", NOT "confirmed not bookmarked" --
+        # exactly like `official: False` on a GraphQL row. Present-and-falsy (rather than
+        # missing) so a consumer can read the key off either path's rows.
+        "bookmarked": False, "liked": False,
+    }
 
 
 # Model-Market categories the GraphQL `generationModels` connection actually honors (probed
@@ -5595,8 +5609,12 @@ def cmd_undo_organize(args, out):
 # ---------------------------------------------------------------------------
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
-def _make_session(token_val):
+def _make_session(token_val, resolve_user=True):
     """Validate config, load token, return a configured PixAIClient.
+
+    `resolve_user=False` skips the USER_ID lookup (the `me` query, which retries three times)
+    for a caller whose requests never use the user id -- the Broken files list's media
+    re-downloads read /v1/media and the media object only.
 
     The app's ONE entry to PixAI: it re-reads config.json at call time (so the GUI works
     even when the module was imported before the working directory was set correctly),
@@ -5638,7 +5656,7 @@ def _make_session(token_val):
         "x-apollo-operation-name": OPERATION_NAME,
     })
     # Auto-resolve the user id from the API key when it isn't pinned in config.
-    if not USER_ID:
+    if not USER_ID and resolve_user:
         if have_api_key:
             try:
                 USER_ID = resolve_user_id(session)
@@ -15205,7 +15223,25 @@ def _normalize_kaisuuken(raw):
         "template_code": raw.get("templateCode") or "",
         "template_id": raw.get("templateId") or "",
         "expires": raw.get("soonestExpireAt") or "",
+        # Every expiry date the type holds, with how many expire then (Session Y, #69): the
+        # credits chip's "N <kind> expire <date>" lines. A dateless or unreadable entry is
+        # dropped -- it can never expire soon.
+        "expiry_counts": _expiry_counts(raw.get("expiryCounts")),
     }
+
+
+def _expiry_counts(rows):
+    out = []
+    for e in rows or []:
+        if not isinstance(e, dict) or not e.get("expiresAt"):
+            continue
+        try:
+            n = int(e.get("count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out.append({"expires_at": str(e["expiresAt"]), "count": n})
+    return out
 
 
 def list_kaisuukens(session):
@@ -16254,6 +16290,25 @@ def run_credit_log(args):
     return {"entries": len(entries)}
 
 
+# When the archive-only flags were last rewritten: the Broken files list's LOST line says "gone
+# from your PixAI history as of <date>", and this is that date (Session W, W5a).
+RECONCILE_STAMP = "reconcile_stamp.json"
+
+
+def _stamp_reconcile(out, flagged, cleared):
+    """Write reconcile_stamp.json at the library root, atomically. Advisory, like the
+    reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
+    doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "flagged": flagged, "cleared": cleared}
+    dest = Path(out) / RECONCILE_STAMP
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        _atomic_replace(tmp, dest)
+    except OSError:
+        pass
+
+
 def run_reconcile_deleted(args):
     """Find catalog rows whose PixAI task no longer exists in your live feed -- i.e.
     generations you deleted on the website -- and flag them (deleted_remote='1') so
@@ -16306,6 +16361,7 @@ def run_reconcile_deleted(args):
         else:
             r["deleted_remote"] = "1" if gone else ""
     save_catalog(db_path, rows)
+    _stamp_reconcile(out, flagged, cleared)
     print("Flagged {:,} row(s) as deleted-on-PixAI; cleared {:,} stale flag(s).".format(
         flagged, cleared))
     print("Review in the gallery: Source -> 'Deleted on PixAI', then bulk Delete (local).")

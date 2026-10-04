@@ -66,10 +66,12 @@ test("all four PixAI sorts and all 9 category chips are rendered when market is 
   });
 });
 
-test("the source row offers Market / Bookmarked / Mine, and Mine is LoRA-only", () => {
+test("the source row offers Market / Saved / Mine, and Mine is LoRA-only", () => {
   // Rendered via data-src={v} over a tuple list; assert the render idiom + each token.
+  // CHANGED ON PURPOSE (Session S, drift 134): Saved -- PixAI's model collections -- replaces
+  // the frozen Bookmarked tab in place (loom/test/mg-model-picker-saved.test.js pins the rest).
   assert.match(src, /data-src=\{v\}/, "the source row must render its buttons from a list");
-  ["market", "bookmark", "mine"].forEach((v) => {
+  ["market", "saved", "mine"].forEach((v) => {
     assert.match(src, new RegExp('"' + v + '"'),
       'missing the "' + v + '" source button');
   });
@@ -129,17 +131,18 @@ test("Model Type is multi-select, and All means clear", () => {
     /modelTypes\.forEach\(\(t\) => typeTokens\(t\)\.forEach\(\(tok\) => \{\s*u \+= "&model_type=" \+ encodeURIComponent\(tok\)/);
 });
 
-test("filters are hidden on the bookmark list, where the server cannot honour them", () => {
-  // The bookmark connection accepts a keyword and the architecture filter and nothing else.
+test("filters are hidden on the Saved list, where the server cannot honour them", () => {
+  // A saved list accepts a keyword and one LoRA base and nothing else (probe 2026-10-03).
   // Leaving sort/category/dropdowns on screen there would be controls that silently do
   // nothing -- the specific failure mode that made the Enhance cards waste months. The
   // element's _syncFilterVisibility() toggled display; the port derives `filtersHidden` and
   // applies display:none, and still refuses to SEND those params in searchUrl.
-  assert.match(src, /const filtersHidden = market && src === "bookmark"/,
-    "bookmark must hide the filter block");
+  // CHANGED ON PURPOSE (Session S): Saved replaced Bookmarked, and keeps its rule.
+  assert.match(src, /const filtersHidden = market && src === "saved"/,
+    "Saved must hide the filter block");
   assert.match(src, /filtersHidden \? \{ display: "none" \}/,
     "the derived hidden flag must actually collapse the filter block");
-  assert.match(src, /if \(src !== "bookmark"\) \{/,
+  assert.match(src, /\} else \{\s*u \+= "&sort="/,
     "and must not SEND those params either -- a hidden control can still hold a stale value");
 });
 
@@ -186,7 +189,8 @@ test("clicking a sort/category button updates state and re-searches, not just to
   assert.match(src, /if \(key === lastKeyRef\.current\) return;[\s\S]{0,80}doSearch\(\);/,
     "a filter change must re-search, not only restyle");
   // searchUrl must actually depend on sort + category, or the effect key would never change.
-  assert.match(src, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType\]\);/,
+  // CHANGED ON PURPOSE (Session S): Saved's set and LoRA base chip are filters too.
+  assert.match(src, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase\]\);/,
     "searchUrl must depend on every filter so the refetch effect fires when one changes");
 });
 
@@ -194,7 +198,10 @@ test("changing source or a filter dropdown also re-searches", () => {
   // A control that repaints itself but does not refetch is the worst kind of broken: it looks
   // like it worked. Each of these sets state that searchUrl depends on (asserted above), so the
   // refetch effect fires; here we pin that each control is actually wired to its setter.
-  assert.match(src, /onClick=\{\(\) => setSrc\(v\)\}/, "switching source must update state (and thus re-search)");
+  // CHANGED ON PURPOSE (Session S): a tap on Saved while it is already on opens the chooser
+  // where the rail is folded; every other tap is still a plain setSrc.
+  assert.match(src, /onClick=\{\(\) => pickSrc\(v\)\}/, "switching source must update state (and thus re-search)");
+  assert.match(src, /const pickSrc = \(v\) => \{[\s\S]{0,240}setSrc\(v\);/);
   assert.match(src, /onChange=\{\(e\) => setPosted\(e\.target\.value\)\}/);
   assert.match(src, /onChange=\{\(e\) => setSource\(e\.target\.value\)\}/);
   assert.match(src, /onChange=\{\(e\) => setLicense\(e\.target\.value\)\}/);

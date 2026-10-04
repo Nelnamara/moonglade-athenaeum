@@ -6,6 +6,7 @@ import {
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import DataSaverRow from "./DataSaverRow.jsx";
+import PagingRow from "./PagingRow.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -13,6 +14,9 @@ import { apiGet } from "../api.js";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
 import { versionFromStamp } from "../notify/updateStore.js";
+import { useSwrGet } from "../hooks/swrCache.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
+import { reviewLabel } from "../lib/brokenFilesCore.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
 import "../styles/control-mobile.css";
@@ -126,6 +130,9 @@ export default function ControlMobile({ account, brandRequest }) {
   for (const j of panelHistory) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
+  // Session W (W6a): the Verify row's "N broken · Review" opens Collection Health at Broken files.
+  const { data: brokenDoc } = useSwrGet("/api/integrity/broken");
+  const brokenReview = reviewLabel(brokenDoc);
 
   // Live Mirror -- new, mobile-only glue reusing the already-shipped, read-
   // only /api/watch/status route (see this file's header comment for why
@@ -294,14 +301,30 @@ export default function ControlMobile({ account, brandRequest }) {
         </div>
       </div>
 
+      {/* THE TWO PER-DEVICE PHONE CHOICES, FIRST (owner's walk 2026-10-04: he could not find
+          Continuous paging -- the long-press on the gallery's layout keys was unknown to him and
+          this row sat at the foot of the screen). Library paging is the first settings row, right
+          under At a glance, and Data saver sits beside it.
+          Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the
+          gallery's long-press sheet on its layout keys sets; a tap here also counts as finding it
+          (the hint dot under the keys goes). Session Q (Q7): Data saver -- Off / Auto on metered /
+          Always, per device. */}
+      <div className="ctm-sec">
+        <PagingRow />
+      </div>
+      <div className="ctm-sec">
+        <DataSaverRow />
+      </div>
+
       {/* Branding is INVISIBLE until earned -- exactly like the desktop Control
           Panel, which hides the whole tab (ControlPanelOverlay: brandingUnlocked &&).
           The 2026-08-09 branding-integration handoff had drawn a locked tile here whose
           label NAMED the hidden feat that unlocks it, to every signed-in user -- the one
           real spoiler the sealing review found in the front-end (HIGH #2; the feat's name
           stays out of this source by design). Owner call 2026-08-21: no tile, no hint --
-          the feat is discovered, never announced. Sits directly under "At a glance" so,
-          once earned, its presence reads first, matching the desktop tab pair. */}
+          the feat is discovered, never announced. Sits right under the phone's two per-device
+          choices, near the top, so once earned its presence reads early, matching the desktop
+          tab pair. */}
       {brandingUnlocked && (
         <div className="ctm-sec">
           <div className="mgcp-tile click" onClick={openBrand}>
@@ -458,6 +481,10 @@ export default function ControlMobile({ account, brandRequest }) {
                       <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
                         {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
                       </span>
+                      {key === "verify-library" && brokenReview ? (
+                        <button type="button" className="mgcp-review"
+                          onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
+                      ) : null}
                       <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                     </div>
                   ) : null
@@ -576,11 +603,6 @@ export default function ControlMobile({ account, brandRequest }) {
           This is the surface it matters MOST on: a phone is the machine the owner's
           ruling names as wanting the blur off while the home desktop keeps it. The tile
           takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
-      {/* Session Q (Q7): the Data saver row -- Off / Auto on metered / Always, per device. */}
-      <div className="ctm-sec">
-        <DataSaverRow />
-      </div>
-
       <div className="ctm-sec">
         <BlurToggleTile className="mgcp-tile" />
       </div>
@@ -615,7 +637,7 @@ export default function ControlMobile({ account, brandRequest }) {
         paused={!!subOverlay || !!power || updScreen} />
 
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
-        <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
+        <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal} phone
           skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
       </MobileScreen>
 

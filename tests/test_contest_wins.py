@@ -760,7 +760,11 @@ class TestTheCheckButton:
         assert len(_winners_calls(pixai, "s1")) == 1
 
     def test_a_check_after_the_fact_settles_the_schedule_it_belongs_to(self, tmp_path, pixai):
-        _setup_contest(tmp_path, pixai, [], reward="distributed", entered=("c1:9",))
+        # The Check route runs on the real clock, so the contest's result time is set a day
+        # before now: a fixed T0 put the seeding read's next check past the 14-day window
+        # once the real date came within a day of it (2026-10-04), and the row expired.
+        _setup_contest(tmp_path, pixai, [], reward="distributed", entered=("c1:9",),
+                       result_ts=time.time() - DAY)
         g.contest_win_pass(tmp_path, now=time.time() - 5, pause=0)    # seeds the row, empty list
         pixai.on("/contest/s1/winners", [_placed("9", "u-test", 1, 5)])
         cli = login_client(tmp_path)

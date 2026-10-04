@@ -73,7 +73,9 @@ The buttons are grouped exactly as the risk splits.
 - **Verify library integrity** — the read-only integrity check (`--verify-library
   --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
   Its row under **Check — read-only** shows when it last ran; the log shows the summary and the
-  first lines of `integrity_report.csv`. See [Health → Library integrity](Health).
+  first lines of `integrity_report.csv`. After a check that found broken files the row also
+  says **N broken · Review ▸**, which opens Health at the **Broken files** list. See
+  [Health → Library integrity](Health).
 - **Top up the Similar index (adds only what's missing)** — embeds any images the
   visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous
@@ -261,7 +263,13 @@ restores the same blur — nothing else about how popups look or open changes ei
 
 The same switch is on the phone's **Control** screen.
 
-**Data saver** (phone). A row on the phone's **Control** screen with three modes — **Off**,
+**Library paging** (phone). The first setting on the phone's **Control** screen, right under **At a
+glance**: **Pages** (the default — **‹ Prev · Next ›**, a page at a time) or **Continuous** (the library
+loads as you scroll). It is the same choice the gallery's long-press sheet makes (see [Gallery](Gallery)),
+kept in the phone's browser like the blur. Tapping either one here also clears the small dot under the
+gallery's ▦ ▭ keys, the same as the long-press does.
+
+**Data saver** (phone). Library paging's neighbour on the phone's **Control** screen, with three modes — **Off**,
 **Auto on metered** (the default) and **Always** — kept in the phone's browser like the blur. While it
 is on: thumbnails are the small 256 px size, a picture opens as a blurred thumbnail with **Tap to load
 full size** (and its size) until you tap, videos do not autoplay or preload, the phone's own automatic

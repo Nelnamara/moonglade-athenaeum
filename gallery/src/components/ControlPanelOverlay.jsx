@@ -4,6 +4,8 @@ import "../styles/control-panel.css";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
+import RolesSection from "./BrandRoles.jsx";
+import RolesPhone from "./BrandRolesPhone.jsx";
 import MarkAnimated from "./MarkAnimated.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
@@ -19,6 +21,9 @@ import useBrandingBeat from "../hooks/useBrandingBeat.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
+import { useSwrGet } from "../hooks/swrCache.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
+import { reviewLabel } from "../lib/brokenFilesCore.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -375,6 +380,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   for (const j of panelHistory) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
+  // Session W (W1a): the "Verify library integrity" row says what the last check found and opens
+  // Health's Broken files list at All ("12 broken · Review ▸"). A file read on the server.
+  const { data: brokenDoc } = useSwrGet("/api/integrity/broken");
+  const brokenReview = reviewLabel(brokenDoc);
 
   // The tab never READS "brand" while locked -- and since the panel can now be opened ON
   // it (a requested tab, above), "locked" has to mean what the panel's OWN achievements read
@@ -858,6 +867,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                   <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
                                     {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
                                   </span>
+                                  {key === "verify-library" && brokenReview ? (
+                                    <button type="button" className="mgcp-review"
+                                      onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
+                                  ) : null}
                                   <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                                 </div>
                               ) : null
@@ -1869,7 +1882,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
   );
 }
 
-export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin, achievements }) {
+export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPickSkin, achievements, phone = false }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   // DC:895-909 -- brandSections sub-nav; marks is the default section.
@@ -1936,6 +1949,8 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     { key: "marks", label: "Icons, marks & animation" },
     { key: "skins", label: "Skins" },
     { key: "banners", label: "Banner slots" },
+    // The named roles (Session X). Lives inside this tab, so it is exactly as hidden as the tab.
+    { key: "roles", label: "Roles" },
   ];
 
   return (
@@ -1963,6 +1978,9 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
         {section === "banners" && (
           <BannerEditor summary={summary} onSaved={onSaved} achievements={achievements} />
         )}
+        {section === "roles" && (phone
+          ? <RolesPhone summary={summary} onSaved={onSaved} />
+          : <RolesSection summary={summary} onSaved={onSaved} />)}
       </div>
     </div>
   );

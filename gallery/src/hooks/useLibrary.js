@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchLibrary } from "../api.js";
+import {
+  PREPEND_MAX_PAGES, RANGE_READ_SIZE, appendUnique, newestAbove, prependUnique, readPagesFor,
+} from "../lib/phoneCore.js";
 
 /* All of App.jsx's library browse/search/filter/sort/pagination state and logic,
    mechanically lifted out (2026-08-02) into its own hook -- media/shelf/perPage/
@@ -102,7 +105,15 @@ export function pruneSelected(setSelected, items) {
 
 /* initialPage: the page the FIRST load lands on (App reads it from ?page=, via
    gen/urlState.js -- #31 "Where the Refit Broke" #7). Every later filter change
-   still restarts from page 1, exactly as before. */
+   still restarts from page 1, exactly as before.
+
+   setPageSize(n) (Session U, the phone's Continuous paging): the size every load asks
+   for unless the call names its own, in place of the Per page setting; 0 hands it back
+   to Per page. It is a ref, so setting it never changes load's identity and never
+   refetches on its own -- the phone decides when a page is asked for. The desktop never
+   calls it. load(p, replace, size): `size` names this one request's page size. An
+   append (replace false) keeps only the pictures not already loaded, so a page that
+   overlaps the end of the list adds just its new tail. */
 export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   // filters
   const [media, setMedia] = useState("");
@@ -121,33 +132,39 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const reqSeq = useRef(0);
+  const sizeRef = useRef(0);
+  const setPageSize = useCallback((n) => { sizeRef.current = Math.max(0, Math.floor(Number(n)) || 0); }, []);
+
+  /* The one parameter list every read of the walk sends: load's, and the phone's prepend below. Built
+     from this render's filters -- the values load's dependency list names. */
+  const pageQuery = (p, pageSize) => ({
+    q: applied, media, collection: shelf,
+    page: p, page_size: pageSize,
+    sort: adv.sort !== "newest" ? adv.sort : "",
+    rating_min: adv.ratingMin || "",
+    model: adv.model, lora: adv.lora,
+    from: adv.dateFrom, to: adv.dateTo,
+    source: adv.source, tag: adv.tag,
+    published: adv.publishedOnly ? "1" : "",
+    batch: adv.batch,
+    // #34 direction B: the series drill-down (?series=<sid>) always rides;
+    // grouping (?group=series) rides ONLY when the toggle is on AND no
+    // drill-down is active -- opening a stack (series OR batch) is exactly
+    // the ungrouped members view, so a live drill-down suppresses the fold
+    // (the backend ignores ?series while grouping anyway) and the "Stack
+    // sessions" toggle can stay lit, ready to snap back when the filter clears.
+    series: adv.series,
+    group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
+  });
 
   const load = useCallback(
-    async (p, replace) => {
+    async (p, replace, size) => {
       const seq = ++reqSeq.current;
       setLoading(true);
       try {
-        const data = await fetchLibrary({
-          q: applied, media, collection: shelf,
-          page: p, page_size: perPage,
-          sort: adv.sort !== "newest" ? adv.sort : "",
-          rating_min: adv.ratingMin || "",
-          model: adv.model, lora: adv.lora,
-          from: adv.dateFrom, to: adv.dateTo,
-          source: adv.source, tag: adv.tag,
-          published: adv.publishedOnly ? "1" : "",
-          batch: adv.batch,
-          // #34 direction B: the series drill-down (?series=<sid>) always rides;
-          // grouping (?group=series) rides ONLY when the toggle is on AND no
-          // drill-down is active -- opening a stack (series OR batch) is exactly
-          // the ungrouped members view, so a live drill-down suppresses the fold
-          // (the backend ignores ?series while grouping anyway) and the "Stack
-          // sessions" toggle can stay lit, ready to snap back when the filter clears.
-          series: adv.series,
-          group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
-        });
+        const data = await fetchLibrary(pageQuery(p, size || sizeRef.current || perPage));
         if (seq !== reqSeq.current) return; // a newer request superseded this one
-        setItems((old) => (replace ? data.items : old.concat(data.items)));
+        setItems((old) => (replace ? data.items : appendUnique(old, data.items)));
         setTotal(data.total);
         setPage(data.page);
         setPages(data.pages);
@@ -161,6 +178,62 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     // exactly like changing media/sort/rating (the toggle re-groups from the top).
     [applied, media, shelf, perPage, adv, group]
   );
+
+  /* Session U, U3a: a pull over the phone's stacked (Continuous) list. It reads the top of the same
+     walk a page at a time, at the size of the moment, and puts the run of new pictures ABOVE everything
+     loaded -- every loaded page is kept -- reading on only while a whole page is new. The total (M)
+     refreshes. A run longer than PREPEND_MAX_PAGES pages is too much to splice in, and the list starts
+     over from page 1 instead; so does an empty list. It does not dim the grid: the pull's own moon is
+     what spins. Resolves {added, reset}, or undefined when a newer read superseded it. */
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const prependNewest = useCallback(async () => {
+    const have = new Set(itemsRef.current.map((it) => it.media_id));
+    if (!have.size) {
+      const d = await load(1, true);
+      return d ? { added: (d.items || []).length, reset: true } : undefined;
+    }
+    const seq = ++reqSeq.current;
+    const size = sizeRef.current || perPage;
+    const fresh = [];
+    let data = null;
+    let met = false;
+    for (let p = 1; p <= PREPEND_MAX_PAGES && !met; p += 1) {
+      data = await fetchLibrary(pageQuery(p, size));
+      if (seq !== reqSeq.current) return undefined;
+      const run = newestAbove(data.items, have);
+      fresh.push(...run.fresh);
+      met = run.met || p >= (Number(data.pages) || 1);
+    }
+    if (!met) {
+      const d = await load(1, true);
+      return d ? { added: fresh.length, reset: true } : undefined;
+    }
+    setItems((old) => prependUnique(fresh, old));
+    setTotal(data.total);
+    setPages(data.pages);
+    return { added: fresh.length, reset: false };
+  }, [applied, media, shelf, perPage, adv, group, load]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Session U, U5c: the ids at absolute places lo..hi (inclusive) of the current walk -- what a range
+     selection needs for the places that are not loaded. Read a page at a time at the route's largest
+     size. A read and nothing more: the list, its count and its pages are untouched. Resolves the ids in
+     order (fewer when the walk is shorter), or null when a read failed. */
+  const idsAt = useCallback(async (lo, hi) => {
+    const out = [];
+    try {
+      for (const p of readPagesFor(lo, hi, RANGE_READ_SIZE)) {
+        const d = await fetchLibrary(pageQuery(p, RANGE_READ_SIZE));
+        const got = d.items || [];
+        const base = (p - 1) * RANGE_READ_SIZE;
+        got.forEach((it, j) => { if (base + j >= lo && base + j <= hi) out.push(it.media_id); });
+        if (got.length < RANGE_READ_SIZE) break;
+      }
+    } catch {
+      return null;
+    }
+    return out;
+  }, [applied, media, shelf, perPage, adv, group]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // The flyout commits a patch: advanced fields always; q/media/shelf/perPage
   // only when a saved view carries them.
@@ -215,7 +288,7 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     media, setMedia, shelf, setShelf, perPage, setPerPage,
     query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
     items, setItems, total, page, pages, loading,
-    load, applyAdvanced, advCount, submitQuery, resetAll,
+    load, applyAdvanced, advCount, submitQuery, resetAll, setPageSize, prependNewest, idsAt,
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
   };
 }

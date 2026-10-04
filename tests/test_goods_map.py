@@ -185,9 +185,10 @@ def test_seal_table_round_trip(monkeypatch):
                         lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
     rr = g._role_rel
     cases = [
-        # the D8 exception: the two reward UI icons stay open
+        # the D8 exception: the reward UI icons stay open (the header's inbox icon too)
         (rr("rewards", "claim.png"), ("open", None)),
         (rr("rewards", "gift.png"), ("open", None)),
+        (rr("rewards", "inbox.png"), ("open", None)),
         # ...while the rest of rewards/ (and the folder itself) denies
         (rr("rewards", "anything-else.png"), ("deny", None)),
         (g.ROLE_CODE["rewards"], ("deny", None)),

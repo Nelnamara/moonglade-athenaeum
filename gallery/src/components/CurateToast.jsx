@@ -9,7 +9,7 @@ export default function CurateToast({ toast, onUndo, onDismiss }) {
   return (
     <div className={"mgcu-toast" + (toast.tone === "peach" ? " peach" : "")} role="status">
       <div className="mgcu-toast-t">{toast.text}</div>
-      {toast.prev ? (
+      {toast.prev || toast.undoFn ? (
         <button type="button" className="mgcu-toast-undo" onClick={onUndo}>Undo {"·"} {toast.secs}s</button>
       ) : (
         <button type="button" className="mgcu-toast-x" onClick={onDismiss} aria-label="Dismiss">{"✕"}</button>

@@ -17,6 +17,31 @@ _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
 
 
+@pytest.fixture()
+def pack_art():
+    """{(slot, key): bytes} of the pack's nine role images (login companion, tracker mascots, reward
+    icons, power poses), read from the folder the MOONGLADE_PACK_ART environment variable names. The
+    folder holds the pack's art in its public layout (login_nel.webp, nel_spinner.png or
+    system/nel_spinner.png, mascots/trk_done.png, rewards/claim.png ...). Skipped when the variable is
+    unset or the folder lacks any of them, so a checkout without the art runs everything else. A
+    test never reads the checkout's own pack (see the hermeticity rule at the top of this file)."""
+    folder = os.environ.get("MOONGLADE_PACK_ART", "").strip()
+    if not folder:
+        pytest.skip("MOONGLADE_PACK_ART is unset (the folder holding the pack's role art)")
+    root, out, missing = Path(folder), {}, []
+    for slot, role in gallery.ROLE_SLOTS.items():
+        for key, img in role["images"].items():
+            public = img["public"]
+            hit = next((p for p in (root / public, root / "system" / public) if p.is_file()), None)
+            if hit is None:
+                missing.append(public)
+            else:
+                out[(slot, key)] = hit.read_bytes()
+    if missing:
+        pytest.skip("MOONGLADE_PACK_ART lacks: %s" % ", ".join(missing))
+    return out
+
+
 def clear_sealed_caches():
     """Reset the three module-level caches that would otherwise answer one install's
     question with another install's roster (and the moments' clip cache beside them).
@@ -519,6 +544,29 @@ def _no_live_recipes(monkeypatch):
     moonglade_recipes.clear_cache()
     yield
     moonglade_recipes.clear_cache()
+
+
+import moonglade_inbox as _inbox_mod   # noqa: E402 -- beside the fixture that blocks it
+
+# Captured before _no_live_inbox (below) swaps it, so a test can drive the real public GET
+# against a patched requests.get and see exactly what it would send.
+_REAL_INBOX_PUBLIC_GET = _inbox_mod._public_get
+
+
+@pytest.fixture(autouse=True)
+def _no_live_inbox(monkeypatch):
+    """moonglade_inbox (Sessions R + Y) has two roads of its own beside the /v2 transport the
+    fixture below blocks: the PUBLIC banner GET (sent with no credential, so it is not the
+    session) and the DELETE of the owner's own reply. Both raise here unless a test swaps in an
+    answer, and the module's memos (the hour's banners, the five-minute thread cache, the pushed
+    notifications) are cleared so one test's PixAI can't answer another's."""
+    def _blocked(*a, **k):
+        raise core.PixAIError("live PixAI blocked in tests")
+    monkeypatch.setattr(_inbox_mod, "_public_get", _blocked)
+    monkeypatch.setattr(_inbox_mod, "_rest_delete", _blocked, raising=False)
+    _inbox_mod.clear_caches()
+    yield
+    _inbox_mod.clear_caches()
 
 
 @pytest.fixture(autouse=True)

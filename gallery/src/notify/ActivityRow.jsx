@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { ago, fmtClock, fmtDuration, groupThousands, kindLabel, labelFor } from "./format.js";
+import MoonGauge from "../components/MoonGauge.jsx";
+import { fractionOf } from "../lib/moonGaugeCore.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 
 /* ActivityRow -- one job row inside the new header-docked Activity dropdown (Claude Design
    handoff 2026-08-09, drift item 39: "Click a row to expand inline STATUS / MODEL / COST /
@@ -15,7 +18,11 @@ import { ago, fmtClock, fmtDuration, groupThousands, kindLabel, labelFor } from 
    (typeof+isFinite checks, "an unknown cost shows NO row at all"). Same rule applied here:
    no field, no row. Wiring real per-job model tracking is a separate, later enhancement. */
 
-export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, compact }) {
+export default function ActivityRow({ job: j, expanded, onToggle: toggle, onDismiss, compact }) {
+  /* Health's Broken files fix run (Session W, W4c): its row has no task to detail -- opening it
+     goes back to Health at the list instead. Every other row toggles its own detail as before. */
+  const integrity = j.type === "integrity";
+  const onToggle = (id) => (integrity ? openBrokenFiles("all") : toggle(id));
   const st = j.status || "running";
   // `started` is ABSENT on non-PixAI jobs and pre-feature rows -- absent means UNKNOWN, which
   // keeps the plain spinner. `=== false`, never `!j.started` (a truthiness check would brand
@@ -26,6 +33,8 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
   const pct = (st === "running" && j.total)
     ? Math.min(100, Math.round((j.done || 0) / j.total * 100)) : null;
   const showErr = (st === "failed" || st === "done_with_errors" || st === "stale") && j.error;
+  // ...and while it runs it mirrors it: "Fixing 12 files · 5 / 12" with the moon on that true fraction.
+  const runMoon = integrity && st === "running" ? fractionOf(j.done, j.total) : null;
   const cls = st === "failed" ? " at-failed"
     : (st === "done_with_errors" || st === "stale") ? " at-warn" : "";
 
@@ -99,7 +108,15 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
       <div className="at-line">
         <div className="at-ic">{icon}</div>
         <div className="at-main">
-          <div className="at-lab">{labelFor(j, fin)}</div>
+          <div className="at-lab">
+            {labelFor(j, fin)}
+            {runMoon != null ? (
+              <>
+                {" · " + (j.done || 0) + " / " + j.total}{" "}
+                <MoonGauge fraction={runMoon} size={16} bar={false} label={labelFor(j, fin)} />
+              </>
+            ) : null}
+          </div>
           <div className="at-sub">
             <span className="at-kind">{kindLabel(j.type)}</span>
             {/* WHERE the run was started, and the ONLY thing that distinguishes a website run
@@ -111,8 +128,11 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
                 already lives on -- a source is not a state, and inventing a second visual
                 language for it would make a website run look like a different KIND of job
                 rather than the same job from somewhere else. */}
+            {/* Sessions R + Y (R2c): a finished job the app learned of only from PixAI's inbox is
+                a website run too, so it wears this same mark; its hover says where the app
+                heard of it. */}
             {j.source === "pixai" ? (
-              <span className="at-src" title="Started on the PixAI website, not in this app.">website</span>
+              <span className="at-src" title={j.via === "inbox" ? "Started on the PixAI website; PixAI's inbox told the app it finished." : "Started on the PixAI website, not in this app."}>website</span>
             ) : null}
             {queued ? (
               <span className="at-phase" title="PixAI has accepted this generation and no worker has picked it up yet — it has not started rendering.">queued</span>
@@ -139,6 +159,10 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
       </div>
       {pct != null ? <div className="at-bar"><i style={{ width: pct + "%" }} /></div> : null}
       {showErr ? <div className="at-errmsg">{j.error}</div> : null}
+      {/* Sessions R + Y (R2c): Activity and PixAI disagree on how this job ended -- PixAI's
+          inbox says it finished. A dim note, never a changed status: the row says what this
+          app saw, and PixAI's word sits under it. */}
+      {j.pixai_says ? <div className="at-says">PixAI says: {j.pixai_says}</div> : null}
       {expanded ? (
         <div className="at-detail">
           <div className="at-drow">

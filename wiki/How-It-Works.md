@@ -10,11 +10,15 @@ moonglade_mcp.py          local stdio MCP server: curation tools over the catalo
                           finder, and a read-only PixAI tag-suggestion tool
 moonglade_recipes.py      PixAI recipes: the market, Mine and Sets, the creator, and attaching
                           recipes to a generation
+moonglade_inbox.py        PixAI's inbox (the ✉ button) and the gift box's gifts and current
+                          event (🎁), a published work's comments and your replies
 moonglade_runs.py         the prompt template (`{a|b}` variables, saved lists), Random and Matrix
                           runs, and the Runs store behind Inspect
 moonglade_contest_wins.py what counts as a verified contest win and when it is checked
 moonglade_integrity.py    the read-only library integrity check (--verify-library) behind
-                          Health's Zero-byte / Missing thumbs / Last verified tiles
+                          Health's Zero-byte / Missing thumbs / Last verified tiles, and
+                          Health's Broken files list: its local marks and its targeted
+                          re-download / thumbnail-rebuild run
 moonglade_curation_io.py  the curation sidecar: --export-curation / --import-curation and the
                           Control Panel's Download curation (JSON)
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite

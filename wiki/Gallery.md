@@ -81,7 +81,58 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   moved, and the page you are reading stays exactly where it is.
 - **Followers and following** sit beside the credits figure in the header, and again in the
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
-  never follows, unfollows, likes or comments on your behalf.
+  never follows, unfollows or likes on your behalf, and it comments only when you write a
+  reply yourself and press **Post publicly** (see [Comments](#comments-on-your-published-work)).
+- **✉ Inbox** and **🎁 Gift box** — two buttons just left of the credits chip, shown once a PixAI
+  account is linked. The inbox is everything PixAI tells you; the gift box is only what you can
+  collect.
+- **✉ Inbox** (the mailbox) is your **PixAI inbox**. Its lavender badge is how many of PixAI's
+  notifications you haven't read. Click it for the panel: tabs for **All · Comments · Likes · Follows ·
+  PixAI**, then one card per work of yours (*"♥ +12 · ❝ 2 new"*, with the newest unread comment
+  quoted), then everything else — new followers folded per day, contest results, PixAI's news.
+  Finished jobs never show here: Activity already tells you those (a job PixAI finished that the
+  app never saw — one started on PixAI's own site while the app was closed — joins Activity as a
+  **website** run, and a job Activity holds as failed that PixAI says finished gets a dim
+  *PixAI says: done* under it).
+  - **Opening a row marks it read on PixAI** — one write, for exactly what that row or card
+    gathers. Opening the panel, scrolling, switching tabs and new arrivals never mark anything.
+    **⋯ → Mark all read** marks the tab's kinds read. With `READ_ONLY` set, rows still open and
+    nothing is marked. If PixAI doesn't answer clearly, the row stays unread with a peach line
+    saying so, and nothing is sent twice.
+  - **It updates live.** A new notification bumps the badge as it arrives (the live mirror hears
+    it), and the count is re-read when the app opens, when the window comes back to the front
+    (at most every 30 seconds) and after the mirror reconnects. Only a **comment** raises a
+    notice in the corner, with **Later** and **Open thread**.
+- **🎁 Gift box** is for rewards. Its lavender badge is how many gifts are waiting to be claimed.
+  Click it for its own panel (opening one panel closes the other; each panel shows its button's
+  picture, large, in its top-right corner): **ON PIXAI NOW** (the events PixAI is running, when
+  there are any), then the free cards about to expire (in peach, the same lines the credits chip's
+  hover shows), then your gifts. With none of the three, it says
+  *Nothing waiting*. Opening it only reads.
+  - **Gifts.** A gift PixAI sends you in a message shows with **Claim ▸**, which shows what it
+    holds, which account it goes to and when it expires before a **Claim** button: one attempt,
+    then the app reads the gift back and says *Claimed*, or in peach *Already claimed* /
+    *This gift expired*. Credit-pack bonuses you hold say **Open on PixAI ↗**; the app redeems
+    nothing. In the Control Panel's **PixAI account → Credit ledger**, event-gift rows show the
+    gift icon.
+  - **ON PIXAI NOW** shows PixAI's live event banners as cards, one per row across the panel's
+    full width, each at its own shape with the event's name and *event ↗* underneath; pressing one
+    opens PixAI's page in a new tab. The app never checks in, claims or plays an event for you, and
+    the banner list is read without your API key (PixAI only answers it that way), at most once an
+    hour.
+- **On a phone** the header stays as it was: the **☰** Menu button carries one badge (unread
+  notifications plus waiting gifts), and **Inbox** and **Gift box** are the Menu's first two rows,
+  each opening a full-height sheet. Inbox is the same list as the desktop's ✉ panel. Gift box is
+  the desktop's 🎁 panel: the event cards, the free cards about to expire and your gifts; its row
+  shows the soonest expiry, or how many gifts are waiting.
+- **Free cards about to expire.** When any free card you hold expires within three days, the
+  **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
+  them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
+  *"… today"*; never a countdown in hours. With nothing that close, there is no underline and
+  the hover reads as it always did. Free cards aren't billing, so the mark is peach, not gold.
+  The dates come from the same card summary the chip already reads. The **🎁 Gift box** lists
+  them too, and on a phone, where there is no hover, the **Menu**'s **Gift box** row shows the
+  soonest one.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the `Runs itself` job list, server Stop/Restart, accounts, updates and **About**.
 - **Health** — the [collection health](Health) dashboard, with the storage bars.
@@ -353,6 +404,32 @@ media pills back on screen. And while a sheet is up — **Sort**, **Advanced Sea
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
+### Comments on your published work
+
+A picture you have published on PixAI shows its **COMMENTS** in Details, on the desktop and the
+phone, where the ♥ / 💬 count used to carry them. They are read live from PixAI when you scroll
+to them — never when Details merely opens — newest first, 50 at a time with **Load older** at
+the end, and kept in memory for five minutes. They are never saved to your library, a file or a
+log: they are other people's words.
+
+- Each comment shows with its replies folded under **N replies ▸**; a chain you've replied in
+  opens by itself, and so does the one you reached from a quote in the inbox. Your own
+  comments wear a **you** badge. Reactions show as a count and stickers as small pictures —
+  there is no like, react or report button. A comment PixAI has flagged is hidden, and one line
+  at the end says how many.
+- **Reply** opens a box under that comment with a counter (PixAI's limit is 4,095 characters;
+  past it the counter turns peach and Send says how far over you are). **Send** asks first —
+  a notice that names your PixAI name, the person and the work and quotes your text in full
+  (on a phone, a sheet with two big buttons): **Back** or **Post publicly**. Only Post publicly
+  sends it, once. The app then reads the thread back and says **Posted · found in the thread**,
+  or — if PixAI's answer was unclear and the reply isn't there — tells you to check on PixAI,
+  and keeps Send off until you change the text, so the same words are never posted twice.
+  PixAI's refusals (email not verified, blocked, not eligible, restricted, too many) are shown
+  in plain words.
+- PixAI has no edit, so a reply you've just posted offers **Delete my reply** while the thread
+  is open; it asks first (*This can't be undone*), sends once and reads back.
+- With `READ_ONLY` set, the reply box shows, greyed, with the reason, and nothing is sent.
+
 ### The phone's reading feed, the new-since line, and pull to refresh
 
 **▦ Grid | ▭ Feed.** The toggle sits in the pill row, beside **Sort**. **Feed** shows one picture per
@@ -394,6 +471,46 @@ filter does not contain shows no number on its record.
 **View batch** on a picture's record shows the other pictures made in the same generation. It
 appears for any picture that came from a generation, not only ones filed in an old batch folder.
 To get your whole library back, press **Clear** in **Advanced search**.
+
+### Pages or Continuous on the phone
+
+**Long-press ▦ or ▭** (the Grid | Feed keys) and a small sheet opens with two rows: **Layout** (Grid ·
+Feed) and **Paging** (**Pages** · **Continuous**). A plain tap on a key still just switches the layout. A
+choice applies at once; tap outside the sheet or swipe it down to close it. **Pages** is the default and is
+the phone as before, with **‹ Prev · Next ›**. Both are remembered **on that phone**, and the same Paging
+choice is the first setting on the **Control** screen, as **Library paging** beside **Data saver**. Until
+you first find the choice — a long-press here, or a tap on Control's row — a small dot under the keys shows
+the gesture is there.
+
+**Continuous** loads the next 100 pictures by itself as you near the end of what is loaded, and stacks
+them under the ones you have. There is no pager: the pill row shows how many are loaded of everything
+your search and filters match (*300 of 3,240*), and at the foot of the list a small spinner says
+*loading…* while the next lot is on its way. If a page fails to load, the foot says **Couldn't load more.
+Retry** in peach; nothing retries on its own, and tapping **Retry** asks once. At the very end it says
+*That's all 3,240.* A new search or filter starts the count over. With **Data saver** on and a metered
+connection it loads 50 at a time instead of 100. On a narrow phone the count, the ▦ ▭ keys and **Sort** sit
+together on a second line under the media pills, so nothing has to scroll sideways.
+
+**New since, ↑ Newest and pull to refresh in Continuous.** The **N new since HH:MM** line stays where it
+is in the stacked list, however far down you have loaded. **↑ Newest** scrolls back to the top and keeps
+everything loaded. A pull at the very top runs **Sync now** and then puts what is new **above** the line,
+keeping every page you had loaded; the count grows by the new ones. A finished generation does not
+reload the list while you are reading it; pull when you want the new pictures in.
+
+**A long list stays light.** However far you scroll, the phone only draws about five hundred pictures
+at a time (five lots of 100) around where you are; the rest keep their place as empty space of exactly
+their height, so nothing jumps, and they are drawn again — a colour first, then the picture — when you
+scroll back to them. In the full-screen viewer, **‹ ›** carry on past the last picture loaded, loading
+the next lot as they go, and the number at the top is the picture's place in everything your search
+matches. Close the viewer and the list is back at the picture you were on, even one far from where you
+opened it.
+
+**Selecting a run of pictures.** While selecting, long-press a second picture and everything between the
+last one you ticked and it is selected — in **Pages** too, even across pages you are not on. When some of
+them are not loaded, a card says so for a few seconds (*Selected 140, including 40 not loaded yet.*) and
+**Actions** waits a moment while the phone looks them up, so every confirm counts all of them. In
+**Continuous** the select bar also has **All loaded (L)**, which ticks every picture loaded so far, and your
+ticks stay put as more load; changing a filter there clears the selection, with **Undo** for ten seconds.
 
 ### The phone turned sideways
 

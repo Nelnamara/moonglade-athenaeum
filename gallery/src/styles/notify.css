@@ -245,6 +245,8 @@
    WHERE a run came from, not that anything is wrong with it, so nothing warning-coloured. */
 .at-sub .at-src{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;color:var(--subtext);}
 .at-errmsg{color:var(--red);font-size:10.5px;margin-top:5px;white-space:normal;}
+/* Sessions R + Y (R2c): PixAI's word on a job Activity saw end otherwise -- dim, never a state. */
+.at-says{color:var(--overlay0);font-size:10px;margin-top:4px;white-space:normal;}
 .at-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:7px;overflow:hidden;}
 .at-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
 .at-thumb{flex:none;} .at-thumb img{width:44px;height:44px;border-radius:8px;object-fit:cover;display:block;}
@@ -295,6 +297,11 @@
 .mg-toast .mt-act.ruby{border-color:var(--red);color:var(--red);}
 .mg-toast .mt-act.ruby:hover{background:color-mix(in srgb,var(--red) 14%,transparent);}
 .mg-toast .mt-foot{font-size:9.5px;line-height:1.45;color:var(--overlay0);margin-top:7px;}
+/* A question that quotes (Sessions R + Y, R6c: "Post publicly as ...?" quoting the reply in
+   full): the toast widens to 420 px and the quote clamps at six lines with a fade. */
+.mg-toast.wide{width:420px;max-width:calc(100vw - 32px);}
+.mg-toast .mt-quote{position:relative;margin-top:6px;padding:8px 10px;border-radius:9px;border:1px solid var(--surface1);background:rgba(33,31,58,.45);color:var(--text);font-size:10.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;line-clamp:6;overflow:hidden;}
+.mg-toast .mt-quote.long{-webkit-mask-image:linear-gradient(180deg,#000 72%,transparent);mask-image:linear-gradient(180deg,#000 72%,transparent);}
 .mg-toast.whatsnew{align-items:center;background:var(--base);border:1px solid var(--surface1);border-radius:12px;padding:10px 12px;}
 .mg-toast.whatsnew .mt-title{font-size:12px;font-weight:400;}
 .mg-toast.whatsnew .mt-msg{font-size:10.5px;}
@@ -414,6 +421,7 @@ html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov,
 html.mg-updbanner-on .mghelp-scrim, html.mg-updbanner-on .mghelp-host,
 html.mg-updbanner-on .mgab-scrim, html.mg-updbanner-on .mgab-host,
 html.mg-updbanner-on .mgwn-scrim, html.mg-updbanner-on .mgwn-host,
+html.mg-updbanner-on .mgbf-scrim, html.mg-updbanner-on .mgbf-host,
 html.mg-updbanner-on .mgguide-block{top:var(--mg-updbanner-h,0px);}
 /* The details page is the one layer above with an explicit height (styles.css, 100dvh for
    drift 122); pushed down without this it would run off the bottom by exactly the strip,

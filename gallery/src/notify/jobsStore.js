@@ -88,6 +88,11 @@ function toastTransitions(rows) {
     // falls through to the sticky "see the activity card" toast like any other job, and
     // the tracker line stays either way.
     if (j.type === "update" && st === "done") { last[j.job_id] = st; return; }
+    // HEALTH'S FIX RUN SAYS ITS OWN END (Session W, W4c): "Fixed 11 of 12. 1 couldn't be
+    // re-downloaded." with [Show], from lib/brokenFixRun.js, which watches the run itself. The
+    // generic line below would add a second toast, call it "done / Added to your gallery.", and
+    // turn a run with one refused file into a red error. The tracker line stays.
+    if (j.type === "integrity") { last[j.job_id] = st; return; }
     // NOBODY CLICKED IT, SO NOBODY IS TOLD (owner's walk, 2026-09-07: "The automated tasks
     // in the living library stack up completion toasts in the corner -- with the new
     // tracking window I would like to remove the notice toasts completely").
@@ -106,6 +111,12 @@ function toastTransitions(rows) {
     // kick, the fifteen-minute tick and the publish kick (Run now, being a click, does not).
     // The tracker reads the same rows and is unaffected.
     if (j.scheduled) { last[j.job_id] = st; return; }
+    // A finished job the app only learned of from PixAI's inbox (Sessions R + Y, R2c: started
+    // on PixAI's site while the app was closed) is BORN done, so the rule below would read its
+    // first appearance as a just-finished job and toast "Added to your gallery". Nobody here
+    // pressed it, so nobody is told: it is a quiet line in the Activity window, like a
+    // scheduled sweep.
+    if (j.via === "inbox") { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";
@@ -156,6 +167,10 @@ export function refresh() {
       // `update` field -- passing that on would read as "nothing is out" and blank a standing
       // notice over one blip, exactly the way the release check refuses to cache a failure.
       if (d && !d.error) noteUpdate(d.update);
+      // The inbox's live count rides this same poll for the same reason (Sessions R + Y,
+      // R4b): the live mirror counts PixAI's newNotification and this payload carries it.
+      // Handed to whoever listens (inbox/inboxStore.js, in the gallery's shells only).
+      if (d && !d.error && d.inbox) pollListeners.forEach((fn) => { try { fn(d.inbox); } catch { /* its own */ } });
       jobs = rows;
       emit();
     })
@@ -169,6 +184,13 @@ function schedule() {
     if (document.hidden) { schedule(); return; }
     refresh().then(schedule);
   }, busy ? 2500 : 7000);
+}
+
+/* Listeners for the poll's `inbox` field: {seq, connects} from the live mirror. */
+const pollListeners = new Set();
+export function onInboxLive(fn) {
+  pollListeners.add(fn);
+  return () => pollListeners.delete(fn);
 }
 
 export function dismiss(id) {

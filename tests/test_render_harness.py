@@ -5229,6 +5229,21 @@ def _crushed(sizes):
     return [(round(w, 1), round(h, 1)) for w, h in sizes if w < 60 or abs(w - h) > 1.5]
 
 
+def _goal_tile_facts(page, selector):
+    """Per goal tile: its text, its size, the computed background of its picture layer once the
+    picture has settled, and how many <img> it holds (Session T: none)."""
+    page.wait_for_function(
+        "sel => [...document.querySelectorAll(sel)].every(t => t.querySelector('.mgtr-goal-pic'))",
+        arg=selector)
+    return page.evaluate("""sel => [...document.querySelectorAll(sel)].map(t => {
+        const pic = t.querySelector('.mgtr-goal-pic'), r = t.getBoundingClientRect();
+        return {text: t.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height),
+                picture: pic ? getComputedStyle(pic).backgroundImage.slice(0, 40) : '',
+                size: pic ? getComputedStyle(pic).backgroundSize : '',
+                imgs: t.querySelectorAll('img').length};
+    })""", selector)
+
+
 def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
         paged_library_server, render_browser, monkeypatch, pixai):
     """Owner walk, 2026-09-29. (1) "From history" drew every picture as a sliver a few pixels
@@ -5237,8 +5252,8 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
     cap between them (train.css .mgtr-pool-grid). Every tile must be a square at least 60 px
     across, in both views, with more than the cap's worth of rows loaded -- the counts waited
     for are past the point where the old rows crushed (five rows no longer fit 300 px). (2)
-    Basic's goal tiles were flat colour squares where PixAI shows a picture: each carries its
-    own glyph."""
+    Basic's goal tiles were flat colour squares where PixAI shows a picture: a glyph stood in
+    until Session T, and now each tile paints its own picture and no glyph."""
     import sqlite3
     _fake_training(pixai, monkeypatch)
     with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
@@ -5246,11 +5261,36 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
     ctx, page, _ = _train_page(paged_library_server, render_browser, monkeypatch)
     try:
         page.click(".mgtr-mode:has-text('Basic training')")
-        marks = page.evaluate(
-            "() => [...document.querySelectorAll('.mgtr-goal .mgtr-goal-tint')]"
-            ".map(t => t.textContent.trim())")
-        assert len(marks) == 4 and all(marks) and len(set(marks)) == 4, (
-            "each goal tile shows its own glyph, not a blank square: %r" % marks)
+        tiles = _goal_tile_facts(page, ".mgtr-goal .mgtr-goal-tint")
+        assert len(tiles) == 4, tiles
+        for t in tiles:
+            assert t["text"] == "", "a goal tile draws no glyph (Session T): %r" % t
+            assert t["picture"].startswith("url("), "each goal tile paints its picture: %r" % t
+            assert t["imgs"] == 0, "the picture is a computed background, never an <img>: %r" % t
+        assert len({t["picture"] for t in tiles}) == 4, "four goals, four different pictures"
+        # Frame 01 of the Goal Tile Art Handoff, as drawn: four square picture tiles in ONE row,
+        # the picture edge to edge over the top 78 %, only the label in the strip beneath it.
+        geo = page.evaluate("""() => [...document.querySelectorAll('.mgtr-goal')].map(b => {
+            const r = b.getBoundingClientRect(), p = b.querySelector('.mgtr-goal-tint').getBoundingClientRect(),
+                  n = b.querySelector('.n').getBoundingClientRect(), cs = getComputedStyle(b);
+            return {x: r.x, y: r.y, w: r.width, h: r.height, px: p.x, py: p.y, pw: p.width, ph: p.height,
+                    ny: n.y, text: b.innerText.trim(), title: b.title, desc: !!b.querySelector('.d'),
+                    radius: cs.borderTopLeftRadius, pad: cs.paddingLeft, font: cs.fontSize + '/' + cs.fontWeight};
+        })""")
+        assert [g["text"] for g in geo] == ["Character", "Art style", "Outfit", "Something else"], geo
+        assert len({round(g["y"]) for g in geo}) == 1, "the four tiles share one row: %r" % geo
+        assert [round(b["x"] - a["x"] - a["w"]) for a, b in zip(geo, geo[1:])] == [8, 8, 8], "8 px apart"
+        for g in geo:
+            assert abs(g["w"] / g["h"] - .82) < .01, "the tile is .82 wide-to-tall: %r" % g
+            assert (g["radius"], g["pad"], g["font"]) == ("12px", "6px", "10px/700"), g
+            assert abs(g["pw"] - (g["w"] - 2)) < 1 and abs(g["px"] - (g["x"] + 1)) < 1, "edge to edge: %r" % g
+            assert abs(g["ph"] - .78 * (g["h"] - 2)) < 1.5, "the picture is the top 78 %%: %r" % g
+            assert 0.95 < g["pw"] / g["ph"] < 1.15, "a square-ish picture: %r" % g
+            assert g["ny"] >= g["py"] + g["ph"] - 1, "the label sits in the strip under the picture: %r" % g
+            assert not g["desc"], "no description text in the tile (it is the tooltip): %r" % g
+        assert [g["title"] for g in geo] == [
+            "One specific person or character", "One set of linework and colours",
+            "One outfit, on any character", "Animals, poses, backgrounds and more"]
         page.click(".mgtr-goal:has-text('Character')")
         page.click(".mgtr-src:has-text('From history')")
         # Grouped pages 18 tasks at a time and its sentinel keeps asking while it is within
@@ -5664,6 +5704,30 @@ def _phone_train(paged_library_server, render_browser, monkeypatch):
     page.click('.glm-menu-item:has-text("Train a LoRA")')
     page.wait_for_selector(".trm-row")
     return ctx, page, posts
+
+
+def test_the_phone_goal_rows_draw_a_44_px_picture_and_no_glyph(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Session T (Goal Tile Art Handoff): on the phone, Basic's four goal rows each carry a
+    44 px square picture (a computed background, cover), with the label and description beside
+    it as shipped and no glyph in the square."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, posts = _phone_train(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".trm-row:has-text('Basic training')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        page.wait_for_selector(".trm-row.goal")
+        tiles = _goal_tile_facts(page, ".trm-row.goal .mgtr-goal-tint")
+        assert len(tiles) == 4, tiles
+        for t in tiles:
+            assert t["text"] == "" and t["imgs"] == 0, t
+            assert t["picture"].startswith("url("), t
+            assert t["size"] == "cover", t
+            assert (t["w"], t["h"]) == (44, 44), t
+        labels = page.locator(".trm-row.goal .trm-row-text").all_inner_texts()
+        assert [l.splitlines()[0] for l in labels] == ["Character", "Art style", "Outfit", "Something else"]
+    finally:
+        ctx.close()
 
 
 def test_phone_train_opens_on_the_chooser_and_its_back_steps_one_screen(
@@ -6144,6 +6208,288 @@ def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_brandi
     page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
     assert page.evaluate("() => sessionStorage.getItem('mg_panel_tab_request')") is None, (
         "the one-shot is consumed by the gallery that honoured it")
+
+
+# ---------------------------------------------------------------------------
+# The Branding tab's named roles (Session X, Branding Roles Handoff; hidden with the tab)
+# ---------------------------------------------------------------------------
+# The Roles section in a real browser, end to end through the real routes: four rows in meeting
+# order, Change expanding a row, a file checked on the device before anything is sent (a refusal
+# names the rule and the measured value and sends NOTHING), Use this writing the install's
+# override, default -> yours, the one-time ask, and the fail-soft note. The Branding tab is
+# unlock-gated by the sealed roster, so these carry the donor gate like the tab's other tests.
+
+_ROLE_NAMES = ["Login companion", "Job tracker mascots", "Reward icons", "Power poses"]
+
+
+def _role_png(path, size, clear=True, mode="RGBA", fmt="PNG"):
+    """A small picture for the editor: a filled disc on a clear ground (or opaque, or a JPEG)."""
+    from PIL import Image, ImageDraw
+    im = Image.new(mode, size, (0, 0, 0, 0) if mode == "RGBA" else (90, 60, 160))
+    if mode == "RGBA":
+        ImageDraw.Draw(im).ellipse((size[0] * .15, size[1] * .15, size[0] * .85, size[1] * .85),
+                                   fill=(190, 140, 255, 255))
+        if not clear:
+            im.putalpha(255)
+    im.save(path, format=fmt)
+    return str(path)
+
+
+def _dress_role_pack():
+    """The harness container, rewritten to carry the nine role images as PACK defaults next to
+    the roster the Branding tab's gate reads (conftest's seed_sealed_container is the roster half).
+    Written at the PER-TEST container path: conftest's autouse fixture has re-pointed it."""
+    import io as _io
+    import json as _json
+    import moonglade_container as _mc
+    import moonglade_gallery as _g
+    from PIL import Image
+    from tests.conftest import _seed_assets, clear_sealed_caches
+
+    def _pic(rgb):
+        buf = _io.BytesIO()
+        Image.new("RGBA", (96, 96), rgb + (255,)).save(buf, "PNG")
+        return buf.getvalue()
+    assets = dict(_seed_assets())
+    for slot, role in _g.ROLE_SLOTS.items():
+        for key, img in role["images"].items():
+            assets[_g._public_rel_to_coded(img["public"])] = _pic((60, 120, 90))
+    defs = _json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+    _mc.write_container(_g._container_path(), assets,
+                        {"achievements": _json.dumps(defs, separators=(",", ":")).encode("utf-8")})
+    clear_sealed_caches()
+
+
+def _open_roles_section(page):
+    _dismiss_any_achievement_toast(page)
+    page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
+    page.wait_for_selector('[aria-label="Control Panel"]')
+    page.click('button:has-text("✦ Branding")')
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rl")
+
+
+def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_pack_untouched(
+        logged_in_page, tmp_path, sealed_donor_present):
+    import moonglade_gallery as _g
+    _dress_role_pack()
+    pack_before = _g._container_path().read_bytes()
+    page = logged_in_page(**DESKTOP)
+    sent = []
+    page.on("request", lambda r: sent.append((r.method, r.url)) if "/api/branding/role" in r.url else None)
+    _visit(page, "/")
+    _settle(page)
+    _open_roles_section(page)
+
+    # four rows, in the order you meet them, 52 px each, with their images at 34 px
+    assert page.locator(".mgcp-rl-name > div:first-child").all_inner_texts() == _ROLE_NAMES
+    geo = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl-row')].map(r => ({
+        h: Math.round(r.getBoundingClientRect().height),
+        art: [...r.querySelectorAll('.mgcp-rl-art')].map(a => Math.round(a.getBoundingClientRect().width))}))""")
+    assert [len(r["art"]) for r in geo] == [1, 4, 2, 2]
+    assert all(r["h"] == 52 for r in geo), geo
+    assert all(w == 34 for r in geo for w in r["art"]), geo
+
+    login = page.locator('.mgcp-rl[data-role="login_companion"]')
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector(".mgcp-rl-editor")
+    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok"
+    use = page.locator(".mgcp-rl-primary:has-text('Use this')")
+    assert use.is_disabled()
+
+    # a portrait for a companion whose pack art is about square: ticked live, refused loudly, nothing sent,
+    # nothing written
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "sq.png", (600, 800)))
+    page.wait_for_selector(".mgcp-rl-loud")
+    ticks = page.locator(".mgcp-rl-ticks span").all_inner_texts()
+    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 about square (got 3:4)", "\u2713 \u2265 480 px"], ticks
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged.")
+    assert use.is_disabled()
+    assert not [s for s in sent if s[0] == "POST"], "a refused file sends nothing: %r" % sent
+    assert not _g._role_override_path("login_companion", "companion").exists()
+
+    # a JPEG for a PNG role: two rules at once, in pairs
+    page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    assert page.locator(".mgcp-rl-editor").count() == 1, "one row open at a time"
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(
+        _role_png(tmp_path / "flat.jpg", (300, 300), mode="RGB", fmt="JPEG"))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert "must be PNG (this one is JPEG) and have a transparent background (this one is opaque)" in \
+        page.locator(".mgcp-rl-loud").inner_text()
+
+    # a good one: ticks all pass, Use this opens, one POST goes, the row now wears it
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "pose.png", (300, 300)))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    assert not page.locator(".mgcp-rl-loud").count()
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-art.yours')
+    page.wait_for_selector(".mgcp-rl-editor", state="detached")
+    assert [s[0] for s in sent if s[0] == "POST"] == ["POST"], sent
+    poses = page.locator('.mgcp-rl[data-role="power_poses"]')
+    assert "1 of 2 yours" in poses.inner_text()
+    assert _g._role_override_path("power_poses", "restart").is_file()
+    served = page.request.get("/branding/mascots/nel_restart.png")
+    assert served.status == 200 and served.body() == _g._role_override_path("power_poses", "restart").read_bytes()
+
+    # default -> yours on a single-image row, and the one-time ask
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "me.png", (500, 490)))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.def')
+    sizes = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl[data-role="login_companion"] .mgcp-rl-row .mgcp-rl-art')]
+        .map(a => ({w: Math.round(a.getBoundingClientRect().width), cls: a.className}))""")
+    assert [s["w"] for s in sizes] == [28, 34]
+    assert "def" in sizes[0]["cls"] and "yours" in sizes[1]["cls"]
+    assert page.evaluate("() => getComputedStyle(document.querySelector('.mgcp-rl-art.def')).opacity") == "0.45"
+    login.locator("button.mgcp-rl-art.def").click()
+    ask = page.locator(".mgcp-rl-ask")
+    assert ask.inner_text().startswith("Go back to the default Login companion?\nYour image is removed from this install.")
+    ask.locator("button:has-text('Keep mine')").click()
+    assert _g._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
+    login.locator("button.mgcp-rl-art.def").click()
+    page.locator(".mgcp-rl-ask button:has-text('Use default')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours', state="detached")
+    assert not _g._role_override_path("login_companion", "companion").exists()
+    assert _g._container_path().read_bytes() == pack_before, "the pack is never touched"
+
+    # fail-soft: a stored override that will not decode -> the default is shown and the row says so
+    _g._role_override_path("power_poses", "restart").write_bytes(b"not a picture")
+    page.reload()
+    _settle(page)
+    _open_roles_section(page)
+    assert page.locator(".mgcp-rl-note").all_inner_texts() == ["Your file couldn't be read; showing the default."]
+    served = page.request.get("/branding/mascots/nel_restart.png")
+    assert served.status == 200 and served.body() != b"not a picture"
+
+
+def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_moving_png_elsewhere(
+        logged_in_page, tmp_path, sealed_donor_present):
+    """The pack's own login companion is an animated WebP, so the editor must tick one as acceptable
+    ("animated" shown, Use this open) and upload it kept animated; an animated file for a role that
+    allows only stills is refused on the device, in the same words as the server's."""
+    import moonglade_gallery as _g
+    from PIL import Image, ImageDraw
+
+    def disc(size, tint):
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        ImageDraw.Draw(im).ellipse((size[0] * .1, size[1] * .1, size[0] * .9, size[1] * .9), fill=tint + (255,))
+        return im
+
+    def anim(path, size, fmt):
+        frames = [disc(size, (60 * i + 40, 80, 200)) for i in range(3)]
+        extra = {"lossless": True} if fmt == "WEBP" else {}
+        frames[0].save(path, format=fmt, save_all=True, append_images=frames[1:], duration=80, loop=0, **extra)
+        return str(path)
+
+    _dress_role_pack()
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_roles_section(page)
+    login = page.locator('.mgcp-rl[data-role="login_companion"]')
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "me.webp", (500, 490), "WEBP"))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    assert page.locator(".mgcp-rl-ticks span").all_inner_texts() == [
+        "\u2713 WEBP", "\u2713 transparent", "\u2713 animated", "\u2713 about square", "\u2713 \u2265 480 px"]
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours')
+    with Image.open(_g._role_override_path("login_companion", "companion")) as im:
+        assert im.format == "WEBP" and im.is_animated, "the companion stayed animated"
+
+    page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "moving.png", (300, 300), "PNG"))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Power poses must be a still picture. This one is animated. Your current art is unchanged.")
+    assert page.locator(".mgcp-rl-primary:has-text('Use this')").is_disabled()
+    assert not _g._role_override_path("power_poses", "restart").exists()
+
+
+def test_the_phones_use_default_is_off_when_the_pack_has_no_default_to_go_back_to(
+        logged_in_page, tmp_path, sealed_donor_present):
+    """No pack art beside this install (the container carries only the roster): an overridden role's
+    file is the only copy, so the phone's Use default stays disabled, as the desktop shows no
+    dimmed default to tap."""
+    page = logged_in_page(width=390, height=844, device_scale_factor=1, is_mobile=True, has_touch=True)
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+    page.click('button:has-text("Control")')
+    page.wait_for_selector(".mgcp-tile.click")
+    page.locator('.mgcp-tile.click:has-text("Branding")').click()
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rlm-row")
+    page.locator(".mgcp-rlm-row", has_text="Reward icons").click()
+    page.wait_for_selector(".mgcp-rlm-screen")
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "ok.png", (128, 128)))
+    page.wait_for_function("() => document.querySelector('.mgcp-rlm-pair .mgcp-rl-art.yours')")
+    use_default = page.locator(".mgcp-rlm-btns button:has-text('Use default')")
+    assert use_default.is_disabled(), "an overridden image with no pack default cannot be restored"
+    assert page.locator(".mgcp-rlm-pair .mgcp-rl-art.def").count() == 0, "and shows no default beside yours"
+
+
+def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
+        logged_in_page, tmp_path, sealed_donor_present):
+    _dress_role_pack()
+    page = logged_in_page(width=390, height=844, device_scale_factor=1, is_mobile=True, has_touch=True)
+    sent = []
+    page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and "/api/branding/role" in r.url else None)
+    _visit(page, "/")
+    _settle(page)
+    _dismiss_any_achievement_toast(page)
+    page.click('button:has-text("Control")')
+    page.wait_for_selector(".mgcp-tile.click")
+    page.locator('.mgcp-tile.click:has-text("Branding")').click()
+    page.wait_for_selector(".mgcp-brandgrid")
+    page.click('.mgcp-brandnav:has-text("Roles")')
+    page.wait_for_selector(".mgcp-rlm-row")
+    rows = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rlm-row')].map(r => ({
+        name: r.querySelector('.mgcp-rl-name > div').textContent,
+        state: r.querySelectorAll('.mgcp-rl-name > div')[1].textContent,
+        h: Math.round(r.getBoundingClientRect().height),
+        art: Math.round(r.querySelector('.mgcp-rl-art').getBoundingClientRect().width)}))""")
+    assert [r["name"] for r in rows] == _ROLE_NAMES
+    assert all(r["state"] == "default" and r["art"] == 28 and r["h"] >= 52 for r in rows), rows
+
+    page.locator(".mgcp-rlm-row", has_text="Reward icons").click()
+    page.wait_for_selector(".mgcp-rlm-screen")
+    # a multi-image role gets a segment control, one segment per image
+    assert page.locator(".mgcp-rlm-seg .mgcp-rl-tab").all_inner_texts() == ["Claim", "Gift"]
+    assert page.locator(".mgcp-rl-spec").inner_text() == "PNG · transparent · about square · ≥ 64 px"
+    heights = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-btns button')].map(b => Math.round(b.getBoundingClientRect().height))")
+    assert heights == [44, 44], heights
+    assert page.locator(".mgcp-rlm-btns button:has-text('Use default')").is_disabled()
+
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "wide.png", (200, 100)))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Reward icons must be about square. This one is 2:1. Your current art is unchanged.")
+    # a pick that fails shows the live ticks and the refusal and uploads nothing
+    assert page.locator(".mgcp-rl-ticks .bad").count() == 1 and page.locator(".mgcp-rl-ticks .ok").count() == 3
+    assert sent == [], "a refused pick sends nothing: %r" % sent
+
+    # the screen draws exactly two buttons, Choose photo and Use default: no Use this on the phone
+    page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "ok.png", (128, 128)))
+    # a pick that passes every check uploads at once: default -> yours, with nothing to press
+    page.wait_for_function("() => document.querySelector('.mgcp-rlm-pair .mgcp-rl-art.yours')")
+    assert len(sent) == 1, "one upload, sent by the pick itself: %r" % sent
+    assert not page.locator(".mgcp-rlm-use").count()
+    assert page.locator(".mgcp-rlm-screen button", has_text="Use this").count() == 0
+    assert page.locator(".mgcp-rlm-btns button").all_inner_texts() == ["Choose photo", "Use default"]
+    pair = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-pair .mgcp-rl-art')].map(a => Math.round(a.getBoundingClientRect().width))")
+    assert pair == [44, 64], pair
+    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
+    page.locator(".glm-screen-back").last.click()      # the role screen's own, over Branding's
+    page.wait_for_function("() => [...document.querySelectorAll('.mgcp-rlm-row')].some(r => /1 of 2 yours/.test(r.innerText))")
 
 
 # ---------------------------------------------------------------------------
@@ -7984,3 +8330,1265 @@ def test_the_phone_lightbox_buttons_wrap_onto_lines_with_room_to_tap(phone_q_ser
         assert len(lefts) == 1 and got["lines"] == len(got["chips"]), "sideways: one column in the rail %r" % got
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# Session U, phone paging and the Home Screen nudge (Phone Paging and Nudge Handoff.dc.html, U1b-U7b).
+# A library deep enough to stack pages: 620 pictures, newest first, so Continuous at 100 a page has seven
+# pages to load and the mounted window (five) has pages to drop. Its own server, like phone_q_server.
+# PixAI is never reached; the pull's Sync now job is answered in the page.
+# ---------------------------------------------------------------------------
+
+_U_ROWS = 620
+_U_BASE_MID = 20000
+
+
+def _u_mid(i):
+    """The media id of the i-th newest picture."""
+    return str(_U_BASE_MID + _U_ROWS - 1 - i)
+
+
+def _u_row(i, created):
+    w, h = [(832, 1216), (1216, 832), (1024, 1024)][i % 3]
+    return {f: "" for f in CATALOG_FIELDS} | {
+        "media_id": str(_U_BASE_MID + i), "filename": "u_%04d.png" % i, "task_id": str(70000 + i),
+        "prompt_preview": "stacked page %d" % i, "rating": str(1 + (i % 5)),
+        "width": str(w), "height": str(h), "model_name": "Probe Model",
+        "created_at": created.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+
+
+@pytest.fixture()
+def phone_u_server(tmp_path_factory, monkeypatch):
+    import datetime as _dt
+    import logging
+    from types import SimpleNamespace
+
+    from PIL import Image
+    from werkzeug.serving import make_server
+
+    from tests.conftest import pin_daytime_clock
+
+    wz_log = logging.getLogger("werkzeug")
+    wz_level = wz_log.level
+    wz_log.setLevel(logging.ERROR)
+
+    root = tmp_path_factory.mktemp("render-harness-phone-u")
+    config_path = root / "config.json"
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+    monkeypatch.setattr(core, "_config_path", lambda: config_path)
+    monkeypatch.setattr(core, "_cfg", {})
+    pin_daytime_clock(monkeypatch)
+    (root / "gallery" / "thumbs").mkdir(parents=True, exist_ok=True)
+    base = _dt.datetime(2026, 9, 28, 20, 0, 0)
+    rows = []
+    for i in range(_U_ROWS):
+        # row i is the (ROWS-1-i)-th newest: the highest id is the newest picture
+        rows.append(_u_row(i, base - _dt.timedelta(minutes=11 * (_U_ROWS - 1 - i))))
+        w, h = [(832, 1216), (1216, 832), (1024, 1024)][i % 3]
+        th = Image.new("RGB", (w // 16, h // 16), (40 + (i * 7) % 90, 44 + (i * 3) % 70, 90 + (i * 5) % 80))
+        th.save(root / "gallery" / "thumbs" / ("%d.jpg" % (_U_BASE_MID + i)), "JPEG")
+    save_catalog(root / "catalog.db", rows)
+    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
+    cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
+    config_path.write_text(json.dumps(cfg))
+    _seed_guide_seen(root)
+    _telem = load_telemetry(root)
+    _metrics = achievement_metrics(root / "catalog.db")
+    _metrics.update(telemetry_metrics(root))
+    _ach = compute_achievements(_metrics, sets=_telem.get("sets", {}))
+    _today = _dt.date.today().isoformat()
+    _earned = [a["id"] for a in _ach["achievements"] if a["earned"]]
+    save_ach_state(root, {"seen": _earned, "earned_at": {i: _today for i in _earned}})
+
+    def add_newest(n):
+        """n pictures newer than everything, as a sync would bring in. Returns their ids, newest first."""
+        extra = [_u_row(_U_ROWS + k, base + _dt.timedelta(minutes=5 * (k + 1))) for k in range(n)]
+        save_catalog(root / "catalog.db", extra)
+        return [r["media_id"] for r in reversed(extra)]
+
+    server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="render-harness-phone-u")
+    thread.start()
+    try:
+        yield SimpleNamespace(base_url="http://127.0.0.1:%d" % server.server_port,
+                              config_path=config_path, root=root, add_newest=add_newest)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        wz_log.setLevel(wz_level)
+
+
+def _u_long_press(page, selector, ms=650):
+    """Hold the pointer on an element past the 500 ms long-press, then let go."""
+    box = page.locator(selector).first.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.wait_for_timeout(ms)
+    page.mouse.up()
+
+
+def _u_store(page, key):
+    return page.evaluate("(k) => localStorage.getItem(k)", key)
+
+
+def test_the_phone_layout_keys_long_press_opens_layout_and_paging_and_a_tap_still_switches(
+        phone_u_server, render_browser, monkeypatch):
+    """U1b. A tap on ▦ / ▭ still only switches the layout. A 500 ms long-press on either opens one bottom
+    sheet with two 44 px segmented rows, Layout (Grid · Feed) and Paging (Pages · Continuous); Pages is
+    the default; a choice applies at once and is kept per device; the sheet closes on a tap outside. A
+    hairline dot sits under the keys until the first long-press. Control's Library paging row mirrors the
+    same value. Opening the phone writes none of it."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        writes = page.evaluate("window.__qWrites")
+        assert not [k for k in writes if k.startswith("mg_phone_paging")], writes
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the one-time dot under the keys"
+
+        # a tap switches the layout and opens nothing
+        page.click(".glm-layout button[aria-label=Feed]")
+        page.wait_for_selector(".glm-feed")
+        _settle(page)
+        assert page.locator(".glm-pgsheet").count() == 0
+        assert _u_store(page, "mg_phone_layout") == "feed"
+
+        # a long-press opens the sheet and does not switch
+        _u_long_press(page, ".glm-layout button[aria-label=Grid]")
+        page.wait_for_selector(".glm-pgsheet")
+        _settle(page)
+        assert _u_store(page, "mg_phone_layout") == "feed", "the long-press is not a tap"
+        assert page.locator(".glm-layout-dot").count() == 0, "the dot goes after the first long-press"
+        assert _u_store(page, "mg_phone_paging_hint") == "1"
+        geo = page.evaluate("""() => [...document.querySelectorAll('.glm-pgrow')].map((r) => ({
+            label: r.getAttribute('aria-label'), h: r.getBoundingClientRect().height,
+            opts: [...r.querySelectorAll('button')].map((b) => ({t: b.textContent.trim(),
+              on: b.getAttribute('aria-checked') === 'true', h: b.getBoundingClientRect().height}))}))""")
+        assert [g["label"] for g in geo] == ["Layout", "Paging"], geo
+        assert all(abs(g["h"] - 44) < 1 for g in geo), geo
+        assert [o["t"] for o in geo[0]["opts"]] == ["▦ Grid", "▭ Feed"], geo
+        assert [o["t"] for o in geo[1]["opts"]] == ["Pages", "Continuous"], geo
+        assert [o["on"] for o in geo[0]["opts"]] == [False, True], geo
+        assert [o["on"] for o in geo[1]["opts"]] == [True, False], geo
+        assert all(abs(o["h"] - 32) < 1 for g in geo for o in g["opts"]), geo
+
+        # a choice applies at once, and the sheet stays until a tap outside
+        page.click(".glm-pgrow[aria-label=Paging] button:has-text('Continuous')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging') === 'continuous'")
+        assert page.locator(".glm-pgsheet").count() == 1
+        page.click(".glm-pgrow[aria-label=Layout] button:has-text('Grid')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_layout') === 'grid'")
+        page.mouse.click(195, 60)
+        page.wait_for_selector(".glm-pgsheet", state="detached")
+
+        # Control's row mirrors the same value, and sets it
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-paging")
+        assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Continuous"
+        page.click(".ctm-paging button:has-text('Pages')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging') === 'pages'")
+        assert page.locator(".ctm-paging button[aria-checked=true]").inner_text() == "Pages"
+    finally:
+        ctx.close()
+
+
+_U_CONTINUOUS_JS = "try { localStorage.setItem('mg_phone_paging', 'continuous'); } catch (e) {}"
+
+
+def _u_libs(seen):
+    """The library reads the page made, as (page, page_size) pairs in order."""
+    out = []
+    for (m, u) in seen:
+        if m == "GET" and _LIBRARY_READ.search(u):
+            pg = re.search(r"[?&]page=(\d+)", u)
+            sz = re.search(r"[?&]page_size=(\d+)", u)
+            out.append((int(pg.group(1)) if pg else None, int(sz.group(1)) if sz else None))
+    return out
+
+
+def _u_count(page):
+    return page.evaluate("() => (document.querySelector('.glm-pgcount') || {textContent: ''}).textContent")
+
+
+def _u_to_end(page):
+    page.evaluate("(() => { const b = document.querySelector('.glm-body'); b.scrollTop = b.scrollHeight; })()")
+
+
+def test_continuous_loads_the_next_page_near_the_end_counts_in_the_header_and_ends_quietly(
+        phone_u_server, render_browser, monkeypatch):
+    """U2a. Continuous at 390 px: "N of M" (mono 9.5 px) before the layout keys and no pager. The next 100
+    are asked for as the end comes within 1.5 screens, one request at a time, with the spinner line while
+    one is in flight. A failed page leaves the peach "Couldn't load more. Retry" and nothing retries by
+    itself; Retry is one request. At the end: "That's all 620." and no more requests."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        del seen[:]                       # the sign-in's own landing is not this document's
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        assert page.locator(".glm-pager").count() == 0, "Continuous has no pager"
+        assert _u_libs(seen) == [(1, 100)], _u_libs(seen)
+        geo = page.evaluate("""() => { const c = document.querySelector('.glm-pgcount'), k = document.querySelector('.glm-layout');
+            const cs = getComputedStyle(c);
+            return {before: c.getBoundingClientRect().right <= k.getBoundingClientRect().left, size: cs.fontSize,
+                    mono: /mono/i.test(cs.fontFamily)}; }""")
+        assert geo == {"before": True, "size": "9.5px", "mono": True}, geo
+
+        # in flight: the spinner line, and one request however much the list is scrolled
+        held = []
+        page.route(_LIBRARY_READ, lambda r: held.append(r))
+        _u_to_end(page)
+        page.wait_for_selector(".glm-cfoot .glm-cfoot-spin")
+        assert page.locator(".glm-cfoot").inner_text().strip() == "loading…"
+        for _ in range(3):
+            page.evaluate("document.querySelector('.glm-body').scrollTop -= 40")
+            _u_to_end(page)
+            page.wait_for_timeout(120)
+        assert len(held) == 1, "one request at a time: %d" % len(held)
+        page.unroute(_LIBRARY_READ)
+        held[0].continue_()
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '200 of 620'")
+        assert _u_libs(seen)[-1] == (2, 100), _u_libs(seen)
+        assert page.locator(".glm-tile").count() >= 200, "the second page is stacked under the first"
+
+        # a failure: the peach line, and no automatic retry
+        fails = []
+        page.route(_LIBRARY_READ, lambda r: (fails.append(r.request.url),
+                                             _q_json(r, {"error": "the harness says no"}, status=500))[1])
+        _u_to_end(page)
+        page.wait_for_selector(".glm-cfoot-retry")
+        line = page.evaluate("""() => { const b = document.querySelector('.glm-cfoot-retry');
+            return {t: b.textContent.trim(), c: getComputedStyle(b).color, h: b.getBoundingClientRect().height,
+                    peach: getComputedStyle(document.documentElement).getPropertyValue('--peach').trim()}; }""")
+        assert line["t"] == "Couldn't load more. Retry", line
+        assert line["h"] >= 44, line
+        for _ in range(3):
+            page.evaluate("document.querySelector('.glm-body').scrollTop -= 60")
+            _u_to_end(page)
+            page.wait_for_timeout(150)
+        page.wait_for_timeout(1200)
+        assert len(fails) == 1, "no automatic retry: %r" % fails
+        page.unroute(_LIBRARY_READ)
+        before = len(_u_libs(seen))
+        page.click(".glm-cfoot-retry")
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '300 of 620'")
+        assert len(_u_libs(seen)) == before + 1 and _u_libs(seen)[-1] == (3, 100), _u_libs(seen)
+
+        # to the end
+        for _ in range(12):
+            if _u_count(page) == "620 of 620":
+                break
+            _u_to_end(page)
+            page.wait_for_timeout(300)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '620 of 620'")
+        page.wait_for_selector(".glm-cfoot-dim:has-text(\"That's all 620.\")")
+        n = len(_u_libs(seen))
+        _u_to_end(page)
+        page.wait_for_timeout(600)
+        assert len(_u_libs(seen)) == n, "nothing is asked for after the end"
+    finally:
+        ctx.close()
+
+
+def test_continuous_pages_are_50_under_data_saver_on_a_metered_connection_and_a_switch_starts_at_the_top(
+        phone_u_server, render_browser, monkeypatch):
+    """U2a's Data saver line: on a metered connection (Auto, cellular) Continuous asks for 50 a page. And a
+    switch from Pages (on page 2) to Continuous starts the stacked list over from page 1 at the top."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, connection={"type": "cellular"})
+    try:
+        _q_open(page)
+        page.wait_for_selector(".glm-pager")
+        page.click(".glm-pager .glm-metal:has-text('Next')")
+        page.wait_for_function("() => /Page 2 of/.test((document.querySelector('.glm-pager-info') || {}).textContent || '')")
+        _u_long_press(page, ".glm-layout button[aria-label=Grid]")
+        page.wait_for_selector(".glm-pgsheet")
+        page.click(".glm-pgrow[aria-label=Paging] button:has-text('Continuous')")
+        page.mouse.click(195, 60)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '50 of 620'")
+        assert _u_libs(seen)[-1] == (1, 50), _u_libs(seen)
+        since = len(_u_libs(seen)) - 1
+        assert page.evaluate("document.querySelector('.glm-body').scrollTop") == 0
+        top = page.evaluate("document.querySelector('.glm-tile').getAttribute('data-mid')")
+        assert top == _u_mid(0), "the stacked list starts at the newest picture"
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '100 of 620'")
+        page.wait_for_timeout(700)
+        # one page, not a run of them: the 50 new pictures grow the window page the view is in at its foot,
+        # which must not drag the view down after them (and so ask again)
+        assert _u_libs(seen)[since:] == [(1, 50), (2, 50)], _u_libs(seen)[since:]
+        assert _u_count(page) == "100 of 620"
+    finally:
+        ctx.close()
+
+
+def _u_marker_init(mid):
+    """Seed the 'last seen' marker on the NEXT document (see _q_seed_marker) at a picture of this library,
+    left at 21:40 UTC."""
+    import datetime as _dt
+    at = int(_dt.datetime(2026, 9, 28, 21, 40, tzinfo=_dt.timezone.utc).timestamp() * 1000)
+    return ("if (sessionStorage.getItem('__qSeedNext') === '1') {"
+            " sessionStorage.removeItem('__qSeedNext');"
+            " localStorage.setItem('mg_phone_seen', JSON.stringify({id: '%s', ts: 0, at: %d})); }" % (mid, at))
+
+
+def test_a_pull_over_continuous_prepends_above_the_rule_and_keeps_every_loaded_page(
+        phone_u_server, render_browser, monkeypatch):
+    """U3a. Over a stacked list: ↑ Newest scrolls to the top and unloads nothing; a pull (at the top) runs
+    Sync now once, then puts the new pictures ABOVE the rule -- which stays with the marker picture --
+    and keeps every page already loaded; N grows by the new count and M refreshes. It reads the top of
+    the walk once (the new run meets the loaded list on page 1), and leaves the marker where it was."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch,
+                              init=_U_CONTINUOUS_JS + "\n" + _u_marker_init(_u_mid(0)))
+    runs = []
+    try:
+        _q_seed_marker(page)
+        _q_open(page)
+        page.route("**/api/panel/run", lambda r: (runs.append(1), _q_json(r, {"ok": True, "action": "sync"}))[1])
+        page.route("**/api/panel/status", lambda r: _q_json(r, {"status": "done", "lines": []}))
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        assert page.locator(".glm-newrule").count() == 0, "nothing is new since the marker yet"
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '200 of 620'")
+
+        # ↑ Newest: back to the top, nothing unloaded
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 3000")
+        page.wait_for_selector(".glm-newest")
+        page.click(".glm-newest")
+        page.wait_for_function("() => document.querySelector('.glm-body').scrollTop === 0", timeout=5000)
+        assert _u_count(page) == "200 of 620"
+        assert page.evaluate("document.querySelectorAll('.glm-tile').length") >= 200
+
+        # three arrive; the pull prepends them above the rule and keeps both pages
+        fresh = phone_u_server.add_newest(3)
+        page.evaluate("window.__qWrites.length = 0")
+        reads = len(_u_libs(seen))
+        _settle(page)
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        release()
+        page.wait_for_function("() => !!document.querySelector('.ptr.syncing')")
+        page.wait_for_function("() => !document.querySelector('.ptr.syncing')", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '203 of 623'")
+        assert runs == [1], runs
+        assert _u_libs(seen)[reads:] == [(1, 100)], "one read of the top: %r" % _u_libs(seen)[reads:]
+        got = page.evaluate("""() => { const rule = document.querySelector('.glm-newrule');
+            const above = rule.previousElementSibling;
+            return {rule: rule.textContent.trim(),
+                    above: [...above.querySelectorAll('.glm-tile')].map((t) => t.getAttribute('data-mid')).sort(),
+                    tiles: document.querySelectorAll('.glm-tile').length}; }""")
+        assert got["rule"] == "3 new since 21:40", got
+        assert got["above"] == sorted(fresh), got
+        assert got["tiles"] >= 203, "every page already loaded is kept: %r" % got
+        assert "mg_phone_seen" not in page.evaluate("window.__qWrites"), "a pull leaves the marker where it was"
+    finally:
+        ctx.close()
+
+
+_U_WINDOW_JS = """() => { const b = document.querySelector('.glm-body');
+    return {pages: [...document.querySelectorAll('.glm-cpage')].map((e) => Number(e.dataset.page)),
+            spacers: [...document.querySelectorAll('.glm-cpage-spacer')].map((e) => [Number(e.dataset.page), e.offsetHeight]),
+            tiles: document.querySelectorAll('.glm-tile').length, sh: b.scrollHeight, st: b.scrollTop}; }"""
+
+_U_TILE_Y_JS = """(m) => { const b = document.querySelector('.glm-body');
+    const t = document.querySelector('.glm-tile[data-mid="' + m + '"]');
+    if (!t) return null;
+    const r = t.getBoundingClientRect(), hb = b.getBoundingClientRect();
+    return {y: r.top - hb.top + b.scrollTop, inView: r.top >= hb.top - 1 && r.bottom <= hb.bottom + 1}; }"""
+
+
+def _u_load_all(page, total=620):
+    want = "%d of %d" % (total, total)
+    for _ in range(24):
+        if _u_count(page) == want:
+            break
+        _u_to_end(page)
+        page.wait_for_timeout(250)
+    page.wait_for_function("(w) => document.querySelector('.glm-pgcount').textContent === w", arg=want)
+    _settle(page)
+
+
+def test_continuous_mounts_at_most_five_pages_with_exact_spacers_and_the_viewer_crosses_page_edges(
+        phone_u_server, render_browser, monkeypatch):
+    """U4a. The viewer's › past the last loaded picture asks for the next page and lands on the picture
+    after it, by id, counting its place in the whole walk; ‹ steps back across the edge. With everything
+    loaded, at most five pages of 100 are in the DOM and the rest are spacers of exactly the height the
+    page had: the list's height does not change as pages drop and mount, and a picture comes back to
+    the very same place. Closing the viewer on a picture in a dropped page mounts that page and brings
+    the picture into view."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+
+        # the viewer crosses the first page edge by id. It walks there from the top picture (the grid stays
+        # at the top, so its own footer is far out of reach and only the viewer can ask for page 2)
+        page.locator('.glm-tile[data-mid="%s"]' % _u_mid(0)).click()
+        page.wait_for_function("() => (document.querySelector('.lbm-index') || {}).textContent === '1'")
+        for _ in range(99):
+            page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
+        assert page.locator(".lbm-total").inner_text() == "OF 620"
+        reads = len(_u_libs(seen))
+        page.click(".lbm-next")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '101'")
+        assert _u_libs(seen)[reads:] == [(2, 100)], _u_libs(seen)[reads:]
+        assert page.locator(".lbm-hero img").get_attribute("src").endswith("/full/" + _u_mid(100))
+        assert page.locator(".lbm-thumb").count() == 100, "the film strip is the window page the picture is on"
+        page.click(".lbm-prev")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
+        assert page.locator(".lbm-hero img").get_attribute("src").endswith("/full/" + _u_mid(99))
+        page.click(".lbm-close")
+        page.wait_for_selector(".lbm-root", state="detached")
+
+        # everything loaded: at most five pages mounted, spacers for the rest
+        _u_load_all(page)
+        w = page.evaluate(_U_WINDOW_JS)
+        assert len(w["pages"]) <= 5 and w["tiles"] <= 500, w
+        assert len(w["spacers"]) == 7 - len(w["pages"]) and all(h > 0 for _, h in w["spacers"]), w
+
+        # exact spacers: the height of the list holds, and a picture comes back to the same place
+        at = page.evaluate(_U_TILE_Y_JS, _u_mid(600))
+        assert at, "the last page is mounted at the bottom"
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 0")
+        page.wait_for_function("() => !document.querySelector('.glm-cpage[data-page=\"6\"]')")
+        _settle(page)
+        top = page.evaluate(_U_WINDOW_JS)
+        assert 0 in top["pages"] and len(top["pages"]) <= 5, top
+        assert abs(top["sh"] - w["sh"]) <= 1, "the list's height holds as pages drop and mount: %r" % ((w["sh"], top["sh"]),)
+        page.evaluate("(y) => { document.querySelector('.glm-body').scrollTop = y; }", w["st"])
+        page.wait_for_selector('.glm-cpage[data-page="6"]')
+        _settle(page)
+        back = page.evaluate(_U_TILE_Y_JS, _u_mid(600))
+        assert abs(back["y"] - at["y"]) <= 1, "the picture comes back to the same place: %r" % ((at, back),)
+
+        # the viewer, opened on a picture in a dropped page, closes back onto it
+        assert page.locator('.glm-tile[data-mid="%s"]' % _u_mid(5)).count() == 0, "page 0 is dropped at the bottom"
+        page.evaluate("(m) => document.dispatchEvent(new CustomEvent('mg-open-details', {detail: {mid: m}}))", _u_mid(5))
+        page.wait_for_selector(".idm-root .idm-lb")
+        page.click(".idm-lb")
+        page.wait_for_function("() => (document.querySelector('.lbm-index') || {}).textContent === '6'")
+        page.click(".lbm-close")
+        page.wait_for_selector(".lbm-root", state="detached")
+        page.wait_for_selector('.glm-tile[data-mid="%s"]' % _u_mid(5))
+        _settle(page)
+        assert page.evaluate(_U_TILE_Y_JS, _u_mid(5))["inView"], "the picture is back in view"
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
+    finally:
+        ctx.close()
+
+
+def test_continuous_holds_its_window_through_a_turn_and_back(phone_u_server, render_browser, monkeypatch):
+    """U4a with Q4: deep in a stacked list, a turn to landscape and back keeps at most five pages mounted,
+    upright is two columns again, and nothing scrolls sideways (the #75 symptom, measured here, not fixed)."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        _u_load_all(page)
+        page.evaluate("document.querySelector('.glm-body').scrollTop = document.querySelector('.glm-body').scrollHeight / 2")
+        _settle(page)
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
+        _settle(page)
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
+        page.set_viewport_size(PHONE)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0", timeout=2500)
+        _settle(page)
+        got = page.evaluate(_Q_COLS_JS)
+        cols = page.evaluate("() => document.querySelector('.glm-cpage .glm-grid').querySelectorAll(':scope > .glm-col').length")
+        assert cols == 2 and not got["rows"], (cols, got)
+        assert got["docW"] <= got["vw"] and got["bodyW"] <= got["bodyCW"] and got["right"] <= PHONE["width"], got
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
+    finally:
+        ctx.close()
+
+
+def _u_press_tile(page, i):
+    """Long-press the tile of the i-th newest picture (scrolled to the middle of the view first)."""
+    sel = '.glm-tile[data-mid="%s"]' % _u_mid(i)
+    page.evaluate("(s) => document.querySelector(s).scrollIntoView({block: 'center'})", sel)
+    _settle(page)
+    _u_long_press(page, sel)
+
+
+def _u_selected(page):
+    return page.evaluate("() => { const c = document.querySelector('.glm-selcount b'); return c ? Number(c.textContent) : null; }")
+
+
+def test_continuous_selection_survives_loading_ranges_by_long_press_and_a_filter_change_can_be_undone(
+        phone_u_server, render_browser, monkeypatch):
+    """U5a + U5c in Continuous. A long-press arms select mode; in select mode a second long-press selects
+    everything between the last ticked tile and it. "All loaded (L)" ticks every loaded picture, and the
+    ticks are kept by id while the next page loads. A filter change clears the selection with a 10 s Undo
+    that hands it back."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+        _u_press_tile(page, 2)
+        page.wait_for_selector(".glm-selcount")
+        assert _u_selected(page) == 1
+        assert page.locator(".glm-allloaded").inner_text() == "All loaded (100)"
+        _u_press_tile(page, 9)
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 8")
+        ticked = page.evaluate("() => [...document.querySelectorAll('.glm-tile.sel')].map((t) => t.getAttribute('data-mid')).sort()")
+        assert ticked == sorted(_u_mid(i) for i in range(2, 10)), ticked
+        assert page.locator(".glm-rangecard").count() == 0, "a range that is all loaded needs no card"
+
+        page.click(".glm-allloaded")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 100")
+        _u_to_end(page)
+        page.wait_for_function("() => document.querySelector('.glm-allloaded').textContent === 'All loaded (200)'")
+        assert _u_selected(page) == 100, "ticks are kept by id while the next page loads"
+
+        page.click(".glm-bar2 .glm-metal:has-text('Images')")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 0")
+        toast = page.locator(".mgcu-toast")
+        assert "The filter changed, so the selection was cleared." in toast.inner_text()
+        page.click(".mgcu-toast-undo")
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 100")
+    finally:
+        ctx.close()
+
+
+def test_pages_range_select_reaches_pictures_not_loaded_and_the_confirm_counts_them_all(
+        phone_u_server, render_browser, monkeypatch):
+    """U5c across pages. Tick place 11 on page 1, turn to page 3, long-press place 251: places 11-251 are
+    selected -- 51 of them on screen, 190 not loaded. A card says so for 4 s; their ids are read (one read
+    at the route's largest page) before Actions opens, and the Actions sheet counts all 241."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        _u_press_tile(page, 10)
+        page.wait_for_selector(".glm-selcount")
+        for want in (2, 3):
+            page.evaluate("document.querySelector('.glm-pager').scrollIntoView({block: 'center'})")
+            page.click(".glm-pager .glm-metal:has-text('Next')")
+            page.wait_for_function("(n) => new RegExp('Page ' + n + ' of').test((document.querySelector('.glm-pager-info') || {}).textContent || '')", arg=want)
+        reads = len(_u_libs(seen))
+        held = []
+        page.route(_LIBRARY_READ, lambda r: held.append(r))
+        _u_press_tile(page, 250)
+        page.wait_for_selector(".glm-rangecard")
+        assert page.locator(".glm-rangecard").inner_text() == "Selected 241, including 190 not loaded yet."
+        assert page.locator(".glm-pill-accent:has-text('Actions')").is_disabled(), "Actions waits for the read"
+        assert _u_selected(page) == 52, "the place first ticked and the 51 on screen are selected at once"
+        page.wait_for_function("(n) => n > 0", arg=len(held))
+        page.unroute(_LIBRARY_READ)
+        for r in held:
+            r.continue_()
+        page.wait_for_function("() => Number(document.querySelector('.glm-selcount b').textContent) === 241")
+        assert _u_libs(seen)[reads:] == [(1, 200)], _u_libs(seen)[reads:]
+        assert not page.locator(".glm-pill-accent:has-text('Actions')").is_disabled()
+        page.click(".glm-pill-accent:has-text('Actions')")
+        page.wait_for_selector(".glm-sheet")
+        assert page.locator(".glm-sheet-title").first.inner_text().startswith("241 SELECTED")
+        page.wait_for_selector(".glm-rangecard", state="detached", timeout=6000)
+    finally:
+        ctx.close()
+
+
+_U_IOS_SAFARI = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+_U_IOS_CHROME = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1")
+
+# A browser offering its own install prompt, as Android Chrome does: the event the gallery holds back for
+# the strip. Its prompt() only counts; nothing is installed.
+_U_OFFER_INSTALL_JS = """() => {
+    const e = new Event('beforeinstallprompt', {cancelable: true});
+    e.prompt = () => { window.__prompted = (window.__prompted || 0) + 1; return Promise.resolve(); };
+    e.userChoice = Promise.resolve({outcome: 'dismissed'});
+    window.__offer = e;
+    window.dispatchEvent(e);
+    return e.defaultPrevented; }"""
+
+
+def _u_phone(render_browser, server, monkeypatch, ua=None, viewport=None):
+    monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
+    opts = {"user_agent": ua} if ua else {}
+    ctx = render_browser.new_context(viewport=viewport or PHONE, device_scale_factor=1, has_touch=True,
+                                     is_mobile=True, base_url=server.base_url, timezone_id="UTC", **opts)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_Q_WRITES_JS)
+    return ctx, ctx.new_page()
+
+
+def _u_landed(page):
+    """The gallery a sign-in lands on, settled."""
+    page.wait_for_selector(".glm-tile")
+    _freeze_motion(page)
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+
+def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bubble_at_share(
+        phone_u_server, render_browser, monkeypatch):
+    """U6c + U7b on iOS Safari. Right after a sign-in: a 36 px strip under the pill row, pushing the grid
+    down, "Add to Home Screen for full screen ›" and ✕. Its tap shows the bubble 12 px above Safari's
+    toolbar with ▼ (▲ under the top, held sideways); any tap closes it, and so do 8 s. A reload does not
+    show the strip again; the next sign-in does, until ✕ -- which is kept on this phone, and is the only
+    write. iOS Chrome sees nothing."""
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch, ua=_U_IOS_SAFARI)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_selector(".glm-nudge")
+        geo = page.evaluate("""() => { const s = document.querySelector('.glm-nudge').getBoundingClientRect();
+            const bar = document.querySelector('.glm-bar2').getBoundingClientRect();
+            const grid = document.querySelector('.glm-grid').getBoundingClientRect();
+            const x = document.querySelector('.glm-nudge-x').getBoundingClientRect();
+            const go = document.querySelector('.glm-nudge-go');
+            return {h: s.height, w: s.width, under: s.top >= bar.bottom - 0.5, pushes: grid.top >= s.bottom,
+                    text: go.textContent, color: getComputedStyle(go).color, xw: x.width, vw: innerWidth}; }""")
+        assert abs(geo["h"] - 36) < 1 and geo["under"] and geo["pushes"], geo
+        assert geo["text"] == "Add to Home Screen for full screen ›", geo
+        assert geo["xw"] >= 44 and geo["w"] >= geo["vw"] - 24, geo
+        assert [k for k in page.evaluate("window.__qWrites") if k.startswith("mg_phone_")] == [], "nothing writes on open"
+
+        page.click(".glm-nudge-go")
+        page.wait_for_selector(".mgnudge-bubble.bottom")
+        b = page.evaluate("""() => { const r = document.querySelector('.mgnudge-bubble').getBoundingClientRect();
+            const card = document.querySelector('.mgnudge-card').getBoundingClientRect();
+            const arrow = document.querySelector('.mgnudge-arrow').getBoundingClientRect();
+            return {gap: innerHeight - r.bottom, text: document.querySelector('.mgnudge-card').textContent,
+                    arrow: document.querySelector('.mgnudge-arrow').textContent, below: arrow.top >= card.bottom - 0.5,
+                    centred: Math.abs((arrow.left + arrow.right) / 2 - innerWidth / 2) < 2}; }""")
+        assert abs(b["gap"] - 12) < 1 and b["arrow"] == "▼" and b["below"] and b["centred"], b
+        assert b["text"] == 'Tap ⬆ below, then "Add to Home Screen".', b
+        page.mouse.click(195, 420)
+        page.wait_for_selector(".mgnudge-bubble", state="detached")
+
+        # held sideways: under the top, pointing up; and it goes by itself after 8 s
+        page.set_viewport_size(LAND)
+        page.wait_for_selector(".glm-nudge-go")
+        page.evaluate("document.querySelector('.glm-nudge-go').click()")
+        page.wait_for_selector(".mgnudge-bubble.top")
+        t = page.evaluate("""() => { const r = document.querySelector('.mgnudge-bubble').getBoundingClientRect();
+            const card = document.querySelector('.mgnudge-card').getBoundingClientRect();
+            const arrow = document.querySelector('.mgnudge-arrow').getBoundingClientRect();
+            return {top: r.top, arrow: document.querySelector('.mgnudge-arrow').textContent, above: arrow.bottom <= card.top + 0.5,
+                    text: document.querySelector('.mgnudge-card').textContent}; }""")
+        assert abs(t["top"] - 12) < 1 and t["arrow"] == "▲" and t["above"], t
+        assert t["text"] == 'Tap ⬆ above, then "Add to Home Screen".', t
+        page.wait_for_selector(".mgnudge-bubble", state="detached", timeout=9500)
+        page.set_viewport_size(PHONE)
+
+        # once: a reload does not show it again
+        _visit(page, "/")
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "a reload is not a sign-in"
+
+        # the next sign-in does, until ✕ -- kept on this phone
+        _login(page)
+        _u_landed(page)
+        page.wait_for_selector(".glm-nudge")
+        page.click(".glm-nudge-x")
+        page.wait_for_selector(".glm-nudge", state="detached")
+        assert _u_store(page, "mg_phone_nudge_off") == "1"
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "waved off on this phone"
+    finally:
+        ctx.close()
+
+    # iOS Chrome cannot add the app the same way: nothing
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch, ua=_U_IOS_CHROME)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0
+    finally:
+        ctx.close()
+
+
+def test_the_home_screen_nudge_fires_the_browsers_own_install_prompt_where_one_is_offered(
+        phone_u_server, render_browser, monkeypatch):
+    """U7b on Android: no strip until the browser offers its install prompt; then the strip holds the
+    offer back, and its tap fires that prompt -- once. Afterwards the browser no longer offers it here,
+    so the strip goes. No bubble."""
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "no offer, no strip"
+        assert page.evaluate(_U_OFFER_INSTALL_JS) is True, "the offer is held back for the strip"
+        page.wait_for_selector(".glm-nudge")
+        page.click(".glm-nudge-go")
+        page.wait_for_function("() => window.__prompted === 1")
+        page.wait_for_selector(".glm-nudge", state="detached")
+        assert page.locator(".mgnudge-bubble").count() == 0
+        assert page.evaluate("window.__prompted") == 1
+    finally:
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# The owner's walk of the R-Y build (2026-10-04): two doors in the header. The gift box is for
+# rewards only; the inbox has its own ✉ button beside it. Each opens its own panel, and opening
+# one closes the other. On the phone the Inbox sheet loses its Gifts tab. PixAI is never reached:
+# the account read and every /api/inbox read are answered in the page.
+# ---------------------------------------------------------------------------
+
+def _rf_iso(days):
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _rf_account(expiring=True):
+    """A linked account: 13 free cards, 5 of them lapsing in two days unless `expiring` is off."""
+    return {"credits": 46200, "cards": 13, "cards_by": [
+        {"name": "Tsubaki.3", "count": 5, "category": "image", "expires": "",
+         "expiry_counts": [{"expires_at": _rf_iso(2), "count": 5}] if expiring else []},
+        {"name": "Daily recipe", "count": 8, "category": "image", "expires": "", "expiry_counts": []}]}
+
+
+def _rf_items():
+    art = {"id": "17886", "title": "Moonwell Vigil", "thumb": "", "media_id": "100"}
+    return [
+        {"id": "n1", "type": "COMMENT", "cat": "comment", "unread": True, "created_at": _rf_iso(-0.1),
+         "users": [{"id": "u1", "name": "kurone"}], "artwork": art, "content": "the hair light is unreal"},
+        {"id": "n2", "type": "LIKE", "cat": "like", "unread": True, "created_at": _rf_iso(-0.2),
+         "users": [{"id": "u2", "name": "Aster"}], "artwork": art, "content": ""},
+        {"id": "n3", "type": "FOLLOW", "cat": "follow", "unread": True, "created_at": _rf_iso(-1),
+         "users": [{"id": "u3", "name": "Ilya"}], "artwork": None, "content": ""},
+        {"id": "n4", "type": "NEWS", "cat": "news", "unread": False, "created_at": _rf_iso(-2),
+         "users": [], "artwork": None, "content": "Tsubaki.3 now supports 4K"},
+    ]
+
+
+_RF_GIFTS = {"gifts": [{"id": "g1", "what": "3 Tsubaki.3 cards", "status": "PENDING", "expires_at": ""}],
+             "bonuses": [], "has_thread": True, "my_name": "Harness", "read_only": False}
+_RF_EVENTS = [
+    {"label": "zeta", "title": "Zeta", "link": "https://pixai.art/en/event/zeta",
+     "image": "https://banners.test/zeta.png", "end": ""},
+    {"label": "anniversary", "title": "4th anniversary", "link": "https://pixai.art/en/event/4th-anniversary",
+     "image": "https://banners.test/missing.png", "end": ""},
+]
+_RF_BANNER_SIZE = (1200, 300)          # a 4:1 banner, so "its own aspect" is not the 3:1 fallback
+
+
+def _rf_routes(page, count=None, events=None, gifts=None, account=None):
+    """Answer the account read and every inbox read in the page. Returns the inbox POSTs seen."""
+    from io import BytesIO
+
+    from PIL import Image
+    count = count if count is not None else {"total": 7, "unread": 5, "gifts": 2}
+    buf = BytesIO()
+    Image.new("RGB", _RF_BANNER_SIZE, (90, 60, 150)).save(buf, "PNG")
+    png = buf.getvalue()
+    page.route(re.compile(r"/api/account(\?|$)"), lambda r: _q_json(r, account or _rf_account()))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(r, dict(count, csrf="harness")))
+    page.route(re.compile(r"/api/inbox(\?|$)"), lambda r: _q_json(r, {
+        "items": _rf_items(), "cursor": None, "has_more": False, "csrf": "harness", "read_only": False}))
+    page.route(re.compile(r"/api/inbox/gifts(\?|$)"), lambda r: _q_json(r, dict(gifts or _RF_GIFTS, csrf="harness")))
+    page.route(re.compile(r"/api/inbox/events(\?|$)"), lambda r: _q_json(
+        r, {"events": _RF_EVENTS if events is None else events}))
+    page.route("https://banners.test/zeta.png", lambda r: r.fulfill(status=200, content_type="image/png", body=png))
+    page.route("https://banners.test/missing.png", lambda r: r.fulfill(status=404, body=b""))
+    posts = []
+    page.on("request", lambda rq: posts.append(rq.url) if rq.method == "POST" and "/api/inbox" in rq.url else None)
+    return posts
+
+
+def _rf_desktop(logged_in_page, init=None, **routes):
+    page = logged_in_page(width=1400, height=1000)
+    posts = _rf_routes(page, **routes)
+    if init:
+        page.add_init_script(init)
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox")
+    page.wait_for_selector(".ib-door.gift")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    return page, posts
+
+
+_RF_DOORS_JS = """() => {
+  const r = (el) => { const b = el.getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, w: b.width, h: b.height}; };
+  const inbox = document.querySelector('.ib-door.inbox'), gift = document.querySelector('.ib-door.gift');
+  const chip = document.querySelector('.mgx-sepright button.mgx-cred');
+  const badge = (el) => { const b = el.querySelector('.ib-badge'); return b ? b.textContent : null; };
+  return {inbox: r(inbox), gift: r(gift), chip: r(chip), inboxBadge: badge(inbox), giftBadge: badge(gift),
+          inboxTitle: inbox.title, giftTitle: gift.title, inboxLabel: inbox.getAttribute('aria-label'),
+          icon: (() => { const i = inbox.querySelector('.ib-inboxic'); if (!i) return null;
+            const b = i.getBoundingClientRect(); return {w: b.width, h: b.height, bg: getComputedStyle(i).backgroundImage}; })(),
+          glyph: (inbox.querySelector('.ib-inboxglyph') || {}).textContent || '',
+          inboxBadgeBg: inbox.querySelector('.ib-badge') && getComputedStyle(inbox.querySelector('.ib-badge')).backgroundColor,
+          giftBadgeBg: gift.querySelector('.ib-badge') && getComputedStyle(gift.querySelector('.ib-badge')).backgroundColor,
+          giftArt: getComputedStyle(gift).backgroundImage, inboxArt: getComputedStyle(inbox).backgroundImage};
+}"""
+
+
+def test_the_header_has_an_inbox_door_then_the_gift_box_then_the_credits_chip(logged_in_page):
+    """Owner's walk, ruling 1. Left of the credits chip: ✉ Inbox, then 🎁 Gift box, twins at 30 x 30
+    with an 8 px gap between each. ✉ carries the unread notifications, 🎁 only the pending gifts, each
+    with the lavender badge and nothing at 0; ✉ caps at 99+. ✉ draws the owner's mailbox at the gift
+    box's 22 px -- here the app's own module copy, since this install's pack has none."""
+    page, _ = _rf_desktop(logged_in_page)
+    page.wait_for_selector(".ib-door.inbox .ib-inboxic[style*='background-image']")
+    g = page.evaluate(_RF_DOORS_JS)
+    for k in ("inbox", "gift"):
+        assert abs(g[k]["w"] - 30) < 0.5 and abs(g[k]["h"] - 30) < 0.5, g
+    assert abs(g["gift"]["l"] - g["inbox"]["r"] - 8) < 1, ("8 px from ✉ to 🎁", g)
+    assert abs(g["chip"]["l"] - g["gift"]["r"] - 8) < 1, ("8 px from 🎁 to the credits chip", g)
+    assert (g["inboxBadge"], g["giftBadge"]) == ("5", "2"), g
+    assert g["inboxBadgeBg"] == g["giftBadgeBg"], g
+    assert (g["inboxTitle"], g["giftTitle"]) == ("PixAI inbox", "Gift box"), g
+    assert g["inboxLabel"] == "Inbox, 5 new", g
+    assert g["icon"] and abs(g["icon"]["w"] - 22) < 0.5 and abs(g["icon"]["h"] - 22) < 0.5, g
+    assert g["icon"]["bg"].startswith('url("data:image/webp;base64,'), ("the module's mailbox", g)
+    assert g["glyph"] == "", ("no ✉ glyph while the picture loads", g)
+    assert "gift.png" in g["giftArt"] and "gift.png" not in g["inboxArt"], g
+
+    page.unroute(re.compile(r"/api/inbox/count(\?|$)"))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(
+        r, {"total": 0, "unread": 0, "gifts": 0, "csrf": "harness"}))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.gift")
+    _settle(page)
+    g = page.evaluate(_RF_DOORS_JS)
+    assert (g["inboxBadge"], g["giftBadge"]) == (None, None), ("no badge at 0", g)
+
+    page.unroute(re.compile(r"/api/inbox/count(\?|$)"))
+    page.route(re.compile(r"/api/inbox/count(\?|$)"), lambda r: _q_json(
+        r, {"total": 120, "unread": 120, "gifts": 0, "csrf": "harness"}))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox .ib-badge")
+    g = page.evaluate(_RF_DOORS_JS)
+    assert (g["inboxBadge"], g["giftBadge"]) == ("99+", None), g
+
+
+_RF_PANEL_JS = """() => {
+  const p = document.querySelector('.ib-panel');
+  if (!p) return null;
+  const b = p.getBoundingClientRect();
+  return {label: p.getAttribute('aria-label'), title: (p.querySelector('.ib-title') || {}).textContent || '',
+          w: b.width, z: getComputedStyle(p).zIndex,
+          tabs: [...p.querySelectorAll('.ib-chip')].map((c) => c.textContent),
+          labs: [...p.querySelectorAll('.ib-lab')].map((c) => c.textContent),
+          rows: p.querySelectorAll('.ib-row').length, events: p.querySelectorAll('.ib-event').length,
+          gifts: [...p.querySelectorAll('.ib-gift-t')].map((c) => c.textContent),
+          claim: [...p.querySelectorAll('.ib-gift .ib-btn')].map((c) => c.textContent),
+          expiry: [...p.querySelectorAll('.ib-expiry-line')].map((c) => ({t: c.textContent, color: getComputedStyle(c).color})),
+          dim: [...p.querySelectorAll('.ib-dim')].map((c) => c.textContent),
+          more: p.querySelectorAll('.ib-more').length,
+          count: document.querySelectorAll('.ib-panel').length};
+}"""
+
+_RF_PEACH_JS = ("() => { const s = document.createElement('span'); s.style.color = 'var(--peach)'; document.body.appendChild(s);"
+                " const c = getComputedStyle(s).color; s.remove(); return c; }")
+
+
+def test_the_inbox_and_the_gift_box_open_their_own_panels_and_one_closes_the_other(logged_in_page):
+    """Owner's walk, ruling 1. ✉ opens the inbox without anything gift- or event-related: "Inbox" and its
+    new count, the tabs All · Comments · Likes · Follows · PixAI, the work cards then everything else, ⋯.
+    🎁 opens "Gift box": ON PIXAI NOW, the cards about to expire in peach (the chip hover's own lines),
+    then the gifts with Claim ▸. Same 380 px, z 300 panel; opening one closes the other, by click or by
+    keyboard; Esc closes. Opening either writes nothing."""
+    page, posts = _rf_desktop(logged_in_page)
+
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox'] .ib-row")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["title"] == "Inbox" and abs(p["w"] - 380) < 1 and p["z"] == "300", p
+    assert p["tabs"] == ["All", "Comments", "Likes", "Follows", "PixAI"], p
+    assert "ON PIXAI NOW" not in p["labs"] and p["events"] == 0, ("no events in the inbox", p)
+    assert p["gifts"] == [] and p["expiry"] == [], ("no gifts and no expiring cards in the inbox", p)
+    assert p["rows"] >= 3 and p["more"] == 1, p
+    assert page.locator(".ib-panel .ib-new").inner_text() == "5 new"
+
+    # the gift box, by a click: the inbox closes
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-event")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["count"] == 1 and p["title"] == "Gift box", p
+    assert abs(p["w"] - 380) < 1 and p["z"] == "300", p
+    assert p["tabs"] == [] and p["rows"] == 0 and p["more"] == 0, ("no tabs, no inbox rows, no ⋯", p)
+    assert p["labs"][:1] == ["ON PIXAI NOW"] and p["events"] == 2, p
+    peach = page.evaluate(_RF_PEACH_JS)
+    assert len(p["expiry"]) == 1, p
+    assert re.match(r"^5 Tsubaki\.3 expire [A-Z][a-z]{2} \d{1,2} · (today|tomorrow|in \d days)$",
+                    p["expiry"][0]["t"]), p
+    assert p["expiry"][0]["color"] == peach, p
+    assert p["gifts"] == ["Gift from PixAI · 3 Tsubaki.3 cards"] and p["claim"] == ["Claim ▸"], p
+    order = page.evaluate("""() => { const p = document.querySelector('.ib-panel');
+      const y = (s) => p.querySelector(s).getBoundingClientRect().top;
+      return [y('.ib-event'), y('.ib-expiry-line'), y('.ib-gift')]; }""")
+    assert order == sorted(order), ("events, then the expiring cards, then the gifts", order)
+
+    # the inbox again, by the keyboard: no mousedown reaches the document, the gift box still closes
+    page.focus(".ib-door.inbox")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box']", state="detached")
+    assert page.locator(".ib-door.inbox.lift").count() == 1 and page.locator(".ib-door.gift.lift").count() == 0
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".ib-panel", state="detached")
+    assert posts == [], ("opening, switching and closing the panels writes nothing", posts)
+
+
+def test_an_empty_gift_box_says_so_in_one_quiet_line(logged_in_page):
+    """Owner's walk, ruling 1. No event live, no card about to expire and no gift: one line, and none of
+    the three sections."""
+    page, posts = _rf_desktop(logged_in_page, events=[], account=_rf_account(expiring=False),
+                              gifts={"gifts": [], "bonuses": [], "has_thread": False, "my_name": "", "read_only": False},
+                              count={"total": 0, "unread": 0, "gifts": 0})
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-dim")
+    _settle(page)
+    p = page.evaluate(_RF_PANEL_JS)
+    assert p["dim"] == ["Nothing waiting. Gifts from PixAI and cards about to expire show here."], p
+    assert p["labs"] == [] and p["events"] == 0 and p["expiry"] == [] and p["gifts"] == [], p
+    assert posts == []
+
+
+def _rf_phone(logged_in_page, init=None, **routes):
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    posts = _rf_routes(page, **routes)
+    if init:
+        page.add_init_script(init)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    return page, posts
+
+
+_RF_ROW_ICON_JS = """() => {
+  const rows = [...document.querySelectorAll('.glm-menu-list .glm-menu-item')];
+  const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+    return {w: Math.round(b.width), h: Math.round(b.height), bg: getComputedStyle(el).backgroundImage}; };
+  return {inbox: box(rows[0].querySelector('.ib-inboxic')), gift: box(rows[1].querySelector('.ib-giftic')),
+          glyph: (rows[0].querySelector('.ib-inboxglyph') || {}).textContent || ''};
+}"""
+
+
+def test_the_phone_inbox_sheet_has_no_gifts_and_the_gift_box_sheet_holds_them(logged_in_page):
+    """Owner's walk, ruling 1, on the phone. The Menu's first two rows stay Inbox and Gift box and the ☰
+    badge stays unread plus pending gifts; the Inbox row counts the unread. The Inbox sheet has no Gifts
+    tab and no gift rows; gifts live only in the Gift box sheet, beside the events and the expiring
+    cards."""
+    page, posts = _rf_phone(logged_in_page)
+    assert page.locator(".glm-iconbtn[title=More] .ib-menubadge").inner_text() == "7"
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-list .glm-menu-item")
+    _settle(page)
+    page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
+    rows = page.evaluate("() => [...document.querySelectorAll('.glm-menu-list .glm-menu-item')].slice(0, 2)"
+                         ".map((b) => b.textContent)")
+    assert rows[0].startswith("Inbox") and rows[0].endswith("5 new ›"), rows
+    assert rows[1].startswith("Gift box"), rows
+    ic = page.evaluate(_RF_ROW_ICON_JS)
+    assert ic["inbox"]["w"] == ic["gift"]["w"] == 18 and ic["inbox"]["h"] == 18, ("the Gift box row's 18 px", ic)
+    assert ic["inbox"]["bg"].startswith('url("data:image/webp;base64,'), ic
+
+    page.click(".glm-menu-item:has-text('Inbox')")
+    page.wait_for_selector(".ib-sheet .ib-row")
+    _settle(page)
+    tabs = page.evaluate("() => [...document.querySelectorAll('.ib-sheet .ib-chip')].map((c) => c.textContent)")
+    assert tabs == ["All", "Comments", "Likes", "Follows", "PixAI"], tabs
+    assert page.locator(".ib-sheet .ib-gift").count() == 0 and page.locator(".ib-sheet .ib-event").count() == 0
+    assert page.locator(".ib-sheet .ib-new").inner_text() == "5 new"
+
+    page.mouse.click(195, 12)                 # the scrim above the full-height sheet
+    page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".ib-sheet .ib-gift")
+    page.wait_for_selector(".ib-sheet .ib-event")
+    _settle(page)
+    assert page.locator(".ib-sheet .ib-chip").count() == 0
+    assert page.locator(".ib-sheet .ib-expiry-line").count() == 1
+    assert page.locator(".ib-sheet .ib-gift .ib-btn").inner_text() == "Claim ▸"
+    assert posts == []
+
+
+# Owner's walk, ruling 2: "Badges look cramped but also too small" -- the ON PIXAI NOW banner cards.
+
+_RF_BANNERS_JS = """(host) => {
+  const box = document.querySelector(host);
+  const scroll = box.querySelector('.ib-scroll');
+  const sw = scroll.getBoundingClientRect();
+  return [...box.querySelectorAll('.ib-event')].map((e) => {
+    const b = e.getBoundingClientRect();
+    const art = e.querySelector('.ib-event-art').getBoundingClientRect();
+    const t = e.querySelector('.ib-event-t');
+    const tb = t.getBoundingClientRect();
+    return {w: b.width, l: b.left, top: b.top, bottom: b.bottom, scrollW: scroll.clientWidth, scrollL: sw.left,
+            artW: art.width, artH: art.height, artBottom: art.bottom, labelTop: tb.top,
+            font: parseFloat(getComputedStyle(t).fontSize), text: t.innerText};
+  });
+}"""
+
+
+def _rf_assert_banners(cards):
+    assert len(cards) == 2, cards
+    zeta, missing = cards
+    for c in cards:
+        assert abs(c["w"] - c["scrollW"]) < 1 and abs(c["l"] - c["scrollL"]) < 1, ("full width", c)
+        assert c["labelTop"] >= c["artBottom"] - 0.5, ("the label sits below the art, not on it", c)
+        assert c["font"] >= 13, ("readable at 13 px or more", c)
+    assert missing["top"] >= zeta["bottom"], ("one per row", cards)
+    w, h = _RF_BANNER_SIZE
+    assert abs(zeta["artH"] - zeta["artW"] * h / w) < 1, ("the banner's own aspect", zeta)
+    assert abs(missing["artH"] - missing["artW"] / 3) < 1, ("a failed image falls back to 3:1", missing)
+    assert zeta["text"].split("\n") == ["Zeta", "event ↗"], zeta
+
+
+def test_the_event_banners_are_one_per_row_at_their_own_aspect_with_room_for_the_label(logged_in_page):
+    """Owner's walk, ruling 2. In the gift box the ON PIXAI NOW banners are one per row at the panel's full
+    width, at the banner image's own aspect (a wide 3:1 box while it loads or when it fails); the title
+    and "event ↗" are 13 px or more, in a strip of their own under the art so they never sit on it. The
+    phone's Gift box sheet draws the same card."""
+    page, posts = _rf_desktop(logged_in_page)
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-event")
+    w, h = _RF_BANNER_SIZE
+    page.wait_for_function("(r) => { const a = document.querySelector('.ib-panel .ib-event-art');"
+                           " return a && Math.abs(a.getBoundingClientRect().height * r - a.getBoundingClientRect().width) < 1; }",
+                           arg=w / h)
+    _settle(page)
+    _rf_assert_banners(page.evaluate(_RF_BANNERS_JS, ".ib-panel"))
+
+    page = _rf_phone(logged_in_page)[0]
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".ib-sheet .ib-event")
+    page.wait_for_function("(r) => { const a = document.querySelector('.ib-sheet .ib-event-art');"
+                           " return a && Math.abs(a.getBoundingClientRect().height * r - a.getBoundingClientRect().width) < 1; }",
+                           arg=w / h)
+    _settle(page)
+    _rf_assert_banners(page.evaluate(_RF_BANNERS_JS, ".glm-sheet.ib-sheet"))
+    assert posts == []
+
+
+# Owner's walk, ruling 3: he could not find Continuous paging -- he did not know to long-press ▦ / ▭ and
+# did not find Control's row at the bottom of the screen.
+
+_RF_CONTROL_ORDER_JS = """() => {
+  const secs = [...document.querySelectorAll('.cm-pad > .ctm-sec')];
+  const idx = (sel) => secs.findIndex((s) => s.querySelector(sel));
+  const paging = document.querySelector('.ctm-paging').getBoundingClientRect();
+  const saver = document.querySelector('.ctm-saver').getBoundingClientRect();
+  return {about: idx('.mghelp-aboutrow'), glance: idx('.ctm-statgrid'), paging: idx('.ctm-paging'),
+          saver: idx('.ctm-saver'), mirror: idx('.ctm-mirror'), skins: idx('.mgcp-skinsrow'), n: secs.length,
+          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight};
+}"""
+
+
+def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_data_saver(
+        phone_u_server, render_browser, monkeypatch):
+    """Owner's walk, ruling 3. On the phone's Control screen, Library paging is the first settings row,
+    right under About and At a glance, with Data saver beside it: the two per-device phone choices
+    together, on the first screen without scrolling. The long-press hint dot under ▦ / ▭ now goes once
+    the paging choice is found by either road -- a tap on Control's row counts as much as the long-press
+    sheet -- and opening Control writes nothing."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the dot shows until found"
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-paging")
+        _settle(page)
+        o = page.evaluate(_RF_CONTROL_ORDER_JS)
+        assert o["about"] >= 0 and o["glance"] == o["about"] + 1, o
+        assert o["paging"] == o["glance"] + 1, ("Library paging is the first settings row", o)
+        assert o["saver"] == o["paging"] + 1, ("Data saver sits beside it", o)
+        assert o["paging"] < o["mirror"], ("above the Live Mirror and everything after it", o)
+        assert o["skins"] < 0 or o["paging"] < o["skins"], o
+        assert o["pagingBottom"] <= o["vh"], ("on the first screen, no scrolling", o)
+        writes = page.evaluate("window.__qWrites")
+        assert not [k for k in writes if k.startswith("mg_phone_paging")], ("opening Control writes nothing", writes)
+
+        # a tap on Control's row is finding it: the dot under the gallery's keys goes
+        page.click(".ctm-paging button:has-text('Pages')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging_hint') === '1'")
+        assert _u_store(page, "mg_phone_paging") == "pages"
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-layout")
+        _settle(page)
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 0, "found from Control: no dot"
+    finally:
+        ctx.close()
+
+
+# The ✉ Inbox button's picture (owner's art, 2026-10-04): pack › the app's module › the ✉ glyph.
+
+# Every WebP data URI the page sets on an <img> is swapped for a broken one, so the module's mailbox
+# cannot decode: what the button does when its picture fails.
+_RF_BREAK_WEBP_JS = """(() => {
+  const d = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+  Object.defineProperty(HTMLImageElement.prototype, 'src', { configurable: true,
+    get() { return d.get.call(this); },
+    set(v) { d.set.call(this, String(v).indexOf('data:image/webp') === 0 ? 'data:image/webp;base64,AAAA' : v); } });
+})();"""
+
+
+def test_the_inbox_picture_falls_back_to_the_envelope_and_the_pack_copy_wins_when_present(logged_in_page):
+    """With no pack copy and a module copy that will not decode, the header button and the phone's Menu
+    row draw today's ✉ glyph. With the pack's rewards/inbox.png present, the pack's copy is drawn instead
+    of the module's, and it is asked for once a page however often the icon is drawn."""
+    page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)
+    page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")
+    g = page.evaluate(_RF_DOORS_JS)
+    assert g["glyph"] == "✉" and g["icon"] is None, g
+    page.context.close()
+
+    page, _ = _rf_phone(logged_in_page, init=_RF_BREAK_WEBP_JS)
+    page.click(".glm-iconbtn[title=More]")
+    page.wait_for_selector(".glm-menu-item .ib-inboxglyph")
+    ic = page.evaluate(_RF_ROW_ICON_JS)
+    assert ic["glyph"] == "✉" and ic["inbox"] is None, ic
+    page.context.close()
+
+    # the pack has it: the pack's copy, asked for once
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGBA", (64, 64), (200, 120, 60, 255)).save(buf, "PNG")
+    asked = []
+    page = logged_in_page(width=390, height=844, is_mobile=True, has_touch=True)
+    _rf_routes(page)
+    page.route("**/branding/rewards/inbox.png", lambda r: (asked.append(1), r.fulfill(
+        status=200, content_type="image/png", body=buf.getvalue()))[1])
+    _visit(page, "/")
+    page.wait_for_selector(".glm-iconbtn[title=More] .ib-menubadge")
+    _dismiss_any_achievement_toast(page)
+    first = None
+    for _ in range(3):                         # the Menu opened three times: no new ask after the first
+        page.click(".glm-iconbtn[title=More]")
+        page.wait_for_selector(".glm-menu-item .ib-inboxic.small[style*='background-image']")
+        ic = page.evaluate(_RF_ROW_ICON_JS)
+        assert "/branding/rewards/inbox.png" in ic["inbox"]["bg"], ic
+        page.mouse.click(195, 12)
+        page.wait_for_selector(".glm-sheet", state="detached")
+        if first is None:
+            # the one probe, plus the paint itself (the /branding/ route answers no-cache)
+            first = len(asked)
+            assert 1 <= first <= 2, asked
+    assert len(asked) == first, ("resolved once a page: a reopened Menu asks nothing more", asked)
+
+
+# Each panel's emblem (owner, 2026-10-04: "a larger version of the icon in the top right of each of
+# their respective frames"): the door's own picture at 48 px in the panel's title row, 40 px in the
+# phone sheet's title row; decorative, and simply absent when its picture fails.
+
+_RF_HEAD_JS = """([sel, row]) => {
+  const p = document.querySelector(sel);
+  const head = p.querySelector(row);
+  const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+    return {l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height, cy: b.top + b.height / 2}; };
+  const em = head.querySelector('.ib-emblem');
+  const pb = p.getBoundingClientRect();
+  return {head: r(head), emblem: r(em), more: r(head.querySelector('.ib-more')), title: r(head.querySelector('.ib-title')),
+          panelR: pb.right, padR: parseFloat(getComputedStyle(p).paddingRight),
+          alt: em ? em.getAttribute('alt') : null, hidden: em ? em.getAttribute('aria-hidden') : null,
+          src: em ? em.getAttribute('src') : '', fit: em ? getComputedStyle(em).objectFit : '',
+          natural: em ? em.naturalWidth : 0, glyph: head.querySelectorAll('.ib-inboxglyph').length};
+}"""
+
+
+def _rf_gift_png():
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGBA", (128, 119), (200, 60, 90, 255)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_each_panel_wears_its_doors_picture_large_in_its_title_row(logged_in_page):
+    """The inbox panel's title row ends in the mailbox and the gift box's in the gift, each 48 px,
+    contained, right-aligned, decorative (alt "", aria-hidden), with the title centred against it. The
+    inbox's ⋯ sits 8 px left of the mailbox, centred on it, wholly inside the panel, and still opens
+    Mark all read. A picture that fails leaves no emblem and no stand-in."""
+    page, posts = _rf_desktop(logged_in_page)
+    gift = _rf_gift_png()
+    page.route("**/branding/rewards/gift.png", lambda r: r.fulfill(status=200, content_type="image/png", body=gift))
+    _visit(page, "/")
+    page.wait_for_selector(".ib-door.inbox")
+    _dismiss_any_achievement_toast(page)
+
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel .ib-head .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.ib-panel .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    em, more, head = h["emblem"], h["more"], h["head"]
+    assert abs(em["w"] - 48) < 0.5 and abs(em["h"] - 48) < 0.5 and h["fit"] == "contain", h
+    assert (h["alt"], h["hidden"]) == ("", "true"), h
+    assert h["src"].startswith("data:image/webp;base64,"), ("the mailbox, through the door's own lookup", h)
+    assert abs(em["r"] - head["r"]) < 1, ("right-aligned in the title row", h)
+    assert head["h"] >= 48 - 0.5, ("the row grows to fit it", h)
+    assert abs(h["title"]["cy"] - em["cy"]) < 1.5, ("the title stays centred against it", h)
+    assert abs(em["l"] - more["r"] - 8) < 1, ("⋯ sits 8 px left of the mailbox", h)
+    assert abs(more["cy"] - em["cy"]) < 1, ("⋯ is centred on it", h)
+    assert more["w"] >= 28 and more["r"] <= h["panelR"] - h["padR"] + 0.5, ("⋯ has room and is not clipped", h)
+    page.click(".ib-panel .ib-more")
+    page.wait_for_selector(".ib-panel .ib-menuitem")
+    item = page.locator(".ib-panel .ib-menuitem")
+    assert item.inner_text() == "Mark all read"
+    box = item.bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= h["panelR"], ("the menu is not clipped", box, h)
+
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-head .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.ib-panel .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    assert h["src"] == "/branding/rewards/gift.png" and h["natural"] == 128, h
+    assert abs(h["emblem"]["w"] - 48) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
+    assert abs(h["title"]["cy"] - h["emblem"]["cy"]) < 1.5, h
+    assert posts == []
+    page.context.close()
+
+    # the pictures fail: no emblem, no stand-in
+    page, _ = _rf_desktop(logged_in_page, init=_RF_BREAK_WEBP_JS)      # no pack gift.png here either
+    page.click(".ib-door.inbox")
+    page.wait_for_selector(".ib-panel .ib-head .ib-title")
+    page.wait_for_selector(".ib-door.inbox .ib-inboxglyph")          # the lookup has settled on nothing
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])
+    assert h["emblem"] is None and h["glyph"] == 0, h
+    assert h["more"] is not None, "⋯ stays"
+    page.click(".ib-door.gift")
+    page.wait_for_selector(".ib-panel[aria-label='PixAI inbox']", state="detached")
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-head")
+    page.wait_for_function("() => !document.querySelector('.ib-panel .ib-emblem')")
+    assert page.evaluate(_RF_HEAD_JS, [".ib-panel", ".ib-head"])["emblem"] is None
+
+
+def test_each_phone_sheet_wears_its_doors_picture_in_its_title_row(logged_in_page):
+    """The phone's Inbox and Gift box sheets end their title rows in the same pictures at 40 px."""
+    page, _ = _rf_phone(logged_in_page)
+    gift = _rf_gift_png()
+    page.route("**/branding/rewards/gift.png", lambda r: r.fulfill(status=200, content_type="image/png", body=gift))
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Inbox')")
+    page.wait_for_selector(".glm-sheet.ib-sheet .glm-sheet-title .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.glm-sheet-title .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
+    assert abs(h["emblem"]["w"] - 40) < 0.5 and abs(h["emblem"]["r"] - h["head"]["r"]) < 1, h
+    assert h["src"].startswith("data:image/webp;base64,") and h["alt"] == "", h
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "INBOX"
+    page.mouse.click(195, 12)
+    page.wait_for_selector(".glm-sheet.ib-sheet", state="detached")
+    page.click(".glm-iconbtn[title=More]")
+    page.click(".glm-menu-item:has-text('Gift box')")
+    page.wait_for_selector(".glm-sheet.ib-sheet .glm-sheet-title .ib-emblem")
+    page.wait_for_function("() => document.querySelector('.glm-sheet-title .ib-emblem').naturalWidth > 0")
+    _settle(page)
+    h = page.evaluate(_RF_HEAD_JS, [".glm-sheet.ib-sheet", ".glm-sheet-title"])
+    assert h["src"] == "/branding/rewards/gift.png" and abs(h["emblem"]["w"] - 40) < 0.5, h
+    assert page.locator(".glm-sheet.ib-sheet").get_attribute("aria-label") == "GIFT BOX"

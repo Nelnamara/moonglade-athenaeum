@@ -1,0 +1,165 @@
+/* inbox.css -- Sessions R + Y (lane R, 2026-10-03): the header's ✉ Inbox and 🎁 Gift box doors
+   and their panels, the gifts, the current event, and the phone's Inbox and Gift box sheets. The
+   pixel source is `Inbox and Event Handoff.dc.html` (moonglade-internal/design/handoff-2026-09-04/),
+   sections 1-3, 7, 9 and 10; every size, colour and spacing below is read off its mock. The owner's
+   walk (2026-10-04) split the one door into two twins: the gift box is for rewards only and the
+   inbox has its own ✉ button beside it, the same size, ring and badge.
+
+   Hues: lavender is action and unread; peach is a held or unclear state (never ruby); emerald
+   is a confirmed write; a gift is not billing, so there is no gold anywhere here.
+   Z: the panel is 300, the floor of the overlays-and-modals band (300-500). */
+
+/* ---- the doors (§1): 30 x 30, radius 9, 8 px apart; the gift box wears gift.png at 22 px, the
+   inbox the owner's mailbox at the same 22 px (the ✉ glyph if it cannot load) ------------------ */
+.ib-wrap { position: static; display: flex; align-items: center; margin-right: -4px; }
+.ib-door { position: relative; width: 30px; height: 30px; flex: none; box-sizing: border-box; padding: 0;
+  border-radius: 9px; border: 1px solid rgba(255, 255, 255, .18); cursor: pointer;
+  display: grid; place-items: center; color: var(--text); font: inherit; background: rgba(33, 31, 58, .6);
+  transition: box-shadow .18s, filter .18s; }
+.ib-door.gift { background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
+.ib-inboxic { display: block; width: 22px; height: 22px; flex: none; pointer-events: none;
+  background-position: center; background-size: contain; background-repeat: no-repeat; }
+.ib-inboxglyph { font-size: 15px; line-height: 1; font-variant-emoji: text; pointer-events: none; }
+.ib-door:hover { filter: brightness(1.12); }
+.ib-door.lift { box-shadow: 0 0 0 2px var(--lavender); }
+.ib-door:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.ib-badge { position: absolute; top: -6px; right: -7px; min-width: 15px; height: 15px; padding: 0 4px;
+  box-sizing: border-box; display: grid; place-items: center; border-radius: 999px; font-size: 9px;
+  font-weight: 800; line-height: 1; background: var(--lavender); color: var(--base);
+  font-family: var(--font-system, system-ui, sans-serif); pointer-events: none; white-space: nowrap; }
+
+/* ---- the panel (§1): 380 px, under the button, right-aligned to the header --------------- */
+@keyframes ibIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes ibOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px); } }
+.ib-panel { position: absolute; top: calc(100% + 10px); right: 0; z-index: 300; width: 380px;
+  max-width: calc(100vw - 28px); max-height: calc(100dvh - 96px); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 7px; padding: 14px; border-radius: 16px;
+  border: 1px solid var(--surface1); background: var(--base); box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
+  font-family: var(--font-system, system-ui, sans-serif); color: var(--text); text-align: left;
+  animation: ibIn .42s cubic-bezier(.2, .9, .24, 1) both; }
+.ib-panel.closing { animation: ibOut .35s cubic-bezier(.4, 0, .2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-panel { animation: none; }
+  .ib-panel.closing { animation: none; opacity: 0; }
+}
+/* the title row: the title (with its "N new") centred against the panel's emblem at the right end,
+   which the row grows to fit; ⋯ sits 8 px left of the emblem (owner, 2026-10-04) */
+.ib-head { display: flex; align-items: center; gap: 8px; }
+.ib-headtext { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ib-emblem { display: block; flex: none; width: 48px; height: 48px; object-fit: contain; pointer-events: none;
+  user-select: none; }
+.ib-emblem.small { width: 40px; height: 40px; }
+.glm-sheet-title.has-end { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ib-title { font-family: Georgia, serif; font-style: italic; font-size: 14px; }
+.ib-new, .ib-meta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px;
+  color: var(--overlay0); white-space: nowrap; flex: none; }
+.ib-sp { flex: 1; }
+.ib-menuwrap { position: relative; display: flex; flex: none; }
+.ib-more { width: 28px; height: 28px; box-sizing: border-box; display: grid; place-items: center; border: 0;
+  border-radius: 8px; background: none; color: var(--overlay0); cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 0; }
+.ib-more:hover, .ib-more[aria-expanded="true"] { color: var(--text); background: rgba(182, 146, 230, .12); }
+.ib-more:focus-visible { outline: 2px solid var(--lavender); outline-offset: -2px; }
+.ib-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 2; display: flex;
+  flex-direction: column; min-width: 140px; padding: 4px; border-radius: 10px;
+  border: 1px solid var(--surface1); background: var(--base); box-shadow: 0 10px 24px rgba(0, 0, 0, .5); }
+.ib-menuitem { border: 0; background: none; text-align: left; color: var(--text); font: inherit;
+  font-size: 10.5px; padding: 6px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.ib-menuitem:hover { background: rgba(182, 146, 230, .12); }
+
+/* kind tabs: pills, lavender when on */
+.ib-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ib-tabs.phone { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.ib-tabs.phone::-webkit-scrollbar { display: none; }
+.ib-chip { font: inherit; font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext); flex: none; }
+.ib-chip.on { border-color: var(--lavender); background: rgba(182, 146, 230, .16); color: var(--text); }
+.ib-tabs.phone .ib-chip { min-height: 32px; padding: 6px 12px; font-size: 11px; }
+
+.ib-scroll { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain; }
+.ib-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.ib-dim { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
+.ib-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.ib-ok { font-size: 10.5px; line-height: 1.5; color: var(--emerald); }
+.ib-peachbox { padding: 9px 11px; border-radius: 10px; border: 1px solid rgba(250, 179, 135, .45);
+  background: rgba(250, 179, 135, .08); font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.ib-quote { font-size: 10.5px; line-height: 1.5; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--surface1); background: rgba(33, 31, 58, .45); color: var(--text); text-align: left; }
+.ib-quotebtn { font: inherit; font-size: 10.5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; display: block; width: 100%; box-sizing: border-box; }
+.ib-quotebtn:hover { border-color: var(--lavender); }
+
+/* ---- rows (§2): a work card and an "everything else" row share one shape ---------------- */
+.ib-row { position: relative; display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  width: 100%; box-sizing: border-box; padding: 6px 8px; border: 0; border-radius: 9px; background: none;
+  font: inherit; text-align: left; color: var(--subtext); cursor: pointer; }
+.ib-row.unread { background: rgba(182, 146, 230, .07); color: var(--text); }
+.ib-row:hover { background: rgba(182, 146, 230, .12); }
+.ib-row:focus-visible { outline: 2px solid var(--lavender); outline-offset: -2px; }
+.ib-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: transparent; }
+.ib-row.unread .ib-dot { background: var(--lavender); }
+.ib-thumb { width: 34px; height: 34px; flex: none; border-radius: 7px; background-color: var(--surface0);
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.ib-text { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.ib-glyph { width: 16px; flex: none; text-align: center; font-size: 11px; color: var(--mauve); }
+
+/* the 600 ms tip on an unread row (§3): opaque, pops toward open space */
+.ib-tipwrap { position: absolute; left: 22px; top: calc(100% + 4px); z-index: 3; pointer-events: none; }
+.ib-tipwrap.above { top: auto; bottom: calc(100% + 4px); }
+.ib-tip { display: block; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--surface1);
+  background: var(--base); box-shadow: 0 10px 24px rgba(0, 0, 0, .5); font-size: 10.5px; line-height: 1.5;
+  color: var(--text); white-space: nowrap; animation: ibIn .18s ease both; }
+
+/* ---- gifts (§7) ------------------------------------------------------------------------- */
+.ib-gift { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-height: 30px; }
+.ib-gift.done { opacity: .6; }
+.ib-gift.done .ib-gift-t { color: var(--subtext); }
+.ib-giftic { width: 30px; height: 30px; flex: none; box-sizing: border-box; border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: url(/branding/rewards/gift.png) center / 22px auto no-repeat, rgba(33, 31, 58, .6); }
+.ib-giftic.small { display: inline-block; vertical-align: middle; width: 18px; height: 18px; border: 0; border-radius: 0;
+  background: url(/branding/rewards/gift.png) center / contain no-repeat; }
+/* the phone Menu's Inbox row: the mailbox at the Gift box row's 18 px, or its ✉ at the row's own size */
+.ib-inboxic.small { display: inline-block; vertical-align: middle; width: 18px; height: 18px; }
+.ib-inboxglyph.small { font-size: inherit; }
+.ib-gift-t { flex: 1; min-width: 0; font-size: 10.5px; line-height: 1.45; }
+.ib-acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.ib-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px; border: 0;
+  background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; flex: none; }
+.ib-btn:disabled { opacity: .5; cursor: default; }
+.ib-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+  background: none; color: var(--subtext); white-space: nowrap; cursor: pointer; flex: none; }
+.ib-ghost:hover { color: var(--text); }
+.ib-link { font-size: 10.5px; color: var(--lavender); white-space: nowrap; flex: none; text-decoration: none; }
+.ib-link:hover { color: var(--mauve); text-decoration: underline; }
+
+/* ---- the current event (§9, resized on the owner's walk 2026-10-04): one banner per row at full
+   width, the art at its own aspect (3:1 until it loads or if it fails), radius 9, and the label in
+   a strip of its own under the art in the scrim's dark, at 13 px. The desktop panel and the phone
+   sheet draw the same card. ------------------------------------------------------------------ */
+.ib-events { display: flex; flex-direction: column; gap: 8px; }
+.ib-event { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; padding: 0; border: 0;
+  border-radius: 9px; overflow: hidden; cursor: pointer; text-align: left; font: inherit; color: var(--text);
+  background: var(--surface0); flex: none; }
+.ib-event-art { display: block; width: 100%; aspect-ratio: 3 / 1; background-color: var(--surface0);
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.ib-event-t { display: block; padding: 7px 10px 8px; font-size: 13px; font-weight: 700; line-height: 1.35;
+  color: var(--text); background: rgba(5, 4, 13, .85); overflow-wrap: anywhere; }
+.ib-event:hover { filter: brightness(1.1); }
+.ib-event:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+
+/* ---- the phone (§10) ---------------------------------------------------------------------- */
+.glm-sheet.ib-sheet { height: calc(100dvh - 40px); max-height: none; display: flex; flex-direction: column; }
+.ib-sheetbody { display: flex; flex-direction: column; gap: 7px; min-height: 0; flex: 1; padding: 0 2px 8px; }
+.ib-sheetbody .ib-row { min-height: 44px; }
+.ib-sheetbody .ib-gift { min-height: 44px; }
+.ib-sheetbody .ib-btn, .ib-sheetbody .ib-ghost { min-height: 44px; padding: 0 16px; }
+.ib-sheetbody .ib-scroll { flex: 1; }
+.ib-mrow-meta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px;
+  color: var(--overlay0); margin-left: auto; white-space: nowrap; }
+.ib-mrow-meta.peach { font-family: inherit; color: var(--peach); }
+.ib-menubadge { position: absolute; top: -4px; right: -6px; min-width: 15px; height: 15px; padding: 0 4px;
+  box-sizing: border-box; display: grid; place-items: center; border-radius: 999px; font-size: 9px;
+  font-weight: 800; line-height: 1; background: var(--lavender); color: var(--base); pointer-events: none; }
+.ib-expiry-line { font-size: 10.5px; line-height: 1.5; color: var(--peach); }

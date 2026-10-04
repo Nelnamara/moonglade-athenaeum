@@ -78,3 +78,7 @@
 .acct-load { margin-top: 10px; text-align: center; font-size: 11.5px; font-weight: 600; color: var(--subtext);
   padding: 8px; border-radius: 9px; border: 1px dashed var(--surface1); cursor: pointer; }
 .acct-load:hover { border-color: var(--accent); color: var(--text); }
+
+/* Session R (R9c, Inbox and Event Handoff §7): the Credit ledger's "event gift" rows wear the
+   gift icon at 14 px before the reason. */
+.acct-gifticon { width: 14px; height: 14px; flex: none; background: url(/branding/rewards/gift.png) center / contain no-repeat; }

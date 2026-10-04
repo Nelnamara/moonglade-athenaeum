@@ -13,8 +13,13 @@ import { apiGet, apiPost, fetchAccount, fetchCollections, fetchCollectionDetail,
 import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
 import { invalidate } from "../hooks/swrCache.js";
-import useDataSaver from "../hooks/usePhonePrefs.js";
-import { isFrontPage, makeMarker, pageOffset, syncOutcomeText } from "../lib/phoneCore.js";
+import useDataSaver, { usePaging } from "../hooks/usePhonePrefs.js";
+import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
+import useInstallNudge from "../hooks/useInstallNudge.js";
+import { NudgeBubble } from "./InstallNudge.jsx";
+import {
+  continuousDone, continuousPageSize, isFrontPage, makeMarker, nextContinuousPage, pageOffset, syncOutcomeText,
+} from "../lib/phoneCore.js";
 import { readMarker, writeMarker } from "../lib/phonePrefs.js";
 import { syncNow } from "../lib/syncNow.js";
 import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
@@ -52,6 +57,7 @@ import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
 import { registerFolioOpener } from "../notify/ach.js";
+import { registerBrokenFilesOpener } from "../lib/brokenFilesNav.js";
 import { readFolioHash, setFolioRow } from "../folio/folioFocus.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
@@ -64,6 +70,8 @@ import "../styles/create-mobile.css";
    the later stylesheet wins (Session Q, Q4). */
 import "../styles/phone-landscape.css";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
+import { useInbox, MenuBadge, MenuInboxRows, InboxSheetBody, GiftSheetBody } from "../inbox/InboxSheets.jsx";
+import { InboxEmblem, GiftEmblem } from "../inbox/PanelEmblem.jsx";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -409,6 +417,9 @@ export default function AppMobile({ boot }) {
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
   /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. */
   useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
+  /* Collection Health's Broken files (Session W, W6a): the Control tab's "Review" and a fix run's
+     Activity row push Health; it opens its Broken files screen itself (lib/brokenFilesNav.js). */
+  useEffect(() => registerBrokenFilesOpener(() => { openSheet(null); openScreenKey("health"); }), []);
   /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
      here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
   useEffect(() => {
@@ -469,6 +480,9 @@ export default function AppMobile({ boot }) {
   // 2026-08-07 review fix: the hand-rolled pair let a reopen inside the 280ms exit
   // window inherit a stale unmount timer and vanish).
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
+  /* Sessions R + Y (RYPc): the inbox's state -- the Menu door's badge, the Inbox and Gift box
+     rows and their sheets. The same store the desktop gift box reads. */
+  const inboxSt = useInbox();
   // The Menu sheet's pushed-screen destination -- generalizes MobileScreen.jsx
   // the same way `sheet` above already generalizes MobileSheet.jsx (one
   // string key, one shared mount). null | 'myart' | 'publish' | 'train' |
@@ -500,7 +514,21 @@ export default function AppMobile({ boot }) {
      ordinary reload, the address is ignored exactly as it always was. */
   const [loomReturn] = useState(() =>
     cameFromLoom(document.referrer, window.location.origin));
+  /* SESSION U (2026-10-03), phone paging. Pages is the phone as shipped; Continuous stacks pages as you
+     scroll (GalleryMobile's footer asks for the next one; loadMore below fetches it). The saver is read
+     here, before the library, because a Continuous page is 50 instead of 100 while it acts on a metered
+     connection -- the size the library asks for whenever no call names its own. */
+  const saver = useDataSaver();
+  const [paging] = usePaging();
+  const continuous = paging === "continuous";
+  const continuousRef = useRef(continuous);
+  continuousRef.current = continuous;
+  /* U6c + U7b: the one-time Home Screen nudge -- its strip rides the Gallery tab; the iOS bubble at
+     Safari's Share button is drawn here, over everything, and the first-run guide stands aside for it. */
+  const { landscape: sideways } = usePhoneLandscape();
+  const nudge = useInstallNudge({ landscape: sideways });
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
+  lib.setPageSize(continuous ? continuousPageSize(saver.active, saver.info) : 0);
   /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
      shell uses. It patches the loaded page in place from the server's answer and says how many
      pictures REALLY changed; Undo puts each one back to its own previous values. Local catalog
@@ -515,9 +543,10 @@ export default function AppMobile({ boot }) {
      for what counts as a background read; each surface that draws differently under it (the grid, the
      Lightbox, the record) asks the same hook itself. `videoRef` is the video drawer's own handle, held
      here so Send to Video and a video's Remix can prefill it (gen/phoneRemix.js) -- it sends nothing. */
-  const saver = useDataSaver();
   const saverRef = useRef(false);
   saverRef.current = saver.active;
+  const saverInfoRef = useRef(saver.info);
+  saverInfoRef.current = saver.info;
   const videoRef = useRef(null);
   const [videoNote, setVideoNote] = useState("");
   useEffect(() => { if (cmode !== "video") setVideoNote(""); }, [cmode]);
@@ -751,7 +780,7 @@ export default function AppMobile({ boot }) {
   libNowRef.current = lib;
   const frontPage = isFrontPage({
     page: lib.page, advCount: lib.advCount, applied: lib.applied, media: lib.media, shelf: lib.shelf,
-    similar: !!similarFor, loaded: lib.total != null,
+    similar: !!similarFor, loaded: lib.total != null, continuous,
   });
   const frontRef = useRef(false);
   frontRef.current = frontPage;
@@ -799,7 +828,18 @@ export default function AppMobile({ boot }) {
   // the grid-tap flavor (#35): a tap must always open SOMETHING -- on an index
   // miss (page replaced mid-tap) it opens Details by id instead of toasting.
   const openLightboxFromGrid = (mid) => openLightbox(mid, openDetails);
-  const closeLightbox = () => setLbIndex(null);
+  /* U4 (Session U): in Continuous, closing the viewer brings the picture it was on back into view in the
+     list -- mounting its page first if the window had dropped it (ContinuousGridMobile's `reveal`). */
+  const [reveal, setReveal] = useState(null);
+  const lbIndexRef = useRef(null);
+  lbIndexRef.current = lbIndex;
+  const closeLightbox = () => {
+    if (continuousRef.current && lbIndexRef.current != null) {
+      const it = libNowRef.current.items[lbIndexRef.current];
+      if (it) setReveal({ mid: it.media_id, n: Date.now() });
+    }
+    setLbIndex(null);
+  };
   /* "Edit with Tsubaki" from Image Details (Session H decision 2, the phone's image menu): the
      Create tab's Image mode on Tsubaki.3, the picture in context slot 1, the prompt seeded
      "Use @image1 …". Prefill only -- the owner presses Generate. */
@@ -998,13 +1038,57 @@ export default function AppMobile({ boot }) {
     const out = await syncNow({ post: apiPost, get: apiGet });
     if (out.state !== "error") {
       invalidate(["/api/health", "/api/achievements", "/api/your-art", DETAIL_PREFIX]);
-      const d = await userLoad(shownPageRef.current, true);
-      if (d) pruneSelected(setLibSelected, d.items);
+      /* Continuous (Session U, U3a): what is new goes above everything loaded, every loaded page is
+         kept and nothing is unselected -- nothing left the list. */
+      if (continuousRef.current) {
+        await libNowRef.current.prependNewest();
+      } else {
+        const d = await userLoad(shownPageRef.current, true);
+        if (d) pruneSelected(setLibSelected, d.items);
+      }
     }
     const msg = syncOutcomeText(out);
     if (msg && window.Toast) window.Toast.show({ title: "Sync", msg });
     return out;
   }, [userLoad]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* U2: Continuous's next page -- the owner's own road (he scrolled to it), one request at a time, never
+     retried on its own. The page asked for is the one that starts at or just before the end of what is
+     loaded (phoneCore.nextContinuousPage), at the page size of the moment; the append keeps only what is
+     new (useLibrary). A failure leaves the footer's peach Retry, and Retry is this same single request.
+     The list stays where it is: no scroll moves, nothing reflows. */
+  const [more, setMore] = useState({ busy: false, failed: false });
+  const moreBusy = useRef(false);
+  const libNow = useRef(lib);
+  libNow.current = lib;
+  const loadMore = useCallback(async () => {
+    if (moreBusy.current) return undefined;
+    const l = libNow.current;
+    if (l.loading || continuousDone(l.items.length, l.total)) return undefined;
+    moreBusy.current = true;
+    setMore({ busy: true, failed: false });
+    const size = continuousPageSize(saverRef.current, saverInfoRef.current);
+    try {
+      const d = await l.load(nextContinuousPage(l.items.length, size), false, size);
+      setMore({ busy: false, failed: false });
+      return d;
+    } catch {
+      setMore({ busy: false, failed: true });
+      return undefined;
+    } finally {
+      moreBusy.current = false;
+    }
+  }, []);
+  /* A switch between Pages and Continuous starts the library over from page 1 at the top: a stacked list
+     always runs from the top of the walk, and a page picked out of the middle is not one. The footer's
+     retry line belongs to the list it failed on, so a new list (a switch, a filter) clears it. */
+  const pagingSeen = useRef(paging);
+  useEffect(() => {
+    if (pagingSeen.current === paging) return;
+    pagingSeen.current = paging;
+    userLoad(1, true);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [paging]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setMore((m) => (m.busy || m.failed ? { busy: false, failed: false } : m)); }, [lib.load, paging]);
   useEffect(() => {
     genLoadRef.current = lib.load;
     genSimilarRef.current = similarFor;
@@ -1028,6 +1112,9 @@ export default function AppMobile({ boot }) {
          waits while the saver acts. The new picture is one pull away (a pull is explicit and never
          asks). The credits chip and the achievement check above are tiny and still run. */
       if (saverRef.current) return;
+      /* Continuous (Session U): a stacked list never reflows under the owner except by a pull he made
+         (U3a, "the library stands still"); a reload of page 1 would also throw away every page loaded. */
+      if (continuousRef.current) return;
       // ...and not under the ◈ token even at the perch: the library grid is not rendered
       // there at all, and the ✕ has to hand back exactly what was underneath.
       if (genSimilarRef.current) return;
@@ -1150,6 +1237,8 @@ export default function AppMobile({ boot }) {
     openSheet(null);
     openScreenKey(key);
   };
+  // A contest row in the Inbox sheet opens the Contests screen (Sessions R + Y).
+  const openContestsFromInbox = useCallback(() => openScreen("contests"), []); // eslint-disable-line react-hooks/exhaustive-deps
   // publishFor resets immediately, not after the exit animation: PublishMobile
   // seeds its own internal mid from the prop at MOUNT only, so the mounted,
   // exiting screen never re-reads it.
@@ -1275,7 +1364,11 @@ export default function AppMobile({ boot }) {
           <HelpButton plain className="glm-iconbtn glm-iconbtn-lav glm-help"
             surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
-            onClick={() => openSheet("menu")}>☰</button>
+            style={{ position: "relative" }} onClick={() => openSheet("menu")}>
+            ☰
+            {/* RYPc: the Menu door carries the inbox's unread badge (lavender count). */}
+            <MenuBadge st={inboxSt} />
+          </button>
         </div>
         <div className="glm-hero-stats">
           {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"\u25D0"} Saver</span> : null}
@@ -1320,6 +1413,7 @@ export default function AppMobile({ boot }) {
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar}
             marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
+            continuous={continuous} onLoadMore={loadMore} more={more} reveal={reveal} nudge={nudge}
             curation={{
               smart, curate, saveSmart, composeView,
               // Session P (P6): the Manual sort's editor, on the Collections screen
@@ -1398,6 +1492,7 @@ export default function AppMobile({ boot }) {
               onOpenImport={() => openScreenKey("import")}
               boot={boot}
               onDuplicatesResolved={afterDuplicatesResolved}
+              onOpenDetails={openDetails}
             />
           )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
@@ -1424,8 +1519,9 @@ export default function AppMobile({ boot }) {
       {!screen && !detailsFor && lbIndex == null && !folioOpen && !contactSheetTarget && !contestEntry
         && (tab === "gallery" || tab === "create") ? (
           <GuideHost key={tab} surface={tab === "create" ? "dock" : "gallery"} phone
-            paused={!!sheet || claimModal.open} />
+            paused={!!sheet || claimModal.open || !!nudge.bubble} />
         ) : null}
+      <NudgeBubble side={nudge.bubble} />
       <PickerHost />
       <RecipesHost />
       {claimModal.open && (
@@ -1457,7 +1553,11 @@ export default function AppMobile({ boot }) {
           loadPage={userLoad}, not lib.load: stepping past the end of a page in the viewer
           is the owner asking for the next page, so it goes on the record exactly the way
           the pager does. The completion handler already refuses while one of his loads is
-          in the air, which is precisely the window this step opens. See navRef above. */}
+          in the air, which is precisely the window this step opens. See navRef above.
+          CONTINUOUS (Session U, U4a) overrides the Pages props at the end: the viewer walks the
+          whole stacked list -- its index is already the picture's place in the walk -- and
+          stepping past the last loaded picture asks for the next page (loadMore) and lands on
+          the picture after it by id. */}
       {lbIndex != null && (
         <LightboxMobile
           items={lib.items} index={lbIndex} setIndex={setLbIndex}
@@ -1470,6 +1570,7 @@ export default function AppMobile({ boot }) {
           onEnterContest={openContestFor}
           member={account ? account.is_member : null}
           onSendToVideo={sendPictureToVideo}
+          {...(continuous ? { page: 1, pages: 1, offset: 0, continuous: true, loadMore } : null)}
         />
       )}
 
@@ -1513,6 +1614,18 @@ export default function AppMobile({ boot }) {
       <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
         className="cmb-choosersheet" title="ENTER INTO A CONTEST">
         <ContestChooserMobile onPick={(c) => openContestEntry(c, contestFor)} />
+      </MobileSheet>
+
+      {/* Sessions R + Y (RYPc): the Inbox and Gift box sheets, full height. A work card or a
+          quote opens Details through the shared mg-open-details bus, which closes the sheet. Each
+          title row ends in its door's picture at 40 px (owner, 2026-10-04). */}
+      <MobileSheet open={sheet === "inbox"} closing={closing} onClose={closeSheet} title="INBOX"
+        titleEnd={<InboxEmblem small />} className="ib-sheet">
+        <InboxSheetBody st={inboxSt} onOpenContests={openContestsFromInbox} />
+      </MobileSheet>
+      <MobileSheet open={sheet === "gifts"} closing={closing} onClose={closeSheet} title="GIFT BOX"
+        titleEnd={<GiftEmblem small />} className="ib-sheet">
+        <GiftSheetBody st={inboxSt} account={account} />
       </MobileSheet>
 
       <MobileSheet open={sheet === "activity"} closing={closing} onClose={closeSheet}
@@ -1568,6 +1681,12 @@ export default function AppMobile({ boot }) {
 
       <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="MENU">
         <div className="glm-menu-list">
+          {/* RYPc: Inbox and Gift box are the Menu's first two rows when a PixAI account is
+              linked; each opens its own full-height sheet. */}
+          {account && !account.error && account.credits != null ? (
+            <MenuInboxRows st={inboxSt} account={account}
+              onInbox={() => openSheet("inbox")} onGifts={() => openSheet("gifts")} />
+          ) : null}
           {MENU_ITEMS.map((mi) => (
             <button key={mi.label} type="button" className="glm-menu-item"
               onClick={() => openScreen(mi.screen)}>

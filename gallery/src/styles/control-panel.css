@@ -413,6 +413,11 @@ button.mgcp-segbtn.on { background: var(--mantle); color: var(--text); box-shado
 .mgcp-checklast { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
   color: var(--overlay0); white-space: nowrap; }
 .mgcp-checklast.ok { color: var(--emerald); }
+/* Session W: "12 broken · Review ▸" on the Verify library integrity row -- peach, the held state,
+   and a link into Health's Broken files list (the run ▸ beside it keeps the accent). */
+button.mgcp-review { font-family: inherit; font-size: 11px; color: var(--peach); background: none; border: none;
+  padding: 0; cursor: pointer; white-space: nowrap; }
+button.mgcp-review:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* The living library's "Runs itself" block (2026-09-06): a full-width stack of the ledger's
    own standing-order rows, above the manual grid. Spacing only -- every row inside it is

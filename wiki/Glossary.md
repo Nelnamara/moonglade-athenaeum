@@ -116,6 +116,10 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   detail page and on a card's right-click menu.
 - **Runs itself** — the block at the top of the Control Panel's job console listing the jobs the app
   performs on its own, each with how often, when it last ran, when it next will, and **Run now**.
+- **Saved** — in the model and LoRA pickers, the models and LoRAs you have saved on PixAI: the list
+  pixai.art's own Save button adds to, which the cards' **⊕ Save** adds to as well. Not a
+  **collection** (pictures you gather in this app). See
+  [Generating](Generating#finding-a-model-or-lora).
 - **the scrim** — the dark blurred layer that covers the Library behind any popup. Switch the blur
   half of it off under Control Panel → **This device** → **Blur behind popups**.
 - **Select mode** — the gallery's ticking mode. Ticked pictures feed the **Actions** dropdown, and
@@ -124,6 +128,9 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   down the left and the pictures of the one you pick on the right.
 - **session stack** — a night of re-rolls, or a lone batch's siblings, folded into one card by the
   filter bar's **Stack sessions** chip.
+- **set** — a named list of recipes, or of models and LoRAs, that you keep on PixAI (PixAI calls
+  them collections; the app says sets, since a **collection** here is your own pictures). Made and
+  renamed on pixai.art; ticked from **Save to a recipe set** or a card's **Keep this model**.
 - **shot** — one clip in The Loom: a card in an act, coded `A·01` for act A, shot one.
 - **the Similar door** — the **◈** mark that finds lookalikes. On a card in the grid, in the
   lightbox, on the detail page, and on the phone viewer's button row. **◈** never means anything
