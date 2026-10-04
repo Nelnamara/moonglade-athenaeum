@@ -6294,7 +6294,7 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     login = page.locator('.mgcp-rl[data-role="login_companion"]')
     login.locator(".mgcp-rl-ghost:has-text('Change')").click()
     page.wait_for_selector(".mgcp-rl-editor")
-    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok"
+    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · about square · ≥ 360 px tall · animated WebP ok"
     use = page.locator(".mgcp-rl-primary:has-text('Use this')")
     assert use.is_disabled()
 
@@ -6303,7 +6303,7 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "sq.png", (600, 800)))
     page.wait_for_selector(".mgcp-rl-loud")
     ticks = page.locator(".mgcp-rl-ticks span").all_inner_texts()
-    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 about square (got 3:4)", "\u2713 \u2265 480 px"], ticks
+    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 about square (got 3:4)", "\u2713 \u2265 360 px"], ticks
     assert page.locator(".mgcp-rl-loud").inner_text() == (
         "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged.")
     assert use.is_disabled()
@@ -6397,7 +6397,7 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
     page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "me.webp", (500, 490), "WEBP"))
     page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
     assert page.locator(".mgcp-rl-ticks span").all_inner_texts() == [
-        "\u2713 WEBP", "\u2713 transparent", "\u2713 animated", "\u2713 about square", "\u2713 \u2265 480 px"]
+        "\u2713 WEBP", "\u2713 transparent", "\u2713 animated", "\u2713 about square", "\u2713 \u2265 360 px"]
     page.click(".mgcp-rl-primary:has-text('Use this')")
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours')
     with Image.open(_g._role_override_path("login_companion", "companion")) as im:

@@ -4631,8 +4631,9 @@ ROLE_SLOTS = {
         "name": "Login companion", "where": "the sign-in page",
         "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "animated_formats": ["WEBP"],
                  "min_axis": "height", "min_px": 600},
+        # Pack v7 re-encoded every animation 360 px tall: the login companion is 366 x 360.
         "images": {"companion": {"label": "Companion", "public": "login_nel.webp",
-                                 "default": {"w": 488, "h": 480, "animated": True}}},
+                                 "default": {"w": 366, "h": 360, "animated": True}}},
     },
     "tracker_mascots": {
         "name": "Job tracker mascots", "where": "the job tracker",
@@ -5099,7 +5100,7 @@ def role_image_spec(slot, key):
     the SHAPE taken from the pack default it replaces (anything between square and that shape,
     ROLE_ASPECT_TOLERANCE beyond either: see role_spec_failures) and the minimum size lowered to the
     default's own where the default is smaller than the drawn minimum (the login companion's pack
-    art is 480 px tall, the drawn minimum 600)."""
+    art is 360 px tall, the drawn minimum 600)."""
     role = ROLE_SLOTS[slot]
     base, d = role["spec"], role["images"][key]["default"]
     own = d["h"] if base["min_axis"] == "height" else min(d["w"], d["h"])
