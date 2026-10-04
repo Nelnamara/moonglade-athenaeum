@@ -22544,7 +22544,9 @@ def create_app(out_dir: Path):
         ROLE_SLOTS), key (one of that role's images) and either `file` (From disk) or `media_id`
         (From the gallery). LOGIN tier, with the explicit CSRF token this write class carries.
         The spec is checked and the file written in branding_role_upload() -- read that, it is the
-        whole path; this handler only reads the request."""
+        whole path; this handler only reads the request. The cap on the request is set before the
+        form is parsed, so a body far past ROLE_MAX_BYTES is a 413 and is never spooled."""
+        request.max_content_length = ROLE_MAX_BYTES + 64 * 1024     # the file, plus its form fields
         if not _check_csrf(request.form):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         slot = request.form.get("slot") or ""

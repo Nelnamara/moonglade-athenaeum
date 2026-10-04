@@ -288,6 +288,18 @@ def test_an_oversized_file_is_refused(tmp_path, monkeypatch):
     assert r.status_code == 400 and "too large" in r.get_json()["error"].lower()
 
 
+def test_a_request_body_far_over_the_limit_is_refused_before_it_is_read(tmp_path, monkeypatch):
+    """The route caps the whole request, not just the file it reads afterwards: a body this big
+    never reaches the form parser (a 413), so a huge upload cannot be spooled to disk first."""
+    monkeypatch.setattr(g, "ROLE_MAX_BYTES", 2000)
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/role", content_type="multipart/form-data", data={
+        "csrf": session_csrf(cli), "slot": "power_poses", "key": "restart",
+        "file": (io.BytesIO(b"\0" * 200_000), "x.png")})
+    assert r.status_code == 413
+    assert not _override_path("power_poses", "restart").exists()
+
+
 def test_the_bad_requests(tmp_path):
     cli = _client(tmp_path)
     ok = _img((256, 256))
