@@ -1114,6 +1114,8 @@ _NOT_PICKABLE = ("CHAT", "VIDEO")
 _GONE_WALK_PAGES = 40          # the removed-models walk gives up after 40 x 24 saves
 _UNCLEAR = ("PixAI's answer was unclear and the check after it failed too, so nothing is "
             "known. Look on PixAI before trying again.")
+_UNCONFIRMED = ("PixAI took it, but the check after it failed, so it isn't confirmed. Look on "
+                "PixAI before trying again.")
 
 
 def _model_kind(kind):
@@ -1366,15 +1368,17 @@ def model_tick(session, set_id, model_id, on, item_id=""):
     sid = _checked_uuid(set_id)
     mid = _checked_id(model_id)
     iid = "" if on else _checked_uuid(item_id)
-    refusal = ""
+    refusal, answered = "", False
     try:
         _collection_write(session, sid, "model", mid, on, iid)
+        answered = True
     except Exception as e:                                       # noqa: BLE001 -- any answer
         refusal = _collection_refusal(e)
     try:
         state = model_state(session, mid)
     except Exception:                                            # noqa: BLE001
-        return {"contains": None, "item_id": "", "error": refusal or _UNCLEAR}
+        return {"contains": None, "item_id": "",
+                "error": refusal or (_UNCONFIRMED if answered else _UNCLEAR)}
     row = next((c for c in state["sets"] if c["id"] == sid), None)
     if row is None:
         return {"contains": None, "item_id": "", "sets": state["sets"], "saved": state["saved"],

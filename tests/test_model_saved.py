@@ -604,3 +604,16 @@ def test_an_old_row_saved_then_taken_out_of_saved_is_old_again(monkeypatch):
     monkeypatch.setattr(core, "_rest_get", _boom)
     rows = rec.model_old_bookmarks(object(), object(), OWNER, "lora")["rows"]
     assert [r["model_id"] for r in rows] == [LORA_ID] and rows[0]["old"] is True
+
+
+def test_a_write_pixai_took_but_could_not_be_checked_is_not_claimed(monkeypatch):
+    w = _Writes(None)
+
+    def get(s, path, params=None, **k):
+        if path == "/collection/selector":
+            raise requests.exceptions.ConnectionError("the check dropped")
+        return w.get(s, path, params, **k)
+    _wire(monkeypatch, w)
+    monkeypatch.setattr(core, "_rest_get", get)
+    out = rec.model_save(object(), OWNER, LORA_ID)
+    assert out["contains"] is None and "isn't confirmed" in out["error"] and len(w.posts) == 1
