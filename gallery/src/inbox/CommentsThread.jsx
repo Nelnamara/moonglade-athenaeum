@@ -86,12 +86,17 @@ export default function CommentsThread({ row, phone }) {
   const inFlight = useRef(false);
   const [seen, setSeen] = useState(false);
 
-  // reset per work
+  // reset per work. `current` lets a read that lands after the picture changed be dropped, so
+  // one work's comments can never be drawn under another's.
+  const current = useRef(artworkId);
+  const arrived = useRef(false);
   useEffect(() => {
+    current.current = artworkId;
     setData(null); setError(""); setPage(1); setOpen({}); setBox(null); setAsk(null);
     setDeleting(null); setSeen(false); setPosted([]);
     const f = takeFocus(artworkId);
     setFocusId(f ? f.commentId : "");
+    arrived.current = !!f;
     if (f) setSeen(true);
   }, [artworkId]);
 
@@ -105,6 +110,7 @@ export default function CommentsThread({ row, phone }) {
   }, [published, seen, artworkId]);
 
   const read = (p) => apiGet("/api/comments/" + encodeURIComponent(artworkId), { page: p }).then((d) => {
+    if (current.current !== artworkId) return;
     if (d.error && !(d.items || []).length) { setError(d.error); setData((cur) => cur || { ...d, items: [] }); return; }
     setError("");
     setData((cur) => (p > 1 && cur ? { ...d, items: cur.items.concat(d.items || []) } : d));
@@ -115,11 +121,14 @@ export default function CommentsThread({ row, phone }) {
     if (published && seen) read(1);
   }, [published, seen, artworkId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // arriving from an inbox quote: scroll the comment into view
+  // arriving from the inbox: Details opens at its comments, and at the quoted comment when a
+  // quote was the door
   useEffect(() => {
-    if (!focusId || !data || !ref.current) return;
-    const el = ref.current.querySelector('[data-comment="' + focusId + '"]');
-    (el || ref.current).scrollIntoView({ block: "center" });
+    if (!arrived.current || !data || !ref.current) return;
+    arrived.current = false;
+    const el = focusId ? ref.current.querySelector('[data-comment="' + focusId + '"]') : null;
+    if (el) el.scrollIntoView({ block: "center" });
+    else ref.current.scrollIntoView({ block: "start" });
   }, [focusId, data]);
 
   if (!published) return null;

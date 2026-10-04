@@ -45,6 +45,12 @@ describe("the read (R5b)", () => {
     assert.ok(targets.every((t) => /"\/reply",$|"\/delete",$/.test(t)), targets.join(" | "));
   });
 
+  test("a read that lands after the picture changed is dropped; arriving from the inbox opens at the comments", () => {
+    assert.match(thread, /if \(current\.current !== artworkId\) return;/);
+    assert.match(thread, /arrived\.current = !!f;/);
+    assert.match(thread, /else ref\.current\.scrollIntoView\(\{ block: "start" \}\);/);
+  });
+
   test("the header count is the catalog's until the read lands, then PixAI's", () => {
     assert.match(thread, /data && data\.total != null \? data\.total : Number\(row\.comment_count \|\| 0\)/);
   });
