@@ -3930,7 +3930,9 @@ def _container_path():
     """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
     a type of its own). Sibling of branding/ and branding.json -- the same app-root,
     machine-local tree. Every code path that reads, fetches, checks or builds the pack asks
-    this; its `.version` marker is derived from it (moonglade_assets._version_marker_path)."""
+    this; its `.version` marker is derived from it (moonglade_assets._version_marker_path).
+    The pack's pre-v7 name is read only by the one-time rename a real start runs
+    (moonglade_assets.migrate_legacy_name, from main())."""
     return branding_root().parent / "moonglade.mgpack"
 
 
@@ -29114,6 +29116,13 @@ def main():
                   "  --allow-port-reuse if you genuinely want that.\n".format(args.port, args.port + 1),
                   file=sys.stderr)
             return 2
+
+    # Pack v7 renamed the art pack. An install still holding it under the old name has it
+    # moved here, once and logged, before anything below asks whether the pack is current --
+    # so a matching pack never downloads again and an outdated one is replaced in place by
+    # the usual verified download. After the port check on purpose: a start refused above
+    # must not move the pack out from under the server that is already running.
+    moonglade_assets.migrate_legacy_name(_container_path())
 
     # One-time, and only on a REAL start: move any rendered banner flat still
     # sitting at the coded root into this install's banner cache. Here rather
