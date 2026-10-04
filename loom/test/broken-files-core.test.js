@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  ARCHIVE_TIP, ARCHIVE_WORD, CHIPS, TILE_CHIP, bytesLine, byteFraction, chipOrAll, confirmLines, endToast,
-  entrySummary, fixPlan, fmtDay, headerSummary, inChip, lostLine, middleEllipsis, pillFor, problemWords,
+  ARCHIVE_TIP, ARCHIVE_WORD, CHIPS, TILE_CHIP, tileChip, bytesLine, byteFraction, chipOrAll, confirmLines, endToast,
+  entrySummary, fixPlan, fmtDay, headerSummary, sizeText, inChip, lostLine, middleEllipsis, pillFor, problemWords,
   reviewLabel, rowAction, rowsFor, runHeader, shortId, visibleChips,
 } from "../../gallery/src/lib/brokenFilesCore.js";
 
@@ -55,8 +55,23 @@ describe("chips", () => {
     assert.equal(chipOrAll(chips, "zero"), "all");
     assert.equal(chipOrAll(chips, "thumb"), "thumb");
   });
-  test("the problem tiles open the list at their chip", () => {
-    assert.deepEqual(TILE_CHIP, { "Zero-byte files": "zero", "Missing thumbs": "thumb" });
+  test("the problem tiles open the list at their chip; Missing files opens it at All", () => {
+    assert.deepEqual(TILE_CHIP, { "Zero-byte files": "zero", "Missing thumbs": "thumb", "Missing files": "all" });
+    const counts = { all: 5, zero: 2, thumb: 0, missing: 1 };
+    assert.equal(tileChip("Zero-byte files", counts), "zero");
+    assert.equal(tileChip("Missing thumbs", counts), null);     // nothing under it: no peach, no link
+    assert.equal(tileChip("Missing files", counts), "all");
+    assert.equal(tileChip("Missing files", { all: 3, missing: 0 }), null);
+    assert.equal(tileChip("Rated", counts), null);
+  });
+  test("a missing file reads 'missing · <path>', under All only, and says when its size is unknown", () => {
+    const m = row({ media_id: "m", problem: "missing", kind: "missing", path: "images/p_t1_m.png", size: "" });
+    assert.equal(problemWords(m), "missing");
+    assert.ok(inChip(m, "all") && !inChip(m, "zero") && !inChip(m, "thumb") && !inChip(m, "suspect"));
+    assert.equal(sizeText(m), "size unknown");
+    assert.equal(sizeText(row({ size: 0 })), "0 B");
+    assert.equal(sizeText(row({ kind: "thumb", size: "" })), "");
+    assert.deepEqual(visibleChips({ all: 1, missing: 1 }).map((c) => c.key), ["all"]);
   });
 });
 

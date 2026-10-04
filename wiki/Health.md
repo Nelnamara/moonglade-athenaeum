@@ -130,17 +130,20 @@ repairs nothing; the **Broken files** list below is where you act on what it fou
 ### Broken files
 
 When the last check found broken files, Health shows a **Broken files** section under the tiles
-and above the storage bars. It is absent on a clean library. The **Zero-byte files** and
-**Missing thumbs** tiles turn peach while the list has rows under them, and clicking one jumps
-to the list with that kind picked. **Control Panel → Check — read-only → Verify library
+and above the storage bars. It is absent on a clean library. The **Zero-byte files**,
+**Missing thumbs** and **Missing files** tiles turn peach while the list has rows of their kind,
+and clicking one jumps to the list with that kind picked (**Missing files** opens it at **All**). **Control Panel → Check — read-only → Verify library
 integrity** says "N broken · Review ▸" after a check that found some; that opens Health at the
 list too.
 
 The chips across the top are **All**, **Zero-byte**, **Thumbnail**, **Suspect** and **Lost**,
-each with its count (a chip with nothing under it is hidden). Each row shows the picture's
-thumbnail (or a "?"), its id, the problem and where the file is, its size, and a pill:
+each with its count (a chip with nothing under it is hidden). A file that is missing altogether
+has no chip of its own: it is listed under **All** (and under **Lost** if PixAI no longer has
+it), reading "missing · <where the catalog expects it>". Each row shows the picture's
+thumbnail (or a "?"), its id, the problem and where the file is, its size ("size unknown" for a
+missing file, since the catalog doesn't record one), and a pill:
 
-- **RECOVERABLE** — an empty file PixAI still has, or a missing or empty thumbnail.
+- **RECOVERABLE** — a missing or empty file PixAI still has, or a missing or empty thumbnail.
 - **SUSPECT** (peach) — a file that stops before its end. "Suspect", never "corrupt": the
   check reads two small pieces of the file and decodes nothing.
 - **LOST** (dashed) — a broken file PixAI no longer has, or one you marked lost. A picture
@@ -164,7 +167,9 @@ A row's own button runs straight away, with no confirm, because it is one file:
 
 - **Re-download** asks PixAI for the picture again, once, the same way a backup does. The new
   copy is checked before it goes anywhere: it has to be a whole file of the same kind as the
-  broken one. Only then does it replace the broken file, under the same name. If PixAI sends
+  broken one. Only then does it replace the broken file, under the same name. A missing file
+  goes back where the catalog expects it (a bare file name means the `images/` folder, or
+  `videos/` for a clip), and only if that place is inside the library and holds nothing yet. If PixAI sends
   nothing, or what it sends doesn't check out, the old file is left exactly as it was and the
   row says so in peach.
 - **Rebuild** makes the thumbnail again from the file on your disk. Nothing reaches PixAI.
@@ -177,7 +182,7 @@ checked again so the tiles and the report follow.
 
 #### Fix all recoverable
 
-The section's **Fix all recoverable (N)** button counts the empty, cut-short and thumbnail rows
+The section's **Fix all recoverable (N)** button counts the missing, empty, cut-short and thumbnail rows
 that can be fixed — never a LOST row, never a picture PixAI no longer has — and asks once:
 how many files it will re-download from PixAI and about how much that is, how many thumbnails
 it will rebuild here, how many lost files it leaves alone, and "Nothing is deleted." On a phone
@@ -193,8 +198,8 @@ couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
 
 #### On a phone
 
-In **☰ Menu → Health** the **Zero-byte files** and **Missing thumbs** tiles turn peach the same
-way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
+In **☰ Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
+turn peach the same way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
 screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
 opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and
 **Mark lost** (a LOST row's sheet says why, and offers **Keep as is** instead). **Fix all

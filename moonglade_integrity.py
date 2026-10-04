@@ -414,17 +414,20 @@ def run_cli(out_dir, db_path, deep=False, progress=None):
 # The list is the report above, read back, with what a row needs to draw and act:
 #   kind    the chip it sits under -- "zero" (Zero-byte), "thumb" (Thumbnail: no thumbnail,
 #           no poster, an empty thumbnail) or "suspect" (Suspect). Lost cuts across them.
+#           "missing" (the file is nowhere on disk) has no chip of its own: it shows under All,
+#           and under Lost when PixAI no longer has it (owner's ruling on the 2026-10-04 fix
+#           round -- the drawn chips stay as they are).
 #   state   the pill: "recoverable", "suspect" (still recoverable, drawn peach) or "lost".
-#   action  the one fix that applies: "redownload" (an empty or cut-short file PixAI still
-#           has), "rebuild" (a thumbnail, local work), or None (a LOST row has none).
+#   action  the one fix that applies: "redownload" (a missing, empty or cut-short file PixAI
+#           still has), "rebuild" (a thumbnail, local work), or None (a LOST row has none).
 #
 # LOST is decided from the catalog NOW, not from the report's recoverable column: the
 # archive-only flag is rewritten at every reconcile, so a file PixAI lists again becomes
 # RECOVERABLE without a new check. A row the owner marked lost is LOST whatever PixAI says.
 #
-# A MISSING file (a catalog row whose file is nowhere on disk) is not on the list: the
-# handoff's chips (All, Zero-byte, Thumbnail, Suspect, Lost) and its counts have no place
-# for one, and Health's own Missing files tile already counts them.
+# A missing file's size is the catalog's expected size where it is known; the catalog keeps no
+# byte size today, so its row says "size unknown" and Fix all's estimate counts the library's
+# average for it.
 
 MARKS_FILE = "integrity_marks.json"
 MARKS_FORMAT = "moonglade-integrity-marks"
@@ -432,10 +435,10 @@ MARKS_FORMAT = "moonglade-integrity-marks"
 # Keep as is: "I've seen it" on a LOST row; it lapses if PixAI lists the file again.
 MARKS = ("lost", "kept")
 
-KIND_ZERO, KIND_THUMB, KIND_SUSPECT = "zero", "thumb", "suspect"
+KIND_ZERO, KIND_THUMB, KIND_SUSPECT, KIND_MISSING = "zero", "thumb", "suspect", "missing"
 LIST_KIND = {P_ZERO: KIND_ZERO, P_SUSPECT: KIND_SUSPECT, P_NO_THUMB: KIND_THUMB,
-             P_NO_POSTER: KIND_THUMB, P_ZERO_THUMB: KIND_THUMB}
-REFETCH_PROBLEMS = (P_ZERO, P_SUSPECT)
+             P_NO_POSTER: KIND_THUMB, P_ZERO_THUMB: KIND_THUMB, P_MISSING: KIND_MISSING}
+REFETCH_PROBLEMS = _FILE_PROBLEMS                   # missing, zero-byte, suspect
 REBUILD_PROBLEMS = (P_NO_THUMB, P_NO_POSTER, P_ZERO_THUMB)
 _STATE_RANK = {"recoverable": 0, "suspect": 1, "lost": 2}
 _REPORT_HEAD = ["media_id", "problem", "path", "size", "recoverable"]
@@ -596,7 +599,8 @@ def broken_list(out_dir, db_path, avg_bytes=None):
     rows.sort(key=lambda x: (x["created_at"], x["media_id"]), reverse=True)
     rows.sort(key=lambda x: _STATE_RANK[x["state"]])  # stable: newest first inside each
 
-    counts = {"all": len(rows), KIND_ZERO: 0, KIND_THUMB: 0, KIND_SUSPECT: 0, "lost": 0}
+    counts = {"all": len(rows), KIND_ZERO: 0, KIND_THUMB: 0, KIND_SUSPECT: 0, KIND_MISSING: 0,
+              "lost": 0}
     for x in rows:
         counts[x["kind"]] += 1
         counts["lost"] += 1 if x["state"] == "lost" else 0
@@ -621,7 +625,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #
 # Two writes, one function each, so a reader can audit them on their own:
 #
-#   redownload_one  an empty or cut-short file PixAI still has. THE RULE comes first: a row
+#   redownload_one  a missing, empty or cut-short file PixAI still has. THE RULE comes first: a row
 #                   PixAI no longer has (archive-only) is refused here, from the catalog,
 #                   whatever the caller asked -- it is the only copy anywhere, and this
 #                   function never touches it. READ_ONLY comes next, before any network.
@@ -629,7 +633,10 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #                   download), ONE attempt, into a staging file under gallery/. Only when the
 #                   new bytes are a whole file of the same kind as the broken one (a format
 #                   this module recognises from its first bytes, and the structural check
-#                   passes) does an atomic replace put them over it, keeping its name.
+#                   passes) does an atomic replace put them over it, keeping its name. A
+#                   MISSING file has no broken file to replace: its destination is the
+#                   catalog's own path, decided in ONE place, missing_target(), and refused
+#                   before anything is fetched unless it resolves strictly inside the library.
 #   rebuild_one     a missing or empty thumbnail: the gallery's own make_thumbnail (a video's
 #                   poster: make_video_thumbnail), local only, no network, READ_ONLY or not.
 #
@@ -647,7 +654,8 @@ WORDS = {
     "archive_only": "PixAI no longer has this picture, so there's no copy left to re-download.",
     "read_only": "Read-only mode is on, so files won't be re-downloaded.",
     "not_in_catalog": "This picture isn't in the catalog any more.",
-    "missing": "The file isn't on disk any more.",
+    "bad_path": "Couldn't re-download. The catalog's path for this file isn't a safe place inside the library, so nothing was written.",
+    "occupied": "Couldn't re-download. Something else is already at this file's path, so nothing was written.",
     "marked_lost": "You marked this file lost.",
     "not_listed": "This file isn't on the Broken files list.",
     "no_file": "Couldn't re-download. PixAI didn't return the file.",
@@ -698,6 +706,52 @@ def verified_whole(path):
     return _format_of(path) is not None and structural_problem(path) is None
 
 
+def missing_target(out_dir, row):
+    """WHERE A RE-DOWNLOADED MISSING FILE GOES -- the one place that decides it. Returns
+    (path, "") or (None, reason), reason "bad_path" or "occupied". Pure path work: it reads the
+    disk only to resolve links and to see whether something is already there, and writes nothing.
+
+    The destination is the catalog row's own `filename`. The backup records most pictures by
+    bare file name and keeps them in images/ (a video in videos/), so a bare name goes back
+    there; a name with folders keeps its folders. It is refused unless every rule holds:
+      1. a relative path: no drive or ':' anywhere, no leading '/', no '..' part, no NUL;
+      2. resolved (links followed), strictly inside the library root;
+      3. not inside a tree every library walk prunes (gallery/, _duplicates/, _deleted/,
+         branding/) -- a file put there would never be found again;
+      4. an extension the re-download knows how to check;
+      5. a file name that carries this row's media id, so the file is found as this picture
+         again and never lands under another picture's name.
+    "occupied": something is already at that path. It is never overwritten."""
+    import moonglade_gallery as g
+    mid = str(row.get("media_id") or "").strip()
+    raw = str(row.get("filename") or "").strip().replace("\\", "/")
+    if not mid or not raw or "\x00" in raw or ":" in raw or raw.startswith("/"):
+        return None, "bad_path"                                        # rule 1
+    parts = [p for p in raw.split("/") if p not in ("", ".")]
+    if not parts or ".." in parts:
+        return None, "bad_path"                                        # rule 1
+    if len(parts) == 1:
+        parts = ["videos" if str(row.get("is_video") or "") == "1" else "images"] + parts
+    root = Path(out_dir).resolve()
+    target = root.joinpath(*parts).resolve()
+    try:
+        rel = target.relative_to(root)
+    except ValueError:
+        return None, "bad_path"                                        # rule 2
+    if not rel.parts:
+        return None, "bad_path"                                        # rule 2: the root itself
+    pruned = {os.path.normcase(n) for n in g.HEALTH_EXCLUDE}
+    if os.path.normcase(rel.parts[0]) in pruned:
+        return None, "bad_path"                                        # rule 3
+    if target.suffix.lower() not in _FORMAT_OF_EXT:
+        return None, "bad_path"                                        # rule 4
+    if g.media_id_of(target) != mid:
+        return None, "bad_path"                                        # rule 5
+    if target.exists() or target.is_symlink():
+        return None, "occupied"
+    return target, ""
+
+
 def _live_check(out, row, index, g):
     return _row_check(row, index or _index(out, g), True, g.GALLERY_DIRNAME)
 
@@ -721,11 +775,17 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         return _result(mid, "redownload", ok=False, refused="read_only")
 
     problem, _path, _size, best = _live_check(out, row, index, g)
-    if problem == P_MISSING:
-        return _result(mid, "redownload", ok=False, refused="missing")
-    if problem not in REFETCH_PROBLEMS or best is None:
+    if problem not in REFETCH_PROBLEMS:
         return _result(mid, "redownload", note="already sound")   # never overwrite a sound file
-    target = Path(best.path)
+    missing = problem == P_MISSING
+    if missing:
+        target, why = missing_target(out, row)         # the catalog's path, checked, or refused
+        if target is None:
+            return _result(mid, "redownload", ok=False, refused=why)
+    elif best is None:
+        return _result(mid, "redownload", note="already sound")
+    else:
+        target = Path(best.path)                       # the broken file itself
     want = _FORMAT_OF_EXT.get(target.suffix.lower())
     if not want:
         return _result(mid, "redownload", ok=False, refused="unknown_type")
@@ -748,7 +808,13 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
         if _format_of(got) != want:
             return _result(mid, "redownload", ok=False, refused="type_differs")
         nbytes = os.path.getsize(got)
-        core._atomic_replace(got, target)              # the verified file, over the broken one
+        if missing:
+            # Re-asked at the last moment: nothing may have appeared there while it downloaded.
+            target, why = missing_target(out, row)
+            if target is None:
+                return _result(mid, "redownload", ok=False, refused=why)
+            target.parent.mkdir(parents=True, exist_ok=True)   # inside the library: rule 2
+        core._atomic_replace(got, target)              # the verified file, into its place
         got = None
     except Exception:                                  # noqa: BLE001 -- one row, said plainly
         return _result(mid, "redownload", ok=False, refused="no_file")

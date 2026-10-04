@@ -3,7 +3,7 @@ import useHealth, { fmt } from "../hooks/useHealth.js";
 import useBrokenFiles from "../hooks/useBrokenFiles.js";
 import StorageBars from "./StorageBars.jsx";
 import BrokenFiles from "./BrokenFiles.jsx";
-import { TILE_CHIP } from "../lib/brokenFilesCore.js";
+import { tileChip } from "../lib/brokenFilesCore.js";
 import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
 import { onRunEnd } from "../lib/brokenFixRun.js";
 import "../styles/overlays.css";
@@ -113,8 +113,8 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                 {stats.map((st) => {
                   // Session W: a problem tile with rows on the Broken files list wears peach and
                   // opens the list at its chip; a clean library reads 0 with no peach.
-                  const chip = TILE_CHIP[st.label];
-                  const flag = !!(chip && bfShown && bf.doc.counts[chip] > 0);
+                  const chip = bfShown ? tileChip(st.label, bf.doc.counts) : null;
+                  const flag = !!chip;
                   return (
                   <div className={"mgh-stat" + (flag ? " flag" : "")} key={st.label}>
                     <div className="mgh-stat-label">{st.label}</div>

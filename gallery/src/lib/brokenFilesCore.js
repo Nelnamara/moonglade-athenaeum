@@ -17,7 +17,17 @@ export const CHIPS = Object.freeze([
 ]);
 
 // Health's problem tiles and the chip each one opens the list at (useHealth.js's labels).
-export const TILE_CHIP = Object.freeze({ "Zero-byte files": "zero", "Missing thumbs": "thumb" });
+// Missing files has no chip of its own, so its tile opens the list at All.
+export const TILE_CHIP = Object.freeze({ "Zero-byte files": "zero", "Missing thumbs": "thumb", "Missing files": "all" });
+// ...and the count that says the tile has rows on the list (peach, and a link) at all.
+const TILE_COUNT = Object.freeze({ "Zero-byte files": "zero", "Missing thumbs": "thumb", "Missing files": "missing" });
+
+/* The chip a Health tile opens the list at, or null when the list has nothing under it (then
+   the tile stays plain: no peach, no link). */
+export function tileChip(label, counts) {
+  const k = TILE_COUNT[label];
+  return k && counts && counts[k] > 0 ? TILE_CHIP[label] : null;
+}
 
 // ARCHIVE: the grid's word for a picture PixAI no longer has, with the grid's own tooltip
 // (Grid.jsx, Lane C, the owner's ruling 2026-10-02).
@@ -25,6 +35,7 @@ export const ARCHIVE_WORD = "ARCHIVE";
 export const ARCHIVE_TIP = "Deleted on PixAI. This is the only copy.";
 
 const PROBLEM_WORDS = {
+  "missing": "missing",
   "zero-byte": "zero-byte",
   "suspect: truncated": "suspect · ends early",
   "no thumbnail": "thumbnail missing",
@@ -75,6 +86,17 @@ export function middleEllipsis(path, max) {
 export function problemWords(row) {
   const p = row && row.problem;
   return PROBLEM_WORDS[p] || String(p || "");
+}
+
+/* The row's size: "0 B", "1.4 MB", "850 KB"; a missing file whose expected size the catalog
+   doesn't know says "size unknown"; a thumbnail row shows none (its report has no file size). */
+export function sizeText(row) {
+  if (!row || row.kind === "thumb") return "";
+  const n = Number(row.size);
+  if (row.size === "" || row.size == null || !Number.isFinite(n)) return row.kind === "missing" ? "size unknown" : "";
+  if (n === 0) return "0 B";
+  if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + " KB";
+  return (Math.round((n / (1024 * 1024)) * 10) / 10) + " MB";
 }
 
 /* The pill: {label, tone}. A row that just finished reads ✓ FIXED (emerald) for its 2 s. */

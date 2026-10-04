@@ -24,7 +24,7 @@ describe("desktop: a section inside Health (W1a)", () => {
   });
   test("a problem tile opens the list at its chip", () => {
     const h = code("components/HealthOverlay.jsx");
-    assert.match(h, /TILE_CHIP\[st\.label\]/);
+    assert.match(h, /tileChip\(st\.label, bf\.doc\.counts\)/);
     assert.match(h, /onClick=\{\(\) => openBroken\(chip\)\}/);
     assert.match(h, /scrollIntoView/);
   });
@@ -116,7 +116,7 @@ describe("Fix all and its progress (W3c / W4c)", () => {
 describe("phone (W6a)", () => {
   test("Collection Health gains peach problem tiles and a 'Broken files ›' row that push the screen", () => {
     const h = code("components/HealthMobile.jsx");
-    assert.match(h, /TILE_CHIP\[st\.label\]/);
+    assert.match(h, /tileChip\(st\.label, bf\.doc\.counts\)/);
     assert.match(h, /className="mgbf-m-entry"/);
     assert.match(h, /entrySummary\(bf\.doc\)/);
     assert.match(h, /<MobileScreen open=\{bfOpen\} closing=\{bfClosing\} onClose=\{closeBf\} title="Broken files">/);

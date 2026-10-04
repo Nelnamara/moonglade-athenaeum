@@ -149,6 +149,74 @@ def test_a_cut_short_file_is_replaced_in_place(tmp_path):
     assert integ.structural_problem(out / "images/p_t1_103.png") is None
 
 
+def test_a_missing_file_is_re_downloaded_to_the_catalogs_own_path(tmp_path):
+    """105's catalog row names a bare file and nothing is on disk. The backup records most
+    pictures by bare name in images/, so that is where the fresh copy lands -- through the
+    same staging file and the same checks as any other re-download."""
+    out = _broken_library(tmp_path)
+    fresh = _png(4, 4)
+    session = FakeMediaSession({"105": (fresh, "image/png")})
+    res = integ.redownload_one(out, out / "catalog.db", "105", session_factory=lambda: session)
+    assert res["ok"] is True and res["action"] == "redownload"
+    assert _bytes(out, "images/p_t1_105.png") == fresh
+    assert (out / "gallery" / "thumbs" / "105.jpg").stat().st_size > 0
+    assert not list((out / "gallery" / integ.STAGING_DIRNAME).glob("*"))
+
+
+def test_a_missing_file_with_a_folder_in_its_path_goes_back_there(tmp_path):
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="105", filename="2026-01/p_t1_105.png")])
+    session = FakeMediaSession({"105": (_png(3, 3), "image/png")})
+    res = integ.redownload_one(out, out / "catalog.db", "105", session_factory=lambda: session)
+    assert res["ok"] is True
+    assert _bytes(out, "2026-01/p_t1_105.png") == _png(3, 3)
+
+
+@pytest.mark.parametrize("crafted", [
+    "../escape_105.png",                    # climbs out of the library
+    "images/../../escape_105.png",          # climbs out after a folder
+    "C:/Windows/Temp/p_t1_105.png",         # a drive path
+    "/tmp/p_t1_105.png",                    # a rooted path
+    "gallery/thumbs/p_t1_105.png",          # inside a tree every walk prunes
+    "_deleted/p_t1_105.png",                # the Trash
+    "images/p_t1_999.png",                  # a name that is another picture's
+    "images/p_t1_105.exe",                  # not a picture
+])
+def test_a_crafted_path_is_refused_before_anything_is_fetched(tmp_path, crafted):
+    out = _broken_library(tmp_path / "lib")
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="105", filename=crafted)])
+    before = {p for p in tmp_path.rglob("*")}
+    res = integ.redownload_one(out, out / "catalog.db", "105", session_factory=_no_network)
+    assert res["ok"] is False and res["refused"] == "bad_path", crafted
+    assert {p for p in tmp_path.rglob("*")} == before, "a refused path wrote something"
+
+
+def test_the_path_rule_on_its_own(tmp_path):
+    """missing_target: the one place a missing file's destination is decided."""
+    out = tmp_path
+    (out / "images").mkdir()
+    row = {"media_id": "105", "filename": "p_t1_105.png", "is_video": ""}
+    assert integ.missing_target(out, row) == ((out / "images" / "p_t1_105.png").resolve(), "")
+    vid = {"media_id": "108", "filename": "p_t1_108.mp4", "is_video": "1"}
+    assert integ.missing_target(out, vid)[0] == (out / "videos" / "p_t1_108.mp4").resolve()
+    (out / "images" / "p_t1_105.png").write_bytes(b"x")       # something is there now
+    assert integ.missing_target(out, row) == (None, "occupied")
+    assert integ.missing_target(out, {"media_id": "105", "filename": ""}) == (None, "bad_path")
+
+
+def test_a_missing_file_pixai_no_longer_has_is_refused_by_the_runner(tmp_path):
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="113", filename="p_t1_113.png",
+                                           deleted_remote="1")])
+    integ.verify_library(out, out / "catalog.db", deep=True)
+    res = integ.redownload_one(out, out / "catalog.db", "113", session_factory=_no_network)
+    assert res["refused"] == "archive_only"
+    assert not (out / "images" / "p_t1_113.png").exists()
+
+
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):
     out = _broken_library(tmp_path)
     before = _bytes(out, "images/p_t1_103.png")

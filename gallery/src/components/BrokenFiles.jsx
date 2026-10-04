@@ -7,7 +7,7 @@ import { setBrokenFilesModalUp } from "../lib/brokenFilesNav.js";
 import {
   ACTION_LABEL, ARCHIVE_TIP, ARCHIVE_WORD, bytesLine, byteFraction, chipOrAll, confirmLines, fixPlan,
   headerSummary, lostLine, middleEllipsis, pillFor, problemWords, rowAction, rowsFor, runHeader,
-  shortId, visibleChips,
+  shortId, sizeText, visibleChips,
 } from "../lib/brokenFilesCore.js";
 import "../styles/broken-files.css";
 
@@ -25,15 +25,6 @@ import "../styles/broken-files.css";
 
    Data and actions: hooks/useBrokenFiles.js (`bf`, owned by HealthOverlay so its tiles can read
    the same counts). Nothing here deletes anything. */
-
-function sizeText(row) {
-  if (row.kind === "thumb") return "";
-  const n = Number(row.size);
-  if (!Number.isFinite(n) || row.size === "") return "";
-  if (n === 0) return "0 B";
-  if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + " KB";
-  return (Math.round((n / (1024 * 1024)) * 10) / 10) + " MB";
-}
 
 function copyText(text) {
   try {

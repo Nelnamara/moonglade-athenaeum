@@ -6,7 +6,7 @@ import useLayerHistory from "../hooks/useLayerHistory.js";
 import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
 import BrokenFilesMobile from "./BrokenFilesMobile.jsx";
 import useBrokenFiles from "../hooks/useBrokenFiles.js";
-import { TILE_CHIP, entrySummary } from "../lib/brokenFilesCore.js";
+import { entrySummary, tileChip } from "../lib/brokenFilesCore.js";
 import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
 import { onRunEnd } from "../lib/brokenFixRun.js";
 import "../styles/broken-files.css";
@@ -79,7 +79,8 @@ import "../styles/menu-screens-mobile.css";
       since Import is a real screen this SAME pass -- tapping it opens the
       Import screen directly, a real destination that didn't exist before
       this batch, instead of the design's plain static note.
-   7. BROKEN FILES (Session W, W6a): the Zero-byte files and Missing thumbs tiles turn peach
+   7. BROKEN FILES (Session W, W6a): the Zero-byte files, Missing thumbs and Missing files
+      tiles turn peach (Missing files opens the list at All)
       while the integrity check's list has rows under them, and tapping one -- or the
       "Broken files" row under the tiles -- pushes the Broken files screen
       (BrokenFilesMobile.jsx) with that chip picked: another push-within-a-push, owned here
@@ -138,8 +139,8 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
     <>
       <div className="ctm-statgrid" style={{ marginBottom: 16 }}>
         {stats.map((st) => {
-          const chip = TILE_CHIP[st.label];
-          const flag = !!(chip && bfShown && bf.doc.counts[chip] > 0);
+          const chip = bfShown ? tileChip(st.label, bf.doc.counts) : null;
+          const flag = !!chip;
           return (
           <div className={"ctm-statcard" + (flag ? " mgbf-flag" : "")} key={st.label}>
             {flag ? (

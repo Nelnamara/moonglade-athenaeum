@@ -77,14 +77,15 @@ def test_the_list_holds_the_broken_rows_the_chips_name(tmp_path):
     out = _broken_library(tmp_path)
     doc = integ.broken_list(out, out / "catalog.db")
     rows = _by_id(doc)
-    # zero-byte, suspect and the three thumbnail problems; never a missing file (the handoff's
-    # chips have no place for one), an uncataloged file or an orphan thumbnail
-    assert set(rows) == {"102", "103", "106", "107", "108", "109", "112"}
+    # zero-byte, suspect, the three thumbnail problems, and a missing file (shown under All,
+    # with no chip of its own); never an uncataloged file or an orphan thumbnail
+    assert set(rows) == {"102", "103", "105", "106", "107", "108", "109", "112"}
     assert {k: rows[k]["kind"] for k in rows} == {
-        "102": "zero", "103": "suspect", "106": "thumb", "107": "thumb", "108": "thumb",
-        "109": "zero", "112": "suspect"}
-    assert doc["counts"] == {"all": 7, "zero": 2, "thumb": 3, "suspect": 2, "lost": 2}
-    assert doc["broken"] == 5 and doc["lost"] == 2
+        "102": "zero", "103": "suspect", "105": "missing", "106": "thumb", "107": "thumb",
+        "108": "thumb", "109": "zero", "112": "suspect"}
+    assert doc["counts"] == {"all": 8, "zero": 2, "thumb": 3, "suspect": 2, "missing": 1,
+                             "lost": 2}
+    assert doc["broken"] == 6 and doc["lost"] == 2
     assert doc["verified_at"].endswith("Z") and doc["deep"] is True
 
 
@@ -96,6 +97,9 @@ def test_each_row_gets_its_pill_and_only_the_action_that_applies(tmp_path):
     assert (rows["106"]["state"], rows["106"]["action"]) == ("recoverable", "rebuild")
     assert (rows["107"]["state"], rows["107"]["action"]) == ("recoverable", "rebuild")
     assert (rows["108"]["state"], rows["108"]["action"]) == ("recoverable", "rebuild")
+    # a missing file PixAI still has: RECOVERABLE, re-downloaded to the catalog's own path
+    assert (rows["105"]["state"], rows["105"]["action"]) == ("recoverable", "redownload")
+    assert rows["105"]["path"] == "p_t1_105.png" and rows["105"]["size"] == ""
     # a broken file PixAI no longer has is LOST and never offers a re-download
     for lost in ("109", "112"):
         assert rows[lost]["state"] == "lost" and rows[lost]["action"] is None, lost
@@ -110,7 +114,7 @@ def test_each_row_gets_its_pill_and_only_the_action_that_applies(tmp_path):
 def test_recoverable_first_then_suspect_then_lost_then_newest(tmp_path):
     out = _broken_library(tmp_path)
     order = [r["media_id"] for r in integ.broken_list(out, out / "catalog.db")["rows"]]
-    assert order == ["108", "107", "106", "102", "103", "112", "109"]
+    assert order == ["108", "107", "106", "105", "102", "103", "112", "109"]
 
 
 def test_lost_rows_say_as_of_when(tmp_path):
@@ -145,7 +149,7 @@ def test_a_reconcile_that_finds_it_again_makes_it_recoverable(tmp_path):
 def test_fix_all_counts_recoverable_rows_only(tmp_path):
     out = _broken_library(tmp_path)
     fix = integ.broken_list(out, out / "catalog.db")["fix"]
-    assert sorted(fix["redownload"]) == ["102", "103"]
+    assert sorted(fix["redownload"]) == ["102", "103", "105"]
     assert sorted(fix["rebuild"]) == ["106", "107", "108"]
     assert fix["lost"] == 2
 
@@ -169,9 +173,26 @@ def test_an_archive_only_thumbnail_row_is_left_out_of_fix_all(tmp_path):
 def test_the_re_download_size_is_an_estimate_from_the_library(tmp_path):
     out = _broken_library(tmp_path)
     fix = integ.broken_list(out, out / "catalog.db", avg_bytes=3_000_000)["fix"]
-    # the zero-byte file counts the library's average; the cut-short one at least its own size
-    assert fix["redownload_bytes"] == 6_000_000
+    # the zero-byte and the missing file count the library's average (the catalog keeps no
+    # byte size); the cut-short one at least its own size
+    assert fix["redownload_bytes"] == 9_000_000
     assert integ.broken_list(out, out / "catalog.db")["fix"]["redownload_bytes"] is None
+
+
+def test_a_missing_file_pixai_no_longer_has_is_lost(tmp_path):
+    """Missing AND archive-only: LOST (+ ARCHIVE), so it sits under Lost as well as All, and
+    Fix all leaves it alone."""
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    save_catalog(out / "catalog.db", [_r(media_id="113", filename="p_t1_113.png",
+                                         created_at="2026-01-13T00:00:00", deleted_remote="1")])
+    integ.verify_library(out, out / "catalog.db", deep=True)
+    doc = integ.broken_list(out, out / "catalog.db")
+    row = _by_id(doc)["113"]
+    assert (row["kind"], row["state"], row["action"], row["archive_only"]) == (
+        "missing", "lost", None, True)
+    assert doc["counts"]["missing"] == 2 and doc["counts"]["lost"] == 3
+    assert "113" not in doc["fix"]["redownload"]
 
 
 def test_no_report_is_an_empty_list(tmp_path):
@@ -266,7 +287,7 @@ def test_the_list_route(tmp_path):
     out = _broken_library(tmp_path)
     cli = _client(out)
     d = cli.get("/api/integrity/broken").get_json()
-    assert d["counts"]["all"] == 7
+    assert d["counts"]["all"] == 8
     assert d["read_only"] is False
 
 
