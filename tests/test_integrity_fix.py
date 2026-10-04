@@ -363,6 +363,158 @@ def test_a_video_is_re_downloaded_the_way_the_backup_downloads_videos(tmp_path):
     assert ("GET", "https://cdn.test/video/114.mp4") in session.calls
 
 
+# ---------------------------------------------------------------------------
+# The review's nits (6-10)
+# ---------------------------------------------------------------------------
+
+def test_each_report_write_has_its_own_temp_file(tmp_path, monkeypatch):
+    """Nit 6: two writers of one report never share a temp name."""
+    seen = []
+    real = core._atomic_replace
+    monkeypatch.setattr(core, "_atomic_replace", lambda tmp, dest: (seen.append(tmp.name), real(tmp, dest)))
+    integ._write_atomic(tmp_path / "integrity_report.json", b"1")
+    integ._write_atomic(tmp_path / "integrity_report.json", b"2")
+    assert len(set(seen)) == 2 and all(".tmp-" in n for n in seen)
+    assert (tmp_path / "integrity_report.json").read_bytes() == b"2"
+    assert not [p.name for p in tmp_path.iterdir() if ".tmp" in p.name]     # none left behind
+
+
+def test_the_recheck_waits_for_the_report_lock(tmp_path, monkeypatch):
+    """Nit 6: the re-check's read-modify-write holds integrity_report.lock, so it cannot
+    interleave with another writer of the reports; it waits while the lock is held."""
+    import threading
+    out = _broken_library(tmp_path)
+    lock = out / integ.REPORT_LOCK
+    lock.write_text("held")
+    before = (out / "integrity_report.csv").read_bytes()
+    (out / "images" / "p_t1_102.png").write_bytes(_png(4, 4))            # fixed meanwhile
+    t = threading.Thread(target=integ.reverify, args=(out, out / "catalog.db", ["102"]))
+    t.start()
+    t.join(0.6)
+    assert t.is_alive() and (out / "integrity_report.csv").read_bytes() == before
+    lock.unlink()
+    t.join(10)
+    assert not t.is_alive()
+    assert "102" not in {ln[0] for ln in integ.read_lines(out)}
+    assert not lock.exists()
+
+
+def test_a_stale_report_lock_is_broken(tmp_path):
+    import os
+    import time as _t
+    out = _broken_library(tmp_path)
+    lock = out / integ.REPORT_LOCK
+    lock.write_text("left by a process that died")
+    old = _t.time() - integ.REPORT_LOCK_STALE_S - 5
+    os.utime(lock, (old, old))
+    (out / "images" / "p_t1_102.png").write_bytes(_png(4, 4))
+    integ.reverify(out, out / "catalog.db", ["102"])
+    assert "102" not in {ln[0] for ln in integ.read_lines(out)} and not lock.exists()
+
+
+def test_a_file_fixed_meanwhile_is_not_replaced(tmp_path):
+    """Nit 7: just before the replace, the target is looked at again; a sync that mended it
+    while the re-download ran wins, and the run says so."""
+    out = _broken_library(tmp_path)
+    mended = _png(5, 5)
+
+    class Mending(FakeMediaSession):
+        def get(self, url, stream=False, timeout=None):
+            if url == "https://cdn.test/102":
+                (out / "images" / "p_t1_102.png").write_bytes(mended)
+            return super().get(url, stream=stream, timeout=timeout)
+
+    session = Mending({"102": (_png(4, 4), "image/png")})
+    res = integ.redownload_one(out, out / "catalog.db", "102", session_factory=lambda: session)
+    assert res["ok"] is True and res["note"] == "already sound"
+    assert _bytes(out, "images/p_t1_102.png") == mended
+    assert not list((out / "gallery" / integ.STAGING_DIRNAME).glob("*"))
+
+
+def test_a_download_cut_off_leaves_no_part_file(tmp_path):
+    """Nit 8: the staging folder keeps nothing of a failed download, .part included."""
+    out = _broken_library(tmp_path)
+
+    class Cut(_Resp):
+        def iter_content(self, chunk_size=65536):
+            yield self._body[:7]
+            raise requests.ConnectionError("cut")
+
+    class Cutting(FakeMediaSession):
+        def get(self, url, stream=False, timeout=None):
+            if url == "https://cdn.test/102":
+                self.calls.append(url)
+                return Cut(body=_png(4, 4), ctype="image/png")
+            return super().get(url, stream=stream, timeout=timeout)
+
+    res = integ.redownload_one(out, out / "catalog.db", "102",
+                               session_factory=lambda: Cutting({"102": (_png(4, 4), "image/png")}))
+    assert res["ok"] is False
+    assert not list((out / "gallery" / integ.STAGING_DIRNAME).glob("*"))
+
+
+def test_odd_report_and_marks_files_never_break_the_list(tmp_path):
+    """Nit 9: a size cell like '²' (isdigit() but not int()) and a marks file nested deep
+    enough to raise RecursionError still give a list, and the route answers."""
+    out = _broken_library(tmp_path)
+    csv_path = out / "integrity_report.csv"
+    csv_path.write_text(csv_path.read_text(encoding="utf-8").replace(
+        "images/p_t1_102.png,0,", "images/p_t1_102.png,\u00b2,"), encoding="utf-8")
+    (out / integ.MARKS_FILE).write_text("[" * 200000, encoding="utf-8")
+    doc = integ.broken_list(out, out / "catalog.db")
+    assert {r["media_id"]: r for r in doc["rows"]}["102"]["size"] == ""
+    assert integ.read_marks(out) == {}
+    cli = login_test_client(create_app(out))
+    assert cli.get("/api/integrity/broken").status_code == 200
+
+
+def test_one_download_session_per_run_and_no_identity_query(tmp_path, monkeypatch):
+    """Nit 10: a run opens ONE session for all its re-downloads, and opening it does not ask
+    PixAI who you are (that `me` query retries three times and has no place inside a run)."""
+    out = _broken_library(tmp_path)
+    made = []
+
+    def factory():
+        made.append(1)
+        return FakeMediaSession({"102": (_png(4, 4), "image/png"),
+                                 "103": (_png(3, 3), "image/png")})
+
+    run = integ.FixRunner(out, out / "catalog.db", session_factory=factory)
+    run.start(_items(["102", "103", "106"]))
+    run.wait(10)
+    assert run.status()["fixed"] == 3 and len(made) == 1
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: seen.update(k) or "session")
+    assert integ._download_session() == "session" and seen == {"resolve_user": False}
+
+
+def test_make_session_can_skip_the_identity_query(tmp_path, monkeypatch):
+    import json as _json
+    cfg = core._config_path()
+    cfg.write_text(_json.dumps({"PIXAI_API_KEY": "sk-test-not-real"}), encoding="utf-8")
+    monkeypatch.setattr(core, "USER_ID", "")
+
+    def _no_me(*a, **k):
+        raise AssertionError("the identity query must not run")
+
+    monkeypatch.setattr(core, "resolve_user_id", _no_me)
+    client = core._make_session(None, resolve_user=False)
+    assert client is not None
+
+
+def test_a_missing_file_is_placed_without_overwriting(tmp_path):
+    """Nit 10: a missing file goes into place with a move that refuses an existing file."""
+    src, dest = tmp_path / "staged.png", tmp_path / "there.png"
+    src.write_bytes(b"new")
+    dest.write_bytes(b"someone else's")
+    with pytest.raises(FileExistsError):
+        integ._move_no_clobber(src, dest)
+    assert dest.read_bytes() == b"someone else's" and src.exists()
+    dest.unlink()
+    integ._move_no_clobber(src, dest)
+    assert dest.read_bytes() == b"new" and not src.exists()
+
+
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):
     out = _broken_library(tmp_path)
     before = _bytes(out, "images/p_t1_103.png")

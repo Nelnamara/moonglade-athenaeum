@@ -5604,8 +5604,12 @@ def cmd_undo_organize(args, out):
 # ---------------------------------------------------------------------------
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
-def _make_session(token_val):
+def _make_session(token_val, resolve_user=True):
     """Validate config, load token, return a configured PixAIClient.
+
+    `resolve_user=False` skips the USER_ID lookup (the `me` query, which retries three times)
+    for a caller whose requests never use the user id -- the Broken files list's media
+    re-downloads read /v1/media and the media object only.
 
     The app's ONE entry to PixAI: it re-reads config.json at call time (so the GUI works
     even when the module was imported before the working directory was set correctly),
@@ -5647,7 +5651,7 @@ def _make_session(token_val):
         "x-apollo-operation-name": OPERATION_NAME,
     })
     # Auto-resolve the user id from the API key when it isn't pinned in config.
-    if not USER_ID:
+    if not USER_ID and resolve_user:
         if have_api_key:
             try:
                 USER_ID = resolve_user_id(session)

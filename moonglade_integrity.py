@@ -190,13 +190,67 @@ def _utc_now():
 
 
 def _write_atomic(path, data):
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
+    """Write `data` to `path` through a temp file of this writer's own (pid + a random tag), so
+    two writers of one report never write into each other's temp file."""
+    import uuid
+    tmp = path.with_name("{}.tmp-{}-{}".format(path.name, os.getpid(), uuid.uuid4().hex[:8]))
     try:
-        import moonglade_backup as core              # lazy: the Windows sharing-violation retry
-        core._atomic_replace(tmp, path)
-    except ImportError:
-        os.replace(tmp, path)
+        tmp.write_bytes(data)
+        try:
+            import moonglade_backup as core          # lazy: the Windows sharing-violation retry
+            core._atomic_replace(tmp, path)
+        except ImportError:
+            os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()                         # only ever this writer's own temp file
+            except OSError:
+                pass
+
+
+# The reports' lock: a file at the library root, created exclusively, held while one writer
+# reads and rewrites the reports (the re-check of a fix run) or writes them (a full check), so
+# neither can lose the other's lines. A lock older than REPORT_LOCK_STALE_S was left by a
+# process that died and is broken; a writer waits up to REPORT_LOCK_WAIT_S for a live one.
+REPORT_LOCK = "integrity_report.lock"
+REPORT_LOCK_STALE_S = 120
+REPORT_LOCK_WAIT_S = 60
+
+
+class _ReportLock:
+    def __init__(self, out):
+        self.path = Path(out) / REPORT_LOCK
+        self.held = False
+
+    def __enter__(self):
+        deadline = time.time() + REPORT_LOCK_WAIT_S
+        while True:
+            try:
+                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > REPORT_LOCK_STALE_S:
+                        self.path.unlink()           # a dead writer's lock, never a live one's
+                        continue
+                except OSError:
+                    continue                         # it went while we looked: try again
+                if time.time() > deadline:
+                    raise TimeoutError("the integrity reports are busy")
+                time.sleep(0.05)
+                continue
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            os.close(fd)
+            self.held = True
+            return self
+
+    def __exit__(self, *exc):
+        if self.held:
+            try:
+                self.path.unlink()
+            except OSError:
+                pass
+        return False
 
 
 def _trash_ids(out, g):
@@ -329,7 +383,8 @@ def verify_library(out_dir, db_path, deep=False, progress=None):
         "rows": total, "files": len(by_rel),
         "counts": _counts(lines), "lost": lost, "report": REPORT_CSV,
     }
-    _write_reports(out, lines, summary)
+    with _ReportLock(out):
+        _write_reports(out, lines, summary)
     return dict(summary, lines=lines)
 
 
@@ -356,7 +411,7 @@ def read_summary(out_dir):
     A file read, never a walk: Health calls this on every recompute."""
     try:
         doc = json.loads((Path(out_dir) / REPORT_JSON).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(doc, dict) or doc.get("format") != REPORT_FORMAT:
         return None
@@ -467,8 +522,9 @@ def read_lines(out_dir):
         if len(r) != 5:
             continue
         mid, problem, path, size, rec = r
+        # isascii() too: "²".isdigit() is True and int("²") raises
         lines.append((_csv_unsafe(mid), problem, _csv_unsafe(path),
-                      int(size) if size.isdigit() else "", rec))
+                      int(size) if size.isascii() and size.isdigit() else "", rec))
     return lines
 
 
@@ -476,7 +532,7 @@ def read_marks(out_dir):
     """{media_id: {"mark": "lost" | "kept", "at": utc}} -- the owner's local flags."""
     try:
         doc = json.loads((Path(out_dir) / MARKS_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return {}
     marks = doc.get("marks") if isinstance(doc, dict) else None
     if not isinstance(marks, dict):
@@ -513,7 +569,7 @@ def reconciled_at(out_dir):
     import moonglade_backup as core                  # lazy, like _write_atomic's
     try:
         doc = json.loads((Path(out_dir) / core.RECONCILE_STAMP).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     at = doc.get("reconciled_at") if isinstance(doc, dict) else None
     return at if isinstance(at, str) and at else None
@@ -812,6 +868,43 @@ def _pixel_size_ok(path, row):
         return False
 
 
+def _download_session():
+    """The session a fix run downloads with -- made once per run (FixRunner), and without the
+    USER_ID lookup: media reads never use the user id, and that `me` query retries three
+    times."""
+    import moonglade_backup as core
+    return core._make_session(None, resolve_user=False)
+
+
+def _move_no_clobber(src, dest):
+    """Put `src` at `dest` only if nothing is there; never overwrite. A hard link, which the OS
+    refuses when `dest` exists, then the staging name goes. Where the disk has no hard links,
+    Windows' own rename, which refuses an existing `dest` too. Raises FileExistsError when
+    something is already at `dest`."""
+    try:
+        os.link(src, dest)
+    except FileExistsError:
+        raise
+    except OSError:
+        if os.name != "nt":
+            raise
+        os.rename(src, dest)
+        return
+    os.unlink(src)
+
+
+def _still_broken(target, problem):
+    """Whether the file about to be replaced is still the broken one: empty, or (for a
+    cut-short file) still failing the structural check. A sync that mended it meanwhile wins."""
+    try:
+        size = os.path.getsize(target)
+    except OSError:
+        return False
+    if size == 0:
+        return True
+    return problem == P_SUSPECT and structural_problem(target) is not None
+
+
 def _live_check(out, row, index, g):
     return _row_check(row, index or _index(out, g), True, g.GALLERY_DIRNAME)
 
@@ -854,14 +947,16 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
 
     stage = out / g.GALLERY_DIRNAME / STAGING_DIRNAME
     got = None
+    stem = None
     try:
         stage.mkdir(parents=True, exist_ok=True)
-        session = (session_factory or (lambda: core._make_session(None)))()
+        session = (session_factory or _download_session)()
         url, why = _full_size_url(core, session, row, mid)
         if not url:
             return _result(mid, "redownload", ok=False, refused=why)
         import uuid
         stem = stage / "{}-{}".format(mid if _safe_id(mid) else "media", uuid.uuid4().hex[:10])
+        # (the finally below removes everything this stem left in the staging folder)
         status, got = core.download(session, url, stem, retries=0, progress=on_bytes)
         if status != "ok" or not got:
             return _result(mid, "redownload", ok=False, refused="no_file")
@@ -880,16 +975,26 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
             if target is None:
                 return _result(mid, "redownload", ok=False, refused=why)
             target.parent.mkdir(parents=True, exist_ok=True)   # inside the library: rule 2
-        core._atomic_replace(got, target)              # the verified file, into its place
+            try:
+                _move_no_clobber(got, target)          # never over something that appeared
+            except FileExistsError:
+                return _result(mid, "redownload", ok=False, refused="occupied")
+        else:
+            if not _still_broken(target, problem):    # mended while it downloaded: leave it
+                return _result(mid, "redownload", note="already sound")
+            core._atomic_replace(got, target)          # the verified file, over the broken one
         got = None
     except Exception:                                  # noqa: BLE001 -- one row, said plainly
         return _result(mid, "redownload", ok=False, refused="no_file")
     finally:
-        if got is not None:
-            try:
-                Path(got).unlink()                     # our own staging file, nothing else
-            except OSError:
-                pass
+        # Our own staging files only: the download (if it never moved) and any .part it left.
+        if stem is not None:
+            for left in list(stage.iterdir()):
+                if left.name.startswith(stem.name):    # a name match, never a glob pattern
+                    try:
+                        left.unlink()
+                    except OSError:
+                        pass
 
     # The fresh file deserves its thumbnail. An image's is remade from it; a video keeps a
     # poster it already has (that one came from PixAI and cannot be remade from the file).
@@ -966,13 +1071,19 @@ def reverify(out_dir, db_path, media_ids):
     stamped `reverified_at`. Returns the new summary, or None when there is no report."""
     import moonglade_gallery as g
     out = Path(out_dir)
+    ids = {str(m) for m in media_ids if str(m).strip()}
+    index = _index(out, g)                             # the walk, before the lock is taken
+    with _ReportLock(out):
+        return _reverify_locked(out, db_path, ids, index, g)
+
+
+def _reverify_locked(out, db_path, ids, index, g):
+    """reverify's read-modify-write, run while it holds the reports' lock."""
     summary = read_summary(out)
     if summary is None:
         return None
-    ids = {str(m) for m in media_ids if str(m).strip()}
     row_problems = set(_SEVERITY) - {P_UNCATALOGED, P_ORPHAN_THUMB}
     lines = [ln for ln in read_lines(out) if not (ln[0] in ids and ln[1] in row_problems)]
-    index = _index(out, g)
     deep = bool(summary.get("deep"))
     for r in g.rows_for_media_ids(db_path, sorted(ids)):
         if not str(r.get("filename") or "").strip():
@@ -1097,6 +1208,12 @@ class FixRunner:
         import moonglade_gallery as g
         touched = []
         err = ""
+        made = []
+
+        def session_once():                            # ONE download session for the whole run
+            if not made:
+                made.append((self._session_factory or _download_session)())
+            return made[0]
         try:
             index = _index(self.out, g)
             marks = read_marks(self.out)
@@ -1107,7 +1224,7 @@ class FixRunner:
                         break
                     self._state["current"] = {"media_id": mid, "bytes": 0, "expect": 0}
                 try:
-                    res = self._fix(self.out, self.db, mid, session_factory=self._session_factory,
+                    res = self._fix(self.out, self.db, mid, session_factory=session_once,
                                     index=index, on_bytes=self._on_bytes, marks=marks,
                                     expect=shown)
                 except Exception:                      # noqa: BLE001 -- one row, never the run
