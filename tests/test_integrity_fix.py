@@ -217,6 +217,27 @@ def test_a_missing_file_pixai_no_longer_has_is_refused_by_the_runner(tmp_path):
     assert not (out / "images" / "p_t1_113.png").exists()
 
 
+def test_a_re_download_never_lands_on_another_pictures_file(tmp_path):
+    """Review finding 1. An odd catalog row (120) names 109's file -- an empty file PixAI no
+    longer has, the only copy anywhere. 120 is not archive-only, so only a check of the file's
+    own media id stands between 120's picture and 109's file."""
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="120", filename="images/p_t1_109.png")])
+    res = integ.redownload_one(out, out / "catalog.db", "120", session_factory=_no_network)
+    assert res["ok"] is False and res["refused"] == "not_this_picture"
+    assert _bytes(out, "images/p_t1_109.png") == b""
+
+
+def test_a_rebuild_never_draws_another_pictures_thumbnail(tmp_path):
+    out = _broken_library(tmp_path)
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="121", filename="images/p_t1_106.png")])
+    res = integ.rebuild_one(out, out / "catalog.db", "121")
+    assert res["ok"] is False and res["refused"] == "not_this_picture"
+    assert not (out / "gallery" / "thumbs" / "121.jpg").exists()
+
+
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):
     out = _broken_library(tmp_path)
     before = _bytes(out, "images/p_t1_103.png")

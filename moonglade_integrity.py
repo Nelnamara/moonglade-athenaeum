@@ -633,7 +633,9 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #                   download), ONE attempt, into a staging file under gallery/. Only when the
 #                   new bytes are a whole file of the same kind as the broken one (a format
 #                   this module recognises from its first bytes, and the structural check
-#                   passes) does an atomic replace put them over it, keeping its name. A
+#                   passes) does an atomic replace put them over it, keeping its name -- and
+#                   only when that file's own name carries this row's media id, so an odd
+#                   catalog row can never put one picture over another's file. A
 #                   MISSING file has no broken file to replace: its destination is the
 #                   catalog's own path, decided in ONE place, missing_target(), and refused
 #                   before anything is fetched unless it resolves strictly inside the library.
@@ -663,6 +665,7 @@ WORDS = {
     "type_differs": "Couldn't re-download. PixAI sent a different kind of file, so the old one was left as it is.",
     "unknown_type": "This kind of file can't be re-downloaded here.",
     "file_broken": "The file itself is broken, so its thumbnail can't be rebuilt from it.",
+    "not_this_picture": "The file the catalog names for this picture belongs to another picture, so nothing was changed.",
     "rebuild_failed": "Couldn't rebuild the thumbnail.",
 }
 
@@ -785,7 +788,9 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
     elif best is None:
         return _result(mid, "redownload", note="already sound")
     else:
-        target = Path(best.path)                       # the broken file itself
+        target = Path(best.path)                       # the broken file itself...
+        if g.media_id_of(target) != mid:               # ...and never another picture's file
+            return _result(mid, "redownload", ok=False, refused="not_this_picture")
     want = _FORMAT_OF_EXT.get(target.suffix.lower())
     if not want:
         return _result(mid, "redownload", ok=False, refused="unknown_type")
@@ -851,6 +856,8 @@ def rebuild_one(out_dir, db_path, media_id, index=None):
         return _result(mid, "rebuild", ok=False, refused="file_broken")
     if problem not in REBUILD_PROBLEMS:
         return _result(mid, "rebuild", note="already sound")
+    if g.media_id_of(best.path) != mid:                # this picture's thumbnail, from its own file
+        return _result(mid, "rebuild", ok=False, refused="not_this_picture")
     thumb = out / g.GALLERY_DIRNAME / "thumbs" / (mid + ".jpg")
     made = (g.make_video_thumbnail(best.path, thumb) if str(row.get("is_video") or "") == "1"
             else g.make_thumbnail(best.path, thumb))
