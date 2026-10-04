@@ -630,7 +630,8 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #                   whatever the caller asked -- it is the only copy anywhere, and this
 #                   function never touches it. READ_ONLY comes next, before any network.
 #                   Then the app's own single-media path (moonglade_backup.resolve_media +
-#                   download), ONE attempt, of the FULL-SIZE file only (never resolve_media's
+#                   download; for a video, media_file_gql's fileUrl + download, the way the
+#                   backup's own sync fetches clips), ONE attempt, of the FULL-SIZE file only (never resolve_media's
 #                   thumbnail fallback), into a staging file under gallery/. Only when the new
 #                   bytes are a whole file of the same kind as the broken one (a format this
 #                   module recognises from its first bytes, and the structural check passes),
@@ -771,7 +772,15 @@ FULL_SIZE_VARIANTS = ("PUBLIC", "ORIGINAL", "ORIG", "FULL")
 
 def _full_size_url(core, session, row, mid):
     """(url, "") for the picture's full-size file, or (None, reason): "no_file" when PixAI
-    returns nothing, "small_copy" when all it lists is a thumbnail."""
+    returns nothing, "small_copy" when all it lists is a thumbnail.
+
+    A VIDEO is read the way the backup's own sync reads one (review finding 5): /v1/media lists
+    no URL for a video, so resolve_media can never find it; the GraphQL media object carries the
+    mp4 itself in `fileUrl` (moonglade_backup.media_file_gql). That file has no thumbnail
+    variants -- it is the clip."""
+    if str(row.get("is_video") or "") == "1":
+        url = (core.media_file_gql(session, mid) or {}).get("fileUrl")
+        return (url, "") if url else (None, "no_file")
     url, info = core.resolve_media(session, mid)
     if not url:
         return None, "no_file"

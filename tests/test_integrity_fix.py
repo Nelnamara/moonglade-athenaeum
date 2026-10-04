@@ -25,7 +25,7 @@ import moonglade_gallery as g
 import moonglade_integrity as integ
 from moonglade_gallery import create_app
 from tests.conftest import login_test_client, with_csrf
-from tests.test_integrity import _png, _webp
+from tests.test_integrity import _mp4, _png, _webp
 from tests.test_integrity_broken import _broken_library
 
 
@@ -319,6 +319,48 @@ def test_a_cut_short_file_is_only_replaced_by_one_at_least_as_big(tmp_path):
     res = integ.redownload_one(out, out / "catalog.db", "103", session_factory=lambda: session)
     assert res["ok"] is False and res["refused"] == "smaller"
     assert _bytes(out, "images/p_t1_103.png") == torn
+
+
+class FakeVideoSession:
+    """PixAI as the backup's own video path meets it: GET /v1/media/<video> answers an EMPTY url
+    list (the real shape for a video), and the GraphQL `media` object carries the mp4 in
+    `fileUrl` (moonglade_backup.media_file_gql)."""
+
+    def __init__(self, mid, body):
+        self.mid, self.body, self.calls = mid, body, []
+
+    def get(self, url, stream=False, timeout=None):
+        self.calls.append(("GET", url))
+        if url == core.MEDIA_BASE.format(id=self.mid):
+            return _Resp(obj={"urls": [], "type": "VIDEO"})
+        if url == "https://cdn.test/video/" + self.mid + ".mp4":
+            return _Resp(body=self.body, ctype="video/mp4")
+        return _Resp(status=404)
+
+    def post(self, url, json=None, timeout=None):
+        self.calls.append(("POST", (json or {}).get("variables")))
+        media = {"id": self.mid, "type": "VIDEO", "duration": 5, "hlsUrl": None, "size": None,
+                 "fileUrl": "https://cdn.test/video/" + self.mid + ".mp4"}
+        return _Resp(obj={"data": {"media": media}})
+
+
+def test_a_video_is_re_downloaded_the_way_the_backup_downloads_videos(tmp_path):
+    """Review finding 5. /v1/media lists no URL for a video, so resolve_media can never find
+    one; the backup's sync reads the GraphQL media object's fileUrl, and so does this."""
+    out = _broken_library(tmp_path)
+    (out / "videos" / "p_t1_114.mp4").write_bytes(b"")
+    from tests.test_integrity import _row as _r
+    g.save_catalog(out / "catalog.db", [_r(media_id="114", filename="videos/p_t1_114.mp4",
+                                           is_video="1")])
+    integ.verify_library(out, out / "catalog.db", deep=True)
+    row = {r["media_id"]: r for r in integ.broken_list(out, out / "catalog.db")["rows"]}["114"]
+    assert (row["state"], row["action"]) == ("recoverable", "redownload")
+    session = FakeVideoSession("114", _mp4())
+    res = integ.redownload_one(out, out / "catalog.db", "114", session_factory=lambda: session)
+    assert res["ok"] is True, res
+    assert _bytes(out, "videos/p_t1_114.mp4") == _mp4()
+    assert ("POST", {"id": "114"}) in session.calls
+    assert ("GET", "https://cdn.test/video/114.mp4") in session.calls
 
 
 def test_new_bytes_that_do_not_check_out_leave_the_old_file_alone(tmp_path):
