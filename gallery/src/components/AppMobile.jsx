@@ -64,6 +64,7 @@ import "../styles/create-mobile.css";
    the later stylesheet wins (Session Q, Q4). */
 import "../styles/phone-landscape.css";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
+import { useInbox, MenuBadge, MenuInboxRows, InboxSheetBody, GiftSheetBody } from "../inbox/InboxSheets.jsx";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -469,6 +470,9 @@ export default function AppMobile({ boot }) {
   // 2026-08-07 review fix: the hand-rolled pair let a reopen inside the 280ms exit
   // window inherit a stale unmount timer and vanish).
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet(280);
+  /* Sessions R + Y (RYPc): the inbox's state -- the Menu door's badge, the Inbox and Gift box
+     rows and their sheets. The same store the desktop gift box reads. */
+  const inboxSt = useInbox();
   // The Menu sheet's pushed-screen destination -- generalizes MobileScreen.jsx
   // the same way `sheet` above already generalizes MobileSheet.jsx (one
   // string key, one shared mount). null | 'myart' | 'publish' | 'train' |
@@ -1150,6 +1154,8 @@ export default function AppMobile({ boot }) {
     openSheet(null);
     openScreenKey(key);
   };
+  // A contest row in the Inbox sheet opens the Contests screen (Sessions R + Y).
+  const openContestsFromInbox = useCallback(() => openScreen("contests"), []); // eslint-disable-line react-hooks/exhaustive-deps
   // publishFor resets immediately, not after the exit animation: PublishMobile
   // seeds its own internal mid from the prop at MOUNT only, so the mounted,
   // exiting screen never re-reads it.
@@ -1275,7 +1281,11 @@ export default function AppMobile({ boot }) {
           <HelpButton plain className="glm-iconbtn glm-iconbtn-lav glm-help"
             surface={tab === "create" ? "dock" : tab === "control" ? "panel" : "gallery"} />
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="More"
-            onClick={() => openSheet("menu")}>☰</button>
+            style={{ position: "relative" }} onClick={() => openSheet("menu")}>
+            ☰
+            {/* RYPc: the Menu door carries the inbox's unread badge (lavender count). */}
+            <MenuBadge st={inboxSt} />
+          </button>
         </div>
         <div className="glm-hero-stats">
           {saver.active ? <span className="glm-saverchip" title="Data saver is on">{"\u25D0"} Saver</span> : null}
@@ -1515,6 +1525,17 @@ export default function AppMobile({ boot }) {
         <ContestChooserMobile onPick={(c) => openContestEntry(c, contestFor)} />
       </MobileSheet>
 
+      {/* Sessions R + Y (RYPc): the Inbox and Gift box sheets, full height. A work card or a
+          quote opens Details through the shared mg-open-details bus, which closes the sheet. */}
+      <MobileSheet open={sheet === "inbox"} closing={closing} onClose={closeSheet} title="INBOX"
+        className="ib-sheet">
+        <InboxSheetBody st={inboxSt} onOpenContests={openContestsFromInbox} />
+      </MobileSheet>
+      <MobileSheet open={sheet === "gifts"} closing={closing} onClose={closeSheet} title="GIFT BOX"
+        className="ib-sheet">
+        <GiftSheetBody st={inboxSt} account={account} />
+      </MobileSheet>
+
       <MobileSheet open={sheet === "activity"} closing={closing} onClose={closeSheet}
         title={
           <span style={{ display: "flex", alignItems: "baseline" }}>
@@ -1568,6 +1589,12 @@ export default function AppMobile({ boot }) {
 
       <MobileSheet open={sheet === "menu"} closing={closing} onClose={closeSheet} title="MENU">
         <div className="glm-menu-list">
+          {/* RYPc: Inbox and Gift box are the Menu's first two rows when a PixAI account is
+              linked; each opens its own full-height sheet. */}
+          {account && !account.error && account.credits != null ? (
+            <MenuInboxRows st={inboxSt} account={account}
+              onInbox={() => openSheet("inbox")} onGifts={() => openSheet("gifts")} />
+          ) : null}
           {MENU_ITEMS.map((mi) => (
             <button key={mi.label} type="button" className="glm-menu-item"
               onClick={() => openScreen(mi.screen)}>

@@ -110,6 +110,11 @@ out this device only (to sign out every device, see [Trust & Safety](Trust-and-S
   - **ON PIXAI NOW** shows PixAI's live event banners as cards; pressing one opens PixAI's page in
     a new tab. The app never checks in, claims or plays an event for you, and the banner list is
     read without your API key (PixAI only answers it that way), at most once an hour.
+  - **On a phone** the header stays as it was: the **☰** Menu button carries the badge, and
+    **Inbox** and **Gift box** are the Menu's first two rows, each opening a full-height sheet.
+    Inbox is the same list as the desktop panel. Gift box holds the event cards, the free cards
+    about to expire (in peach — the phone has no hover) and your gifts; its row shows the soonest
+    expiry, or how many gifts are waiting.
 - **Free cards about to expire.** When any free card you hold expires within three days, the
   **CARDS** half of the credits chip gets a thin peach underline, and hovering the chip lists
   them first, one line per kind — *"5 Tsubaki.3 expire Oct 6 · in 3 days"*, *"… tomorrow"*,
