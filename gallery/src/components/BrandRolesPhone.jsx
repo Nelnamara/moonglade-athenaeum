@@ -38,7 +38,7 @@ function RoleScreen({ role, csrf, onSaved }) {
       )}
       <div className="mgcp-rlm-pair"><RolePair img={img} big /></div>
       {note && <div className="mgcp-rl-note">{note}</div>}
-      <div className="mgcp-rl-spec">{specLine(role.spec, { phone: true })}</div>
+      <div className="mgcp-rl-spec">{specLine(img.spec, { phone: true })}</div>
       {(ed.measuring || ed.busy) && <div className="mgcp-rlm-checks">{ed.busy ? "Saving…" : "Checking…"}</div>}
       {ed.cand && !ed.measuring && !ed.cand.unreadable && (
         <div className="mgcp-rlm-checks"><RoleTicks list={ed.cand.ticks} /></div>

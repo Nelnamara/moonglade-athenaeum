@@ -6294,17 +6294,18 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     login = page.locator('.mgcp-rl[data-role="login_companion"]')
     login.locator(".mgcp-rl-ghost:has-text('Change')").click()
     page.wait_for_selector(".mgcp-rl-editor")
-    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · 3:4 · ≥ 600 px tall"
+    assert page.locator(".mgcp-rl-spec").inner_text() == "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok"
     use = page.locator(".mgcp-rl-primary:has-text('Use this')")
     assert use.is_disabled()
 
-    # a square picture for a 3:4 role: ticked live, refused loudly, nothing sent, nothing written
-    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "sq.png", (800, 800)))
+    # a portrait for a companion whose pack art is about square: ticked live, refused loudly, nothing sent,
+    # nothing written
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "sq.png", (600, 800)))
     page.wait_for_selector(".mgcp-rl-loud")
     ticks = page.locator(".mgcp-rl-ticks span").all_inner_texts()
-    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 3:4 (got 1:1)", "\u2713 \u2265 600 px"], ticks
+    assert ticks == ["\u2713 PNG", "\u2713 transparent", "\u2715 about square (got 3:4)", "\u2713 \u2265 480 px"], ticks
     assert page.locator(".mgcp-rl-loud").inner_text() == (
-        "Refused: the Login companion must be 3:4. This one is 1:1. Your current art is unchanged.")
+        "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged.")
     assert use.is_disabled()
     assert not [s for s in sent if s[0] == "POST"], "a refused file sends nothing: %r" % sent
     assert not _g._role_override_path("login_companion", "companion").exists()
@@ -6336,7 +6337,7 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     # default -> yours on a single-image row, and the one-time ask
     login.locator(".mgcp-rl-ghost:has-text('Change')").click()
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-editor')
-    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "me.png", (600, 800)))
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(_role_png(tmp_path / "me.png", (500, 490)))
     page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
     page.click(".mgcp-rl-primary:has-text('Use this')")
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.def')
@@ -6366,6 +6367,52 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     assert served.status == 200 and served.body() != b"not a picture"
 
 
+def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_moving_png_elsewhere(
+        logged_in_page, tmp_path, sealed_donor_present):
+    """The pack's own login companion is an animated WebP, so the editor must tick one as acceptable
+    ("animated" shown, Use this open) and upload it kept animated; an animated file for a role that
+    allows only stills is refused on the device, in the same words as the server's."""
+    import moonglade_gallery as _g
+    from PIL import Image, ImageDraw
+
+    def disc(size, tint):
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        ImageDraw.Draw(im).ellipse((size[0] * .1, size[1] * .1, size[0] * .9, size[1] * .9), fill=tint + (255,))
+        return im
+
+    def anim(path, size, fmt):
+        frames = [disc(size, (60 * i + 40, 80, 200)) for i in range(3)]
+        extra = {"lossless": True} if fmt == "WEBP" else {}
+        frames[0].save(path, format=fmt, save_all=True, append_images=frames[1:], duration=80, loop=0, **extra)
+        return str(path)
+
+    _dress_role_pack()
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_roles_section(page)
+    login = page.locator('.mgcp-rl[data-role="login_companion"]')
+    login.locator(".mgcp-rl-ghost:has-text('Change')").click()
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "me.webp", (500, 490), "WEBP"))
+    page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
+    assert page.locator(".mgcp-rl-ticks span").all_inner_texts() == [
+        "\u2713 WEBP", "\u2713 transparent", "\u2713 animated", "\u2713 about square", "\u2713 \u2265 480 px"]
+    page.click(".mgcp-rl-primary:has-text('Use this')")
+    page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.yours')
+    with Image.open(_g._role_override_path("login_companion", "companion")) as im:
+        assert im.format == "WEBP" and im.is_animated, "the companion stayed animated"
+
+    page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
+    page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "moving.png", (300, 300), "PNG"))
+    page.wait_for_selector(".mgcp-rl-loud")
+    assert page.locator(".mgcp-rl-loud").inner_text() == (
+        "Refused: the Power poses must be a still picture. This one is animated. Your current art is unchanged.")
+    assert page.locator(".mgcp-rl-primary:has-text('Use this')").is_disabled()
+    assert not _g._role_override_path("power_poses", "restart").exists()
+
+
 def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
         logged_in_page, tmp_path, sealed_donor_present):
     _dress_role_pack()
@@ -6393,7 +6440,7 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     page.wait_for_selector(".mgcp-rlm-screen")
     # a multi-image role gets a segment control, one segment per image
     assert page.locator(".mgcp-rlm-seg .mgcp-rl-tab").all_inner_texts() == ["Claim", "Gift"]
-    assert page.locator(".mgcp-rl-spec").inner_text() == "PNG · transparent · square · ≥ 64 px"
+    assert page.locator(".mgcp-rl-spec").inner_text() == "PNG · transparent · about square · ≥ 64 px"
     heights = page.evaluate("() => [...document.querySelectorAll('.mgcp-rlm-btns button')].map(b => Math.round(b.getBoundingClientRect().height))")
     assert heights == [44, 44], heights
     assert page.locator(".mgcp-rlm-btns button:has-text('Use default')").is_disabled()
@@ -6401,7 +6448,7 @@ def test_the_phone_branding_roles_push_a_role_screen_with_44_px_controls(
     page.locator(".mgcp-rlm-screen input[type=file]").set_input_files(_role_png(tmp_path / "wide.png", (200, 100)))
     page.wait_for_selector(".mgcp-rl-loud")
     assert page.locator(".mgcp-rl-loud").inner_text() == (
-        "Refused: the Reward icons must be square. This one is 2:1. Your current art is unchanged.")
+        "Refused: the Reward icons must be about square. This one is 2:1. Your current art is unchanged.")
     # a pick that fails shows the live ticks and the refusal and uploads nothing
     assert page.locator(".mgcp-rl-ticks .bad").count() == 1 and page.locator(".mgcp-rl-ticks .ok").count() == 3
     assert sent == [], "a refused pick sends nothing: %r" % sent

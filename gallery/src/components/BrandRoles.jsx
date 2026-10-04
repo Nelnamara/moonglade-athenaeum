@@ -50,7 +50,6 @@ function RoleRow({ role, csrf, open, onOpen, onClose, onSaved }) {
   };
 
   const img = role.images.find((i) => i.key === ed.key) || role.images[0];
-  const spec = role.spec;
   const note = unreadableNote(role);
   const single = role.images.length === 1;
   const ask = (k) => setAsking(k);
@@ -106,7 +105,7 @@ function RoleRow({ role, csrf, open, onOpen, onClose, onSaved }) {
             <RestoreAsk role={role} img={role.images.find((i) => i.key === asking) || img} busy={ed.busy}
               onKeep={() => setAsking(null)} onUse={useDefault} />
           )}
-          <div className="mgcp-rl-spec">{specLine(spec)}</div>
+          <div className="mgcp-rl-spec">{specLine(img.spec)}</div>
           <div className={"mgcp-rl-drop" + (over ? " over" : "")}
             onDragOver={(e) => { e.preventDefault(); setOver(true); }}
             onDragLeave={() => setOver(false)} onDrop={onDrop}

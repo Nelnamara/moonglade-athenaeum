@@ -19,8 +19,9 @@ export default function useRoleEditor({ role, csrf, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");        // a server refusal / transport error, in its own words
   const urlRef = useRef("");
-  const specRef = useRef(role.spec);
-  specRef.current = role.spec;
+  // The rule THIS image's override must meet (the server's role_image_spec, in the Branding payload).
+  const specRef = useRef(null);
+  specRef.current = (role.images.find((i) => i.key === key) || role.images[0]).spec;
 
   const drop = useCallback(() => {
     if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = ""; }

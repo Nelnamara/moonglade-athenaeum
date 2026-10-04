@@ -4603,48 +4603,71 @@ BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
 # name, the one the app already asks for. An override is a single file written where that name
 # resolves first (the coded tree, loose before the pack), so every screen that shows the art
 # wears it with no change of its own; the pack's default stays in the container and is never
-# written. `spec` is what an upload must be, checked HERE whatever the client said.
+# written.
+#
+# WHAT AN UPLOAD MUST BE is checked HERE whatever the client said, and it is derived from the
+# art it replaces (role_image_spec): the role's formats and drawn minimum size, plus, per image,
+# `default` -- the pack default's own size (and whether it moves). The shape must be within
+# ROLE_ASPECT_TOLERANCE of that default's, the minimum size is the drawn one unless the default is
+# smaller (then the default's own), and an animation is allowed only where the role says its format
+# may (the login companion's default is an animated WebP). Transparency is always required. The
+# stand-in specs drawn first (3:4, square) would have refused the pack's own login companion, the
+# tracker's done / failed / empty and the gift icon; tests/test_branding_roles.py holds that every
+# pack default passes its own role's check.
 ROLE_SLOTS = {
     "login_companion": {
         "name": "Login companion", "where": "the sign-in page",
-        "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "aspect": [3, 4],
+        "spec": {"formats": ["WEBP", "PNG"], "transparent": True, "animated_formats": ["WEBP"],
                  "min_axis": "height", "min_px": 600},
-        "images": {"companion": {"label": "Companion", "public": "login_nel.webp"}},
+        "images": {"companion": {"label": "Companion", "public": "login_nel.webp",
+                                 "default": {"w": 488, "h": 480, "animated": True}}},
     },
     "tracker_mascots": {
         "name": "Job tracker mascots", "where": "the job tracker",
-        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
                  "min_axis": "side", "min_px": 128},
-        "images": {"spinner": {"label": "Spinner", "public": "nel_spinner.png"},
-                   "done": {"label": "Done", "public": "mascots/trk_done.png"},
-                   "failed": {"label": "Failed", "public": "mascots/trk_fail.png"},
-                   "empty": {"label": "Empty", "public": "mascots/trk_empty.png"}},
+        "images": {"spinner": {"label": "Spinner", "public": "nel_spinner.png",
+                               "default": {"w": 566, "h": 560}},
+                   "done": {"label": "Done", "public": "mascots/trk_done.png",
+                            "default": {"w": 329, "h": 364}},
+                   "failed": {"label": "Failed", "public": "mascots/trk_fail.png",
+                              "default": {"w": 324, "h": 365}},
+                   "empty": {"label": "Empty", "public": "mascots/trk_empty.png",
+                             "default": {"w": 402, "h": 356}}},
     },
     "reward_icons": {
         "name": "Reward icons", "where": "the claim toast and the header",
-        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
                  "min_axis": "side", "min_px": 64},
-        "images": {"claim": {"label": "Claim", "public": "rewards/claim.png"},
-                   "gift": {"label": "Gift", "public": "rewards/gift.png"}},
+        "images": {"claim": {"label": "Claim", "public": "rewards/claim.png",
+                             "default": {"w": 128, "h": 128}},
+                   "gift": {"label": "Gift", "public": "rewards/gift.png",
+                            "default": {"w": 128, "h": 119}}},
     },
     "power_poses": {
         "name": "Power poses", "where": "the restart and shutdown screens",
-        "spec": {"formats": ["PNG"], "transparent": True, "aspect": [1, 1],
+        "spec": {"formats": ["PNG"], "transparent": True, "animated_formats": [],
                  "min_axis": "side", "min_px": 256},
-        "images": {"restart": {"label": "Restart", "public": "mascots/nel_restart.png"},
-                   "shutdown": {"label": "Shutdown", "public": "mascots/nel_shutdown.png"}},
+        "images": {"restart": {"label": "Restart", "public": "mascots/nel_restart.png",
+                               "default": {"w": 406, "h": 401}},
+                   "shutdown": {"label": "Shutdown", "public": "mascots/nel_shutdown.png",
+                                "default": {"w": 401, "h": 398}}},
     },
 }
 BRANDING_SLOTS = BANNER_SLOTS + tuple(ROLE_SLOTS)
 
 # What an upload to a role must clear besides its spec: a hard ceiling on the bytes read and on
-# the pixels' extent (checked from the header, before any pixel is decoded), and the two
-# tolerances the spec's words stand for -- "square" and "3:4" within 2 %, "transparent" meaning
-# at least 1 % of the pixels are more than half see-through.
+# the pixels' extent (checked from the header, before any pixel is decoded), the shape tolerance
+# (a picture's shape may differ from its pack default's by this much, relative), "transparent"
+# meaning at least 1 % of the pixels are more than half see-through, and the budget for an
+# animation the role allows (its frames are decoded one at a time to prove the file is sound, so
+# the count and the total pixels are capped first).
 ROLE_MAX_BYTES = 12 * 1024 * 1024
 ROLE_MAX_SIDE = 4096
-ROLE_ASPECT_TOLERANCE = 0.02
+ROLE_ASPECT_TOLERANCE = 0.08
 ROLE_SEE_THROUGH_MIN = 0.01
+ROLE_MAX_FRAMES = 300
+ROLE_MAX_ANIM_PIXELS = 64_000_000
 
 
 def _slot_dir(slot):
@@ -5051,15 +5074,37 @@ def _ratio_label(w, h):
     return "%.2f:1" % have
 
 
-def role_spec_failures(spec, facts):
-    """The rules `facts` breaks against a role's spec, in the order the editor lists them:
-    format, transparency, shape, size. [] means the file is acceptable.
+def role_image_spec(slot, key):
+    """What ONE image's override must be: the role's formats, transparency and drawn minimum, with
+    the SHAPE taken from the pack default it replaces (within ROLE_ASPECT_TOLERANCE) and the minimum
+    size lowered to the default's own where the default is smaller than the drawn minimum (the
+    login companion's pack art is 480 px tall, the drawn minimum 600)."""
+    role = ROLE_SLOTS[slot]
+    base, d = role["spec"], role["images"][key]["default"]
+    own = d["h"] if base["min_axis"] == "height" else min(d["w"], d["h"])
+    return {"formats": list(base["formats"]), "transparent": base["transparent"],
+            "animated_formats": list(base["animated_formats"]),
+            "aspect": [d["w"], d["h"]], "aspect_tolerance": ROLE_ASPECT_TOLERANCE,
+            "min_axis": base["min_axis"], "min_px": min(base["min_px"], own)}
 
-    `facts` is what was MEASURED: {"format": "PNG", "w": 256, "h": 256, "see_through": 0.31}
-    (see_through = the share of pixels more than half clear). Each failure is
-    {"rule", "need", "got"}: the words a refusal and the editor's tick line both use. The
-    client runs the same rules over the same measurements (lib/brandRolesCore.js) to tick them
-    live; THIS is the one that decides."""
+
+def _aspect_words(aw, ah, tol):
+    """A default's shape in words for a rule: "about square" when it is square to within the
+    tolerance, else "about 9:10"."""
+    if abs(aw / ah - 1.0) <= tol:
+        return "about square"
+    return "about " + _ratio_label(aw, ah)
+
+
+def role_spec_failures(spec, facts):
+    """The rules `facts` breaks against one image's spec (role_image_spec), in the order the editor
+    lists them: format, transparency, animation, shape, size. [] means the file is acceptable.
+
+    `facts` is what was MEASURED (role_measure): {"format": "PNG", "w": 256, "h": 256,
+    "see_through": 0.31, "animated": False} (see_through = the share of pixels more than half
+    clear). Each failure is {"rule", "need", "got"}: the words a refusal and the editor's tick
+    line both use. The client runs the same rules over the same measurements
+    (lib/brandRolesCore.js) to tick them live; THIS is the one that decides."""
     failed = []
     fmt = str(facts.get("format") or "").upper()
     if fmt not in spec["formats"]:
@@ -5068,12 +5113,13 @@ def role_spec_failures(spec, facts):
         clear = facts["see_through"]
         failed.append({"rule": "transparent", "need": "a transparent background",
                        "got": "opaque" if clear <= 0 else "%.1f%% see-through" % (clear * 100)})
+    if facts.get("animated") and fmt not in spec["animated_formats"]:
+        failed.append({"rule": "animation", "need": "a still picture", "got": "animated"})
     w, h = facts["w"], facts["h"]
     aw, ah = spec["aspect"]
-    want = aw / ah
-    if h <= 0 or abs(w / h - want) / want > ROLE_ASPECT_TOLERANCE:
-        failed.append({"rule": "aspect", "need": "square" if aw == ah else "%d:%d" % (aw, ah),
-                       "got": _ratio_label(w, h)})
+    want, tol = aw / ah, spec["aspect_tolerance"]
+    if h <= 0 or abs(w / h - want) / want > tol:
+        failed.append({"rule": "aspect", "need": _aspect_words(aw, ah, tol), "got": _ratio_label(w, h)})
     tall = spec["min_axis"] == "height"
     have = h if tall else min(w, h)
     if have < spec["min_px"]:
@@ -5083,13 +5129,13 @@ def role_spec_failures(spec, facts):
     return failed
 
 
-_ROLE_NEED_VERB = {"format": "be", "transparent": "have", "aspect": "be", "size": "be"}
+_ROLE_NEED_VERB = {"format": "be", "transparent": "have", "animation": "be", "aspect": "be", "size": "be"}
 
 
 def role_refusal_text(role_name, failed):
     """The loud refusal, in plain words: the rule and the measured value, ending on the one
-    thing the user most needs to hear. One broken rule reads "...must be 3:4. This one is
-    1:1."; several read as pairs, "...must be square (this one is 3:2) and at least 128 px
+    thing the user most needs to hear. One broken rule reads "...must be about square. This one
+    is 3:4."; several read as pairs, "...must be about 9:10 (this one is 3:2) and at least 128 px
     (this one is 64 px)."."""
     if len(failed) == 1:
         f = failed[0]
@@ -5102,6 +5148,53 @@ def role_refusal_text(role_name, failed):
             last = verb
         what = ", ".join(parts[:-1]) + " and " + parts[-1] + "."
     return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
+
+
+def role_measure(raw):
+    """Open one picture's bytes and measure it: (facts, rgba) with facts as role_spec_failures reads
+    them. The size comes from the header and is refused past ROLE_MAX_SIDE before a pixel is decoded;
+    an animation is refused past its frame and pixel budget before any frame is. Raises ValueError
+    with the plain-words message when the picture cannot be used at all."""
+    import io
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        fmt, (w, h) = im.format, im.size
+        if max(w, h) > ROLE_MAX_SIDE:
+            raise ValueError("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
+        frames = getattr(im, "n_frames", 1)
+        if frames > 1 and (frames > ROLE_MAX_FRAMES or frames * w * h > ROLE_MAX_ANIM_PIXELS):
+            raise ValueError("That animation is too long or too big.")
+        im.load()
+        rgba = im.convert("RGBA")
+    except ValueError:
+        raise
+    except Exception:                      # noqa: BLE001 -- anything that will not open or decode
+        raise ValueError("not a readable image")
+    clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
+    return {"format": fmt, "w": w, "h": h, "see_through": clear, "animated": frames > 1}, rgba
+
+
+def _role_animation_bytes(raw):
+    """An accepted animated WebP, ready to store: every frame decoded once to prove the file is sound,
+    and cut at the end of its RIFF container so nothing appended after the picture survives. Raises
+    ValueError('not a readable image') for a stream that stops short or will not decode."""
+    import io
+    from PIL import Image
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
+        raise ValueError("not a readable image")
+    end = 8 + int.from_bytes(raw[4:8], "little")
+    if end > len(raw):
+        raise ValueError("not a readable image")
+    data = raw[:end]
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            for i in range(getattr(im, "n_frames", 1)):
+                im.seek(i)
+                im.load()
+    except Exception:                      # noqa: BLE001
+        raise ValueError("not a readable image")
+    return data
 
 
 def _role_coded_rel(slot, key):
@@ -5150,7 +5243,7 @@ def _role_file_decodes(path):
 
 def branding_roles_payload(out_dir):
     """The Roles section's state for the Branding tab, in the fixed meeting order (the order of
-    ROLE_SLOTS): per role its name, where it shows and its spec, and per image the URL the app
+    ROLE_SLOTS): per role its name and where it shows, and per image its own spec, the URL the app
     wears now, whether that is the install's own file, whether that file still decodes (a
     missing or unreadable override is served as the pack's default -- see the /branding/ route
     -- and the row says so), and a URL for the pack's own art so the row can show default
@@ -5174,11 +5267,10 @@ def branding_roles_payload(out_dir):
                 "v": stamp,
                 "default_url": ("/api/branding/role/default/%s/%s" % (slot, key))
                                if box is not None and box.has(coded) else None,
+                # the rule THIS image's override must meet (role_image_spec), for the editor to tick
+                "spec": dict(role_image_spec(slot, key), see_through_min=ROLE_SEE_THROUGH_MIN),
             })
-        roles.append({"slot": slot, "name": role["name"], "where": role["where"],
-                      "spec": dict(role["spec"], see_through_min=ROLE_SEE_THROUGH_MIN,
-                                   aspect_tolerance=ROLE_ASPECT_TOLERANCE),
-                      "images": images})
+        roles.append({"slot": slot, "name": role["name"], "where": role["where"], "images": images})
     return roles
 
 
@@ -5193,13 +5285,15 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
       1. take the bytes, from the uploaded file or from the user's own library by media id,
          capped at ROLE_MAX_BYTES;
       2. open the picture and read its size from the HEADER; refuse anything over ROLE_MAX_SIDE a
-         side before a pixel is decoded;
-      3. decode it (first frame), measure format, shape, size and how much of it is see-through,
-         and check those against the role's spec -- a broken rule is a 400 that names the rule
-         and the measured value, and NOTHING has been written;
-      4. only then re-encode from the decoded pixels (nothing the sender appended survives; the
-         login companion is stored as WebP, every other role as PNG, under the public name the app
-         already asks for) and replace the override file whole.
+         side before a pixel is decoded (role_measure);
+      3. decode it (first frame), measure format, shape, size, whether it moves and how much of it
+         is see-through, and check those against THIS image's spec (role_image_spec) -- a broken
+         rule is a 400 that names the rule and the measured value, and NOTHING has been written;
+      4. only then write it: a still is re-encoded from the decoded pixels (nothing the sender
+         appended survives; the login companion is stored as WebP, every other role as PNG, under
+         the public name the app already asks for); the one animation a role allows (the login
+         companion's WebP) is decoded frame by frame and stored as sent, cut at its container's end
+         (_role_animation_bytes). The override file is replaced whole.
 
     `check_only` stops after step 3 and answers with the measurements ({"facts": ...}) instead of
     judging them: that is how a picture already in the library ("From the gallery") gets its rules
@@ -5230,24 +5324,21 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
     if len(raw) > ROLE_MAX_BYTES:
         return {"error": "That file is too large."}, 400
     try:
-        from PIL import Image
-        im = Image.open(io.BytesIO(raw))
-        fmt, (w, h) = im.format, im.size
-        if max(w, h) > ROLE_MAX_SIDE:
-            return {"error": "That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE)}, 400
-        im.load()
-        rgba = im.convert("RGBA")
-    except Exception:                      # noqa: BLE001 -- anything that will not open or decode
-        return {"error": "not a readable image"}, 400
-    clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
-    facts = {"format": fmt, "w": w, "h": h, "see_through": clear}
+        facts, rgba = role_measure(raw)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
     if check_only:
         return {"facts": facts}, 200
-    failed = role_spec_failures(role["spec"], facts)
+    failed = role_spec_failures(role_image_spec(slot, key), facts)
     if failed:
         return {"error": role_refusal_text(role["name"], failed), "failed": failed}, 400
     buf = io.BytesIO()
-    if img["public"].lower().endswith(".webp"):
+    if facts["animated"]:
+        try:
+            buf.write(_role_animation_bytes(raw))
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+    elif img["public"].lower().endswith(".webp"):
         rgba.save(buf, "WEBP", lossless=True, quality=100, method=4)
     else:
         rgba.save(buf, "PNG", optimize=True)

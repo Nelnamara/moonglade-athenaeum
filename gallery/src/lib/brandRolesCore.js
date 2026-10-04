@@ -2,16 +2,18 @@
    (Session X, Branding Roles Handoff; hidden, unlock-gated). Pure: loom/test/brand-roles-core.test.js
    holds them, components/BrandRoles.jsx and BrandRolesPhone.jsx draw them.
 
-   WHO DECIDES. The server (moonglade_gallery.py: ROLE_SLOTS, role_spec_failures) is the one that
-   decides: it measures the file again and refuses what breaks the spec, whatever this module said.
-   This module runs the SAME rules over the SAME measurements on the device first, so the editor
-   can tick them live and nothing is uploaded that would be refused (the handoff's "checked
-   locally before any upload"). The spec itself is not copied here: it arrives in the Branding
-   payload (`roles[].spec`), so the two cannot drift. The refusal sentences are pinned against the
-   server's in tests/test_branding_roles.py and loom/test/brand-roles-core.test.js alike. */
+   WHO DECIDES. The server (moonglade_gallery.py: ROLE_SLOTS, role_image_spec, role_spec_failures)
+   is the one that decides: it measures the file again and refuses what breaks the spec, whatever
+   this module said. This module runs the SAME rules over the SAME measurements on the device first,
+   so the editor can tick them live and nothing is uploaded that would be refused (the handoff's
+   "checked locally before any upload"). The spec itself is not copied here: each IMAGE's effective
+   spec arrives in the Branding payload (`roles[].images[].spec`) -- the role's formats and drawn
+   minimum, with the shape and (where the pack's own art is smaller) the minimum size taken from the
+   pack default that image replaces -- so the two cannot drift. The refusal sentences are pinned
+   against the server's in tests/test_branding_roles.py and loom/test/brand-roles-core.test.js alike. */
 
 export const ROLE_REFUSAL_END = "Your current art is unchanged.";
-const NEED_VERB = { format: "be", transparent: "have", aspect: "be", size: "be" };
+const NEED_VERB = { format: "be", transparent: "have", animation: "be", aspect: "be", size: "be" };
 
 /** A picture's shape in words for a refusal: "1:1", "3:2", "16:9", else "1.68:1". */
 export function ratioLabel(w, h) {
@@ -28,18 +30,27 @@ export function ratioLabel(w, h) {
   return have.toFixed(2) + ":1";
 }
 
-/** "WEBP/PNG · transparent · 3:4 · ≥ 600 px tall" (the gold mono line). `phone` drops "tall",
-    as the phone's role screen draws it. */
-export function specLine(spec, { phone = false } = {}) {
+/** An image's shape in words, from the pack default it replaces: "about square" when that default is
+    square to within the tolerance, else "about 9:10". The server says the same (_aspect_words). */
+export function aspectWords(spec) {
   const [aw, ah] = spec.aspect;
-  const shape = aw === ah ? "square" : aw + ":" + ah;
+  if (Math.abs(aw / ah - 1) <= spec.aspect_tolerance) return "about square";
+  return "about " + ratioLabel(aw, ah);
+}
+
+/** "WEBP/PNG · transparent · about square · ≥ 480 px tall · animated WebP ok" (the gold mono line:
+    the EFFECTIVE rule for this image). `phone` drops "tall", as the phone's role screen draws it. */
+export function specLine(spec, { phone = false } = {}) {
   const min = "≥ " + spec.min_px + " px" + (spec.min_axis === "height" && !phone ? " tall" : "");
-  return [spec.formats.join("/"), spec.transparent ? "transparent" : null, shape, min]
+  const moves = (spec.animated_formats || []).length
+    ? "animated " + spec.animated_formats.map((f) => (f === "WEBP" ? "WebP" : f)).join("/") + " ok" : null;
+  return [spec.formats.join("/"), spec.transparent ? "transparent" : null, aspectWords(spec), min, moves]
     .filter(Boolean).join(" · ");
 }
 
-/** The rules `facts` breaks, in the editor's order. Mirrors role_spec_failures() on the server.
-    facts = {format: "PNG", w, h, see_through: 0..1}. Each failure is {rule, need, got}. */
+/** The rules `facts` breaks, in the editor's order (format, transparency, animation, shape, size).
+    Mirrors role_spec_failures() on the server. facts = {format: "PNG", w, h, see_through: 0..1,
+    animated}. Each failure is {rule, need, got}. */
 export function specFailures(spec, facts) {
   const failed = [];
   const fmt = String(facts.format || "").toUpperCase();
@@ -50,10 +61,13 @@ export function specFailures(spec, facts) {
     failed.push({ rule: "transparent", need: "a transparent background",
       got: facts.see_through <= 0 ? "opaque" : (facts.see_through * 100).toFixed(1) + "% see-through" });
   }
+  if (facts.animated && !(spec.animated_formats || []).includes(fmt)) {
+    failed.push({ rule: "animation", need: "a still picture", got: "animated" });
+  }
   const [aw, ah] = spec.aspect;
   const want = aw / ah;
   if (!(facts.h > 0) || Math.abs(facts.w / facts.h - want) / want > spec.aspect_tolerance) {
-    failed.push({ rule: "aspect", need: aw === ah ? "square" : aw + ":" + ah, got: ratioLabel(facts.w, facts.h) });
+    failed.push({ rule: "aspect", need: aspectWords(spec), got: ratioLabel(facts.w, facts.h) });
   }
   const tall = spec.min_axis === "height";
   const have = tall ? facts.h : Math.min(facts.w, facts.h);
@@ -68,7 +82,6 @@ export function specFailures(spec, facts) {
     {rule, ok, text}: "✓ WEBP  ✓ transparent  ✕ 3:4 (got 1:1)  ✓ ≥ 600 px". */
 export function ticks(spec, facts) {
   const bad = new Map(specFailures(spec, facts).map((f) => [f.rule, f]));
-  const [aw, ah] = spec.aspect;
   const fmt = String(facts.format || "").toUpperCase() || "unknown";
   const out = [];
   out.push(bad.has("format")
@@ -79,7 +92,12 @@ export function ticks(spec, facts) {
       ? { rule: "transparent", ok: false, text: "transparent (got " + bad.get("transparent").got + ")" }
       : { rule: "transparent", ok: true, text: "transparent" });
   }
-  const shape = aw === ah ? "square" : aw + ":" + ah;
+  if (facts.animated) {
+    out.push(bad.has("animation")
+      ? { rule: "animation", ok: false, text: "still picture (got animated)" }
+      : { rule: "animation", ok: true, text: "animated" });
+  }
+  const shape = aspectWords(spec);
   out.push(bad.has("aspect")
     ? { rule: "aspect", ok: false, text: shape + " (got " + bad.get("aspect").got + ")" }
     : { rule: "aspect", ok: true, text: shape });
@@ -124,6 +142,25 @@ export function sniffFormat(bytes) {
   return "";
 }
 
+/** Whether the file moves, from its first bytes (a few KB are enough): an animated WebP sets the
+    animation flag in its VP8X header; an animated PNG carries an acTL chunk ahead of its first
+    IDAT. A GIF or anything else is not asked: it fails the format rule first. */
+export function sniffAnimated(bytes, format) {
+  const b = bytes || [];
+  if (format === "WEBP") {
+    const vp8x = b[12] === 0x56 && b[13] === 0x50 && b[14] === 0x38 && b[15] === 0x58;     // "VP8X"
+    return !!(vp8x && (b[20] & 0x02));
+  }
+  if (format === "PNG") {
+    let text = "";
+    for (let i = 0; i < b.length; i++) text += String.fromCharCode(b[i]);
+    const ac = text.indexOf("acTL");
+    const idat = text.indexOf("IDAT");
+    return ac >= 0 && (idat < 0 || ac < idat);
+  }
+  return false;
+}
+
 /** The share of pixels more than half see-through, from canvas RGBA data (alpha < 128). */
 export function seeThroughFraction(rgba) {
   const n = Math.floor(rgba.length / 4);
@@ -137,16 +174,18 @@ export function seeThroughFraction(rgba) {
     the full picture, and a 4096 px canvas is a lot to ask of a phone. */
 export const SAMPLE_PX = 256;
 
-/** Measure a File or Blob on this device: {format, w, h, see_through} or {unreadable: true}. The
-    format is sniffed from the bytes; the size and transparency come from decoding it. */
+/** Measure a File or Blob on this device: {format, w, h, see_through, animated} or {unreadable: true}.
+    The format and whether it moves are sniffed from the bytes; the size and transparency come from
+    decoding it (the first frame, for an animation). */
 export async function measureBlob(blob) {
-  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+  const head = new Uint8Array(await blob.slice(0, 4096).arrayBuffer());
   const format = sniffFormat(head);
+  const animated = sniffAnimated(head, format);
   let bmp;
   try {
     bmp = await createImageBitmap(blob);
   } catch (e) {
-    return { unreadable: true, format };
+    return { unreadable: true, format, animated };
   }
   const w = bmp.width, h = bmp.height;
   const scale = Math.min(1, SAMPLE_PX / Math.max(w, h));
@@ -157,7 +196,7 @@ export async function measureBlob(blob) {
   ctx.drawImage(bmp, 0, 0, cw, ch);
   const see_through = seeThroughFraction(ctx.getImageData(0, 0, cw, ch).data);
   if (bmp.close) bmp.close();
-  return { format, w, h, see_through };
+  return { format, w, h, see_through, animated };
 }
 
 /** The collapsed row's second line: where the role shows, or for a multi-image role the image
