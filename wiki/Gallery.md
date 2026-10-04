@@ -477,8 +477,9 @@ To get your whole library back, press **Clear** in **Advanced search**.
 Feed) and **Paging** (**Pages** · **Continuous**). A plain tap on a key still just switches the layout. A
 choice applies at once; tap outside the sheet or swipe it down to close it. **Pages** is the default and is
 the phone as before, with **‹ Prev · Next ›**. Both are remembered **on that phone**, and the same Paging
-choice is on the **Control** screen as **Library paging**. Until you first long-press, a small dot under
-the keys shows the gesture is there.
+choice is the first setting on the **Control** screen, as **Library paging** beside **Data saver**. Until
+you first find the choice — a long-press here, or a tap on Control's row — a small dot under the keys shows
+the gesture is there.
 
 **Continuous** loads the next 100 pictures by itself as you near the end of what is loaded, and stacks
 them under the ones you have. There is no pager: the pill row shows how many are loaded of everything

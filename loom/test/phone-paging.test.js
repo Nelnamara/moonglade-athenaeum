@@ -96,15 +96,32 @@ describe("U1 the paging choice: where it lives", () => {
     assert.match(sheet, /PAGINGS\.map/);
   });
 
-  test("Control's Library paging row sits right after Data saver and reads the same pref", () => {
+  test("Control's Library paging row is its first settings row, Data saver beside it (owner's walk 2026-10-04)", () => {
     const c = code("components/ControlMobile.jsx");
     assert.match(c, /import PagingRow from "\.\/PagingRow\.jsx";/);
-    const saver = c.indexOf("<DataSaverRow />");
+    const glance = c.indexOf(">At a glance<");
     const paging = c.indexOf("<PagingRow />");
-    assert.ok(saver > 0 && paging > saver, "Library paging is Data saver's neighbour");
+    const saver = c.indexOf("<DataSaverRow />");
+    assert.ok(glance > 0 && paging > glance && saver > paging, "At a glance, then Library paging, then Data saver");
+    // nothing that is a setting comes before them: not Branding, the mirror, the blur tile or the skins
+    for (const later of ["brandingUnlocked && (", 'className="ctm-mirror"', "<BlurToggleTile", "<SkinsRow"]) {
+      const at = c.indexOf(later);
+      assert.ok(at > saver, later + " comes after the two per-device phone choices");
+    }
+    const between = c.slice(c.indexOf("</div>", c.indexOf("ctm-statgrid")), paging);
+    assert.ok(!/<(?!\/)(?!div)[A-Z]/.test(between.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")),
+      "no other row between At a glance and Library paging");
     const row = code("components/PagingRow.jsx");
     assert.match(row, /usePaging\(\)/);
     assert.match(row, /Library paging/);
+  });
+
+  test("the hint dot goes once the paging choice is found by either road: a tap on Control's row counts", () => {
+    const row = code("components/PagingRow.jsx");
+    assert.match(row, /const \[, markHintSeen\] = usePagingHint\(\);/);
+    assert.match(row, /onClick=\{\(\) => \{ markHintSeen\(\); setPaging\(p\); \}\}/);
+    // still a tap, never an open: the hook's writers stay callbacks
+    assert.doesNotMatch(row, /useEffect/);
   });
 
   test("the keys are private to lib/phonePrefs.js", () => {

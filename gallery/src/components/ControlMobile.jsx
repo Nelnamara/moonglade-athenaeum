@@ -301,14 +301,30 @@ export default function ControlMobile({ account, brandRequest }) {
         </div>
       </div>
 
+      {/* THE TWO PER-DEVICE PHONE CHOICES, FIRST (owner's walk 2026-10-04: he could not find
+          Continuous paging -- the long-press on the gallery's layout keys was unknown to him and
+          this row sat at the foot of the screen). Library paging is the first settings row, right
+          under At a glance, and Data saver sits beside it.
+          Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the
+          gallery's long-press sheet on its layout keys sets; a tap here also counts as finding it
+          (the hint dot under the keys goes). Session Q (Q7): Data saver -- Off / Auto on metered /
+          Always, per device. */}
+      <div className="ctm-sec">
+        <PagingRow />
+      </div>
+      <div className="ctm-sec">
+        <DataSaverRow />
+      </div>
+
       {/* Branding is INVISIBLE until earned -- exactly like the desktop Control
           Panel, which hides the whole tab (ControlPanelOverlay: brandingUnlocked &&).
           The 2026-08-09 branding-integration handoff had drawn a locked tile here whose
           label NAMED the hidden feat that unlocks it, to every signed-in user -- the one
           real spoiler the sealing review found in the front-end (HIGH #2; the feat's name
           stays out of this source by design). Owner call 2026-08-21: no tile, no hint --
-          the feat is discovered, never announced. Sits directly under "At a glance" so,
-          once earned, its presence reads first, matching the desktop tab pair. */}
+          the feat is discovered, never announced. Sits right under the phone's two per-device
+          choices, near the top, so once earned its presence reads early, matching the desktop
+          tab pair. */}
       {brandingUnlocked && (
         <div className="ctm-sec">
           <div className="mgcp-tile click" onClick={openBrand}>
@@ -587,16 +603,6 @@ export default function ControlMobile({ account, brandRequest }) {
           This is the surface it matters MOST on: a phone is the machine the owner's
           ruling names as wanting the blur off while the home desktop keeps it. The tile
           takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
-      {/* Session Q (Q7): the Data saver row -- Off / Auto on metered / Always, per device. */}
-      <div className="ctm-sec">
-        <DataSaverRow />
-      </div>
-      {/* Session U (U1b): Library paging -- Pages | Continuous, the same per-device value the gallery's
-          long-press sheet on its layout keys sets. */}
-      <div className="ctm-sec">
-        <PagingRow />
-      </div>
-
       <div className="ctm-sec">
         <BlurToggleTile className="mgcp-tile" />
       </div>

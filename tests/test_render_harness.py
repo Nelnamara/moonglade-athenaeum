@@ -9344,3 +9344,53 @@ def test_the_event_banners_are_one_per_row_at_their_own_aspect_with_room_for_the
     _settle(page)
     _rf_assert_banners(page.evaluate(_RF_BANNERS_JS, ".glm-sheet.ib-sheet"))
     assert posts == []
+
+
+# Owner's walk, ruling 3: he could not find Continuous paging -- he did not know to long-press ▦ / ▭ and
+# did not find Control's row at the bottom of the screen.
+
+_RF_CONTROL_ORDER_JS = """() => {
+  const secs = [...document.querySelectorAll('.cm-pad > .ctm-sec')];
+  const idx = (sel) => secs.findIndex((s) => s.querySelector(sel));
+  const paging = document.querySelector('.ctm-paging').getBoundingClientRect();
+  const saver = document.querySelector('.ctm-saver').getBoundingClientRect();
+  return {about: idx('.mghelp-aboutrow'), glance: idx('.ctm-statgrid'), paging: idx('.ctm-paging'),
+          saver: idx('.ctm-saver'), mirror: idx('.ctm-mirror'), skins: idx('.mgcp-skinsrow'), n: secs.length,
+          pagingBottom: paging.bottom, saverTop: saver.top, vh: window.innerHeight};
+}"""
+
+
+def test_the_phone_control_screen_leads_its_settings_with_library_paging_and_data_saver(
+        phone_u_server, render_browser, monkeypatch):
+    """Owner's walk, ruling 3. On the phone's Control screen, Library paging is the first settings row,
+    right under About and At a glance, with Data saver beside it: the two per-device phone choices
+    together, on the first screen without scrolling. The long-press hint dot under ▦ / ▭ now goes once
+    the paging choice is found by either road -- a tap on Control's row counts as much as the long-press
+    sheet -- and opening Control writes nothing."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 1, "the dot shows until found"
+        page.click(".glm-navitem:has-text('Control')")
+        page.wait_for_selector(".ctm-paging")
+        _settle(page)
+        o = page.evaluate(_RF_CONTROL_ORDER_JS)
+        assert o["about"] >= 0 and o["glance"] == o["about"] + 1, o
+        assert o["paging"] == o["glance"] + 1, ("Library paging is the first settings row", o)
+        assert o["saver"] == o["paging"] + 1, ("Data saver sits beside it", o)
+        assert o["paging"] < o["mirror"], ("above the Live Mirror and everything after it", o)
+        assert o["skins"] < 0 or o["paging"] < o["skins"], o
+        assert o["pagingBottom"] <= o["vh"], ("on the first screen, no scrolling", o)
+        writes = page.evaluate("window.__qWrites")
+        assert not [k for k in writes if k.startswith("mg_phone_paging")], ("opening Control writes nothing", writes)
+
+        # a tap on Control's row is finding it: the dot under the gallery's keys goes
+        page.click(".ctm-paging button:has-text('Pages')")
+        page.wait_for_function("() => localStorage.getItem('mg_phone_paging_hint') === '1'")
+        assert _u_store(page, "mg_phone_paging") == "pages"
+        page.click(".glm-navitem:has-text('Gallery')")
+        page.wait_for_selector(".glm-layout")
+        _settle(page)
+        assert page.locator(".glm-layout .glm-layout-dot").count() == 0, "found from Control: no dot"
+    finally:
+        ctx.close()
