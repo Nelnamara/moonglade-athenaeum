@@ -22,7 +22,7 @@ import "../styles/curation-mobile.css";
 /* Image Details Mobile -- design spec: "Image Details Mobile.dc.html"
    (design_handoff_moonglade_suite/), the mobile port of DetailsView.jsx ("the
    layer deeper", owner 2026-07-30). Reuses useImageDetails.js -- the EXACT
-   same /api/next/detail/<mid> fetch, rating mirror, engagement fetch, copy/
+   same /api/detail/<mid> fetch, rating mirror, engagement fetch, copy/
    suggest/save/delete actions and shared <UpscalePanel> mount as
    DetailsView.jsx -- so there is ONE fetch, ONE set of action handlers, ONE
    Upscale mount contract for both surfaces, never a second drifting copy.

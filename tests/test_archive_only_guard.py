@@ -105,7 +105,7 @@ def test_the_trash_restores_an_only_copy_with_its_row(tmp_path):
     assert rows["300"]["cloud_deleted_at"] == "2026-09-20T10:00:00Z"
     assert (tmp_path / "images" / "p_200.png").read_bytes() == b"B"
     assert (tmp_path / "images" / "p_300.png").read_bytes() == b"C"
-    assert cli.get("/api/next/detail/200").get_json()["archive_only"] is True
+    assert cli.get("/api/detail/200").get_json()["archive_only"] is True
 
 
 def test_the_single_image_path_removes_one_like_any_other(tmp_path):
@@ -123,14 +123,14 @@ def test_the_single_image_path_removes_one_like_any_other(tmp_path):
 
 def test_the_grid_card_carries_archive_only(tmp_path):
     _three(tmp_path)
-    items = login_client(tmp_path).get("/api/next/library").get_json()["items"]
+    items = login_client(tmp_path).get("/api/library").get_json()["items"]
     flags = {it["media_id"]: it["archive_only"] for it in items}
     assert flags == {"100": False, "200": True, "300": True}
 
 
 def test_the_grouped_grid_card_carries_archive_only(tmp_path):
     _three(tmp_path)
-    items = login_client(tmp_path).get("/api/next/library?group=series").get_json()["items"]
+    items = login_client(tmp_path).get("/api/library?group=series").get_json()["items"]
     flags = {it["media_id"]: it["archive_only"] for it in items}
     assert flags == {"100": False, "200": True, "300": True}
 
@@ -138,9 +138,9 @@ def test_the_grouped_grid_card_carries_archive_only(tmp_path):
 def test_the_detail_read_carries_archive_only(tmp_path):
     _three(tmp_path)
     cli = login_client(tmp_path)
-    assert cli.get("/api/next/detail/100").get_json()["archive_only"] is False
-    assert cli.get("/api/next/detail/200").get_json()["archive_only"] is True
-    assert cli.get("/api/next/detail/300").get_json()["archive_only"] is True
+    assert cli.get("/api/detail/100").get_json()["archive_only"] is False
+    assert cli.get("/api/detail/200").get_json()["archive_only"] is True
+    assert cli.get("/api/detail/300").get_json()["archive_only"] is True
 
 
 def _same_seed(tmp_path, newer_flags):

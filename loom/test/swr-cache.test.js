@@ -32,10 +32,10 @@ describe("peek / put -- the happy path", () => {
   test("paths are keyed WHOLE, querystring included", () => {
     // The Publish strip's read is a library page with its own query; two different
     // querystrings are two different answers and must not share a slot.
-    put("/api/next/library?page=1&media=image", { items: [1] });
-    put("/api/next/library?page=2&media=image", { items: [2] });
-    assert.deepEqual(peek("/api/next/library?page=1&media=image").items, [1]);
-    assert.deepEqual(peek("/api/next/library?page=2&media=image").items, [2]);
+    put("/api/library?page=1&media=image", { items: [1] });
+    put("/api/library?page=2&media=image", { items: [2] });
+    assert.deepEqual(peek("/api/library?page=1&media=image").items, [1]);
+    assert.deepEqual(peek("/api/library?page=2&media=image").items, [2]);
   });
 
   test("a later put replaces the earlier one rather than merging into it", () => {
@@ -119,16 +119,16 @@ describe("invalidate -- prefix semantics", () => {
   const seed = () => {
     put("/api/your-art", { a: 1 });
     put("/api/achievements", { a: 1 });
-    put("/api/next/detail/abc", { a: 1 });
-    put("/api/next/detail/def", { a: 1 });
-    put("/api/next/library?page=1", { a: 1 });
+    put("/api/detail/abc", { a: 1 });
+    put("/api/detail/def", { a: 1 });
+    put("/api/library?page=1", { a: 1 });
   };
 
   test("a prefix drops the whole family, and nothing outside it", () => {
     seed();
-    assert.equal(invalidate("/api/next/detail/"), 2);
-    assert.equal(peek("/api/next/detail/abc"), null);
-    assert.equal(peek("/api/next/detail/def"), null);
+    assert.equal(invalidate("/api/detail/"), 2);
+    assert.equal(peek("/api/detail/abc"), null);
+    assert.equal(peek("/api/detail/def"), null);
     assert.notEqual(peek("/api/your-art"), null);
     assert.notEqual(peek("/api/achievements"), null);
   });
@@ -142,23 +142,23 @@ describe("invalidate -- prefix semantics", () => {
 
   test("a prefix reaches paths that carry a querystring", () => {
     seed();
-    assert.equal(invalidate("/api/next/library"), 1);
-    assert.equal(peek("/api/next/library?page=1"), null);
+    assert.equal(invalidate("/api/library"), 1);
+    assert.equal(peek("/api/library?page=1"), null);
   });
 
   test("an array invalidates every prefix in it, in one call", () => {
     seed();
-    const n = invalidate(["/api/your-art", "/api/achievements", "/api/next/detail/"]);
+    const n = invalidate(["/api/your-art", "/api/achievements", "/api/detail/"]);
     assert.equal(n, 4);
     assert.equal(peek("/api/your-art"), null);
     assert.equal(peek("/api/achievements"), null);
-    assert.equal(peek("/api/next/detail/abc"), null);
-    assert.notEqual(peek("/api/next/library?page=1"), null);
+    assert.equal(peek("/api/detail/abc"), null);
+    assert.notEqual(peek("/api/library?page=1"), null);
   });
 
   test("a path counted once even when two prefixes both match it", () => {
     seed();
-    assert.equal(invalidate(["/api/next/detail/", "/api/next/detail/abc"]), 2);
+    assert.equal(invalidate(["/api/detail/", "/api/detail/abc"]), 2);
   });
 
   test("a FALSY prefix removes nothing -- a mistyped call must not empty the cache", () => {
@@ -167,7 +167,7 @@ describe("invalidate -- prefix semantics", () => {
       assert.equal(invalidate(bad), 0, JSON.stringify(bad));
     }
     assert.notEqual(peek("/api/your-art"), null);
-    assert.notEqual(peek("/api/next/detail/abc"), null);
+    assert.notEqual(peek("/api/detail/abc"), null);
   });
 
   test("invalidating something that was never cached is a harmless 0", () => {

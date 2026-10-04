@@ -4,7 +4,7 @@
 // Design of record: design_handoff/design_handoff_moonglade_suite/Frontend Gallery.dc.html
 // (C3a) -- mkRun 2683-2726 (tile geometry, caption cost), groupDefs 2677-2681 (day labels),
 // olderLabel 3524, tooltip 2711-2723 + 1594-1605; DECISIONS.md "Generate dock History --
-// LOCKED" (2026-08-16). Content is REAL: the catalog-backed feed GET /api/next/history
+// LOCKED" (2026-08-16). Content is REAL: the catalog-backed feed GET /api/history
 // (7 local days, newest first, jobs.jsonl live rows merged server-side) replaces the DC's
 // SEEDED / OLDER_SEED stand-ins, DAY_LABELS, `age` bucketing and the hand-written cost.
 
@@ -23,7 +23,7 @@ const pad2 = (n) => (n < 10 ? "0" : "") + n;
 
 /* ---- local-day keys ("YYYY-MM-DD") ------------------------------------------------ */
 
-// tsSec -> the LOCAL calendar day. With `tzMin` (minutes EAST of UTC, the /api/next/history
+// tsSec -> the LOCAL calendar day. With `tzMin` (minutes EAST of UTC, the /api/history
 // `tz` idiom) the day is computed for that offset -- deterministic for the tests; without
 // it, the runtime's own zone (Date getters).
 export function dayKeyLocal(tsSec, tzMin) {

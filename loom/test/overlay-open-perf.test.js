@@ -450,7 +450,7 @@ describe("the invalidation seams", () => {
   test("App's one mutation seam purges the read cache before it reloads", () => {
     const seam = app.slice(app.indexOf("const afterMutation = async () => {"),
                            app.indexOf("const actions = {"));
-    for (const p of ["/api/your-art", "/api/myart/items", "/api/next/detail/",
+    for (const p of ["/api/your-art", "/api/myart/items", "DETAIL_PREFIX",
                      "/api/achievements", "/api/health"]) {
       assert.ok(seam.includes(p), p);
     }

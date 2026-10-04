@@ -29,7 +29,7 @@ export const ADV_DEFAULTS = {
    Two callers need it, and they disagree on ONE thing -- the date format:
 
    - dateStyle "library" (default): `from`/`to` as "YYYY-MM". This is what
-     /api/next/library reads AND what Flyout's parsePresetQuery() reads back, so a
+     /api/library reads AND what Flyout's parsePresetQuery() reads back, so a
      saved-view preset round-trips through it losslessly.
    - dateStyle "export": `from_year`/`from_month` (+ `to_*`). The CSV route parses its
      filters through _filters_from_args(), whose date helper keys off `<prefix>_year`/

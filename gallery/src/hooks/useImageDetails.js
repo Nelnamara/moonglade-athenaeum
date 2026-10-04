@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { detailsHeadline } from "../gen/headline.js";
 import { onCurated } from "../curation/curationBus.js";
+import { detail } from "../apiRoutes.js";
 
 /* useImageDetails -- DetailsView.jsx's fetch/state/derivation/action logic,
    mechanically lifted out (2026-08-03) into its own hook so a new mobile
-   surface (ImageDetailsMobile.jsx) can consume the EXACT same /api/next/detail
+   surface (ImageDetailsMobile.jsx) can consume the EXACT same /api/detail
    data shape, rating mirror, engagement fetch, copy/suggest/save/delete
    actions and Upscale mount -- never a second, drifting copy of any of it.
    Matches the useMyArt.js/useHealth.js/useImport.js/useContests.js precedent
@@ -60,7 +61,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     if (upEl.current) upEl.current.close();
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(advParams || {})) if (v) qs.set(k, v);
-    apiGet("/api/next/detail/" + encodeURIComponent(mediaId) + "?" + qs.toString())
+    apiGet(detail(mediaId) + "?" + qs.toString())
       .then((d) => {
         if (mine !== seq.current) return;
         if (d.error) { setState({ loading: false, data: null, error: d.error }); return; }

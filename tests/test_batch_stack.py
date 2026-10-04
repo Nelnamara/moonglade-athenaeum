@@ -12,7 +12,7 @@ batch answers as a series of ONE run. Pins:
   * 404 for an unknown id, for a blank id, and for a LONE image -- one survivor is
     not a batch, and the grid never draws a stack for it;
   * the route and the pictures listing the modal fetches next
-    (/api/next/library?batch=) agree on the count, because both read through the same
+    (/api/library?batch=) agree on the count, because both read through the same
     `(batch = ? OR task_id = ?)` predicate;
   * the route is a pure catalog read: no network, and it does not answer for a
     deleted-file row (the catalog's `filename != ''` survivor rule).
@@ -129,7 +129,7 @@ def test_the_struct_and_the_pictures_listing_count_the_same_rows(tmp_path):
     _seed(tmp_path, _rows())
     cli = _client(tmp_path)
     meta = cli.get("/api/batch/T1").get_json()
-    lib = cli.get("/api/next/library?batch=T1").get_json()
+    lib = cli.get("/api/library?batch=T1").get_json()
     assert meta["count_images"] == meta["steps"][0]["n"] == lib["total"] == 3
     assert {i["media_id"] for i in lib["items"]} == {"m10", "m20", "m30"}
 

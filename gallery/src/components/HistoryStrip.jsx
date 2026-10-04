@@ -4,6 +4,7 @@ import {
   HISTORY_DAYS, anyRunning, costColor, costText, dayCells, dayLabel, mergeHistoryPages,
   olderLabel, tipLines, todayKey, tzMinutes,
 } from "../gen/historyCore.js";
+import { HISTORY } from "../apiRoutes.js";
 
 /* The dock's HISTORY mode -- the runs strip in a different mode (Frontend Gallery.dc.html
    C3a: the same reel element 1121/3534, groups 1122-1196, "Load older" 1197-1199; DECISIONS
@@ -12,7 +13,7 @@ import {
    a 2-row column-flow grid of fixed-96px aspect-true tiles, newest first, top-then-bottom.
    "Load N older days ⌄" at the trailing end appends pages.
 
-   CONTENT IS REAL: GET /api/next/history (catalog rows by created_at, bucketed by local day
+   CONTENT IS REAL: GET /api/history (catalog rows by created_at, bucketed by local day
    server-side, jobs.jsonl live rows merged and deduped) replaces the DC's SEEDED stand-ins.
    Thumbs are the real /thumbs/<mid>.jpg (video rows use the same poster). Cost is the
    settled `paid_credit` through historyCore's ONE formatter. There is no per-image progress
@@ -105,7 +106,7 @@ export default function HistoryStrip({ onPrefill, onTip }) {
   const tz = tzMinutes();
 
   const load = useCallback((before) => {
-    const url = "/api/next/history?days=" + HISTORY_DAYS + "&tz=" + tz
+    const url = HISTORY + "?days=" + HISTORY_DAYS + "&tz=" + tz
       + (before ? "&before=" + encodeURIComponent(before) : "");
     setLoading(true);
     return apiGet(url)

@@ -822,7 +822,7 @@ def test_history_reuse_gets_the_template_back(cli, rig, tmp_path):
     tid = d["jobs"][1]["task_id"]
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "M9", "task_id": tid, "filename": "2025-01/m9.png", "prompt_full": "b glade"}])
-    got = cli.get("/api/next/detail/M9").get_json()["run"]
+    got = cli.get("/api/detail/M9").get_json()["run"]
     assert got["template"] == "{a|b} glade" and got["var_mode"] == "random"
     assert got["run_seed"] == 12345 and got["cell"] == 1 and got["count"] == 2
 
@@ -831,7 +831,7 @@ def test_a_single_send_record_has_no_run_template_so_reuse_escapes(cli, rig, tmp
     tid = cli.post("/api/generate", json=dict(BASE, count=1)).get_json()["task_id"]
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "M8", "task_id": tid, "filename": "2025-01/m8.png"}])
-    assert cli.get("/api/next/detail/M8").get_json()["run"]["var_mode"] == ""
+    assert cli.get("/api/detail/M8").get_json()["run"]["var_mode"] == ""
 
 
 def test_a_failed_sending_write_stops_before_the_mutation(cli, rig, monkeypatch):

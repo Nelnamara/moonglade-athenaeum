@@ -3349,6 +3349,9 @@ ${"=".repeat(48)}
   })();
   var artFilters_default = MgArtFilters;
 
+  // ../gallery/src/apiRoutes.js
+  var LIBRARY = "/api/library";
+
   // ../gallery/src/api.js
   function withParams(path, params) {
     if (!params) return path;
@@ -6457,7 +6460,7 @@ ${"=".repeat(48)}
           if (cb) cb("done", d);
         } catch {
         }
-        invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]);
+        invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", LIBRARY]);
         clearPending2(id);
         refresh();
       } else if (d.phase === "failed") {

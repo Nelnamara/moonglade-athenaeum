@@ -9,6 +9,7 @@ import "../styles/myart-contests.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 import ContestChooser from "./ContestChooser.jsx";
 import ContestConfirm from "./ContestConfirm.jsx";
+import { DETAIL_PREFIX } from "../apiRoutes.js";
 
 /* "My Art" overlay — rebuilt 2026-08-06 to the returned handoff's tabbed-gallery
    design (Frontend Gallery.dc.html ovMyArt, markup 599-809, logic 2277-2436):
@@ -236,7 +237,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
       setAsk(null); setEditing(null);
       // The account just changed: the My Art totals, the roster (publishing earns things)
       // and this image's own record are all stale everywhere they are cached.
-      invalidate(["/api/your-art", "/api/achievements", "/api/next/detail/"]);
+      invalidate(["/api/your-art", "/api/achievements", DETAIL_PREFIX]);
       await load();
     } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
   };
@@ -271,7 +272,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     }
     setBulkAsk(null); setBulkBusy(false); setBulkResult({ ok, fail });
     setSelected(new Set());
-    if (ok) invalidate(["/api/your-art", "/api/achievements", "/api/next/detail/"]);
+    if (ok) invalidate(["/api/your-art", "/api/achievements", DETAIL_PREFIX]);
     await load();
   };
 

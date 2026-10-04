@@ -88,7 +88,7 @@ def test_siblings_rejects_a_non_list_body_and_tolerates_an_empty_one(tmp_path):
 def test_library_items_carry_task_id_and_title(tmp_path):
     _seed(tmp_path, [{"media_id": "777", "task_id": "T77", "title": "  Moonrise  "}])
     cli = _client(tmp_path)
-    r = cli.get("/api/next/library")
+    r = cli.get("/api/library")
     assert r.status_code == 200
     item = r.get_json()["items"][0]
     assert item["media_id"] == "777"
@@ -190,7 +190,7 @@ def test_query_catalog_batch_finds_an_organized_row_by_task_id(tmp_path):
     assert total == 1 and rows[0]["media_id"] == "603"
     # and through the route the button actually hits
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?batch=T1").get_json()
+    d = cli.get("/api/library?batch=T1").get_json()
     assert d["total"] == 2 and {i["media_id"] for i in d["items"]} == {"601", "602"}
 
 # ---- adversarial-review fixes (2026-08-22) ----

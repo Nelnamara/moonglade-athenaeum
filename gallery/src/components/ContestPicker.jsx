@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api.js";
 import { dayOf, qualifies } from "../hooks/useContests.js";
 import "../styles/myart-contests.css";
+import { LIBRARY } from "../apiRoutes.js";
 
 /* THE PICKER — Contest Surface v2.dc.html C1/C2/C3 (§8.5): one modal, two labeled
    sections, same tile density, single select ring in --accent with a ✓ chip.
@@ -44,7 +45,7 @@ export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish
         || names.find((n) => n && n.startsWith("Contest: ") && title
                              && n.toLowerCase().includes(title.toLowerCase()));
       if (!hit) { setShortIds(new Set()); return; }
-      apiGet("/api/next/library", { collection: hit, page_size: 200, sort: "newest" })
+      apiGet(LIBRARY, { collection: hit, page_size: 200, sort: "newest" })
         .then((lib) => {
           if (dead) return;
           setShortIds(new Set((lib.items || []).map((it) => it.media_id)));

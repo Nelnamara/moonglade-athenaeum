@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Under the hood
+- The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
+
 ## [3.16.0] - 2026-10-03 — Keeping Watch
 
 ### From the owner's walk (2026-10-03)

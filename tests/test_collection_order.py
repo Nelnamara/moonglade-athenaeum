@@ -273,5 +273,5 @@ def test_the_manage_route_carries_the_order(client, db):
 
 def test_the_library_view_offers_it_through_its_sort(client, db):
     set_collection_order(db, "Stills", ["3", "1"])
-    d = client.get("/api/next/library?collection=Stills&sort=manual").get_json()
+    d = client.get("/api/library?collection=Stills&sort=manual").get_json()
     assert [it["media_id"] for it in d["items"]] == ["3", "1", "2", "4"]

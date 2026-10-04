@@ -509,17 +509,17 @@ def test_cards_carry_the_mark_and_tags_and_details_carries_the_layer(client, db)
     _post(client, "/api/curate", media_ids=["1"], op={"mark": "keeper"})
     _post(client, "/api/curate", media_ids=["1"], op={"add_tag": "pose-study"})
     _post(client, "/api/curate", media_ids=["1"], op={"note": "hands"})
-    items = {i["media_id"]: i for i in client.get("/api/next/library").get_json()["items"]}
+    items = {i["media_id"]: i for i in client.get("/api/library").get_json()["items"]}
     assert items["1"]["mark"] == "keeper" and items["1"]["tags"] == ["pose-study"]
     assert items["2"]["mark"] == "" and items["2"]["tags"] == []
-    detail = client.get("/api/next/detail/1").get_json()
+    detail = client.get("/api/detail/1").get_json()
     assert detail["personal"] == {"tags": ["pose-study"], "mark": "keeper", "note": "hands"}
-    assert client.get("/api/next/detail/2").get_json()["personal"] == {"tags": [], "mark": "", "note": ""}
+    assert client.get("/api/detail/2").get_json()["personal"] == {"tags": [], "mark": "", "note": ""}
 
 
 def test_the_library_lists_a_smart_collection_live(client):
     _post(client, "/api/collections/manage", action="smart", query="keeper", name="Keepers")
-    lib = lambda: client.get("/api/next/library?collection=Keepers").get_json()   # noqa: E731
+    lib = lambda: client.get("/api/library?collection=Keepers").get_json()   # noqa: E731
     assert lib()["total"] == 0
     _post(client, "/api/curate", media_ids=["3"], op={"mark": "keeper"})
     d = lib()

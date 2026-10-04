@@ -284,7 +284,7 @@ def test_catalog_model_options_most_used_first(tmp_path):
 def test_source_surfaced_per_item_in_library_api(tmp_path):
     """Ported from the classic grid's source badges (classic cut 2026-08-08):
     the per-row `source` the "sbadge gen/loc" markup rendered from must still
-    reach the client -- it now rides each /api/next/library item, where the
+    reach the client -- it now rides each /api/library item, where the
     React grid draws its badge from."""
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
@@ -295,7 +295,7 @@ def test_source_surfaced_per_item_in_library_api(tmp_path):
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "a.png").write_bytes(b"x")
     (tmp_path / "images" / "b.png").write_bytes(b"x")
-    d = login_client(tmp_path).get("/api/next/library").get_json()
+    d = login_client(tmp_path).get("/api/library").get_json()
     by = {i["media_id"]: i["source"] for i in d["items"]}
     assert by == {"g1": "api", "l1": "local"}
 
@@ -628,13 +628,13 @@ def test_video_row_flagged_and_serves(tmp_path):
     client = login_client(tmp_path)
 
     # grid data: the video row is flagged so the client can badge it
-    items = client.get("/api/next/library").get_json()["items"]
+    items = client.get("/api/library").get_json()["items"]
     by = {i["media_id"]: i for i in items}
     assert by["VID"]["is_video"] is True
     assert by["POSTER"]["is_video"] is False
 
     # detail data: the full row (incl. is_video) backs the Details view's player decision
-    d = client.get("/api/next/detail/VID")
+    d = client.get("/api/detail/VID")
     assert d.status_code == 200
     assert d.get_json()["row"]["is_video"] == "1"
 
@@ -725,25 +725,25 @@ def test_detail_route_reports_the_true_position_and_total_of_the_filtered_walk(t
     client = login_client(tmp_path)
 
     # newest first: e5 e4 e3 e2 e1 -> e3 is third of five, and the neighbours agree
-    d = client.get("/api/next/detail/e3?sort=newest").get_json()
+    d = client.get("/api/detail/e3?sort=newest").get_json()
     assert (d["position"], d["nav_total"]) == (3, 5)
     assert (d["prev_id"], d["next_id"]) == ("e4", "e2")
 
     # the sort decides the position: oldest first puts e5 last
-    d = client.get("/api/next/detail/e5?sort=oldest").get_json()
+    d = client.get("/api/detail/e5?sort=oldest").get_json()
     assert (d["position"], d["nav_total"]) == (5, 5)
     assert d["next_id"] is None
 
     # a narrowing filter shrinks the walk: rating 3+ keeps e5 e3 e1
-    d = client.get("/api/next/detail/e3?sort=newest&rating_min=3").get_json()
+    d = client.get("/api/detail/e3?sort=newest&rating_min=3").get_json()
     assert (d["position"], d["nav_total"]) == (2, 3)
     assert (d["prev_id"], d["next_id"]) == ("e5", "e1")
 
     # so does a search
-    d = client.get("/api/next/detail/e1?q=elf").get_json()
+    d = client.get("/api/detail/e1?q=elf").get_json()
     assert (d["position"], d["nav_total"]) == (3, 3)
 
     # a picture the filter does not contain has no position (the client then shows none)
-    d = client.get("/api/next/detail/e4?rating_min=3").get_json()
+    d = client.get("/api/detail/e4?rating_min=3").get_json()
     assert d["position"] is None and d["nav_total"] == 3
     assert d["prev_id"] is None and d["next_id"] is None

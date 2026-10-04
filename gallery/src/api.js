@@ -53,6 +53,8 @@
                            (again(4000)), which needs the rejection itself, not an {error} body.
    All three are pinned by their own structure tests. */
 
+import { LIBRARY } from "./apiRoutes.js";
+
 // ---- the seam -------------------------------------------------------------------------
 
 function withParams(path, params) {
@@ -138,11 +140,12 @@ export function apiUpload(path, formData) {
 }
 
 // ---- the gallery's OWN data surface ----------------------------------------------------
-// /api/next/* (purpose-built, not the old picker routes). Every call is same-origin; the
+// /api/library, /api/detail, /api/history (purpose-built, not the old picker routes; the
+// paths live in apiRoutes.js). Every call is same-origin; the
 // front-door session cookie rides along automatically.
 
 export async function fetchLibrary(params = {}) {
-  const d = await apiGet("/api/next/library", params);
+  const d = await apiGet(LIBRARY, params);
   // The one caller (hooks/useLibrary.js) reads data.items/total/page/pages straight off this,
   // so an unusable answer must not arrive as a half-empty object.
   if (d.error) throw new Error("library fetch failed: " + d.error);
@@ -187,7 +190,7 @@ export async function fetchSeries(taskId) {
 
    Two existing routes, no new backend. GET /api/series/<sid> is the run list: the
    ordered steps {task_id, v, reroll, label, first_media_id, n}, each step being one
-   RUN of the dial-in. GET /api/next/library?series=<sid> is the pictures: the same
+   RUN of the dial-in. GET /api/library?series=<sid> is the pictures: the same
    ?series= drill-down the retired custom-search takeover used to push into the
    library's own filters, asked for directly here instead -- so the modal reads the
    series without disturbing the library underneath it, which is what lets Esc go
@@ -195,7 +198,7 @@ export async function fetchSeries(taskId) {
 
    THE MODAL SHOWS THE SERIES WHOLE -- it does not page, because a lineage rail that
    only knows about the first page would put wrong counts against its runs. So this
-   walks the listing to the end. /api/next/library caps page_size at 200 server-side
+   walks the listing to the end. /api/library caps page_size at 200 server-side
    (asking for more is silently clamped, so this asks for exactly the cap), and a
    dial-in series runs to at most ~801 images -- PAGE_CAP of 5 covers that with room,
    and is a real ceiling rather than an unbounded loop: if a series ever exceeds it,
@@ -203,14 +206,14 @@ export async function fetchSeries(taskId) {
 
    Fails soft to null, like fetchSeries: a 404 sid (a series dissolved by deletions)
    or an unreachable route means no modal, never an error surface. */
-const SERIES_PAGE_SIZE = 200;   // /api/next/library's own server-side cap
+const SERIES_PAGE_SIZE = 200;   // /api/library's own server-side cap
 const SERIES_PAGE_CAP = 5;      // 1000 images; the documented series maximum is ~801
 
 /* ONE stack loader, two stack kinds (owner ruling, 2026-09-07: a batch card opens in
    the series modal, tagged BATCH, instead of taking the library over). The only thing
    that differs between them is WHICH pair of routes carries the stack:
-     series -> /api/series/<sid>      + /api/next/library?series=<sid>
-     batch  -> /api/batch/<task_id>   + /api/next/library?batch=<task_id>
+     series -> /api/series/<sid>      + /api/library?series=<sid>
+     batch  -> /api/batch/<task_id>   + /api/library?batch=<task_id>
    Everything else -- the walk to the end of the listing, the page cap, the truncated
    flag, the fail-soft null -- is shared, so the modal has one code path and a batch
    never touches /api/series/. */
@@ -221,7 +224,7 @@ async function fetchStack(metaRoute, listParam, id) {
   const items = [];
   let total = null, pages = 1, truncated = false;
   for (let p = 1; p <= SERIES_PAGE_CAP; p++) {
-    const lib = await apiGet("/api/next/library",
+    const lib = await apiGet(LIBRARY,
       { [listParam]: id, page: p, page_size: SERIES_PAGE_SIZE });
     if (!lib || lib.error || !Array.isArray(lib.items)) break;
     items.push(...lib.items);

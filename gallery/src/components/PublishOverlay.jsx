@@ -8,6 +8,7 @@ import GalleryPicker from "./GalleryPicker.jsx";
 import ContestChooser from "./ContestChooser.jsx";
 import { countdown, dayOf, isRunning } from "../hooks/useContests.js";
 import "../styles/myart-contests.css";
+import { LIBRARY, DETAIL_PREFIX, detail } from "../apiRoutes.js";
 
 /* Publish panel — Frontend Gallery.dc.html's ovPublish (markup 294-390, values
    2890-2937), built on the real publish pipeline (POST /api/myart/publish).
@@ -58,7 +59,7 @@ import "../styles/myart-contests.css";
 
 // The strip's read, written once: the seed and the fetch must key the shared cache on the
 // SAME string or the seed would never hit.
-const STRIP_PATH = "/api/next/library?page=1&page_size=24&media=image&sort=newest";
+const STRIP_PATH = LIBRARY + "?page=1&page_size=24&media=image&sort=newest";
 
 export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   useScrollLock();
@@ -84,7 +85,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   /* The DC's inline "choose a different image" strip, on real recent library images --
      seeded from the shared read cache (hooks/swrCache.js) so a reopened panel draws its
      swatches immediately. The contest list below is seeded the same way. NEITHER the csrf
-     nor GET /api/next/detail/<mid> is: a stale artwork_id would re-enable the Publish
+     nor GET /api/detail/<mid> is: a stale artwork_id would re-enable the Publish
      button for a piece that is already published, which is the one wrong answer this panel
      can give, so that read stays live on every open. */
   const [strip, setStrip] = useState(() => (peek(STRIP_PATH) || {}).items || []);
@@ -102,7 +103,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     if (!mid) return;
     let dead = false;
     setRow(null); setErr("");
-    apiGet("/api/next/detail/" + encodeURIComponent(mid))
+    apiGet(detail(mid))
       .then((d) => {
         if (dead) return;
         if (d.error) { setErr(d.error); return; }
@@ -192,7 +193,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
       // publishing is an achievement metric. Drop all three rather than let a reopen paint
       // the pre-publish answer. (App.jsx's onPublished -> afterMutation does the same for
       // the library; this covers the surfaces it doesn't.)
-      invalidate(["/api/next/detail/", "/api/your-art", "/api/achievements", "/api/myart/items"]);
+      invalidate([DETAIL_PREFIX, "/api/your-art", "/api/achievements", "/api/myart/items"]);
       setDone(res);
       if (onPublished) onPublished(mid);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }

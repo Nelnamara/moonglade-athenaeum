@@ -4,6 +4,7 @@ import { note as noteUpdate, subscribe as subscribeUpdate,
          armReceipt as armUpdateReceipt } from "../notify/updateStore.js";
 import { invalidate, peek, put } from "./swrCache.js";
 import { noticeAchievements } from "../notify/ach.js";
+import { DETAIL_PREFIX } from "../apiRoutes.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
    ControlPanelOverlay.jsx (2026-08-03) into its own hook -- summary/achievements fetch,
@@ -350,7 +351,7 @@ export default function useControlPanel() {
     // collects new art, which is what earns things). Purge those two READ caches so the
     // next Health/Folio open re-reads instead of painting a pre-job snapshot; fetchSummary
     // above and fetchPanelHistory below refresh this hook's own two directly.
-    invalidate(["/api/health", "/api/achievements", "/api/your-art", "/api/next/detail/"]);
+    invalidate(["/api/health", "/api/achievements", "/api/your-art", DETAIL_PREFIX]);
     // Either branch: the run just wrote its terminal event to jobs.jsonl, so the
     // ledger has a new row to show (failed runs are ledger rows too, by design --
     // the DC colors them, it doesn't hide them).

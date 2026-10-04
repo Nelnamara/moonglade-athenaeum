@@ -4,11 +4,12 @@ import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/publish.css";
 import "../styles/publish-mobile.css";
+import { LIBRARY, detail } from "../apiRoutes.js";
 
 /* Publish -- mobile, replaces the "no backend route" placeholder (2026-08-07,
    Moonglade Mobile.dc.html screenIsPublish + the pubconfirm sheet). Single column;
    real data throughout, the exact real pipeline desktop's PublishOverlay.jsx already
-   proved: /api/next/detail (prefill), /api/myart/items (csrf), /api/next/library
+   proved: /api/detail (prefill), /api/myart/items (csrf), /api/library
    (recent-image strip), /api/suggest-prompt (✦ suggest a title), /api/tag-suggest
    (live tag search), /api/contests (real contest list), /api/myart/publish
    (preview-then-confirm).
@@ -61,7 +62,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
     if (!mid) return;
     let dead = false;
     setRow(null); setErr("");
-    apiGet("/api/next/detail/" + encodeURIComponent(mid))
+    apiGet(detail(mid))
       .then((d) => {
         if (dead) return;
         if (d.error) { setErr(d.error); return; }
@@ -78,7 +79,7 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
     apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
     apiGet("/api/contests")
       .then((d) => setContests((d.contests || []).filter((c) => c && c.title)));
-    apiGet("/api/next/library?page=1&page_size=18&media=image&sort=newest")
+    apiGet(LIBRARY + "?page=1&page_size=18&media=image&sort=newest")
       .then((d) => setStrip((d.items || []).slice(0, 18)));
   }, []);
 

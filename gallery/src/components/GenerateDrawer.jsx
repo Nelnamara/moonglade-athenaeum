@@ -42,6 +42,7 @@ import { presetNegativeTail } from "../gen/powerCore.js";
 import RunInspector from "./RunInspector.jsx";
 import { escapeLiteral, newRoll, promptTint, quoteSends } from "../gen/templateCore.js";
 import "../styles/dock.css";
+import { detail } from "../apiRoutes.js";
 
 /* The Generate DOCK — the designed bottom-center glass reshell of the pilot's
    Generate drawer (design spec: Frontend Gallery.dc.html §§ dock 708–1224,
@@ -562,7 +563,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
   }, [g]);
 
   /* REUSE: a done reel tile's real prefill (owner correction, 2026-08-02) --
-     fetches the SAME /api/next/detail/<media_id> Details/Lightbox already call,
+     fetches the SAME /api/detail/<media_id> Details/Lightbox already call,
      and maps its row onto the real composer setters. Prefills only -- never
      submits; the user reviews/edits, then clicks Generate themselves.
 
@@ -610,7 +611,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
     setPrefillBusy(true);
     const notes = [];
     try {
-      const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+      const d = await apiGet(detail(mediaId));
       if (d.error || !d.row) {
         if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
         return;
@@ -730,7 +731,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
      prefill wholesale, the same prefillBusy holds Generate until the whole recipe has
      settled -- but lands on the VIDEO tab and drives the <VideoDrawer> imperative handle.
 
-     Two reads: the catalog row (/api/next/detail, prompt/duration/engine fallback + the
+     Two reads: the catalog row (/api/detail, prompt/duration/engine fallback + the
      numeric engine id) and the task recipe (/api/video-task-params, the authoritative
      shot kind + every recipe field). The pure videoRemixFromRow merges them -- so the
      mapping matrix (§2.2) is loom-testable without React -- and returns the prefill object
@@ -746,7 +747,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
     const live = () => prefillSeq.current === my;   // stale flows stop applying, wholesale
     setPrefillBusy(true);
     try {
-      const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+      const d = await apiGet(detail(mediaId));
       if (d.error || !d.row) {
         if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
         return;
@@ -800,7 +801,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
     // and bail if a newer prefill started while we were waiting; the callees bump again.
     const my = ++prefillSeq.current;
     // an error answer falls through -- prefillFromRun re-fetches and reports its own error
-    const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+    const d = await apiGet(detail(mediaId));
     if (prefillSeq.current !== my) return undefined;   // superseded -- a newer click won
     if (d && d.row && String(d.row.is_video) === "1") {
       // A video recipe has no seed field at all (videoRemixFromRow maps none), so a

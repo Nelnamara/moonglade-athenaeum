@@ -1,5 +1,5 @@
 """Issue #34 direction B -- grid stacking, the SERVER half: the grouped listing mode
-(/api/next/library?group=series) that folds the FULL filtered set into dial-in series
+(/api/library?group=series) that folds the FULL filtered set into dial-in series
 UNITS, and the ?series=<sid> filter that "opens a stack" to one series' members. Pins:
   * ?series=<sid> returns exactly that series' members, honours an added filter
     (rating), an unknown sid is an empty result (not an error), and never leaks a
@@ -17,7 +17,7 @@ UNITS, and the ?series=<sid> filter that "opens a stack" to one series' members.
   * regression: without group=series the payload is byte-identical to before -- one
     card per row, no series key;
   * the route keeps its LOGIN tier and adds NO new endpoint (group/series are params
-    on the existing api_next_library).
+    on the existing api_library).
 """
 import json
 
@@ -89,7 +89,7 @@ _SERIES_MIDS = {"x1a", "x1b", "x1c", "x2a", "x2b", "x3a", "x3b"}
 def test_series_filter_returns_exactly_that_series_members(tmp_path):
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?series=X1&page_size=200").get_json()
+    d = cli.get("/api/library?series=X1&page_size=200").get_json()
     assert d["total"] == 7
     assert {it["media_id"] for it in d["items"]} == _SERIES_MIDS
     # never a non-member (no Y/Z rows leak in)
@@ -102,7 +102,7 @@ def test_series_filter_honours_an_additional_filter(tmp_path):
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
     # only x3a carries rating 5; rating_min=3 must intersect with the series membership
-    d = cli.get("/api/next/library?series=X1&rating_min=3&page_size=200").get_json()
+    d = cli.get("/api/library?series=X1&rating_min=3&page_size=200").get_json()
     assert [it["media_id"] for it in d["items"]] == ["x3a"]
     assert d["total"] == 1
 
@@ -110,12 +110,12 @@ def test_series_filter_honours_an_additional_filter(tmp_path):
 def test_series_filter_unknown_sid_is_empty_not_an_error(tmp_path):
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
-    r = cli.get("/api/next/library?series=NOPExx&page_size=200")
+    r = cli.get("/api/library?series=NOPExx&page_size=200")
     assert r.status_code == 200
     d = r.get_json()
     assert d["items"] == [] and d["total"] == 0
     # a member's own task id is NOT a series id either (sid is the FIRST task's id)
-    assert cli.get("/api/next/library?series=X2").get_json()["total"] == 0
+    assert cli.get("/api/library?series=X2").get_json()["total"] == 0
 
 
 # --- ?group=series : the grouped listing ------------------------------------------------
@@ -123,7 +123,7 @@ def test_series_filter_unknown_sid_is_empty_not_an_error(tmp_path):
 def test_group_series_units_not_rows(tmp_path):
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?group=series&page_size=200").get_json()
+    d = cli.get("/api/library?group=series&page_size=200").get_json()
     # 14 rows fold to 7 units: 1 series + 5 standalones + 1 batch
     assert d["total"] == 7
     assert len(d["items"]) == 7
@@ -146,9 +146,9 @@ def test_group_series_units_not_rows(tmp_path):
 def test_group_series_pages_over_units(tmp_path):
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
-    p1 = cli.get("/api/next/library?group=series&page_size=3&page=1").get_json()
-    p2 = cli.get("/api/next/library?group=series&page_size=3&page=2").get_json()
-    p3 = cli.get("/api/next/library?group=series&page_size=3&page=3").get_json()
+    p1 = cli.get("/api/library?group=series&page_size=3&page=1").get_json()
+    p2 = cli.get("/api/library?group=series&page_size=3&page=2").get_json()
+    p3 = cli.get("/api/library?group=series&page_size=3&page=3").get_json()
     assert (p1["total"], p1["pages"]) == (7, 3)
     assert [len(p1["items"]), len(p2["items"]), len(p3["items"])] == [3, 3, 1]
     # units page without overlap and cover all 7
@@ -175,7 +175,7 @@ def test_group_series_marks_a_batch_but_not_a_singleton(tmp_path):
                   ["s1"], model_id="MS", model_name="Solo One")
     _seed(tmp_path, rows)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?group=series&page_size=50").get_json()
+    d = cli.get("/api/library?group=series&page_size=50").get_json()
     assert d["total"] == 2
     # the 4-image batch: ONE card, batch.count == 4 (all survivors), no series key
     batch = next(it for it in d["items"] if "batch" in it)
@@ -199,7 +199,7 @@ def test_series_cover_is_newest_image_even_when_newest_member_is_a_video(tmp_pat
     rows += _task("V3", _P, "2026-08-20T11:00:00Z", ["v3"], is_video="1")  # newest MEMBER
     _seed(tmp_path, rows)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?group=series&page_size=50").get_json()
+    d = cli.get("/api/library?group=series&page_size=50").get_json()
     unit = next(it for it in d["items"] if "series" in it)
     assert unit["media_id"] == "i2"          # newest image, not v3 (the newest member)
     assert unit["is_video"] is False
@@ -229,7 +229,7 @@ def _seed_filter_case(tmp_path):
 def test_filter_keeps_a_series_with_a_surviving_member_and_drops_one_without(tmp_path):
     _seed_filter_case(tmp_path)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?group=series&rating_min=3&page_size=50").get_json()
+    d = cli.get("/api/library?group=series&rating_min=3&page_size=50").get_json()
     by_sid = {it["series"]["sid"]: it for it in d["items"] if "series" in it}
     # series R survives (r_hi rating 5): present, cover among survivors, counts honest
     assert "R1" in by_sid
@@ -247,7 +247,7 @@ def test_filter_keeps_a_series_with_a_surviving_member_and_drops_one_without(tmp
 
 def test_without_group_the_payload_is_unchanged(tmp_path):
     """The default (no group=series) path is one card per ROW, no series key -- exactly
-    what /api/next/library returned before direction B. Pins the full card dict for a
+    what /api/library returned before direction B. Pins the full card dict for a
     fully-populated row so a drift in the shared card builder fails loudly."""
     _seed(tmp_path, [{
         "media_id": "900", "task_id": "T", "is_video": "", "is_nsfw": "1",
@@ -256,7 +256,7 @@ def test_without_group_the_payload_is_unchanged(tmp_path):
         "source": "online", "title": "My Title", "batch_index": "1", "batch_size": "2",
     }])
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library").get_json()
+    d = cli.get("/api/library").get_json()
     assert len(d["items"]) == 1
     it = d["items"][0]
     assert "series" not in it
@@ -282,7 +282,7 @@ def test_group_off_returns_every_row_and_no_series_key(tmp_path):
     strictly opt-in, so a series' members are NOT collapsed when group is absent."""
     _seed_mixed(tmp_path)
     cli = _client(tmp_path)
-    d = cli.get("/api/next/library?page_size=200").get_json()
+    d = cli.get("/api/library?page_size=200").get_json()
     assert d["total"] == 14
     assert len(d["items"]) == 14
     assert all("series" not in it for it in d["items"])
@@ -292,13 +292,14 @@ def test_group_off_returns_every_row_and_no_series_key(tmp_path):
 # --- tier / no new route ----------------------------------------------------------------
 
 def test_group_and_series_are_params_not_a_new_route(tmp_path):
-    """group/series ride on api_next_library -- no new endpoint, so no ROUTE_TIERS
-    change: the url_map has exactly one rule for /api/next/library and it is
-    api_next_library."""
+    """group/series ride on api_library -- no new endpoint, so no ROUTE_TIERS
+    change: the url_map has exactly one rule for /api/library and it is
+    api_library (the old /api/library name is an alias rule on that same view;
+    tests/test_api_route_aliases.py owns it)."""
     app = create_app(tmp_path)
-    rules = [r for r in app.url_map.iter_rules() if str(r) == "/api/next/library"]
+    rules = [r for r in app.url_map.iter_rules() if str(r) == "/api/library"]
     assert len(rules) == 1
-    assert rules[0].endpoint == "api_next_library"
+    assert rules[0].endpoint == "api_library"
 
 
 def test_grouped_listing_inherits_the_login_tier(tmp_path):
@@ -307,10 +308,10 @@ def test_grouped_listing_inherits_the_login_tier(tmp_path):
     _seed_mixed(tmp_path)
     anon = create_app(tmp_path).test_client()
     LAN = "192.168.1.50"
-    r = anon.get("/api/next/library?group=series", environ_overrides={"REMOTE_ADDR": LAN})
+    r = anon.get("/api/library?group=series", environ_overrides={"REMOTE_ADDR": LAN})
     assert r.status_code == 401
     cli = _client(tmp_path)
-    assert cli.get("/api/next/library?group=series").status_code == 200
+    assert cli.get("/api/library?group=series").status_code == 200
 
 
 # --- the fold, unit-tested without a request --------------------------------------------
