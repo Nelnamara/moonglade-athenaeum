@@ -15,8 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.16.0 — Keeping Watch,
-  2026-10-03), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.17.0 — Mail Call,
+  2026-10-04), per the rule at the top of this file.
 
 ---
 
@@ -32,13 +32,6 @@ why this section exists.
 
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.
-
-- **Free cards: say when they expire, and open PixAI's current event.** *(owner, 2026-10-02)*
-  Event cards have been expiring unused. Add a plain warning before held cards run out, and a
-  link to whatever event PixAI is running, read from its public home-banner list. No per-event
-  check-in: PixAI has no read-only check-in status, and each event's routes differ. The
-  placement needs a short design session first:
-  [#69](https://github.com/Nelnamara/moonglade-athenaeum/issues/69).
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
@@ -82,11 +75,6 @@ why this section exists.
   Deck era, rerolls only) that would name a series from the *image* rather than the prompt —
   banked for when the Provider Deck seam exists.
 
-- **Gift icon on promo cards** *(the last slice of [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))*
-  The icon on the claim chip shipped 2026-08-22 and the claimed-reward line in the activity tracker
-  shipped 2026-08-31 (3.7.0). What remains is the gift icon on future promo gifts — blocked until a
-  promo/card-claim surface exists to carry it.
-
 
 ---
 
@@ -107,12 +95,7 @@ why this section exists.
 
 ## Design-pass reworks — rescope, don't just build
 
-- **PixAI inbox and comment replies.** Being told about everything PixAI's inbox carries for his
-  works (all kinds: comments, likes, follows; owner, 2026-10-02), and replying to comments. Liking,
-  bookmarking and following are not actions the app takes (owner, 2026-09-07). The promo gift folds
-  in, with a gift-box button by the credits chip, which issue #26 always intended. A probe (running
-  2026-10-02), then design Session R, then the build; a reply is the first write to PixAI other than
-  generate and delete.
+- None right now.
 
 ## Scoped-but-unbuilt — decided once, never executed
 
@@ -130,14 +113,6 @@ why this section exists.
   seams (the request module, the price transport, the library scan, `media_tools`). The item still stands
   as a deliberate sweep — the job is to hunt what's *left* (deprecated-in-place flags, orphaned
   classic-era code), not to bank the refactor's incidental cleanup as the sweep.
-
-- **Model bookmarks → PixAI's collections.** *(deferred, 2026-08-17)* PixAI turned bookmarks into
-  named public/private collections. The model picker's Bookmarked tab still works on the older
-  call, so nothing is broken; a check in the build warns when that call leaves PixAI's site.
-  Adopting collections needs one read-only capture of their shapes and a design step for the
-  picker's source tabs. **Owner, 2026-10-02: show and save.** The picker shows his PixAI collections
-  so site-saved models appear in the app, and a Save in the picker puts a model into one of his PixAI
-  collections (design Session S).
 
 ## Open questions — need a call before they can be scoped
 
@@ -217,22 +192,14 @@ why this section exists.
   on-ramp, argparse's own vocabulary, a flag-to-column table, the `--sync` stage-to-column table).
   Docs-only, no behavior changes.
 
-From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
-it's actionable. Listed so they aren't lost, not because they're ready.
-
-- **Curator:** archive-integrity job, Phase B: the list of broken files and what to do about each
-  (the read-only check, its Health tiles and its Panel row are Phase A, built in Wave 1). Needs
-  design Session W first.
-
 From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationale in
 `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
 above, tagged "Scope":
 
 - **Curator:** an in-app screen for importing a curation backup (the export, and the command-line
   import, are built in Wave 1; a screen needs a design step).
-- **Mobile:** optional infinite scroll, after the phone gallery itself is fixed
-  ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73)) · an opt-in "remember this device" longer LAN session (still
-  authenticated) · QR-connect onboarding (URL only, login gate unchanged).
+- **Mobile:** an opt-in "remember this device" longer LAN session (still authenticated). Designed
+  (design Session V) and held for the app security review below.
 
 (The sweep's Loom draft-vs-professional marking on rendered shots was dropped by the owner on
 2026-09-07.)

@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-10-04 — Mail Call
+
 ### The pickers' Saved tab
 - **Saved replaces Bookmarked in the model and LoRA pickers.** Bookmarked read PixAI's old bookmarks list, which has taken no new save since mid-August; Saved reads the list pixai.art's own Save button adds to, newest saved first, so a save made on their site shows up. On the desktop a narrow list beside it holds your named sets from PixAI, counting only models (or only LoRAs), and a narrower picker opens the same list from Saved ▾. The line above counts what is there and how many saved models PixAI no longer has, LoRAs filter by base, and a list that fails to load says so with Retry instead of looking empty. Opening it only reads. (2026-10-03)
 - **Old bookmarks that never reached Saved show after it, tagged old.** The count line adds "M old", and Show old bookmarks at the end of the list hides them for your account. (2026-10-03)
