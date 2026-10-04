@@ -1,0 +1,122 @@
+/* Health's Broken files section (Session W; Archive Integrity Handoff.dc.html, the build's pixel
+   source). Sizes, colours and copy are the handoff's own; everything else rides the skin tokens.
+   No ruby anywhere: held and refused states are peach, LOST is a dashed neutral, ✓ FIXED is
+   emerald. Local z-index only (the components band), so nothing here joins the overlay ladder. */
+
+.mgbf { margin: 18px 0 4px; display: flex; flex-direction: column; gap: 7px; }
+.mgbf-head { display: flex; align-items: center; gap: 10px; }
+.mgbf-title { flex: 1 1 auto; font-family: Georgia, serif; font-style: italic; font-size: 15px; color: var(--text); }
+.mgbf-sum { font: 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); white-space: nowrap; }
+.mgbf-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.mgbf-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mgbf-chip { font-family: inherit; font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
+.mgbf-chip:hover { color: var(--text); }
+.mgbf-chip.on { border-color: var(--lavender); background: rgba(182, 146, 230, .16); color: var(--text); }
+
+.mgbf-rows { display: flex; flex-direction: column; gap: 7px; }
+.mgbf-item { position: relative; display: flex; flex-direction: column; gap: 6px; }
+/* W2a: 46 px -- a 34 px thumb inside 6 px of padding */
+.mgbf-row { position: relative; display: flex; align-items: center; gap: 6px; box-sizing: border-box;
+  min-height: 46px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--surface1);
+  background: rgba(33, 31, 58, .3); }
+.mgbf-row.failed { border-color: rgba(250, 179, 135, .55); }
+.mgbf-row.failed .mgbf-prob { color: var(--peach); white-space: normal; }
+.mgbf-thumb { flex: none; width: 34px; height: 34px; border-radius: 7px; background: var(--surface0) center / cover no-repeat; }
+.mgbf-thumb.none { display: grid; place-items: center; box-sizing: border-box; border: 1px dashed var(--surface1);
+  background: rgba(33, 31, 58, .4); font-size: 12px; color: var(--overlay0); }
+.mgbf-main { flex: 1 1 auto; min-width: 0; font-size: 10.5px; line-height: 1.45; color: var(--text); }
+.mgbf-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mgbf-prob { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mgbf-size { flex: none; font: 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); white-space: nowrap; }
+.mgbf-pill { flex: none; font-size: 8.5px; font-weight: 800; letter-spacing: .06em; padding: 2px 7px; border-radius: 999px;
+  white-space: nowrap; border: 1px solid var(--surface1); color: var(--overlay0); }
+.mgbf-pill.peach { border-color: rgba(250, 179, 135, .55); color: var(--peach); }
+.mgbf-pill.lost { border: 1px dashed var(--subtext); color: var(--subtext); }
+.mgbf-pill.ok { border-color: rgba(79, 201, 154, .5); color: var(--emerald); }
+.mgbf-ghost { flex: none; font-family: inherit; font-size: 10px; padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; }
+.mgbf-ghost:hover { color: var(--text); border-color: var(--lavender); }
+.mgbf-ghost:disabled { opacity: .5; cursor: default; }
+.mgbf-btn { flex: none; font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px;
+  white-space: nowrap; border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
+.mgbf-btn:hover { background: var(--mauve); }
+/* the ⋯ menu (the handoff's popover: lavender edge, the base ground, a soft drop) */
+.mgbf-pop { position: absolute; right: 8px; top: calc(100% + 4px); z-index: 3; display: flex; flex-direction: column;
+  min-width: 140px; padding: 5px; border-radius: 12px; border: 1px solid var(--lavender); background: #0c0a1c;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .5); }
+.mgbf-pop button { font-family: inherit; font-size: 10.5px; line-height: 1.5; text-align: left; padding: 4px 8px; border-radius: 7px;
+  border: 0; background: none; color: var(--text); cursor: pointer; }
+.mgbf-pop button:hover { background: rgba(182, 146, 230, .14); }
+/* W5a: a LOST row's reason, and its two buttons */
+.mgbf-lostline { font-size: 10.5px; line-height: 1.5; color: var(--subtext); padding: 0 4px; }
+.mgbf-lostacts { display: flex; gap: 6px; justify-content: flex-end; }
+/* W4c: the active row's byte bar, 3 px of lavender on the true fraction */
+.mgbf-bar { height: 3px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
+.mgbf-bar i { display: block; height: 100%; background: var(--lavender); transition: width .25s; }
+.mgbf-empty { font-size: 10.5px; color: var(--overlay0); padding: 4px 2px; }
+/* W4c: "5 / 12 fixed" + the moon (MoonGauge, 16 px, the moon alone) + Stop, in the header */
+.mgbf-run { font-size: 10.5px; color: var(--text); white-space: nowrap; }
+
+/* W3c: the one confirm. Its own rung on the overlay ladder (overlays.css's THE OVERLAY LADDER):
+   above Health's slab (411) and the curation undo toast (427), under the power modal (430). */
+.mgbf-scrim { position: fixed; inset: 0; z-index: 428; background: rgba(5, 4, 13, .55); }
+.mgbf-host { position: fixed; inset: 0; z-index: 429; display: grid; place-items: center; pointer-events: none; }
+.mgbf-confirm { pointer-events: auto; box-sizing: border-box; width: min(440px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 5px; padding: 14px 16px 12px; border-radius: 12px;
+  border: 1px solid var(--lavender); background: #0c0a1c; box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
+  font-size: 10.5px; line-height: 1.5; color: var(--text); }
+.mgbf-ctitle { font-size: 12px; font-weight: 700; }
+.mgbf-cline { color: var(--text); }
+.mgbf-cacts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+
+/* Health's problem tiles, flagged while the list has rows under them (the handoff draws them
+   peach; a clean library reads 0 with no peach). On the desktop's open tiles that is the value and
+   its rule in peach, and the value is the button that opens the list at its chip. */
+.mgh-stat.flag { border-bottom-color: rgba(250, 179, 135, .5); }
+.mgh-stat-value.flag { color: var(--peach); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgbf-bar i { transition: none; }
+}
+
+/* ---- the phone (W6a): Collection Health's tiles and entry row, and the pushed screen ---- */
+.ctm-statcard.mgbf-flag { border-color: rgba(250, 179, 135, .5); background: rgba(250, 179, 135, .06); }
+.ctm-statcard.mgbf-flag .ctm-statnum-btn { color: var(--peach); }
+.mgbf-m-entry { display: flex; align-items: baseline; gap: 8px; width: 100%; box-sizing: border-box; min-height: 44px;
+  padding: 10px 4px; margin: 0 0 14px; border: 0; border-bottom: 1px solid var(--surface1); background: none;
+  font-family: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-entry .mgbf-title { font-size: 13px; }
+.mgbf-m { display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+/* progress lives at the screen's head while a run goes (the screen's own title row stays) */
+.mgbf-m-run { position: sticky; top: -13px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  margin: -13px -13px 0; padding: 9px 13px; background: var(--base); border-bottom: 1px solid var(--surface1); }
+.mgbf-m-chips { flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; height: 36px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.mgbf-m-chips::-webkit-scrollbar { display: none; }
+.mgbf-m-chips .mgbf-chip { flex: none; min-height: 30px; font-size: 11px; }
+.mgbf-m-rows { display: flex; flex-direction: column; gap: 7px; }
+.mgbf-m-item { display: flex; flex-direction: column; gap: 5px; }
+/* 64 px rows: a 44 px thumb inside 10 px of padding */
+.mgbf-m-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 64px; box-sizing: border-box;
+  padding: 9px 10px; border-radius: 10px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .3);
+  font-family: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-row.failed { border-color: rgba(250, 179, 135, .55); }
+.mgbf-m-row.failed .mgbf-prob { color: var(--peach); white-space: normal; }
+.mgbf-m-row .mgbf-thumb { width: 44px; height: 44px; border-radius: 8px; }
+.mgbf-m-row .mgbf-main { display: flex; flex-direction: column; font-size: 11.5px; }
+.mgbf-m-pills { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+/* THE STICKY FIX ALL (drift 122's recipe, on this screen only): it sticks to the scroller's
+   real foot -- the offset is minus the body's own 13 px pad, the same reason the shared sheet's
+   action row uses minus its pad -- and on a short list margin-top:auto rests it there anyway. The
+   tab bar under this screen already keeps the home indicator's safe area. */
+.mgbf-m-foot { position: sticky; bottom: -13px; z-index: 2; display: flex; justify-content: center;
+  margin: auto -13px -13px; padding: 10px 13px 13px; background: var(--base); border-top: 1px solid var(--surface1); }
+.mgbf-m-foot .mgbf-btn { min-height: 44px; padding: 0 18px; font-size: 12px; }
+.mgbf-m-sheet { display: flex; flex-direction: column; }
+.mgbf-m-sheet .mgbf-lostline { padding: 2px 4px 8px; font-size: 12px; }
+.mgbf-m-sheet button { min-height: 44px; padding: 0 4px; border: 0; border-bottom: 1px solid var(--surface0);
+  background: none; font-family: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer; }
+.mgbf-m-confirm { display: flex; flex-direction: column; gap: 5px; padding: 2px 2px 4px; font-size: 12px; line-height: 1.5; }
+.mgbf-m-cacts { display: flex; justify-content: flex-end; gap: 8px; }
+.mgbf-m-cacts button { min-height: 44px; padding: 0 16px; font-size: 12px; }

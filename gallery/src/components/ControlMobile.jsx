@@ -14,6 +14,9 @@ import { apiGet } from "../api.js";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
 import { versionFromStamp } from "../notify/updateStore.js";
+import { useSwrGet } from "../hooks/swrCache.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
+import { reviewLabel } from "../lib/brokenFilesCore.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
 import "../styles/control-mobile.css";
@@ -127,6 +130,9 @@ export default function ControlMobile({ account, brandRequest }) {
   for (const j of panelHistory) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
+  // Session W (W6a): the Verify row's "N broken · Review" opens Collection Health at Broken files.
+  const { data: brokenDoc } = useSwrGet("/api/integrity/broken");
+  const brokenReview = reviewLabel(brokenDoc);
 
   // Live Mirror -- new, mobile-only glue reusing the already-shipped, read-
   // only /api/watch/status route (see this file's header comment for why
@@ -459,6 +465,10 @@ export default function ControlMobile({ account, brandRequest }) {
                       <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
                         {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
                       </span>
+                      {key === "verify-library" && brokenReview ? (
+                        <button type="button" className="mgcp-review"
+                          onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
+                      ) : null}
                       <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                     </div>
                   ) : null

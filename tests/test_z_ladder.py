@@ -128,6 +128,18 @@ def test_the_collections_manager_and_its_undo_toast_keep_their_rungs(z):
     assert z["cu_toast"] > z["cu_mgr"] and z["cu_toast"] < z["cp_pwr"]
 
 
+def test_the_broken_files_confirm_opens_over_health_and_under_the_power_modal(z):
+    """Session W: "Fix all recoverable" confirms in a modal over Health's slab (the handoff drew
+    "z 310", the band's floor before this ladder put the Lightbox at 400). It takes the free
+    428/429: above the slab it opens from and the curation undo toast (its own Mark lost toast
+    is the same toast), below the power modal; its scrim sits under its own card."""
+    bf = {"scrim": _z("styles/broken-files.css", ".mgbf-scrim"),
+          "host": _z("styles/broken-files.css", ".mgbf-host")}
+    assert bf["host"] > bf["scrim"], "the confirm's scrim would eat clicks meant for its buttons"
+    assert bf["scrim"] > z["mgv_host"], "the confirm opens behind Health"
+    assert bf["scrim"] > z["cu_toast"] and bf["host"] < z["cp_pwr"]
+
+
 def test_the_colour_palette_stays_under_the_picker_it_opens():
     """"Extract from image" -> "From the gallery" opens the shared picker ON TOP of the palette
     window; flip that pair and the picker paints behind the window that asked for it."""

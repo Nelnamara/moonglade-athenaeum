@@ -73,7 +73,9 @@ The buttons are grouped exactly as the risk splits.
 - **Verify library integrity** — the read-only integrity check (`--verify-library
   --verify-deep`): missing and empty files, files cut short, missing or empty thumbnails.
   Its row under **Check — read-only** shows when it last ran; the log shows the summary and the
-  first lines of `integrity_report.csv`. See [Health → Library integrity](Health).
+  first lines of `integrity_report.csv`. After a check that found broken files the row also
+  says **N broken · Review ▸**, which opens Health at the **Broken files** list. See
+  [Health → Library integrity](Health).
 - **Top up the Similar index (adds only what's missing)** — embeds any images the
   visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous

@@ -9718,6 +9718,18 @@ def health_cached(out_dir, db_path, fresh=False):
     return payload
 
 
+def health_avg_file_bytes():
+    """The library's average image size from the LAST Health measurement, or None before
+    there is one. A memory read, never a walk: the Broken files list sizes its re-download
+    estimate with it ("~9 MB"), and a cut-short file says nothing about how big it should be."""
+    with _HEALTH_LOCK:
+        payload = _HEALTH_CACHE["payload"]
+    if not payload:
+        return None
+    n, total = payload.get("total_files"), payload.get("total_bytes")
+    return int(total / n) if n and total else None
+
+
 def _health_prime(out_dir, db_path):
     """Warm the memo off-thread at boot so the first Health open of a session is a memory
     read too. Daemon, so it can never hold up an exit; fail-soft, so a broken library still
@@ -15741,6 +15753,97 @@ def create_app(out_dir: Path):
         sends it on an explicit user refresh, never on a plain open."""
         return jsonify(health_cached(out_dir, db_path,
                                      fresh=bool(request.args.get("fresh"))))
+
+    # ---- Health's Broken files list (Session W, the Archive Integrity Handoff) ----
+    # The list reads the last integrity check's report (moonglade_integrity.broken_list);
+    # the owner's Mark lost / Keep as is are a local flag beside it (integrity_marks.json).
+    # Neither touches a file, a catalog row or PixAI.
+
+    @app.route("/api/integrity/broken")
+    @tier(LOGIN)
+    def api_integrity_broken():
+        """The Broken files list: the last check's broken rows with each one's pill, the one
+        action that applies, its chip and its local mark, plus what Fix all would do.
+        `read_only` says whether re-downloads are off (READ_ONLY in config.json)."""
+        import moonglade_backup as core
+        import moonglade_integrity
+        doc = moonglade_integrity.broken_list(out_dir, db_path,
+                                              avg_bytes=health_avg_file_bytes())
+        doc["read_only"] = bool(core.READ_ONLY or core._read_only_now())
+        doc["run"] = _fix_runner.status()
+        return jsonify(doc)
+
+    @app.route("/api/integrity/mark", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_mark():
+        """Mark lost / Keep as is / Undo: set one broken row's local mark ("lost", "kept",
+        or "" to clear it) and answer the mark it had before, which Undo sends back. Only a
+        row on the list can take a mark; clearing is allowed for any row that has one.
+        Body: {csrf, media_id, mark}."""
+        import moonglade_integrity
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        mid = str(body.get("media_id") or "").strip()
+        mark = str(body.get("mark") or "")
+        if mark not in ("",) + moonglade_integrity.MARKS:
+            return jsonify({"error": "That isn't a mark this list keeps."}), 400
+        if mark and mid not in moonglade_integrity.listed_ids(out_dir):
+            return jsonify({"error": "That file isn't on the Broken files list."}), 400
+        if not mark and mid not in moonglade_integrity.read_marks(out_dir):
+            return jsonify({"ok": True, "media_id": mid, "mark": "", "prev": ""})
+        try:
+            prev = moonglade_integrity.set_mark(out_dir, mid, mark)
+        except (ValueError, OSError) as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
+        return jsonify({"ok": True, "media_id": mid, "mark": mark, "prev": prev})
+
+    # The fix run: moonglade_integrity.FixRunner, one per server, on its own thread so closing
+    # Health never stops it. It refuses an archive-only row BY ITSELF (redownload_one reads the
+    # catalog, whatever the client sent), READ_ONLY blocks its re-downloads but not its local
+    # thumbnail rebuilds, and it deletes nothing. Test seam: app.extensions["mg_integrity_fix"].
+    import moonglade_integrity as _integ
+    _fix_runner = _integ.FixRunner(out_dir, db_path, log_job=_log_job)
+    app.extensions["mg_integrity_fix"] = _fix_runner
+
+    @app.route("/api/integrity/fix", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_fix():
+        """Start a fix run over the chosen rows: one per-row Re-download / Rebuild, or Fix all
+        recoverable. Body: {csrf, items: [{media_id, action}, ...]} -- every row with the action
+        the list SHOWED ("redownload" or "rebuild"), which the runner holds it to: a file that
+        changed since the check runs nothing (review finding 3). Rows not on the Broken files
+        list come back in `refused`; 409 while a run is going. Answers the run's status with
+        `started`."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        items = body.get("items")
+        if (not isinstance(items, list) or not items
+                or not all(isinstance(it, dict) and str(it.get("media_id") or "").strip()
+                           and it.get("action") in _integ.FIX_ACTIONS for it in items)):
+            return jsonify({"error": "No files were chosen."}), 400
+        st = _fix_runner.start(items[:5000])
+        if st is None:
+            return jsonify({"error": "A fix is already running.", "busy": True}), 409
+        st["started"] = bool(st["running"])
+        return jsonify(st)
+
+    @app.route("/api/integrity/fix/status")
+    @tier(LOGIN)
+    def api_integrity_fix_status():
+        """The fix run as it stands: n / N, the current row's bytes, every result so far."""
+        return jsonify(_fix_runner.status())
+
+    @app.route("/api/integrity/fix/stop", methods=["POST"])
+    @tier(LOGIN)
+    def api_integrity_fix_stop():
+        """Stop: the current file finishes, then the run ends. Nothing is rolled back."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        _fix_runner.stop()
+        return jsonify({"ok": True})
 
     @app.route("/api/panel/summary")
     @tier(LOGIN)

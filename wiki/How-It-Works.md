@@ -16,7 +16,9 @@ moonglade_runs.py         the prompt template (`{a|b}` variables, saved lists), 
                           runs, and the Runs store behind Inspect
 moonglade_contest_wins.py what counts as a verified contest win and when it is checked
 moonglade_integrity.py    the read-only library integrity check (--verify-library) behind
-                          Health's Zero-byte / Missing thumbs / Last verified tiles
+                          Health's Zero-byte / Missing thumbs / Last verified tiles, and
+                          Health's Broken files list: its local marks and its targeted
+                          re-download / thumbnail-rebuild run
 moonglade_curation_io.py  the curation sidecar: --export-curation / --import-curation and the
                           Control Panel's Download curation (JSON)
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite

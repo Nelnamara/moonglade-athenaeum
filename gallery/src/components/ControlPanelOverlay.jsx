@@ -21,6 +21,9 @@ import useBrandingBeat from "../hooks/useBrandingBeat.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { openAbout } from "../help/helpStore.js";
+import { useSwrGet } from "../hooks/swrCache.js";
+import { openBrokenFiles } from "../lib/brokenFilesNav.js";
+import { reviewLabel } from "../lib/brokenFilesCore.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -377,6 +380,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
   for (const j of panelHistory) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
+  // Session W (W1a): the "Verify library integrity" row says what the last check found and opens
+  // Health's Broken files list at All ("12 broken · Review ▸"). A file read on the server.
+  const { data: brokenDoc } = useSwrGet("/api/integrity/broken");
+  const brokenReview = reviewLabel(brokenDoc);
 
   // The tab never READS "brand" while locked -- and since the panel can now be opened ON
   // it (a requested tab, above), "locked" has to mean what the panel's OWN achievements read
@@ -860,6 +867,10 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                                   <span className={"mgcp-checklast" + (lastByAction[key] && ledgerResult(lastByAction[key]).good ? " ok" : "")}>
                                     {lastByAction[key] ? fmtWhen(lastByAction[key].ts) : "—"}
                                   </span>
+                                  {key === "verify-library" && brokenReview ? (
+                                    <button type="button" className="mgcp-review"
+                                      onClick={() => openBrokenFiles("all")}>{brokenReview}</button>
+                                  ) : null}
                                   <button type="button" className="mgcp-run" onClick={() => runAction(key)}>run ▸</button>
                                 </div>
                               ) : null

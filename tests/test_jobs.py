@@ -1267,14 +1267,16 @@ def test_sweep_is_idempotent_and_skips_finished_jobs(tmp_path):
 
 
 def test_sweep_covers_every_server_owned_prefix(tmp_path):
-    """import-/bulkdel- are spawned by the server exactly like panel-, so all three must be
-    swept. Pinned as a set so adding a new server-spawned prefix without adding it here fails
-    loudly rather than leaving a whole job class stuck at 'running'."""
-    assert set(core._JOBS_SERVER_OWNED_PREFIXES) == {"panel-", "import-", "bulkdel-"}
-    for jid in ("panel-1", "import-2", "bulkdel-3"):
+    """import-/bulkdel-/integrity- are spawned by the server exactly like panel-, so all four
+    must be swept (integrity- is the Broken files list's fix run). Pinned as a set so adding a
+    new server-spawned prefix without adding it here fails loudly rather than leaving a whole
+    job class stuck at 'running'."""
+    assert set(core._JOBS_SERVER_OWNED_PREFIXES) == {"panel-", "import-", "bulkdel-",
+                                                     "integrity-"}
+    for jid in ("panel-1", "import-2", "bulkdel-3", "integrity-4"):
         core.append_job_event(tmp_path, jid, status="running", type="panel")
 
-    assert core.resolve_interrupted_local_jobs(tmp_path) == 3
+    assert core.resolve_interrupted_local_jobs(tmp_path) == 4
 
 
 def test_a_surviving_subprocess_can_still_correct_a_premature_failure(tmp_path):

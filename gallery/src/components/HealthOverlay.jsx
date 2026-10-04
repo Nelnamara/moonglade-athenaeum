@@ -1,6 +1,11 @@
 import React from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
+import useBrokenFiles from "../hooks/useBrokenFiles.js";
 import StorageBars from "./StorageBars.jsx";
+import BrokenFiles from "./BrokenFiles.jsx";
+import { tileChip } from "../lib/brokenFilesCore.js";
+import { subscribeBrokenFilesIntent, takeBrokenFilesIntent } from "../lib/brokenFilesNav.js";
+import { onRunEnd } from "../lib/brokenFixRun.js";
 import "../styles/overlays.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -61,11 +66,33 @@ function donutData(models) {
   return { data, total, gradient: "conic-gradient(" + stops.join(", ") + ")" };
 }
 
-export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates, onStoragePick }) {
+export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onLoraFilter, onOpenDuplicates, onStoragePick, onOpenDetails }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
-  const { h, err, stats, monthMax, modelMax, tier, buckets, storage } = useHealth();
+  // A Broken files fix run changed the library under this panel: the tiles re-measure when it ends.
+  const [runsEnded, setRunsEnded] = React.useState(0);
+  React.useEffect(() => onRunEnd(() => setRunsEnded((n) => n + 1)), []);
+  const { h, err, stats, monthMax, modelMax, tier, buckets, storage } = useHealth(runsEnded);
   const [monthView, setMonthView] = React.useState("trend");   // DC default
   const [modelView, setModelView] = React.useState("bars");    // DC default
+
+  /* Session W (W1a): the Broken files section, under the tiles and above the storage bars, only
+     while the last integrity check found broken rows. A problem tile opens it at its chip; the
+     Control Panel's "Review ▸" and a fix run's Activity row open it at All (lib/brokenFilesNav.js:
+     on mount, or live when Health is already up). */
+  const bf = useBrokenFiles();
+  const [bfChip, setBfChip] = React.useState("all");
+  const bfRef = React.useRef(null);
+  const [bfGo, setBfGo] = React.useState(() => takeBrokenFilesIntent());
+  React.useEffect(() => subscribeBrokenFilesIntent(() => setBfGo(takeBrokenFilesIntent())), []);
+  const bfShown = !!(bf.doc && bf.doc.counts && bf.doc.counts.all > 0);
+  const openBroken = (chip) => setBfGo(chip || "all");
+  React.useEffect(() => {
+    if (!bfGo || !bfShown || !h) return;
+    setBfChip(bf.doc.counts[bfGo] > 0 ? bfGo : "all");
+    const el = bfRef.current;
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setBfGo(null);
+  }, [bfGo, bfShown, h]);
 
   return (
     <>
@@ -83,10 +110,23 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
           {h && (
             <>
               <div className="mgh-stats">
-                {stats.map((st) => (
-                  <div className="mgh-stat" key={st.label}>
+                {stats.map((st) => {
+                  // Session W: a problem tile with rows on the Broken files list wears peach and
+                  // opens the list at its chip; a clean library reads 0 with no peach.
+                  const chip = bfShown ? tileChip(st.label, bf.doc.counts) : null;
+                  const flag = !!chip;
+                  return (
+                  <div className={"mgh-stat" + (flag ? " flag" : "")} key={st.label}>
                     <div className="mgh-stat-label">{st.label}</div>
-                    {st.dup ? (
+                    {flag ? (
+                      <button type="button" className="mgh-stat-value flag"
+                        style={{ display: "block", width: "100%", border: "none", background: "none",
+                          padding: 0, font: "inherit", textAlign: "left" }}
+                        title="Show these in Broken files"
+                        onClick={() => openBroken(chip)}>
+                        {st.value}
+                      </button>
+                    ) : st.dup ? (
                       <button type="button" className="mgh-stat-value dup"
                         style={{ display: "block", width: "100%", border: "none", background: "none",
                           padding: 0, font: "inherit", textAlign: "left" }}
@@ -100,8 +140,14 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
+
+              {bfShown ? (
+                <BrokenFiles bf={bf} chip={bfChip} setChip={setBfChip} sectionRef={bfRef}
+                  onOpenDetails={onOpenDetails} />
+              ) : null}
 
               {/* N6: Storage used, as three stacked bars. A segment closes this and opens the
                   gallery filtered to it (App's onStoragePick). */}

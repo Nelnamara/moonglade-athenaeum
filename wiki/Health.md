@@ -125,9 +125,88 @@ at the library root, `integrity_report.csv` (one line per problem: media id, pro
 size, recoverable) and `integrity_report.json` (the counts and when it ran), and the Panel's log
 shows the summary and the first lines. A broken picture that PixAI no longer has says
 **recoverable: no** — there is nothing left to download it from again. The check itself
-repairs nothing. What already does: **Sync now** builds thumbnails that are missing (not
-empty ones), and the Advanced **Full re-walk** downloads a missing or empty file again. A file
-that is cut short but not empty is skipped by both, so for now it stays on the report.
+repairs nothing; the **Broken files** list below is where you act on what it found.
+
+### Broken files
+
+When the last check found broken files, Health shows a **Broken files** section under the tiles
+and above the storage bars. It is absent on a clean library. The **Zero-byte files**,
+**Missing thumbs** and **Missing files** tiles turn peach while the list has rows of their kind,
+and clicking one jumps to the list with that kind picked (**Missing files** opens it at **All**). **Control Panel → Check — read-only → Verify library
+integrity** says "N broken · Review ▸" after a check that found some; that opens Health at the
+list too.
+
+The chips across the top are **All**, **Zero-byte**, **Thumbnail**, **Suspect** and **Lost**,
+each with its count (a chip with nothing under it is hidden). A file that is missing altogether
+has no chip of its own: it is listed under **All** (and under **Lost** if PixAI no longer has
+it), reading "missing · <where the catalog expects it>". Each row shows the picture's
+thumbnail (or a "?"), its id, the problem and where the file is, its size ("size unknown" for a
+missing file, since the catalog doesn't record one), and a pill:
+
+- **RECOVERABLE** — a missing or empty file PixAI still has, or a missing or empty thumbnail.
+- **SUSPECT** (peach) — a file that stops before its end. "Suspect", never "corrupt": the
+  check reads two small pieces of the file and decodes nothing.
+- **LOST** (dashed) — a broken file PixAI no longer has, or one you marked lost. A picture
+  PixAI no longer has also wears **ARCHIVE**, the same word the gallery uses, and its row says
+  "Broken here, and gone from your PixAI history as of <date>. There's no copy left to
+  re-download." The date is when the archive-only flag was last rewritten by a sync. If a
+  later sync finds the picture on PixAI again, the row turns back into **RECOVERABLE**.
+
+A row offers only the fix that applies to it (**Re-download** or **Rebuild**, see below) and a
+**⋯** menu with **Open details**, **Mark lost** and **Copy path**. A LOST row never offers a
+re-download; it offers **Open details** and **Keep as is**, which quiets it.
+
+**Mark lost** and **Keep as is** are a note this app keeps for itself, in
+`integrity_marks.json` at the library root beside the two reports. They delete nothing and
+change nothing else, a lost row stops being counted for **Fix all**, and the toast that
+confirms either one has an **Undo** for ten seconds.
+
+#### Fixing a row
+
+A row's own button runs straight away, with no confirm, because it is one file:
+
+- **Re-download** asks PixAI for the picture again, once, the same way a backup does. The new
+  copy is checked before it goes anywhere: it has to be a whole file of the same kind as the
+  broken one. Only then does it replace the broken file, under the same name. A missing file
+  goes back where the catalog expects it (a bare file name means the `images/` folder, or
+  `videos/` for a clip), and only if that place is inside the library and holds nothing yet. If PixAI sends
+  nothing, or what it sends doesn't check out, the old file is left exactly as it was and the
+  row says so in peach.
+- **Rebuild** makes the thumbnail again from the file on your disk. Nothing reaches PixAI.
+
+Nothing in the list deletes or quarantines a file. A picture PixAI no longer has is never
+re-downloaded — the app refuses it on the server whatever the screen asks — and with
+`READ_ONLY` on, re-downloads are off (thumbnails can still be rebuilt). When a fix finishes, the
+row shows **✓ FIXED** for two seconds and leaves the list, and the rows that were fixed are
+checked again so the tiles and the report follow.
+
+#### Fix all recoverable
+
+The section's **Fix all recoverable (N)** button counts the missing, empty, cut-short and thumbnail rows
+that can be fixed — never a LOST row, never a picture PixAI no longer has — and asks once:
+how many files it will re-download from PixAI and about how much that is, how many thumbnails
+it will rebuild here, how many lost files it leaves alone, and "Nothing is deleted." On a phone
+whose Data saver is on over a metered connection, it says that too. With `READ_ONLY` on it
+counts only the thumbnails.
+
+While it runs, the section's header reads "5 / 12 fixed" with the moon filling as files finish,
+and a **Stop** that lets the current file finish and then stops (nothing is rolled back). The
+file being downloaded shows how many of its bytes have arrived. You can close Health: the run
+carries on, the Activity window shows it as "Fixing 12 files · 5 / 12", and clicking that line
+brings you back to the list. When it ends a note says what happened ("Fixed 11 of 12. 1
+couldn't be re-downloaded.") with **Show**, and Health's tiles measure again.
+
+#### On a phone
+
+In **☰ Menu → Health** the **Zero-byte files**, **Missing thumbs** and **Missing files** tiles
+turn peach the same way, and a **Broken files** row under the tiles (with "12 · 1 lost ›") opens the list as its own
+screen; tapping a peach tile opens it at that kind. The chips scroll sideways, and tapping a row
+opens a sheet with what applies to it: **Re-download** or **Rebuild**, **Open details**, and
+**Mark lost** (a LOST row's sheet says why, and offers **Keep as is** instead). **Fix all
+recoverable (N)** stays at the foot of the screen and confirms in a sheet with the same lines as
+the desktop. While it runs, the top of the screen shows "n / N fixed" with the moon and **Stop**,
+and the Activity sheet shows the run. The phone's **Control → Check — read-only** row says
+"N broken · Review ▸" too.
 
 ## Thumbnails & health accuracy
 
