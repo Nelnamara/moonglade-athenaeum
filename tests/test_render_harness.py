@@ -8538,3 +8538,142 @@ def test_pages_range_select_reaches_pictures_not_loaded_and_the_confirm_counts_t
         page.wait_for_selector(".glm-rangecard", state="detached", timeout=6000)
     finally:
         ctx.close()
+
+
+_U_IOS_SAFARI = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+_U_IOS_CHROME = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                 "(KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1")
+
+# A browser offering its own install prompt, as Android Chrome does: the event the gallery holds back for
+# the strip. Its prompt() only counts; nothing is installed.
+_U_OFFER_INSTALL_JS = """() => {
+    const e = new Event('beforeinstallprompt', {cancelable: true});
+    e.prompt = () => { window.__prompted = (window.__prompted || 0) + 1; return Promise.resolve(); };
+    e.userChoice = Promise.resolve({outcome: 'dismissed'});
+    window.__offer = e;
+    window.dispatchEvent(e);
+    return e.defaultPrevented; }"""
+
+
+def _u_phone(render_browser, server, monkeypatch, ua=None, viewport=None):
+    monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
+    opts = {"user_agent": ua} if ua else {}
+    ctx = render_browser.new_context(viewport=viewport or PHONE, device_scale_factor=1, has_touch=True,
+                                     is_mobile=True, base_url=server.base_url, timezone_id="UTC", **opts)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_Q_WRITES_JS)
+    return ctx, ctx.new_page()
+
+
+def _u_landed(page):
+    """The gallery a sign-in lands on, settled."""
+    page.wait_for_selector(".glm-tile")
+    _freeze_motion(page)
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+
+def test_the_home_screen_nudge_shows_once_after_sign_in_on_ios_safari_with_a_bubble_at_share(
+        phone_u_server, render_browser, monkeypatch):
+    """U6c + U7b on iOS Safari. Right after a sign-in: a 36 px strip under the pill row, pushing the grid
+    down, "Add to Home Screen for full screen ›" and ✕. Its tap shows the bubble 12 px above Safari's
+    toolbar with ▼ (▲ under the top, held sideways); any tap closes it, and so do 8 s. A reload does not
+    show the strip again; the next sign-in does, until ✕ -- which is kept on this phone, and is the only
+    write. iOS Chrome sees nothing."""
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch, ua=_U_IOS_SAFARI)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_selector(".glm-nudge")
+        geo = page.evaluate("""() => { const s = document.querySelector('.glm-nudge').getBoundingClientRect();
+            const bar = document.querySelector('.glm-bar2').getBoundingClientRect();
+            const grid = document.querySelector('.glm-grid').getBoundingClientRect();
+            const x = document.querySelector('.glm-nudge-x').getBoundingClientRect();
+            const go = document.querySelector('.glm-nudge-go');
+            return {h: s.height, w: s.width, under: s.top >= bar.bottom - 0.5, pushes: grid.top >= s.bottom,
+                    text: go.textContent, color: getComputedStyle(go).color, xw: x.width, vw: innerWidth}; }""")
+        assert abs(geo["h"] - 36) < 1 and geo["under"] and geo["pushes"], geo
+        assert geo["text"] == "Add to Home Screen for full screen ›", geo
+        assert geo["xw"] >= 44 and geo["w"] >= geo["vw"] - 24, geo
+        assert [k for k in page.evaluate("window.__qWrites") if k.startswith("mg_phone_")] == [], "nothing writes on open"
+
+        page.click(".glm-nudge-go")
+        page.wait_for_selector(".mgnudge-bubble.bottom")
+        b = page.evaluate("""() => { const r = document.querySelector('.mgnudge-bubble').getBoundingClientRect();
+            const card = document.querySelector('.mgnudge-card').getBoundingClientRect();
+            const arrow = document.querySelector('.mgnudge-arrow').getBoundingClientRect();
+            return {gap: innerHeight - r.bottom, text: document.querySelector('.mgnudge-card').textContent,
+                    arrow: document.querySelector('.mgnudge-arrow').textContent, below: arrow.top >= card.bottom - 0.5,
+                    centred: Math.abs((arrow.left + arrow.right) / 2 - innerWidth / 2) < 2}; }""")
+        assert abs(b["gap"] - 12) < 1 and b["arrow"] == "▼" and b["below"] and b["centred"], b
+        assert b["text"] == 'Tap ⬆ below, then "Add to Home Screen".', b
+        page.mouse.click(195, 420)
+        page.wait_for_selector(".mgnudge-bubble", state="detached")
+
+        # held sideways: under the top, pointing up; and it goes by itself after 8 s
+        page.set_viewport_size(LAND)
+        page.wait_for_selector(".glm-nudge-go")
+        page.evaluate("document.querySelector('.glm-nudge-go').click()")
+        page.wait_for_selector(".mgnudge-bubble.top")
+        t = page.evaluate("""() => { const r = document.querySelector('.mgnudge-bubble').getBoundingClientRect();
+            const card = document.querySelector('.mgnudge-card').getBoundingClientRect();
+            const arrow = document.querySelector('.mgnudge-arrow').getBoundingClientRect();
+            return {top: r.top, arrow: document.querySelector('.mgnudge-arrow').textContent, above: arrow.bottom <= card.top + 0.5,
+                    text: document.querySelector('.mgnudge-card').textContent}; }""")
+        assert abs(t["top"] - 12) < 1 and t["arrow"] == "▲" and t["above"], t
+        assert t["text"] == 'Tap ⬆ above, then "Add to Home Screen".', t
+        page.wait_for_selector(".mgnudge-bubble", state="detached", timeout=9500)
+        page.set_viewport_size(PHONE)
+
+        # once: a reload does not show it again
+        _visit(page, "/")
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "a reload is not a sign-in"
+
+        # the next sign-in does, until ✕ -- kept on this phone
+        _login(page)
+        _u_landed(page)
+        page.wait_for_selector(".glm-nudge")
+        page.click(".glm-nudge-x")
+        page.wait_for_selector(".glm-nudge", state="detached")
+        assert _u_store(page, "mg_phone_nudge_off") == "1"
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "waved off on this phone"
+    finally:
+        ctx.close()
+
+    # iOS Chrome cannot add the app the same way: nothing
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch, ua=_U_IOS_CHROME)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0
+    finally:
+        ctx.close()
+
+
+def test_the_home_screen_nudge_fires_the_browsers_own_install_prompt_where_one_is_offered(
+        phone_u_server, render_browser, monkeypatch):
+    """U7b on Android: no strip until the browser offers its install prompt; then the strip holds the
+    offer back, and its tap fires that prompt -- once. Afterwards the browser no longer offers it here,
+    so the strip goes. No bubble."""
+    ctx, page = _u_phone(render_browser, phone_u_server, monkeypatch)
+    try:
+        _login(page)
+        _u_landed(page)
+        page.wait_for_timeout(300)
+        assert page.locator(".glm-nudge").count() == 0, "no offer, no strip"
+        assert page.evaluate(_U_OFFER_INSTALL_JS) is True, "the offer is held back for the strip"
+        page.wait_for_selector(".glm-nudge")
+        page.click(".glm-nudge-go")
+        page.wait_for_function("() => window.__prompted === 1")
+        page.wait_for_selector(".glm-nudge", state="detached")
+        assert page.locator(".mgnudge-bubble").count() == 0
+        assert page.evaluate("window.__prompted") == 1
+    finally:
+        ctx.close()

@@ -14,6 +14,9 @@ import useCurate from "../hooks/useCurate.js";
 import { composeSmartQuery } from "../curation/curationCore.js";
 import { invalidate } from "../hooks/swrCache.js";
 import useDataSaver, { usePaging } from "../hooks/usePhonePrefs.js";
+import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
+import useInstallNudge from "../hooks/useInstallNudge.js";
+import { NudgeBubble } from "./InstallNudge.jsx";
 import {
   continuousDone, continuousPageSize, isFrontPage, makeMarker, nextContinuousPage, pageOffset, syncOutcomeText,
 } from "../lib/phoneCore.js";
@@ -511,6 +514,10 @@ export default function AppMobile({ boot }) {
   const continuous = paging === "continuous";
   const continuousRef = useRef(continuous);
   continuousRef.current = continuous;
+  /* U6c + U7b: the one-time Home Screen nudge -- its strip rides the Gallery tab; the iOS bubble at
+     Safari's Share button is drawn here, over everything, and the first-run guide stands aside for it. */
+  const { landscape: sideways } = usePhoneLandscape();
+  const nudge = useInstallNudge({ landscape: sideways });
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
   lib.setPageSize(continuous ? continuousPageSize(saver.active, saver.info) : 0);
   /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
@@ -1391,7 +1398,7 @@ export default function AppMobile({ boot }) {
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar}
             marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
-            continuous={continuous} onLoadMore={loadMore} more={more} reveal={reveal}
+            continuous={continuous} onLoadMore={loadMore} more={more} reveal={reveal} nudge={nudge}
             curation={{
               smart, curate, saveSmart, composeView,
               // Session P (P6): the Manual sort's editor, on the Collections screen
@@ -1496,8 +1503,9 @@ export default function AppMobile({ boot }) {
       {!screen && !detailsFor && lbIndex == null && !folioOpen && !contactSheetTarget && !contestEntry
         && (tab === "gallery" || tab === "create") ? (
           <GuideHost key={tab} surface={tab === "create" ? "dock" : "gallery"} phone
-            paused={!!sheet || claimModal.open} />
+            paused={!!sheet || claimModal.open || !!nudge.bubble} />
         ) : null}
+      <NudgeBubble side={nudge.bubble} />
       <PickerHost />
       <RecipesHost />
       {claimModal.open && (

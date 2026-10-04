@@ -77,6 +77,34 @@
   background: color-mix(in srgb, var(--base) 96%, transparent); box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
   font-size: 10.5px; line-height: 1.5; color: var(--text); }
 
+/* ---- U6 the Home Screen strip: 36 px under the pill row, pushing the grid down (in .42 s, out .34 s) -- */
+@keyframes glmNudgeIn { from { height: 0; opacity: 0; } to { height: 36px; opacity: 1; } }
+@keyframes glmNudgeOut { from { height: 36px; opacity: 1; } to { height: 0; opacity: 0; margin-bottom: 0; } }
+.glm-nudge { display: flex; align-items: center; box-sizing: border-box; height: 36px; margin: 0 11px 6px;
+  padding-left: 10px; border-radius: 9px; border: 1px solid var(--surface1); overflow: hidden;
+  animation: glmNudgeIn .42s cubic-bezier(.2, .9, .24, 1) both; }
+/* Grown in: the ✕'s 44 px hit area may reach past the 36 px strip. */
+.glm-nudge.settled { overflow: visible; }
+.glm-nudge.leaving { overflow: hidden; animation: glmNudgeOut .34s cubic-bezier(.4, 0, .2, 1) both; }
+.glm-nudge-go { flex: 1; min-width: 0; height: 100%; padding: 0; text-align: left; font: inherit; font-size: 10px;
+  color: var(--lavender); background: none; border: 0; cursor: pointer; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.glm-nudge-x { flex: none; width: 44px; height: 44px; margin: -4px 0; padding: 0; font: inherit; font-size: 11px;
+  line-height: 1; color: var(--overlay0); background: none; border: 0; cursor: pointer; }
+
+/* ---- U7 the iOS bubble at Safari's Share button: 12 px above the toolbar (▼), or under the top (▲) --- */
+@keyframes mgNudgeBubbleIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.mgnudge-bubble { position: fixed; left: 12px; right: 12px; z-index: 446; display: flex; flex-direction: column;
+  align-items: center; gap: 3px; pointer-events: none; animation: mgNudgeBubbleIn .28s ease both; }
+.mgnudge-bubble.bottom { bottom: calc(12px + env(safe-area-inset-bottom)); }
+.mgnudge-bubble.top { top: calc(12px + env(safe-area-inset-top)); }
+.mgnudge-card { box-sizing: border-box; width: 100%; max-width: 380px; padding: 10px 12px; border-radius: 14px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--base) 96%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .5); font-size: 10.5px; line-height: 1.5; color: var(--text); }
+.mgnudge-arrow { font-size: 12px; line-height: 1; color: var(--lavender); }
+
 @media (prefers-reduced-motion: reduce) {
   .glm-cfoot-spin { animation: none; }
+  .glm-nudge, .glm-nudge.leaving, .mgnudge-bubble { animation: none; }
+  .glm-nudge { overflow: visible; }
 }

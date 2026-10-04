@@ -171,3 +171,21 @@ def test_bonjour_status_and_settings_routes(tmp_path, monkeypatch):
 
     for bad in ({"host": "8.8.8.8"}, {"port": 0}, {"port": 70000}, {"port": "nope"}, {"name": "   "}):
         assert "error" in cli.post("/api/bonjour/settings", json=bad).get_json(), bad
+
+
+def test_the_qr_addresses_are_bare_urls_with_nothing_appended(tmp_path, monkeypatch):
+    """The QR a phone arrives by stays URL-only: no session, token, next or credential, ever (Session U,
+    the Home Screen nudge's constraint). The Control Panel's QR encodes the first reachable URL
+    (BonjourCard.jsx; loom/test/phone-nudge.test.js holds that side), so every reachable URL is the
+    scheme, the host and the port -- and the phone signs in the normal way when it gets there."""
+    import re
+    from tests.conftest import login_client
+    import moonglade_gallery as g
+    monkeypatch.setitem(g._SERVER_CONTROL, "bonjour", None)
+    monkeypatch.setitem(g._SERVER_CONTROL, "serving", {"host": "0.0.0.0", "port": 5757, "scheme": "https"})
+    monkeypatch.setattr(mb, "lan_ip", lambda: "192.168.0.5")
+    cli = login_client(tmp_path)
+    urls = cli.get("/api/bonjour/status").get_json()["reachable_urls"]
+    assert urls, "a LAN bind with a LAN address has reachable URLs"
+    for u in urls:
+        assert re.fullmatch(r"https://[A-Za-z0-9.\-]+:5757/", u), u

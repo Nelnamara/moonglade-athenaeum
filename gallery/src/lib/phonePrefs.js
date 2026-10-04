@@ -20,7 +20,8 @@
 
 /* SESSION U adds two more, written the same way (a tap, never an open): the paging choice (Pages |
    Continuous, set from the long-press sheet on the layout keys or Control's Library paging row) and
-   whether the long-press hint dot under those keys has done its job (written by the first long-press). */
+   whether the long-press hint dot under those keys has done its job (written by the first long-press).
+   And one more: the Home Screen nudge's ✕ on this device. */
 
 import { DEFAULT_LAYOUT, parseLayout, parseMarker, parsePaging, parseSaverMode } from "./phoneCore.js";
 
@@ -29,6 +30,7 @@ export const SAVER_KEY = "mg_phone_saver";
 export const SEEN_KEY = "mg_phone_seen";
 export const PAGING_KEY = "mg_phone_paging";
 export const PAGING_HINT_KEY = "mg_phone_paging_hint";
+export const NUDGE_OFF_KEY = "mg_phone_nudge_off";
 export const PREFS_EVENT = "mg-phone-prefs";
 
 function store(storage) {
@@ -80,6 +82,15 @@ export function readPagingHintSeen(storage) {
 }
 export function writePagingHintSeen(storage) {
   return write(PAGING_HINT_KEY, "1", storage);
+}
+
+/* The Home Screen nudge's ✕ (Session U, U6c): waved off on this device for good. Written by the ✕
+   only. */
+export function readNudgeOff(storage) {
+  return read(NUDGE_OFF_KEY, storage) === "1";
+}
+export function writeNudgeOff(storage) {
+  return write(NUDGE_OFF_KEY, "1", storage);
 }
 
 export function readMarker(storage) {

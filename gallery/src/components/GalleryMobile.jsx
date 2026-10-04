@@ -4,6 +4,7 @@ import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
 import ContinuousGridMobile from "./ContinuousGridMobile.jsx";
+import { NudgeStrip } from "./InstallNudge.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import SimilarResults from "./SimilarResults.jsx";
@@ -99,7 +100,12 @@ import "../styles/phone-q.css";
          absolute index in the filtered walk, loaded or not; when some are not loaded a card says
          "Selected N, including K not loaded yet." for 4 s and their ids are read (useLibrary.idsAt) --
          Actions waits for that read, so every confirm states the full count. Continuous's bar adds
-         "All loaded (L)", and there a filter change clears the selection with a 10 s Undo. */
+         "All loaded (L)", and there a filter change clears the selection with a 10 s Undo.
+
+   SESSION U, THE HOME SCREEN NUDGE (U6c): `nudge` is the shell's useInstallNudge. Once, after a sign-in,
+   on a phone browser that can add the app to its Home Screen, its 36 px strip sits under the pill row
+   and pushes the grid down; its tap opens the steps (the shell draws the iOS bubble), its ✕ waves it
+   off for good on this phone. */
 
 /* A long-press that moves further than this is a scroll or a drag, not a hold. */
 const KEY_MOVE_CANCEL_PX = 10;
@@ -129,7 +135,7 @@ export default function GalleryMobile({
      own front page, and what a pull runs. */
   marker, frontPage, onPullRefresh,
   /* Session U: Continuous paging, the shell's next-page request and its state ({busy, failed}). */
-  continuous = false, onLoadMore, more, reveal, idsAt,
+  continuous = false, onLoadMore, more, reveal, idsAt, nudge,
   /* Session N: what curation hands this tab -- {smart, curate, saveSmart, composeView, strip}.
      smart is the saved searches ({name, query}) listed in the Collection field with the refresh
      mark; curate is the shell's useCurate (the bulk verbs and their undo toast); saveSmart and
@@ -503,6 +509,8 @@ export default function GalleryMobile({
       </div>
 
       {!similar && curation && curation.strip ? curation.strip : null}
+
+      {nudge ? <NudgeStrip show={nudge.show} onOpen={nudge.open} onDismiss={nudge.dismiss} /> : null}
 
       {similar ? (
         /* The lookalikes take the GRID's place, in the same column, under the same
