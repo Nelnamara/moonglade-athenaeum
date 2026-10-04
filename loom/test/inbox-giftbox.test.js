@@ -122,6 +122,22 @@ describe("an unclear claim locks that gift's Claim until the gifts are read agai
   });
 });
 
+describe("one mark-read per open, with a token (review nit 9)", () => {
+  test("a double click on a row sends one mark-read", () => {
+    const open = fnBody(store, "openItem");
+    assert.match(open, /if \(marking\.has\(key\)\) return Promise\.resolve\(null\);\n\s*marking\.add\(key\);/);
+    assert.match(open, /\.finally\(\(\) => marking\.delete\(key\)\)/);
+  });
+
+  test("every write fetches the CSRF token first when the panel never handed one out", () => {
+    assert.match(fnBody(store, "ensureCsrf"), /apiGet\("\/api\/inbox\/count"\)/);
+    for (const name of ["openItem", "markAllRead", "claimGift"]) {
+      assert.match(fnBody(store, name), /ensureCsrf\(\)\.then\(/, name + " waits for the token");
+    }
+    assert.match(fnBody(store, "readCount"), /csrf: d\.csrf \|\| state\.csrf/);
+  });
+});
+
 describe("delivery (R4b)", () => {
   test("the live count rides the Activity poll; a reconnect re-reads the count; focus at most every 30 s", () => {
     assert.match(jobs, /if \(d && !d\.error && d\.inbox\) pollListeners\.forEach/);

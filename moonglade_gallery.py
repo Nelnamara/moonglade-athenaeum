@@ -27950,11 +27950,16 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def api_inbox_count():
         """The gift box's badge: PixAI's unread count (TASK excluded) plus pending gifts.
-        Read on app open, on focus (the client debounces 30 s) and on a socket reconnect."""
+        Read on app open, on focus (the client debounces 30 s) and on a socket reconnect.
+        Carries the CSRF token too, so a write that comes before the panel ever opened (a
+        comment toast's Open thread) never goes out with an empty one."""
+        session.setdefault("csrf", secrets.token_hex(16))
         try:
-            return jsonify(_inbox().unread_total(_inbox().pixai_session()))
+            out = dict(_inbox().unread_total(_inbox().pixai_session()))
         except Exception as e:                                   # noqa: BLE001
-            return _inbox_fail(e, total=None)
+            return _inbox_fail(e, total=None, csrf=session["csrf"])
+        out["csrf"] = session["csrf"]
+        return jsonify(out)
 
     @app.route("/api/inbox/events")
     @tier(LOGIN)

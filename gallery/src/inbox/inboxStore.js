@@ -59,7 +59,20 @@ export function getState() { return state; }
 
 export function readCount() {
   return apiGet("/api/inbox/count").then((d) => {
+    if (d && d.csrf) set({ csrf: d.csrf || state.csrf });
     if (d && !d.error && d.total != null) set({ count: d.total, gifts: d.gifts });
+  });
+}
+
+/* The CSRF token every write carries. The panel's read hands it out, and so does the count
+   read at app open; a write that comes before either (a comment toast's Open thread, before
+   the panel was ever opened) fetches it first rather than sending an empty one. */
+export function ensureCsrf() {
+  if (state.csrf) return Promise.resolve(state.csrf);
+  return apiGet("/api/inbox/count").then((d) => {
+    if (d && d.csrf) set({ csrf: d.csrf });
+    if (d && !d.error && d.total != null) set({ count: d.total, gifts: d.gifts });
+    return state.csrf;
   });
 }
 
@@ -154,6 +167,7 @@ export function loadGifts() {
 /* Each shell's door to its contest surface (the desktop's Contests overlay, the phone's
    Contests screen) -- a contest row opens it. */
 let contestOpener = null;
+const marking = new Set();      // rows whose mark-read is in flight
 export function registerContestOpener(fn) {
   contestOpener = typeof fn === "function" ? fn : null;
   return () => { if (contestOpener === fn) contestOpener = null; };
@@ -200,7 +214,11 @@ export function openItem(row) {
   const loaded = new Map(state.items.map((x) => [x.id, x]));
   const ids = (row.ids || []).filter((id) => !loaded.has(id) || loaded.get(id).unread);
   if (!ids.length) return Promise.resolve(null);
-  return apiPost("/api/inbox/read", { csrf: state.csrf, ids }).then((d) => {
+  // One mark-read per row at a time: a double click is one write, not two.
+  const key = row.key || ids.join(",");
+  if (marking.has(key)) return Promise.resolve(null);
+  marking.add(key);
+  return ensureCsrf().then(() => apiPost("/api/inbox/read", { csrf: state.csrf, ids })).then((d) => {
     if (d && d.state === "done") {
       const gone = new Set(ids);
       const was = state.items.filter((x) => gone.has(x.id) && x.unread).length;
@@ -214,7 +232,7 @@ export function openItem(row) {
         "Couldn't confirm it was marked read. It stays unread here; nothing was sent twice." } });
     }
     return d;
-  });
+  }).finally(() => marking.delete(key));
 }
 
 export function markAllRead(tab) {
@@ -222,7 +240,7 @@ export function markAllRead(tab) {
     set({ allNotice: "Read-only mode is on, so nothing is marked read on PixAI." });
     return Promise.resolve(null);
   }
-  return apiPost("/api/inbox/read-all", { csrf: state.csrf, tab }).then((d) => {
+  return ensureCsrf().then(() => apiPost("/api/inbox/read-all", { csrf: state.csrf, tab })).then((d) => {
     if (d && d.state === "done") {
       set({ allNotice: "", items: state.items.map((x) => ({ ...x, unread: false })) });
       readCount();
@@ -242,7 +260,7 @@ export function claimGift(id) {
   if (state.claim && state.claim.state === "sending") return Promise.resolve(null);
   if (state.claimLocked[id]) return Promise.resolve(null);
   set({ claim: { id, state: "sending", message: "" } });
-  return apiPost("/api/inbox/gifts/claim", { csrf: state.csrf, id }).then((d) => {
+  return ensureCsrf().then(() => apiPost("/api/inbox/gifts/claim", { csrf: state.csrf, id })).then((d) => {
     const answer = (d && d.state) || "unclear";
     set({ claim: { id, state: answer,
       message: (d && (d.message || d.error)) || "No clear answer from PixAI. Check on PixAI before trying again." } });

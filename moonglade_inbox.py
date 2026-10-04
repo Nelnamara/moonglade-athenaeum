@@ -295,8 +295,12 @@ def _public_get(path, timeout=15):
     """GET a public /v2 route with NO credential attached. The banner list answers 404 when the
     API key rides along (PROBE_2026-10-02_site), so this is deliberately not the session: a
     plain requests.get, HTTPS verification on, one attempt. Blocked in tests by conftest."""
-    r = requests.get(core.REST_API_BASE + path, timeout=timeout,
-                     headers={"Accept": "application/json"})
+    with requests.Session() as s:
+        # trust_env off: requests would otherwise read ~/.netrc (and proxy settings) and could
+        # attach a credential this call must never carry.
+        s.trust_env = False
+        r = s.get(core.REST_API_BASE + path, timeout=timeout,
+                  headers={"Accept": "application/json"})
     if not r.ok:
         raise core._rest_error("GET", path, r)
     return r.json()
@@ -321,7 +325,8 @@ def event_from_banner(b, lang="en", now=None):
         return None
     link = _absolute(_localized(b.get("link"), lang))
     u = urlparse(link)
-    if u.scheme != "https" or not (u.hostname or "").endswith("pixai.art"):
+    host = (u.hostname or "").lower()
+    if u.scheme != "https" or not (host == "pixai.art" or host.endswith(".pixai.art")):
         return None
     if not _EVENT_PATH.match(u.path or ""):
         return None
@@ -468,7 +473,8 @@ def task_activity(tasks, jobs_by_id):
             continue
         j = (jobs_by_id or {}).get(tid)
         if j is None:
-            add.append({"job_id": tid, "label": t.get("ref_title") or "Generation"})
+            # A fixed label: the notification's own words never go to the disk (jobs.jsonl).
+            add.append({"job_id": tid, "label": "Generation"})
         elif j.get("status") in ("failed", "stale"):
             with _live_lock:
                 if len(_pixai_says) >= _SAYS_KEEP:

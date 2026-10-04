@@ -103,6 +103,11 @@ def test_a_finished_job_activity_never_saw_joins_activity_as_pixais(tmp_path, pi
     assert cli.get("/api/inbox").get_json()["items"] == []            # never an inbox row
     job = {j["job_id"]: j for j in core.read_jobs(tmp_path)}["2062832974899841293"]
     assert job["status"] == "done" and job["source"] == "pixai" and job["via"] == "inbox"
+    # Review nit 7: the notification's own words never reach the disk; the label is fixed.
+    assert job["label"] == "Generation"
+    for p in tmp_path.rglob("*"):
+        if p.is_file():
+            assert b"a quiet library" not in p.read_bytes(), p
 
 
 def test_an_old_finished_job_is_not_resurrected(tmp_path, pixai, monkeypatch):

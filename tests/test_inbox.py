@@ -175,7 +175,9 @@ def test_the_banner_read_is_cached_for_an_hour_and_a_failure_is_not(monkeypatch)
 
 
 def test_the_banner_read_sends_no_credential(monkeypatch):
-    """With the API key attached /v2/banners/ answers 404, so the read is a bare GET."""
+    """With the API key attached /v2/banners/ answers 404, so the read is a bare GET -- on a
+    session of its own that ignores the environment (review nit 8), so ~/.netrc or a proxy
+    variable can never attach a credential either."""
     sent = {}
 
     class R:
@@ -184,15 +186,45 @@ def test_the_banner_read_sends_no_credential(monkeypatch):
         def json(self):
             return {"items": []}
 
-    def fake_get(url, **kw):
-        sent.update(url=url, **kw)
-        return R()
-    monkeypatch.setattr(inbox.requests, "get", fake_get)
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, **kw):
+            sent.update(url=url, trust_env=self.trust_env, session_headers=dict(self.headers), **kw)
+            return R()
+
+    def no_bare_get(*a, **k):
+        raise AssertionError("the banner read must ride its own trust_env=False session")
+    monkeypatch.setattr(inbox.requests, "Session", FakeSession)
+    monkeypatch.setattr(inbox.requests, "get", no_bare_get)
     from tests.conftest import _REAL_INBOX_PUBLIC_GET   # conftest blocks the live one
     assert _REAL_INBOX_PUBLIC_GET("/banners/") == {"items": []}
     assert sent["url"].endswith("/v2/banners/")
+    assert sent["trust_env"] is False
     assert "Authorization" not in (sent.get("headers") or {})
+    assert "Authorization" not in sent["session_headers"]
     assert "auth" not in sent and "cookies" not in sent
+
+
+@pytest.mark.parametrize("link,ok", [
+    ("https://pixai.art/event/zeta", True),
+    ("https://www.pixai.art/en/event/zeta", True),
+    ("https://evilpixai.art/event/zeta", False),
+    ("https://pixai.art.evil.test/event/zeta", False),
+    ("http://pixai.art/event/zeta", False),
+])
+def test_an_event_link_must_be_pixai_itself(link, ok):
+    ev = inbox.event_from_banner({"label": "x", "link": {"en": link}, "imageUrl": {"en": ""},
+                                  "title": None, "blank": False, "endTime": None})
+    assert (ev is not None) is ok
 
 
 # ---------------------------------------------------------------------------
@@ -378,3 +410,13 @@ def test_the_mark_all_route_sends_no_tab_as_no_tab(tmp_path, pixai):
     pixai.calls.clear()
     d = cli.post("/api/inbox/read-all", json={"csrf": csrf}).get_json()
     assert d["state"] == "refused" and pixai.calls == []
+
+
+def test_the_count_route_hands_out_the_token_a_toast_write_needs(tmp_path, pixai):
+    """Review nit 9: a comment toast's Open thread can mark read before the panel ever opened,
+    so the count read (which runs at app open) carries the CSRF token too."""
+    pixai.on("/user/me/notifications/unread-counts", [])
+    pixai.on("/user/me/official-dm/unread-summary", {"unreadMessages": 0, "unclaimedRewards": 0,
+                                                     "hasMessages": False, "terminated": False})
+    cli = login_test_client(_app_with_work(tmp_path))
+    assert cli.get("/api/inbox/count").get_json()["csrf"]
