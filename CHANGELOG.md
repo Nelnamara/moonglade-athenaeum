@@ -24,6 +24,7 @@ git tags. Full prose notes for tagged versions live on
 - **Comments on your published work, in Details.** A published picture's comments are read live when you scroll to them (desktop and phone), with replies folded under each comment and your own marked "you"; they are kept five minutes in memory and never saved. (2026-10-03)
 - **Reply to a comment on your own work.** Send asks once, quoting your text and naming the account, the person and the work; Post publicly sends it once, and the app reads the thread back before it says Posted. A reply you just posted can be deleted the same careful way. (2026-10-03)
 - **PixAI's current event, one press away.** The gift box shows the events PixAI is running as banner cards that open PixAI's page; the app never checks in or claims. (#69) (2026-10-03)
+- **The credit ledger's reason chips show as known again.** The Control Panel's PixAI account → Credit ledger drew every reason chip in its "unknown" style, because the app's list of known reasons was spelled differently from what PixAI sends. (2026-10-04)
 - **Free cards about to expire say so.** When a free card you hold expires within three days, the credits chip's CARDS half gets a thin peach underline and its hover lists them first, one line per kind ("5 Tsubaki.3 expire Oct 6 · in 3 days"). (#69) (2026-10-03)
 
 ### Under the hood
