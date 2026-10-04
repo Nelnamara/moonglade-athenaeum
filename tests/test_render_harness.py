@@ -5229,6 +5229,21 @@ def _crushed(sizes):
     return [(round(w, 1), round(h, 1)) for w, h in sizes if w < 60 or abs(w - h) > 1.5]
 
 
+def _goal_tile_facts(page, selector):
+    """Per goal tile: its text, its size, the computed background of its picture layer once the
+    picture has settled, and how many <img> it holds (Session T: none)."""
+    page.wait_for_function(
+        "sel => [...document.querySelectorAll(sel)].every(t => t.querySelector('.mgtr-goal-pic'))",
+        arg=selector)
+    return page.evaluate("""sel => [...document.querySelectorAll(sel)].map(t => {
+        const pic = t.querySelector('.mgtr-goal-pic'), r = t.getBoundingClientRect();
+        return {text: t.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height),
+                picture: pic ? getComputedStyle(pic).backgroundImage.slice(0, 40) : '',
+                size: pic ? getComputedStyle(pic).backgroundSize : '',
+                imgs: t.querySelectorAll('img').length};
+    })""", selector)
+
+
 def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
         paged_library_server, render_browser, monkeypatch, pixai):
     """Owner walk, 2026-09-29. (1) "From history" drew every picture as a sliver a few pixels
@@ -5237,8 +5252,8 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
     cap between them (train.css .mgtr-pool-grid). Every tile must be a square at least 60 px
     across, in both views, with more than the cap's worth of rows loaded -- the counts waited
     for are past the point where the old rows crushed (five rows no longer fit 300 px). (2)
-    Basic's goal tiles were flat colour squares where PixAI shows a picture: each carries its
-    own glyph."""
+    Basic's goal tiles were flat colour squares where PixAI shows a picture: a glyph stood in
+    until Session T, and now each tile paints its own picture and no glyph."""
     import sqlite3
     _fake_training(pixai, monkeypatch)
     with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
@@ -5246,11 +5261,14 @@ def test_the_train_goal_tiles_and_history_pool_draw_pictures_not_slivers(
     ctx, page, _ = _train_page(paged_library_server, render_browser, monkeypatch)
     try:
         page.click(".mgtr-mode:has-text('Basic training')")
-        marks = page.evaluate(
-            "() => [...document.querySelectorAll('.mgtr-goal .mgtr-goal-tint')]"
-            ".map(t => t.textContent.trim())")
-        assert len(marks) == 4 and all(marks) and len(set(marks)) == 4, (
-            "each goal tile shows its own glyph, not a blank square: %r" % marks)
+        tiles = _goal_tile_facts(page, ".mgtr-goal .mgtr-goal-tint")
+        assert len(tiles) == 4, tiles
+        for t in tiles:
+            assert t["text"] == "", "a goal tile draws no glyph (Session T): %r" % t
+            assert t["picture"].startswith("url("), "each goal tile paints its picture: %r" % t
+            assert (t["w"], t["h"]) == (34, 34), "the desktop tile keeps its 34 px square: %r" % t
+            assert t["imgs"] == 0, "the picture is a computed background, never an <img>: %r" % t
+        assert len({t["picture"] for t in tiles}) == 4, "four goals, four different pictures"
         page.click(".mgtr-goal:has-text('Character')")
         page.click(".mgtr-src:has-text('From history')")
         # Grouped pages 18 tasks at a time and its sentinel keeps asking while it is within
@@ -5664,6 +5682,30 @@ def _phone_train(paged_library_server, render_browser, monkeypatch):
     page.click('.glm-menu-item:has-text("Train a LoRA")')
     page.wait_for_selector(".trm-row")
     return ctx, page, posts
+
+
+def test_the_phone_goal_rows_draw_a_44_px_picture_and_no_glyph(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Session T (Goal Tile Art Handoff): on the phone, Basic's four goal rows each carry a
+    44 px square picture (a computed background, cover), with the label and description beside
+    it as shipped and no glyph in the square."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, posts = _phone_train(paged_library_server, render_browser, monkeypatch)
+    try:
+        page.click(".trm-row:has-text('Basic training')")
+        page.click(".trm-cta-btn:has-text('Continue')")
+        page.wait_for_selector(".trm-row.goal")
+        tiles = _goal_tile_facts(page, ".trm-row.goal .mgtr-goal-tint")
+        assert len(tiles) == 4, tiles
+        for t in tiles:
+            assert t["text"] == "" and t["imgs"] == 0, t
+            assert t["picture"].startswith("url("), t
+            assert t["size"] == "cover", t
+            assert (t["w"], t["h"]) == (44, 44), t
+        labels = page.locator(".trm-row.goal .trm-row-text").all_inner_texts()
+        assert [l.splitlines()[0] for l in labels] == ["Character", "Art style", "Outfit", "Something else"]
+    finally:
+        ctx.close()
 
 
 def test_phone_train_opens_on_the_chooser_and_its_back_steps_one_screen(

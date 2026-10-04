@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import TrainPool from "./TrainPool.jsx";
 import DatasetImport from "./DatasetImport.jsx";
+import GoalTile from "./GoalTile.jsx";
 import {
   GOALS, MAX_IMAGES, MIN_IMAGES, SOURCE_MARK, credits, etaText, roomLeft, startLabel,
 } from "../../gen/trainCore.js";
@@ -47,7 +48,7 @@ export default function TrainBasic({ b, setup, step, setStep, onBack, onAdvanced
             {GOALS.map((g, i) => (
               <button type="button" key={g.value} className={"mgtr-goal" + (b.goal === g.value ? " on" : "")}
                 onClick={() => { b.setGoal(g.value); setStep(2); }}>
-                <span className={"mgtr-goal-tint " + GOAL_TINT[i]} aria-hidden="true">{g.mark}</span>
+                <GoalTile goal={g} tint={GOAL_TINT[i]} />
                 <span><span className="n">{g.label}</span><span className="d">{g.desc}</span></span>
               </button>
             ))}

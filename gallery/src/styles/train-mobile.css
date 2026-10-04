@@ -65,6 +65,8 @@
 .trm-row-go { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px;
   color: var(--overlay0); }
 .trm-row.goal { flex-direction: row; align-items: center; justify-content: flex-start; gap: 9px; }
+/* The goal's picture on the phone: 44 px (Goal Tile Art Handoff), the same piece the desktop draws. */
+.trm-row.goal .mgtr-goal-tint { width: 44px; height: 44px; border-radius: 9px; }
 .trm-row-text { display: flex; flex-direction: column; min-width: 0; }
 .trm-across { align-self: center; min-height: 44px; padding: 0 6px; border: 0; background: none; font: inherit;
   font-size: 10.5px; color: var(--lavender); cursor: pointer; }

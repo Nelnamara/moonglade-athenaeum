@@ -130,14 +130,31 @@
 .mgtr-goal > span:last-child { min-width: 0; display: flex; flex-direction: column; }
 .mgtr-goal .n { font-size: 11.5px; font-weight: 700; }
 .mgtr-goal .d { font-size: 9.5px; line-height: 1.35; color: var(--subtext); }
-/* The goal's square carries its glyph (trainCore GOALS' `mark`): PixAI shows a sample picture
-   here, the app has no such art yet, and the bare tint read as a blank tile (walk 2026-09-29). */
-.mgtr-goal-tint { width: 34px; height: 34px; flex: none; border-radius: 8px; display: grid;
-  place-items: center; font-size: 17px; line-height: 1; color: var(--text); }
+/* The goal's square carries its picture (Session T, T1a / T2b; lib/goalTileCore.js, GoalTile.jsx):
+   one opaque full-bleed square, cover, rounded by this radius, with no frame, scrim or tint over
+   it. The tint below paints at once, stays as the loading state and is the whole tile when no
+   picture loads: a flat colour, no glyph. */
+.mgtr-goal-tint { position: relative; overflow: hidden; width: 34px; height: 34px; flex: none;
+  border-radius: 8px; }
 .mgtr-goal-tint.lavender { background: color-mix(in srgb, var(--lavender) 35%, var(--surface0)); }
 .mgtr-goal-tint.mauve { background: color-mix(in srgb, var(--mauve) 30%, var(--surface0)); }
 .mgtr-goal-tint.emerald { background: color-mix(in srgb, var(--emerald) 30%, var(--surface0)); }
 .mgtr-goal-tint.peach { background: color-mix(in srgb, var(--peach) 30%, var(--surface0)); }
+/* The picture: a computed background on a child of the square (never an <img>), fading in over
+   .42 s when it lands; `still` is a tile that found it already settled. */
+.mgtr-goal-pic { position: absolute; inset: 0; z-index: 1; background-size: cover;
+  background-position: center; background-repeat: no-repeat; animation: mgtr-pic-in .42s ease both; }
+.mgtr-goal-pic.still { animation: none; }
+@keyframes mgtr-pic-in { from { opacity: 0; } to { opacity: 1; } }
+/* The loading sheen: a slow lavender band across the tint, a layer BENEATH the picture. The
+   component drops the class at 3 s or the moment the picture decodes, whichever is first. */
+.mgtr-goal-tint.sheen::after { content: ""; position: absolute; inset: 0; z-index: 0;
+  background: linear-gradient(110deg, transparent 40%, rgba(182, 146, 230, .35) 50%, transparent 60%);
+  background-size: 250% 100%; animation: mgtr-sheen 1.6s linear infinite; }
+@keyframes mgtr-sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .mgtr-goal-tint.sheen::after { display: none; }
+  .mgtr-goal-pic { animation: none; }
+}
 .mgtr-across { font-size: 10.5px; color: var(--lavender); text-align: center; padding: 0;
   border: 0; background: none; cursor: pointer; }
 .mgtr-across.left { text-align: left; align-self: flex-start; }

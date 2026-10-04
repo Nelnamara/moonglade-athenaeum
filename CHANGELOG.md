@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Goal-tile art
+- **Basic training's four goal tiles have pictures.** Character, Art style, Outfit and Something else each show their own picture beside the name (on the phone, 44 px), where a glyph stood in since 3.15.0. The square paints its colour at once with a soft sheen while the picture loads, and stays a flat colour, with no symbol, if it can't. The pictures ship inside the app; an art pack that carries its own wins when installed. (#61) (2026-10-03)
+
 ### Under the hood
 - The app's library, details and history reads have plain names: `/api/library`, `/api/detail/<id>` and `/api/history`, instead of `/api/next/...` after the app's pilot codename. Nothing you see changes. The old paths still answer for one release, so a page left open from before an update keeps working. (2026-10-03)
 
