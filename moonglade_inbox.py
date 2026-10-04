@@ -792,11 +792,32 @@ def _read_message(session, message_id):
     return ("found", raw) if isinstance(raw, dict) and raw.get("id") else ("unread", None)
 
 
-def _find_reply(session, artwork_id, posted_id, me, reply_to, text):
+def _thread_snapshot(session, artwork_id):
+    """The ids on the thread's newest page just before a reply is sent (a fresh read, never
+    the cache), or None when that read failed. The unclear-answer read-back uses it to tell a
+    reply THIS send made from an identical one already there."""
+    try:
+        _data, rows = _fetch_thread(session, artwork_id, 1)
+    except Exception:                                        # noqa: BLE001
+        return None
+    return {str(r.get("id") or "") for r in rows if isinstance(r, dict)}
+
+
+def _made_by_this_send(r, before, started):
+    """A reply found after an unclear send counts only if it is new: absent from the snapshot
+    taken just before the POST, or -- when no snapshot could be read -- created after the send
+    began. An older reply with the same words to the same comment proves nothing."""
+    if before is not None:
+        return str(r.get("id") or "") not in before
+    when = _when(r.get("createdAt"))
+    return when is not None and when >= started
+
+
+def _find_reply(session, artwork_id, posted_id, me, reply_to, text, before=None, started=None):
     """The reply's read-back: ("found", raw) / ("absent", None) / ("unread", None). With an id
     from PixAI's answer it reads that message; without one (an unclear send) it reads the
     thread's newest page fresh -- never the cache -- for the account's own reply to that
-    comment with exactly that text."""
+    comment with exactly that text that this send made (_made_by_this_send)."""
     if posted_id:
         state, raw = _read_message(session, posted_id)
         if state == "found" and str(raw.get("topicId") or "") == artwork_id:
@@ -809,7 +830,8 @@ def _find_reply(session, artwork_id, posted_id, me, reply_to, text):
     for r in rows:
         if (isinstance(r, dict) and str(r.get("authorId") or "") == str(me)
                 and str(r.get("replyToMessageId") or "") == reply_to
-                and str(r.get("content") or "") == text):
+                and str(r.get("content") or "") == text
+                and _made_by_this_send(r, before, started)):
             return "found", r
     return "absent", None
 
@@ -820,7 +842,8 @@ def post_reply(session, artwork_id, reply_to, content):
     read-back that decides what is said.
 
     Order: READ_ONLY (nothing is asked of PixAI) -> the text's own checks (empty, over 4,095)
-    -> the comment being answered must be on this work -> the one POST -> the read-back. The
+    -> the comment being answered must be on this work -> a read of the thread as it stands
+    (the snapshot an unclear answer is judged against) -> the one POST -> the read-back. The
     caller (the route) has already checked the work is in the owner's library. "done" only
     when the read-back finds the reply; an unclear send that reads back nothing is the peach
     "not found, check on PixAI", and the client keeps Send off until the text changes."""
@@ -850,6 +873,8 @@ def post_reply(session, artwork_id, reply_to, content):
     me = _user_id(session)
     body = {"topicId": artwork_id, "topicRefType": "ARTWORK", "content": text,
             "replyToMessageId": reply_to}
+    before = _thread_snapshot(session, artwork_id)          # read-only, before the one write
+    started = _dt.datetime.now(_dt.timezone.utc)
     posted_id = ""
     try:
         r = core._rest_post(session, "/messages/", body)
@@ -858,7 +883,8 @@ def post_reply(session, artwork_id, reply_to, content):
         if core.definite_refusal(e):
             return _answer("refused", _reply_refusal(e))
     _drop_thread(artwork_id)
-    found, raw = _find_reply(session, artwork_id, posted_id, me, reply_to, text)
+    found, raw = _find_reply(session, artwork_id, posted_id, me, reply_to, text,
+                             before=before, started=started)
     if found == "found":
         return _answer("done", "Posted · found in the thread.", comment=comment_of(raw, me))
     if found == "unread" and posted_id:

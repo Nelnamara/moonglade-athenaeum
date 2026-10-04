@@ -148,17 +148,57 @@ def test_an_unclear_send_that_reads_back_nothing_is_never_success(pixai):
     assert len(_posts(pixai)) == 1                          # never a retry
 
 
+def _before_and_after(pixai, before, after, post_error):
+    """/messages/ answers `before` until the POST, `post_error` for the POST, `after` once
+    it has been sent -- the thread as PixAI would show it either side of an unclear send."""
+    sent = []
+
+    def answer(call):
+        if call.verb == "rest_post":
+            sent.append(1)
+            raise post_error
+        if isinstance(before, Exception) and not sent:
+            raise before
+        return after if sent else before
+    pixai.on("/messages/", answer)
+
+
 def test_an_unclear_send_that_reads_back_the_reply_is_posted(pixai):
     _target_ok(pixai)
-
-    def post_or_list(call):
-        if call.verb == "rest_post":
-            raise core.PixAIRestError("REST POST /messages/ -> 502", status=502)
-        return _thread(_msg("2001", author=ME, reply_to="1001", content="thanks!"), _msg("1001"))
-    pixai.on("/messages/", post_or_list)
+    _before_and_after(pixai, _thread(_msg("1001")),
+                      _thread(_msg("2001", author=ME, reply_to="1001", content="thanks!"), _msg("1001")),
+                      core.PixAIRestError("REST POST /messages/ -> 502", status=502))
     out = inbox.post_reply(pixai, ART, "1001", "thanks!")
     assert out["state"] == "done" and out["comment"]["id"] == "2001"
     assert len(_posts(pixai)) == 1
+
+
+def test_an_old_identical_reply_never_reads_as_posted(pixai):
+    """Review item 4: the same words to the same comment, posted earlier, were on the thread
+    before this send. Finding them again after an unclear answer proves nothing."""
+    _target_ok(pixai)
+    old = _msg("1999", author=ME, reply_to="1001", content="thanks!", at="2026-10-01T10:00:00Z")
+    _before_and_after(pixai, _thread(old, _msg("1001")), _thread(old, _msg("1001")),
+                      core.requests.ReadTimeout("no answer"))
+    out = inbox.post_reply(pixai, ART, "1001", "thanks!")
+    assert out["state"] == "unclear" and len(_posts(pixai)) == 1
+
+
+def test_without_a_snapshot_only_a_reply_made_after_the_send_counts(pixai):
+    _target_ok(pixai)
+    old = _msg("1999", author=ME, reply_to="1001", content="thanks!", at="2020-01-01T00:00:00Z")
+    _before_and_after(pixai, core.PixAIRestError("REST GET -> 503", status=503),
+                      _thread(old, _msg("1001")), core.requests.ReadTimeout("no answer"))
+    assert inbox.post_reply(pixai, ART, "1001", "thanks!")["state"] == "unclear"
+
+
+def test_without_a_snapshot_a_reply_made_after_the_send_is_posted(pixai):
+    _target_ok(pixai)
+    new = _msg("2001", author=ME, reply_to="1001", content="thanks!", at="2099-01-01T00:00:00Z")
+    _before_and_after(pixai, core.PixAIRestError("REST GET -> 503", status=503),
+                      _thread(new, _msg("1001")), core.requests.ReadTimeout("no answer"))
+    out = inbox.post_reply(pixai, ART, "1001", "thanks!")
+    assert out["state"] == "done" and out["comment"]["id"] == "2001"
 
 
 @pytest.mark.parametrize("code,status,words", [
