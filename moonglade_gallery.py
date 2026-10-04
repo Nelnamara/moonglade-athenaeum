@@ -25404,16 +25404,13 @@ __DESIGN_TOKENS__
         resp.headers["Cache-Control"] = "no-cache"
         return resp
 
-    # The app's three data routes: /api/library, /api/detail/<media_id>, /api/history.
-    # Each also answers on its old name under /api/next/, the React app's pilot codename
-    # (#51 retired the /next page route and left these for their own change). The old rule
-    # sits on the SAME view, so both paths answer byte-for-byte alike and there is no second
-    # handler to drift. It stays for ONE release, so a tab still running an older cached
-    # bundle against an updated server keeps working; the release after removes it
-    # (tests/test_api_route_aliases.py). The /next/assets/ prefix above is NOT part of this:
-    # installed phone apps read their icons from it, so it is never dropped.
+    # The app's three data routes: /api/library, /api/detail/<media_id>, /api/history, each
+    # on exactly one path. They used to answer on a second one under /api/next/, the React
+    # app's pilot codename, for one release of grace; that is gone, and a page left open
+    # from before 3.17.0 needs a reload (tests/test_api_route_aliases.py pins it). The
+    # /next/assets/ prefix above is NOT part of this: installed phone apps read their icons
+    # from it, so it is never dropped.
     @app.route("/api/library")
-    @app.route("/api/next/library")
     @tier(LOGIN)
     def api_library():
         """The new gallery's own listing surface -- full filter set, clean field
@@ -25561,7 +25558,6 @@ __DESIGN_TOKENS__
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
 
     @app.route("/api/detail/<media_id>")
-    @app.route("/api/next/detail/<media_id>")
     @tier(LOGIN)
     def api_detail(media_id):
         """The pilot's Details view backing data -- classic's detail() route (~12254),
@@ -25667,7 +25663,6 @@ __DESIGN_TOKENS__
         return base.timestamp() + ms
 
     @app.route("/api/history")
-    @app.route("/api/next/history")
     @tier(LOGIN)
     def api_history():
         """Read-only feed for the Generate dock's History mode: the last `days` LOCAL

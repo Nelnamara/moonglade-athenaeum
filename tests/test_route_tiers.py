@@ -260,11 +260,6 @@ TIER_SNAPSHOT = [
     "/api/myart/items [GET] LOGIN",
     "/api/myart/publish [POST] LOGIN",
     "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
-    # the pilot-codename aliases of /api/detail, /api/history and /api/library: the SAME
-    # views, kept one release for older cached bundles, then removed
-    "/api/next/detail/<media_id> [GET] LOGIN",
-    "/api/next/history [GET] LOGIN",
-    "/api/next/library [GET] LOGIN",
     "/api/palettes/presets [GET] LOGIN",
     "/api/panel/cancel [POST] LOCALHOST",
     "/api/panel/run [POST] LOGIN",
