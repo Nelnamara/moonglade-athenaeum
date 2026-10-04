@@ -386,7 +386,7 @@ def test_the_bad_requests(tmp_path):
                  content_type="multipart/form-data")
     assert r.status_code == 400 and r.get_json()["error"] == "no file"
     r = _post(cli, "power_poses", "restart", b"not an image")
-    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image"
+    assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image."
     assert not _override_path("power_poses", "restart").exists()
 
 
@@ -729,7 +729,7 @@ def test_a_webp_canvas_at_the_limit_is_not_refused_by_the_header_reader():
 def test_a_webp_whose_header_cannot_be_read_is_refused_without_being_opened(tmp_path, no_open, header):
     cli = _client(tmp_path)
     r = _post(cli, "power_poses", "restart", header, "x.webp")
-    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image"
+    assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image."
     assert no_open == []
 
 
@@ -777,7 +777,7 @@ def test_a_format_outside_the_allowlist_is_refused_before_a_decoder_runs(tmp_pat
     Image.new("RGB", (64, 64), (200, 100, 50)).save(buf, fmt)
     cli = _client(tmp_path)
     r = _post(cli, "power_poses", "restart", buf.getvalue(), "x.png")
-    assert r.status_code == 400 and r.get_json()["error"] == "not a readable image", fmt
+    assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image.", fmt
     assert seen and all(f and fmt not in f for f in seen), "opened with an allowlist that excludes %s: %r" % (fmt, seen)
     assert not _override_path("power_poses", "restart").exists()
 
@@ -850,3 +850,74 @@ def test_this_lanes_public_files_name_no_private_repo_path():
                 "gallery/src/components/train/GoalTile.jsx", "loom/test/brand-roles-core.test.js",
                 "loom/test/goal-tile-core.test.js"):
         assert needle not in (root / rel).read_text(encoding="utf-8"), rel
+
+
+# ---- small things the review found ------------------------------------------------------------------
+
+def test_a_restore_post_with_a_list_or_dict_for_slot_is_a_400_not_a_500(tmp_path):
+    cli = _client(tmp_path)
+    for bad in (["power_poses"], {"a": 1}, 7, None, True):
+        r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": bad, "key": "restart"})
+        assert r.status_code == 400 and r.get_json()["error"] == "unknown slot", repr(bad)
+    r = cli.post("/api/branding/role/restore", json={"csrf": session_csrf(cli), "slot": "power_poses", "key": ["restart"]})
+    assert r.status_code == 400 and r.get_json()["error"] == "unknown image"
+
+
+def test_pillows_own_errors_never_reach_the_user(tmp_path, monkeypatch):
+    """Whatever Pillow raises (a ValueError about a tile, say) is turned into the plain sentence."""
+    cli = _client(tmp_path)
+    data = _img((256, 256))                  # built BEFORE Pillow is made to fail
+
+    def open_that_chokes(*a, **k):
+        raise ValueError("tile cannot extend outside image")
+
+    def load_that_chokes(self, *a, **k):
+        raise ValueError("buffer is not large enough")
+    for target, name, fn in ((Image, "open", open_that_chokes), (Image.Image, "load", load_that_chokes)):
+        with monkeypatch.context() as m:
+            m.setattr(target, name, fn)
+            r = _post(cli, "power_poses", "restart", data)
+        assert r.status_code == 400 and r.get_json()["error"] == "Couldn't read this image.", name
+        assert "tile" not in r.get_data(as_text=True) and "buffer" not in r.get_data(as_text=True)
+
+
+def test_the_apps_own_refusals_keep_their_own_words(tmp_path):
+    cli = _client(tmp_path)
+    r = _post(cli, "power_poses", "restart", _img((4400, 300)))
+    assert r.get_json()["error"] == "That picture is larger than 4,096 px on a side."
+    assert issubclass(g.ImageRefused, Exception) and not issubclass(g.ImageRefused, ValueError), \
+        "the app's refusal is its own type, so a ValueError from Pillow cannot pass for one"
+
+
+def _riff_chunks(data):
+    """The top-level chunk names of a RIFF/WEBP file, in order."""
+    out, pos = [], 12
+    while pos + 8 <= len(data):
+        size = int.from_bytes(data[pos + 4:pos + 8], "little")
+        out.append(data[pos:pos + 4].decode("ascii"))
+        pos += 8 + size + (size & 1)
+    return out
+
+
+def test_an_animated_companion_is_stored_without_its_exif_and_xmp(tmp_path):
+    """Only the chunks the picture needs are kept (VP8X, ICCP, ANIM, ANMF): metadata a sender embedded
+    (a camera's EXIF, an editor's XMP) is not served from the sign-in page, and the VP8X header no
+    longer says it is there."""
+    cli = _client(tmp_path)
+    base = [_disc((500, 490), (60 * i + 40, 80, 200)) for i in range(3)]
+    buf = io.BytesIO()
+    base[0].save(buf, format="WEBP", save_all=True, append_images=base[1:], duration=80, loop=0, lossless=True,
+                 exif=b"Exif\x00\x00GPS-MARKER-12345", xmp=b"<x:xmpmeta>AUTHOR-MARKER-67890</x:xmpmeta>",
+                 icc_profile=b"icc-profile-bytes")
+    sent = buf.getvalue()
+    assert b"GPS-MARKER" in sent and b"AUTHOR-MARKER" in sent, "the fixture really carries the metadata"
+    assert {"EXIF", "XMP ", "ICCP", "ANIM"} <= set(_riff_chunks(sent))
+    assert _post(cli, "login_companion", "companion", sent, "me.webp").status_code == 200
+    stored = _override_path("login_companion", "companion").read_bytes()
+    assert b"GPS-MARKER" not in stored and b"AUTHOR-MARKER" not in stored
+    assert _riff_chunks(stored) == ["VP8X", "ICCP", "ANIM", "ANMF", "ANMF", "ANMF"]
+    assert stored[20] & 0x0C == 0, "the header no longer claims EXIF or XMP"
+    assert stored[20] & 0x22 == 0x22, "it still says animated, with a colour profile"
+    assert int.from_bytes(stored[4:8], "little") == len(stored) - 8, "and the container size is right"
+    with Image.open(_override_path("login_companion", "companion")) as im:
+        assert im.is_animated and im.n_frames == 3

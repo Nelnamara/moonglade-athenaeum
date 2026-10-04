@@ -5158,8 +5158,13 @@ def role_refusal_text(role_name, failed):
     return "Refused: the %s must %s Your current art is unchanged." % (role_name, what)
 
 
-class ImageRefused(ValueError):
-    """A picture the app turns away in its own plain words (the message IS the sentence to show)."""
+class ImageRefused(Exception):
+    """A picture the app turns away in its own plain words (the message IS the sentence to show). It is
+    deliberately NOT a ValueError: Pillow raises ValueErrors of its own ("tile cannot extend outside
+    image"), and one of those must never pass for a sentence meant for the user."""
+
+
+_UNREADABLE = "Couldn't read this image."
 
 
 def webp_declared_size(head):
@@ -5183,7 +5188,7 @@ def webp_declared_size(head):
     if kind == b"VP8L" and len(head) >= 25 and head[20] == 0x2F:
         bits = int.from_bytes(head[21:25], "little")
         return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
-    raise ImageRefused("not a readable image")
+    raise ImageRefused(_UNREADABLE)
 
 
 def guard_webp_canvas(head, max_side):
@@ -5200,7 +5205,8 @@ def role_measure(raw):
     them. A WebP's declared canvas is read from its header first (guard_webp_canvas); the size of
     anything else comes from its header too and is refused past ROLE_MAX_SIDE before a pixel is
     decoded; an animation is refused past its frame and pixel budget before any frame is. Raises
-    ValueError with the plain-words message when the picture cannot be used at all."""
+    ImageRefused with the plain-words message when the picture cannot be used at all; anything
+    Pillow itself raises becomes the one plain sentence about not being able to read it."""
     import io
     guard_webp_canvas(raw[:64], ROLE_MAX_SIDE)
     try:
@@ -5208,39 +5214,60 @@ def role_measure(raw):
         im = Image.open(io.BytesIO(raw), formats=ROLE_OPEN_FORMATS)
         fmt, (w, h) = im.format, im.size
         if max(w, h) > ROLE_MAX_SIDE:
-            raise ValueError("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
+            raise ImageRefused("That picture is larger than {:,} px on a side.".format(ROLE_MAX_SIDE))
         frames = getattr(im, "n_frames", 1)
         if frames > 1 and (frames > ROLE_MAX_FRAMES or frames * w * h > ROLE_MAX_ANIM_PIXELS):
-            raise ValueError("That animation is too long or too big.")
+            raise ImageRefused("That animation is too long or too big.")
         im.load()
         rgba = im.convert("RGBA")
-    except ValueError:
+    except ImageRefused:
         raise
-    except Exception:                      # noqa: BLE001 -- anything that will not open or decode
-        raise ValueError("not a readable image")
+    except Exception:                      # noqa: BLE001 -- anything Pillow raises, ValueErrors included
+        raise ImageRefused(_UNREADABLE)
     clear = sum(rgba.getchannel("A").histogram()[:128]) / float(w * h)
     return {"format": fmt, "w": w, "h": h, "see_through": clear, "animated": frames > 1}, rgba
 
 
+_ROLE_KEEP_CHUNKS = (b"VP8X", b"ICCP", b"ANIM", b"ANMF")
+
+
 def _role_animation_bytes(raw):
-    """An accepted animated WebP, ready to store: every frame decoded once to prove the file is sound,
-    and cut at the end of its RIFF container so nothing appended after the picture survives. Raises
-    ValueError('not a readable image') for a stream that stops short or will not decode."""
+    """An accepted animated WebP, ready to store: rebuilt from only the chunks the picture needs (the
+    VP8X header, a colour profile, the animation's parameters and its frames), so metadata a sender
+    embedded (a camera's EXIF, an editor's XMP) is not served from the sign-in page, with the VP8X
+    header no longer claiming it; cut at the end of its RIFF container so nothing appended after the
+    picture survives; and every frame decoded once to prove the file is sound. Raises ImageRefused for
+    a stream that stops short, has a chunk that overruns, or will not decode."""
     import io
     from PIL import Image
     if raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
-        raise ValueError("not a readable image")
+        raise ImageRefused(_UNREADABLE)
     end = 8 + int.from_bytes(raw[4:8], "little")
     if end > len(raw):
-        raise ValueError("not a readable image")
-    data = raw[:end]
+        raise ImageRefused(_UNREADABLE)
+    body, pos, kept = raw[12:end], 0, []
+    while pos + 8 <= len(body):
+        fourcc = body[pos:pos + 4]
+        size = int.from_bytes(body[pos + 4:pos + 8], "little")
+        if pos + 8 + size > len(body):
+            raise ImageRefused(_UNREADABLE)
+        span = min(8 + size + (size & 1), len(body) - pos)          # a chunk is padded to an even length
+        if fourcc in _ROLE_KEEP_CHUNKS:
+            kept.append(body[pos:pos + span])
+        pos += span
+    if not kept or kept[0][:4] != b"VP8X" or len(kept[0]) < 18:
+        raise ImageRefused(_UNREADABLE)
+    head = bytearray(kept[0])
+    head[8] &= ~0x0C & 0xFF                                         # no EXIF (0x08), no XMP (0x04)
+    kept[0] = bytes(head)
+    data = b"RIFF" + (4 + sum(len(c) for c in kept)).to_bytes(4, "little") + b"WEBP" + b"".join(kept)
     try:
         with Image.open(io.BytesIO(data), formats=("WEBP",)) as im:
             for i in range(getattr(im, "n_frames", 1)):
                 im.seek(i)
                 im.load()
     except Exception:                      # noqa: BLE001
-        raise ValueError("not a readable image")
+        raise ImageRefused(_UNREADABLE)
     return data
 
 
@@ -5365,14 +5392,14 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
                 return {"error": "That file is too large."}, 400
             raw = hit.read_bytes()
         except OSError:
-            return {"error": "not a readable image"}, 400
+            return {"error": _UNREADABLE}, 400
     else:
         return {"error": "no file"}, 400
     if len(raw) > ROLE_MAX_BYTES:
         return {"error": "That file is too large."}, 400
     try:
         facts, rgba = role_measure(raw)
-    except ValueError as exc:
+    except ImageRefused as exc:
         return {"error": str(exc)}, 400
     if check_only:
         return {"facts": facts}, 200
@@ -5383,7 +5410,7 @@ def branding_role_upload(out_dir, slot, key, upload=None, media_id="", check_onl
     if facts["animated"]:
         try:
             buf.write(_role_animation_bytes(raw))
-        except ValueError as exc:
+        except ImageRefused as exc:
             return {"error": str(exc)}, 400
     elif img["public"].lower().endswith(".webp"):
         rgba.save(buf, "WEBP", lossless=True, quality=100, method=4)
@@ -22719,7 +22746,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        slot = body.get("slot")
+        slot = str(body.get("slot") or "")          # a list or dict is not hashable: coerce before the lookup
         if slot not in ROLE_SLOTS:
             return jsonify({"error": "unknown slot"}), 400
         out, status = branding_role_restore(out_dir, slot, str(body.get("key") or ""))
