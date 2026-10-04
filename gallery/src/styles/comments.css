@@ -1,0 +1,76 @@
+/* comments.css -- the comment thread in Image Details and Image Details Mobile (Session R, R5b +
+   R6c), read off `Inbox and Event Handoff.dc.html` sections 5, 6 and 10. Lavender is action,
+   peach a refusal or an unclear answer, emerald a confirmed post, ruby only "Delete my reply"
+   (it cannot be undone). Reactions and stickers are shown, never sent: no control here likes,
+   reacts or reports. */
+
+.cm-thread { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.cm-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); margin-bottom: 4px; }
+.cm-dim { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); padding: 4px 0; }
+.cm-warn { font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.cm-ok { font-size: 10.5px; line-height: 1.5; color: var(--emerald); }
+.cm-peachbox { padding: 9px 11px; border-radius: 10px; border: 1px solid rgba(250, 179, 135, .45);
+  background: rgba(250, 179, 135, .08); font-size: 10.5px; line-height: 1.5; color: var(--peach); }
+.cm-peachbox a { color: var(--peach); }
+
+/* one comment: a 20 px avatar, the name, "you"; the words and the meta indented under them */
+.cm-c { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; }
+.cm-c.indent { margin-left: 26px; padding-left: 10px; border-left: 1px solid var(--surface1); }
+.cm-head { display: flex; align-items: center; gap: 6px; }
+.cm-av { width: 20px; height: 20px; flex: none; border-radius: 50%; background-color: var(--surface1);
+  background-size: cover; background-position: center; background-repeat: no-repeat; }
+.cm-name { font-size: 10.5px; font-weight: 700; white-space: nowrap; color: var(--text); }
+.cm-you { font-size: 8.5px; font-weight: 800; padding: 1px 6px; border-radius: 4px;
+  background: rgba(182, 146, 230, .18); color: var(--lavender); }
+.cm-text { padding-left: 26px; font-size: 10.5px; line-height: 1.45; color: var(--subtext);
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-sticker { margin-left: 26px; width: 64px; height: 64px; border-radius: 8px; background-color: var(--surface0);
+  background-size: contain; background-position: center; background-repeat: no-repeat; }
+.cm-foot { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-left: 26px; }
+.cm-meta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); }
+.cm-toggle, .cm-replylink, .cm-delete, .cm-link { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; }
+.cm-toggle { color: var(--overlay0); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; }
+.cm-toggle:hover { color: var(--text); }
+.cm-replylink { font-size: 9.5px; color: var(--lavender); }
+.cm-replylink:hover, .cm-link:hover { color: var(--mauve); text-decoration: underline; }
+.cm-delete { font-size: 10px; color: var(--ruby); text-decoration: underline dotted; }
+.cm-older { display: flex; justify-content: flex-end; padding-top: 4px; }
+.cm-link { font-size: 10.5px; color: var(--lavender); }
+
+/* the reply box (§6): grows from 36 px, a mono counter that turns peach past 4,095 */
+.cm-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 26px; }
+.cm-field { min-height: 36px; box-sizing: border-box; width: 100%; resize: none; overflow: hidden;
+  padding: 8px 10px; border-radius: 9px; border: 1px solid var(--lavender); background: rgba(12, 10, 28, .8);
+  font: inherit; font-size: 10.5px; line-height: 1.5; color: var(--text); }
+.cm-field:focus { outline: none; box-shadow: 0 0 0 2px rgba(182, 146, 230, .25); }
+.cm-field:disabled { opacity: .7; }
+.cm-field.off { border-color: var(--surface1); background: rgba(12, 10, 28, .5); color: var(--overlay0); min-height: 0; }
+.cm-boxrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cm-count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.cm-count.over { color: var(--peach); }
+.cm-sp { flex: 1; }
+.cm-btn { font: inherit; font-size: 10.5px; font-weight: 700; padding: 6px 12px; border-radius: 9px; border: 0;
+  background: var(--lavender); color: var(--base); white-space: nowrap; cursor: pointer; }
+.cm-btn:disabled { opacity: .45; cursor: default; }
+.cm-btn.ruby { background: var(--ruby); color: var(--text); }
+.cm-ghost { font: inherit; font-size: 10.5px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--surface1);
+  background: none; color: var(--subtext); white-space: nowrap; cursor: pointer; }
+.cm-ghost:hover { color: var(--text); }
+
+/* the phone (§10): rows at least 44 px, and the question as a bottom sheet with 44 px buttons */
+.cm-thread.phone .cm-c { min-height: 44px; box-sizing: border-box; }
+.cm-thread.phone .cm-replylink, .cm-thread.phone .cm-toggle, .cm-thread.phone .cm-delete {
+  min-height: 32px; display: inline-flex; align-items: center; }
+.cm-thread.phone .cm-btn, .cm-thread.phone .cm-ghost { min-height: 44px; padding: 0 16px; }
+.cm-ask { display: flex; flex-direction: column; gap: 10px; padding: 4px 4px 8px; }
+.cm-askq { font-size: 13px; line-height: 1.45; color: var(--text); }
+.cm-askquote { max-height: 9em; overflow: hidden; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--surface1);
+  background: rgba(33, 31, 58, .45); font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre-wrap;
+  overflow-wrap: anywhere; }
+.cm-askquote.long { -webkit-mask-image: linear-gradient(180deg, #000 75%, transparent);
+  mask-image: linear-gradient(180deg, #000 75%, transparent); }
+.cm-askacts { display: flex; gap: 10px; }
+.cm-askacts .big { flex: 1; min-height: 44px; font-size: 13px; }
+
+/* the phone wrapper in Image Details Mobile: gone when the picture is not published */
+.idm-comments:empty { display: none; }

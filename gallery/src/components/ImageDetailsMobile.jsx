@@ -18,6 +18,7 @@ import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
 import "../styles/curation.css";
 import "../styles/curation-mobile.css";
+import CommentsThread from "../inbox/CommentsThread.jsx";
 
 /* Image Details Mobile -- design spec: "Image Details Mobile.dc.html"
    (design_handoff_moonglade_suite/), the mobile port of DetailsView.jsx ("the
@@ -381,7 +382,9 @@ export default function ImageDetailsMobile({
               <div className="idm-row-vwrap">
                 <div className="idm-row-val">
                   {views != null ? "👁 " + Number(views).toLocaleString() + " · " : ""}
-                  ♥ {row.liked_count || 0} · 💬 {row.comment_count || 0}
+                  {/* Session R (R5b): the "💬 n" count left this line -- the thread below
+                      carries it, read live. */}
+                  ♥ {row.liked_count || 0}
                   {row.aes_score ? " · aesthetic " + row.aes_score : ""}
                 </div>
               </div>
@@ -421,6 +424,11 @@ export default function ImageDetailsMobile({
             <div className="idm-simnote">{similar.error}</div>
           )}
         </div>
+
+        {/* COMMENTS (Session R, R5b + R6c; Inbox and Event Handoff §10): Image Details Mobile
+            gets the desktop's thread as-is; the reply's question is a bottom sheet with two
+            44 px buttons. Draws nothing for a picture that is not published. */}
+        <div className="idm-comments"><CommentsThread row={row} phone /></div>
 
         <div className="idm-recrow">
           {/* Q2: the page's two buttons, 44 px+ each, first in the pinned foot. Remix opens Create

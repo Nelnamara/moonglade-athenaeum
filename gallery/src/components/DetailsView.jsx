@@ -10,6 +10,7 @@ import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
 import { seriesSuffix } from "../gen/seriesName.js";
 import { positionLabel } from "../lib/phoneCore.js";
+import CommentsThread from "../inbox/CommentsThread.jsx";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -390,9 +391,11 @@ export default function DetailsView({
   push("Video Mode", row.video_mode);
   push("Video Model", row.video_model);
   if (row.is_published === "1") {
+    // Session R (R5b): the "💬 n" count left this line -- the work's comments are read live
+    // in their own section below (COMMENTS · N), which carries the count.
     push("Engagement",
       (views != null ? "👁 " + Number(views).toLocaleString() + " · " : "") +
-      "♥ " + (row.liked_count || 0) + " · 💬 " + (row.comment_count || 0) +
+      "♥ " + (row.liked_count || 0) +
       (row.aes_score ? " · aesthetic " + row.aes_score : ""));
   }
   push("Content", nsfw);
@@ -760,6 +763,11 @@ export default function DetailsView({
               </div>
             </div>
           ) : null}
+
+          {/* COMMENTS (Session R, R5b + R6c; Inbox and Event Handoff §5-6): a published work's
+              thread, read live when this section scrolls into view, with replies on your own
+              work. Draws nothing for a picture that is not published. */}
+          <CommentsThread row={row} />
 
           {/* Session M (NOTES 7, page M5): the exact request this picture's task was sent with, secrets
               stripped, Copy JSON / Copy as CLI. Opened by the More row's { } Inspect chip; nothing is read

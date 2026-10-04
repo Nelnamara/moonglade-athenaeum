@@ -388,6 +388,32 @@ media pills back on screen. And while a sheet is up — **Sort**, **Advanced Sea
 **Actions** — the library behind the dim is held still, and is exactly where you left it
 when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
+### Comments on your published work
+
+A picture you have published on PixAI shows its **COMMENTS** in Details, on the desktop and the
+phone, where the ♥ / 💬 count used to carry them. They are read live from PixAI when you scroll
+to them — never when Details merely opens — newest first, 50 at a time with **Load older** at
+the end, and kept in memory for five minutes. They are never saved to your library, a file or a
+log: they are other people's words.
+
+- Each comment shows with its replies folded under **N replies ▸**; a chain you've replied in
+  opens by itself, and so does the one you reached from a quote in the gift box. Your own
+  comments wear a **you** badge. Reactions show as a count and stickers as small pictures —
+  there is no like, react or report button. A comment PixAI has flagged is hidden, and one line
+  at the end says how many.
+- **Reply** opens a box under that comment with a counter (PixAI's limit is 4,095 characters;
+  past it the counter turns peach and Send says how far over you are). **Send** asks first —
+  a notice that names your PixAI name, the person and the work and quotes your text in full
+  (on a phone, a sheet with two big buttons): **Back** or **Post publicly**. Only Post publicly
+  sends it, once. The app then reads the thread back and says **Posted · found in the thread**,
+  or — if PixAI's answer was unclear and the reply isn't there — tells you to check on PixAI,
+  and keeps Send off until you change the text, so the same words are never posted twice.
+  PixAI's refusals (email not verified, blocked, not eligible, restricted, too many) are shown
+  in plain words.
+- PixAI has no edit, so a reply you've just posted offers **Delete my reply** while the thread
+  is open; it asks first (*This can't be undone*), sends once and reads back.
+- With `READ_ONLY` set, the reply box shows, greyed, with the reason, and nothing is sent.
+
 ### The phone's reading feed, the new-since line, and pull to refresh
 
 **▦ Grid | ▭ Feed.** The toggle sits in the pill row, beside **Sort**. **Feed** shows one picture per
