@@ -27832,6 +27832,73 @@ __DESIGN_TOKENS__
         except Exception as e:                                   # noqa: BLE001
             return _recipe_fail(e)
 
+    # --- The inbox, comments, gifts and the current event (Sessions R + Y, lane R) -------
+    # Over moonglade_inbox (its docstring has the contract and the four write rules). Reads
+    # are LOGIN, like every other read of PixAI here. A write is a deliberate press: LOGIN,
+    # explicit-token CSRF (_check_csrf), then moonglade_inbox's own function -- READ_ONLY
+    # first, one attempt, a read-back that decides the answer. Nothing here writes when the
+    # panel opens, a list scrolls or a push arrives. Strangers' words pass through to the
+    # browser and are never written to the catalog, a file or a log line.
+
+    def _inbox():
+        import moonglade_inbox
+        return moonglade_inbox
+
+    def _inbox_fail(e, **extra):
+        """A read that failed, as the house's {error} answer (HTTP 200: the body is the
+        answer, api.js's one rule). PixAI's own message only -- never the words of a comment."""
+        out = {"error": _redact_host_paths(str(e))[:240]}
+        out.update(extra)
+        return jsonify(out), 200
+
+    def _inbox_read_only():
+        import moonglade_backup as core
+        return bool(core.READ_ONLY or core._read_only_now())
+
+    def _inbox_local_media(items):
+        """Fill each work's local media id (Details opens on it), from the catalog."""
+        ids = [i["artwork"]["id"] for i in items if i.get("artwork")]
+        found = artwork_media_ids(db_path, ids) if ids else {}
+        for i in items:
+            if i.get("artwork"):
+                i["artwork"]["media_id"] = found.get(i["artwork"]["id"], "")
+        return items
+
+    @app.route("/api/inbox")
+    @tier(LOGIN)
+    def api_inbox():
+        """One page of PixAI's inbox, newest first (?before=<cursor> pages older). Opening the
+        panel is this one read and nothing else: no mark-read, no count write. Also answers
+        read_only (the rows say why nothing gets marked) and the CSRF token its writes carry."""
+        session.setdefault("csrf", secrets.token_hex(16))
+        ib = _inbox()
+        try:
+            gsession = ib.pixai_session()
+            page = ib.list_notifications(gsession, before=request.args.get("before") or None)
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, items=[], csrf=session["csrf"],
+                               read_only=_inbox_read_only())
+        return jsonify({"items": _inbox_local_media(page["items"]), "cursor": page["cursor"],
+                        "has_more": page["has_more"], "csrf": session["csrf"],
+                        "read_only": _inbox_read_only()})
+
+    @app.route("/api/inbox/count")
+    @tier(LOGIN)
+    def api_inbox_count():
+        """The gift box's badge: PixAI's unread count (TASK excluded) plus pending gifts.
+        Read on app open, on focus (the client debounces 30 s) and on a socket reconnect."""
+        try:
+            return jsonify(_inbox().unread_total(_inbox().pixai_session()))
+        except Exception as e:                                   # noqa: BLE001
+            return _inbox_fail(e, total=None)
+
+    @app.route("/api/inbox/events")
+    @tier(LOGIN)
+    def api_inbox_events():
+        """ON PIXAI NOW: the banners PixAI runs whose link is under /event/. Public and sent
+        with no credential; cached an hour. The app never follows a link -- a press opens it."""
+        return jsonify({"events": _inbox().current_events()})
+
     @app.after_request
     def _gzip_html(resp):
         # Compress only HTML pages (the big card grids). File responses are

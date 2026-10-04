@@ -521,6 +521,29 @@ def _no_live_recipes(monkeypatch):
     moonglade_recipes.clear_cache()
 
 
+import moonglade_inbox as _inbox_mod   # noqa: E402 -- beside the fixture that blocks it
+
+# Captured before _no_live_inbox (below) swaps it, so a test can drive the real public GET
+# against a patched requests.get and see exactly what it would send.
+_REAL_INBOX_PUBLIC_GET = _inbox_mod._public_get
+
+
+@pytest.fixture(autouse=True)
+def _no_live_inbox(monkeypatch):
+    """moonglade_inbox (Sessions R + Y) has two roads of its own beside the /v2 transport the
+    fixture below blocks: the PUBLIC banner GET (sent with no credential, so it is not the
+    session) and the DELETE of the owner's own reply. Both raise here unless a test swaps in an
+    answer, and the module's memos (the hour's banners, the five-minute thread cache, the pushed
+    notifications) are cleared so one test's PixAI can't answer another's."""
+    def _blocked(*a, **k):
+        raise core.PixAIError("live PixAI blocked in tests")
+    monkeypatch.setattr(_inbox_mod, "_public_get", _blocked)
+    monkeypatch.setattr(_inbox_mod, "_rest_delete", _blocked, raising=False)
+    _inbox_mod.clear_caches()
+    yield
+    _inbox_mod.clear_caches()
+
+
 @pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by

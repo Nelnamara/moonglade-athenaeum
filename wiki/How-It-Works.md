@@ -10,6 +10,8 @@ moonglade_mcp.py          local stdio MCP server: curation tools over the catalo
                           finder, and a read-only PixAI tag-suggestion tool
 moonglade_recipes.py      PixAI recipes: the market, Mine and Sets, the creator, and attaching
                           recipes to a generation
+moonglade_inbox.py        PixAI's inbox behind the gift box, a published work's comments and
+                          your replies, gifts, and the event PixAI is running now
 moonglade_runs.py         the prompt template (`{a|b}` variables, saved lists), Random and Matrix
                           runs, and the Runs store behind Inspect
 moonglade_contest_wins.py what counts as a verified contest win and when it is checked
