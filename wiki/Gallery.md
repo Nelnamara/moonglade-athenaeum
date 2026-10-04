@@ -419,6 +419,14 @@ everything loaded. A pull at the very top runs **Sync now** and then puts what i
 keeping every page you had loaded; the count grows by the new ones. A finished generation does not
 reload the list while you are reading it; pull when you want the new pictures in.
 
+**A long list stays light.** However far you scroll, the phone only draws about five hundred pictures
+at a time (five lots of 100) around where you are; the rest keep their place as empty space of exactly
+their height, so nothing jumps, and they are drawn again — a colour first, then the picture — when you
+scroll back to them. In the full-screen viewer, **‹ ›** carry on past the last picture loaded, loading
+the next lot as they go, and the number at the top is the picture's place in everything your search
+matches. Close the viewer and the list is back at the picture you were on, even one far from where you
+opened it.
+
 ### The phone turned sideways
 
 Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop

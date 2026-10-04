@@ -400,11 +400,6 @@ const SCREEN_TITLES = {
   health: "Collection Health",
 };
 
-/* Session U: in Continuous the viewer walks the whole stacked list. Its index is already the picture's
-   place in the walk (the list runs from the top), so nothing comes before it and there is no page to
-   step to -- these override the Pages-mode props the Lightbox mount spells out. */
-const LIGHTBOX_CONTINUOUS = { page: 1, pages: 1, offset: 0 };
-
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
   /* WHAT "UPDATE" MEANS ON THE PHONE (owner ruling 2026-09-07, "phone gets update"). The
@@ -817,7 +812,18 @@ export default function AppMobile({ boot }) {
   // the grid-tap flavor (#35): a tap must always open SOMETHING -- on an index
   // miss (page replaced mid-tap) it opens Details by id instead of toasting.
   const openLightboxFromGrid = (mid) => openLightbox(mid, openDetails);
-  const closeLightbox = () => setLbIndex(null);
+  /* U4 (Session U): in Continuous, closing the viewer brings the picture it was on back into view in the
+     list -- mounting its page first if the window had dropped it (ContinuousGridMobile's `reveal`). */
+  const [reveal, setReveal] = useState(null);
+  const lbIndexRef = useRef(null);
+  lbIndexRef.current = lbIndex;
+  const closeLightbox = () => {
+    if (continuousRef.current && lbIndexRef.current != null) {
+      const it = libNowRef.current.items[lbIndexRef.current];
+      if (it) setReveal({ mid: it.media_id, n: Date.now() });
+    }
+    setLbIndex(null);
+  };
   /* "Edit with Tsubaki" from Image Details (Session H decision 2, the phone's image menu): the
      Create tab's Image mode on Tsubaki.3, the picture in context slot 1, the prompt seeded
      "Use @image1 …". Prefill only -- the owner presses Generate. */
@@ -1385,7 +1391,7 @@ export default function AppMobile({ boot }) {
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar}
             marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
-            continuous={continuous} onLoadMore={loadMore} more={more}
+            continuous={continuous} onLoadMore={loadMore} more={more} reveal={reveal}
             curation={{
               smart, curate, saveSmart, composeView,
               // Session P (P6): the Manual sort's editor, on the Collections screen
@@ -1523,7 +1529,11 @@ export default function AppMobile({ boot }) {
           loadPage={userLoad}, not lib.load: stepping past the end of a page in the viewer
           is the owner asking for the next page, so it goes on the record exactly the way
           the pager does. The completion handler already refuses while one of his loads is
-          in the air, which is precisely the window this step opens. See navRef above. */}
+          in the air, which is precisely the window this step opens. See navRef above.
+          CONTINUOUS (Session U, U4a) overrides the Pages props at the end: the viewer walks the
+          whole stacked list -- its index is already the picture's place in the walk -- and
+          stepping past the last loaded picture asks for the next page (loadMore) and lands on
+          the picture after it by id. */}
       {lbIndex != null && (
         <LightboxMobile
           items={lib.items} index={lbIndex} setIndex={setLbIndex}
@@ -1536,7 +1546,7 @@ export default function AppMobile({ boot }) {
           onEnterContest={openContestFor}
           member={account ? account.is_member : null}
           onSendToVideo={sendPictureToVideo}
-          {...(continuous ? LIGHTBOX_CONTINUOUS : null)}
+          {...(continuous ? { page: 1, pages: 1, offset: 0, continuous: true, loadMore } : null)}
         />
       )}
 

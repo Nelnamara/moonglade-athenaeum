@@ -87,6 +87,56 @@ export function endLabel(total) {
   return "That's all " + Number(total || 0).toLocaleString() + ".";
 }
 
+/* The mounted window (U4a). A stacked list keeps every picture's data in memory but puts at most five
+   pages of 100 in the DOM; a page scrolled out of the window leaves a spacer of its exact measured
+   height, and scrolling back mounts it again from memory (each tile paints its tint, then its picture --
+   its box is its aspect ratio, so nothing shifts). A window page is 100 pictures by its place in the
+   list, whatever size the requests were cut at. */
+export const WINDOW_PAGE = 100;
+export const WINDOW_PAGES = 5;
+
+export function windowPageCount(n) {
+  return Math.ceil(Math.max(0, Number(n) || 0) / WINDOW_PAGE);
+}
+
+export function windowPageOf(index) {
+  return Math.floor(Math.max(0, Number(index) || 0) / WINDOW_PAGE);
+}
+
+/* The pages to mount: centred on the page in view, held inside the list, at most `max`. `end` is
+   inclusive; an empty list mounts nothing. */
+export function mountWindow(center, count, max = WINDOW_PAGES) {
+  const n = Math.max(0, Math.floor(Number(count)) || 0);
+  if (!n) return { start: 0, end: -1 };
+  const m = Math.max(1, Math.floor(Number(max)) || WINDOW_PAGES);
+  const c = Math.min(n - 1, Math.max(0, Math.floor(Number(center)) || 0));
+  const start = Math.max(0, Math.min(c - Math.floor(m / 2), n - m));
+  return { start, end: Math.min(n - 1, start + m - 1) };
+}
+
+/* The window page the "N new since" rule closes: the page of the last new picture (none at zero). */
+export function rulePage(newCount) {
+  const k = Math.floor(Number(newCount) || 0);
+  return k > 0 ? Math.floor((k - 1) / WINDOW_PAGE) : -1;
+}
+
+/* A page whose height changed between two frames -- mounted again over a spacer that was an estimate
+   (after a turn of the phone, say), or an estimate refined: when the WHOLE page was above the top of the
+   view (its bottom, before the change, at or above it) the view follows it by the difference, so nothing
+   in view moves. A page the view is in, or one below it, is never corrected: a page that grows at its
+   foot (the next pictures appended into it) moves nothing in view. */
+export function remountShift(spacerHeight, realHeight, bottomBefore, viewTop) {
+  if (!(Number(bottomBefore) <= Number(viewTop))) return 0;
+  const d = Number(realHeight) - Number(spacerHeight);
+  return Number.isFinite(d) ? d : 0;
+}
+
+/* The viewer's film strip in Continuous: the window page the picture is on ([start, end) of the list). */
+export function stripRange(index, count) {
+  const start = windowPageOf(index) * WINDOW_PAGE;
+  return { start, end: Math.min(Math.max(0, Number(count) || 0), start + WINDOW_PAGE) };
+}
+
 /* The footer says one thing at a time: the spinner line while a page is in flight, the peach retry
    after a failed one (until Retry is tapped -- there is no automatic retry), the end line, or nothing. */
 export function footerState({ busy, failed, done }) {

@@ -3,6 +3,7 @@ import Icon from "../icons/Icons.jsx";
 import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
+import ContinuousGridMobile from "./ContinuousGridMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import SimilarResults from "./SimilarResults.jsx";
@@ -89,7 +90,10 @@ import "../styles/phone-q.css";
          instead -- the spinner line while the next page is in flight, the peach "Couldn't load more.
          Retry" after a failure (Retry is one request; nothing retries by itself), "That's all M." at the
          end. The next page is asked for (`onLoadMore`, the shell's) when the footer comes within 1.5
-         screens of the bottom of the view, one request at a time; `more` is that request's state. */
+         screens of the bottom of the view, one request at a time; `more` is that request's state.
+     U4  the stacked list is ContinuousGridMobile: at most five pages of 100 in the DOM, exact-height
+         spacers for the rest. `reveal` is the shell's ask to bring a picture back into view after the
+         viewer closes on it. */
 
 /* A long-press that moves further than this is a scroll or a drag, not a hold. */
 const KEY_MOVE_CANCEL_PX = 10;
@@ -119,7 +123,7 @@ export default function GalleryMobile({
      own front page, and what a pull runs. */
   marker, frontPage, onPullRefresh,
   /* Session U: Continuous paging, the shell's next-page request and its state ({busy, failed}). */
-  continuous = false, onLoadMore, more,
+  continuous = false, onLoadMore, more, reveal,
   /* Session N: what curation hands this tab -- {smart, curate, saveSmart, composeView, strip}.
      smart is the saved searches ({name, query}) listed in the Collection field with the refresh
      mark; curate is the shell's useCurate (the bulk verbs and their undo toast); saveSmart and
@@ -432,9 +436,15 @@ export default function GalleryMobile({
           onSimilar={onSimilar}
           onClear={onClearSimilar}
         />
+      ) : continuous ? (
+        <ContinuousGridMobile
+          items={items} loading={loading && !moreBusy} selectMode={selectMode} selected={selected}
+          toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+          layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols} reveal={reveal}
+        />
       ) : (
         <GalleryGridMobile
-          items={items} loading={loading && !(continuous && moreBusy)} selectMode={selectMode} selected={selected}
+          items={items} loading={loading} selectMode={selectMode} selected={selected}
           toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
           layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols}
         />

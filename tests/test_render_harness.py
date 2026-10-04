@@ -8259,12 +8259,17 @@ def test_continuous_pages_are_50_under_data_saver_on_a_metered_connection_and_a_
         page.mouse.click(195, 60)
         page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '50 of 620'")
         assert _u_libs(seen)[-1] == (1, 50), _u_libs(seen)
+        since = len(_u_libs(seen)) - 1
         assert page.evaluate("document.querySelector('.glm-body').scrollTop") == 0
         top = page.evaluate("document.querySelector('.glm-tile').getAttribute('data-mid')")
         assert top == _u_mid(0), "the stacked list starts at the newest picture"
         _u_to_end(page)
         page.wait_for_function("() => document.querySelector('.glm-pgcount').textContent === '100 of 620'")
-        assert _u_libs(seen)[-1] == (2, 50), _u_libs(seen)
+        page.wait_for_timeout(700)
+        # one page, not a run of them: the 50 new pictures grow the window page the view is in at its foot,
+        # which must not drag the view down after them (and so ask again)
+        assert _u_libs(seen)[since:] == [(1, 50), (2, 50)], _u_libs(seen)[since:]
+        assert _u_count(page) == "100 of 620"
     finally:
         ctx.close()
 
@@ -8328,5 +8333,123 @@ def test_a_pull_over_continuous_prepends_above_the_rule_and_keeps_every_loaded_p
         assert got["above"] == sorted(fresh), got
         assert got["tiles"] >= 203, "every page already loaded is kept: %r" % got
         assert "mg_phone_seen" not in page.evaluate("window.__qWrites"), "a pull leaves the marker where it was"
+    finally:
+        ctx.close()
+
+
+_U_WINDOW_JS = """() => { const b = document.querySelector('.glm-body');
+    return {pages: [...document.querySelectorAll('.glm-cpage')].map((e) => Number(e.dataset.page)),
+            spacers: [...document.querySelectorAll('.glm-cpage-spacer')].map((e) => [Number(e.dataset.page), e.offsetHeight]),
+            tiles: document.querySelectorAll('.glm-tile').length, sh: b.scrollHeight, st: b.scrollTop}; }"""
+
+_U_TILE_Y_JS = """(m) => { const b = document.querySelector('.glm-body');
+    const t = document.querySelector('.glm-tile[data-mid="' + m + '"]');
+    if (!t) return null;
+    const r = t.getBoundingClientRect(), hb = b.getBoundingClientRect();
+    return {y: r.top - hb.top + b.scrollTop, inView: r.top >= hb.top - 1 && r.bottom <= hb.bottom + 1}; }"""
+
+
+def _u_load_all(page, total=620):
+    want = "%d of %d" % (total, total)
+    for _ in range(24):
+        if _u_count(page) == want:
+            break
+        _u_to_end(page)
+        page.wait_for_timeout(250)
+    page.wait_for_function("(w) => document.querySelector('.glm-pgcount').textContent === w", arg=want)
+    _settle(page)
+
+
+def test_continuous_mounts_at_most_five_pages_with_exact_spacers_and_the_viewer_crosses_page_edges(
+        phone_u_server, render_browser, monkeypatch):
+    """U4a. The viewer's › past the last loaded picture asks for the next page and lands on the picture
+    after it, by id, counting its place in the whole walk; ‹ steps back across the edge. With everything
+    loaded, at most five pages of 100 are in the DOM and the rest are spacers of exactly the height the
+    page had: the list's height does not change as pages drop and mount, and a picture comes back to
+    the very same place. Closing the viewer on a picture in a dropped page mounts that page and brings
+    the picture into view."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        page.wait_for_function("() => (document.querySelector('.glm-pgcount') || {}).textContent === '100 of 620'")
+
+        # the viewer crosses the first page edge by id. It walks there from the top picture (the grid stays
+        # at the top, so its own footer is far out of reach and only the viewer can ask for page 2)
+        page.locator('.glm-tile[data-mid="%s"]' % _u_mid(0)).click()
+        page.wait_for_function("() => (document.querySelector('.lbm-index') || {}).textContent === '1'")
+        for _ in range(99):
+            page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
+        assert page.locator(".lbm-total").inner_text() == "OF 620"
+        reads = len(_u_libs(seen))
+        page.click(".lbm-next")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '101'")
+        assert _u_libs(seen)[reads:] == [(2, 100)], _u_libs(seen)[reads:]
+        assert page.locator(".lbm-hero img").get_attribute("src").endswith("/full/" + _u_mid(100))
+        assert page.locator(".lbm-thumb").count() == 100, "the film strip is the window page the picture is on"
+        page.click(".lbm-prev")
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '100'")
+        assert page.locator(".lbm-hero img").get_attribute("src").endswith("/full/" + _u_mid(99))
+        page.click(".lbm-close")
+        page.wait_for_selector(".lbm-root", state="detached")
+
+        # everything loaded: at most five pages mounted, spacers for the rest
+        _u_load_all(page)
+        w = page.evaluate(_U_WINDOW_JS)
+        assert len(w["pages"]) <= 5 and w["tiles"] <= 500, w
+        assert len(w["spacers"]) == 7 - len(w["pages"]) and all(h > 0 for _, h in w["spacers"]), w
+
+        # exact spacers: the height of the list holds, and a picture comes back to the same place
+        at = page.evaluate(_U_TILE_Y_JS, _u_mid(600))
+        assert at, "the last page is mounted at the bottom"
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 0")
+        page.wait_for_function("() => !document.querySelector('.glm-cpage[data-page=\"6\"]')")
+        _settle(page)
+        top = page.evaluate(_U_WINDOW_JS)
+        assert 0 in top["pages"] and len(top["pages"]) <= 5, top
+        assert abs(top["sh"] - w["sh"]) <= 1, "the list's height holds as pages drop and mount: %r" % ((w["sh"], top["sh"]),)
+        page.evaluate("(y) => { document.querySelector('.glm-body').scrollTop = y; }", w["st"])
+        page.wait_for_selector('.glm-cpage[data-page="6"]')
+        _settle(page)
+        back = page.evaluate(_U_TILE_Y_JS, _u_mid(600))
+        assert abs(back["y"] - at["y"]) <= 1, "the picture comes back to the same place: %r" % ((at, back),)
+
+        # the viewer, opened on a picture in a dropped page, closes back onto it
+        assert page.locator('.glm-tile[data-mid="%s"]' % _u_mid(5)).count() == 0, "page 0 is dropped at the bottom"
+        page.evaluate("(m) => document.dispatchEvent(new CustomEvent('mg-open-details', {detail: {mid: m}}))", _u_mid(5))
+        page.wait_for_selector(".idm-root .idm-lb")
+        page.click(".idm-lb")
+        page.wait_for_function("() => (document.querySelector('.lbm-index') || {}).textContent === '6'")
+        page.click(".lbm-close")
+        page.wait_for_selector(".lbm-root", state="detached")
+        page.wait_for_selector('.glm-tile[data-mid="%s"]' % _u_mid(5))
+        _settle(page)
+        assert page.evaluate(_U_TILE_Y_JS, _u_mid(5))["inView"], "the picture is back in view"
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
+    finally:
+        ctx.close()
+
+
+def test_continuous_holds_its_window_through_a_turn_and_back(phone_u_server, render_browser, monkeypatch):
+    """U4a with Q4: deep in a stacked list, a turn to landscape and back keeps at most five pages mounted,
+    upright is two columns again, and nothing scrolls sideways (the #75 symptom, measured here, not fixed)."""
+    ctx, page, seen = _q_page(render_browser, phone_u_server, monkeypatch, init=_U_CONTINUOUS_JS)
+    try:
+        _q_open(page)
+        _u_load_all(page)
+        page.evaluate("document.querySelector('.glm-body').scrollTop = document.querySelector('.glm-body').scrollHeight / 2")
+        _settle(page)
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
+        _settle(page)
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
+        page.set_viewport_size(PHONE)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0", timeout=2500)
+        _settle(page)
+        got = page.evaluate(_Q_COLS_JS)
+        cols = page.evaluate("() => document.querySelector('.glm-cpage .glm-grid').querySelectorAll(':scope > .glm-col').length")
+        assert cols == 2 and not got["rows"], (cols, got)
+        assert got["docW"] <= got["vw"] and got["bodyW"] <= got["bodyCW"] and got["right"] <= PHONE["width"], got
+        assert len(page.evaluate(_U_WINDOW_JS)["pages"]) <= 5
     finally:
         ctx.close()

@@ -8,7 +8,8 @@ import {
   CONTINUOUS_PAGE, CONTINUOUS_PAGE_METERED, DEFAULT_PAGING, KEY_LONG_PRESS_MS, PAGINGS, PAGING_LABELS,
   PREFETCH_SCREENS, PREPEND_MAX_PAGES, appendUnique, connectionInfo, continuousDone, continuousPageSize,
   countLabel, endLabel, footerState, isFrontPage, nearEnd, newSince, newestAbove, nextContinuousPage,
-  parsePaging, prependUnique,
+  parsePaging, prependUnique, WINDOW_PAGE, WINDOW_PAGES, mountWindow, remountShift, rulePage, stripRange,
+  windowPageCount, windowPageOf,
 } from "../../gallery/src/lib/phoneCore.js";
 import {
   PAGING_HINT_KEY, PAGING_KEY, readPaging, readPagingHintSeen, writePaging, writePagingHintSeen,
@@ -266,5 +267,84 @@ describe("U3 new since over stacked pages: the wiring", () => {
     const body = fn.slice(0, fn.indexOf("};") + 2);
     assert.match(body, /host\.scrollTo\(/);
     assert.doesNotMatch(body, /load|setItems|onLoadMore/);
+  });
+});
+
+describe("U4 the mounted window: the rules", () => {
+  test("a window page is 100 pictures and at most 5 are mounted", () => {
+    assert.equal(WINDOW_PAGE, 100);
+    assert.equal(WINDOW_PAGES, 5);
+    assert.equal(windowPageCount(0), 0);
+    assert.equal(windowPageCount(100), 1);
+    assert.equal(windowPageCount(620), 7);
+    assert.equal(windowPageOf(0), 0);
+    assert.equal(windowPageOf(99), 0);
+    assert.equal(windowPageOf(100), 1);
+  });
+
+  test("the window is centred on the page in view, held inside the list, never more than five", () => {
+    assert.deepEqual(mountWindow(0, 7), { start: 0, end: 4 });
+    assert.deepEqual(mountWindow(3, 7), { start: 1, end: 5 });
+    assert.deepEqual(mountWindow(6, 7), { start: 2, end: 6 });
+    assert.deepEqual(mountWindow(1, 3), { start: 0, end: 2 }, "a short list is all mounted");
+    assert.deepEqual(mountWindow(9, 7), { start: 2, end: 6 }, "a stale centre is held inside the list");
+    assert.deepEqual(mountWindow(0, 0), { start: 0, end: -1 });
+    for (let c = 0; c < 40; c += 1) {
+      const w = mountWindow(c, 40);
+      assert.ok(w.end - w.start + 1 <= 5 && w.start <= c && c <= w.end, JSON.stringify([c, w]));
+    }
+  });
+
+  test("the new-since rule belongs to the page its last new picture is on", () => {
+    assert.equal(rulePage(0), -1, "no rule");
+    assert.equal(rulePage(1), 0);
+    assert.equal(rulePage(100), 0, "exactly a page new: the rule closes page 0");
+    assert.equal(rulePage(101), 1);
+  });
+
+  test("a page wholly above the view that changes height moves the view by the difference, so nothing in view moves", () => {
+    assert.equal(remountShift(9000, 9040, -3000, 0), 40, "above the view: follow it");
+    assert.equal(remountShift(9000, 8990, -3000, 0), -10);
+    assert.equal(remountShift(9000, 9040, 0, 0), 40, "its foot exactly at the top of the view is still above it");
+    assert.equal(remountShift(9000, 9000, -3000, 0), 0, "an exact spacer: nothing moves");
+  });
+
+  test("a page the view is in, or one below it, is never corrected: growing at its foot moves nothing in view", () => {
+    assert.equal(remountShift(5000, 10000, 400, 0), 0, "the next pictures appended into the page in view");
+    assert.equal(remountShift(9000, 9040, 2000, 0), 0, "below the view");
+  });
+
+  test("the viewer's film strip is the window page the picture is on", () => {
+    assert.deepEqual(stripRange(0, 620), { start: 0, end: 100 });
+    assert.deepEqual(stripRange(250, 620), { start: 200, end: 300 });
+    assert.deepEqual(stripRange(615, 620), { start: 600, end: 620 });
+  });
+});
+
+describe("U4 the mounted window: the wiring", () => {
+  test("Continuous draws the windowed list; Pages keeps the grid as shipped", () => {
+    const g = code("components/GalleryMobile.jsx");
+    assert.match(g, /continuous \? \(\s*<ContinuousGridMobile/);
+    const c = code("components/ContinuousGridMobile.jsx");
+    assert.match(c, /mountWindow\(/);
+    assert.match(c, /className="glm-cpage-spacer"/);
+    assert.match(c, /<GalleryGridMobile/, "each mounted page is the shipped grid");
+    assert.match(c, /remountShift\(/);
+  });
+
+  test("the viewer crosses a page edge by id, asking for the next page when it must", () => {
+    const lb = code("components/LightboxMobile.jsx");
+    assert.match(lb, /if \(continuous\) \{/);
+    assert.match(lb, /await loadMore\(\)/);
+    assert.match(lb, /pendingFrom\.current = /);
+    assert.match(lb, /items\.findIndex\(\(x\) => x\.media_id === want\.from\)/);
+  });
+
+  test("closing the viewer in Continuous brings its picture back into view, even from a dropped page", () => {
+    const app = code("components/AppMobile.jsx");
+    assert.match(app, /setReveal\(\{ mid: /);
+    assert.match(app, /reveal=\{reveal\}/);
+    const c = code("components/ContinuousGridMobile.jsx");
+    assert.match(c, /reveal/);
   });
 });

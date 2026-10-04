@@ -58,6 +58,15 @@
 .glm-cfoot-retry { display: block; width: 100%; min-height: 44px; padding: 0; text-align: left; font: inherit;
   font-size: 10.5px; line-height: 1.5; color: var(--peach); background: none; border: 0; cursor: pointer; }
 
+/* ---- U4 the mounted window: pages stacked one under the next, spacers for the dropped ones -------- */
+.glm-cpage-spacer { pointer-events: none; }
+/* A page after the first starts right under the one before it: no second top pad, no fresh stagger
+   (the feed keeps its own 10 px between pictures). Padding, not margin, so a page's measured height is
+   all of it and its spacer is exact. */
+.glm-cpage:not([data-page="0"]) > .glm-grid:first-child { padding-top: 0; }
+.glm-cpage:not([data-page="0"]) > .glm-grid:first-child > .glm-col-off { margin-top: 0; }
+.glm-cpage:not([data-page="0"]) > .glm-grid.glm-feed:first-child { padding-top: 10px; }
+
 @media (prefers-reduced-motion: reduce) {
   .glm-cfoot-spin { animation: none; }
 }
