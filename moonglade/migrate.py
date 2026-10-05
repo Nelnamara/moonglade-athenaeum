@@ -212,6 +212,26 @@ def _size(p):
     return p.stat().st_size
 
 
+def fingerprint(p):
+    """What a file or folder looks like now, to tell later whether it changed: a file's
+    {size, mtime_ns}; a folder's {files, newest_mtime_ns, size} over the files a copy would
+    take (locks and temps left out). Raises OSError when it cannot be read."""
+    p = Path(p)
+    if p.is_dir():
+        files = newest = size = 0
+        for dirpath, _dirs, filenames in os.walk(p, onerror=_raise):
+            for fn in filenames:
+                if _transient(fn):
+                    continue
+                st = (Path(dirpath) / fn).stat()
+                files += 1
+                size += st.st_size
+                newest = max(newest, st.st_mtime_ns)
+        return {"files": files, "newest_mtime_ns": newest, "size": size}
+    st = p.stat()
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
 def _bring(name, src, dest, how, root, outcome, recorded):
     """Bring one name across `how` ("moved", "copied" or "fresh"). Returns the manifest entry
     it wrote down, or None when there was nothing to do (already recorded, nothing in the old
@@ -224,6 +244,7 @@ def _bring(name, src, dest, how, root, outcome, recorded):
     try:
         if not src.exists():
             return None
+        source_print = fingerprint(src)
         if how == "fresh":
             size = _size(src)                       # left where it is; a new one starts
         elif dest.exists():
@@ -243,7 +264,7 @@ def _bring(name, src, dest, how, root, outcome, recorded):
         outcome.failed.append((name, _reason(e)))
         return None
     entry = {"name": name, "source": _rel(src, root), "dest": _rel(dest, root),
-             "action": how, "time": _now(), "size": size}
+             "action": how, "time": _now(), "size": size, "source_print": source_print}
     outcome.done.append(entry)
     return entry
 
@@ -396,6 +417,32 @@ def _shown(p):
     return p.name + os.sep if p.is_dir() else p.name
 
 
+# Old copies already reported as changed since they were brought across, so the log says it
+# once per process rather than on every About.
+_conflicts_said = set()
+
+
+def _unchanged(name, old, entry):
+    """True while the old copy at `old` is still exactly what the migration recorded bringing
+    across. One that changed since (edited on 3.19 after a rollback, or by an older install
+    still using the same folder) may now be NEWER than the copy in use: it is never called
+    safe to delete, and the log says so once."""
+    want = (entry or {}).get("source_print")
+    try:
+        now = fingerprint(old)
+    except OSError:
+        return False
+    if want is not None and now == want:
+        return True
+    if str(old) not in _conflicts_said and not name.startswith("serve.log"):
+        _conflicts_said.add(str(old))
+        logging.getLogger(LOGGER_NAME).warning(
+            "The old copy of %s at %s has changed since 3.20 brought it across; the app "
+            "keeps using the new one and leaves the old one alone (About does not offer it "
+            "for deletion).", name, old)
+    return False
+
+
 def leftovers(out_dir=None):
     """Every old copy the app no longer reads, as (where, name) -- where is "app" (the app
     folder) or "library" (the top of `out_dir`); a folder's name ends in a separator. Read
@@ -411,7 +458,7 @@ def leftovers(out_dir=None):
     try:
         from moonglade import assets as _assets
         pack_in_use = _paths.local_path(PACK_NAME)
-        local_recorded = _paths.moved_names(_paths.local_dir() / _paths.MOVED_NAME)
+        local_entries = _paths.moved_entries(_paths.local_dir() / _paths.MOVED_NAME)
         app_names = [_assets.LEGACY_NAME, _assets.LEGACY_NAME + ".version"]
         app_names += [n for n, _ in LOCAL_PLAN] + list(_OLD_SERVE_LOGS)
         for name in app_names:
@@ -425,7 +472,8 @@ def leftovers(out_dir=None):
             elif name in _OLD_SERVE_LOGS:
                 gone = _paths.local_path("serve.log") != _paths.old_local_path("serve.log")
             else:
-                gone = name in local_recorded and _paths.local_path(name) != old
+                gone = (name in local_entries and _paths.local_path(name) != old
+                        and _unchanged(name, old, local_entries[name]))
             if gone:
                 found.append(("app", _shown(old)))
     except OSError:
@@ -434,12 +482,12 @@ def leftovers(out_dir=None):
         return found
     out = Path(out_dir)
     try:
-        recorded = _paths.moved_names(_paths.records_manifest(out))
+        entries = _paths.moved_entries(_paths.records_manifest(out))
         for name, src, _dest, _how in _library_plan(out):
-            if name not in recorded or not src.exists():
+            if name not in entries or not src.exists():
                 continue
             ask = _paths.state_path if name in _paths.STATE_NAMES else _paths.reports_path
-            if ask(out, name) != src:
+            if ask(out, name) != src and _unchanged(name, src, entries[name]):
                 found.append(("library", _shown(src)))
         for name in _UNUSED_LIBRARY_FILES:
             p = _paths.old_state_path(out, name)

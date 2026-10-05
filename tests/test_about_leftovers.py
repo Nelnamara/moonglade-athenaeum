@@ -163,3 +163,41 @@ def test_the_old_icon_cache_is_never_called_a_leftover(app):
     assert (app / "_container_cache" / "marks" / "mark_4.ico").is_file()
     names = _names(mig.leftovers(), "app")
     assert not [n for n in names if "cache" in n], names
+
+
+# ---- review round: an old copy that changed after it was brought across ------------------
+
+def test_the_manifest_records_each_sources_fingerprint(app, lib):
+    mig.migrate_library(lib)
+    doc = json.loads((lib / "_moonglade" / "MOVED.json").read_text(encoding="utf-8"))
+    by = {e["name"]: e for e in doc["entries"]}
+    st = (lib / "achievements.json").stat()
+    assert by["achievements.json"]["source_print"] == {"size": st.st_size,
+                                                        "mtime_ns": st.st_mtime_ns}
+    folder = by["logs"]["source_print"]
+    assert folder["files"] == 1
+    assert folder["size"] == (lib / "logs" / "moonglade.log").stat().st_size
+    assert folder["newest_mtime_ns"] == (lib / "logs" / "moonglade.log").stat().st_mtime_ns
+
+
+def test_an_old_copy_changed_since_the_move_is_not_called_safe_to_delete(app, lib, caplog):
+    """Edits made on 3.19 after a rollback, or by an older install still using the same
+    library: the old copy is now newer than the one 3.20 uses. About must not offer it for
+    deletion; the log says so, once."""
+    import logging
+    mig.migrate_library(lib)
+    old = lib / "achievements.json"
+    old.write_text('{"earned": {"something": 1}}', encoding="utf-8")
+    os.utime(old, ns=(old.stat().st_atime_ns, old.stat().st_mtime_ns + 5_000_000_000))
+    (lib / "logs" / "moonglade.3.19.log").write_text("a line from 3.19\n", encoding="utf-8")
+    with caplog.at_level(logging.DEBUG, logger="moonglade"):
+        first = [n for _, n in mig.leftovers(lib)]
+        second = [n for _, n in mig.leftovers(lib)]
+    for names in (first, second):
+        assert "achievements.json" not in names and "logs" + SEP not in names
+        assert "organize_manifest.csv" in names                 # unchanged: still listed
+    said = [r.getMessage() for r in caplog.records if r.name == mig.LOGGER_NAME]
+    assert len([m for m in said if "achievements.json" in m]) == 1
+    assert len([m for m in said if "logs" in m]) == 1
+    note = mig.leftovers_note(mig.leftovers(lib))
+    assert "achievements" not in note and "changed" not in note

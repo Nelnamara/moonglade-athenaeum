@@ -119,30 +119,38 @@ def icon_cache_dir():
     return local_path(ICON_CACHE_NAME) / "marks"
 
 
-# The manifest's recorded names, read once per change of the file (path -> (stamp, names)).
-_moved_names_cache = {}
+# A manifest's entries by name, read once per change of the file (path -> (stamp, entries)).
+_moved_entries_cache = {}
 
 
-def moved_names(manifest):
-    """The names a migration manifest records as brought across (copied, moved or started
-    fresh). An absent or unreadable manifest records nothing."""
+def moved_entries(manifest):
+    """{name: its LATEST entry} in a migration manifest: what was brought across (copied,
+    moved, started fresh, or found already in place), from where, and the source's
+    fingerprint at the time. An absent or unreadable manifest records nothing."""
     manifest = Path(manifest)
     try:
         st = manifest.stat()
     except OSError:
-        return frozenset()
+        return {}
     stamp = (st.st_mtime_ns, st.st_size)
-    hit = _moved_names_cache.get(str(manifest))
+    hit = _moved_entries_cache.get(str(manifest))
     if hit and hit[0] == stamp:
         return hit[1]
+    entries = {}
     try:
         doc = json.loads(manifest.read_text(encoding="utf-8"))
-        names = frozenset(e["name"] for e in doc.get("entries", [])
-                          if isinstance(e, dict) and isinstance(e.get("name"), str))
+        for e in doc.get("entries", []):
+            if isinstance(e, dict) and isinstance(e.get("name"), str):
+                entries[e["name"]] = e
     except (OSError, ValueError, AttributeError, TypeError):
-        names = frozenset()
-    _moved_names_cache[str(manifest)] = (stamp, names)
-    return names
+        entries = {}
+    _moved_entries_cache[str(manifest)] = (stamp, entries)
+    return entries
+
+
+def moved_names(manifest):
+    """The names a migration manifest records as brought across."""
+    return frozenset(moved_entries(manifest))
 
 
 def _settled(new_dir, name, old, manifest):
