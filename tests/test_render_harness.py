@@ -4815,8 +4815,13 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
     assert "on" not in (pill.get_attribute("class") or "").split(), "the pill flipped on"
     assert page.evaluate(_READ_MIRROR_RING_JS)["stroke"] == ring["grey"]
 
-    after = seen[before:]
-    assert not after, "pressing the toggle fired {} request(s): {}".format(len(after), after)
+    # Only the Mirror's own requests can come from the toggle. The page keeps its own
+    # start-up traffic going in the background (the inbox count poll, the header door art,
+    # an account-prefs save), and under CPU load some of it lands after the click; counting
+    # that as the toggle's made this assertion race the page instead of testing the tile.
+    after = [(m, u) for (m, u) in seen[before:] if "/api/mirror" in u]
+    assert not after, "pressing the toggle fired {} Mirror request(s): {}".format(
+        len(after), after)
     # And over the WHOLE test: the tile read its status and wrote nothing, and nothing at
     # all went anywhere but this harness's own ephemeral port.
     host = urlparse(page.url).hostname
