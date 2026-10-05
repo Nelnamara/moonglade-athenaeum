@@ -10128,9 +10128,14 @@ DELETED_DIRNAME = "_deleted"
 # the move still has files here, and a scan that swept them in would catalogue
 # someone's banner and mascots as gallery images.
 BRANDING_DIRNAME = "branding"
+# The app's own records in a library (3.20): its state, jobs, logs, runs.db and reports --
+# never pictures. Every walker prunes it, so a record is never catalogued, counted, flagged
+# as a stray, organized or quarantined.
+RECORDS_DIRNAME = _paths.RECORDS_DIRNAME
 
-# The two spellings of "skip the derived + quarantined trees" (named disagreement 2).
-QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME)
+# The two spellings of "skip the derived + quarantined trees, and the app's records"
+# (named disagreement 2).
+QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME)
 QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
 # --import-local's internal scan: the three above plus legacy branding/.
 IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
@@ -10369,7 +10374,7 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
     contract applies to videos, not just images.
     """
     exclude = (QUARANTINE_EXCLUDE if not include_gallery
-               else (DUPLICATES_DIRNAME, DELETED_DIRNAME))
+               else (DUPLICATES_DIRNAME, DELETED_DIRNAME, RECORDS_DIRNAME))
     return files_for(out_dir, media_id,
                      kinds=(("image",) if exts is None else exts),
                      exclude=exclude)
@@ -10424,6 +10429,7 @@ def find_image_file(out_dir, media_id, filename):
     """
     gallery_dir = out_dir / "gallery"
     deleted_dir = out_dir / DELETED_DIRNAME
+    records_dir = out_dir / RECORDS_DIRNAME
     if filename:
         for candidate in out_dir.rglob(filename):
             # The fallback below (find_files_for_media_id) already skips zero-byte
@@ -10434,7 +10440,8 @@ def find_image_file(out_dir, media_id, filename):
             try:
                 if (candidate.is_file() and candidate.stat().st_size > 0
                         and not _is_under(candidate, gallery_dir)
-                        and not _is_under(candidate, deleted_dir)):
+                        and not _is_under(candidate, deleted_dir)
+                        and not _is_under(candidate, records_dir)):
                     return candidate
             except OSError:
                 continue

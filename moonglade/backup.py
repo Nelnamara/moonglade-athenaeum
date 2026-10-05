@@ -16210,6 +16210,7 @@ def _count_backup_images(out):
     _norm = os.path.normcase
     _gallery, _deleted, _dupes = (_norm(GALLERY_DIRNAME), _norm(DELETED_DIRNAME),
                                   _norm(DUPLICATES_DIRNAME))
+    _records = _norm(_paths.RECORDS_DIRNAME)
     n = b = thumbs = trashed = trashed_bytes = 0
     for e in scan_library(out, kinds=("image",), exclude=()):
         top = _norm(e.rel.parts[0]) if len(e.rel.parts) > 1 else ""
@@ -16220,6 +16221,8 @@ def _count_backup_images(out):
             trashed_bytes += e.size or 0
         elif top == _dupes:
             pass                       # quarantined duplicates: neither live nor trash
+        elif top == _records:
+            pass                       # the app's own records (3.20), never pictures
         else:
             n += 1
             b += e.size or 0
