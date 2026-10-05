@@ -568,3 +568,57 @@ def test_about_lists_only_what_the_migration_recorded(old_library):
     (lib / "_moonglade").mkdir()
     (lib / "_moonglade" / "achievements.json").write_text('{"earned": {}}', encoding="utf-8")
     assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]
+
+
+# ---- review round: a start that died after its copies but before MOVED.json --------------
+
+def _crash_before_the_manifest(monkeypatch):
+    real = mig._write_manifest
+
+    def died(*a, **k):
+        raise KeyboardInterrupt("the process died here")
+    monkeypatch.setattr(mig, "_write_manifest", died)
+    return real
+
+
+def test_copies_a_dead_start_left_are_recorded_as_kept(old_library, monkeypatch):
+    lib = old_library
+    real = _crash_before_the_manifest(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        mig.migrate_library(lib)
+    assert (lib / "_moonglade" / "reports" / "organize_manifest.csv").is_file()   # copied...
+    assert not paths.records_manifest(lib).exists()                             # ...unrecorded
+    monkeypatch.setattr(mig, "_write_manifest", real)
+    mig.migrate_library(lib)                                        # the next start
+    entries = paths.moved_entries(paths.records_manifest(lib))
+    kept = {n for n, e in entries.items() if e["action"] == "kept"}
+    assert {"achievements.json", "logs", "organize_manifest.csv"} <= kept
+    e = entries["achievements.json"]
+    assert e["source_print"] == e["dest_print"]                    # a finished copy
+    assert "achievements.json" in [n for _, n in mig.leftovers(lib)]
+
+
+def test_after_a_dead_start_the_organize_undo_never_falls_back_to_the_stale_list(
+        old_library, monkeypatch, capsys):
+    """--undo-organize clears its list once it has reverted. If the copy was never recorded,
+    the old list at the library's top would answer again and be undone twice."""
+    lib = old_library
+    real = _crash_before_the_manifest(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        mig.migrate_library(lib)
+    monkeypatch.setattr(mig, "_write_manifest", real)
+    mig.migrate_library(lib)
+    paths.reports_path(lib, "organize_manifest.csv").unlink()      # what the undo does
+    core.cmd_undo_organize(SimpleNamespace(out=str(lib), dry_run=True), lib)
+    assert "nothing to undo" in capsys.readouterr().out
+
+
+def test_both_places_holding_different_things_is_kept_but_never_offered(old_library):
+    lib = old_library
+    (lib / "_moonglade").mkdir()
+    (lib / "_moonglade" / "achievements.json").write_text('{"earned": {"other": 1}}',
+                                                          encoding="utf-8")
+    mig.migrate_library(lib)
+    e = paths.moved_entries(paths.records_manifest(lib))["achievements.json"]
+    assert e["action"] == "kept" and e["source_print"] != e["dest_print"]
+    assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]

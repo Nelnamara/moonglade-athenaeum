@@ -85,7 +85,7 @@ class Outcome:
         """One plain line, or "" when there is nothing to say."""
         parts = []
         for action, verb in (("moved", "moved"), ("copied", "copied"),
-                             ("fresh", "started fresh")):
+                             ("fresh", "started fresh"), ("kept", "found already in place")):
             names = [e["name"] for e in self.done if e["action"] == action]
             if names:
                 parts.append("%s %s" % (verb, ", ".join(names)))
@@ -245,10 +245,17 @@ def _bring(name, src, dest, how, root, outcome, recorded):
         if not src.exists():
             return None
         source_print = fingerprint(src)
+        action, dest_print = how, None
         if how == "fresh":
             size = _size(src)                       # left where it is; a new one starts
         elif dest.exists():
-            return None                              # both: the new one wins
+            if name in recorded:
+                return None                          # a moved kind in both places: new wins
+            # Both places hold it and nothing recorded why: an earlier start that died after
+            # its copies but before MOVED.json, or a copy made by hand. The new one wins; it
+            # is written down as "kept" with both fingerprints, so the old one is offered
+            # for deletion only if the two were the same.
+            action, dest_print, size = "kept", fingerprint(dest), _size(src)
         elif how == "moved":
             os.replace(src, dest)
             size = _size(dest)
@@ -260,11 +267,14 @@ def _bring(name, src, dest, how, root, outcome, recorded):
         else:
             _copy_file(src, dest)
             size = _size(dest)
+        if dest_print is None:
+            dest_print = fingerprint(dest) if dest.exists() else None
     except (OSError, sqlite3.Error) as e:
         outcome.failed.append((name, _reason(e)))
         return None
     entry = {"name": name, "source": _rel(src, root), "dest": _rel(dest, root),
-             "action": how, "time": _now(), "size": size, "source_print": source_print}
+             "action": action, "time": _now(), "size": size, "source_print": source_print,
+             "dest_print": dest_print}
     outcome.done.append(entry)
     return entry
 
@@ -432,7 +442,10 @@ def _unchanged(name, old, entry):
         now = fingerprint(old)
     except OSError:
         return False
-    if want is not None and now == want:
+    # "kept": both places held it when it was recorded -- a finished copy only if the two
+    # were the same then.
+    same_then = (entry or {}).get("action") != "kept" or entry.get("dest_print") == want
+    if want is not None and now == want and same_then:
         return True
     if str(old) not in _conflicts_said and not name.startswith("serve.log"):
         _conflicts_said.add(str(old))
