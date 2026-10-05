@@ -43,7 +43,6 @@ export function subscribe(fn) {
   fn(state);
   return () => subs.delete(fn);
 }
-export function getHelp() { return state; }
 /* Up or on its way out -- what an Escape ladder underneath asks before it acts. */
 export function isHelpUp() { return state.open || state.closing; }
 

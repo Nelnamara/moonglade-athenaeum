@@ -20,6 +20,10 @@ git tags. Full prose notes for tagged versions live on
 - **`serve.log` no longer grows forever.** When the launcher (`Serve Gallery`) starts and the log is over 1 MB, it moves it to `serve.log.1` (the older ones become `.2` and `.3`; the oldest is deleted) and starts a fresh one. A Restart from the Control Panel keeps writing to the same log. (2026-10-04)
 - Behind the scenes, every file the app keeps in its own folder (`config.json`, the art pack, `branding.json`, `serve.log`, the wiki, the built pages and the rest) is now found through one place in the code, ready for the next release's tidy. Nothing moved, and nothing you see changes. (2026-10-04)
 
+### Tidier code
+- **`--delete-task` is gone.** It was deprecated on 2026-09-06. To delete from your PixAI account, use the gallery's **Delete from PixAI** (on one image's own page, or from the **Actions** dropdown for a selection): its `READ_ONLY` refusal, localhost-only rule and typed `DELETE` are unchanged. A script that still passes `--delete-task`, or the `--yes` that only it used, now stops with an "unrecognized arguments" error and deletes nothing. The Deleting and Trust & Safety wiki pages say so.
+- **The old browser-cookie reader is gone.** The Mirror signs in through the JWT reader as before, off the token your browser keeps in its localStorage, and `--mirror-check` works the same.
+
 ## [3.18.0] - 2026-10-04 — Travelling Light
 
 ### Art pack v7

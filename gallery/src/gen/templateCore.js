@@ -16,7 +16,6 @@
 export const MAX_VARS = 8;
 export const MAX_OPTIONS = 64;
 export const CELL_CAP = 24;
-export const MAX_COUNT = 4;
 export const RUN_SEED_MAX = 2147483646;
 export const SEED_MOD = 2147483647;
 export const LISTS_KEY = "gen.lists";

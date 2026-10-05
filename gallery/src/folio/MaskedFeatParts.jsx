@@ -11,7 +11,6 @@ import "../styles/folio-masked.css";
    next unfound feat's badge. Nothing else about that feat reaches this file: it is never given
    an id, a name, a count or the badge. */
 
-export const VEIL_ART = "/branding/mystery/secret_feat.png";
 export const CURTAIN_ART = "/branding/mystery/secret_banner_curtain.png";
 
 /* The veil art seen through the mask. `maskUrl` is the server's own path (validated in

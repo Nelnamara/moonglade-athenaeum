@@ -302,8 +302,8 @@ export default function HealthOverlay({ onClose, onModelFilter, onTagFilter, onL
 
               {h.uncataloged > 0 && (
                 <div className="mgh-note">
-                  · {fmt(h.uncataloged)} file(s) on disk aren't in the catalog. Use the
-                  classic gallery's ↑ Import button, or run --import-local, to catalog them.
+                  · {fmt(h.uncataloged)} file(s) on disk aren't in the catalog. Use Import
+                  (in the row under the banner), or run --import-local, to catalog them.
                 </div>
               )}
             </>

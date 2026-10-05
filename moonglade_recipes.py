@@ -36,7 +36,6 @@ TITLE_MAX = 200
 DESCRIPTION_MAX = 2000
 SHOWCASE_MIN, SHOWCASE_MAX = 3, 8
 STYLE_CODE_MAX = 100
-TRIGGER_WORDS_MAX = 512
 
 # The seven categories (GET /v2/recipes/categories answers the live list; this is the
 # order the handoff draws and the fallback when that read fails).
@@ -44,7 +43,6 @@ CATEGORIES = ("character", "style", "pose", "panel", "effect", "outfit", "scene"
 MODEL_TYPES = ("MMDIT26B_MODEL", "MMDIT26A_MODEL", "SDXL_MODEL")
 SLOT_TYPES = ("promptFragment", "contextImages", "baseImage", "referenceVideos",
               "referenceImages", "styleCode", "lora")
-STATUSES = ("draft", "test", "published", "archived")
 # What the update route's presetType takes (stepUp $r). `unlisted` is a state PixAI sets; the
 # site's own form leaves presetType out when a recipe reads unlisted.
 PRESET_TYPES_WRITABLE = ("public", "follow_to_use", "private")
@@ -197,11 +195,10 @@ def price_verdict(session, params, cost):
 # ---------------------------------------------------------------------------------------
 
 REFUSAL_CODES = ("RECIPE_UNAVAILABLE", "RECIPE_INCOMPATIBLE")
-# RECIPE_UNAVAILABLE's reasons (stepUp Fa); RECIPE_INCOMPATIBLE's 22 (stepUp ue), in H
-# decision 10's six groups.
-UNAVAILABLE_REASONS = ("not_found", "draft", "test_not_author", "not_public",
-                       "follow_required", "violating", "apply_disabled", "invalid_id",
-                       "lora_disabled")
+# RECIPE_UNAVAILABLE carries one reason (not_found, draft, test_not_author, not_public,
+# follow_required, violating, apply_disabled, invalid_id, lora_disabled: stepUp Fa), which
+# _group_of reads as follow or unavailable. RECIPE_INCOMPATIBLE's 22 (stepUp ue) are below, in
+# H decision 10's six groups.
 REASON_GROUPS = {
     "model": ("target_model_unknown", "model_mismatch", "lora_model_mismatch"),
     "images": ("multiple_base_image", "model_rejects_base_image",

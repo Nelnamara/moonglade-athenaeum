@@ -50,11 +50,11 @@ def test_clause_tokenizer_replicates_the_validated_js():
     trim, lowercase, keep len > 3 -- the exact rule the owner validated."""
     s = ("Masterpiece, best quality; Frost Queen.\n"
          "<lora:ice palace:0.8> glacial crown, ice, a b")
-    assert G._series_clauses(s) == {
+    assert set(G._series_clause_list(s)) == {
         "masterpiece", "best quality", "frost queen", "glacial crown"}
     # reorderings are the SAME set (the differ drops them for free)
-    assert G._series_clauses("a snow fox, b moon") == G._series_clauses(
-        "b moon, a snow fox")
+    assert set(G._series_clause_list("a snow fox, b moon")) == set(G._series_clause_list(
+        "b moon, a snow fox"))
 
 
 def test_series_text_is_the_library_apis_capped_prompt_expression():

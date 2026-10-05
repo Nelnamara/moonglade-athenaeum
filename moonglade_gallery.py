@@ -2714,15 +2714,12 @@ def apply_artwork_meta(db_path, metas):
     return changed
 
 
-# The four view columns, folded by their own verb rather than by ARTWORK_META_FIELDS.
-# Deliberately NOT part of the meta list: the meta fields ride the fifteen-minute
-# living-library sweep, and reading a view count on PixAI ADDS one to it (PROBE_2026-09-06
-# measured it: a page that selects `views` moves every row it returns by +1). So views are
-# read ONCE per deliberate --sync-artworks and never on the sweep's cadence -- a rule that
-# only holds while the two writes stay two separate statements.
-ARTWORK_VIEW_FIELDS = ("views", "views_prev", "views_at", "views_prev_at")
-
-
+# The four view columns (views, views_prev, views_at, views_prev_at) are folded by their own
+# verb rather than by ARTWORK_META_FIELDS. Deliberately NOT part of the meta list: the meta
+# fields ride the fifteen-minute living-library sweep, and reading a view count on PixAI ADDS
+# one to it (PROBE_2026-09-06 measured it: a page that selects `views` moves every row it
+# returns by +1). So views are read ONCE per deliberate --sync-artworks and never on the
+# sweep's cadence -- a rule that only holds while the two writes stay two separate statements.
 def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
     """Fold a bulk views sweep onto the catalog rows it names, one narrow UPDATE each,
     keyed by artwork_id (the id the sweep returns; media_id is what the row is keyed by).
@@ -2884,11 +2881,6 @@ def recent_train_task_page(db_path, limit=18, before=None, q=""):
               "count": len(groups[h["task_id"]]), "newest": h["newest"]} for h in heads]
     nxt = ({"at": heads[-1]["newest"], "task": heads[-1]["task_id"]} if more and heads else None)
     return tasks, nxt
-
-
-def recent_train_tasks(db_path, limit=18):
-    """The first page of recent_train_task_page: the newest `limit` tasks."""
-    return recent_train_task_page(db_path, limit)[0]
 
 
 class TrainGuard:
@@ -3169,12 +3161,6 @@ def _series_clause_list(text):
             seen.add(c)
             out.append(c)
     return out
-
-
-def _series_clauses(text):
-    """The validated clause SET for a prompt (#34) -- set semantics drop pure
-    reorderings for free, which is exactly what the validated Jaccard saw."""
-    return set(_series_clause_list(text))
 
 
 def _series_ts(created_at):
@@ -8937,15 +8923,6 @@ def living_clamp_interval(action, value, default=None):
     return max(floor, min(v, LIVING_MAX_INTERVAL_S))
 
 
-def living_defaults():
-    """The shipped job list as plain, saveable dicts (action / enabled / interval_s /
-    last_run). Static defaults are a tuple of frozen specs; this is the mutable copy
-    schedule.json stores and the owner edits."""
-    return [{"action": j["action"], "enabled": bool(j["enabled"]),
-             "interval_s": float(j["interval_s"]), "last_run": None}
-            for j in LIVING_ALL]
-
-
 def living_merge(saved):
     """Normalize whatever is in schedule.json against the shipped list.
 
@@ -9323,20 +9300,6 @@ def unique_models(db_path):
             "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
         ).fetchall()
         return [r[0] for r in rows]
-
-
-def catalog_model_options(db_path):
-    """Return [(name, model_id)] for distinct models in the catalog, most-used
-    first. model_id is the version id used in real generations, so it's a valid,
-    guaranteed-working value for --generate's --model -- the basis of the model
-    picker dropdown."""
-    with catalog(db_path) as con:
-        rows = con.execute(
-            "SELECT COALESCE(NULLIF(model_name,''), model_id) AS nm, model_id, COUNT(*) c "
-            "FROM catalog WHERE COALESCE(model_id,'') != '' AND model_id GLOB '[0-9]*' "
-            "GROUP BY model_id ORDER BY c DESC"
-        ).fetchall()
-        return [(r[0], r[1]) for r in rows]
 
 
 def backfill_batches(out_dir, db_path):
@@ -15810,9 +15773,9 @@ def create_app(out_dir: Path):
         mascots, banners) with traversal already rejected in branding(), and the
         login page every unauthenticated visitor sees has to render it; the
         /next/assets/ bundle is public for the same reason -- LoginPage.jsx's
-        own compiled CSS/JS, no user data, no catalog, no credential. The 4
-        /static/mg-*.js custom-element scripts are NOT in that set: the login
-        page never loads them, and `static` stays LOGIN.
+        own compiled CSS/JS, no user data, no catalog, no credential. /static/ is
+        NOT in that set: the login page never loads anything from it, and `static`
+        stays LOGIN.
 
         Three tiers, one place:
           PUBLIC    -> through, no session needed.
@@ -17646,8 +17609,8 @@ def create_app(out_dir: Path):
         the failure already logged to the job card). Callers check total > 0
         themselves -- this helper assumes there is work.
 
-        purge_local=False is the JSON route's cloud-only mode (the CLI
-        --delete-task behavior: cloud gone, local files + catalog intact). It
+        purge_local=False is the JSON route's cloud-only mode (cloud gone, local files
+        + catalog intact: what the removed --delete-task command used to do). It
         drops the local_only imports HERE, not in the caller, because with no
         cloud side they would otherwise be pure local purges -- exactly what the
         flag says not to do."""
@@ -17754,8 +17717,8 @@ def create_app(out_dir: Path):
         Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
         sent -- they are already the unit the delete operates on), plus optional
         purge_local (default true, the page behavior: purge follows cloud so
-        catalog and account never drift; false = cloud-only, the CLI
-        --delete-task behavior, and imports are then left alone entirely).
+        catalog and account never drift; false = cloud-only, what the removed
+        --delete-task command used to do, and imports are then left alone entirely).
 
         _check_read_only fires HERE, before the job even starts, on top of the one
         inside delete_task_gql: failing fast with one readable refusal beats
@@ -25417,24 +25380,18 @@ __UPSCALE_CONST__
 </body></html>"""
 
     # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
-    # template rather than reusing APP_PAGE verbatim. Two real reasons, not
-    # just tidiness:
-    #   1. APP_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
-    #      (pickers, cost badge, generate drawer, upscale panel) are for
-    #      surfaces that don't exist on the login page at all -- dead weight
-    #      to parse before a visitor has even signed in.
-    #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
-    #      public tier, and never needed to be until now -- only
-    #      /next/assets/ (this page's own bundle/stylesheet) is
-    #      @tier(PUBLIC). Reusing APP_PAGE unmodified would have 404/401'd
-    #      an unauthenticated visitor's <script> requests for all 8 -- caught
-    #      live: those requests 302'd back to /login (the front door redoing
-    #      its own job on itself), the module script's own fetch got HTML
-    #      back and threw "Unexpected token '<'", and the bundle never ran at
-    #      all. Same app.js bundle either way (main.jsx statically imports
-    #      both App and LoginPage, so Vite ships one file) -- only the SHELL
-    #      differs, and the shell is what decides which one actually needs to
-    #      reach an unauthenticated browser.
+    # template rather than reusing APP_PAGE verbatim. When it was written, APP_PAGE
+    # also loaded eight /static/mg-*.js custom-element scripts (pickers, cost badge,
+    # generate drawer, upscale panel; since ported into the React bundle and deleted,
+    # 2026-08-08). They were not on the public tier, so an unauthenticated visitor's
+    # <script> requests for them 302'd back to /login (the front door redoing its own
+    # job on itself), the module script's own fetch got HTML back and threw
+    # "Unexpected token '<'", and the bundle never ran at all. The shell stays its own:
+    # only /next/assets/ (this page's own bundle/stylesheet) is @tier(PUBLIC), and a
+    # visitor who has not signed in has no use for __UPSCALE_CONST__. Same app.js bundle
+    # either way (main.jsx statically imports both App and LoginPage, so Vite ships one
+    # file) -- only the SHELL differs, and the shell is what decides which one actually
+    # needs to reach an unauthenticated browser.
     # viewport-fit=cover, same reason as APP_PAGE's own note above: this shell serves
     # LoginPageMobile.jsx on a phone, and login-mobile.css cannot read an inset the
     # viewport never opened.
@@ -27942,8 +27899,8 @@ __DESIGN_TOKENS__
     # (gallery/src/notify/ActivityTray.jsx) renders from /api/jobs, never from api_task_status()'s response,
     # so `started` has to be written DOWN to reach it -- and writing it here is what makes
     # the signal identical on both hosts, because the gallery's Jobs.poll(), the Loom's
-    # pollShot/pollTaskWithCeiling and mg-generate-drawer.js's own poll all hit this one
-    # route and none of them has to know the field exists.
+    # pollShot/pollTaskWithCeiling and the video drawer's own poll (gen/submitTask.js) all
+    # hit this one route and none of them has to know the field exists.
     #
     # De-duped rather than written per poll for two concrete reasons: four pollers ask every
     # 3s per job, so a task PixAI sits on for its whole ~60-minute reap window would add
@@ -29065,9 +29022,10 @@ __DESIGN_TOKENS__
 
     @app.after_request
     def _code_assets_no_cache(resp):
-        # Same staleness class as /next/assets (see next_assets): the shared
-        # static/mg-*.js web components change on edit with no url change, and
-        # heuristic caching kept old copies live in real tabs. Scoped to /static/
+        # Same staleness class as /next/assets (see next_assets): files under static/
+        # (today the design pages and tokens; once the shared mg-*.js web components)
+        # change on edit with no url change, and heuristic caching kept old copies
+        # live in real tabs. Scoped to /static/
         # ONLY -- thumbnails and full media stay freely cacheable (huge, and a
         # media file's content never changes under its id).
         if request.path.startswith("/static/"):

@@ -1,7 +1,7 @@
 """READ_ONLY: a config.json trust signal for anyone nervous about handing a third-party
 tool spend/delete access to their PixAI account. The property that actually matters isn't
 "does it raise" -- it's that the underlying network call NEVER FIRES, and that this holds
-even when --confirm/--apply/--yes are passed, since those flags are exactly what a cautious
+even when --confirm/--apply are passed, since those flags are exactly what a cautious
 first run wants to be safe to use without reading the source first.
 
 This file covers the four WEB choke points -- submit_generation, submit_fixer,
@@ -55,19 +55,27 @@ class TestDeleteTaskGqlReadOnly:
             core.delete_task_gql(mock_session, "123")
         mock_session.post.assert_not_called()
 
-    def test_overrides_apply_and_yes(self, pixai, monkeypatch, tmp_path, capsys):
-        """The whole point: --apply --yes must NOT be enough to get past READ_ONLY. Drives
-        the real CLI entry point, not just the raw function, for genuine end-to-end proof."""
-        from types import SimpleNamespace
+    def test_the_gallery_delete_route_sends_nothing(self, pixai, monkeypatch, tmp_path):
+        """The gallery's Delete from PixAI is the one road to a delete now (the command-line
+        --delete-task is gone), so this is the end-to-end proof: the real route with the REAL
+        delete_task_gql behind it. READ_ONLY refuses up front, with one plain 403 and no job,
+        and not one request reaches PixAI -- not the delete, not a read before it."""
+        from moonglade_gallery import CATALOG_FIELDS, save_catalog
+        from tests.conftest import login_client
+        row = {f: "" for f in CATALOG_FIELDS} | {
+            "media_id": "m1", "task_id": "T1", "filename": "m1.png"}
+        save_catalog(tmp_path / "catalog.db", [row])
+        (tmp_path / "images").mkdir()
+        (tmp_path / "images" / "m1.png").write_bytes(b"x")
         monkeypatch.setattr(core, "READ_ONLY", True)
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        args = SimpleNamespace(delete_task=["123"], apply=True, yes=True, delay=0)
-        result = core.run_delete_tasks(args)
-        assert result["deleted"] == 0
-        assert result["failed"] == 1
-        # Nothing reached PixAI at all -- the fake records every verb, and READ_ONLY
-        # refuses before the delete mutation is ever built.
+        cli = login_client(tmp_path)
+        r = cli.post("/api/delete-tasks", json={"media_ids": ["m1"]})
+        assert r.status_code == 403
+        assert "READ_ONLY" in (r.get_json().get("error") or "")
+        assert not [j for j in cli.get("/api/jobs").get_json()["jobs"]
+                    if j.get("type") == "delete"]
         assert pixai.calls == []
+        assert (tmp_path / "images" / "m1.png").exists()     # nothing local moved either
 
 
 class TestRoutedImageDeleteReadOnly:

@@ -29,9 +29,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
 - **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
-  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`, which goes
-  in the next minor release) `--apply` plus typing the word `delete` on the CLI, skippable
-  with `--yes` only if you pass it explicitly. A **single-image** delete asks PixAI what it still has of that generation
+  `DELETE` in the gallery's confirm dialog, and it works only from the machine running the
+  server. That dialog is the only way to do it: the old `--delete-task` command is gone, so
+  nothing on the command line can delete from your account. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
   record. It never sends a delete on a generation it could not read. Whenever a delete
@@ -186,8 +186,8 @@ a LoRA training run, deleting a task, claiming a reward, publishing an artwork, 
 changing a recipe or a recipe set, saving a model or LoRA to PixAI or changing its sets (the
 pickers' **⊕ Save** and **Keep this model**), uploading a frame from The Loom (splice and Re-anchor),
 posting or deleting a reply to a comment, claiming a gift, marking a PixAI notification read, or
-**entering a contest** — refuses itself with a clear error, **regardless of `--confirm`,
-`--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
+**entering a contest** — refuses itself with a clear error, **regardless of `--confirm`
+or `--apply`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
 trust yet, so it overrides them rather than just changing their default. Browsing, backing up,
 and searching your existing catalog all keep working normally — only the account-mutating

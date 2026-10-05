@@ -248,9 +248,3 @@ def clean_choice(raw):
             if isinstance(v, str) and v.strip():
                 out[k] = v.strip()[:200]
     return out
-
-
-def default_rng():
-    """A Random the route can hold; separate from the global one so a test that seeds
-    `random` cannot reach it."""
-    return random.Random()

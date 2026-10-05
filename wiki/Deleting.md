@@ -176,21 +176,15 @@ turns up in your feed again loses it.
 
 ```bash
 python moonglade_backup.py --reconcile-deleted     # flag cloud-deleted orphans
-python moonglade_backup.py --delete-task <taskid>  # DEPRECATED, removed in the next minor release -- use the gallery's Delete from PixAI
 ```
 
-**`--delete-task` is deprecated, and it goes in the next minor release.** Until then it still
-works and still prints its own notice saying so, but it is no longer the way to delete — so
-don't build a script on it. Use the gallery's **Delete from PixAI** — on one image for a single
-picture, or from the **Actions** dropdown for a selection. Those check with PixAI first and
-keep your library in step; `--delete-task` does neither.
+**There is no command-line delete.** `--delete-task` was deprecated on 2026-09-06 and has been
+removed, along with the `--yes` that only it used, so a script that still calls it now stops at
+once with an "unrecognized arguments" error and deletes nothing. To delete from your PixAI
+account, use the gallery's **Delete from PixAI** — on one image for a single picture, or from the
+**Actions** dropdown for a selection. Those check with PixAI first, keep your library in step
+(the local copy goes to the Trash), and ask you to type `DELETE`; they are the only way to do it,
+and they work only from the machine running the server.
 
-While it lasts, it behaves as it always has: dry-run until `--apply`, and **cloud-only** —
-your local files and `catalog.db` are untouched, so a task deleted this way leaves orphan
-rows behind for `--reconcile-deleted` to find. The `--apply` flag plus typing `delete` at the
-confirmation prompt (case-insensitive; skippable with `--yes`) are the safety mechanism.
-Uppercase `DELETE` is the *gallery's* gate (that one **is** case-sensitive); `--confirm` is a
-different flag entirely — it gates credit-spending generation, not deletion.
-
-`READ_ONLY: true` in `config.json` blocks every one of these outright, regardless of `--yes`
-or the typed confirm — see [Trust & Safety](Trust-and-Safety#the-read_only-flag).
+`READ_ONLY: true` in `config.json` blocks the gallery's **Delete from PixAI** outright — see
+[Trust & Safety](Trust-and-Safety#the-read_only-flag).
