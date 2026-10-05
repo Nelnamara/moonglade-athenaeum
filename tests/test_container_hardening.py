@@ -249,14 +249,19 @@ def test_a_pre_stamp_v2_container_still_opens_as_schema_zero(tmp_path):
 
 
 def test_the_shipped_container_still_opens():
-    """The real art pack, if this machine has one: moonglade.mgpack, or a checkout's pack
-    still under its pre-v7 name, moonglade.dat. An early pack predates the stamp, so this
+    """The real art pack, if this machine has one: local/moonglade.mgpack (3.20 on), or a
+    checkout that has not started since updating, with it still beside the program, under
+    either name. An early pack predates the stamp, so this
     runs the actual shipped artefact rather than a fixture -- the one file that must not
     stop opening. It is git-ignored (delivery is a Release asset) and absent in CI and in a
     worktree, so this SKIPS rather than fails when it is not there; the fixture test above
-    covers the same path unconditionally. MOONGLADE_DAT points it at a copy elsewhere."""
+    covers the same path unconditionally. MOONGLADE_DAT points it at a copy elsewhere.
+
+    The literal local/ path, not paths.local_path(): conftest points that at a temp folder
+    for every test, and this one is about the real file."""
     app_root = Path(__file__).resolve().parents[1]
-    candidates = [app_root / "moonglade.mgpack", app_root / "moonglade.dat"]
+    candidates = [app_root / "local" / "moonglade.mgpack",
+                  app_root / "moonglade.mgpack", app_root / "moonglade.dat"]
     env = os.environ.get("MOONGLADE_DAT")
     if env:
         candidates.insert(0, Path(env))
