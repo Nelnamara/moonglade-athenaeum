@@ -51,8 +51,9 @@ ALWAYS_IGNORED = (
     "D_library/_moonglade/account_prefs/a.json",
     "some/where/lib/gallery/thumbs/a.jpg", "some/where/lib/images/a.png",
     "other_out/catalog.db", "other_out/jobs.jsonl",
-    # the runtime files at the root, as before
+    # the runtime files at the root, as before, and the old logs the launcher rotates to
     "serve.log", "serve.txt", "mirror_session.json", "moonglade.mgpack",
+    "serve.log.1", "serve.log.2", "serve.log.3", "local/serve.log.1",
     "branding.json", "0x676F6F6473/README.txt",
     # Python's caches stay ignored, inside the code folder too
     "moonglade/__pycache__/gallery.cpython-314.pyc", "moonglade/server/__pycache__/x.pyc",

@@ -7,6 +7,8 @@ mirror_session.json
 mirror_session.json.*
 serve.txt
 serve.log
+# ...and the old logs the launcher rotates it to at start (serve.log.1 to .3)
+serve.log.*
 
 # ---- Private dev notes: reverse-engineering ledger, internal maps. NEVER publish ----
 # MOVED 2026-09-06 -> ../moonglade-internal/private/ (notes + the harvest capture).
@@ -183,7 +185,7 @@ _moonglade/
 # ---- The code folder: nothing in it is ever ignored (KEEP THIS BLOCK LAST) ----
 # The modules move into moonglade/ next release. Several lines above are unanchored on purpose
 # -- `gallery/`, `images/`, `videos/`, `imported/`, `_duplicates/`, `private/`, `catalog.db`,
-# `config.json`, `serve.*` -- so they keep a library or a stray runtime file out of git wherever
+# `config.json`, `serve.txt`, `serve.log` -- so they keep a library or a stray runtime file out of git wherever
 # it sits; they would hide package files of the same names just as well (a `moonglade/gallery/`
 # sub-package would never reach git). git takes the LAST pattern that matches a path, so this
 # re-include must stay below every other line. The one exception is Python's own byte-code
