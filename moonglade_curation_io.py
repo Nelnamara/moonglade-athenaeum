@@ -54,6 +54,8 @@ import json
 import time
 from pathlib import Path
 
+import moonglade_paths as _paths
+
 FORMAT = "moonglade-curation"
 VERSION = 1
 SNAPSHOT_PREFIX = "curation_pre_import_"
@@ -348,11 +350,14 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
         return report
 
     # --- apply: snapshot first, then the existing verbs ---------------------------
+    # The snapshot is the import's undo file, one of the library's reports (like the organize
+    # undo list), so its folder is reports_path()'s: the library root today.
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    snap = db_path.parent / "{}{}.json".format(SNAPSHOT_PREFIX, stamp)
+    library = Path(db_path).parent
+    snap = _paths.reports_path(library, "{}{}.json".format(SNAPSHOT_PREFIX, stamp))
     n = 2
     while snap.exists():
-        snap = db_path.parent / "{}{}-{}.json".format(SNAPSHOT_PREFIX, stamp, n)
+        snap = _paths.reports_path(library, "{}{}-{}.json".format(SNAPSHOT_PREFIX, stamp, n))
         n += 1
     before = export_curation(db_path)
     touched = (set(states) | {m for v in labels.values() for m in v}

@@ -9,9 +9,10 @@ named helper here, so moving a group of files is a change to one line in this mo
   APP_ROOT          the folder holding the launcher and config.json.
   config_path()     config.json: beside the app first, then the working directory.
   local_path(name)  the machine files: the art pack and its .version marker, branding.json,
-                    branding_slots.json, mirror_session.json, serve.txt, serve.log and the
-                    icon cache. They belong to this machine, not to the code, the art tree
-                    or the library.
+                    branding_slots.json, serve.txt, serve.log and the icon cache. They belong
+                    to this machine, not to the code, the art tree or the library.
+                    (mirror_session.json joins them next release; this release it keeps
+                    3.18's rule, beside wherever config.json was found.)
   art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
                     from local_path(): the art tree and the machine files move separately.
   state_path(out_dir, name)    one of the app's own records inside a library: its state
@@ -62,8 +63,8 @@ def token_paths():
 
 def local_path(name):
     """A machine file by name: `moonglade.mgpack` (+ `.version`), `branding.json`,
-    `branding_slots.json`, `mirror_session.json`, `serve.txt`, `serve.log`, the icon cache.
-    Today it is APP_ROOT / name."""
+    `branding_slots.json`, `serve.txt`, `serve.log`, the icon cache. Today it is
+    APP_ROOT / name."""
     return APP_ROOT / name
 
 
@@ -129,9 +130,14 @@ def launcher_path():
     return APP_ROOT / "Serve Gallery.pyw"
 
 
+# The web server's entry script, by its path under APP_ROOT. The launcher joins it onto its
+# own os.path.abspath folder, so the path it runs is byte-for-byte what 3.18 ran.
+GALLERY_SCRIPT = "moonglade_gallery.py"
+
+
 def gallery_script_path():
     """The web server's entry script, which the launcher runs."""
-    return APP_ROOT / "moonglade_gallery.py"
+    return APP_ROOT / GALLERY_SCRIPT
 
 
 def backup_script_path():
@@ -150,14 +156,17 @@ def state_path(out_dir, name):
     `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
     `reconcile_stamp.json`, `jobs.jsonl`, `raw_tasks.jsonl`, `runs.db`, the per-account
     folders (`account_prefs/`, `account_state/`, `prompt_snippets/`, `toolbox_presets/`,
-    `view_presets/`) and `logs/`. Today it is out_dir / name."""
+    `view_presets/`), the install-wide files they replaced and still fall back to
+    (`prompt_snippets.json`, `toolbox_presets.json`, `view_presets.json`) and `logs/`.
+    Today it is out_dir / name."""
     return Path(out_dir) / name
 
 
 def reports_path(out_dir, name):
     """One of the app's reports inside the library `out_dir`, by name:
     `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
-    `verify_report.csv`, `organize_manifest.csv`. Today it is out_dir / name."""
+    `verify_report.csv`, `organize_manifest.csv` and the curation import's undo files
+    (`curation_pre_import_<time>.json`). Today it is out_dir / name."""
     return Path(out_dir) / name
 
 

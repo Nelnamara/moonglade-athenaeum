@@ -90,11 +90,13 @@ def test_core_config_path_is_the_paths_rule(monkeypatch, tmp_path):
     assert core._config_path() == tmp_path / "x" / "config.json"
 
 
-# ---- mirror_session.json is a machine file ----------------------------------------------
+# ---- mirror_session.json stays beside config.json this release ---------------------------
 
-def test_mirror_session_follows_local_path_not_config_json(routed, tmp_path, monkeypatch):
+def test_mirror_session_sits_beside_config_json(routed, tmp_path, monkeypatch):
+    """3.18's rule, kept exactly for this release: beside wherever config_path() found
+    config.json. It joins the machine files (local_path) next release, in one place."""
     monkeypatch.setattr(paths, "local_path", lambda name: tmp_path / "local" / name)
-    assert core._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
+    assert core._mirror_state_path() == routed.parent / "mirror_session.json"
 
 
 def test_mirror_session_is_where_it_was(monkeypatch):

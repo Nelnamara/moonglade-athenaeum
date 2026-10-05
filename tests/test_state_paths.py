@@ -29,12 +29,18 @@ STATE_NAMES = (
     "reconcile_stamp.json", "jobs.jsonl", "raw_tasks.jsonl", "runs.db",
     "account_prefs", "account_state", "prompt_snippets", "toolbox_presets",
     "view_presets", "logs",
+    # the install-wide files those per-account folders replaced, still read as a fallback for
+    # an account with no file of its own (an install can have a live one: D:'s toolbox presets)
+    "prompt_snippets.json", "toolbox_presets.json", "view_presets.json",
 )
 REPORT_NAMES = (
     "integrity_report.csv", "integrity_report.json", "integrity_marks.json",
     "integrity_report.lock", "audit_report.csv", "verify_report.csv",
     "organize_manifest.csv",
 )
+# Also a report, by a name with a time in it so the lint below cannot list it: the curation
+# import's undo file, curation_pre_import_<time>.json (test_the_curation_snapshot_...). The
+# CLI's --export-curation default file is NOT a record: it is the export the owner asked for.
 # Library contents that are NOT the app's records: they stay put.
 NOT_RECORDS = ("catalog.db", "images", "videos", "imported", "loom", "gallery",
                "_deleted", "_duplicates")
@@ -96,6 +102,24 @@ def test_the_integrity_reports_follow_reports_path(tmp_path, moved):
     assert (r / "integrity_marks.json").is_file()
     assert set(integrity.read_marks(tmp_path)) == {"m1"}
     assert not (tmp_path / "integrity_marks.json").exists()
+
+
+def test_the_curation_import_snapshot_follows_reports_path(tmp_path, moved):
+    """The undo file a curation import writes before it changes anything is a report, like
+    the organize undo list: it goes where reports_path() says, beside nothing else."""
+    import moonglade_curation_io as cio
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"}])
+    (tmp_path / "_r").mkdir()
+    doc = cio.export_curation(db)
+    doc["items"] = [{"media_id": "m1", "rating": 3, "collections": [], "tags": [],
+                     "mark": "", "note": ""}]
+    rep = cio.import_curation(db, doc, apply=True)
+    assert rep["snapshot"].startswith(cio.SNAPSHOT_PREFIX)
+    assert (tmp_path / "_r" / rep["snapshot"]).is_file()
+    assert not list(tmp_path.glob(cio.SNAPSHOT_PREFIX + "*"))
 
 
 def test_the_reconcile_stamp_follows_state_path(tmp_path, moved):

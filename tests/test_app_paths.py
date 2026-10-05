@@ -62,7 +62,7 @@ _TABLE = [
      lambda: _REPO / "branding.json"),
     ("branding_slots.json", lambda: g._slot_active_path(Path("/any/library")),
      lambda: _REPO / "branding_slots.json"),
-    ("mirror_session.json", lambda: paths.local_path("mirror_session.json"),
+    ("mirror_session.json", lambda: core._mirror_state_path(),
      lambda: _REPO / "mirror_session.json"),
     ("serve.txt", lambda: paths.local_path("serve.txt"), lambda: _REPO / "serve.txt"),
     ("serve.log", lambda: paths.local_path("serve.log"), lambda: _REPO / "serve.log"),
@@ -180,9 +180,11 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
 # moonglade_paths.
 _FILE_ALLOWED = {
     "moonglade_paths.py": "it IS the app-root definition",
-    "Serve Gallery.pyw": "bootstrap only: puts its own folder on sys.path so it can import "
-                         "moonglade_paths however it was started; every path after that "
-                         "comes from the helpers",
+    "Serve Gallery.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
+                         "on sys.path so moonglade_paths imports however the launcher was "
+                         "started, and it is the cwd and the child script's folder, byte-for-"
+                         "byte as in 3.18 on a mapped or subst drive (resolve() would turn "
+                         "those into their targets). Every other path comes from the helpers",
 }
 
 
@@ -190,17 +192,23 @@ def _first_party_modules():
     return first_party_sources()          # the root, and the moonglade/ code folder
 
 
-def _file_uses(path):
-    """(line, source line) for every `__file__` the module reads, as a name or an
-    attribute (`core.__file__`)."""
-    text = path.read_text(encoding="utf-8")
+def _file_uses_in(text, filename="<src>"):
+    """(line, source line) for every `__file__` the source reads, as a name or an attribute
+    (`core.__file__`), and every `sys.argv[0]` (the running script's own path: the other
+    way to find the app's folder)."""
     lines = text.splitlines()
     hits = []
-    for node in ast.walk(ast.parse(text, filename=str(path))):
+    for node in ast.walk(ast.parse(text, filename=filename)):
         if (isinstance(node, ast.Name) and node.id == "__file__") or \
-                (isinstance(node, ast.Attribute) and node.attr == "__file__"):
+                (isinstance(node, ast.Attribute) and node.attr == "__file__") or \
+                (isinstance(node, ast.Subscript) and ast.unparse(node.value) == "sys.argv"
+                 and ast.unparse(node.slice) == "0"):
             hits.append((node.lineno, lines[node.lineno - 1].strip()))
     return hits
+
+
+def _file_uses(path):
+    return _file_uses_in(path.read_text(encoding="utf-8"), str(path))
 
 
 def test_no_module_but_moonglade_paths_derives_an_app_root_path_from_its_file():
@@ -215,18 +223,43 @@ def test_no_module_but_moonglade_paths_derives_an_app_root_path_from_its_file():
                        + "\n  ".join(stray))
 
 
-def test_the_launcher_reads_its_file_only_to_find_moonglade_paths():
+def test_the_launcher_finds_its_own_folder_once_and_byte_for_byte():
+    """One read of its own file, by os.path.abspath (as in 3.18, never resolve()), and that
+    folder is what goes on sys.path, what it changes into and where the child script is."""
+    src = (_REPO / "Serve Gallery.pyw").read_text(encoding="utf-8")
     uses = _file_uses(_REPO / "Serve Gallery.pyw")
-    assert len(uses) == 1 and "sys.path" in uses[0][1], uses
+    assert [u[1] for u in uses] == ["here = os.path.dirname(os.path.abspath(__file__))"], uses
+    assert "sys.path.insert(0, here)" in src
+    assert "os.chdir(here)" in src
+    assert "os.path.join(here, _paths.GALLERY_SCRIPT)" in src
+    assert "cwd=here" in src
+    assert paths.gallery_script_path() == paths.APP_ROOT / paths.GALLERY_SCRIPT
+
+
+def test_the_lints_catch_the_other_spellings():
+    """The cheap dodges: the script's own path through sys.argv[0], and getcwd imported by
+    name. (Exotic ones -- getattr, importlib -- are not chased.)"""
+    assert [n for n, _ in _file_uses_in("import sys\nhere = sys.argv[0]\n")] == [2]
+    assert [n for n, _ in _file_uses_in("import sys\nx = sys.argv[1]\n")] == []
+    src = "from os import getcwd\nfrom os import getcwd as g\nimport os\nx = os.getcwd()\n"
+    assert [h.split()[0] for h in _cwd_reads_in(src, "m.py")] == ["m.py:1", "m.py:2", "m.py:4"]
+
+
+def _cwd_reads_in(text, name):
+    """`os.getcwd()` / `Path.cwd()` calls and `from os import getcwd`: the working
+    directory, read directly."""
+    lines = text.splitlines()
+    hits = []
+    for n in ast.walk(ast.parse(text, filename=name)):
+        if (isinstance(n, ast.Call) and getattr(n.func, "attr", None) in ("getcwd", "cwd")) \
+                or (isinstance(n, ast.ImportFrom) and n.module == "os"
+                    and any(a.name in ("getcwd", "getcwdb") for a in n.names)):
+            hits.append((n.lineno, "%s:%d  %s" % (name, n.lineno, lines[n.lineno - 1].strip())))
+    return [h for _, h in sorted(hits)]
 
 
 def _cwd_reads(path):
-    """`os.getcwd()` / `Path.cwd()` calls: the working directory, read directly."""
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    return ["%s:%d  %s" % (path.name, n.lineno, lines[n.lineno - 1].strip())
-            for n in ast.walk(ast.parse(text, filename=str(path)))
-            if isinstance(n, ast.Call) and getattr(n.func, "attr", None) in ("getcwd", "cwd")]
+    return _cwd_reads_in(path.read_text(encoding="utf-8"), path.name)
 
 
 def test_no_module_but_moonglade_paths_reads_the_working_directory():
@@ -234,3 +267,45 @@ def test_no_module_but_moonglade_paths_reads_the_working_directory():
     stray = [h for p in _first_party_modules() if p.name != "moonglade_paths.py"
              for h in _cwd_reads(p)]
     assert not stray, "ask moonglade_paths.run_dir():\n  " + "\n  ".join(stray)
+
+
+# ---- Flask resolves a relative library against the app folder, not the module's ---------
+
+def test_a_relative_library_serves_from_the_app_folder(tmp_path, monkeypatch):
+    """send_from_directory() and send_file() join a RELATIVE path onto Flask's root_path,
+    which defaults to the folder of the module that made the app. The default library
+    (`pixai_backup`) is relative, so a thumbnail and a video must come from APP_ROOT/<library>
+    -- not from wherever moonglade_gallery.py sits, which stops being the app folder when
+    the code moves. Here the app folder is a tmp one and the module is not in it."""
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from tests.conftest import login_client
+    app_root = tmp_path / "app"
+    lib = app_root / "lib"
+    (lib / "gallery" / "thumbs").mkdir(parents=True)
+    (lib / "videos").mkdir()
+    (lib / "gallery" / "thumbs" / "m1.jpg").write_bytes(b"\xff\xd8\xff\xe0THUMB")
+    (lib / "videos" / "clip_V1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42CLIP")
+    row = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(lib / "catalog.db", [
+        row | {"media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"},
+        row | {"media_id": "V1", "filename": "videos/clip_V1.mp4", "is_video": "1",
+               "created_at": "2025-01-02T00:00:00"}])
+    monkeypatch.setattr(paths, "APP_ROOT", app_root)
+    monkeypatch.chdir(app_root)                   # as every entry point runs
+    assert Path(g.__file__).resolve().parent != app_root
+    cli = login_client(Path("lib"))
+    thumb = cli.get("/thumbs/m1.jpg")
+    assert thumb.status_code == 200 and thumb.data.endswith(b"THUMB")
+    video = cli.get("/video-file/V1")
+    assert video.status_code == 200 and video.data.endswith(b"CLIP")
+
+
+def test_flask_root_path_is_the_app_folder():
+    """Read off the source, for the same reason as the static folder above."""
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(g.create_app)))
+    flask = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "id", None) == "Flask"]
+    kw = {k.arg: ast.unparse(k.value) for k in flask[0].keywords}
+    assert kw.get("root_path") == "str(_paths.APP_ROOT)"

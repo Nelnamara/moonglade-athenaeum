@@ -144,3 +144,52 @@ def test_the_launcher_still_supervises_and_relaunches_on_42():
     assert "RESTART_CODE = 42" in src
     assert 'MOONGLADE_SUPERVISED="1"' in src
     assert "if rc == RESTART_CODE:" in src and "continue" in src
+
+
+def _refuse_renames_of(monkeypatch, *held):
+    """Make os.replace refuse to move exactly these files, as Windows refuses to rename a
+    file another process holds open; every other rename really happens."""
+    import os
+    from pathlib import Path
+    real = os.replace
+    held = {Path(h) for h in held}
+
+    def replace(src, dst):
+        if Path(src) in held:
+            raise PermissionError("in use: %s" % src)
+        return real(src, dst)
+    monkeypatch.setattr(os, "replace", replace)
+
+
+def _contents(folder):
+    return {p.name: _head(p) for p in folder.iterdir()}
+
+
+def test_a_held_log_loses_nothing(app, monkeypatch):
+    """The usual failure: the server's own log is held open. Only serve.log is refused, so
+    the old ones COULD shift -- and must not, or every refused start would drop one."""
+    log = app / "serve.log"
+    _write(log, "current", MB + 1)
+    _write(app / "serve.log.1", "one")
+    _write(app / "serve.log.2", "two")
+    _write(app / "serve.log.3", "three")
+    before = _contents(app)
+    _refuse_renames_of(monkeypatch, log)
+    for _ in range(3):                             # three starts in a row, all refused
+        assert mlog.rotate_by_size(log) is False
+    assert _contents(app) == before
+
+
+def test_a_refused_shift_puts_the_log_back(app, monkeypatch):
+    """A shift refused half-way: the log goes back to where the launcher appends, and the
+    old ones are still there."""
+    log = app / "serve.log"
+    _write(log, "current", MB + 1)
+    _write(app / "serve.log.1", "one")
+    _write(app / "serve.log.2", "two")
+    _refuse_renames_of(monkeypatch, app / "serve.log.1")
+    assert mlog.rotate_by_size(log) is False
+    got = _contents(app)
+    assert got["serve.log"] == "current"
+    assert "one" in got.values() and "two" in got.values()
+    assert not [n for n in got if "rotating" in n], "a temporary copy was left behind"

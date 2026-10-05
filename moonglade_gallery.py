@@ -13642,9 +13642,12 @@ def watch_close_info(exc, redact=None):
 
 
 def create_app(out_dir: Path):
-    # static_folder named explicitly: Flask's default is a folder beside this MODULE, and
-    # /static/ belongs to the app folder (moonglade_paths), wherever the module sits.
-    app = Flask(__name__, static_folder=str(_paths.static_dir()))
+    # Both named explicitly, because Flask's defaults are this MODULE's folder and both
+    # belong to the app folder (moonglade_paths), wherever the module sits: root_path is
+    # what send_from_directory()/send_file() join a RELATIVE path onto -- the default
+    # library, `pixai_backup`, is one -- and static_folder serves /static/.
+    app = Flask(__name__, root_path=str(_paths.APP_ROOT),
+                static_folder=str(_paths.static_dir()))
 
     # A job the SERVER owns cannot outlive the server, so anything still marked running when we
     # boot is from a process that is gone -- nothing will ever report it finished. Sweep those to
@@ -20218,7 +20221,7 @@ def create_app(out_dir: Path):
         return _snips_dir() / (_account_key(user) + ".json")
 
     def _legacy_snips_path():
-        return out_dir / "prompt_snippets.json"
+        return _paths.state_path(out_dir, "prompt_snippets.json")
 
     def _read_snips_file(p):
         try:
@@ -23398,7 +23401,7 @@ def create_app(out_dir: Path):
         return _toolbox_dir() / (_account_key(user) + ".json")
 
     def _legacy_presets_path():
-        return out_dir / "toolbox_presets.json"
+        return _paths.state_path(out_dir, "toolbox_presets.json")
 
     def _read_presets_data(p):
         try:
@@ -23502,7 +23505,7 @@ def create_app(out_dir: Path):
         return _view_presets_dir() / (_account_key(user) + ".json")
 
     def _legacy_view_presets_path():
-        return out_dir / "view_presets.json"
+        return _paths.state_path(out_dir, "view_presets.json")
 
     def _read_presets_file(p):
         try:
