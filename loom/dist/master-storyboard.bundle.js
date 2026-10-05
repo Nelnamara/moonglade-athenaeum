@@ -2640,7 +2640,6 @@ ${"=".repeat(48)}
   var PureComponent = React2.PureComponent;
 
   // ../gallery/src/lib/phoneCore.js
-  var LAYOUTS = Object.freeze(["grid", "feed"]);
   var PAGINGS = Object.freeze(["pages", "continuous"]);
   var PAGING_LABELS = Object.freeze({ pages: "Pages", continuous: "Continuous" });
   var SAVER_MODES = Object.freeze(["off", "auto", "always"]);
@@ -3865,7 +3864,6 @@ ${"=".repeat(48)}
       glyph
     );
   }
-  var ICON_NAMES = Object.keys(GLYPHS);
 
   // ../gallery/src/hooks/accountPrefsStore.js
   var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
