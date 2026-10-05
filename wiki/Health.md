@@ -121,7 +121,7 @@ that stops before its end marker, or a video with no index, is listed as **suspe
 unusual but valid file can look cut short.
 
 It changes nothing: no file is deleted, moved, downloaded or rebuilt. It writes two reports
-at the library root, `integrity_report.csv` (one line per problem: media id, problem, path,
+in the library's `_moonglade/reports/` folder, `integrity_report.csv` (one line per problem: media id, problem, path,
 size, recoverable) and `integrity_report.json` (the counts and when it ran), and the Panel's log
 shows the summary and the first lines. A broken picture that PixAI no longer has says
 **recoverable: no** — there is nothing left to download it from again. The check itself

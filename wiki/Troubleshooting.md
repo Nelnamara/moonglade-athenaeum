@@ -67,7 +67,7 @@ once per run, above the flood of per-image lines, ending with:
 > is in the log.)
 
 It's said once rather than 17,000 times for the obvious reason; each individual failure is
-still recorded in the rotating log at `pixai_backup/logs/moonglade.log`, whether or not you
+still recorded in the rotating log at `pixai_backup/_moonglade/logs/moonglade.log`, whether or not you
 ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
 
 Two details worth knowing. The API host and the media CDN are different hosts, so one can be
@@ -75,6 +75,34 @@ trusted while the other isn't — which is why this used to look like a PixAI pr
 of a local one. And "once per run" is literally once per *process*: on the long-lived gallery
 server the paragraph appears on the console the first time and not again, so read the log
 there rather than waiting for it to repeat.
+
+## After updating to 3.20: where did my files go?
+Nothing was deleted. 3.20 keeps the app's own files in two tidy folders and brings yours
+across the first time it starts:
+
+- **Beside the program, in `local\`:** the art pack (`moonglade.mgpack` and its `.version`
+  note), `branding.json`, `branding_slots.json`, the Mirror's sign-in (`mirror_session.json`),
+  `serve.txt`, `serve.log` and the icon cache (`local\cache`). `config.json` stays where it was.
+  Put launch flags such as `--port` in `local\serve.txt` now.
+- **In your library, in `_moonglade\`:** the achievements, counters, schedule, job list,
+  presets, snippets and settings, the Runs store and the logs; the reports (broken files, the
+  duplicate audit, the `--organize` undo list) in `_moonglade\reports\`.
+
+The pack, the Mirror's sign-in and the training spend guard were **moved**; the rest was
+**copied**, and the old copies are still in the old places. `local\MOVED.json` and
+`pixai_backup\_moonglade\MOVED.json` list what went where. **About** lists the old copies,
+which are safe to delete once you've checked this version works. A file another program held
+open is left where it is, still used there, and tried again at the next start; the log says so.
+The old icon cache, `_container_cache`, stays where it is and About never lists it: a Desktop
+shortcut made with **Put a shortcut on the Desktop** before 3.20 takes its icon from there. A
+shortcut you make now uses `local\cache`.
+
+**Going back to 3.19?** Move `moonglade.mgpack` and `moonglade.mgpack.version` from `local\`
+back beside the program, or 3.19 downloads the pack again. Move `local\mirror_session.json`
+back too, or sign the Mirror in again, and `pixai_backup\_moonglade\train_guard.json` back to
+`pixai_backup\`, so a training run that may already have started is still guarded. Everything
+else 3.19 reads is still where it was. (Anything you change while on 3.19 stays in the old
+places; when you come back to 3.20, the copies in the new places win.)
 
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you

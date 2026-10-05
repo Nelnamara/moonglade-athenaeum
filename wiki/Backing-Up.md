@@ -261,7 +261,7 @@ Organize.)
 ## Duplicate audit & dedup
 
 ```bash
-python -m moonglade --audit                 # report -> audit_report.csv
+python -m moonglade --audit                 # report -> _moonglade/reports/audit_report.csv
 python -m moonglade --dedup                 # dry-run plan
 python -m moonglade --dedup --apply         # quarantine redundant copies
 python -m moonglade --verify-dupes          # confirm quarantine is safe to delete
@@ -295,7 +295,7 @@ python -m moonglade --verify-library --verify-deep          # + files cut short
 `--verify-library` is read-only. It checks every catalogued file for a missing or zero-byte
 file, a missing or empty thumbnail (a video's poster), images on disk with no catalog row and
 thumbnails with no row, and writes `integrity_report.csv` (one line per problem) and
-`integrity_report.json` (counts and the time it ran) at the library root. `--verify-deep` also
+`integrity_report.json` (counts and the time it ran) in the library's `_moonglade/reports/` folder. `--verify-deep` also
 reads the end of each file — PNG, JPEG, WebP and GIF end markers, an MP4's index — and lists a
 file that stops short as *suspect*, without decoding it. Health's **Missing thumbs** and **Last
 verified** tiles read the JSON report; see [Health → Library integrity](Health).
@@ -392,7 +392,8 @@ These are either regenerated on demand or superseded by something newer.
 |---|---|
 | `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
 | `pixai_backup/catalog.csv` | The **legacy** catalog format from the OG backup tool. Nothing reads or writes it any more — the silent auto-seed and the CLI `--export-csv` dump were both retired 2026-08-24; `catalog.db` is the source of truth, so deleting this loses nothing. (The **⬇ Download catalog (CSV)** button in the gallery is a separate in-browser download.) |
-| `serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). Rotating file logs live in `pixai_backup/logs/` instead. |
+| `local/serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). Rotating file logs live in `pixai_backup/_moonglade/logs/` instead. |
+| The old copies 3.20 left behind | Since 3.20 the app keeps its own files in `local/` beside the program and in `pixai_backup/_moonglade/`. The copies still in the old places (`serve.txt`, `serve.log`, `branding.json` beside the program; `achievements.json`, `logs/` and the other records at the top of `pixai_backup/`) are listed in **About**, and are safe to delete once you've checked the new version works. |
 | `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
 | `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
 | A `0`-byte `catalog.db` in the *install root* | Not your catalog — that lives at `pixai_backup/catalog.db`. An empty stray file at the top level is an artefact of an old run. Check the size before deleting: if it isn't 0 bytes, stop and ask. |
@@ -433,8 +434,8 @@ python -m moonglade --organize --dry-run          # preview, changes nothing
 python -m moonglade --organize                    # normalize into YYYY-MM/
 ```
 
-`--organize` writes `organize_manifest.csv` and `--undo-organize` reverses it, so this is a
-safe thing to try.
+`--organize` writes `organize_manifest.csv` (in `_moonglade/reports/`) and `--undo-organize`
+reverses it, so this is a safe thing to try.
 
 ### Where the space actually goes
 

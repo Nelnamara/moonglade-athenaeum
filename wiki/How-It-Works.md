@@ -98,20 +98,34 @@ pixai_backup/
 ├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)
-├─ view_presets/      per-account saved gallery views (<account>.json each)
-├─ account_prefs/     per-account settings (<account>.json each): your pinned goal, saved
-│                     lists and presets, recipe row and drafts, and your answers to the first-run guide
-├─ organize_manifest.csv   reversible move log (--undo-organize)
-├─ achievements.json  earned achievements + earn dates
-├─ telemetry.json     achievement counters
-├─ jobs.jsonl         Control Panel job log
-├─ schedule.json      Control Panel scheduled jobs
-├─ prompt_snippets.json    saved prompt snippets
-├─ toolbox_presets.json    saved Toolbox presets
 ├─ catalog.db         the source of truth
-├─ runs.db            the Runs store: each multi-send's template and the exact request it sent
-└─ raw_tasks.jsonl    raw task data
+└─ _moonglade/        the app's own records (3.20; every scan of the library skips it)
+   ├─ achievements.json  earned achievements + earn dates
+   ├─ telemetry.json     achievement counters
+   ├─ jobs.jsonl         Control Panel job log
+   ├─ schedule.json      Control Panel scheduled jobs
+   ├─ train_guard.json   the training spend guard
+   ├─ view_presets/      per-account saved gallery views (<account>.json each)
+   ├─ account_prefs/     per-account settings (<account>.json each): your pinned goal, saved
+   │                     lists and presets, recipe row and drafts, and your answers to the
+   │                     first-run guide
+   ├─ prompt_snippets/  toolbox_presets/   per-account snippets and Toolbox presets
+   ├─ runs.db            the Runs store: each multi-send's template and the exact request it sent
+   ├─ raw_tasks.jsonl    raw task data
+   ├─ logs/              the rotating log, moonglade.log
+   ├─ reports/           integrity_report.csv/.json, audit_report.csv, verify_report.csv,
+   │                     organize_manifest.csv (the --undo-organize list)
+   └─ MOVED.json         what 3.20 brought across from the library's top, and when
 ```
+
+Beside the program, the machine's own files sit in `local/`: the art pack
+(`moonglade.mgpack` + `.version`), `branding.json`, `branding_slots.json`,
+`mirror_session.json`, `serve.txt`, `serve.log` and the icon cache (`local/cache/`), with
+`local/MOVED.json`. `config.json` stays beside the program. A 3.19 install has these at the
+top of each folder; the first 3.20 start brings them across (copied, except the pack, the
+Mirror's sign-in and the training spend guard, which are moved), and About lists the old
+copies that are safe to delete -- never the old icon cache, `_container_cache/`, which a
+Desktop shortcut made before 3.20 still takes its icon from.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

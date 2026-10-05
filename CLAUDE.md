@@ -118,8 +118,9 @@ effect if they're in the file that loads every session.)*
 - **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`:
   never `python -m moonglade.gallery` bare; use the launcher. Only the launcher sets supervised
   mode, and without it `/api/server/restart` 409s, silently removing the owner's Restart
-  button. Machine-local flags live in the git-ignored `serve.txt` beside it; the `--out` pin
-  matters (an unpinned C: launch resolves `LIBRARY_DIR` and serves the D: install).
+  button. Machine-local flags live in the git-ignored `local/serve.txt` beside it (3.19 and
+  earlier: `serve.txt` itself); the `--out` pin matters (an unpinned C: launch resolves
+  `LIBRARY_DIR` and serves the D: install).
 - **The D: install is the owner's domain.** He tests branches live there, so the D: run-copy and
   the C: repo drift by design — that is normal operation, not corruption. Never mass-commit to
   "reconcile" them. If D: looks badly behind, **say so and let him drive**; a periodic heads-up is
@@ -258,7 +259,7 @@ single-image generation.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `moonglade/logs.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
+- `moonglade/logs.py` is the persistent baseline: a rotating file at `out_dir/_moonglade/logs/moonglade.log` (3.19 and earlier: `out_dir/logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -411,7 +412,7 @@ python -m moonglade --dedup                           # dry-run dedup plan (noth
 python -m moonglade --dedup --apply                   # quarantine redundant copies to _duplicates/
 python -m moonglade --dedup --apply --dedup-delete    # delete instead of quarantine
 python -m moonglade --verify-dupes                    # confirm _duplicates/ is safe to delete
-"Serve Gallery.pyw"                                   # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in serve.txt)
+"Serve Gallery.pyw"                                   # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in local/serve.txt)
 python -m moonglade -v --update                       # verbose: per-page / per-image timing diagnostics
 python -m moonglade --watch                           # live event stream (WS push): watch tasks complete
 python -m moonglade --watch --watch-backup            # + auto-collect each finished gen as it completes

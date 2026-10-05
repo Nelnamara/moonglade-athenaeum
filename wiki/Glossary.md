@@ -11,8 +11,9 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   and as the last page of the guide. See [Control Panel](Control-Panel#updates-and-about).
 - **AI Tools** — the **✦ AI Tools** catalog in the gallery header: PixAI's one-click workflow tools,
   one card each. The entry only appears once **Mirror to PixAI** is armed.
-- **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, sitting beside the
-  program. Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
+- **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, in the `local`
+  folder beside the program (3.19 and earlier kept it beside the program itself; the app moves
+  it by itself). Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
   next time it starts. On Windows, Explorer lists its type as *Moonglade art pack*, with the
   app's icon (set for your own Windows account only). Also called the container, or just the
   pack.

@@ -23,11 +23,12 @@ pip install -r requirements.txt
 
 **In the browser (recommended):** once you've signed in (below), a fresh install with no
 key yet walks you through pasting one and running the first sync right there. If the art
-pack (the app's own artwork, the file `moonglade.mgpack` beside the program) hasn't arrived yet
+pack (the app's own artwork, the file `moonglade.mgpack` in the `local` folder beside the program) hasn't arrived yet
 it is fetched first — a one-time download with a progress bar (**↻ Try again** if it is
 interrupted, or **Continue without the default artwork** to let it finish later). An install
-that still has the pack under its old name, `moonglade.dat`, renames it by itself when the app
-starts, so a current pack is never downloaded twice. Then a short intro, a spot to paste the key (validated for
+that still has the pack under its old name, `moonglade.dat`, or beside the program where 3.19
+kept it, renames it and moves it into `local` by itself when the app starts, so a current pack is
+never downloaded twice. Then a short intro, a spot to paste the key (validated for
 real before it's saved), a live sync progress screen, and a **Welcome home.** screen with what
 your library holds. Nothing to edit by hand. Skip to [3. First run](#3-first-run) if you're
 doing it this way.

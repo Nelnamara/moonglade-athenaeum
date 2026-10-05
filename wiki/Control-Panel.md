@@ -65,7 +65,7 @@ The buttons are grouped exactly as the risk splits.
   the button you'll use most. See [Backing Up](Backing-Up).
 - **Catalog stats** — counts summarized straight from `catalog.db`.
 - **Duplicate audit (fast, read-only)** — the location-only duplicate report, written to
-  `audit_report.csv`. The **full (byte-compare — slower)** checkbox on the button runs the
+  `audit_report.csv` in the library's `_moonglade/reports/` folder. The **full (byte-compare — slower)** checkbox on the button runs the
   content-hashing pass instead, which also catches byte-identical files saved under
   different ids.
 - **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is

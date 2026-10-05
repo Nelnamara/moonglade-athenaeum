@@ -27,7 +27,7 @@ disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
 | `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Serve Gallery`** launcher waits until the server answers and opens the browser itself |
-| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `logs/` in your library always has them |
+| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `_moonglade/logs/` in your library always has them |
 
 ## The header
 
