@@ -121,6 +121,10 @@ def migrate_legacy_name(container_path):
       - the rename refused (a read-only folder, a locked file): one warning, and the start
         carries on as it did before this existed (no pack under the new name: the check
         offers the download).
+      - two starts at once: the one whose move finds the old file gone and the new one there
+        lost a race to the other, which has done the rename. That is "renamed", quietly, and
+        the marker the other start moved is left alone (a marker is only ever dropped while
+        the new pack is really absent).
       - the old name absent: nothing to do.
 
     Returns "renamed", "both", "failed" or "none". Never raises. Every outcome but "none" is
@@ -136,10 +140,12 @@ def migrate_legacy_name(container_path):
         return "both"
     old_marker, new_marker = _version_marker_path(old), _version_marker_path(new)
     try:
-        if new_marker.exists():
+        if new_marker.exists() and not new.exists():
             os.remove(new_marker)                  # a marker whose pack is not there
         os.replace(old, new)
     except OSError as e:
+        if new.exists() and not old.exists():
+            return "renamed"                       # another start just did it, marker and all
         log.warning("art pack: could not rename %s to %s (%s); carrying on without it.",
                     old, new.name, e)
         return "failed"

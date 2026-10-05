@@ -582,3 +582,34 @@ def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
             "both": "an old copy remains",
             "failed": "could not rename"}[case]
     assert want in text, "%r is not in the log file:\n%s" % (want, text)
+
+
+def test_two_starts_at_once_the_late_one_finds_the_rename_done(tmp_path, monkeypatch, caplog):
+    """Two starts race. Both find the old pack; the other one renames it, marker and all,
+    just after this one has checked that the new name is free. This start's own move then
+    finds the old file gone and the new one there: that is the rename done, not a failure.
+    No "could not rename" warning, and the marker the other start just moved is left alone.
+    (The other start is run at the first marker-path lookup, which comes right after the
+    both-names check.)"""
+    manifest = _manifest_for(REAL_BYTES)
+    old = _old_pack(tmp_path, manifest=manifest)
+    new = tmp_path / _NEW
+    real_marker_path, real_replace = ma._version_marker_path, ma.os.replace
+    raced = []
+
+    def _marker_path(p):
+        if not raced:
+            raced.append(1)
+            real_replace(old, new)                                 # the other start's move
+            real_replace(real_marker_path(old), real_marker_path(new))
+        return real_marker_path(p)
+    monkeypatch.setattr(ma, "_version_marker_path", _marker_path)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "renamed"
+    monkeypatch.undo()
+    assert raced
+    assert _warnings(caplog) == []
+    assert new.read_bytes() == REAL_BYTES
+    assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+    assert ma.needs_download(new, manifest) is False
