@@ -824,7 +824,7 @@ def run_view(run, live=True):
 # Copy as CLI (NOTES 7, Settled 1): the real command and flags
 # ---------------------------------------------------------------------------------------
 
-CLI_PREFIX = ["python", "moonglade_backup.py", "--generate"]
+CLI_PREFIX = ["python", "-m", "moonglade", "--generate"]
 # PowerShell reads all four of these as a single quote inside a '...' string (review F8b).
 _PS_SINGLE_QUOTES = "'‘’‚‛"
 _MODES = ("lite", "standard", "pro", "ultra")

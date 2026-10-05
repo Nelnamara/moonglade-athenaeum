@@ -2,9 +2,9 @@
 gated behind confirm, one at a time. The subprocess spawn is monkeypatched so no CLI
 actually runs."""
 import re
-import moonglade_gallery as g
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
 
@@ -98,7 +98,7 @@ def test_panel_summary_trash_count_is_real(tmp_path):
     count. Previously hardcoded to "--" on both platforms (2026-08-05 fix):
     nothing fetched it until now, the real number only ever resolved once
     TrashSubOverlay's own /api/trash/list call ran."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     qdir = tmp_path / g.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "a.webp").write_bytes(b"x")
@@ -231,7 +231,7 @@ def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
     cli = _authed_client(tmp_path)
     cli.post("/api/panel/run", json={"action": "sync"})
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     # Wait for the TERMINAL event (rc + status) to actually land in jobs.jsonl -- not just for
     # /api/panel/status to flip to "done". On a loaded runner the status flips a beat before the
     # terminal line is flushed, and read_jobs would then see rc=None (the flaky CI race).
@@ -316,8 +316,11 @@ def test_schedule_roundtrip_and_safe_only(tmp_path):
 
 def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     """The spawned argv must be python + the CLI + --out + our fixed flags -- never a
-    shell string, never user input."""
+    shell string, never user input. Since 3.20 the CLI is the package's module, run from the
+    app's folder (where `-m` finds it, and where config.json lives)."""
     import subprocess
+    import sys
+    from moonglade import paths
     captured = {}
 
     class FakeProc:
@@ -328,6 +331,7 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
             return 0
     def fake_popen(argv, **k):
         captured["argv"] = argv
+        captured["cwd"] = k.get("cwd")
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
@@ -336,7 +340,8 @@ def test_run_argv_is_whitelisted_flags_only(tmp_path, monkeypatch):
     import time
     time.sleep(0.05)
     argv = captured["argv"]
-    assert argv[1].endswith("moonglade_backup.py")
+    assert argv[:3] == [sys.executable, "-m", "moonglade"]
+    assert captured["cwd"] == str(paths.APP_ROOT)
     assert "--audit" in argv and "--no-content" in argv and "--out" in argv
     assert all(isinstance(a, str) for a in argv)
 
@@ -611,7 +616,7 @@ def test_schedule_write_is_localhost_only_but_read_is_not(tmp_path):
 
 def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     import subprocess, io, time
-    import moonglade_backup as core
+    from moonglade import backup as core
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")   # media_id 'v1'
     # the export resolves the clip via the catalog row (is_video + filename)
@@ -660,7 +665,7 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
 
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     cli = _authed_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
@@ -675,7 +680,7 @@ def test_probe_has_audio(monkeypatch):
     CompletedProcess has. Every assertion is the original one: the gallery face of this
     probe still answers True/False, never None, and never raises."""
     import subprocess
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
@@ -702,7 +707,7 @@ def test_probe_duration(monkeypatch):
     surviving probe answers at FULL precision, and a caller that wants fewer rounds at
     its own call site."""
     import subprocess
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
@@ -724,7 +729,7 @@ def _mock_export_ffmpeg(monkeypatch):
     """Same FakeProc convention as test_loom_export_runs_and_downloads, but captures
     every argv so the constructed ffmpeg command is inspectable."""
     import subprocess, io
-    import moonglade_backup as core
+    from moonglade import backup as core
     # ffmpeg present, ffprobe absent -- asked of media_tools now, not shutil.which.
     monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(core, "ffprobe_path", lambda: "")

@@ -12,7 +12,7 @@ drift), and the kit's OLD hand-typed token slices had already drifted from the c
 import importlib.util
 import pathlib
 
-import moonglade_gallery as gallery
+from moonglade import gallery
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
@@ -35,7 +35,7 @@ def test_textual_extraction_matches_the_runtime_constant():
     # dependencies); the app serves the CONSTANT. If the r-string anchor ever stops
     # isolating exactly that constant, every downstream guarantee is off -- fail here
     # first, loudly.
-    src = (REPO / "moonglade_gallery.py").read_text(encoding="utf-8")
+    src = (REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8")
     assert KIT.extract_tokens(src) == TOKENS
 
 

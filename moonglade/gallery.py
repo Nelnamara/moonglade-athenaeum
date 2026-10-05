@@ -13790,14 +13790,16 @@ def create_app(out_dir: Path):
 
     # ------------------------------------------------------------------
     # Control Panel: run maintenance CLI ops as background jobs with live
-    # logs. Each action is a WHITELISTED argv against moonglade_backup.py
+    # logs. Each action is a WHITELISTED argv against the CLI, `python -m moonglade`
     # (never an arbitrary command); destructive ones require confirm=True.
     # One job at a time. Localhost-gated at the routes. Runs the CLI as a
     # subprocess (isolation from the Flask process + natural stdout capture, so
     # the unmodified CLI script's own print output streams straight to the
     # Jobs card) with cwd = the checkout dir (where config.json lives).
     # ------------------------------------------------------------------
-    _cli_path = str(_paths.backup_script_path())
+    # The CLI is the package's module (3.20), run from the app's folder: `-m` finds the
+    # package through the working directory, and config.json lives there.
+    _cli_module = ["-m", "moonglade"]
     _cli_dir = str(_paths.APP_ROOT)
     # catalog media_id -> upload-kind media_id, for references sent from the gallery.
     # PixAI refuses a generation-output id as an input (see resolve_img), so each
@@ -14105,7 +14107,7 @@ def create_app(out_dir: Path):
             action_args = action_args + [str(n)]
         if scheduled:
             action_args = action_args + list(spec.get("scheduled_args") or [])
-        argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
+        argv = [sys.executable] + _cli_module + ["--out", str(out_dir), "-v",
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
         # PYTHONIOENCODING: the reader below decodes this pipe as UTF-8, but a child whose
@@ -29216,7 +29218,7 @@ def main():
         init_db(db_path)
         print("No catalog yet in {} -- starting anyway. "
               "Use the setup wizard on the gallery's home page, "
-              "or run `python moonglade_backup.py --sync` yourself.".format(out_dir))
+              "or run `python -m moonglade --sync` yourself.".format(out_dir))
 
     thumb_dir = out_dir / "gallery" / "thumbs"
     print("Loading catalog...")

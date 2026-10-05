@@ -27,10 +27,10 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_assets as ma
-import moonglade_backup as core
-import moonglade_container as mc
-import moonglade_gallery as g
+from moonglade import assets as ma
+from moonglade import backup as core
+from moonglade import container as mc
+from moonglade import gallery as g
 
 # tools/ is not a package; load the script by path (its own module-level code only
 # does imports + a sys.path insert, so importing it at collection time is safe --

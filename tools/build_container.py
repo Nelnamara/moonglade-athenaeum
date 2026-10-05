@@ -57,10 +57,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import moonglade_assets as ma
-import moonglade_backup as core
-import moonglade_container as mc
-import moonglade_gallery as g
+from moonglade import assets as ma
+from moonglade import backup as core
+from moonglade import container as mc
+from moonglade import gallery as g
 
 EXCLUDED_DIRS = {"_thumbs"}
 

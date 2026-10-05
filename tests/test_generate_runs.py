@@ -32,11 +32,11 @@ import uuid
 import pytest
 import requests
 
-import moonglade_backup as core
-import moonglade_gallery
-import moonglade_recipes
-import moonglade_runs as runs
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as moonglade_gallery
+from moonglade import recipes as moonglade_recipes
+from moonglade import runs
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, login_test_client
 
@@ -324,7 +324,7 @@ def test_a_single_send_is_recorded_for_inspect_without_changing_it(cli, rig, tmp
     assert d["source"] == "local"
     sent = d["request"]["variables"]["parameters"]
     assert sent == rig.mutations[0]
-    assert d["cli"]["command"].startswith("python moonglade_backup.py --generate")
+    assert d["cli"]["command"].startswith("python -m moonglade --generate")
     assert "--confirm" not in d["cli"]["command"]
 
 
@@ -1153,8 +1153,8 @@ def cli_parser():
 def _posix_argv(command):
     import shlex
     words = shlex.split(command)
-    assert words[:3] == ["python", "moonglade_backup.py", "--generate"]
-    return words[2:]
+    assert words[:4] == ["python", "-m", "moonglade", "--generate"]
+    return words[3:]
 
 
 def _web_params(**kw):
@@ -1272,7 +1272,7 @@ def test_the_powershell_command_survives_real_windows_powershell(tmp_path, cli_p
     for extra in ({}, {"contextImages": ["1"]}):
         params = dict(_web_params(**kw), **extra)
         out = runs.cli_command(core, params, shell="powershell")
-        line = out["command"].replace("python moonglade_backup.py",
+        line = out["command"].replace("python -m moonglade",
                                       "& '%s' '%s'" % (sys.executable, stub), 1)
         script = tmp_path / "line.ps1"
         script.write_bytes(b"\xef\xbb\xbf" + line.encode("utf-8"))

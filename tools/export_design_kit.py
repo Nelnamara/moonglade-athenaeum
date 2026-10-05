@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-GALLERY_PY = REPO / "moonglade_gallery.py"
+GALLERY_PY = REPO / "moonglade" / "gallery.py"
 STATIC = REPO / "static"
 TOKENS_CSS = STATIC / "design-tokens.css"
 
