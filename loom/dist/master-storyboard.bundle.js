@@ -7325,6 +7325,32 @@ ${"=".repeat(48)}
     return true;
   }
 
+  // ../gallery/src/notify/serverNotice.js
+  var SEEN_KEY = "mg_server_notice";
+  var seenHere = "";
+  function lastShown() {
+    try {
+      return localStorage.getItem(SEEN_KEY) || seenHere;
+    } catch {
+      return seenHere;
+    }
+  }
+  function markShown(key) {
+    seenHere = key;
+    try {
+      localStorage.setItem(SEEN_KEY, key);
+    } catch {
+    }
+  }
+  function noteServerNotice(notice) {
+    if (!notice || !notice.key || !notice.title && !notice.msg) return false;
+    const key = String(notice.key);
+    if (lastShown() === key) return false;
+    markShown(key);
+    show({ kind: "", sticky: true, title: String(notice.title || ""), msg: String(notice.msg || "") });
+    return true;
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -7435,6 +7461,7 @@ ${"=".repeat(48)}
       const rows = d && d.jobs || [];
       toastTransitions(rows);
       if (d && !d.error) note(d.update);
+      if (d && !d.error) noteServerNotice(d.notice);
       if (d && !d.error && d.inbox) pollListeners.forEach((fn) => {
         try {
           fn(d.inbox);
@@ -8348,12 +8375,12 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/notify/spikeStore.js
-  var SEEN_KEY = "mg_spike_announced";
+  var SEEN_KEY2 = "mg_spike_announced";
   var memSeen = "";
   var asked = false;
   function readStored() {
     try {
-      return localStorage.getItem(SEEN_KEY) || "";
+      return localStorage.getItem(SEEN_KEY2) || "";
     } catch {
       return "";
     }
@@ -8361,13 +8388,13 @@ ${"=".repeat(48)}
   function markSeen(at) {
     memSeen = at;
     try {
-      localStorage.setItem(SEEN_KEY, at);
+      localStorage.setItem(SEEN_KEY2, at);
     } catch {
     }
   }
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("storage", (e) => {
-      if (!e || e.key !== SEEN_KEY) return;
+      if (!e || e.key !== SEEN_KEY2) return;
       const v = String(e.newValue || "");
       if (v && v > memSeen) memSeen = v;
     });
@@ -11298,7 +11325,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/help/whatsNew.js
-  var SEEN_KEY2 = "seen.whatsnew";
+  var SEEN_KEY3 = "seen.whatsnew";
   var POLL_MS2 = 500;
   var QUIET_POLLS = 3;
   var GIVE_UP_MS = 5 * 60 * 1e3;
@@ -11332,18 +11359,18 @@ ${"=".repeat(48)}
       if (!ok || !about2 || about2.error || !about2.display_version) return;
       const stats = boot && boot.stats || {};
       const plan = whatsNewPlan({
-        seen: store.get(SEEN_KEY2, void 0),
+        seen: store.get(SEEN_KEY3, void 0),
         display: about2.display_version,
         kind: about2.kind,
         hasLibrary: (Number(stats.images) || 0) + (Number(stats.videos) || 0) > 0
       });
       if (!plan.show) {
-        if (plan.mark) store.set(SEEN_KEY2, about2.display_version);
+        if (plan.mark) store.set(SEEN_KEY3, about2.display_version);
         return;
       }
       whenCelebrationsSettle(() => {
-        if (store.get(SEEN_KEY2, void 0) === about2.display_version) return;
-        store.set(SEEN_KEY2, about2.display_version);
+        if (store.get(SEEN_KEY3, void 0) === about2.display_version) return;
+        store.set(SEEN_KEY3, about2.display_version);
         retireReceiptToast();
         show({
           kind: "whatsnew",
