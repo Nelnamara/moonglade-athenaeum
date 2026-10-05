@@ -15765,9 +15765,9 @@ def create_app(out_dir: Path):
         mascots, banners) with traversal already rejected in branding(), and the
         login page every unauthenticated visitor sees has to render it; the
         /next/assets/ bundle is public for the same reason -- LoginPage.jsx's
-        own compiled CSS/JS, no user data, no catalog, no credential. The 4
-        /static/mg-*.js custom-element scripts are NOT in that set: the login
-        page never loads them, and `static` stays LOGIN.
+        own compiled CSS/JS, no user data, no catalog, no credential. /static/ is
+        NOT in that set: the login page never loads anything from it, and `static`
+        stays LOGIN.
 
         Three tiers, one place:
           PUBLIC    -> through, no session needed.
@@ -25366,24 +25366,18 @@ __UPSCALE_CONST__
 </body></html>"""
 
     # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
-    # template rather than reusing APP_PAGE verbatim. Two real reasons, not
-    # just tidiness:
-    #   1. APP_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
-    #      (pickers, cost badge, generate drawer, upscale panel) are for
-    #      surfaces that don't exist on the login page at all -- dead weight
-    #      to parse before a visitor has even signed in.
-    #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
-    #      public tier, and never needed to be until now -- only
-    #      /next/assets/ (this page's own bundle/stylesheet) is
-    #      @tier(PUBLIC). Reusing APP_PAGE unmodified would have 404/401'd
-    #      an unauthenticated visitor's <script> requests for all 8 -- caught
-    #      live: those requests 302'd back to /login (the front door redoing
-    #      its own job on itself), the module script's own fetch got HTML
-    #      back and threw "Unexpected token '<'", and the bundle never ran at
-    #      all. Same app.js bundle either way (main.jsx statically imports
-    #      both App and LoginPage, so Vite ships one file) -- only the SHELL
-    #      differs, and the shell is what decides which one actually needs to
-    #      reach an unauthenticated browser.
+    # template rather than reusing APP_PAGE verbatim. When it was written, APP_PAGE
+    # also loaded eight /static/mg-*.js custom-element scripts (pickers, cost badge,
+    # generate drawer, upscale panel; since ported into the React bundle and deleted,
+    # 2026-08-08). They were not on the public tier, so an unauthenticated visitor's
+    # <script> requests for them 302'd back to /login (the front door redoing its own
+    # job on itself), the module script's own fetch got HTML back and threw
+    # "Unexpected token '<'", and the bundle never ran at all. The shell stays its own:
+    # only /next/assets/ (this page's own bundle/stylesheet) is @tier(PUBLIC), and a
+    # visitor who has not signed in has no use for __UPSCALE_CONST__. Same app.js bundle
+    # either way (main.jsx statically imports both App and LoginPage, so Vite ships one
+    # file) -- only the SHELL differs, and the shell is what decides which one actually
+    # needs to reach an unauthenticated browser.
     # viewport-fit=cover, same reason as APP_PAGE's own note above: this shell serves
     # LoginPageMobile.jsx on a phone, and login-mobile.css cannot read an inset the
     # viewport never opened.
@@ -27891,8 +27885,8 @@ __DESIGN_TOKENS__
     # (gallery/src/notify/ActivityTray.jsx) renders from /api/jobs, never from api_task_status()'s response,
     # so `started` has to be written DOWN to reach it -- and writing it here is what makes
     # the signal identical on both hosts, because the gallery's Jobs.poll(), the Loom's
-    # pollShot/pollTaskWithCeiling and mg-generate-drawer.js's own poll all hit this one
-    # route and none of them has to know the field exists.
+    # pollShot/pollTaskWithCeiling and the video drawer's own poll (gen/submitTask.js) all
+    # hit this one route and none of them has to know the field exists.
     #
     # De-duped rather than written per poll for two concrete reasons: four pollers ask every
     # 3s per job, so a task PixAI sits on for its whole ~60-minute reap window would add
@@ -29014,9 +29008,10 @@ __DESIGN_TOKENS__
 
     @app.after_request
     def _code_assets_no_cache(resp):
-        # Same staleness class as /next/assets (see next_assets): the shared
-        # static/mg-*.js web components change on edit with no url change, and
-        # heuristic caching kept old copies live in real tabs. Scoped to /static/
+        # Same staleness class as /next/assets (see next_assets): files under static/
+        # (today the design pages and tokens; once the shared mg-*.js web components)
+        # change on edit with no url change, and heuristic caching kept old copies
+        # live in real tabs. Scoped to /static/
         # ONLY -- thumbnails and full media stay freely cacheable (huge, and a
         # media file's content never changes under its id).
         if request.path.startswith("/static/"):

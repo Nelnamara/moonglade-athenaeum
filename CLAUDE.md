@@ -8,7 +8,7 @@ This file is committed so it is available on every machine that clones the repo.
 
 **Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `../moonglade-internal/architecture.md` for the module breakdown, function reference, and catalog schema.
 
-Built by reverse-engineering site network traffic (catalogued privately in `../moonglade-internal/private/API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
+Built by reverse-engineering site network traffic (catalogued privately in `../moonglade-internal/private/API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `wiki/`.
 
 ---
 
