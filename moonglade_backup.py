@@ -765,8 +765,8 @@ def verify_web_user(username, password):
 _cfg = _load_config()
 # A trust signal for anyone nervous about handing a third-party tool spend/delete access
 # to their PixAI account: with READ_ONLY:true in config.json, every account-mutating
-# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply/
-# --yes, since those flags are the very thing a cautious first run wants to be safe to
+# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply,
+# since those flags are the very thing a cautious first run wants to be safe to
 # pass without reading the source first. This does NOT cover purely local operations
 # (--organize, --dedup) -- those already have their own dry-run-by-default + --apply
 # gates and never touch the network; conflating "protect my files" with "protect my
@@ -806,7 +806,7 @@ def _read_only_now():
 def _check_read_only(action):
     """Called at the top of every branch that actually fires an account-mutating
     network call. Raising here, unconditionally, is what makes READ_ONLY override
-    --confirm/--apply/--yes rather than just changing their default.
+    --confirm/--apply rather than just changing their default.
 
     Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
     claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
@@ -869,10 +869,9 @@ ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
     "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
-# ever touches YOUR OWN tasks, and the destructive paths are independently gated by
-# explicit confirmation (typed "DELETE" in the gallery; --apply plus a typed "delete"
-# on the CLI -- NOT --confirm, which gates credit-spending generation), so the default
-# is safe; override in config.json if it rotates.
+# ever touches YOUR OWN tasks, and the destructive path is independently gated by
+# explicit confirmation (typed "DELETE" in the gallery, which is the only road to this
+# mutation), so the default is safe; override in config.json if it rotates.
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
@@ -2831,8 +2830,8 @@ def delete_task_gql(session, task_id):
     _check_read_only("delete a task from your PixAI account")
     # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
     # can fire solely if that default is stripped or the hash rotates and someone blanks
-    # it. It is NOT a setup gate -- --apply plus the typed "delete" confirm are what stand
-    # between a caller and a real delete.
+    # it. It is NOT a setup gate -- the gallery's typed "DELETE" confirm and READ_ONLY are
+    # what stand between a caller and a real delete.
     if not DELETE_TASK_HASH:
         raise PixAIError(
             "DELETE_TASK_HASH is empty -- the built-in default is missing or was overridden "
@@ -6642,87 +6641,6 @@ def run_probe(args):
             print("\nLooks right? Run a download to back up everything.")
         else:
             print("\nCouldn't find a URL in the media object -- paste this back.")
-
-
-#: Printed by every --delete-task run (2026-09-06). Deletion converged on the per-image
-#: path: the gallery reads the task back and sends whichever mutation PixAI accepts, and its
-#: Actions dropdown still takes whole tasks in bulk. This flag is a third road to the same
-#: place with none of the reading, so it is deprecated -- still working this release, but no
-#: longer the answer.
-_DELETE_TASK_DEPRECATED = (
-    "NOTE: --delete-task is DEPRECATED and will be removed in the next minor release.\n"
-    "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
-    "  with PixAI first and removes just that image when the rest of its batch is still\n"
-    "  there. To delete whole generations, select them in the gallery and use Delete from\n"
-    "  PixAI in the Actions dropdown. Both remove the local copy to your trash folder too,\n"
-    "  so your library and your account stay in step; this flag never touches local files.")
-
-
-def run_delete_tasks(args):
-    """Delete one or more generation tasks from your PixAI account (IRREVERSIBLE).
-
-    DEPRECATED 2026-09-06 -- see `_DELETE_TASK_DEPRECATED`, printed on every run. It still
-    works exactly as it did; it is simply no longer the road deletion is maintained on.
-
-    Guards, in order:
-      1. Dry-run by default -- prints the target list and stops. Requires --apply.
-      2. With --apply, a typed 'delete' confirmation (skippable with --yes, which
-         is refused on a non-interactive stdin unless explicitly passed).
-      3. Single-attempt per task (delete_task_gql does no retry).
-    Local backups (image files + catalog.db) are NOT touched -- this only removes
-    the generation from your account on PixAI's servers.
-    """
-    print(_DELETE_TASK_DEPRECATED)
-    raw = getattr(args, "delete_task", None) or []
-    seen, ids = set(), []
-    for t in raw:
-        t = str(t).strip()
-        if t and t not in seen:
-            seen.add(t)
-            ids.append(t)
-    if not ids:
-        raise PixAIError("No task ids given. Usage: --delete-task <taskId> [<taskId> ...]")
-
-    print("Tasks targeted for deletion ({}):".format(len(ids)))
-    for t in ids:
-        print("  {}".format(t))
-
-    if not getattr(args, "apply", False):
-        print("\nDRY RUN -- nothing deleted. Re-run with --apply to permanently delete "
-              "these from your PixAI account.")
-        print("(Deletion is irreversible. Your local backups are NOT affected.)")
-        return {"targeted": len(ids), "deleted": 0, "failed": 0, "dry_run": True}
-
-    if not getattr(args, "yes", False):
-        if not getattr(sys.stdin, "isatty", lambda: False)():
-            raise PixAIError(
-                "--apply needs interactive confirmation. Re-run attached to a terminal, "
-                "or pass --yes to confirm non-interactively (irreversible -- be careful).")
-        ans = input("\nPermanently delete {} task(s) from your PixAI account? "
-                    "Type 'delete' to confirm: ".format(len(ids)))
-        if ans.strip().lower() != "delete":
-            print("Aborted -- nothing deleted.")
-            return {"targeted": len(ids), "deleted": 0, "failed": 0, "aborted": True}
-
-    session = _make_session(getattr(args, "token", None))
-    delay = getattr(args, "delay", 0.4)
-    deleted = failed = 0
-    for i, t in enumerate(ids, 1):
-        try:
-            # deleteGenerationTask is a void mutation: it returns null on a
-            # SUCCESSFUL delete and raises (GraphQL errors / 401 / PersistedQuery
-            # NotFound) on failure. So a clean return -- whatever the payload --
-            # means the task was deleted.
-            delete_task_gql(session, t)
-            deleted += 1
-            print("  [{}/{}] deleted task {}".format(i, len(ids), t))
-        except PixAIError as e:
-            failed += 1
-            print("  [{}/{}] FAILED task {}: {}".format(i, len(ids), t, e))
-        if i < len(ids):
-            time.sleep(delay)
-    print("\nDeletion complete: {} deleted, {} failed.".format(deleted, failed))
-    return {"targeted": len(ids), "deleted": deleted, "failed": failed}
 
 
 def run_count(args):
@@ -17729,17 +17647,6 @@ def main():
     ap.add_argument("--token",
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
-    ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DEPRECATED, removed in the next minor release (use the gallery's "
-                         "Delete from PixAI, on one image or on a selection). DELETE the "
-                         "given generation task id(s) from your "
-                         "PixAI account (irreversible). Dry-run unless --apply is also "
-                         "given; then asks for typed confirmation unless --yes. Local "
-                         "backups are untouched. (DELETE_TASK_HASH ships with a working "
-                         "default; no config.json setup needed.)")
-    ap.add_argument("--yes", action="store_true",
-                    help="skip the interactive confirmation for --delete-task --apply "
-                         "(use with care; deletion cannot be undone)")
     ap.add_argument("--out", default="pixai_backup",
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=250,
@@ -18239,9 +18146,6 @@ def main():
         pass
 
     try:
-        if getattr(args, "delete_task", None):
-            run_delete_tasks(args)
-            return
         if args.catalog_stats:
             run_catalog_stats(args)
             return

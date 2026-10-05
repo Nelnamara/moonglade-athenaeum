@@ -94,16 +94,6 @@ why this section exists.
   coded tree replaced the old loose `branding/` folder, which no longer exists. Before anything is
   scoped, re-audit what still sits loose at the install root today (owner, 2026-10-02: "old topic and
   half done now").
-- **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
-  left behind (what else is dead?). `--faststart-videos` is live and stays (it rewrites a video so it
-  starts playing before it has fully downloaded). `--delete-task`, deprecated since 2026-09-06 in favour
-  of the gallery's Delete, is removed in the next minor release. **Partly
-  overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
-  it removed real cruft in passing — the `_connect` catalog shim and the front-end `postJSON` helper are
-  gone, `LibraryBar` shed thirteen dead props, and dozens of hand-rolled call sites collapsed onto single
-  seams (the request module, the price transport, the library scan, `media_tools`). The item still stands
-  as a deliberate sweep — the job is to hunt what's *left* (deprecated-in-place flags, orphaned
-  classic-era code), not to bank the refactor's incidental cleanup as the sweep.
 
 ## Open questions — need a call before they can be scoped
 

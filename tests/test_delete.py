@@ -1,11 +1,9 @@
-"""Tests for the delete-task feature (delete_task_gql + run_delete_tasks).
+"""Tests for the task-level delete mutation (delete_task_gql), and that the command line
+no longer has a delete of its own.
 
-These never hit the network: the GraphQL call is mocked, and run_delete_tasks is
-driven with a SimpleNamespace args object. The point is to lock in the SAFETY
-guards (dry-run default, confirmation, single-attempt) so they can't regress.
+These never hit the network: the GraphQL call is mocked. The point is to lock in the SAFETY
+guards (the READ_ONLY refusal, single attempt, no retry) so they can't regress.
 """
-from types import SimpleNamespace
-
 import pytest
 
 import moonglade_backup as core
@@ -37,15 +35,17 @@ class TestDeleteTaskGql:
     def test_missing_hash_raises_before_any_call(self, mock_session, monkeypatch):
         """Defensive only -- the hash ships with a working default, so this guard can fire
         solely if that default is stripped or blanked in config.json. It is NOT a setup
-        gate (--apply + the typed 'delete' are); the message must not claim otherwise."""
+        gate (the gallery's typed DELETE and READ_ONLY are); the message must not claim
+        otherwise."""
         monkeypatch.setattr(core, "DELETE_TASK_HASH", "")
         with pytest.raises(core.PixAIError, match="DELETE_TASK_HASH is empty"):
             core.delete_task_gql(mock_session, "123")
         mock_session.post.assert_not_called()
 
     def test_delete_hash_has_a_working_default(self):
-        """The real gates are --apply + the typed confirm. Docs claimed for months that a
-        missing hash was a setup gate that stopped deletion from firing -- it never was."""
+        """The real gates are the gallery's typed DELETE and READ_ONLY. Docs claimed for
+        months that a missing hash was a setup gate that stopped deletion from firing -- it
+        never was."""
         assert core.DELETE_TASK_HASH and len(core.DELETE_TASK_HASH) == 64
 
     def test_persisted_query_not_found(self, mock_session, mocker, monkeypatch):
@@ -82,113 +82,34 @@ class TestDeleteTaskGql:
 
 
 # ---------------------------------------------------------------------------
-# run_delete_tasks() -- the safety guards
+# the command line no longer deletes
 # ---------------------------------------------------------------------------
 
-class TestRunDeleteTasks:
-    def test_no_ids_raises(self):
-        args = SimpleNamespace(delete_task=[], apply=False, yes=False)
-        with pytest.raises(core.PixAIError, match="No task ids"):
-            core.run_delete_tasks(args)
+class TestNoCommandLineDelete:
+    """`--delete-task` (deprecated 2026-09-06) is gone, and so is the `--yes` that only it
+    used. The gallery's Delete from PixAI is the one road to deleting from the account; its
+    guards (READ_ONLY, localhost-only, the typed DELETE, the read-back before a single-image
+    delete) are tested in test_read_only.py, test_api_bulk_json.py and test_delete_image.py."""
 
-    def test_dry_run_deletes_nothing(self, monkeypatch):
-        # _make_session/delete must NOT be reached in a dry run.
+    @pytest.mark.parametrize("argv", [
+        ["--delete-task", "123"],
+        ["--delete-task", "123", "--apply", "--yes"],
+        ["--yes"],
+    ])
+    def test_the_parser_refuses_it_and_nothing_reaches_pixai(self, monkeypatch, capsys, argv):
+        import sys
         monkeypatch.setattr(core, "_make_session",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
-        args = SimpleNamespace(delete_task=["1", "2"], apply=False, yes=False)
-        out = core.run_delete_tasks(args)
-        assert out == {"targeted": 2, "deleted": 0, "failed": 0, "dry_run": True}
-
-    def test_dedupes_ids(self, monkeypatch):
-        monkeypatch.setattr(core, "_make_session", lambda *a, **k: None)
-        args = SimpleNamespace(delete_task=["7", "7", "8"], apply=False, yes=False)
-        out = core.run_delete_tasks(args)
-        assert out["targeted"] == 2  # duplicate "7" collapsed
-
-    def test_apply_without_yes_on_non_tty_refuses(self, monkeypatch):
-        # pytest's stdin is not a tty, so confirmation can't be obtained.
-        monkeypatch.setattr(core, "_make_session",
-                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
-        args = SimpleNamespace(delete_task=["1"], apply=True, yes=False, token=None)
-        with pytest.raises(core.PixAIError, match="interactive confirmation"):
-            core.run_delete_tasks(args)
-
-    def test_apply_with_yes_deletes_each(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr(core, "_make_session", lambda *a, **k: "SESSION")
         monkeypatch.setattr(core, "delete_task_gql",
-                            lambda session, tid: calls.append(tid) or True)
-        args = SimpleNamespace(delete_task=["10", "11"], apply=True, yes=True,
-                               token=None, delay=0)
-        out = core.run_delete_tasks(args)
-        assert calls == ["10", "11"]
-        assert out == {"targeted": 2, "deleted": 2, "failed": 0}
+                            lambda *a, **k: pytest.fail("a delete was sent"))
+        monkeypatch.setattr(sys, "argv", ["prog", *argv])
+        with pytest.raises(SystemExit) as exc:
+            core.main()
+        assert exc.value.code == 2                       # argparse: unrecognized arguments
+        assert "unrecognized arguments" in capsys.readouterr().err
 
-    def test_apply_counts_failures(self, monkeypatch):
-        def _boom(session, tid):
-            if tid == "bad":
-                raise core.PixAIError("nope")
-            return None
-        monkeypatch.setattr(core, "_make_session", lambda *a, **k: "SESSION")
-        monkeypatch.setattr(core, "delete_task_gql", _boom)
-        args = SimpleNamespace(delete_task=["ok", "bad"], apply=True, yes=True,
-                               token=None, delay=0)
-        out = core.run_delete_tasks(args)
-        assert out == {"targeted": 2, "deleted": 1, "failed": 1}
-
-    def test_null_return_counts_as_deleted(self, monkeypatch):
-        # deleteGenerationTask is a void mutation: it returns null on a SUCCESSFUL
-        # delete (confirmed against a real task). A clean return -- even None --
-        # means the task was deleted, so it must count as a deletion, not a no-op.
-        monkeypatch.setattr(core, "_make_session", lambda *a, **k: "SESSION")
-        monkeypatch.setattr(core, "delete_task_gql", lambda session, tid: None)
-        args = SimpleNamespace(delete_task=["real-task"], apply=True, yes=True,
-                               token=None, delay=0)
-        out = core.run_delete_tasks(args)
-        assert out == {"targeted": 1, "deleted": 1, "failed": 0}
-
-
-class TestDeprecationNotice:
-    """`--delete-task` is deprecated (2026-09-06). Deletion converged on the per-image path:
-    the gallery's Delete from PixAI now reads the task first and sends whichever mutation
-    PixAI accepts, and the Actions dropdown's Delete from PixAI still takes whole tasks in
-    bulk. This flag is the third road to the same place, with none of the reading -- so it
-    keeps working this release and says where to go instead.
-
-    The notice must reach someone who is only ever going to run the DRY RUN, which is the
-    default and the shape most people try first."""
-
-    def test_the_dry_run_says_it_is_deprecated_and_where_to_go(self, monkeypatch, capsys):
-        monkeypatch.setattr(core, "_make_session",
-                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
-        args = SimpleNamespace(delete_task=["1"], apply=False, yes=False)
-        core.run_delete_tasks(args)
-        out = capsys.readouterr().out.lower()
-        assert "deprecated" in out
-        assert "delete from pixai" in out, "it never names the control that replaces it"
-
-    def test_the_real_delete_says_it_too(self, monkeypatch, capsys):
-        monkeypatch.setattr(core, "_make_session", lambda *a, **k: "SESSION")
-        monkeypatch.setattr(core, "delete_task_gql", lambda session, tid: None)
-        args = SimpleNamespace(delete_task=["10"], apply=True, yes=True, token=None, delay=0)
-        core.run_delete_tasks(args)
-        assert "deprecated" in capsys.readouterr().out.lower()
-
-    def test_the_help_text_says_deprecated(self):
-        """`--help` is where someone looks BEFORE running it, so the notice has to be there
-        too, not only in the output of a run. The parser is built inside main(), so the help
-        string is read out of the source rather than by running the CLI."""
-        import ast
-        import inspect
-        helps = [kw.value.value
-                 for node in ast.walk(ast.parse(inspect.getsource(core)))
-                 if isinstance(node, ast.Call)
-                 and isinstance(node.func, ast.Attribute)
-                 and node.func.attr == "add_argument"
-                 and any(isinstance(a, ast.Constant) and a.value == "--delete-task"
-                         for a in node.args)
-                 for kw in node.keywords
-                 if kw.arg == "help" and isinstance(kw.value, ast.Constant)]
-        assert helps, "--delete-task has no help text at all"
-        assert "deprecated" in helps[0].lower(), (
-            "`--help` still presents --delete-task as the way to delete")
+    def test_the_runner_and_its_notice_are_gone_but_the_shared_pieces_stay(self):
+        assert not hasattr(core, "run_delete_tasks")
+        assert not hasattr(core, "_DELETE_TASK_DEPRECATED")
+        # what the gallery's delete routes call
+        assert callable(core.delete_task_gql) and callable(core.delete_image_routed)

@@ -206,7 +206,7 @@ shipped bug.
   backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
   document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
   `gql_mutate` so the intent is reviewable. Guarded by `tests/test_spend_no_retry.py`.
-- **`READ_ONLY` in config.json overrides `--confirm`/`--apply`/`--yes`.** Any new code path that
+- **`READ_ONLY` in config.json overrides `--confirm`/`--apply`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
   it is the contract the `Trust & Safety` wiki page makes to users. See
@@ -248,7 +248,7 @@ single-image generation.
   not list, an already-deleted member, a video task: no mutation, a plain-words message.
 - `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response.)
 - Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards are what stand between you and a real delete.
-- **`--delete-task` is DEPRECATED (2026-09-06)** — still working, printing its own notice, and removed in the next minor release; its `--help` says so. The maintained roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`). Its guards are unchanged while it lasts: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin); single-attempt per task; cloud-only, so it leaves local rows behind for `--reconcile-deleted`.
+- **There is no command-line delete.** `--delete-task` (deprecated 2026-09-06) and the `--yes` that only it used are gone. The roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`: localhost-only, typed `DELETE`, `READ_ONLY` refuses before any job starts). `delete_task_gql` stays because those routes call it. A bulk delete sent with `purge_local: false` is cloud-only and leaves local rows behind for `--reconcile-deleted`.
 - `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
 
 > **Reverse-engineering detail (frontend handler flow, sibling mutations, hash-capture
@@ -406,8 +406,6 @@ python moonglade_backup.py --dedup --apply            # quarantine redundant cop
 python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
 python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
 "Serve Gallery.pyw"                                   # launch the gallery (double-click; never bare `python moonglade_gallery.py` -- see the standing rule above; machine-local flags live in serve.txt)
-python moonglade_backup.py --delete-task <id> [<id> ...]        # DEPRECATED, removed in the next minor release (use the gallery's Delete from PixAI). DRY-RUN: list what would be deleted
-python moonglade_backup.py --delete-task <id> --apply --yes     # DEPRECATED, same. Actually delete from your account (irreversible; null=success)
 python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
 python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
 python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes

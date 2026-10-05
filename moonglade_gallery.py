@@ -17600,8 +17600,8 @@ def create_app(out_dir: Path):
         the failure already logged to the job card). Callers check total > 0
         themselves -- this helper assumes there is work.
 
-        purge_local=False is the JSON route's cloud-only mode (the CLI
-        --delete-task behavior: cloud gone, local files + catalog intact). It
+        purge_local=False is the JSON route's cloud-only mode (cloud gone, local files
+        + catalog intact: what the removed --delete-task command used to do). It
         drops the local_only imports HERE, not in the caller, because with no
         cloud side they would otherwise be pure local purges -- exactly what the
         flag says not to do."""
@@ -17708,8 +17708,8 @@ def create_app(out_dir: Path):
         Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
         sent -- they are already the unit the delete operates on), plus optional
         purge_local (default true, the page behavior: purge follows cloud so
-        catalog and account never drift; false = cloud-only, the CLI
-        --delete-task behavior, and imports are then left alone entirely).
+        catalog and account never drift; false = cloud-only, what the removed
+        --delete-task command used to do, and imports are then left alone entirely).
 
         _check_read_only fires HERE, before the job even starts, on top of the one
         inside delete_task_gql: failing fast with one readable refusal beats
