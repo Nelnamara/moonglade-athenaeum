@@ -6736,11 +6736,12 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
         .mgpack                                 (default)          MoongladeAthenaeum.ArtPack
         MoongladeAthenaeum.ArtPack              (default)          Moonglade art pack
                                                 FriendlyTypeName   Moonglade art pack
-        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <the launcher's .ico>,0
+        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <_pack_type_icon()>,0
 
-    The icon is the current mark's, the same file the Desktop shortcut uses (_mark_ico_path);
-    with no .ico cut the type is written without one. There is deliberately NO open command:
-    the pack is data the app reads, not a document, so double-clicking one does nothing.
+    The icon is a per-user copy of the current mark's .ico, the Desktop shortcut's picture
+    (_pack_type_icon). With no .ico to copy, or a copy that failed, the icon value is left as
+    it is. There is deliberately NO open command: the pack isn't meant to be opened; the
+    app reads it by itself (double-click one and Windows asks which app to open it with).
 
     Each value is read first and written only when it differs, so a start that finds them in
     place writes nothing (and only a start that wrote asks Explorer to refresh). A no-op off
@@ -6752,23 +6753,22 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
     try:
         if winreg is None:
             import winreg
-        classes = "Software\\Classes\\"
+        hkcu = winreg.HKEY_CURRENT_USER      # first: a registry that is not there fails here,
+        classes = "Software\\Classes\\"     # before any file is written
         want = [(classes + _container_path().suffix, "", PACK_PROGID),
                 (classes + PACK_PROGID, "", PACK_TYPE_NAME),
                 (classes + PACK_PROGID, "FriendlyTypeName", PACK_TYPE_NAME)]
-        icon = _mark_ico_path(load_branding(out_dir)["mark"])
+        icon, wrote = _pack_type_icon(out_dir)
         if icon is not None:
             want.append((classes + PACK_PROGID + "\\DefaultIcon", "", str(icon) + ",0"))
-        wrote = False
         for key_path, name, value in want:
             try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                with winreg.OpenKey(hkcu, key_path) as key:
                     if winreg.QueryValueEx(key, name)[0] == value:
                         continue                   # already right: leave it alone
             except OSError:
                 pass                               # not there yet: write it below
-            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key_path, 0,
-                                    winreg.KEY_WRITE) as key:
+            with winreg.CreateKeyEx(hkcu, key_path, 0, winreg.KEY_WRITE) as key:
                 winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
             wrote = True
         if wrote:
@@ -6779,6 +6779,33 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
         _logging.getLogger(__name__).warning(
             "art pack: could not register its Explorer file type (%s); carrying on.", e)
         return False
+
+
+def _pack_type_icon(out_dir):
+    """(path, rewritten) for the pack's Explorer icon: %LOCALAPPDATA%\\Moonglade Athenaeum\\
+    mgpack.ico, a copy of the current mark's .ico (the Desktop shortcut's picture, read the
+    same loose-then-pack way). One fixed per-user place, outside every install, so the D: and
+    C: installs point Explorer at the same path and moving or deleting an install never leaves
+    it pointing at a file that is gone. Rewritten only when its bytes differ. (None, False)
+    when the mark has no .ico, or when the copy fails -- logged once, and the caller then
+    leaves the registry's icon as it was."""
+    raw = _branding_bytes(_role_rel("marks", str(load_branding(out_dir)["mark"]) + ".ico"))
+    if raw is None:
+        return None, False
+    try:
+        dst = Path(os.environ["LOCALAPPDATA"]) / "Moonglade Athenaeum" / "mgpack.ico"
+        if dst.is_file() and dst.read_bytes() == raw:
+            return dst, False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + ".tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, dst)                   # whole, never half-written under Explorer
+        return dst, True
+    except (KeyError, OSError) as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "art pack: could not copy its Explorer icon (%r); the icon is left as it was.", e)
+        return None, False
 
 
 def _tell_explorer_file_types_changed():
@@ -12042,7 +12069,12 @@ def changelog_entries(text=None):
 def art_pack_info(container_path):
     """{installed, version} for the About card's "art pack vN". The version comes from the
     installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so."""
+    the pack on disk is the one this build expects; a missing pack says so.
+
+    Plus `note`, only when there is one to give: a pack still under its pre-v7 name beside
+    the one in use. A start that finds both never deletes the old copy (a stray asset copy is
+    the owner's to remove), so About says so in plain words. Read from the disk on each ask,
+    so the note leaves the moment the old copy does."""
     try:
         present = Path(container_path).exists()
     except OSError:
@@ -12051,13 +12083,22 @@ def art_pack_info(container_path):
         return {"installed": False, "version": ""}
     marker = moonglade_assets._read_marker(Path(container_path)) or {}
     if marker.get("version"):
-        return {"installed": True, "version": str(marker["version"])}
-    man = moonglade_assets.read_manifest()
+        info = {"installed": True, "version": str(marker["version"])}
+    else:
+        man = moonglade_assets.read_manifest()
+        try:
+            current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
+        except Exception:                        # noqa: BLE001 -- a label, never a failure
+            current = False
+        info = {"installed": True, "version": str(man["version"]) if current else ""}
     try:
-        current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
-    except Exception:                            # noqa: BLE001 -- a label, never a failure
-        current = False
-    return {"installed": True, "version": str(man["version"]) if current else ""}
+        old_copy = Path(container_path).with_name(moonglade_assets.LEGACY_NAME).is_file()
+    except OSError:
+        old_copy = False
+    if old_copy:
+        info["note"] = ("An old %s is still beside the pack. It's safe to delete."
+                        % moonglade_assets.LEGACY_NAME)
+    return info
 
 
 def about_payload(version, container_path, entries=None):
@@ -29207,7 +29248,11 @@ def main():
     # so a matching pack never downloads again and an outdated one is replaced in place by
     # the usual verified download. After the port check on purpose: a start refused above
     # must not move the pack out from under the server that is already running.
-    moonglade_assets.migrate_legacy_name(_container_path())
+    pack_rename = moonglade_assets.migrate_legacy_name(_container_path())
+    if pack_rename == "both":
+        # Logged too; About's art-pack line says it as well (art_pack_info's note).
+        print("An old {} is still beside the art pack. It's safe to delete.".format(
+            moonglade_assets.LEGACY_NAME))
 
     # One-time, and only on a REAL start: move any rendered banner flat still
     # sitting at the coded root into this install's banner cache. Here rather

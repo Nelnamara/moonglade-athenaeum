@@ -98,6 +98,12 @@ def _write_marker(container_path, manifest):
 # other code path asks moonglade_gallery._container_path() (tests/test_pack_file_name.py).
 LEGACY_NAME = "moonglade.dat"
 
+# Where the rename writes down what it did: a child of the app's own logger, which
+# moonglade_logging lets through to out_dir/logs/moonglade.log at every level. This module's
+# own name would not do -- the root ceiling there is WARNING, so the INFO line that says the
+# rename happened would never reach the file.
+_LOG = "moonglade.assets"
+
 
 def migrate_legacy_name(container_path):
     """Move an install's pack from its pre-v7 name to `container_path`, once. A real server
@@ -115,13 +121,27 @@ def migrate_legacy_name(container_path):
       - the rename refused (a read-only folder, a locked file): one warning, and the start
         carries on as it did before this existed (no pack under the new name: the check
         offers the download).
-      - the old name absent: nothing to do.
+      - two starts at once: the one whose move finds the old file gone and the new one there
+        lost a race to the other, which has done the rename. That is "renamed", quietly, and
+        the marker the other start moved is left alone (a marker is only ever dropped while
+        the new pack is really absent).
+      - the old name absent: nothing to do, except that a marker left under the old name
+        beside the moved pack (a rename whose marker could not follow) is removed. It is a
+        few bytes about a file that is not there, not an asset copy.
 
-    Returns "renamed", "both", "failed" or "none". Never raises."""
-    log = logging.getLogger(__name__)
+    Returns "renamed", "both", "failed" or "none". Never raises. Every outcome but "none" is
+    written to the log file (_LOG)."""
+    log = logging.getLogger(_LOG)
     new = Path(container_path)
     old = new.with_name(LEGACY_NAME)
     if not old.is_file():
+        stray = _version_marker_path(old)
+        try:
+            if stray.is_file() and new.is_file():
+                os.remove(stray)
+                log.info("art pack: removed %s, a marker left by the old name", stray.name)
+        except OSError:
+            pass                                   # a few bytes; tried again next start
         return "none"
     if new.exists():
         log.warning("art pack: an old copy remains at %s beside %s. It is left untouched; "
@@ -129,10 +149,12 @@ def migrate_legacy_name(container_path):
         return "both"
     old_marker, new_marker = _version_marker_path(old), _version_marker_path(new)
     try:
-        if new_marker.exists():
+        if new_marker.exists() and not new.exists():
             os.remove(new_marker)                  # a marker whose pack is not there
         os.replace(old, new)
     except OSError as e:
+        if new.exists() and not old.exists():
+            return "renamed"                       # another start just did it, marker and all
         log.warning("art pack: could not rename %s to %s (%s); carrying on without it.",
                     old, new.name, e)
         return "failed"

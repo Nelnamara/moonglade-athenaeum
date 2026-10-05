@@ -76,6 +76,18 @@ class FakeWinreg:
         return {(root, path, name): v for (root, path, name), v in self.values.items()}
 
 
+@pytest.fixture(autouse=True)
+def lad(tmp_path, monkeypatch):
+    """A temporary %LOCALAPPDATA%: the icon copy lands here, never in the real one."""
+    folder = tmp_path / "localappdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(folder))
+    return folder
+
+
+def _icon_file(lad):
+    return lad / "Moonglade Athenaeum" / "mgpack.ico"
+
+
 @pytest.fixture
 def told(monkeypatch):
     """Stands in for the Explorer refresh; counts the calls."""
@@ -84,13 +96,13 @@ def told(monkeypatch):
     return calls
 
 
-def _install_pack(tmp_path):
+def _install_pack(tmp_path, ico=ICO):
     """A pack carrying the default mark and its launcher .ico, as the shipped pack does."""
     marks = {"marks": [{"id": "mark_4", "label": "Mark", "kind": "tile"}]}
     mc.write_container(g._container_path(), {
         g._role_rel("marks", "marks.json"): json.dumps(marks).encode("utf-8"),
         g._role_rel("marks", "mark_4.png"): PNG,
-        g._role_rel("marks", "mark_4.ico"): ICO,
+        g._role_rel("marks", "mark_4.ico"): ico,
     }, {})
     g._container_cache.update(path=None, mtime=None, box=None)
 
@@ -105,27 +117,70 @@ def _want(icon):
     }
 
 
-def test_a_start_writes_the_per_user_file_type(tmp_path, told):
+def test_a_start_writes_the_per_user_file_type(tmp_path, lad, told):
     _install_pack(tmp_path)
     reg = FakeWinreg()
     assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
-    icon = g.branding_root().parent / "_container_cache" / "marks" / "mark_4.ico"
-    assert reg.table() == _want(icon)
-    assert icon.read_bytes() == ICO                   # a real file: Windows reads icons off disk
+    assert reg.table() == _want(_icon_file(lad))
+    assert _icon_file(lad).read_bytes() == ICO        # a real file: Windows reads icons off disk
     assert {w[3] for w in reg.writes} == {FakeWinreg.REG_SZ}
     assert told == [1]
 
 
-def test_the_icon_is_the_one_the_desktop_shortcut_uses(tmp_path, told):
-    """Both ask _mark_ico_path for the current mark, so the pack's icon and the Desktop
-    launcher's are the same file."""
+def test_the_icon_is_the_desktop_shortcuts_copied_to_one_place_outside_any_install(
+        tmp_path, lad, told, monkeypatch):
+    """The picture is the current mark's .ico, the one the Desktop shortcut uses. Explorer is
+    pointed at a copy in one fixed per-user place rather than into an install's own cache, so
+    every install on the account (the D: one and the C: one) names the same path, and moving
+    or deleting an install never leaves Explorer pointing at a file that is gone."""
     _install_pack(tmp_path)
     reg = FakeWinreg()
     g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
     shortcut_icon = g._mark_ico_path(g.load_branding(tmp_path)["mark"])
+    assert _icon_file(lad).read_bytes() == shortcut_icon.read_bytes()
     icon_key = ("HKCU", "software\\classes\\moongladeathenaeum.artpack\\defaulticon", "")
-    assert reg.table()[icon_key] == str(shortcut_icon) + ",0"
+    assert reg.table()[icon_key] == str(_icon_file(lad)) + ",0"
+    assert "_container_cache" not in reg.table()[icon_key]
     assert "_mark_ico_path" in inspect.getsource(g.make_launcher_shortcut)
+    # a second install on the same account names the very same path
+    other = tmp_path / "second-install"
+    other.mkdir()
+    monkeypatch.setattr(g, "branding_root", lambda: other / "branding")
+    _install_pack(other)
+    g.register_pack_file_type(other, winreg=reg, platform="win32")
+    assert reg.table()[icon_key] == str(_icon_file(lad)) + ",0"
+
+
+def test_the_icon_copy_is_rewritten_only_when_its_bytes_differ(tmp_path, lad, told):
+    _install_pack(tmp_path)
+    reg = FakeWinreg()
+    g.register_pack_file_type(tmp_path, winreg=reg, platform="win32")
+    stamp = _icon_file(lad).stat().st_mtime_ns
+    import time
+    time.sleep(0.05)
+    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is False
+    assert _icon_file(lad).stat().st_mtime_ns == stamp          # same bytes: untouched
+    _install_pack(tmp_path, ico=ICO + b"-recut")                  # the mark's icon changed
+    assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+    assert _icon_file(lad).read_bytes() == ICO + b"-recut"
+    assert told == [1, 1]                                         # Explorer told about the new icon
+
+
+def test_a_failed_icon_copy_keeps_the_registrys_icon_and_logs_once(
+        tmp_path, monkeypatch, told, caplog):
+    _install_pack(tmp_path)
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_bytes(b"x")                                     # a folder can't be made under a file
+    monkeypatch.setenv("LOCALAPPDATA", str(blocker))
+    reg = FakeWinreg()
+    icon_key = ("HKCU", "software\\classes\\moongladeathenaeum.artpack\\defaulticon", "")
+    reg.keys.add(icon_key[:2])
+    reg.values[icon_key] = "C:\\before\\mgpack.ico,0"
+    with caplog.at_level(logging.INFO):
+        assert g.register_pack_file_type(tmp_path, winreg=reg, platform="win32") is True
+    assert reg.table()[icon_key] == "C:\\before\\mgpack.ico,0"     # today's icon kept
+    assert reg.table()[("HKCU", "software\\classes\\.mgpack", "")] == "MoongladeAthenaeum.ArtPack"
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
 
 
 def test_it_reads_first_and_writes_only_what_differs(tmp_path, told):
@@ -198,3 +253,17 @@ def test_a_real_start_registers_the_file_type_after_the_pack_is_settled():
     i = names.index("register_pack_file_type")
     assert names.index("migrate_legacy_name") < i
     assert names.index("ensure_branding_discovery_tree") < i < names.index("create_app")
+
+
+def test_no_test_can_reach_the_real_registry(tmp_path, lad, told):
+    """conftest swaps the module a plain `import winreg` hands back for a stub that refuses
+    every use, so a test that forgets to pass a fake can never touch the real registry: the
+    function reaches the registry first, fails there, and writes nothing -- not even the
+    icon copy."""
+    import winreg
+    with pytest.raises(OSError):
+        winreg.HKEY_CURRENT_USER
+    _install_pack(tmp_path)
+    assert g.register_pack_file_type(tmp_path, platform="win32") is False
+    assert not _icon_file(lad).exists()
+    assert told == []

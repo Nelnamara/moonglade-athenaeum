@@ -145,7 +145,9 @@ def test_the_committed_module_has_the_scripts_shape():
 def test_a_pack_copy_under_training_is_served_and_its_absence_is_a_plain_404(tmp_path):
     """The front end asks /branding/training/goal_<goal>.png first (lib/goalTileCore.js). When
     the pack carries it the route serves it; when it does not the answer is a 404, which is what
-    sends the tile on to the app's own module copy. Pack v7 only has to carry the files."""
+    sends the tile on to the app's own module copy. Pack v7 only has to carry the files, in the
+    training role's coded folder (ROLE_CODE["training"]), where the public name now lands."""
+    import moonglade_gallery as g
     from moonglade_gallery import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_client
     save_catalog(tmp_path / "catalog.db", [
@@ -153,9 +155,8 @@ def test_a_pack_copy_under_training_is_served_and_its_absence_is_a_plain_404(tmp
                                            "created_at": "2025-01-01T00:00:00"}])
     cli = login_client(tmp_path)
     assert cli.get("/branding/training/goal_character.png").status_code == 404
-    import moonglade_gallery as g
-    pack = g._role_dir("training")                   # the coded folder pack v7 files them under
-    pack.mkdir(parents=True, exist_ok=True)
+    pack = g._role_dir("training")
+    pack.mkdir(parents=True)
     Image.new("RGB", (8, 8), (1, 2, 3)).save(pack / "goal_character.png")
     r = cli.get("/branding/training/goal_character.png")
     assert r.status_code == 200 and r.mimetype == "image/png"

@@ -552,3 +552,79 @@ def test_a_marker_that_cannot_follow_its_pack_never_leaves_a_stale_one_vouching(
     assert ma._read_marker(new) is None
     assert ma.needs_download(new, v7) is True
     assert len(_warnings(caplog)) == 1
+
+
+@pytest.mark.parametrize("case", ["renamed", "both", "failed"])
+def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
+    """The start's only record is out_dir/logs/moonglade.log, written through the real
+    setup_logging. Its root ceiling is WARNING and only the app's own loggers are let through
+    below it, so a line logged anywhere else at INFO never reaches the file: each outcome --
+    the rename itself included -- must be findable there afterwards."""
+    import moonglade_logging as ml
+    library, app = tmp_path / "library", tmp_path / "app"
+    app.mkdir()
+    _old_pack(app, manifest=_manifest_for(REAL_BYTES))
+    if case == "both":
+        (app / _NEW).write_bytes(REAL_BYTES)
+    if case == "failed":
+        def _refuse(src, dst):
+            raise PermissionError(13, "Access is denied", str(src))
+        monkeypatch.setattr(ma.os, "replace", _refuse)
+    ml._reset_for_tests()
+    try:
+        ml.setup_logging(library)
+        assert ma.migrate_legacy_name(app / _NEW) == case
+        log = ml.log_path(library)
+        text = log.read_text(encoding="utf-8") if log.exists() else ""
+    finally:
+        ml._reset_for_tests()
+    want = {"renamed": "renamed %s to %s" % (ma.LEGACY_NAME, _NEW),
+            "both": "an old copy remains",
+            "failed": "could not rename"}[case]
+    assert want in text, "%r is not in the log file:\n%s" % (want, text)
+
+
+def test_two_starts_at_once_the_late_one_finds_the_rename_done(tmp_path, monkeypatch, caplog):
+    """Two starts race. Both find the old pack; the other one renames it, marker and all,
+    just after this one has checked that the new name is free. This start's own move then
+    finds the old file gone and the new one there: that is the rename done, not a failure.
+    No "could not rename" warning, and the marker the other start just moved is left alone.
+    (The other start is run at the first marker-path lookup, which comes right after the
+    both-names check.)"""
+    manifest = _manifest_for(REAL_BYTES)
+    old = _old_pack(tmp_path, manifest=manifest)
+    new = tmp_path / _NEW
+    real_marker_path, real_replace = ma._version_marker_path, ma.os.replace
+    raced = []
+
+    def _marker_path(p):
+        if not raced:
+            raced.append(1)
+            real_replace(old, new)                                 # the other start's move
+            real_replace(real_marker_path(old), real_marker_path(new))
+        return real_marker_path(p)
+    monkeypatch.setattr(ma, "_version_marker_path", _marker_path)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "renamed"
+    monkeypatch.undo()
+    assert raced
+    assert _warnings(caplog) == []
+    assert new.read_bytes() == REAL_BYTES
+    assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+    assert ma.needs_download(new, manifest) is False
+
+
+def test_a_marker_left_under_the_old_name_is_tidied_once_the_pack_has_moved(tmp_path):
+    """A rename whose marker could not follow leaves moonglade.dat.version behind. Once the
+    old pack is gone and the pack under the new name exists, that marker is a few bytes about
+    a file that is not there (not an asset copy), so a start removes it. With no pack under
+    either name there is nothing to say it is stray, and it is left."""
+    stray = tmp_path / (ma.LEGACY_NAME + ".version")
+    stray.write_text('{"version": "6", "sha256": "ab"}', encoding="utf-8")
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "none"
+    assert stray.exists()
+    new.write_bytes(REAL_BYTES)
+    assert ma.migrate_legacy_name(new) == "none"
+    assert _names(tmp_path) == [_NEW]
