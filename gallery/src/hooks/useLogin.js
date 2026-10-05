@@ -56,16 +56,15 @@ export function passwordProblem(p) {
   return "";
 }
 
-// Mirrors classic LOGIN_HTML's data-fb ladder exactly (moonglade_gallery.py):
-// webp (animated) -> still png -> the mascots/ copies -> the generic narrator.
+// The sign-in mascot's ladder: webp (animated) -> still png -> the generic narrator. Both
+// first rungs resolve to the pack's system folder; pack v7 keeps ONE copy of the login art
+// there, so the two rungs that asked for its old mascots/ duplicate are gone.
 // The LAST rung is the app's own carried copy (art/loginArt.js, Session I decision 4b):
 // before the art pack is installed every /branding/ rung 404s, and the sign-in page is the
 // one screen a fresh install shows before its pack arrives. The pack's files win whenever
 // they are there; the carried still is the silent fallback, never a note on the page.
 export const MASCOT_FALLBACKS = [
   "/branding/login_nel.png",
-  "/branding/mascots/login_nel.webp",
-  "/branding/mascots/login_nel.png",
   "/branding/mascots/nel_narrator.png",
   LOGIN_NEL,
 ];

@@ -53,7 +53,7 @@ def _donor_roster():
 def _write_box(tmp_path, assets):
     """Replace this test's container with one carrying only `assets` (no roster), then
     drop every cache that remembers the old one."""
-    mc.write_container(tmp_path / "moonglade.dat", assets, {})
+    mc.write_container(g._container_path(), assets, {})
     clear_sealed_caches()
 
 
@@ -273,7 +273,7 @@ def test_a_corrupt_clip_is_404_and_never_cached(tmp_path, monkeypatch):
     clip = MOMENT_FIXTURE_CLIP.read_bytes()
     key = g._public_rel_to_coded(g._MOMENT_CLIPS["keyturn"])
     cli = _clip_client(tmp_path, monkeypatch, {key: clip})
-    dat = tmp_path / "moonglade.dat"
+    dat = g._container_path()
     off = mc.open_container(dat)._toc["assets"][key][0]
     raw = bytearray(dat.read_bytes())
     raw[off + len(clip) // 2] ^= 0xFF

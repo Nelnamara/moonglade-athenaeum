@@ -164,7 +164,7 @@ def test_a_highlight_names_its_surface_by_mark_or_by_its_words():
 
 def test_about_reads_the_running_versions_entry_not_the_newest(tmp_path):
     es = g.changelog_entries(CHANGELOG)
-    a = g.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.dat", entries=es)
+    a = g.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.mgpack", entries=es)
     assert (a["version"], a["display_version"], a["kind"]) == ("3.14.1", "3.14.1", "patch")
     assert (a["date"], a["title"]) == ("2026-09-27", "Small Mend")
     assert [i["lead"] for i in a["items"]] == ["A fix"]
@@ -181,9 +181,9 @@ def test_release_size_and_display_version():
 
 def test_the_pack_version_reads_the_installed_marker(tmp_path):
     (tmp_path / "pack").mkdir()
-    dat = tmp_path / "pack" / "moonglade.dat"
+    dat = tmp_path / "pack" / "moonglade.mgpack"
     dat.write_bytes(b"x")
-    (tmp_path / "pack" / "moonglade.dat.version").write_text('{"version": "7", "sha256": "ab"}')
+    (tmp_path / "pack" / "moonglade.mgpack.version").write_text('{"version": "7", "sha256": "ab"}')
     assert g.art_pack_info(dat) == {"installed": True, "version": "7"}
 
 

@@ -63,7 +63,7 @@ def _roster():
 def _seed(tmp_path):
     defs = {"roster": _roster(), "skins": [], "skin_unlock": {}, "ach_criteria": {},
             "ladder_tracks": [{"id": "syn-images", "name": "Synthetic Images", "metric": "images"}]}
-    _mc.write_container(tmp_path / "moonglade.dat", {"_seed.txt": b"x"},
+    _mc.write_container(g._container_path(), {"_seed.txt": b"x"},
                         {"achievements": json.dumps(defs).encode("utf-8")})
     clear_sealed_caches()
 

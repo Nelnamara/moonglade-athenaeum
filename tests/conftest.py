@@ -270,7 +270,7 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     root = tmp_path_factory.mktemp("session-branding")
     mp.setattr(gallery, "branding_root", lambda: root / "branding")
-    seed_sealed_container(root / "moonglade.dat")
+    seed_sealed_container(gallery._container_path())
     try:
         yield root
     finally:
@@ -431,9 +431,9 @@ def _isolated_asset_manifest(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _sealed_roster_container(request, tmp_path):
     """Ship the sealed achievement roster to every test. The definitions live in
-    moonglade.dat now (not source), so without a container the roster is empty and every
+    the art pack now (not source), so without a container the roster is empty and every
     roster-dependent test fails. _isolated_branding points branding_root() at
-    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.dat -- write a
+    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.mgpack -- write a
     sealed container there from the private donor. Skips silently when the donor is absent
     (public CI without the companion repo): roster tests then see the empty fallback and
     are expected to skip, not fail. The sealed-defs cache is cleared around each test so no
@@ -446,7 +446,7 @@ def _sealed_roster_container(request, tmp_path):
     if "test_assets" in request.node.nodeid:
         yield
         return
-    seed_sealed_container(tmp_path / "moonglade.dat")
+    seed_sealed_container(tmp_path / gallery._container_path().name)
     yield
     clear_sealed_caches()
 

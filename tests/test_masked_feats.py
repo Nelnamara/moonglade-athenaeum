@@ -39,7 +39,7 @@ def _client(tmp_path, **seed_kw):
     rows = [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}]
     save_catalog(tmp_path / "catalog.db", rows)
-    sf.seed(tmp_path / "moonglade.dat", **seed_kw)
+    sf.seed(g._container_path(), **seed_kw)
     cli = login_client(tmp_path)
     sf.all_badges()                       # after the app exists: create_app sweeps the tree
     return cli
@@ -164,7 +164,7 @@ def test_no_container_means_no_veil_and_no_crash(tmp_path):
     rows = [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "created_at": "2025-01-01T00:00:00"}]
     save_catalog(tmp_path / "catalog.db", rows)
-    (tmp_path / "moonglade.dat").unlink(missing_ok=True)
+    g._container_path().unlink(missing_ok=True)
     from tests.conftest import clear_sealed_caches
     clear_sealed_caches()
     d = login_client(tmp_path).get("/api/achievements").get_json()

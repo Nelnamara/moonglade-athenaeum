@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the Moonglade asset container (moonglade.dat) from the coded branding source tree.
+"""Build the Moonglade art pack (moonglade.mgpack) from the coded branding source tree.
 
-    python tools/build_container.py                      # branding_root() -> <app root>/moonglade.dat
+    python tools/build_container.py                      # branding_root() -> <app root>/moonglade.mgpack
     python tools/build_container.py --root path/to/tree  # pack a source tree that lives elsewhere
-    python tools/build_container.py --out path/to.dat    # explicit output
+    python tools/build_container.py --out path/to.mgpack # explicit output
 
 Packs every file under the source tree -- default: branding_root(), the app's own
 coded branding location -- EXCEPT _thumbs/ (a regenerable cache) into the custom
@@ -20,7 +20,7 @@ the roster no longer lives in committed source), so a container built without it
 would leave the app running on its bare fallback defaults; the packer fills it
 from the private donor so a built container is already complete.
 
-The built .dat is deliberately NOT committed (git-ignored): delivery is a GitHub
+The built pack is deliberately NOT committed (git-ignored): delivery is a GitHub
 Release asset fetched on first run -- decided 2026-08-10, same record. This tool
 runs on the machine that has the real art -- and since the source tree is not
 required to sit beside the code (it usually doesn't; the app grows its own at the
@@ -211,7 +211,7 @@ def main():
                          "when it lives away from the code; files are keyed relative "
                          "to this root either way, so the layout seals in as found.")
     ap.add_argument("--out", default=None,
-                    help="output path (default: <app root>/moonglade.dat, even when "
+                    help="output path (default: <app root>/moonglade.mgpack, even when "
                          "--root points elsewhere -- that is where the app looks)")
     ap.add_argument("--version", default=None,
                     help="manifest version string (default: bump the current "
@@ -249,10 +249,10 @@ def main():
             sys.exit("No login mascot and banner in %s -- the carried set was not written." % root)
         print("Wrote the carried login set: %s" % wrote)
         return
-    # Output defaults to the APP root even when --root points elsewhere: that is
-    # where _container_path() looks for the .dat, and the manifest written below
-    # describes that file. --out overrides for anything unusual.
-    out_path = Path(args.out) if args.out else g.branding_root().parent / "moonglade.dat"
+    # Output defaults to the APP root even when --root points elsewhere: it IS
+    # _container_path(), the one place the app looks for the pack, and the manifest
+    # written below describes that file. --out overrides for anything unusual.
+    out_path = Path(args.out) if args.out else g._container_path()
 
     assets = gather(root)
     if not assets:

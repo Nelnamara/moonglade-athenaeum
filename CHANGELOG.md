@@ -16,6 +16,12 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Art pack v7
+- **The art pack's file is now `moonglade.mgpack`.** An install that still has the old `moonglade.dat` renames it by itself, with its version note, the next time the app starts, so a pack that is already current is never downloaded again; when the new pack is newer, the usual checked download then replaces it in place, leaving one file. If both files are there, the old one is left untouched and the log says an old copy remains, for you to remove. (2026-10-04)
+- **On Windows, Explorer shows the pack's type as "Moonglade art pack", with the app's icon.** The app sets this for your own Windows account when it starts, and only rewrites what has changed; nothing machine-wide, and double-clicking the pack still opens nothing. (2026-10-04)
+- **The pack's animations are smaller.** Every animation in it (the mascots, the animated badges, the marks and the sign-in companion) is 360 px tall and plays every second frame over the same time, so the pack downloads at about half its old size. The badge pictures keep their full colour. (2026-10-04)
+- **The login companion's role in Branding takes art from 360 px tall**, the size of the pack's own sign-in animation now. (2026-10-04)
+
 ## [3.17.0] - 2026-10-04 — Mail Call
 
 ### The pickers' Saved tab

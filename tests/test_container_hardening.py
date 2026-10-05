@@ -249,19 +249,20 @@ def test_a_pre_stamp_v2_container_still_opens_as_schema_zero(tmp_path):
 
 
 def test_the_shipped_container_still_opens():
-    """The real moonglade.dat, if this machine has one. It predates the stamp, so this runs
-    the pre-stamp path against the actual shipped artefact rather than a fixture -- the one
-    file that must not stop opening. It is git-ignored (delivery is a Release asset) and
-    absent in CI and in a worktree, so this SKIPS rather than fails when it is not there;
-    the fixture test above covers the same path unconditionally. MOONGLADE_DAT points it at
-    a copy elsewhere."""
-    candidates = [Path(__file__).resolve().parents[1] / "moonglade.dat"]
+    """The real art pack, if this machine has one: moonglade.mgpack, or a checkout's pack
+    still under its pre-v7 name, moonglade.dat. An early pack predates the stamp, so this
+    runs the actual shipped artefact rather than a fixture -- the one file that must not
+    stop opening. It is git-ignored (delivery is a Release asset) and absent in CI and in a
+    worktree, so this SKIPS rather than fails when it is not there; the fixture test above
+    covers the same path unconditionally. MOONGLADE_DAT points it at a copy elsewhere."""
+    app_root = Path(__file__).resolve().parents[1]
+    candidates = [app_root / "moonglade.mgpack", app_root / "moonglade.dat"]
     env = os.environ.get("MOONGLADE_DAT")
     if env:
         candidates.insert(0, Path(env))
     real = next((c for c in candidates if c.is_file()), None)
     if real is None:
-        pytest.skip("no built moonglade.dat on this machine to check")
+        pytest.skip("no built art pack on this machine to check")
     box = mc.open_container(real)
     assert box is not None
     assert box.paths()                                       # it really has content
