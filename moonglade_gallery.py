@@ -7277,7 +7277,7 @@ def claim_job_label(claimed, credits):
 
 
 def _ach_state_path(out_dir):
-    return Path(out_dir) / "achievements.json"
+    return _paths.state_path(out_dir, "achievements.json")
 
 
 def load_ach_state(out_dir):
@@ -7432,7 +7432,7 @@ _TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no
 
 
 def _telemetry_path(out_dir):
-    return Path(out_dir) / "telemetry.json"
+    return _paths.state_path(out_dir, "telemetry.json")
 
 
 def set_telemetry_out(out_dir):
@@ -12809,7 +12809,7 @@ def account_prefs_path(out_dir, account):
         key = _account_key(account)
     else:
         raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
-    return Path(out_dir) / ACCOUNT_PREFS_DIRNAME / (key + ".json")
+    return _paths.state_path(out_dir, ACCOUNT_PREFS_DIRNAME) / (key + ".json")
 
 
 def _account_prefs_read(p):
@@ -12970,7 +12970,7 @@ def account_state_path(out_dir, account):
     landing on some shared file."""
     if not (isinstance(account, str) and account.strip()):
         raise ValueError("account state needs a signed-in account")
-    return Path(out_dir) / ACCOUNT_STATE_DIRNAME / (_account_key(account) + ".json")
+    return _paths.state_path(out_dir, ACCOUNT_STATE_DIRNAME) / (_account_key(account) + ".json")
 
 
 @contextmanager
@@ -14228,7 +14228,7 @@ def create_app(out_dir: Path):
             pass
 
     def _sched_path():
-        return out_dir / "schedule.json"
+        return _paths.state_path(out_dir, "schedule.json")
 
     def _load_sched():
         """schedule.json, normalized. The legacy quartet (enabled/action/interval_hours/
@@ -20245,7 +20245,7 @@ def create_app(out_dir: Path):
     _snips_lock = threading.Lock()
 
     def _snips_dir():
-        d = out_dir / "prompt_snippets"
+        d = _paths.state_path(out_dir, "prompt_snippets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -21611,7 +21611,7 @@ def create_app(out_dir: Path):
     _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
                            "answer clearly. Check Runs before trying again (this guard clears "
                            "by itself after 15 minutes). Nothing was sent.")
-    train_guard = TrainGuard(out_dir / "train_guard.json")
+    train_guard = TrainGuard(_paths.state_path(out_dir, "train_guard.json"))
     _runs_cache = {"full": None, "light": None}
 
     def _runs_dirty():
@@ -23424,7 +23424,7 @@ def create_app(out_dir: Path):
     # presets. The legacy shared file stays a READ-ONLY fallback for an account with no
     # file of its own yet -- same no-migration-flag contract as _load_view_presets.
     def _toolbox_dir():
-        d = out_dir / "toolbox_presets"
+        d = _paths.state_path(out_dir, "toolbox_presets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -23525,7 +23525,7 @@ def create_app(out_dir: Path):
     # For the case this feature was built for -- one owner, desktop and tablet, same
     # account against one server -- per-account behaves identically. Nothing is lost.
     def _view_presets_dir():
-        d = out_dir / "view_presets"
+        d = _paths.state_path(out_dir, "view_presets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 

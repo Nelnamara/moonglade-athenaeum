@@ -14,6 +14,10 @@ named helper here, so moving a group of files is a change to one line in this mo
                     or the library.
   art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
                     from local_path(): the art tree and the machine files move separately.
+  state_path(out_dir, name)    one of the app's own records inside a library: its state
+  reports_path(out_dir, name)  files, jobs, logs and per-account folders, and its reports.
+                    catalog.db, the pictures, loom/, gallery/, _deleted/ and _duplicates/
+                    are the library itself, not records, and never go through these.
   the rest          the shipped files the app reads: the pack manifest, wiki/, the
                     CHANGELOG, gallery/dist, loom/, static/, requirements.txt, the launcher
                     and the two entry scripts.
@@ -139,6 +143,22 @@ def default_library_path():
     """The default library as an absolute path, for a process whose working directory is not
     the app's (the MCP server, started by an MCP client from anywhere)."""
     return APP_ROOT / DEFAULT_LIBRARY_DIR
+
+
+def state_path(out_dir, name):
+    """One of the app's own records inside the library `out_dir`, by name:
+    `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
+    `reconcile_stamp.json`, `jobs.jsonl`, `raw_tasks.jsonl`, `runs.db`, the per-account
+    folders (`account_prefs/`, `account_state/`, `prompt_snippets/`, `toolbox_presets/`,
+    `view_presets/`) and `logs/`. Today it is out_dir / name."""
+    return Path(out_dir) / name
+
+
+def reports_path(out_dir, name):
+    """One of the app's reports inside the library `out_dir`, by name:
+    `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
+    `verify_report.csv`, `organize_manifest.csv`. Today it is out_dir / name."""
+    return Path(out_dir) / name
 
 
 def run_dir():

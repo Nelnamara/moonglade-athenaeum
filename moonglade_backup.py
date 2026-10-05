@@ -1071,7 +1071,7 @@ _jobs_compact_lock = threading.Lock()
 
 
 def _jobs_path(out_dir):
-    return Path(out_dir) / JOBS_LOG_NAME
+    return _paths.state_path(out_dir, JOBS_LOG_NAME)
 
 
 def append_job_event(out_dir, job_id, status=None, **fields):
@@ -5123,7 +5123,7 @@ def cmd_audit(args, out):
         _fmt_bytes(t["reclaimable_bytes"])))
 
     # Write detailed CSV
-    report_path = out / "audit_report.csv"
+    report_path = _paths.reports_path(out, "audit_report.csv")
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
@@ -5321,7 +5321,7 @@ def cmd_verify_dupes(args, out):
     print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
 
     if res["differs"] or res["orphan"]:
-        report = out / "verify_report.csv"
+        report = _paths.reports_path(out, "verify_report.csv")
         with open(report, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["status", "quarantined_file", "surviving_keeper"])
@@ -5443,7 +5443,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Nothing to do -- everything already organized.")
         return
 
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     mf_new = not manifest_path.exists()
     mf = open(manifest_path, "a", newline="", encoding="utf-8")
     mw = csv.writer(mf)
@@ -5573,7 +5573,7 @@ def cmd_undo_organize(args, out):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
     then clears the manifest. Lets a re-normalize be undone if you don't like it."""
     db_path = _ensure_db(out)
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     if not manifest_path.exists():
         print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
         return
@@ -16301,7 +16301,7 @@ def _stamp_reconcile(out, flagged, cleared):
     reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
-    dest = Path(out) / RECONCILE_STAMP
+    dest = _paths.state_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
         tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
@@ -17253,7 +17253,7 @@ def run_download(args, progress=None):
     """
     out = Path(args.out)
     img_dir = out / "images"
-    raw_path = out / "raw_tasks.jsonl"
+    raw_path = _paths.state_path(out, "raw_tasks.jsonl")
     db_path  = out / "catalog.db"
 
     # Ensure the catalog db exists + is schema-migrated (raises if none; no CSV auto-seed, #19)

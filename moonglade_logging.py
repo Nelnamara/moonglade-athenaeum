@@ -25,6 +25,8 @@ import sys
 import threading
 from pathlib import Path
 
+import moonglade_paths as _paths
+
 LOGGER_NAME = "moonglade"
 
 # The web server's OWN module logger, under both names it can have. moonglade_gallery.py's
@@ -65,7 +67,7 @@ def setup_logging(out_dir, verbose=False):
         _console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
         return app_logger
 
-    log_dir = Path(out_dir) / "logs"
+    log_dir = _paths.state_path(out_dir, "logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
     fmt = logging.Formatter(
@@ -159,7 +161,7 @@ def _install_crash_hook(logger):
 
 def log_path(out_dir):
     """The current log file's path, for a future --show-logs/Panel affordance."""
-    return Path(out_dir) / "logs" / "moonglade.log"
+    return _paths.state_path(out_dir, "logs") / "moonglade.log"
 
 
 def get_logger():
