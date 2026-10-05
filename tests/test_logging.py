@@ -136,6 +136,38 @@ def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
     assert "disconnected cleanly" in text
 
 
+def test_flasks_own_app_logger_is_levelled_under_every_name_it_takes(tmp_path, monkeypatch):
+    """Flask names app.logger after the app. Run as the main module (production) that is the
+    main FILE's stem: "moonglade_gallery" before 3.20, "gallery" since (moonglade/gallery.py).
+    Imported it is the module name, "moonglade.gallery". Each must be levelled like the
+    server's own module logger, or the app logger's INFO lines fall under root's WARNING
+    ceiling and never reach moonglade.log -- the move would have dropped them silently."""
+    import sys
+    import types
+    from pathlib import Path
+
+    import flask
+
+    from moonglade import gallery as moonglade_gallery
+
+    main = types.ModuleType("__main__")
+    main.__file__ = str(Path(moonglade_gallery.__file__).resolve())   # moonglade/gallery.py
+    monkeypatch.setitem(sys.modules, "__main__", main)
+    as_run = flask.Flask("__main__", root_path=str(tmp_path))
+    as_imported = flask.Flask(moonglade_gallery.__name__, root_path=str(tmp_path))
+    assert (as_run.logger.name, as_imported.logger.name) == ("gallery", "moonglade.gallery")
+
+    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    for app in (as_run, as_imported):
+        assert app.logger.name in moonglade_logging.GALLERY_LOGGER_NAMES, app.logger.name
+        assert app.logger.getEffectiveLevel() == logging.DEBUG, app.logger.name
+    as_run.logger.info("app logger line under the production name")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    text = moonglade_logging.log_path(tmp_path).read_text(encoding="utf-8")
+    assert "[gallery] app logger line under the production name" in text
+
+
 def test_uncaught_exception_is_logged_before_the_normal_crash_behavior_runs(tmp_path):
     """FAILS before the fix: Python's default excepthook only prints to
     stderr -- there was no permanent record of a crash at all."""

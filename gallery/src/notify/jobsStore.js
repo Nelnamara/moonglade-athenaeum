@@ -169,7 +169,7 @@ export function refresh() {
       // notice over one blip, exactly the way the release check refuses to cache a failure.
       if (d && !d.error) noteUpdate(d.update);
       // A sentence the server asks every open tab to say once per server start (3.20: a
-      // launcher from before the move is still in charge -- close and reopen once). Same poll,
+      // launcher from before the move is still in charge -- stop and start once). Same poll,
       // same rule: only on a real answer.
       if (d && !d.error) noteServerNotice(d.notice);
       // The inbox's live count rides this same poll for the same reason (Sessions R + Y,

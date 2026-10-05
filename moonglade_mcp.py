@@ -9,6 +9,9 @@ It prints nothing of its own: an MCP server's stdout is the protocol.
 
 Goes in 3.21, with the other stand-ins.
 """
+if __name__ != "__main__":          # imported by old code: run nothing, say where it went
+    raise ImportError("moonglade_mcp moved to moonglade.mcp_server")
+
 import runpy
 
 runpy.run_module("moonglade.mcp_server", run_name="__main__", alter_sys=True)

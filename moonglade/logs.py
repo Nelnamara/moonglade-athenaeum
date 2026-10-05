@@ -15,9 +15,10 @@ see GALLERY_LOGGER_NAMES) and werkzeug's request-line logger explicitly override
 that ceiling, so their messages reach the handlers regardless. Flask's own internal
 `app.logger.error(..., exc_info=...)` call on an unhandled request exception
 already logs at ERROR -- above the WARNING ceiling -- so it reaches the file
-with no bespoke @app.errorhandler needed, and it works under whatever name
-`app.logger` resolves to (`__main__` when run as a script, `moonglade_gallery`
-when imported) without this module needing to know or care which.
+with no bespoke @app.errorhandler needed. `app.logger`'s own name is the app's: the main
+file's stem when the server runs as the main module (`gallery` since 3.20, `moonglade_gallery`
+before) and the module name when imported (`moonglade.gallery`). GALLERY_LOGGER_NAMES levels
+those too, so the app logger's INFO lines reach the file as they did before the move.
 """
 import logging
 import logging.handlers
@@ -44,7 +45,12 @@ LOGGER_NAME = "moonglade"
 # that generation finished?" after the fact. Both names are levelled because both are real:
 # the script name in production, the module name under the test suite and anything that
 # imports the app.
-GALLERY_LOGGER_NAMES = ("moonglade.gallery", "__main__")
+#
+# "gallery" is Flask's own app.logger in production: Flask names it after the main FILE's stem
+# when the app's import name is "__main__" (moonglade/gallery.py since 3.20; it was
+# "moonglade_gallery" before the move, which this tuple already levelled). Without it the move
+# would have put the app logger back under root's WARNING ceiling.
+GALLERY_LOGGER_NAMES = ("moonglade.gallery", "__main__", "gallery")
 
 _configured = False
 _file_handler = None

@@ -213,7 +213,8 @@ def test_an_old_copy_changed_since_the_move_is_not_called_safe_to_delete(app, li
 def test_the_root_serve_log_is_never_offered_while_an_old_launcher_writes_it(app, lib,
                                                                              monkeypatch):
     """After an update the launcher that was already running keeps appending to the root
-    serve.log until Moonglade is closed and opened again (MOONGLADE_VIA_STANDIN)."""
+    serve.log until Moonglade is stopped once and started again from its shortcut
+    (MOONGLADE_VIA_STANDIN)."""
     _w(app / "local" / "serve.log", "")            # an earlier new launcher's log
     mig.migrate_local()
     monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
