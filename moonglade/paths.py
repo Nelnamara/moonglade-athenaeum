@@ -277,7 +277,7 @@ REPORT_NAMES = (
 CURATION_SNAPSHOT_PREFIX = "curation_pre_import_"
 
 
-def state_path(out_dir, name):
+def state_path(out_dir, name, make=True):
     """One of the app's own records inside the library `out_dir`, by name:
     `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
     `reconcile_stamp.json`, `jobs.jsonl`, `raw_tasks.jsonl`, `runs.db`, the per-account
@@ -288,19 +288,20 @@ def state_path(out_dir, name):
     out_dir/_moonglade/name since 3.20 -- except while a record is still only at the
     library's top (old_state_path) and the library's migration has not recorded it (a
     library not yet opened by 3.20, or a move that was refused): then it is read, and
-    written, where it is."""
+    written, where it is. `make=False` only looks: it never makes the records folder (About's
+    list of leftovers asks this way)."""
     out = Path(out_dir)
-    return _record(out, out / RECORDS_DIRNAME, name)
+    return _record(out, out / RECORDS_DIRNAME, name, make)
 
 
-def reports_path(out_dir, name):
+def reports_path(out_dir, name, make=True):
     """One of the app's reports inside the library `out_dir`, by name:
     `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
     `verify_report.csv`, `organize_manifest.csv` and the curation import's undo files
     (`curation_pre_import_<time>.json`). out_dir/_moonglade/reports/name since 3.20, with
-    the same fallback to the library's top as state_path()."""
+    the same fallback to the library's top, and the same `make`, as state_path()."""
     out = Path(out_dir)
-    return _record(out, out / RECORDS_DIRNAME / REPORTS_DIRNAME, name)
+    return _record(out, out / RECORDS_DIRNAME / REPORTS_DIRNAME, name, make)
 
 
 def old_state_path(out_dir, name):
@@ -314,12 +315,12 @@ def records_manifest(out_dir):
     return Path(out_dir) / RECORDS_DIRNAME / MOVED_NAME
 
 
-def _record(out, new_dir, name):
+def _record(out, new_dir, name, make=True):
     """_settled() for a library record. When the answer is the new place and its folder is
     not there yet, the folder is made -- but only inside a library that exists, so asking
     about a folder that is not a library never creates one -- so a first write can land."""
     p = _settled(new_dir, name, old_state_path(out, name), records_manifest(out))
-    if p.parent == new_dir:
+    if make and p.parent == new_dir:
         try:
             if not new_dir.is_dir() and out.is_dir():
                 new_dir.mkdir(parents=True, exist_ok=True)

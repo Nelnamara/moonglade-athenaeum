@@ -313,6 +313,78 @@ def _write_manifest(manifest, outcome):
             pass
 
 
+# One migration at a time per folder: a `.migrating` file made with O_EXCL in local/ or in
+# a library's _moonglade/, held while MOVED.json is read, the copies are made and MOVED.json
+# is written. Another process waits for it, then leaves the folder to its holder this start.
+LOCK_NAME = ".migrating"
+LOCK_WAIT_S = 10.0          # how long a start waits for another start's tidy
+LOCK_STALE_S = 120.0        # a lock older than this was left by a process that died
+LOCK_BUSY_S = 2.0           # how long Windows' "busy" answer is retried (a read-only folder
+                            # answers the same, and must never stall a start)
+
+
+class _FolderLock:
+    """The folder's `.migrating` lock (the pattern of moonglade.integrity's report lock).
+    acquire() raises TimeoutError when another live process holds it past LOCK_WAIT_S, or
+    OSError when it cannot be made at all; release() removes it only if this run made it."""
+
+    def __init__(self, folder):
+        self.path = Path(folder) / LOCK_NAME
+        self.held = False
+
+    def acquire(self):
+        deadline = time.time() + LOCK_WAIT_S
+        busy_until = time.time() + LOCK_BUSY_S
+        while True:
+            try:
+                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except PermissionError:
+                # Windows answers EACCES while another holder's lock is being deleted: busy,
+                # so try again -- briefly, since a read-only folder answers the same.
+                if time.time() > min(deadline, busy_until):
+                    raise
+                time.sleep(0.05)
+                continue
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > LOCK_STALE_S:
+                        os.remove(self.path)         # a dead process's lock, never a live one's
+                        continue
+                except OSError:
+                    continue                         # it went while we looked: try again
+                if time.time() > deadline:
+                    raise TimeoutError("another start is tidying it")
+                time.sleep(0.05)
+                continue
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii"))
+            finally:
+                os.close(fd)
+            self.held = True
+            return self
+
+    def release(self):
+        if self.held:
+            self.held = False
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+
+
+def _locked(folder, outcome):
+    """The folder's lock, taken; or None, with the reason in `outcome`, when it could not
+    be (the start carries on, and the next one tries again)."""
+    lock = _FolderLock(folder)
+    try:
+        return lock.acquire()
+    except TimeoutError:
+        outcome.failed.append((folder.name, "another start is tidying it"))
+    except OSError as e:
+        outcome.failed.append((folder.name, _reason(e)))
+    return None
+
+
 def _legacy_pack_rename(old_pack, new_pack, outcome):
     """3.18's one-time rename, at the OLD place, for an install whose pack still has its
     pre-v7 name: then the move below carries the renamed pack across like any other.
@@ -362,27 +434,34 @@ def migrate_local(only=None):
     except OSError as e:
         outcome.failed.append((_paths.LOCAL_DIRNAME, _reason(e)))
         return outcome
-    manifest = local / _paths.MOVED_NAME
-    entries = _paths.moved_entries(manifest)
-    recorded = frozenset(entries)
-    root = _paths.APP_ROOT
-    renamed = {}
-    for name, how in LOCAL_PLAN:
-        if only is not None and name not in only:
-            continue
-        src, dest = _paths.old_local_path(name), local / name
-        if name == PACK_NAME:
-            renamed = _legacy_pack_rename(src, dest, outcome)
-        if name == PACK_MARKER_NAME and not _marker_may_follow(local, outcome, entries):
-            continue                                 # the marker stays with its own pack
-        if how == "fresh" and (_via_standin() or not (local / "serve.log").exists()):
-            # The old serve.log is left behind only once the new one is real -- the launcher
-            # opens it after its own tidy -- and never while an old launcher still writes it.
-            continue
-        entry = _bring(name, src, dest, how, root, outcome, recorded)
-        if entry is not None and entry["action"] == "moved" and name in renamed:
-            entry["source"] = _rel(renamed[name], root)      # renamed from its pre-v7 name
-    _write_manifest(manifest, outcome)
+    lock = _locked(local, outcome)
+    if lock is None:
+        return outcome
+    try:
+        manifest = local / _paths.MOVED_NAME
+        entries = _paths.moved_entries(manifest)              # read under the lock
+        recorded = frozenset(entries)
+        root = _paths.APP_ROOT
+        renamed = {}
+        for name, how in LOCAL_PLAN:
+            if only is not None and name not in only:
+                continue
+            src, dest = _paths.old_local_path(name), local / name
+            if name == PACK_NAME:
+                renamed = _legacy_pack_rename(src, dest, outcome)
+            if name == PACK_MARKER_NAME and not _marker_may_follow(local, outcome, entries):
+                continue                             # the marker stays with its own pack
+            if how == "fresh" and (_via_standin() or not (local / "serve.log").exists()):
+                # The old serve.log is left behind only once the new one is real -- the
+                # launcher opens it after its own tidy -- and never while an old launcher
+                # still writes it.
+                continue
+            entry = _bring(name, src, dest, how, root, outcome, recorded)
+            if entry is not None and entry["action"] == "moved" and name in renamed:
+                entry["source"] = _rel(renamed[name], root)  # renamed from its pre-v7 name
+        _write_manifest(manifest, outcome)                    # written under the lock
+    finally:
+        lock.release()
     return outcome
 
 
@@ -429,13 +508,19 @@ def migrate_library(out_dir, move_guard=False):
     except OSError as e:
         outcome.failed.append((_paths.RECORDS_DIRNAME, _reason(e)))
         return outcome
-    manifest = _paths.records_manifest(out)
-    recorded = _paths.moved_names(manifest)
-    for name, src, dest, how in _library_plan(out):
-        if name in MOVED_RECORDS and not move_guard:
-            continue
-        _bring(name, src, dest, how, out, outcome, recorded)
-    _write_manifest(manifest, outcome)
+    lock = _locked(out / _paths.RECORDS_DIRNAME, outcome)
+    if lock is None:
+        return outcome
+    try:
+        manifest = _paths.records_manifest(out)
+        recorded = frozenset(_paths.moved_entries(manifest))  # read under the lock
+        for name, src, dest, how in _library_plan(out):
+            if name in MOVED_RECORDS and not move_guard:
+                continue
+            _bring(name, src, dest, how, out, outcome, recorded)
+        _write_manifest(manifest, outcome)                    # written under the lock
+    finally:
+        lock.release()
     return outcome
 
 
@@ -543,7 +628,7 @@ def leftovers(out_dir=None):
             if name not in entries or not src.exists():
                 continue
             ask = _paths.state_path if name in _paths.STATE_NAMES else _paths.reports_path
-            if ask(out, name) != src and _unchanged(name, src, entries[name]):
+            if ask(out, name, make=False) != src and _unchanged(name, src, entries[name]):
                 found.append(("library", _shown(src)))
         for name in _UNUSED_LIBRARY_FILES:
             p = _paths.old_state_path(out, name)

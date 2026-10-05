@@ -482,3 +482,16 @@ def test_the_launcher_writes_local_serve_log_from_its_first_start(old_layout):
     app = old_layout
     mig.tidy_launcher_files()
     assert paths.local_path("serve.log") == app / "local" / "serve.log"
+
+
+def test_the_app_folder_is_tidied_by_one_start_at_a_time(old_layout, monkeypatch):
+    app = old_layout
+    (app / "local").mkdir()
+    (app / "local" / ".migrating").write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(mig, "LOCK_WAIT_S", 0.2)
+    out = mig.tidy_app_folder()                                     # never raises
+    assert out.failed and not out.done
+    assert (app / PACK).is_file() and not (app / "local" / PACK).exists()
+    (app / "local" / ".migrating").unlink()
+    out = mig.migrate_local()
+    assert out.done and not (app / "local" / ".migrating").exists()

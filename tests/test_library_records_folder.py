@@ -622,3 +622,85 @@ def test_both_places_holding_different_things_is_kept_but_never_offered(old_libr
     e = paths.moved_entries(paths.records_manifest(lib))["achievements.json"]
     assert e["action"] == "kept" and e["source_print"] != e["dest_print"]
     assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]
+
+
+# ---- review round: one migration at a time per folder, and About only looks --------------
+
+def test_a_library_being_tidied_by_another_start_is_left_to_it(old_library, monkeypatch):
+    """Another process holds _moonglade/.migrating: this one waits, then gives up for this
+    start (tried again next time) -- it never copies or writes MOVED.json beside the other."""
+    lib = old_library
+    (lib / "_moonglade").mkdir()
+    (lib / "_moonglade" / ".migrating").write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(mig, "LOCK_WAIT_S", 0.2)
+    out = mig.open_library(lib)                                     # never raises
+    assert out.failed and not out.done
+    assert not paths.records_manifest(lib).exists()
+    assert not (lib / "_moonglade" / "achievements.json").exists()
+    assert (lib / "_moonglade" / ".migrating").read_text() == "4242"   # not ours to remove
+
+
+def test_a_stale_lock_is_broken_and_the_lock_never_outlives_the_run(old_library):
+    lib = old_library
+    (lib / "_moonglade").mkdir()
+    lock = lib / "_moonglade" / ".migrating"
+    lock.write_text("dead", encoding="utf-8")
+    old = lock.stat().st_mtime - 3600
+    os.utime(lock, (old, old))
+    out = mig.migrate_library(lib)
+    assert out.done and not out.failed
+    assert not lock.exists()
+
+
+def test_a_windows_busy_answer_on_the_lock_is_retried(old_library, monkeypatch):
+    """While another process's lock is being deleted Windows answers the exclusive create
+    with PermissionError, not FileExistsError: busy, so wait and try again."""
+    lib = old_library
+    real = os.open
+    calls = {"n": 0}
+
+    def flaky(path, flags, *a):
+        if str(path).endswith(".migrating"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError(13, "Permission denied", str(path))
+        return real(path, flags, *a)
+    monkeypatch.setattr(mig.os, "open", flaky)
+    out = mig.migrate_library(lib)
+    assert out.done and calls["n"] >= 2
+
+
+def test_moved_json_is_read_and_written_under_the_lock(old_library, monkeypatch):
+    lib = old_library
+    lock = lib / "_moonglade" / ".migrating"
+    seen = []
+    real_entries, real_write = paths.moved_entries, mig._write_manifest
+
+    def entries(manifest):
+        seen.append(("read", lock.exists()))
+        return real_entries(manifest)
+
+    def write(manifest, outcome):
+        seen.append(("write", lock.exists()))
+        return real_write(manifest, outcome)
+    monkeypatch.setattr(mig._paths, "moved_entries", entries)
+    monkeypatch.setattr(mig, "_write_manifest", write)
+    mig.migrate_library(lib)
+    assert ("read", True) in seen and ("write", True) in seen
+    assert ("read", False) not in seen and ("write", False) not in seen
+
+
+def test_abouts_lookup_never_creates_the_records_folders(old_library):
+    """leftovers() only looks: it never makes _moonglade/ or its reports/ folder, even for a
+    library whose reports folder the owner removed."""
+    import shutil
+    lib = old_library
+    mig.migrate_library(lib)
+    shutil.rmtree(lib / "_moonglade" / "reports")
+    mig.leftovers(lib)
+    assert not (lib / "_moonglade" / "reports").exists()
+    bare = lib.parent / "never-opened"
+    bare.mkdir()
+    (bare / "achievements.json").write_text("{}", encoding="utf-8")
+    mig.leftovers(bare)
+    assert not (bare / "_moonglade").exists()
