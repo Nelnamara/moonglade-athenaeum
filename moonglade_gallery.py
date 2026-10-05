@@ -20101,7 +20101,10 @@ def create_app(out_dir: Path):
             if "401" in msg or "Unauthorized" in msg:
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
-        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        # THE config.json path (core._config_path(), i.e. moonglade_paths.config_path()) --
+        # never rebuilt by hand: a hand-built copy is how a test once wrote the checkout's real
+        # file (2026-08-02), and it would stop matching the moment the code left the app folder.
+        cfg_path = core._config_path()
         # Serialize against the account writers on core._accounts_lock. This is the only
         # config.json read-modify-write in the app that doesn't go through core's account
         # helpers (deliberately -- see the note above about the module-cached _cfg), which
@@ -22808,7 +22811,9 @@ def create_app(out_dir: Path):
         other config writers."""
         import moonglade_backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
-        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        # The SAME file _save_config() writes below (core._config_path()): reading one path and
+        # writing another would put that file's contents over the real auth block.
+        cfg_path = core._config_path()
         with core._accounts_lock:
             try:
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}

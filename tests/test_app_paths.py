@@ -185,12 +185,6 @@ _FILE_ALLOWED = {
 }
 
 
-# The two config.json writers that rebuild the path by hand; the next commit routes them
-# through core._config_path() and empties this.
-_NOT_YET = {("moonglade_gallery.py",
-             'cfg_path = Path(core.__file__).resolve().parent / "config.json"')}
-
-
 def _first_party_modules():
     return sorted([*_REPO.glob("*.py"), *_REPO.glob("*.pyw")])
 
@@ -215,8 +209,7 @@ def test_no_module_but_moonglade_paths_derives_an_app_root_path_from_its_file():
     for path in modules:
         if path.name in _FILE_ALLOWED:
             continue
-        stray += ["%s:%d  %s" % (path.name, n, line) for n, line in _file_uses(path)
-                  if (path.name, line) not in _NOT_YET]
+        stray += ["%s:%d  %s" % (path.name, n, line) for n, line in _file_uses(path)]
     assert not stray, ("derive app-root paths through moonglade_paths, not __file__:\n  "
                        + "\n  ".join(stray))
 

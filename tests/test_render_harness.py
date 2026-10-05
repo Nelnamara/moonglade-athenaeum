@@ -1563,13 +1563,11 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # no catalog, which is what the Setup Wizard is measured against; it also has to mean an
     # install that reads none of its state off the wall clock (conftest::pin_daytime_clock).
     pin_daytime_clock(monkeypatch)
-    # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
-    # own docstring) -- it derives its path from core.__file__'s directory instead, the
-    # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
-    # MISSING THIS ONCE caused a real test to overwrite the checkout's actual config.json
-    # with a fake key, live, 2026-08-02 -- caught immediately by checking the file, but
-    # never again: both path mechanisms this route family can use must be redirected.
-    monkeypatch.setattr(core, "__file__", str(root / "moonglade_backup.py"))
+    # /api/setup/save-key used to derive its path from core.__file__'s directory instead of
+    # core._config_path(), and MISSING a second redirect for that once caused a real test to
+    # overwrite the checkout's actual config.json with a fake key, live, 2026-08-02. Since
+    # Wave 4 every config.json reader and writer goes through core._config_path() (pinned
+    # above), and tests/test_config_path_routing.py holds that with a decoy.
     save_catalog(root / "catalog.db", [])          # genuinely empty -- no rows at all
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
 
