@@ -184,10 +184,11 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
 _FILE_ALLOWED = {
     "moonglade/paths.py": "it IS the app-root definition",
     "Serve Gallery.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
-                         "on sys.path so moonglade_paths imports however the launcher was "
-                         "started, and it is the cwd and the child script's folder, byte-for-"
-                         "byte as in 3.18 on a mapped or subst drive (resolve() would turn "
-                         "those into their targets). Every other path comes from the helpers",
+                         "on sys.path so the moonglade package imports however the launcher "
+                         "was started, and it is the cwd the server runs from (`-m "
+                         "moonglade.gallery` finds the package through it), byte-for-byte as "
+                         "in 3.18 on a mapped or subst drive (resolve() would turn those into "
+                         "their targets). Every other path comes from the helpers",
 }
 
 
@@ -233,15 +234,16 @@ def test_no_module_but_moonglade_paths_derives_an_app_root_path_from_its_file():
 
 def test_the_launcher_finds_its_own_folder_once_and_byte_for_byte():
     """One read of its own file, by os.path.abspath (as in 3.18, never resolve()), and that
-    folder is what goes on sys.path, what it changes into and where the child script is."""
+    folder is what goes on sys.path, what it changes into and the folder the server runs from
+    (since 3.20 as `-m moonglade.gallery`, which finds the package through the working
+    directory). tests/test_launcher_runs_the_package.py runs the launcher for the rest."""
     src = (_REPO / "Serve Gallery.pyw").read_text(encoding="utf-8")
     uses = _file_uses(_REPO / "Serve Gallery.pyw")
     assert [u[1] for u in uses] == ["here = os.path.dirname(os.path.abspath(__file__))"], uses
     assert "sys.path.insert(0, here)" in src
     assert "os.chdir(here)" in src
-    assert "os.path.join(here, _paths.GALLERY_SCRIPT)" in src
+    assert 'cmd = [sys.executable, "-m", "moonglade.gallery"] + SERVE_ARGS' in src
     assert "cwd=here" in src
-    assert paths.gallery_script_path() == paths.APP_ROOT / paths.GALLERY_SCRIPT
 
 
 def test_the_lints_catch_the_other_spellings():

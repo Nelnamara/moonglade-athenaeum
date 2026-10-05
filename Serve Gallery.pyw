@@ -5,7 +5,8 @@ Double-click to start the web gallery and open it in your browser, with NO termi
 window (.pyw runs under pythonw.exe). This is the "click to launch straight into the
 web interface" entry point.
 
-It runs as a tiny SUPERVISOR: it starts moonglade_gallery.py as a child and watches it.
+It runs as a tiny SUPERVISOR: it starts the web server (`python -m moonglade.gallery`, from
+this folder) as a child and watches it.
 That's what makes the browser Stop / Restart buttons (Control Panel -> Server) work
 like Homebridge -- no Task Manager, no terminal:
   * Restart from the web UI  -> the child exits with code 42, and this loop relaunches it.
@@ -26,14 +27,14 @@ import threading
 import time
 import webbrowser
 
-# This file's own folder IS the app folder (moonglade_paths.APP_ROOT), spelled by
+# This file's own folder IS the app folder (moonglade.paths.APP_ROOT), spelled by
 # os.path.abspath as it always was here -- not resolve(), which would turn a mapped or subst
-# drive into its target -- so the working directory and the child script's path stay
-# byte-for-byte what they were. It goes on sys.path first so moonglade_paths imports however
-# the launcher was started; every other path comes from moonglade_paths.
+# drive into its target -- so the working directory stays byte-for-byte what it was. It goes
+# on sys.path first so the moonglade package imports however the launcher was started; every
+# other path comes from moonglade.paths.
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
-import moonglade_paths as _paths    # noqa: E402
+from moonglade import paths as _paths    # noqa: E402
 
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
@@ -69,7 +70,7 @@ else:
     # Without this the chip could move the server's port while the browser still opened :5000 --
     # the same class of bug the "no --out here" note above fixed for the library folder.
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         _cfg_port = (_core._load_config() or {}).get("PORT")
         if _cfg_port:
             PORT = int(_cfg_port)
@@ -110,8 +111,13 @@ if _moonglade_on_port(PORT):
         pass
     sys.exit(0)
 
-cmd = [sys.executable, os.path.join(here, _paths.GALLERY_SCRIPT)] + SERVE_ARGS
+# The server runs as the package's module (3.20), from this folder: `-m` finds the moonglade
+# package through the working directory, which is why cwd=here below matters.
+cmd = [sys.executable, "-m", "moonglade.gallery"] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
+# The root moonglade_gallery.py stand-in sets this for a server an OLD launcher started (one
+# still running from before 3.20). This launcher is the new one, so it never hands it on.
+env.pop("MOONGLADE_VIA_STANDIN", None)
 
 
 def _open_when_ready():
@@ -144,7 +150,7 @@ def _open_when_ready():
 # Best effort: nothing here can stop the app starting.
 _serve_log = _paths.local_path("serve.log")
 try:
-    import moonglade_logging as _mlog
+    from moonglade import logs as _mlog
     _mlog.rotate_by_size(_serve_log)
 except Exception:
     pass
