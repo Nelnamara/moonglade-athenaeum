@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Tidier code
+- **`--delete-task` is gone.** It was deprecated on 2026-09-06. To delete from your PixAI account, use the gallery's **Delete from PixAI** (on one image's own page, or from the **Actions** dropdown for a selection): its `READ_ONLY` refusal, localhost-only rule and typed `DELETE` are unchanged. A script that still passes `--delete-task`, or the `--yes` that only it used, now stops with an "unrecognized arguments" error and deletes nothing. The Deleting and Trust & Safety wiki pages say so.
+- **The old browser-cookie reader is gone.** The Mirror signs in through the JWT reader as before, off the token your browser keeps in its localStorage, and `--mirror-check` works the same.
+
 ## [3.18.0] - 2026-10-04 — Travelling Light
 
 ### Art pack v7
