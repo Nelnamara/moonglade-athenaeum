@@ -153,8 +153,9 @@ def test_a_pack_copy_under_training_is_served_and_its_absence_is_a_plain_404(tmp
                                            "created_at": "2025-01-01T00:00:00"}])
     cli = login_client(tmp_path)
     assert cli.get("/branding/training/goal_character.png").status_code == 404
-    pack = tmp_path / "branding" / "training"
-    pack.mkdir(parents=True)
+    import moonglade_gallery as g
+    pack = g._role_dir("training")                   # the coded folder pack v7 files them under
+    pack.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 8), (1, 2, 3)).save(pack / "goal_character.png")
     r = cli.get("/branding/training/goal_character.png")
     assert r.status_code == 200 and r.mimetype == "image/png"
