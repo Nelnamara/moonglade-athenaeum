@@ -26,9 +26,19 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- Nothing in review.
+- **3.20, the move** (`wave4/integration`): the app's code moves into `moonglade/`, its own files into
+  `local/` and the library's `_moonglade/`, with stand-ins at the old names. Walk sheet:
+  `../moonglade-internal/design/walk/BOOP_SHEET_2026-10-05_v3.20-the-move.html`.
 
 ## Next — scoped, not started
+
+- **A faster full test run.** *(owner, 2026-10-05)* The full local run takes about 38 minutes and is
+  the longest wait in every release. Measure first: per-test and per-file timings, from the 3.20
+  release's one full run. Then cut: one shared app for the tests that only read, instead of a fresh
+  app per test (each also starts a scheduler nobody stops, #77); isolated tests run in parallel; the
+  browser harness runs as its own job beside the rest; duplicate and over-broad tests go; fixed
+  sleeps become waits on the real condition. Target: under 10 minutes with the same coverage.
+  `tools/ci_local.py` and the CI workflow change to match.
 
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.
