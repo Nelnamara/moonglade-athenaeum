@@ -15,8 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.18.0 — Travelling Light,
-  2026-10-04), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.19.0 — Clearing the Ground,
+  2026-10-05), per the rule at the top of this file.
 
 ---
 
