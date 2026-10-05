@@ -150,14 +150,17 @@ def state_path(out_dir, name):
     `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
     `reconcile_stamp.json`, `jobs.jsonl`, `raw_tasks.jsonl`, `runs.db`, the per-account
     folders (`account_prefs/`, `account_state/`, `prompt_snippets/`, `toolbox_presets/`,
-    `view_presets/`) and `logs/`. Today it is out_dir / name."""
+    `view_presets/`), the install-wide files they replaced and still fall back to
+    (`prompt_snippets.json`, `toolbox_presets.json`, `view_presets.json`) and `logs/`.
+    Today it is out_dir / name."""
     return Path(out_dir) / name
 
 
 def reports_path(out_dir, name):
     """One of the app's reports inside the library `out_dir`, by name:
     `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
-    `verify_report.csv`, `organize_manifest.csv`. Today it is out_dir / name."""
+    `verify_report.csv`, `organize_manifest.csv` and the curation import's undo files
+    (`curation_pre_import_<time>.json`). Today it is out_dir / name."""
     return Path(out_dir) / name
 
 

@@ -20255,7 +20255,7 @@ def create_app(out_dir: Path):
         return _snips_dir() / (_account_key(user) + ".json")
 
     def _legacy_snips_path():
-        return out_dir / "prompt_snippets.json"
+        return _paths.state_path(out_dir, "prompt_snippets.json")
 
     def _read_snips_file(p):
         try:
@@ -23435,7 +23435,7 @@ def create_app(out_dir: Path):
         return _toolbox_dir() / (_account_key(user) + ".json")
 
     def _legacy_presets_path():
-        return out_dir / "toolbox_presets.json"
+        return _paths.state_path(out_dir, "toolbox_presets.json")
 
     def _read_presets_data(p):
         try:
@@ -23539,7 +23539,7 @@ def create_app(out_dir: Path):
         return _view_presets_dir() / (_account_key(user) + ".json")
 
     def _legacy_view_presets_path():
-        return out_dir / "view_presets.json"
+        return _paths.state_path(out_dir, "view_presets.json")
 
     def _read_presets_file(p):
         try:
