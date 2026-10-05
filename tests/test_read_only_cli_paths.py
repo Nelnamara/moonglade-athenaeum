@@ -11,8 +11,8 @@ so none of them ever called _check_read_only.
 Found 2026-07-21 by a 33-agent post-release audit, proved dynamically here rather than
 asserted: with READ_ONLY=True and the CLI's own --confirm passed, every one of them used to
 reach the mutation, and the free-card check (_apply_kaisuuken) fired FIRST -- a live network
-call before any guard ran at all. Every test below drives the real CLI entry point, the same
-way tests/test_read_only.py's own delete-task test does, and the property that matters is not
+call before any guard ran at all. Every test below drives the real CLI entry point rather than
+the helper underneath it, and the property that matters is not
 "does it raise" but that mock_session.post is NEVER CALLED -- no network call fires, from
 _apply_kaisuuken, an upload, or the mutation itself.
 

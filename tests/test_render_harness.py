@@ -96,6 +96,7 @@ import pytest
 from tests.conftest import _SEALED_DONOR
 
 import moonglade_backup as core
+import moonglade_paths
 from moonglade_gallery import (
     CATALOG_FIELDS, create_app, load_catalog, save_catalog,
     achievement_metrics, compute_achievements, save_ach_state,
@@ -250,9 +251,10 @@ def render_server(tmp_path_factory):
     server never sees this machine's real config, credentials, coded tree or pack:
     `MOONGLADE_DISABLE_WATCH=1` (no live-mirror WebSocket), `core._config_path` (so
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
-    checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the coded tree
-    `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
-    `moonglade.mgpack`, land under this fixture's own root). The same MonkeyPatch carries the
+    checkout), an empty `core._cfg`, `gallery.branding_root` (so the coded tree
+    `create_app()` builds lands under this fixture's own root) and `moonglade_paths.local_path`
+    (so the machine files -- `_container_path()`'s `moonglade.mgpack` among them -- land
+    there too; they no longer derive from the tree's parent). The same MonkeyPatch carries the
     clock pin -- `pin_daytime_clock`, below -- so the state this install reports is the
     state it would report at any hour.
 
@@ -290,6 +292,7 @@ def render_server(tmp_path_factory):
     # BEFORE anything below reads achievement state (and before create_app() builds a
     # coded tree): this fixture's own coded tree, and its own sealed pack beside it.
     mp.setattr(_gallery, "branding_root", lambda: root / "branding")
+    mp.setattr(moonglade_paths, "local_path", lambda name: root / name)
     # ...and before the server can answer a single request: the clock this install reads,
     # pinned to a fixed daytime weekday instant (tests/conftest.py::pin_daytime_clock).
     pin_daytime_clock(mp)
@@ -1554,18 +1557,17 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # BEFORE create_app() builds a coded tree, and before anything reads achievement
     # state: this fixture's own coded tree, and its own sealed pack beside it.
     monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
+    monkeypatch.setattr(moonglade_paths, "local_path", lambda name: root / name)
     seed_sealed_container(_gallery._container_path())
     # ...and the clock, before the server can answer anything. "Fresh" here means no key and
     # no catalog, which is what the Setup Wizard is measured against; it also has to mean an
     # install that reads none of its state off the wall clock (conftest::pin_daytime_clock).
     pin_daytime_clock(monkeypatch)
-    # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
-    # own docstring) -- it derives its path from core.__file__'s directory instead, the
-    # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
-    # MISSING THIS ONCE caused a real test to overwrite the checkout's actual config.json
-    # with a fake key, live, 2026-08-02 -- caught immediately by checking the file, but
-    # never again: both path mechanisms this route family can use must be redirected.
-    monkeypatch.setattr(core, "__file__", str(root / "moonglade_backup.py"))
+    # /api/setup/save-key used to derive its path from core.__file__'s directory instead of
+    # core._config_path(), and MISSING a second redirect for that once caused a real test to
+    # overwrite the checkout's actual config.json with a fake key, live, 2026-08-02. Since
+    # Wave 4 every config.json reader and writer goes through core._config_path() (pinned
+    # above), and tests/test_config_path_routing.py holds that with a decoy.
     save_catalog(root / "catalog.db", [])          # genuinely empty -- no rows at all
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
 
@@ -4815,8 +4817,13 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
     assert "on" not in (pill.get_attribute("class") or "").split(), "the pill flipped on"
     assert page.evaluate(_READ_MIRROR_RING_JS)["stroke"] == ring["grey"]
 
-    after = seen[before:]
-    assert not after, "pressing the toggle fired {} request(s): {}".format(len(after), after)
+    # Only the Mirror's own requests can come from the toggle. The page keeps its own
+    # start-up traffic going in the background (the inbox count poll, the header door art,
+    # an account-prefs save), and under CPU load some of it lands after the click; counting
+    # that as the toggle's made this assertion race the page instead of testing the tile.
+    after = [(m, u) for (m, u) in seen[before:] if "/api/mirror" in u]
+    assert not after, "pressing the toggle fired {} Mirror request(s): {}".format(
+        len(after), after)
     # And over the WHOLE test: the tile read its status and wrote nothing, and nothing at
     # all went anywhere but this harness's own ephemeral port.
     host = urlparse(page.url).hostname

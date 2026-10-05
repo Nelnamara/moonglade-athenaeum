@@ -11,7 +11,6 @@
    Layout (Q3)
    --------------------------------------------------------------------------------------------- */
 
-export const LAYOUTS = Object.freeze(["grid", "feed"]);
 export const DEFAULT_LAYOUT = "grid";
 
 /* Anything that is not exactly a known layout is the grid: the phone as built. */

@@ -31,7 +31,7 @@ from moonglade_gallery import (CATALOG_FIELDS, catalog, migrate, save_catalog,
                                init_db, task_media, task_media_count,
                                delete_targets, delete_preview_rows, myart_items,
                                artwork_row, publish_state, lineage, sibling_media,
-                               recent_train_tasks, history_page,
+                               recent_train_task_page, history_page,
                                history_created_ats)
 
 from tests.conftest import login_client
@@ -501,11 +501,11 @@ def test_recent_train_tasks_groups_by_task_with_real_counts(tmp_path):
         _row(media_id="n1", task_id="T4", filename="", created_at="2026-05-01T00:00:00Z"),
         _row(media_id="imp", task_id="", filename="imp.png", created_at="2026-06-01T00:00:00Z"),
     ])
-    tasks = recent_train_tasks(db)
+    tasks = recent_train_task_page(db)[0]
     assert [t["task_id"] for t in tasks] == ["T1", "T2"]      # newest task first
     assert tasks[0]["count"] == 2 and tasks[0]["media_ids"] == ["a1", "a2"]
     assert tasks[1]["count"] == 1
-    assert [t["task_id"] for t in recent_train_tasks(db, limit=1)] == ["T1"]
+    assert [t["task_id"] for t in recent_train_task_page(db, limit=1)[0]] == ["T1"]
 
 
 def test_recent_train_tasks_verb_and_route_agree(tmp_path):
@@ -514,7 +514,7 @@ def test_recent_train_tasks_verb_and_route_agree(tmp_path):
         _row(media_id="a2", task_id="T1", filename="a2.png", created_at="2026-03-01T00:00:00Z"),
     ])
     body = login_client(tmp_path).get("/api/train/recent-tasks").get_json()
-    verb = recent_train_tasks(db, 18)
+    verb = recent_train_task_page(db, 18)[0]
     assert [t["task_id"] for t in body["tasks"]] == [t["task_id"] for t in verb]
     assert body["tasks"][0]["count"] == 2
     assert body["tasks"][0]["thumb"] == "/thumbs/a1.jpg"      # the route adds the URL
@@ -718,7 +718,7 @@ def test_every_catalog_verb_returns_plain_data(tmp_path):
         [artwork_row(db, "m1")],
         [lineage(db, "m1")["row"]],
         sibling_media(db, ["T1"]),
-        recent_train_tasks(db),
+        recent_train_task_page(db)[0],
         history_page(db, "2026-08-11T00:00:00.000Z", "2026-08-12T00:00:00.000Z")["rows"],
     ]
     for rows in samples:

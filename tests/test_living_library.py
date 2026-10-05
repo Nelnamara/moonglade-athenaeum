@@ -78,7 +78,7 @@ def _fresh_sweep_state():
 def _jobs(**overrides):
     """The shipped default list, with per-action overrides -- so a cadence test states
     only what it is testing and inherits the real shipped defaults for everything else."""
-    rows = g.living_defaults()
+    rows = g.living_merge(None)
     for row in rows:
         row.update(overrides.get(row["action"], {}))
     return rows

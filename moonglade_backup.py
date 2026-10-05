@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.18.0"
+__version__ = "3.19.0"
 
 import argparse
 import base64
@@ -56,6 +56,7 @@ from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import moonglade_paths as _paths
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
@@ -246,14 +247,13 @@ CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
 def _config_path():
-    """Resolve config.json's path: prefer a copy next to the script file, then the
-    current working directory (same order _load_config() has always read in). If
-    neither exists yet (first run / a fresh write), default to creating it next to
-    the script -- the natural "this install's config" location."""
-    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
-        if cfg_path.exists():
-            return cfg_path
-    return Path(__file__).resolve().parent / "config.json"
+    """config.json's path -- THE call every reader and writer of it makes. The rule lives in
+    moonglade_paths.config_path(): the copy beside the app first, then the current working
+    directory (same order _load_config() has always read in); if neither exists yet (first
+    run / a fresh write), the one beside the app. Kept as this module's function because
+    the test suite pins it per test (tests/conftest.py's _isolated_auth_config), so no test
+    can reach the real file."""
+    return _paths.config_path()
 
 
 def _load_config():
@@ -765,8 +765,8 @@ def verify_web_user(username, password):
 _cfg = _load_config()
 # A trust signal for anyone nervous about handing a third-party tool spend/delete access
 # to their PixAI account: with READ_ONLY:true in config.json, every account-mutating
-# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply/
-# --yes, since those flags are the very thing a cautious first run wants to be safe to
+# network call refuses itself -- CLI and web alike, and REGARDLESS of --confirm/--apply,
+# since those flags are the very thing a cautious first run wants to be safe to
 # pass without reading the source first. This does NOT cover purely local operations
 # (--organize, --dedup) -- those already have their own dry-run-by-default + --apply
 # gates and never touch the network; conflating "protect my files" with "protect my
@@ -806,7 +806,7 @@ def _read_only_now():
 def _check_read_only(action):
     """Called at the top of every branch that actually fires an account-mutating
     network call. Raising here, unconditionally, is what makes READ_ONLY override
-    --confirm/--apply/--yes rather than just changing their default.
+    --confirm/--apply rather than just changing their default.
 
     Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
     claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
@@ -869,10 +869,9 @@ ARTWORK_LIST_HASH = _cfg.get("ARTWORK_LIST_HASH", "") or \
     "ce6f4a6e63fe210c7f77b29c7b8bdce8b7ede4d4520c01de1d36e01b224918a5"
 CLIENT_LIBRARY_ARTWORK = {"name": "@apollo/client", "version": "4.1.4"}
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
-# ever touches YOUR OWN tasks, and the destructive paths are independently gated by
-# explicit confirmation (typed "DELETE" in the gallery; --apply plus a typed "delete"
-# on the CLI -- NOT --confirm, which gates credit-spending generation), so the default
-# is safe; override in config.json if it rotates.
+# ever touches YOUR OWN tasks, and the destructive path is independently gated by
+# explicit confirmation (typed "DELETE" in the gallery, which is the only road to this
+# mutation), so the default is safe; override in config.json if it rotates.
 DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
     "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
 DELETE_OPERATION = "deleteGenerationTask"
@@ -883,7 +882,6 @@ DELETE_OPERATION = "deleteGenerationTask"
 # Public hash; override in config.json if it rotates.
 REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
     "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
-PIXAI_COOKIE_DOMAIN = "pixai.art"
 # A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
 # own renewal and the app's refreshToken alike; the ~27 days measured in August no longer
 # holds). Renew once fewer than this many days are left -- measured in the token's real
@@ -932,7 +930,7 @@ def load_token(cli_token=None):
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
-    for f in (Path(__file__).resolve().parent / "token.txt", Path("token.txt")):
+    for f in _paths.token_paths():
         if f.exists():
             return f.read_text(encoding="utf-8").strip()
     raise PixAIError("No credential found. Add PIXAI_API_KEY to config.json (preferred), "
@@ -1071,7 +1069,7 @@ _jobs_compact_lock = threading.Lock()
 
 
 def _jobs_path(out_dir):
-    return Path(out_dir) / JOBS_LOG_NAME
+    return _paths.state_path(out_dir, JOBS_LOG_NAME)
 
 
 def append_job_event(out_dir, job_id, status=None, **fields):
@@ -2832,8 +2830,8 @@ def delete_task_gql(session, task_id):
     _check_read_only("delete a task from your PixAI account")
     # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
     # can fire solely if that default is stripped or the hash rotates and someone blanks
-    # it. It is NOT a setup gate -- --apply plus the typed "delete" confirm are what stand
-    # between a caller and a real delete.
+    # it. It is NOT a setup gate -- the gallery's typed "DELETE" confirm and READ_ONLY are
+    # what stand between a caller and a real delete.
     if not DELETE_TASK_HASH:
         raise PixAIError(
             "DELETE_TASK_HASH is empty -- the built-in default is missing or was overridden "
@@ -5123,7 +5121,7 @@ def cmd_audit(args, out):
         _fmt_bytes(t["reclaimable_bytes"])))
 
     # Write detailed CSV
-    report_path = out / "audit_report.csv"
+    report_path = _paths.reports_path(out, "audit_report.csv")
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
@@ -5321,7 +5319,7 @@ def cmd_verify_dupes(args, out):
     print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
 
     if res["differs"] or res["orphan"]:
-        report = out / "verify_report.csv"
+        report = _paths.reports_path(out, "verify_report.csv")
         with open(report, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["status", "quarantined_file", "surviving_keeper"])
@@ -5443,7 +5441,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Nothing to do -- everything already organized.")
         return
 
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     mf_new = not manifest_path.exists()
     mf = open(manifest_path, "a", newline="", encoding="utf-8")
     mw = csv.writer(mf)
@@ -5573,7 +5571,7 @@ def cmd_undo_organize(args, out):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
     then clears the manifest. Lets a re-normalize be undone if you don't like it."""
     db_path = _ensure_db(out)
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     if not manifest_path.exists():
         print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
         return
@@ -5690,9 +5688,9 @@ def _make_session(token_val, resolve_user=True):
 #   - The JWT rides as Authorization: Bearer (~27d); a FRESH jwt is returned in the
 #     `token` response header (access-control-expose-headers: token,...).
 #   - refreshToken is a no-arg persisted mutation (REFRESH_TOKEN_HASH).
-# So: read the .pixai.art session from the local browser ONCE (cookies-from-browser),
-# then the cookies self-refresh and refreshToken rolls the JWT -- zero paste. A
-# one-time paste field is the break-glass fallback only.
+# So: read the live JWT from the local browser's localStorage ONCE (read_browser_jwt), then
+# refreshToken rolls it -- zero paste. A one-time paste field is the break-glass fallback
+# only.
 #
 # SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
 # these). The credential never leaves this machine and is never printed, logged, or
@@ -5748,123 +5746,14 @@ def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAY
     return exp - now <= threshold_days * 86400
 
 
-def read_browser_session(browsers=("chrome", "edge", "brave")):
-    """Read the current .pixai.art session cookies from the local browser store, the
-    way yt-dlp's --cookies-from-browser does. Returns {name: value} for the cookies
-    found, or {} if none could be read. NEVER raises and NEVER logs a value.
-
-    Prefers `browser_cookie3` (handles Chrome/Edge/Brave/Firefox + the Windows DPAPI +
-    AES-GCM decrypt across OSes). Falls back to the native Windows reader below. On a
-    machine with neither a browser nor the dep, returns {} and the caller degrades to
-    the stored session / the break-glass paste."""
-    jar = {}
-    try:
-        import browser_cookie3 as bc3  # optional dep; the robust path
-    except Exception:
-        bc3 = None
-    if bc3 is not None:
-        for name in browsers:
-            loader = getattr(bc3, name, None)
-            if loader is None:
-                continue
-            try:
-                cj = loader(domain_name=PIXAI_COOKIE_DOMAIN)
-                for c in cj:
-                    if PIXAI_COOKIE_DOMAIN in (c.domain or ""):
-                        jar[c.name] = c.value
-                if jar:
-                    return jar
-            except Exception:
-                continue  # locked profile, no such browser, decrypt fail -> try next
-        if jar:
-            return jar
-    try:
-        return _read_chromium_cookies_windows()
-    except Exception:
-        return {}
-
-
-def _read_chromium_cookies_windows():
-    """Native Windows Chrome/Edge cookie read: AES-GCM values decrypted with the
-    profile key from Local State (DPAPI-unprotected). Read-only; copies the
-    share-readable DB to a temp file so an open browser doesn't block it. Returns {}
-    on any failure -- a best-effort fallback, never a hard dependency. No value logged."""
-    import shutil
-    import sqlite3
-    import tempfile
-    la = os.environ.get("LOCALAPPDATA", "")
-    profiles = [
-        os.path.join(la, r"Google\Chrome\User Data"),
-        os.path.join(la, r"Microsoft\Edge\User Data"),
-    ]
-    jar = {}
-    for udir in profiles:
-        ck = os.path.join(udir, "Default", "Network", "Cookies")
-        ls = os.path.join(udir, "Local State")
-        if not (os.path.isfile(ck) and os.path.isfile(ls)):
-            continue
-        try:
-            key = _chromium_aes_key(ls)
-            if not key:
-                continue
-            tmp = os.path.join(tempfile.gettempdir(), "mg_ck_%d.db" % os.getpid())
-            shutil.copy2(ck, tmp)  # native copy succeeds even while the browser holds it
-            try:
-                con = sqlite3.connect(tmp)
-                rows = con.execute(
-                    "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
-                    ("%" + PIXAI_COOKIE_DOMAIN,),
-                ).fetchall()
-                con.close()
-            finally:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-            for name, enc in rows:
-                val = _chromium_decrypt(enc, key)
-                if val:
-                    jar[name] = val
-            if jar:
-                return jar
-        except Exception:
-            continue
-    return jar
-
-
-def _chromium_aes_key(local_state_path):
-    """The per-profile AES key from Local State, DPAPI-unprotected. Windows only."""
-    try:
-        import win32crypt  # from pywin32
-    except Exception:
-        return None
-    with open(local_state_path, "r", encoding="utf-8") as fh:
-        state = json.load(fh)
-    enc_key = base64.b64decode(state["os_crypt"]["encrypted_key"])
-    enc_key = enc_key[5:]  # strip the "DPAPI" prefix
-    return win32crypt.CryptUnprotectData(enc_key, None, None, None, 0)[1]
-
-
-def _chromium_decrypt(enc, key):
-    """AES-256-GCM decrypt of a Chromium v10/v11 cookie value. '' on failure."""
-    try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        if enc[:3] in (b"v10", b"v11"):
-            nonce, ct = enc[3:15], enc[15:]
-            return AESGCM(key).decrypt(nonce, ct, None).decode("utf-8", "replace")
-    except Exception:
-        pass
-    return ""
-
-
 # --- localStorage JWT reader ------------------------------------------------------
 # Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
-# user process can't decrypt, so the cookie path above returns nothing there. But the
-# pixai.art frontend ALSO keeps the live JWT in localStorage, and localStorage's
-# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we read the JWT
-# straight out of it. That's the whole reason "Connect" can work on a current Chrome
-# without a paste. The Bearer JWT alone authenticates the mirror (create rides
-# Authorization: Bearer; refreshToken renews off the Bearer), so cookies are optional.
+# user process can't decrypt, so a cookie read comes back empty there (the app no longer
+# reads cookies at all). The pixai.art frontend keeps the live JWT in localStorage, and
+# localStorage's on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we
+# read the JWT straight out of it. That's the whole reason "Connect" can work on a current
+# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# Authorization: Bearer; refreshToken renews off the Bearer), so no cookie is needed.
 #
 # We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
 # library). A raw byte-scan is NOT enough: an established profile compacts its writes into
@@ -6337,9 +6226,11 @@ _mirror_renewal_reset()
 
 def _mirror_state_path():
     """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
-    git-ignored file beside config.json. Deliberately NOT config.json -- the JWT
-    rotates on every refresh, and a write there must never risk clobbering the API
-    key (a test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
+    git-ignored file beside config.json -- beside wherever _config_path() found it, exactly
+    as in 3.18 (it joins the machine files, moonglade_paths.local_path(), next release).
+    Deliberately NOT config.json -- the JWT rotates on every refresh, and a write there must
+    never risk clobbering the API key (a test once overwrote the real PIXAI_API_KEY; a
+    separate file can't)."""
     return _config_path().parent / "mirror_session.json"
 
 
@@ -6752,87 +6643,6 @@ def run_probe(args):
             print("\nLooks right? Run a download to back up everything.")
         else:
             print("\nCouldn't find a URL in the media object -- paste this back.")
-
-
-#: Printed by every --delete-task run (2026-09-06). Deletion converged on the per-image
-#: path: the gallery reads the task back and sends whichever mutation PixAI accepts, and its
-#: Actions dropdown still takes whole tasks in bulk. This flag is a third road to the same
-#: place with none of the reading, so it is deprecated -- still working this release, but no
-#: longer the answer.
-_DELETE_TASK_DEPRECATED = (
-    "NOTE: --delete-task is DEPRECATED and will be removed in the next minor release.\n"
-    "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
-    "  with PixAI first and removes just that image when the rest of its batch is still\n"
-    "  there. To delete whole generations, select them in the gallery and use Delete from\n"
-    "  PixAI in the Actions dropdown. Both remove the local copy to your trash folder too,\n"
-    "  so your library and your account stay in step; this flag never touches local files.")
-
-
-def run_delete_tasks(args):
-    """Delete one or more generation tasks from your PixAI account (IRREVERSIBLE).
-
-    DEPRECATED 2026-09-06 -- see `_DELETE_TASK_DEPRECATED`, printed on every run. It still
-    works exactly as it did; it is simply no longer the road deletion is maintained on.
-
-    Guards, in order:
-      1. Dry-run by default -- prints the target list and stops. Requires --apply.
-      2. With --apply, a typed 'delete' confirmation (skippable with --yes, which
-         is refused on a non-interactive stdin unless explicitly passed).
-      3. Single-attempt per task (delete_task_gql does no retry).
-    Local backups (image files + catalog.db) are NOT touched -- this only removes
-    the generation from your account on PixAI's servers.
-    """
-    print(_DELETE_TASK_DEPRECATED)
-    raw = getattr(args, "delete_task", None) or []
-    seen, ids = set(), []
-    for t in raw:
-        t = str(t).strip()
-        if t and t not in seen:
-            seen.add(t)
-            ids.append(t)
-    if not ids:
-        raise PixAIError("No task ids given. Usage: --delete-task <taskId> [<taskId> ...]")
-
-    print("Tasks targeted for deletion ({}):".format(len(ids)))
-    for t in ids:
-        print("  {}".format(t))
-
-    if not getattr(args, "apply", False):
-        print("\nDRY RUN -- nothing deleted. Re-run with --apply to permanently delete "
-              "these from your PixAI account.")
-        print("(Deletion is irreversible. Your local backups are NOT affected.)")
-        return {"targeted": len(ids), "deleted": 0, "failed": 0, "dry_run": True}
-
-    if not getattr(args, "yes", False):
-        if not getattr(sys.stdin, "isatty", lambda: False)():
-            raise PixAIError(
-                "--apply needs interactive confirmation. Re-run attached to a terminal, "
-                "or pass --yes to confirm non-interactively (irreversible -- be careful).")
-        ans = input("\nPermanently delete {} task(s) from your PixAI account? "
-                    "Type 'delete' to confirm: ".format(len(ids)))
-        if ans.strip().lower() != "delete":
-            print("Aborted -- nothing deleted.")
-            return {"targeted": len(ids), "deleted": 0, "failed": 0, "aborted": True}
-
-    session = _make_session(getattr(args, "token", None))
-    delay = getattr(args, "delay", 0.4)
-    deleted = failed = 0
-    for i, t in enumerate(ids, 1):
-        try:
-            # deleteGenerationTask is a void mutation: it returns null on a
-            # SUCCESSFUL delete and raises (GraphQL errors / 401 / PersistedQuery
-            # NotFound) on failure. So a clean return -- whatever the payload --
-            # means the task was deleted.
-            delete_task_gql(session, t)
-            deleted += 1
-            print("  [{}/{}] deleted task {}".format(i, len(ids), t))
-        except PixAIError as e:
-            failed += 1
-            print("  [{}/{}] FAILED task {}: {}".format(i, len(ids), t, e))
-        if i < len(ids):
-            time.sleep(delay)
-    print("\nDeletion complete: {} deleted, {} failed.".format(deleted, failed))
-    return {"targeted": len(ids), "deleted": deleted, "failed": failed}
 
 
 def run_count(args):
@@ -12812,19 +12622,6 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     return {"media_ids": mids, "saved": len(saved), "is_video": False}
 
 
-def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
-    """Synchronous submit -> wait -> download+catalog (used by tests / any blocking caller).
-    The async gallery routes use submit_generation + generation_status + collect_generation
-    instead. Returns {task_id, media_ids, saved, paid_credit}."""
-    task_id = submit_generation(session, params)
-    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
-                             label="generate", fail_noun="generation")
-    got = collect_generation(session, task_id, out_dir,
-                             name_length=name_length, name_sep=name_sep)
-    return {"task_id": task_id, "media_ids": got["media_ids"],
-            "saved": got["saved"], "paid_credit": paid}
-
-
 def _i2v_cli_unsent_notes(args):
     """The receipts for what --generate-video was asked for and does not send (the CLI's half
     of the receipts rule; build_request records the web road's). A Tsubaki engine has no
@@ -14831,7 +14628,7 @@ def run_watch(args):
         return
     seconds = getattr(args, "watch_seconds", 0) or None
     do_backup = bool(getattr(args, "watch_backup", False))
-    out_dir = getattr(args, "out", "pixai_backup") or "pixai_backup"
+    out_dir = getattr(args, "out", _paths.DEFAULT_LIBRARY_DIR) or _paths.DEFAULT_LIBRARY_DIR
     enc = (sys.stdout.encoding or "utf-8")
 
     def _safe(t):
@@ -15873,7 +15670,7 @@ def run_suggest_prompt(args):
                 "video file (PixAI's image-to-prompt endpoint doesn't support "
                 "video).".format(src))
     else:
-        out = getattr(args, "out", "") or "pixai_backup"
+        out = getattr(args, "out", "") or _paths.DEFAULT_LIBRARY_DIR
         row = next((r for r in load_catalog(Path(out) / "catalog.db")
                     if r.get("media_id") == src), None)
         if row and row.get("is_video") == "1":
@@ -16300,7 +16097,7 @@ def _stamp_reconcile(out, flagged, cleared):
     reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
-    dest = Path(out) / RECONCILE_STAMP
+    dest = _paths.state_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
         tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
@@ -17252,7 +17049,7 @@ def run_download(args, progress=None):
     """
     out = Path(args.out)
     img_dir = out / "images"
-    raw_path = out / "raw_tasks.jsonl"
+    raw_path = _paths.state_path(out, "raw_tasks.jsonl")
     db_path  = out / "catalog.db"
 
     # Ensure the catalog db exists + is schema-migrated (raises if none; no CSV auto-seed, #19)
@@ -17852,18 +17649,7 @@ def main():
     ap.add_argument("--token",
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
-    ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DEPRECATED, removed in the next minor release (use the gallery's "
-                         "Delete from PixAI, on one image or on a selection). DELETE the "
-                         "given generation task id(s) from your "
-                         "PixAI account (irreversible). Dry-run unless --apply is also "
-                         "given; then asks for typed confirmation unless --yes. Local "
-                         "backups are untouched. (DELETE_TASK_HASH ships with a working "
-                         "default; no config.json setup needed.)")
-    ap.add_argument("--yes", action="store_true",
-                    help="skip the interactive confirmation for --delete-task --apply "
-                         "(use with care; deletion cannot be undone)")
-    ap.add_argument("--out", default="pixai_backup",
+    ap.add_argument("--out", default=_paths.DEFAULT_LIBRARY_DIR,
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")
@@ -18362,9 +18148,6 @@ def main():
         pass
 
     try:
-        if getattr(args, "delete_task", None):
-            run_delete_tasks(args)
-            return
         if args.catalog_stats:
             run_catalog_stats(args)
             return

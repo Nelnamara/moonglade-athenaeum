@@ -26,9 +26,16 @@ import threading
 import time
 import webbrowser
 
+# This file's own folder IS the app folder (moonglade_paths.APP_ROOT), spelled by
+# os.path.abspath as it always was here -- not resolve(), which would turn a mapped or subst
+# drive into its target -- so the working directory and the child script's path stay
+# byte-for-byte what they were. It goes on sys.path first so moonglade_paths imports however
+# the launcher was started; every other path comes from moonglade_paths.
 here = os.path.dirname(os.path.abspath(__file__))
-os.chdir(here)                     # so config.json / pixai_backup resolve here
 sys.path.insert(0, here)
+import moonglade_paths as _paths    # noqa: E402
+
+os.chdir(here)                     # so config.json / pixai_backup resolve here
 
 # No --out here on purpose. The server resolves its own folder (an explicit --out, then
 # config.json's LIBRARY_DIR, then pixai_backup), and a hardcoded flag here would always beat
@@ -42,7 +49,7 @@ RESTART_CODE = 42                           # child exit code that means "relaun
 # put extra flags in an untracked "serve.txt" next to this launcher, e.g. one line:
 #     --host 0.0.0.0 --port 5757
 # (LAN access + a custom port). Whitespace-separated; blank/missing = defaults.
-_serve_txt = os.path.join(here, "serve.txt")
+_serve_txt = str(_paths.local_path("serve.txt"))
 if os.path.exists(_serve_txt):
     try:
         SERVE_ARGS += open(_serve_txt, encoding="utf-8").read().split()
@@ -103,7 +110,7 @@ if _moonglade_on_port(PORT):
         pass
     sys.exit(0)
 
-cmd = [sys.executable, os.path.join(here, "moonglade_gallery.py")] + SERVE_ARGS
+cmd = [sys.executable, os.path.join(here, _paths.GALLERY_SCRIPT)] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 
@@ -130,8 +137,19 @@ def _open_when_ready():
 
 # Capture the child's stdout/stderr to serve.log so a boot failure isn't silent under pythonw
 # (no console). stdin=DEVNULL so the headless child never blocks on input.
+#
+# The log trims itself, once per launcher start (not on a Restart): over 1 MB it becomes
+# serve.log.1, the older ones shift to .2 and .3, and the oldest is dropped. After the
+# single-instance check above, so a second launcher never touches a running server's log.
+# Best effort: nothing here can stop the app starting.
+_serve_log = _paths.local_path("serve.log")
 try:
-    _log = open(os.path.join(here, "serve.log"), "a", buffering=1, encoding="utf-8")
+    import moonglade_logging as _mlog
+    _mlog.rotate_by_size(_serve_log)
+except Exception:
+    pass
+try:
+    _log = open(str(_serve_log), "a", buffering=1, encoding="utf-8")
 except OSError:
     _log = subprocess.DEVNULL
 

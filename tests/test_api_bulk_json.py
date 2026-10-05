@@ -255,7 +255,7 @@ def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch, pixai):
 
 
 def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monkeypatch, pixai):
-    """Cloud-only mode (the CLI --delete-task behavior): the task is deleted on
+    """Cloud-only mode (what the removed --delete-task command did): the task is deleted on
     PixAI, local files and catalog rows stay, and imports -- which have no cloud
     side at all -- are dropped from the job entirely."""
     db = _cloud_batch(tmp_path)

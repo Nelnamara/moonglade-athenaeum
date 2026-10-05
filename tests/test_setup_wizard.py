@@ -36,10 +36,11 @@ def _authed_client(tmp_path, rows=()):
 
 
 def _redirect_config_to(monkeypatch, tmp_path):
-    """core.__file__'s directory is where config.json is read/written. Point it at a
-    throwaway tmp_path directory so a test can never touch the real one."""
-    fake_module_file = tmp_path / "moonglade_backup.py"
-    monkeypatch.setattr(core, "__file__", str(fake_module_file))
+    """config.json is read and written through core._config_path() (save-key included, since
+    Wave 4). Point it at a throwaway tmp_path file so a test can never touch the real one --
+    conftest's autouse _isolated_auth_config already does exactly this; kept explicit here so
+    each test states where it reads the file back from."""
+    monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
 
 
 class TestSaveKeyEndpoint:

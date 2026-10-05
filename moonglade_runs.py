@@ -39,6 +39,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import moonglade_paths as _paths
+
 # ---------------------------------------------------------------------------------------
 # The template (NOTES 1, page M1 + M6)
 # ---------------------------------------------------------------------------------------
@@ -53,7 +55,6 @@ _BIG = 1000000                # above this the over-cap message stops counting
 
 LISTS_KEY = "gen.lists"       # the account store key the Lists sheet writes: {name: [items]}
 LIST_NAME_RE = re.compile(r"^[a-z0-9_]{1,32}$")
-MAX_LISTS = 50
 MAX_LIST_ITEMS = 200
 LIST_ITEM_MAX = 200
 
@@ -625,7 +626,7 @@ class RunsStore(object):
     yet: the file grows with every run (reported as still to do)."""
 
     def __init__(self, out_dir):
-        self.path = Path(out_dir) / RUNS_DB
+        self.path = _paths.state_path(out_dir, RUNS_DB)
         self._lock = threading.Lock()
 
     def _connect(self, create):

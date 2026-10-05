@@ -7,6 +7,8 @@ mirror_session.json
 mirror_session.json.*
 serve.txt
 serve.log
+# ...and the old logs the launcher rotates it to at start (serve.log.1 to .3)
+serve.log.*
 
 # ---- Private dev notes: reverse-engineering ledger, internal maps. NEVER publish ----
 # MOVED 2026-09-06 -> ../moonglade-internal/private/ (notes + the harvest capture).
@@ -170,3 +172,39 @@ static/_mockup_*.html
 # sweeping a spoiler or a large binary into this PUBLIC repo (adversarial, 2026-08-22).
 /_backups/
 /_2000/
+
+# ---- The folders the next release moves runtime files into (Wave 4) ----
+# The machine files' folder: the art pack and its marker, branding.json, branding_slots.json,
+# mirror_session.json, serve.txt, serve.log and the icon cache. Machine-local, never committed.
+# Anchored: only the app root's.
+/local/
+# The app's own records INSIDE a library (its state files, jobs, logs and reports).
+# Unanchored, like the library guards above, so a library anywhere is covered.
+_moonglade/
+
+# ---- The code folder: its code is never ignored (KEEP THIS BLOCK LAST) ----
+# The modules move into moonglade/ next release. Several lines above are unanchored on purpose
+# -- `gallery/`, `images/`, `videos/`, `imported/`, `_duplicates/`, `private/`, `catalog.db`,
+# `config.json`, `serve.txt`, `serve.log` -- so they keep a library or a stray runtime file out
+# of git wherever it sits; they would hide package files of the same names just as well (a
+# `moonglade/gallery/` sub-package would never reach git). git takes the LAST pattern that
+# matches a path, so the re-include below must stay under every other line, and the lines
+# after it put back what must never be committed from inside the code folder either: Python's
+# byte-code caches, and every secret or runtime file (config.json, the mirror token, a token,
+# .env, the launcher's files, a catalog, the art pack, a library, the machine files' folder).
+# The launcher's files are spelled out rather than `serve.*`, which would hide a `serve.py`.
+# tests/test_gitignore_move_proof.py asks git itself.
+!/moonglade/**
+/moonglade/**/__pycache__/
+/moonglade/**/*.py[cod]
+/moonglade/**/config.json*
+/moonglade/**/mirror_session.json*
+/moonglade/**/token.txt
+/moonglade/**/.env
+/moonglade/**/serve.txt
+/moonglade/**/serve.log
+/moonglade/**/serve.log.*
+/moonglade/**/catalog.db
+/moonglade/**/*.mgpack*
+/moonglade/**/pixai_backup/
+/moonglade/**/local/

@@ -434,26 +434,6 @@ def test_annotate_lora_compat_all_incompatible_still_returns_everything():
     assert len(out) == 2 and all(r["compat"] == "no" for r in out)
 
 
-def test_web_generate_pipeline(monkeypatch, tmp_path):
-    # web_generate = submit -> poll -> task detail -> download/catalog; all reused parts
-    # mocked so no network / no spend. Verifies it threads the pieces + returns media_ids.
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {"id": "T1"}})
-    monkeypatch.setattr(core, "_poll_task_status", lambda *a, **k: 0)
-    monkeypatch.setattr(core, "task_detail_gql",
-                        lambda s, t: {"outputs": {"mediaId": "M1", "batchMediaIds": ["M2"]}})
-    monkeypatch.setattr(core, "_download_image_task", lambda *a, **k: ["/p/M1.webp", "/p/M2.webp"])
-    res = core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
-    assert res["task_id"] == "T1" and res["media_ids"] == ["M1", "M2"]
-    assert res["saved"] == 2 and res["paid_credit"] == 0
-
-
-def test_web_generate_raises_without_task_id(monkeypatch, tmp_path):
-    import pytest
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", lambda s, q, v=None, retries=None: {"createGenerationTask": {}})
-    with pytest.raises(core.PixAIError):
-        core.web_generate(object(), {"prompts": "x", "modelId": "v"}, str(tmp_path))
-
-
 def test_model_search_market_gql(monkeypatch):
     """Market browse via GraphQL: honors category + Newest sort (which REST silently ignores),
     returns the SAME row shape as model_search_rest (REST-only fields empty) + tags/created_at,

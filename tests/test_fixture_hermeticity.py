@@ -103,10 +103,12 @@ def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
     forgot, instead of writing and reading its own.
 
     So the pin is asserted directly, at the only level that survives the mask: the
-    fixture's own source must (a) setattr `branding_root` and (b) call conftest's
-    `seed_sealed_container`. Both, because either alone is a half-pin -- a pinned root
-    with no seeded pack points `_container_path()` at a pack nobody wrote,
-    and a seeded pack with no pinned root writes it beside the checkout.
+    fixture's own source must (a) setattr `branding_root`, (b) setattr `local_path` and (c)
+    call conftest's `seed_sealed_container`. All three, because any one alone is a half-pin
+    -- a pinned root with no seeded pack points `_container_path()` at a pack nobody wrote,
+    a seeded pack with no pinned root writes it beside the checkout, and since the machine
+    files stopped deriving from the tree's parent (Wave 4) a pinned tree with an unpinned
+    `local_path` leaves the pack and branding.json in the session's shared folder.
 
     `paged_library_server` is deliberately NOT in this list: it is function-scoped, so
     conftest's autouse `_isolated_branding` and `_sealed_roster_container` have already
@@ -123,6 +125,13 @@ def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
         "tests/test_render_harness.py::{} no longer pins branding_root() -- it would "
         "resolve to conftest's session-wide fallback root, shared with every other fixture "
         "that forgot, instead of its own".format(fixture_name))
+    pins_local = any(
+        isinstance(c.func, ast.Attribute) and c.func.attr == "setattr"
+        and any(isinstance(a, ast.Constant) and a.value == "local_path" for a in c.args)
+        for c in calls)
+    assert pins_local, (
+        "tests/test_render_harness.py::{} no longer pins moonglade_paths.local_path() -- "
+        "its pack and branding.json would be the session's shared ones".format(fixture_name))
     assert _calls_by_name(calls, "seed_sealed_container"), (
         "tests/test_render_harness.py::{} no longer calls seed_sealed_container() -- its "
         "achievement state would come from a container this fixture never wrote"
@@ -318,7 +327,8 @@ def unpinned_module_view():
     from types import SimpleNamespace
 
     import moonglade_gallery as _g
-    return SimpleNamespace(root=_g.branding_root(), container=_g._container_path())
+    return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
+                           branding_json=_g._branding_path(None))
 
 
 def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_module_view):
@@ -335,9 +345,10 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
     Fails loudly if a future change unpins it: the next symptom would again be a fixture that
     behaves one way on a dev box and another on CI, which is not a failure anyone reads as
     "the resolver was not pinned"."""
-    from tests.conftest import _REAL_CODED_ROOT
+    from tests.conftest import _REAL_CODED_ROOT, _REAL_LOCAL_PACK
 
-    real_pack = _REAL_CODED_ROOT.parent / "moonglade.mgpack"
+    real_pack = _REAL_LOCAL_PACK
+    real_local = _REAL_LOCAL_PACK.parent
     assert unpinned_module_view.root != _REAL_CODED_ROOT, (
         "a module-scoped fixture resolved branding_root() to the checkout's own coded tree "
         "at {}".format(_REAL_CODED_ROOT))
@@ -346,3 +357,7 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
         "a module-scoped fixture resolved _container_path() to the pack beside the checkout "
         "at {} -- its achievement state would be whatever that file happens to hold on this "
         "machine".format(real_pack))
+    # The other machine files resolve through the same helper: none may be the checkout's.
+    assert unpinned_module_view.branding_json.parent != real_local, (
+        "a module-scoped fixture resolved branding.json to the checkout's own {}"
+        .format(unpinned_module_view.branding_json))
