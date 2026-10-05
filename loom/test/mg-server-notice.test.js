@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 /* The server's one-time notice (3.20, "the move"): a server started through the stand-in an
-   old launcher left behind asks every open tab, once per server start, to close Moonglade
-   and open it again. gallery/src/notify/serverNotice.js decides when; the existing corner
+   old launcher left behind asks every open tab, once per server start, to stop Moonglade
+   once and start it again. gallery/src/notify/serverNotice.js decides when; the existing corner
    toast says it.
 
      1. ONCE PER SERVER START. The same key on every poll, a reload or a second tab: one toast.
@@ -40,7 +40,7 @@ async function freshNotice() {
 }
 
 const MOVED = { key: "a1", title: "Moonglade moved into its new folder.",
-                msg: "Close it and open it again once to finish." };
+                msg: "Stop it once (Control Panel → Server → ■ Stop, and confirm), then start it again from its shortcut." };
 
 function shown() { return toasts.getToasts().filter((t) => !t.out); }
 function clearToasts() { toasts.getToasts().forEach((t) => toasts.dismiss(t.id)); }

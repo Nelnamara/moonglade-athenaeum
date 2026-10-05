@@ -3,7 +3,7 @@
    The one user today (3.20, "the move"): a server started by a launcher that was already
    running when the install updated into the moonglade/ folder. That old launcher still
    starts the server through the stand-in it left behind, and the server asks the person to
-   close Moonglade and open it again once, which starts the new launcher. The words are the
+   stop it once and start it again from its shortcut, which starts the new launcher. The words are the
    server's (moonglade/gallery.py's server_notice()); this file only decides when to show them.
 
    It rides the /api/jobs poll (jobsStore.js), the one server-truth channel every open tab

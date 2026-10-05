@@ -9,8 +9,8 @@ stops.
 
 It runs the real server as the main module, with the same arguments and exit code, and sets
 MOONGLADE_VIA_STANDIN=1 so the server knows an old launcher is still in charge. The server
-then asks, once per start, for Moonglade to be closed and opened again (which starts the new
-launcher, which never comes here), and refuses the next update until that has happened.
+then asks, once per start, for Moonglade to be stopped once and started again from its
+shortcut (which starts the new launcher, which never comes here), and refuses the next update until that has happened.
 
 Goes in 3.21, with the other stand-ins. This release's update refuses while an old launcher
 is in charge, so the update that deletes this file only ever lands on a server the new

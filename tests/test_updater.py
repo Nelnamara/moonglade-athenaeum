@@ -282,8 +282,9 @@ def test_apply_refuses_while_an_old_launcher_is_in_charge(tmp_path, monkeypatch)
     r = _apply(cli)
     assert started["n"] == 0
     assert r.status_code == 409
-    assert r.get_json() == {"error": "Moonglade moved into its new folder. Close it and open "
-                                     "it again once to finish.", "kind": "failed"}
+    assert r.get_json() == {"error": "Moonglade moved into its new folder. Stop it once "
+                                     "(Control Panel → Server → ■ Stop, and confirm), then "
+                                     "start it again from its shortcut.", "kind": "failed"}
     assert asked == []
     assert g.update_state()["phase"] == "idle"
 

@@ -12208,16 +12208,22 @@ def _supervised():
     return os.environ.get("MOONGLADE_SUPERVISED") == "1"
 
 
-# CLOSE AND REOPEN ONCE (3.20, the move into the moonglade/ folder). A launcher that was already
+# STOP AND START ONCE (3.20, the move into the moonglade/ folder). A launcher that was already
 # running when the install updated across the move built its command line before the move, as
 # `python <app folder>/moonglade_gallery.py`, and after the update's restart it runs that path
 # again. The root stand-in of that name keeps it working for one release and sets
-# MOONGLADE_VIA_STANDIN=1. Such a server asks, once per start, for Moonglade to be closed and
-# opened again (which starts the new launcher, which runs the package directly), and refuses
+# MOONGLADE_VIA_STANDIN=1. Such a server asks, once per start, for Moonglade to be stopped once
+# and started again from its shortcut (which starts the new launcher, which runs the package
+# directly), and refuses
 # the next update until that has happened: that update deletes the stand-in, and the old
 # launcher would restart into nothing. The same words do both jobs.
 STANDIN_NOTICE_TITLE = "Moonglade moved into its new folder."
-STANDIN_NOTICE_MSG = "Close it and open it again once to finish."
+# Not "close it": closing the browser leaves the server running, the shortcut then finds the
+# port taken and only opens a tab, and Restart goes back through the old launcher. The
+# Control Panel's ■ Stop exits 0, which ends the old launcher too (it relaunches only on 42);
+# the shortcut then starts the new one.
+STANDIN_NOTICE_MSG = ("Stop it once (Control Panel → Server → ■ Stop, and confirm), then start "
+                      "it again from its shortcut.")
 # New on every server start, so each start through the old launcher asks again, once.
 _SERVER_START = secrets.token_hex(8)
 
@@ -16393,7 +16399,7 @@ def create_app(out_dir: Path):
         if st.get("error"):
             st["error"] = _redact_host_paths(st["error"])
         # 3.20: an old launcher is still in charge, so the update is refused until Moonglade
-        # has been closed and opened again (see _via_standin).
+        # has been stopped once and started again from its shortcut (see _via_standin).
         st["via_standin"] = _via_standin()
         return jsonify(st)
 
@@ -16424,7 +16430,7 @@ def create_app(out_dir: Path):
                                        be indistinguishable from "the app vanished"
           * not via the stand-in    -- a launcher from before 3.20 restarts the server
                                        through the root stand-in the NEXT release deletes:
-                                       it must be closed and opened again first
+                                       it must be stopped once and started again first
           * no running panel job    -- same rule Restart uses; a pull under a running job
                                        swaps the code out from under it
           * on master               -- the recovered scope's own out-of-scope rule: a
@@ -28275,7 +28281,7 @@ __DESIGN_TOKENS__
                     j["pixai_says"] = says
         except Exception:                                  # noqa: BLE001
             pass
-        # `notice`: the one-time "close and reopen" while an old launcher is in charge
+        # `notice`: the one-time "stop and start again" while an old launcher is in charge
         # (server_notice, 3.20), or null.
         return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live,
                         "notice": server_notice()})
