@@ -18,7 +18,7 @@ import pytest
 
 import moonglade_backup as core
 import moonglade_paths as paths
-from tests.conftest import login_client
+from tests.conftest import first_party_sources, login_client
 
 _REPO = Path(__file__).resolve().parents[1]
 _REAL_LOCAL_PATH = paths.local_path
@@ -128,7 +128,7 @@ def _hand_built_config_paths(path):
 
 
 def test_no_module_but_moonglade_paths_builds_the_config_json_path():
-    modules = sorted([*_REPO.glob("*.py"), *_REPO.glob("*.pyw")])
+    modules = first_party_sources()       # the root, and the moonglade/ code folder
     assert any(p.name == "moonglade_gallery.py" for p in modules)
     stray = [h for p in modules if p.name != "moonglade_paths.py"
              for h in _hand_built_config_paths(p)]

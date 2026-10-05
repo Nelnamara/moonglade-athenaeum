@@ -19,6 +19,32 @@ import moonglade_paths
 _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
 
+# The checkout this suite tests, and the code folder the app's modules move into next release.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CODE_PACKAGE = "moonglade"
+_NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})
+
+
+def first_party_sources(root=None, suffixes=(".py", ".pyw")):
+    """Every first-party Python source of the app, sorted: the modules at the repo root, and
+    every one at any depth under a `moonglade/` code folder if one exists. Never tests/,
+    node_modules/, .git/ or __pycache__/.
+
+    THE one collector for every guard that reads the app's own code -- the spoiler and
+    pack-name guards, and the path lints. They used to glob the root flat (`moonglade_*.py`,
+    `*.py`), which would keep passing after the code moves into `moonglade/` while checking
+    nothing at all. tests/test_first_party_sources.py holds that it finds every module there
+    is today, so it can never silently find nothing."""
+    root = Path(root) if root is not None else REPO_ROOT
+    found = sorted(p for p in root.iterdir() if p.is_file() and p.suffix in suffixes)
+    package = root / CODE_PACKAGE
+    if package.is_dir():
+        for dirpath, dirnames, filenames in os.walk(package):
+            dirnames[:] = sorted(d for d in dirnames if d not in _NOT_FIRST_PARTY)
+            found += [Path(dirpath) / f for f in sorted(filenames)
+                      if Path(f).suffix in suffixes]
+    return found
+
 
 @pytest.fixture()
 def pack_art():

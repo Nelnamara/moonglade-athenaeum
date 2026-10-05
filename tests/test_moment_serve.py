@@ -20,7 +20,7 @@ import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import (STARFALL_EVENT, _SEALED_DONOR, MOMENT_FIXTURE_CLIP, ach_event, clear_sealed_caches,
-                            login_client, moment_clip_keys)
+                            first_party_sources, login_client, moment_clip_keys)
 
 _REPO = Path(__file__).resolve().parents[1]
 _KEYTURN_URL = "/branding/" + g._MOMENT_CLIPS["keyturn"]
@@ -443,7 +443,7 @@ def test_no_public_file_names_a_moment_feat(sealed_donor_present):
                   if isinstance(a, dict) and a.get("id") and (a.get("moment") or a.get("unlocks"))})
     assert ids, "no moment or unlock feat in the donor -- the guard would be a no-op"
     files = list(_public_files())
-    files += [p for p in _REPO.glob("*.py")]
+    files += first_party_sources()            # the app's modules: the root and moonglade/
     files += [p for p in (_REPO / "tests").glob("*.py")]
     leaks = []
     for path in files:

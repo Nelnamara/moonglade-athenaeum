@@ -20,6 +20,7 @@ import moonglade_integrity as integrity
 import moonglade_logging as mlog
 import moonglade_paths as paths
 import moonglade_runs as runs
+from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -111,7 +112,7 @@ _RECORD_NAMES = set(STATE_NAMES) | set(REPORT_NAMES)
 
 
 def _modules():
-    return sorted([*_REPO.glob("*.py"), *_REPO.glob("*.pyw")])
+    return first_party_sources()          # the root, and the moonglade/ code folder
 
 
 def _record_constants(trees):

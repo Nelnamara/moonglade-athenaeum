@@ -20,6 +20,7 @@ import moonglade_assets as ma
 import moonglade_backup as core
 import moonglade_gallery as g
 import moonglade_paths as paths
+from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -186,7 +187,7 @@ _FILE_ALLOWED = {
 
 
 def _first_party_modules():
-    return sorted([*_REPO.glob("*.py"), *_REPO.glob("*.pyw")])
+    return first_party_sources()          # the root, and the moonglade/ code folder
 
 
 def _file_uses(path):

@@ -11,6 +11,7 @@ from pathlib import Path
 import moonglade_assets as ma
 import moonglade_gallery as g
 import moonglade_paths
+from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -19,16 +20,18 @@ _OLD = "moonglade" + ".dat"
 
 # The code: every Python and JavaScript source the app, its tools and its two front ends are
 # built from. Not tests/ (fixtures may name anything), not the built bundles (integration
-# rebuilds them), not the docs (CHANGELOG history keeps the old name on purpose).
+# rebuilds them), not the docs (CHANGELOG history keeps the old name on purpose). The app's
+# own modules come from the shared collector: the repo root and the moonglade/ code folder.
 _CODE_GLOBS = [
-    "*.py", "*.pyw", "tools/**/*.py",
+    "tools/**/*.py",
     "gallery/src/**/*.js", "gallery/src/**/*.jsx",
     "loom/src/**/*.js", "loom/src/**/*.jsx", "loom/scripts/*.mjs", "loom/scripts/*.js",
 ]
 
 
 def _code_files():
-    seen = set()
+    seen = set(first_party_sources())
+    yield from sorted(seen)
     for pat in _CODE_GLOBS:
         for p in _REPO.glob(pat):
             if p.is_file() and p not in seen and "node_modules" not in p.parts:

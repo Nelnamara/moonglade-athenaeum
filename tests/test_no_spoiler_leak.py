@@ -10,15 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _SEALED_DONOR
+from tests.conftest import _SEALED_DONOR, first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
 
 # Public text surfaces a roast could leak into. NOT tests/ (fixtures hold fake data) and NOT
 # the private donor itself. dist/ bundles are included -- a rebuilt bundle must not embed one.
+# The app's own modules come from the shared collector (conftest.first_party_sources): the
+# repo root AND the moonglade/ code folder once the modules move there.
 _SCAN_GLOBS = [
     "*.md", "docs/**/*.md", "wiki/**/*.md",
-    "moonglade_*.py", "tools/*.py",
+    "tools/*.py",
     "gallery/src/**/*.jsx", "gallery/src/**/*.js", "gallery/dist/*.js",
     "gallery/dist/*.css", "gallery/dist/*.html", "gallery/dist/*.json",
     "loom/src/**/*.js", "loom/dist/*.js",
@@ -26,7 +28,8 @@ _SCAN_GLOBS = [
 
 
 def _files_to_scan():
-    seen = set()
+    seen = set(first_party_sources())
+    yield from sorted(seen)
     for pat in _SCAN_GLOBS:
         for p in _REPO.glob(pat):
             if not p.is_file() or p in seen:
@@ -113,7 +116,7 @@ def test_built_bundles_do_not_name_a_hidden_feat():
 # its name (it is the sealed roster's), which is why the needle is the quoted bare word only.
 # Source, not the built bundle: the committed bundle is held to a rebuild of this source by
 # the bundle-freshness tests, so a clean source is a clean bundle.
-_EVENT_SCAN_GLOBS = ["moonglade_*.py", "tools/*.py", "gallery/src/**/*.js",
+_EVENT_SCAN_GLOBS = ["tools/*.py", "gallery/src/**/*.js",
                      "gallery/src/**/*.jsx", "loom/src/**/*.js", "loom/src/**/*.jsx"]
 
 
@@ -129,12 +132,13 @@ def test_the_key_sequence_beacon_event_has_a_neutral_name():
     word = metrics[0][:-len("_triggered")]
     needles = ['"%s"' % word, "'%s'" % word]
     leaks = []
+    paths = list(first_party_sources())          # the app's modules, root and moonglade/
     for pat in _EVENT_SCAN_GLOBS:
-        for path in _REPO.glob(pat):
-            if not path.is_file() or "node_modules" in path.parts:
-                continue
-            text = path.read_text(encoding="utf-8", errors="replace")
-            if any(n in text for n in needles):
-                leaks.append(str(path.relative_to(_REPO)))     # never echo the word itself
+        paths += [p for p in _REPO.glob(pat) if p.is_file() and "node_modules" not in p.parts]
+    assert paths, "scanned no source file -- the guard would be a no-op"
+    for path in paths:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if any(n in text for n in needles):
+            leaks.append(str(path.relative_to(_REPO)))         # never echo the word itself
     assert not leaks, ("the key-sequence beacon's old event name is back in public source: "
                        + "; ".join(sorted(set(leaks))))
