@@ -69,18 +69,8 @@ def setup_logging(out_dir, verbose=False):
         _console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
         return app_logger
 
-    log_dir = _paths.state_path(out_dir, "logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S")
-
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        str(log_dir / "moonglade.log"), when="midnight", backupCount=14,
-        encoding="utf-8", delay=True)
-    file_handler.setFormatter(fmt)
-    file_handler.setLevel(logging.DEBUG)   # the file always captures everything
+    file_handler = _file_handler_for(out_dir)
+    fmt = file_handler.formatter
 
     _console_handler = logging.StreamHandler(sys.stdout)
     _console_handler.setFormatter(fmt)
@@ -106,6 +96,46 @@ def setup_logging(out_dir, verbose=False):
     _file_handler = file_handler
     _configured = True
     return app_logger
+
+
+def _file_handler_for(out_dir):
+    """The rotating file handler for out_dir's log (log_path()), its folder made."""
+    log_file = log_path(out_dir)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.TimedRotatingFileHandler(
+        str(log_file), when="midnight", backupCount=14, encoding="utf-8", delay=True)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"))
+    handler.setLevel(logging.DEBUG)   # the file always captures everything
+    return handler
+
+
+def reopen(out_dir):
+    """Point the file log at log_path(out_dir) when that has moved since setup_logging()
+    opened it -- 3.20: logging opens before a library is brought across (in its old logs/,
+    where an unmigrated library still keeps it), and moonglade.migrate.open_library() calls
+    this once the copy into _moonglade/logs/ is made. Returns True when it re-pointed; a no-op
+    (False) when logging is not set up or is already writing there. Never raises."""
+    global _file_handler
+    if not _configured or _file_handler is None:
+        return False
+    try:
+        new = os.path.normcase(os.path.abspath(str(log_path(out_dir))))
+        if os.path.normcase(_file_handler.baseFilename) == new:
+            return False
+        handler = _file_handler_for(out_dir)
+    except Exception:
+        return False
+    root = logging.getLogger()
+    root.addHandler(handler)
+    old, _file_handler = _file_handler, handler
+    root.removeHandler(old)
+    try:
+        old.close()
+    except Exception:
+        pass
+    return True
 
 
 def _install_crash_hook(logger):

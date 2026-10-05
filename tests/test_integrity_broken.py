@@ -18,9 +18,13 @@ from types import SimpleNamespace
 
 from moonglade import backup as core
 from moonglade import integrity as integ
+from moonglade import paths
 from moonglade.gallery import create_app, save_catalog
 from tests.conftest import login_test_client, with_csrf
-from tests.test_integrity import _jpeg, _png, _row, _tree_hash
+from tests.test_integrity import _REPORTS_WRITTEN, _jpeg, _png, _row, _tree_hash
+
+# What a mark writes, besides the check's own reports: its file, beside them.
+_WRITTEN = _REPORTS_WRITTEN + ("_moonglade/reports/integrity_marks.json",)
 
 
 def _broken_library(tmp_path, deleted_remote_on=("109",)):
@@ -215,18 +219,18 @@ def test_a_row_gone_from_the_catalog_since_the_check_leaves_the_list(tmp_path):
 
 def test_mark_lost_moves_a_row_to_lost_and_out_of_fix_all(tmp_path):
     out = _broken_library(tmp_path)
-    before = _tree_hash(out, skip=("integrity_report.csv", "integrity_report.json",
-                                   integ.MARKS_FILE))
+    before = _tree_hash(out, skip=_WRITTEN)
     assert integ.set_mark(out, "102", "lost") == ""
     doc = integ.broken_list(out, out / "catalog.db")
     row = _by_id(doc)["102"]
     assert (row["state"], row["action"], row["mark"]) == ("lost", None, "lost")
     assert "102" not in doc["fix"]["redownload"]
     assert doc["counts"]["lost"] == 3 and doc["counts"]["zero"] == 2
-    # a local flag at the library root, beside the reports -- and nothing else changed
-    assert json.loads((out / integ.MARKS_FILE).read_text(encoding="utf-8"))["marks"]["102"]["mark"] == "lost"
-    assert _tree_hash(out, skip=("integrity_report.csv", "integrity_report.json",
-                                 integ.MARKS_FILE)) == before
+    # a local flag beside the reports (the library's _moonglade/reports/) -- and nothing else
+    # changed
+    assert json.loads(paths.reports_path(out, integ.MARKS_FILE).read_text(
+        encoding="utf-8"))["marks"]["102"]["mark"] == "lost"
+    assert _tree_hash(out, skip=_WRITTEN) == before
 
 
 def test_undo_puts_the_previous_mark_back(tmp_path):
@@ -270,7 +274,7 @@ def test_a_reconcile_stamps_when_it_ran(tmp_path, monkeypatch, pixai):
     conn = {"edges": [{"node": {"id": "LIVE"}}], "pageInfo": {"hasPreviousPage": False}}
     monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
     core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
-    doc = json.loads((tmp_path / core.RECONCILE_STAMP).read_text(encoding="utf-8"))
+    doc = json.loads(paths.state_path(tmp_path, core.RECONCILE_STAMP).read_text(encoding="utf-8"))
     assert doc["reconciled_at"].endswith("Z") and doc["flagged"] == 1
     assert integ.reconciled_at(tmp_path) == doc["reconciled_at"]
 

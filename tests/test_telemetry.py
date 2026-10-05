@@ -465,7 +465,7 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
     from moonglade import backup as core
     core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
     assert g.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
-    (tmp_path / "telemetry.json").unlink()
+    g._telemetry_path(tmp_path).unlink()
     core._check_time_capsule("2099-01-01T00:00:00", tmp_path)   # young: no fire
     core._check_time_capsule("", tmp_path)                       # blank: no crash
     assert g.telemetry_metrics(tmp_path).get("old_piece_backed_up", 0) == 0
@@ -557,7 +557,7 @@ def test_best_day_streak_and_keyed_daylists(tmp_path):
     assert len(t["day_lists"]["gen_days"]) == 1 and len(t["day_lists"]["active_days"]) == 1
     assert t["days"] == []                                                        # legacy Vigil untouched
     # a synthetic multi-day store proves the metric wiring end to end
-    (tmp_path / "telemetry.json").write_text(json.dumps({
+    g._telemetry_path(tmp_path).write_text(json.dumps({
         "counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
         "day_lists": {"gen_days": ["2026-02-01", "2026-02-02", "2026-02-03"],
                       "curation_days": ["2026-03-01", "2026-03-03"],

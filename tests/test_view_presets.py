@@ -11,6 +11,7 @@ Tier enforcement (login-required) is asserted by tests/test_route_tiers.py.
 """
 import json
 
+from moonglade import paths
 from moonglade.gallery import _account_key, create_app
 from tests.conftest import login_client, with_csrf
 
@@ -23,7 +24,7 @@ def _presets_file(tmp_path, user="tester"):
     Keyed through the same _account_key() the app itself uses (B14 residual: a bare
     username here would silently pass on a case-insensitive filesystem even after a
     regression, since "tester" happens to need no encoding either way)."""
-    return tmp_path / "view_presets" / (_account_key(user) + ".json")
+    return paths.state_path(tmp_path, "view_presets") / (_account_key(user) + ".json")
 
 
 def _legacy_presets_file(tmp_path):

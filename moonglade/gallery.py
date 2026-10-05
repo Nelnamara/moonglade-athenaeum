@@ -29269,7 +29269,12 @@ def main():
     # first) -- so a matching pack never downloads again. After the port check on purpose: a
     # start refused above must not move the pack out from under the server already running.
     # Never stops the start: what could not move is read where it is (moonglade.migrate).
+    # The library's own records go the same way, into its _moonglade/ folder (copied; the
+    # spend guard moved), before the app below opens any of them; the file log follows its
+    # logs/ folder there. Also after the port check: a refused start must not move the spend
+    # guard out from under the server already running.
     from moonglade import migrate as moonglade_migrate
+    moonglade_migrate.open_library(out_dir)
     moonglade_migrate.tidy_app_folder()
 
     # One-time, and only on a REAL start: move any rendered banner flat still

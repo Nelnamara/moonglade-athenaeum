@@ -17,7 +17,9 @@ named helper here, so moving a group of files is a change to one line in this mo
   art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
                     from local_path(): the art tree and the machine files move separately.
   state_path(out_dir, name)    one of the app's own records inside a library: its state
-  reports_path(out_dir, name)  files, jobs, logs and per-account folders, and its reports.
+  reports_path(out_dir, name)  files, jobs, logs and per-account folders, and its reports,
+                    in the library's _moonglade/ (reports in _moonglade/reports/) since
+                    3.20, read at the library's top until the library is brought across.
                     catalog.db, the pictures, loom/, gallery/, _deleted/ and _duplicates/
                     are the library itself, not records, and never go through these.
   the rest          the shipped files the app reads: the pack manifest, wiki/, the
@@ -229,6 +231,26 @@ def default_library_path():
     return APP_ROOT / DEFAULT_LIBRARY_DIR
 
 
+# The app's own records inside a library: its state files and folders...
+STATE_NAMES = (
+    "achievements.json", "telemetry.json", "schedule.json", "train_guard.json",
+    "reconcile_stamp.json", "jobs.jsonl", "raw_tasks.jsonl", "runs.db",
+    "account_prefs", "account_state", "prompt_snippets", "toolbox_presets",
+    "view_presets", "logs",
+    # the install-wide files the per-account folders replaced, still read as a fallback for
+    # an account with no file of its own (an install can have a live one: D:'s presets)
+    "prompt_snippets.json", "toolbox_presets.json", "view_presets.json",
+)
+# ...and its reports. (Also a report, by a name with a time in it: the curation import's
+# undo files, CURATION_SNAPSHOT_PREFIX + "<time>.json".)
+REPORT_NAMES = (
+    "integrity_report.csv", "integrity_report.json", "integrity_marks.json",
+    "integrity_report.lock", "audit_report.csv", "verify_report.csv",
+    "organize_manifest.csv",
+)
+CURATION_SNAPSHOT_PREFIX = "curation_pre_import_"
+
+
 def state_path(out_dir, name):
     """One of the app's own records inside the library `out_dir`, by name:
     `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
@@ -236,16 +258,48 @@ def state_path(out_dir, name):
     folders (`account_prefs/`, `account_state/`, `prompt_snippets/`, `toolbox_presets/`,
     `view_presets/`), the install-wide files they replaced and still fall back to
     (`prompt_snippets.json`, `toolbox_presets.json`, `view_presets.json`) and `logs/`.
-    Today it is out_dir / name."""
-    return Path(out_dir) / name
+
+    out_dir/_moonglade/name since 3.20 -- except while a record is still only at the
+    library's top (old_state_path) and the library's migration has not recorded it (a
+    library not yet opened by 3.20, or a move that was refused): then it is read, and
+    written, where it is."""
+    out = Path(out_dir)
+    return _record(out, out / RECORDS_DIRNAME, name)
 
 
 def reports_path(out_dir, name):
     """One of the app's reports inside the library `out_dir`, by name:
     `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
     `verify_report.csv`, `organize_manifest.csv` and the curation import's undo files
-    (`curation_pre_import_<time>.json`). Today it is out_dir / name."""
+    (`curation_pre_import_<time>.json`). out_dir/_moonglade/reports/name since 3.20, with
+    the same fallback to the library's top as state_path()."""
+    out = Path(out_dir)
+    return _record(out, out / RECORDS_DIRNAME / REPORTS_DIRNAME, name)
+
+
+def old_state_path(out_dir, name):
+    """Where 3.19 kept a record or report: the library's top. The migration's source, and a
+    reader's fallback until it has been brought across."""
     return Path(out_dir) / name
+
+
+def records_manifest(out_dir):
+    """The library's record of what its migration brought across."""
+    return Path(out_dir) / RECORDS_DIRNAME / MOVED_NAME
+
+
+def _record(out, new_dir, name):
+    """_settled() for a library record. When the answer is the new place and its folder is
+    not there yet, the folder is made -- but only inside a library that exists, so asking
+    about a folder that is not a library never creates one -- so a first write can land."""
+    p = _settled(new_dir, name, old_state_path(out, name), records_manifest(out))
+    if p.parent == new_dir:
+        try:
+            if not new_dir.is_dir() and out.is_dir():
+                new_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    return p
 
 
 def run_dir():

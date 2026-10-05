@@ -23,6 +23,7 @@ import requests
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity as integ
+from moonglade import paths
 from moonglade.gallery import create_app
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _mp4, _png, _webp
@@ -386,12 +387,12 @@ def test_the_recheck_waits_for_the_report_lock(tmp_path, monkeypatch):
     out = _broken_library(tmp_path)
     lock = out / integ.REPORT_LOCK
     lock.write_text("held")
-    before = (out / "integrity_report.csv").read_bytes()
+    before = (paths.reports_path(out, "integrity_report.csv")).read_bytes()
     (out / "images" / "p_t1_102.png").write_bytes(_png(4, 4))            # fixed meanwhile
     t = threading.Thread(target=integ.reverify, args=(out, out / "catalog.db", ["102"]))
     t.start()
     t.join(0.6)
-    assert t.is_alive() and (out / "integrity_report.csv").read_bytes() == before
+    assert t.is_alive() and (paths.reports_path(out, "integrity_report.csv")).read_bytes() == before
     lock.unlink()
     t.join(10)
     assert not t.is_alive()
@@ -457,7 +458,7 @@ def test_odd_report_and_marks_files_never_break_the_list(tmp_path):
     """Nit 9: a size cell like '²' (isdigit() but not int()) and a marks file nested deep
     enough to raise RecursionError still give a list, and the route answers."""
     out = _broken_library(tmp_path)
-    csv_path = out / "integrity_report.csv"
+    csv_path = paths.reports_path(out, "integrity_report.csv")
     csv_path.write_text(csv_path.read_text(encoding="utf-8").replace(
         "images/p_t1_102.png,0,", "images/p_t1_102.png,\u00b2,"), encoding="utf-8")
     (out / integ.MARKS_FILE).write_text("[" * 200000, encoding="utf-8")
@@ -773,5 +774,5 @@ def test_the_report_lock_retries_when_windows_answers_permission_denied(tmp_path
 
     monkeypatch.setattr(integ.os, "open", flaky_open)
     with integ._ReportLock(tmp_path) as lk:
-        assert lk.held and (tmp_path / integ.REPORT_LOCK).exists()
-    assert calls["n"] == 2 and not (tmp_path / integ.REPORT_LOCK).exists()
+        assert lk.held and paths.reports_path(tmp_path, integ.REPORT_LOCK).exists()
+    assert calls["n"] == 2 and not paths.reports_path(tmp_path, integ.REPORT_LOCK).exists()

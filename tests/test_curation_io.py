@@ -22,6 +22,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import curation_io as cio
 from moonglade import gallery as g
+from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
@@ -223,7 +224,7 @@ def test_apply_saves_the_current_state_first_and_that_undoes_the_import(tmp_path
     g.add_to_collection(b, ["m2"], "Mine")
     before = cio.export_curation(b, now=NOW)["items"]
     rep = cio.import_curation(b, doc, apply=True)
-    snap = tmp_path / "b" / rep["snapshot"]
+    snap = paths.reports_path(tmp_path / "b", rep["snapshot"])
     assert snap.name.startswith("curation_pre_import_") and snap.exists()
     assert cio.export_curation(b, now=NOW)["items"] != before
     # the snapshot, imported with overwrite, puts every touched picture back

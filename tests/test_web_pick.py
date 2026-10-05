@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from moonglade import backup as core
+from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client, with_csrf
@@ -633,7 +634,7 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch, pixai):
     # Per-account storage (D-7): the file lives under prompt_snippets/<key>.json now,
     # not the old flat prompt_snippets.json every account used to share. Keyed via
     # _account_key (B14 residual), not the raw username.
-    assert (tmp_path / "prompt_snippets" / (_account_key("tester") + ".json")).exists()
+    assert (paths.state_path(tmp_path, "prompt_snippets") / (_account_key("tester") + ".json")).exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -723,7 +724,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path
     assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
 
     cli.post("/api/snippets", json=with_csrf(cli, {"snippets": ["from-before", "new-one"]}))
-    own = json.loads((tmp_path / "prompt_snippets" / (_account_key("tester") + ".json"))
+    own = json.loads((paths.state_path(tmp_path, "prompt_snippets") / (_account_key("tester") + ".json"))
                      .read_text(encoding="utf-8"))
     assert own == ["from-before", "new-one"]
     assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
@@ -1145,7 +1146,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
     assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
 
     cli.post("/api/presets", json=with_csrf(cli, {"task_id": "333"}))
-    own = json.loads((tmp_path / "toolbox_presets" / (_account_key("tester") + ".json"))
+    own = json.loads((paths.state_path(tmp_path, "toolbox_presets") / (_account_key("tester") + ".json"))
                      .read_text(encoding="utf-8"))
     assert set(own) == {"from-before", "new-scene"}
     legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))

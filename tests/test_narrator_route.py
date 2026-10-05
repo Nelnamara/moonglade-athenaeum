@@ -256,9 +256,10 @@ def test_nothing_else_is_written(tmp_path, clock):
     after = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
     new = sorted(after - before)
     key = g._account_key("tester")
-    assert set(new) <= {"account_state/%s.json" % key, "telemetry.json",
-                        "achievements.json"}, new
-    assert "account_state/%s.json" % key in new
+    # the library's own records folder (3.20): _moonglade/
+    assert set(new) <= {"_moonglade/account_state/%s.json" % key, "_moonglade/telemetry.json",
+                        "_moonglade/achievements.json"}, new
+    assert "_moonglade/account_state/%s.json" % key in new
     assert not [n for n in after if n.endswith((".lock", ".tmp")) or ".tmp-" in n], "leftover"
 
 

@@ -40,6 +40,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
+from moonglade import paths
 from moonglade.gallery import LOCALHOST, _account_key, create_app, route_tier
 from tests.conftest import login_test_client, session_csrf, with_csrf
 
@@ -247,7 +248,7 @@ def _two_sessions(tmp_path):
 
 
 def _store_file(tmp_path, folder, user):
-    return tmp_path / folder / (_account_key(user) + ".json")
+    return paths.state_path(tmp_path, folder) / (_account_key(user) + ".json")
 
 
 _STORES = [

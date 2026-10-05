@@ -16,6 +16,7 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import paths
 from moonglade.gallery import (
     ACCOUNT_LOCAL,
     ACCOUNT_PREF_VALUE_MAX,
@@ -34,7 +35,7 @@ URL = "/api/account/prefs"
 
 
 def _prefs_file(tmp_path, user="tester"):
-    return tmp_path / "account_prefs" / (_account_key(user) + ".json")
+    return paths.state_path(tmp_path, "account_prefs") / (_account_key(user) + ".json")
 
 
 def _csrf(cli):
@@ -74,7 +75,7 @@ def test_set_roundtrip_lands_in_the_accounts_own_file(tmp_path):
     # on disk under the digest key, never the raw username, as valid JSON
     p = _prefs_file(tmp_path)
     assert json.loads(p.read_text(encoding="utf-8")) == want
-    assert not (tmp_path / "account_prefs" / "tester.json").exists()
+    assert not (paths.state_path(tmp_path, "account_prefs") / "tester.json").exists()
     assert [x.name for x in p.parent.iterdir()] == [p.name], (
         "a temp file or lockfile was left behind: {}".format(list(p.parent.iterdir())))
 
@@ -164,12 +165,12 @@ def test_no_accounts_install_refuses_both_methods_and_writes_nothing(tmp_path):
     assert r.status_code == 401 and r.get_json() == {"error": "authentication required"}
     r = cli.post(URL, json={"set": {"a": 1}})
     assert r.status_code == 401
-    assert not (tmp_path / "account_prefs").exists()
+    assert not (paths.state_path(tmp_path, "account_prefs")).exists()
 
 
 def test_account_local_is_the_one_stable_key_for_a_sessionless_caller(tmp_path):
     p = account_prefs_path(tmp_path, ACCOUNT_LOCAL)
-    assert p == tmp_path / "account_prefs" / "_local.json"
+    assert p == paths.state_path(tmp_path, "account_prefs") / "_local.json"
     account_prefs_update(tmp_path, ACCOUNT_LOCAL, set_={"unleash": True})
     assert account_prefs_get(tmp_path, ACCOUNT_LOCAL) == {"unleash": True}
     assert json.loads(p.read_text(encoding="utf-8")) == {"unleash": True}
@@ -189,7 +190,7 @@ def test_a_missing_account_never_falls_back_to_a_shared_file(tmp_path, who):
         account_prefs_get(tmp_path, who)
     with pytest.raises(ValueError):
         account_prefs_update(tmp_path, who, set_={"a": 1})
-    assert not (tmp_path / "account_prefs").exists()
+    assert not (paths.state_path(tmp_path, "account_prefs")).exists()
 
 
 # ---------------------------------------------------------------------------

@@ -190,6 +190,9 @@ class TestM07ParallelDownloadHonoursDelay:
 
         _patch_download_layer(mocker)
         mocker.patch.object(core, "gql", side_effect=[_one_page(["m1"])])
+        # A second library, already there as the command line always leaves it before a
+        # download (main() makes the folder and opens its records first).
+        (tmp_path / "b").mkdir()
         core.run_download(_dl_args(tmp_path / "b", delay=0.01, workers=4))
         assert "paced to one image per 0.01s across the pool" in capsys.readouterr().out
 

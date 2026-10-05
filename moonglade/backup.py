@@ -18141,6 +18141,12 @@ def main():
         return
 
     out = Path(args.out)
+    # 3.20: the library's own records live in its _moonglade/ folder. A library not yet
+    # opened by 3.20 has them brought across here, once and logged, before any command reads
+    # one (copied; the spend guard moved); the file log follows its logs/ folder there. Never
+    # stops the command: what could not be brought across is read where it is.
+    from moonglade import migrate as moonglade_migrate
+    moonglade_migrate.open_library(out)
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger

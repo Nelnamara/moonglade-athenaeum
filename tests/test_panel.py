@@ -4,6 +4,7 @@ actually runs."""
 import re
 from moonglade import gallery as g
 from moonglade import backup as core
+from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client, login_existing_client
@@ -304,7 +305,7 @@ def test_schedule_roundtrip_and_safe_only(tmp_path):
     s = cli.post("/api/panel/schedule",
                  json={"enabled": True, "action": "sync-videos", "interval_hours": 12}).get_json()
     assert s["enabled"] is True and s["action"] == "sync-videos" and s["interval_hours"] == 12
-    assert (tmp_path / "schedule.json").exists()
+    assert paths.state_path(tmp_path, "schedule.json").exists()
     assert cli.get("/api/panel/schedule").get_json()["interval_hours"] == 12
     # destructive actions cannot be scheduled
     r = cli.post("/api/panel/schedule", json={"enabled": True, "action": "dedup-apply"})

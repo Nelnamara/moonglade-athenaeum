@@ -11,6 +11,7 @@ import logging.handlers
 import pytest
 
 from moonglade import logs as moonglade_logging
+from moonglade import paths
 
 
 @pytest.fixture(autouse=True)
@@ -191,5 +192,5 @@ def test_rotation_is_time_based_daily_keeping_14_days(tmp_path):
 def test_log_directory_is_under_out_dir_and_needs_no_new_gitignore_entry(tmp_path):
     moonglade_logging.setup_logging(tmp_path, verbose=False)
     log_file = moonglade_logging.log_path(tmp_path)
-    assert log_file.parent == tmp_path / "logs"
+    assert log_file.parent == paths.state_path(tmp_path, "logs")
     assert log_file.parent.is_relative_to(tmp_path)

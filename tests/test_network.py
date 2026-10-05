@@ -4,6 +4,7 @@ import pytest
 import requests
 
 from moonglade import backup as core
+from moonglade import paths
 from tests.fake_pixai import FakePixAI
 
 
@@ -637,8 +638,8 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
 
     assert core.walk_end_reached(a) is True
     assert core.walk_end_reached(b) is False
-    assert (a / "telemetry.json").exists()
-    assert not (b / "telemetry.json").exists()
+    assert paths.state_path(a, "telemetry.json").exists()
+    assert not paths.state_path(b, "telemetry.json").exists()
 
     # ...and library B, two known pages deep and never walked to its end, keeps going.
     (b / "images").mkdir(parents=True)

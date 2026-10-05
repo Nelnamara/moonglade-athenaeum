@@ -1,14 +1,21 @@
-"""moonglade.migrate -- 3.20's move: the machine files into APP_ROOT/local/.
+"""moonglade.migrate -- 3.20's move: the machine files into APP_ROOT/local/, and each
+library's own records into <library>/_moonglade/ (its reports into _moonglade/reports/).
 
 Where everything goes is moonglade.paths' to say; this module only brings an install's old
-layout across, once, when a real start runs it (moonglade.gallery's main(), and the launcher for
-its own two files). The rules:
+layout across, once, when a real start runs it (moonglade.gallery's main(), the launcher for
+its own two files, and the command line, `python -m moonglade`, for the library it is pointed
+at). The rules:
 
   * NOTHING OF THE OWNER'S IS EVER DELETED. What is left in an old place is named on the About
     card as safe to delete (leftovers()); the app never removes it.
-  * Small files are COPIED and the old copy left for one release, so going back to 3.19 still
-    works. mirror_session.json is MOVED instead: it is a rotating login token, and two copies
-    would diverge.
+  * Small files are COPIED (folders included) and the old copy left for one release, so going
+    back to 3.19 still works. Two are MOVED instead, because two copies would diverge:
+    mirror_session.json (a rotating login token) and train_guard.json (a spend guard: a stale
+    copy could let a training spend slip it). A SQLite file is copied with SQLite's own
+    backup API, never byte for byte.
+  * The library itself is never touched: catalog.db, the pictures, YYYY-MM/, images/,
+    videos/, imported/, loom/, gallery/, _deleted/, _duplicates/, and the library-side
+    branding.json nothing reads.
   * The art pack is MOVED with os.replace (same volume: no copy of a file of several hundred
     MB), its .version marker with it. A pack still under its pre-v7 name goes through 3.18's
     rename first (moonglade.assets.migrate_legacy_name).
@@ -23,9 +30,10 @@ its own two files). The rules:
   * A FAILURE NEVER STOPS THE APP STARTING. It is logged once, on the app's own logger (which
     moonglade.logs lets through to the file at every level), and tried again at the next
     start; meanwhile moonglade.paths keeps reading anything not brought across where it is.
-  * What was brought across is written down beside it in MOVED.json (local/MOVED.json): one
-    entry per name with its source, its destination, copied/moved/fresh, the time and the
-    size -- the reversible pattern of organize_manifest.csv.
+  * What was brought across is written down beside it in MOVED.json (local/MOVED.json,
+    <library>/_moonglade/MOVED.json): one entry per name with its source, its destination,
+    copied/moved/fresh, the time and the size -- the reversible pattern of
+    organize_manifest.csv.
 """
 import json
 import logging
@@ -285,6 +293,72 @@ def migrate_local(only=None):
             continue                                 # the marker stays with its pack
         _bring(name, src, dest, how, root, outcome, recorded)
     _write_manifest(manifest, outcome)
+    return outcome
+
+
+# The library's records that are MOVED rather than copied (see the module's rules).
+MOVED_RECORDS = ("train_guard.json",)
+# A report never worth bringing across: the integrity writers' lock, held for seconds.
+TRANSIENT_REPORTS = ("integrity_report.lock",)
+
+
+def _library_plan(out):
+    """(name, source, destination, how) for every record and report the library holds,
+    state first, then reports, then the curation import's undo files."""
+    records = out / _paths.RECORDS_DIRNAME
+    reports = records / _paths.REPORTS_DIRNAME
+    for name in _paths.STATE_NAMES:
+        how = "moved" if name in MOVED_RECORDS else "copied"
+        yield name, _paths.old_state_path(out, name), records / name, how
+    for name in _paths.REPORT_NAMES:
+        if name not in TRANSIENT_REPORTS:
+            yield name, _paths.old_state_path(out, name), reports / name, "copied"
+    try:
+        snapshots = sorted(p.name for p in out.glob(_paths.CURATION_SNAPSHOT_PREFIX + "*.json"))
+    except OSError:
+        snapshots = []
+    for name in snapshots:
+        yield name, _paths.old_state_path(out, name), reports / name, "copied"
+
+
+def migrate_library(out_dir):
+    """Bring the library `out_dir`'s records across into its _moonglade/ folder. A folder
+    that is not there yet (a first run's library) is left alone. Returns an Outcome; never
+    raises for a record it could not bring."""
+    out = Path(out_dir)
+    outcome = Outcome("the library " + str(out))
+    if not out.is_dir():
+        return outcome
+    reports = out / _paths.RECORDS_DIRNAME / _paths.REPORTS_DIRNAME
+    try:
+        reports.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        outcome.failed.append((_paths.RECORDS_DIRNAME, _reason(e)))
+        return outcome
+    manifest = _paths.records_manifest(out)
+    recorded = _paths.moved_names(manifest)
+    for name, src, dest, how in _library_plan(out):
+        _bring(name, src, dest, how, out, outcome, recorded)
+    _write_manifest(manifest, outcome)
+    return outcome
+
+
+def open_library(out_dir):
+    """Every entry point's one call for its library, once logging is set up and before
+    anything reads a record: bring the records across, re-point the file log at the new
+    logs/ (moonglade.logs.reopen), then log what happened, once -- in the new log. Never
+    raises."""
+    try:
+        outcome = migrate_library(out_dir)
+    except Exception as e:                       # noqa: BLE001 -- a start must go on
+        outcome = Outcome("the library " + str(out_dir))
+        outcome.failed.append(("the library's records", _reason(e)))
+    try:
+        from moonglade import logs as moonglade_logging
+        moonglade_logging.reopen(out_dir)
+    except Exception:                            # noqa: BLE001 -- the old log still works
+        pass
+    outcome.log()
     return outcome
 
 

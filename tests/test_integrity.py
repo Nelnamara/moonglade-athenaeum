@@ -26,6 +26,7 @@ from pathlib import Path
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity as integ
+from moonglade import paths
 from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 
@@ -106,7 +107,13 @@ def _library(tmp_path):
     return out
 
 
-def _tree_hash(root, skip=("integrity_report.csv", "integrity_report.json")):
+# What the pass writes: its two reports, in the library's records folder (3.20), which it
+# makes when it is not there yet. Everything else in the library must stay as it was.
+_REPORTS_WRITTEN = ("_moonglade", "_moonglade/reports", "_moonglade/reports/integrity_report.csv",
+                    "_moonglade/reports/integrity_report.json")
+
+
+def _tree_hash(root, skip=_REPORTS_WRITTEN):
     h = hashlib.sha256()
     for p in sorted(Path(root).rglob("*")):
         rel = p.relative_to(root).as_posix()
@@ -119,7 +126,7 @@ def _tree_hash(root, skip=("integrity_report.csv", "integrity_report.json")):
 
 
 def _lines(out):
-    with open(out / "integrity_report.csv", newline="", encoding="utf-8") as f:
+    with open(paths.reports_path(out, "integrity_report.csv"), newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
     assert rows[0] == ["media_id", "problem", "path", "size", "recoverable"]
     return {r[0]: r for r in rows[1:]}
@@ -166,7 +173,7 @@ def test_the_deep_tier_marks_torn_files_suspect(tmp_path):
         assert sound not in lines, sound
     assert rep["counts"]["suspect"] == 3
     assert rep["deep"] is True
-    assert "corrupt" not in (out / "integrity_report.csv").read_text(encoding="utf-8")
+    assert "corrupt" not in (paths.reports_path(out, "integrity_report.csv")).read_text(encoding="utf-8")
 
 
 def test_the_structural_checks_on_their_own(tmp_path):
@@ -192,7 +199,7 @@ def test_the_structural_checks_on_their_own(tmp_path):
 def test_the_report_files_and_the_stamp(tmp_path):
     out = _library(tmp_path)
     integ.verify_library(out, out / "catalog.db")
-    doc = json.loads((out / "integrity_report.json").read_text(encoding="utf-8"))
+    doc = json.loads((paths.reports_path(out, "integrity_report.json")).read_text(encoding="utf-8"))
     assert doc["verified_at"].endswith("Z")
     datetime.strptime(doc["verified_at"], "%Y-%m-%dT%H:%M:%SZ")
     assert doc["rows"] == 11
@@ -213,9 +220,9 @@ def test_it_is_read_only(tmp_path):
 def test_it_is_idempotent(tmp_path):
     out = _library(tmp_path)
     first = integ.verify_library(out, out / "catalog.db", deep=True)
-    csv1 = (out / "integrity_report.csv").read_bytes()
+    csv1 = (paths.reports_path(out, "integrity_report.csv")).read_bytes()
     second = integ.verify_library(out, out / "catalog.db", deep=True)
-    assert (out / "integrity_report.csv").read_bytes() == csv1
+    assert (paths.reports_path(out, "integrity_report.csv")).read_bytes() == csv1
     assert first["counts"] == second["counts"] and first["rows"] == second["rows"]
 
 
@@ -272,7 +279,7 @@ def test_the_cli_flag_runs_the_pass_and_logs_a_job(tmp_path, monkeypatch, capsys
     core.main()
     printed = capsys.readouterr().out
     assert "suspect" in printed and "missing" in printed
-    doc = json.loads((out / "integrity_report.json").read_text(encoding="utf-8"))
+    doc = json.loads((paths.reports_path(out, "integrity_report.json")).read_text(encoding="utf-8"))
     assert doc["deep"] is True and doc["counts"]["suspect"] == 3
     jobs = [j for j in core.read_jobs(out) if j.get("type") == "cli"]
     assert [j["label"] for j in jobs] == ["Verify library integrity"]

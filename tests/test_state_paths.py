@@ -1,10 +1,11 @@
-"""The library's own records go through one resolver (Wave 4 groundwork, 3.19.0).
+"""The library's own records go through one resolver (Wave 4 groundwork 3.19.0; moved 3.20.0).
 
 moonglade_paths.state_path(out_dir, name) names the app's state files and folders inside a
-library; moonglade_paths.reports_path(out_dir, name) names its reports. Today both are
-`out_dir / name`, so NOTHING moves -- the next release moves them under the library's
-`_moonglade/` folder by changing those two functions. That only works if no code builds one
-of these names off out_dir by hand, which the lint at the foot of this file holds.
+library; moonglade_paths.reports_path(out_dir, name) names its reports. Since 3.20 they are
+`out_dir/_moonglade/name` and `out_dir/_moonglade/reports/name` (a library not yet brought
+across is read where it is: tests/test_library_records_folder.py). That only works if no
+code builds one of these names off out_dir by hand, which the lint at the foot of this file
+holds.
 
 NOT records, and never routed through here: catalog.db, the picture folders, loom/,
 gallery/, _deleted/ and _duplicates/ -- they stay where they are.
@@ -47,26 +48,29 @@ NOT_RECORDS = ("catalog.db", "images", "videos", "imported", "loom", "gallery",
 
 
 @pytest.mark.parametrize("name", STATE_NAMES)
-def test_a_state_record_is_where_it_was(tmp_path, name):
-    assert paths.state_path(tmp_path, name) == tmp_path / name
-    assert paths.state_path(str(tmp_path), name) == tmp_path / name     # str out_dir too
+def test_a_state_record_is_in_the_records_folder(tmp_path, name):
+    rec = tmp_path / "_moonglade"
+    assert paths.state_path(tmp_path, name) == rec / name
+    assert paths.state_path(str(tmp_path), name) == rec / name     # str out_dir too
 
 
 @pytest.mark.parametrize("name", REPORT_NAMES)
-def test_a_report_is_where_it_was(tmp_path, name):
-    assert paths.reports_path(tmp_path, name) == tmp_path / name
-    assert paths.reports_path(str(tmp_path), name) == tmp_path / name
+def test_a_report_is_in_the_reports_folder(tmp_path, name):
+    rep = tmp_path / "_moonglade" / "reports"
+    assert paths.reports_path(tmp_path, name) == rep / name
+    assert paths.reports_path(str(tmp_path), name) == rep / name
 
 
-def test_the_app_resolvers_are_where_they_were(tmp_path):
+def test_the_app_resolvers_are_in_the_records_folder(tmp_path):
     key = g._account_key("alice")
-    assert g._ach_state_path(tmp_path) == tmp_path / "achievements.json"
-    assert g._telemetry_path(tmp_path) == tmp_path / "telemetry.json"
-    assert core._jobs_path(tmp_path) == tmp_path / "jobs.jsonl"
-    assert g.account_prefs_path(tmp_path, "alice") == tmp_path / "account_prefs" / (key + ".json")
-    assert g.account_state_path(tmp_path, "alice") == tmp_path / "account_state" / (key + ".json")
-    assert mlog.log_path(tmp_path) == tmp_path / "logs" / "moonglade.log"
-    assert runs.RunsStore(tmp_path).path == tmp_path / "runs.db"
+    rec = tmp_path / "_moonglade"
+    assert g._ach_state_path(tmp_path) == rec / "achievements.json"
+    assert g._telemetry_path(tmp_path) == rec / "telemetry.json"
+    assert core._jobs_path(tmp_path) == rec / "jobs.jsonl"
+    assert g.account_prefs_path(tmp_path, "alice") == rec / "account_prefs" / (key + ".json")
+    assert g.account_state_path(tmp_path, "alice") == rec / "account_state" / (key + ".json")
+    assert mlog.log_path(tmp_path) == rec / "logs" / "moonglade.log"
+    assert runs.RunsStore(tmp_path).path == rec / "runs.db"
 
 
 @pytest.fixture
