@@ -304,15 +304,43 @@ def _write_manifest(manifest, outcome):
             pass
 
 
-def _legacy_pack_rename(old_pack, new_pack, recorded, outcome):
+def _legacy_pack_rename(old_pack, new_pack, outcome):
     """3.18's one-time rename, at the OLD place, for an install whose pack still has its
-    pre-v7 name: then the move below carries the renamed pack across like any other."""
+    pre-v7 name: then the move below carries the renamed pack across like any other.
+    Returns the old names it renamed {new name: old name} (the pack, and its marker when it
+    had one), so the record can say where they really came from."""
     if new_pack.exists():
-        return
+        return {}
     from moonglade import assets as _assets
-    if _assets.migrate_legacy_name(old_pack) == "both":
+    legacy = old_pack.with_name(_assets.LEGACY_NAME)
+    legacy_marker = legacy.with_name(legacy.name + ".version")
+    had_marker = legacy_marker.exists()
+    result = _assets.migrate_legacy_name(old_pack)
+    if result == "both":
         outcome.notes.append("An old %s is still in the app folder. It's safe to delete."
                              % _assets.LEGACY_NAME)
+    if result != "renamed":
+        return {}
+    renamed = {PACK_NAME: legacy}
+    if had_marker and not legacy_marker.exists():
+        renamed[PACK_MARKER_NAME] = legacy_marker
+    return renamed
+
+
+def _marker_may_follow(local, outcome, entries):
+    """The pack's .version marker describes ONE pack's bytes, so it moves only beside that
+    same pack: the one this run moved, or the one an earlier run recorded moving that is
+    still in local/ unchanged (its marker could not follow then). Never beside a pack that
+    reached local/ some other way (as moonglade.assets.migrate_legacy_name already refuses)."""
+    if any(e["name"] == PACK_NAME and e["action"] == "moved" for e in outcome.done):
+        return True
+    rec = entries.get(PACK_NAME) or {}
+    if rec.get("action") != "moved" or rec.get("dest_print") is None:
+        return False
+    try:
+        return fingerprint(local / PACK_NAME) == rec["dest_print"]
+    except OSError:
+        return False
 
 
 def migrate_local(only=None):
@@ -326,17 +354,21 @@ def migrate_local(only=None):
         outcome.failed.append((_paths.LOCAL_DIRNAME, _reason(e)))
         return outcome
     manifest = local / _paths.MOVED_NAME
-    recorded = _paths.moved_names(manifest)
+    entries = _paths.moved_entries(manifest)
+    recorded = frozenset(entries)
     root = _paths.APP_ROOT
+    renamed = {}
     for name, how in LOCAL_PLAN:
         if only is not None and name not in only:
             continue
         src, dest = _paths.old_local_path(name), local / name
         if name == PACK_NAME:
-            _legacy_pack_rename(src, dest, recorded, outcome)
-        if name == PACK_MARKER_NAME and not (local / PACK_NAME).exists():
-            continue                                 # the marker stays with its pack
-        _bring(name, src, dest, how, root, outcome, recorded)
+            renamed = _legacy_pack_rename(src, dest, outcome)
+        if name == PACK_MARKER_NAME and not _marker_may_follow(local, outcome, entries):
+            continue                                 # the marker stays with its own pack
+        entry = _bring(name, src, dest, how, root, outcome, recorded)
+        if entry is not None and entry["action"] == "moved" and name in renamed:
+            entry["source"] = _rel(renamed[name], root)      # renamed from its pre-v7 name
     _write_manifest(manifest, outcome)
     return outcome
 

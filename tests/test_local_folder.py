@@ -399,3 +399,49 @@ def test_the_moved_files_survive_a_round_trip_to_3_19(old_layout):
         assert (app / "local" / name).is_file() and not (app / name).exists(), name
     assert core.load_mirror_state() == {"jwt": "renewed-on-3.19"}
     assert g._container_path() == app / "local" / PACK
+
+
+# ---- review round: the pack's marker only follows its own pack ---------------------------
+
+def test_a_marker_never_moves_beside_a_pack_from_somewhere_else(old_layout):
+    """local/ already holds a pack from another source (a download, a copy by hand). The old
+    pack's marker describes the OLD pack: it must not move beside the other one and vouch
+    for bytes it never saw."""
+    app = old_layout
+    _write(app / "local" / PACK, b"ANOTHER PACK")
+    mig.migrate_local()
+    assert not (app / "local" / MARKER).exists()
+    assert (app / MARKER).is_file() and (app / PACK).is_file()      # nothing deleted
+    assert (app / "local" / PACK).read_bytes() == b"ANOTHER PACK"
+
+
+def test_a_marker_left_behind_follows_its_own_pack_next_start(old_layout, monkeypatch):
+    app = old_layout
+    real = os.replace
+    _refuse_replace_of(monkeypatch, MARKER)
+    mig.migrate_local()
+    assert (app / "local" / PACK).is_file() and (app / MARKER).is_file()
+    monkeypatch.setattr(os, "replace", real)
+    mig.migrate_local()                       # the record moved this same pack: it follows
+    assert (app / "local" / MARKER).is_file() and not (app / MARKER).exists()
+
+
+def test_a_marker_left_behind_stays_when_the_pack_was_replaced_since(old_layout, monkeypatch):
+    app = old_layout
+    real = os.replace
+    _refuse_replace_of(monkeypatch, MARKER)
+    mig.migrate_local()
+    monkeypatch.setattr(os, "replace", real)
+    (app / "local" / PACK).write_bytes(b"A NEWER DOWNLOAD")          # not the pack it described
+    mig.migrate_local()
+    assert not (app / "local" / MARKER).exists() and (app / MARKER).is_file()
+
+
+def test_a_pack_renamed_in_the_same_pass_is_recorded_from_its_old_name(app):
+    _write(app / _OLD_NAME, b"OLDPACK")
+    _write(app / (_OLD_NAME + ".version"), '{"version": "6", "sha256": "cd"}')
+    mig.migrate_local()
+    by = {e["name"]: e for e in _moved_doc(app)["entries"]}
+    assert by[PACK]["source"] == _OLD_NAME
+    assert by[MARKER]["source"] == _OLD_NAME + ".version"
+    assert by[PACK]["dest"] == "local/" + PACK
