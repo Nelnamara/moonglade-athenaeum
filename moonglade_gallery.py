@@ -16,6 +16,9 @@ Goes in 3.21, with the other stand-ins. This release's update refuses while an o
 is in charge, so the update that deletes this file only ever lands on a server the new
 launcher started, and no old launcher is left to come looking for it.
 """
+if __name__ != "__main__":          # imported by old code: run nothing, say where it went
+    raise ImportError("moonglade_gallery moved to moonglade.gallery")
+
 import os
 import runpy
 

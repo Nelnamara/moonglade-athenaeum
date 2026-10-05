@@ -7,6 +7,9 @@ instead. The same arguments, the same exit code.
 
 Goes in 3.21, with the other stand-ins.
 """
+if __name__ != "__main__":          # imported by old code: run nothing, say where it went
+    raise ImportError("moonglade_backup moved to moonglade.backup")
+
 import runpy
 import sys
 

@@ -48,8 +48,46 @@ def test_each_stand_in_is_a_few_lines_that_say_why_and_when_it_goes(name):
     doc = ast.get_docstring(ast.parse(src)) or ""
     assert "3.21" in doc, name + " must say which release removes it"
     code = [ln for ln in src.split('"""')[-1].splitlines() if ln.strip()]
-    assert len(code) <= 6, code
+    assert len(code) <= 8, code
     assert 'run_name="__main__", alter_sys=True' in src
+
+
+# ---- imported, a stand-in runs nothing --------------------------------------------------------
+
+@pytest.mark.parametrize("module,moved_to", [
+    ("moonglade_backup", "moonglade.backup"),
+    ("moonglade_gallery", "moonglade.gallery"),
+    ("moonglade_mcp", "moonglade.mcp_server"),
+])
+def test_importing_a_stand_in_raises_and_runs_nothing(monkeypatch, module, moved_to):
+    """A process still running OLD code can import a flat name for the first time after the
+    update -- an old MCP server's first tag_suggest does `import moonglade_backup`. Were the
+    stand-in to run its body on import, that would start a full backup with no flags inside
+    the MCP process, its prints corrupting the protocol on stdout. Imported, a stand-in only
+    says where its module went. (runpy.run_module is stood in for, so a missing guard here
+    records a call instead of really running anything.)"""
+    import importlib
+    ran = []
+    monkeypatch.setattr(runpy, "run_module", lambda name, **kw: ran.append(name))
+    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "0")      # restored after, whatever it was
+    monkeypatch.delitem(sys.modules, module, raising=False)
+    with pytest.raises(ImportError) as e:
+        importlib.import_module(module)
+    assert str(e.value) == "%s moved to %s" % (module, moved_to)
+    assert ran == []
+    assert os.environ["MOONGLADE_VIA_STANDIN"] == "0"
+    assert module not in sys.modules
+
+
+def test_importing_the_cli_stand_in_from_an_old_process_prints_nothing():
+    """The MCP case end to end, in a fresh interpreter: nothing on stdout, no backup run."""
+    r = subprocess.run([sys.executable, "-c", "import moonglade_backup"], cwd=str(REPO_ROOT),
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
+                       encoding="utf-8", errors="replace", env=_env())
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert "ImportError: moonglade_backup moved to moonglade.backup" in r.stderr
+    assert _NOTICE not in r.stderr
 
 
 # ---- the command-line tool ----------------------------------------------------------------
@@ -102,7 +140,7 @@ def test_the_server_stand_in_says_it_came_through_the_old_path(monkeypatch):
     def run_module(name, **kw):
         calls.append((name, kw, os.environ.get("MOONGLADE_VIA_STANDIN")))
     monkeypatch.setattr(runpy, "run_module", run_module)
-    runpy.run_path(str(REPO_ROOT / "moonglade_gallery.py"))
+    runpy.run_path(str(REPO_ROOT / "moonglade_gallery.py"), run_name="__main__")
     assert calls == [("moonglade.gallery", {"run_name": "__main__", "alter_sys": True}, "1")]
 
 
