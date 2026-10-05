@@ -170,26 +170,37 @@ def _copy_sqlite(src, dest):
             pass
 
 
-def _merge_tree(src, dest):
-    """Copy every file of the folder `src` that `dest` does not have yet (the new one wins
-    per file), keeping its shape; locks and temps are left behind. Returns the bytes copied
-    or already there."""
-    dest.mkdir(parents=True, exist_ok=True)
+def _raise(e):
+    raise e
+
+
+def _copy_tree(src, dest):
+    """Copy the folder `src` to `dest` whole or not at all: everything goes into a temp
+    sibling of this run's own, which is renamed into place only once every file has copied.
+    A file that cannot be read, or a subfolder that cannot be listed, aborts the folder: the
+    temp copy (this run's own, never the owner's) is removed, nothing is recorded, and the
+    next start tries again. Locks and half-written temps are left behind. Returns the bytes
+    copied."""
+    tmp = _temp_beside(dest)
     total = 0
-    for dirpath, dirnames, filenames in os.walk(src):
-        here = Path(dirpath)
-        rel = here.relative_to(src)
-        (dest / rel).mkdir(parents=True, exist_ok=True)
-        for fn in filenames:
-            if _transient(fn):
-                continue
-            target = dest / rel / fn
-            if not target.exists():
+    try:
+        tmp.mkdir()
+        for dirpath, dirnames, filenames in os.walk(src, onerror=_raise):
+            here = Path(dirpath)
+            rel = here.relative_to(src)
+            (tmp / rel).mkdir(parents=True, exist_ok=True)
+            for fn in filenames:
+                if _transient(fn):
+                    continue
                 if fn.endswith(".db"):
-                    _copy_sqlite(here / fn, target)
+                    _copy_sqlite(here / fn, tmp / rel / fn)
                 else:
-                    _copy_file(here / fn, target)
-            total += (here / fn).stat().st_size
+                    shutil.copy2(here / fn, tmp / rel / fn)
+                total += (here / fn).stat().st_size
+        os.replace(tmp, dest)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     return total
 
 
@@ -215,13 +226,13 @@ def _bring(name, src, dest, how, root, outcome, recorded):
             return None
         if how == "fresh":
             size = _size(src)                       # left where it is; a new one starts
-        elif src.is_dir() and how == "copied":
-            size = _merge_tree(src, dest)            # a partial earlier try is finished
         elif dest.exists():
             return None                              # both: the new one wins
         elif how == "moved":
             os.replace(src, dest)
             size = _size(dest)
+        elif src.is_dir():
+            size = _copy_tree(src, dest)             # whole, or not at all
         elif src.suffix == ".db":
             _copy_sqlite(src, dest)
             size = _size(dest)
@@ -390,13 +401,17 @@ def leftovers(out_dir=None):
     folder) or "library" (the top of `out_dir`); a folder's name ends in a separator. Read
     from the disk on each ask, so a name leaves the moment its file is deleted.
 
-    A copy is left over when it is still in its old place but the resolver now answers
-    somewhere else: an install not yet brought across has nothing left over (everything is
-    still read where it is). Never raises."""
+    A copy is left over when the migration RECORDED bringing it across (MOVED.json) and the
+    resolver now answers somewhere else: an install not yet brought across, a copy the
+    migration did not make, or a folder it could not finish, has nothing left over. (Two
+    names predate the migration and are named without a record: a pack still under its
+    pre-v7 name beside the one in use, and the library-side branding.json nothing reads.)
+    Never raises."""
     found = []
     try:
         from moonglade import assets as _assets
         pack_in_use = _paths.local_path(PACK_NAME)
+        local_recorded = _paths.moved_names(_paths.local_dir() / _paths.MOVED_NAME)
         app_names = [_assets.LEGACY_NAME, _assets.LEGACY_NAME + ".version"]
         app_names += [n for n, _ in LOCAL_PLAN] + list(_OLD_SERVE_LOGS)
         for name in app_names:
@@ -410,7 +425,7 @@ def leftovers(out_dir=None):
             elif name in _OLD_SERVE_LOGS:
                 gone = _paths.local_path("serve.log") != _paths.old_local_path("serve.log")
             else:
-                gone = _paths.local_path(name) != old
+                gone = name in local_recorded and _paths.local_path(name) != old
             if gone:
                 found.append(("app", _shown(old)))
     except OSError:
@@ -419,8 +434,9 @@ def leftovers(out_dir=None):
         return found
     out = Path(out_dir)
     try:
+        recorded = _paths.moved_names(_paths.records_manifest(out))
         for name, src, _dest, _how in _library_plan(out):
-            if not src.exists():
+            if name not in recorded or not src.exists():
                 continue
             ask = _paths.state_path if name in _paths.STATE_NAMES else _paths.reports_path
             if ask(out, name) != src:

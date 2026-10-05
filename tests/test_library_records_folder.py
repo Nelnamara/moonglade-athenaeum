@@ -506,3 +506,65 @@ def test_only_the_servers_start_moves_the_guard():
     call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
                 and getattr(n.func, "attr", None) == "open_library")
     assert "move_guard" not in {k.arg for k in call.keywords}
+
+
+# ---- review round: a folder is brought across whole or not at all ------------------------
+
+def _refuse_copy_of(monkeypatch, filename):
+    real = mig.shutil.copy2
+
+    def copy2(src, dst, *a, **k):
+        if Path(src).name == filename:
+            raise PermissionError("locked: %s" % src)
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(mig.shutil, "copy2", copy2)
+    return real
+
+
+def test_a_locked_file_mid_folder_leaves_the_folder_where_it_was(old_library, monkeypatch):
+    """One file in account_prefs/ that cannot be read: the new folder must not appear without
+    it (the app would read it, and About would call the old folder -- the only full copy --
+    safe to delete). Nothing is recorded, no half copy is left, and the next start retries."""
+    lib = old_library
+    (lib / "account_prefs" / "second.json").write_text('{"b": 2}', encoding="utf-8")
+    real = _refuse_copy_of(monkeypatch, "second.json")
+    out = mig.migrate_library(lib)
+    assert "account_prefs" in [f[0] for f in out.failed]
+    assert not (lib / "_moonglade" / "account_prefs").exists()
+    assert not [p for p in (lib / "_moonglade").iterdir() if ".copying-" in p.name]
+    assert "account_prefs" not in paths.moved_names(paths.records_manifest(lib))
+    assert paths.state_path(lib, "account_prefs") == lib / "account_prefs"
+    assert "account_prefs" + os.sep not in [n for _, n in mig.leftovers(lib)]
+    monkeypatch.setattr(mig.shutil, "copy2", real)
+    mig.migrate_library(lib)
+    assert (lib / "_moonglade" / "account_prefs" / "second.json").read_text() == '{"b": 2}'
+    assert paths.state_path(lib, "account_prefs") == lib / "_moonglade" / "account_prefs"
+
+
+def test_an_unreadable_subfolder_aborts_the_folder(old_library, monkeypatch):
+    """os.walk skips a folder it cannot list unless told otherwise: the copy would look whole
+    and be recorded. It is aborted instead."""
+    lib = old_library
+    sub = lib / "account_state" / "older"
+    sub.mkdir()
+    (sub / "kept.json").write_text("{}", encoding="utf-8")
+    real_scandir = os.scandir
+
+    def scandir(path="."):
+        if Path(path) == sub:
+            raise PermissionError("cannot list %s" % path)
+        return real_scandir(path)
+    monkeypatch.setattr(os, "scandir", scandir)
+    out = mig.migrate_library(lib)
+    assert "account_state" in [f[0] for f in out.failed]
+    assert not (lib / "_moonglade" / "account_state").exists()
+    assert "account_state" not in paths.moved_names(paths.records_manifest(lib))
+
+
+def test_about_lists_only_what_the_migration_recorded(old_library):
+    """A new copy the migration did not make (put there by hand, or by a run that died before
+    writing MOVED.json) is not enough to call the old one safe to delete."""
+    lib = old_library
+    (lib / "_moonglade").mkdir()
+    (lib / "_moonglade" / "achievements.json").write_text('{"earned": {}}', encoding="utf-8")
+    assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]
