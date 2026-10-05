@@ -22,6 +22,9 @@ git tags. Full prose notes for tagged versions live on
 - **The pack's animations are smaller.** Every animation in it (the mascots, the animated badges, the marks and the sign-in companion) is 360 px tall and plays every second frame over the same time, so the pack downloads at about half its old size. The badge pictures keep their full colour. (2026-10-04)
 - **The login companion's role in Branding takes art from 360 px tall**, the size of the pack's own sign-in animation now. (2026-10-04)
 
+### Under the hood
+- The old `/api/next/...` paths are gone. The app reads `/api/library`, `/api/detail/<id>` and `/api/history`, which have answered since 3.17.0, so nothing you see changes; a page left open since before 3.17.0 needs a reload. (2026-10-04)
+
 ## [3.17.0] - 2026-10-04 — Mail Call
 
 ### The pickers' Saved tab
