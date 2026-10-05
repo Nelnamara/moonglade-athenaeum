@@ -234,3 +234,45 @@ def test_no_module_but_moonglade_paths_reads_the_working_directory():
     stray = [h for p in _first_party_modules() if p.name != "moonglade_paths.py"
              for h in _cwd_reads(p)]
     assert not stray, "ask moonglade_paths.run_dir():\n  " + "\n  ".join(stray)
+
+
+# ---- Flask resolves a relative library against the app folder, not the module's ---------
+
+def test_a_relative_library_serves_from_the_app_folder(tmp_path, monkeypatch):
+    """send_from_directory() and send_file() join a RELATIVE path onto Flask's root_path,
+    which defaults to the folder of the module that made the app. The default library
+    (`pixai_backup`) is relative, so a thumbnail and a video must come from APP_ROOT/<library>
+    -- not from wherever moonglade_gallery.py sits, which stops being the app folder when
+    the code moves. Here the app folder is a tmp one and the module is not in it."""
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from tests.conftest import login_client
+    app_root = tmp_path / "app"
+    lib = app_root / "lib"
+    (lib / "gallery" / "thumbs").mkdir(parents=True)
+    (lib / "videos").mkdir()
+    (lib / "gallery" / "thumbs" / "m1.jpg").write_bytes(b"\xff\xd8\xff\xe0THUMB")
+    (lib / "videos" / "clip_V1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42CLIP")
+    row = {f: "" for f in CATALOG_FIELDS}
+    save_catalog(lib / "catalog.db", [
+        row | {"media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"},
+        row | {"media_id": "V1", "filename": "videos/clip_V1.mp4", "is_video": "1",
+               "created_at": "2025-01-02T00:00:00"}])
+    monkeypatch.setattr(paths, "APP_ROOT", app_root)
+    monkeypatch.chdir(app_root)                   # as every entry point runs
+    assert Path(g.__file__).resolve().parent != app_root
+    cli = login_client(Path("lib"))
+    thumb = cli.get("/thumbs/m1.jpg")
+    assert thumb.status_code == 200 and thumb.data.endswith(b"THUMB")
+    video = cli.get("/video-file/V1")
+    assert video.status_code == 200 and video.data.endswith(b"CLIP")
+
+
+def test_flask_root_path_is_the_app_folder():
+    """Read off the source, for the same reason as the static folder above."""
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(g.create_app)))
+    flask = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "id", None) == "Flask"]
+    kw = {k.arg: ast.unparse(k.value) for k in flask[0].keywords}
+    assert kw.get("root_path") == "str(_paths.APP_ROOT)"
