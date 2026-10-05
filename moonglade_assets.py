@@ -98,6 +98,12 @@ def _write_marker(container_path, manifest):
 # other code path asks moonglade_gallery._container_path() (tests/test_pack_file_name.py).
 LEGACY_NAME = "moonglade.dat"
 
+# Where the rename writes down what it did: a child of the app's own logger, which
+# moonglade_logging lets through to out_dir/logs/moonglade.log at every level. This module's
+# own name would not do -- the root ceiling there is WARNING, so the INFO line that says the
+# rename happened would never reach the file.
+_LOG = "moonglade.assets"
+
 
 def migrate_legacy_name(container_path):
     """Move an install's pack from its pre-v7 name to `container_path`, once. A real server
@@ -117,8 +123,9 @@ def migrate_legacy_name(container_path):
         offers the download).
       - the old name absent: nothing to do.
 
-    Returns "renamed", "both", "failed" or "none". Never raises."""
-    log = logging.getLogger(__name__)
+    Returns "renamed", "both", "failed" or "none". Never raises. Every outcome but "none" is
+    written to the log file (_LOG)."""
+    log = logging.getLogger(_LOG)
     new = Path(container_path)
     old = new.with_name(LEGACY_NAME)
     if not old.is_file():

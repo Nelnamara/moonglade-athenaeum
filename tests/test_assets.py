@@ -552,3 +552,33 @@ def test_a_marker_that_cannot_follow_its_pack_never_leaves_a_stale_one_vouching(
     assert ma._read_marker(new) is None
     assert ma.needs_download(new, v7) is True
     assert len(_warnings(caplog)) == 1
+
+
+@pytest.mark.parametrize("case", ["renamed", "both", "failed"])
+def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
+    """The start's only record is out_dir/logs/moonglade.log, written through the real
+    setup_logging. Its root ceiling is WARNING and only the app's own loggers are let through
+    below it, so a line logged anywhere else at INFO never reaches the file: each outcome --
+    the rename itself included -- must be findable there afterwards."""
+    import moonglade_logging as ml
+    library, app = tmp_path / "library", tmp_path / "app"
+    app.mkdir()
+    _old_pack(app, manifest=_manifest_for(REAL_BYTES))
+    if case == "both":
+        (app / _NEW).write_bytes(REAL_BYTES)
+    if case == "failed":
+        def _refuse(src, dst):
+            raise PermissionError(13, "Access is denied", str(src))
+        monkeypatch.setattr(ma.os, "replace", _refuse)
+    ml._reset_for_tests()
+    try:
+        ml.setup_logging(library)
+        assert ma.migrate_legacy_name(app / _NEW) == case
+        log = ml.log_path(library)
+        text = log.read_text(encoding="utf-8") if log.exists() else ""
+    finally:
+        ml._reset_for_tests()
+    want = {"renamed": "renamed %s to %s" % (ma.LEGACY_NAME, _NEW),
+            "both": "an old copy remains",
+            "failed": "could not rename"}[case]
+    assert want in text, "%r is not in the log file:\n%s" % (want, text)
