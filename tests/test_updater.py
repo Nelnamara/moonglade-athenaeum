@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _row(**kw):
@@ -126,7 +126,7 @@ def test_check_reports_behind_with_the_release_details(tmp_path, monkeypatch):
 
 
 def test_check_reports_up_to_date_on_its_own_version(tmp_path, monkeypatch):
-    import moonglade_backup as core
+    from moonglade import backup as core
     _fresh_cache(monkeypatch)
     monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v" + core.__version__)])
     d = _client(tmp_path).get("/api/update/check").get_json()
@@ -250,7 +250,7 @@ def test_apply_refuses_without_confirm(tmp_path, monkeypatch):
 def test_apply_refuses_under_read_only(tmp_path, monkeypatch):
     """Not a PixAI spend, but the owner's flag says don't change this install -- and this
     changes it more than anything else in the app."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "READ_ONLY", True)
     _apply_ready(monkeypatch)
     cli = _client(tmp_path)
@@ -265,6 +265,27 @@ def test_apply_refuses_unsupervised(tmp_path, monkeypatch):
     cli = _client(tmp_path)
     r = _apply(cli)
     assert r.status_code == 409 and "managed launcher" in r.get_json()["error"]
+
+
+def test_apply_refuses_while_an_old_launcher_is_in_charge(tmp_path, monkeypatch):
+    """3.20: a server the root moonglade_gallery.py stand-in started belongs to a launcher
+    from before the move, which only knows that path. The next release deletes the
+    stand-in, so an update applied now would restart into nothing and the app would stop.
+    The refusal says what fixes it, in the words of the one-time notice
+    (tests/test_standin_notice.py), before git is asked anything."""
+    git = _apply_ready(monkeypatch)
+    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
+    asked = []
+    monkeypatch.setattr(g, "_git", lambda args, **k: (asked.append(args), git(args, **k))[1])
+    cli = _client(tmp_path)                 # built BEFORE the Thread patch, as above
+    started = _started(monkeypatch)         # an apply that got through never really runs
+    r = _apply(cli)
+    assert started["n"] == 0
+    assert r.status_code == 409
+    assert r.get_json() == {"error": "Moonglade moved into its new folder. Close it and open "
+                                     "it again once to finish.", "kind": "failed"}
+    assert asked == []
+    assert g.update_state()["phase"] == "idle"
 
 
 def test_apply_refuses_while_a_job_runs(tmp_path, monkeypatch):
@@ -300,13 +321,13 @@ def test_apply_refuses_a_tracked_edit_and_names_the_file(tmp_path, monkeypatch):
 
     The untracked `notes.txt` alongside it is NOT named and NOT a reason: the update
     doesn't write that path, so it was never endangered."""
-    _apply_ready(monkeypatch, dirty=" M moonglade_gallery.py\n?? notes.txt\n",
-                 incoming=["moonglade_gallery.py"])
+    _apply_ready(monkeypatch, dirty=" M moonglade/gallery.py\n?? notes.txt\n",
+                 incoming=["moonglade/gallery.py"])
     cli = _client(tmp_path)
     r = _apply(cli)
     assert r.status_code == 409
     err = r.get_json()["error"]
-    assert "uncommitted" in err and "moonglade_gallery.py" in err
+    assert "uncommitted" in err and "moonglade/gallery.py" in err
     assert "notes.txt" not in err
 
 
@@ -323,7 +344,7 @@ def _started(monkeypatch):
 def test_an_untracked_file_the_update_never_touches_does_not_stop_it(tmp_path, monkeypatch):
     """A stray file is not an endangered file. Real installs collect them, so blocking on
     sight refuses every real machine forever."""
-    _apply_ready(monkeypatch, dirty="?? notes.txt\n", incoming=["moonglade_gallery.py"])
+    _apply_ready(monkeypatch, dirty="?? notes.txt\n", incoming=["moonglade/gallery.py"])
     cli = _client(tmp_path)
     started = _started(monkeypatch)
     r = _apply(cli)
@@ -335,7 +356,7 @@ def test_the_live_case_an_untracked_boop_folder_does_not_stop_the_update(tmp_pat
     release had never heard of, with the untrue claim that the update would overwrite it.
     Nothing in the release lives under that path; the update proceeds."""
     _apply_ready(monkeypatch, dirty="?? boop/\n",
-                 incoming=["moonglade_gallery.py", "static/app.js"])
+                 incoming=["moonglade/gallery.py", "static/app.js"])
     cli = _client(tmp_path)
     started = _started(monkeypatch)
     r = _apply(cli)
@@ -346,7 +367,7 @@ def test_an_untracked_file_at_an_incoming_path_refuses_and_names_it(tmp_path, mo
     """The case the guard is FOR: git would refuse this pull too, so this says why in
     words, and honestly -- 'where the update needs to write', not 'your changes'."""
     _apply_ready(monkeypatch, dirty="?? new_module.py\n?? notes.txt\n",
-                 incoming=["new_module.py", "moonglade_gallery.py"])
+                 incoming=["new_module.py", "moonglade/gallery.py"])
     cli = _client(tmp_path)
     r = _apply(cli)
     assert r.status_code == 409
@@ -431,7 +452,7 @@ def _refuse_no_confirm(tmp_path, monkeypatch):
 
 
 def _refuse_read_only(tmp_path, monkeypatch):
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "READ_ONLY", True)
     _apply_ready(monkeypatch)
     return _apply(_client(tmp_path))
@@ -440,6 +461,14 @@ def _refuse_read_only(tmp_path, monkeypatch):
 def _refuse_unsupervised(tmp_path, monkeypatch):
     _apply_ready(monkeypatch, supervised=False)
     return _apply(_client(tmp_path))
+
+
+def _refuse_via_standin(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
+    cli = _client(tmp_path)                 # built BEFORE the Thread patch, as above
+    _started(monkeypatch)
+    return _apply(cli)
 
 
 def _refuse_busy_job(tmp_path, monkeypatch):
@@ -457,14 +486,14 @@ def _refuse_off_master(tmp_path, monkeypatch):
 
 
 def _refuse_dirty_tracked(tmp_path, monkeypatch):
-    _apply_ready(monkeypatch, dirty=" M moonglade_gallery.py\n",
-                 incoming=["moonglade_gallery.py"])
+    _apply_ready(monkeypatch, dirty=" M moonglade/gallery.py\n",
+                 incoming=["moonglade/gallery.py"])
     return _apply(_client(tmp_path))
 
 
 def _refuse_untracked_collision(tmp_path, monkeypatch):
     _apply_ready(monkeypatch, dirty="?? new_module.py\n",
-                 incoming=["new_module.py", "moonglade_gallery.py"])
+                 incoming=["new_module.py", "moonglade/gallery.py"])
     return _apply(_client(tmp_path))
 
 
@@ -481,21 +510,22 @@ def _refuse_already_running(tmp_path, monkeypatch):
     (_refuse_no_confirm, "failed"),
     (_refuse_read_only, "failed"),
     (_refuse_unsupervised, "failed"),
+    (_refuse_via_standin, "failed"),
     (_refuse_busy_job, "busy"),
     (_refuse_off_master, "failed"),
     (_refuse_dirty_tracked, "failed"),
     (_refuse_untracked_collision, "failed"),
     (_refuse_already_running, "busy"),
-], ids=["no-csrf", "no-confirm", "read-only", "unsupervised", "busy-job",
+], ids=["no-csrf", "no-confirm", "read-only", "unsupervised", "via-standin", "busy-job",
         "off-master", "dirty-tracked", "untracked-collision", "already-running"])
 def test_every_refusal_carries_a_kind_the_modal_can_dispatch_on(
         tmp_path, monkeypatch, setup, expected):
     """Each refusal /api/update/apply can reach names itself as "busy" or "failed".
 
     COVERED, one case per refusal the route can be driven into with the fixtures this
-    file already has: no CSRF, no confirm, READ_ONLY, unsupervised, a panel job in the
-    way, off master, a tracked edit, an untracked file at an incoming path, and a second
-    apply while one is already running.
+    file already has: no CSRF, no confirm, READ_ONLY, unsupervised, an old launcher still in
+    charge (3.20's stand-in), a panel job in the way, off master, a tracked edit, an
+    untracked file at an incoming path, and a second apply while one is already running.
 
     NOT COVERED here, because each needs a git seam that fails rather than answers and
     the fixtures above have no shape for one: the three "couldn't read this checkout"
@@ -723,7 +753,7 @@ def test_a_logging_failure_never_breaks_the_update(monkeypatch):
 
 def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatch):
     """End to end through the route: the jobs.jsonl line the activity tracker serves."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     _apply_ready(monkeypatch)
     monkeypatch.setattr(g, "_git", lambda args, **k:
                         (0, "master") if args[:2] == ["rev-parse", "--abbrev-ref"]
@@ -747,9 +777,9 @@ def test_the_log_line_records_the_untracked_files_the_update_stepped_around(
         tmp_path, monkeypatch):
     """The guard's decision has to leave a trace. Without it, "it updated OVER my files"
     and "it updated BESIDE my files" look identical afterwards, and only one is a bug."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     _apply_ready(monkeypatch, dirty="?? boop/\n?? notes.txt\n",
-                 incoming=["moonglade_gallery.py"])
+                 incoming=["moonglade/gallery.py"])
     cli = _client(tmp_path)
     monkeypatch.setattr(g, "_schedule_server_exit", lambda code: None)
     real_thread = g.threading.Thread
