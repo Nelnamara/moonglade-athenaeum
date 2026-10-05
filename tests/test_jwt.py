@@ -13,7 +13,7 @@ import pytest
 
 import moonglade_backup as mj
 
-# read_browser_jwt / read_browser_session resolve *Windows* browser profiles (LOCALAPPDATA +
+# read_browser_jwt resolves *Windows* browser profiles (LOCALAPPDATA +
 # backslash Chrome/Edge/Brave paths). Tests that build a real on-disk profile layout and call the
 # un-mocked reader are Windows-only by construction: on a Linux runner the backslash path is
 # malformed, so the reader finds nothing and returns ''. Guard those rather than fail CI's Linux
@@ -116,22 +116,6 @@ def test_refresh_returns_none_when_nothing_usable():
     # (review) the gateway echoes the SAME token we sent -> not a renewal
     same = _jwt(NOW + 10 * 86400)
     assert mj.refresh_jwt(_Session(_Resp(headers={"token": same}, jd={})), current_jwt=same) is None
-
-
-def test_read_browser_session_degrades_to_empty(monkeypatch):
-    """No browser_cookie3 and no native read available -> {} (caller then uses the stored
-    session or the break-glass paste), never a crash."""
-    import builtins
-    real_import = builtins.__import__
-
-    def no_bc3(name, *a, **k):
-        if name == "browser_cookie3":
-            raise ImportError("absent")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", no_bc3)
-    monkeypatch.setattr(mj, "_read_chromium_cookies_windows", lambda: {})
-    assert mj.read_browser_session() == {}
 
 
 # ---- mirror session: persistence, session build, refresh, and the check command ----
@@ -252,8 +236,7 @@ def test_run_mirror_check_never_prints_the_token(tmp_path, monkeypatch, capsys):
 
 def test_run_mirror_check_no_session(tmp_path, monkeypatch):
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
-    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})
-    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: "")   # no localStorage JWT either
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: "")   # no localStorage JWT
     res = mj.run_mirror_check(SimpleNamespace())
     assert res["ok"] is False and res["source"] == "none"
 
@@ -551,15 +534,15 @@ def test_read_browser_jwt_logout_tombstone_across_ldb_and_log(tmp_path, monkeypa
 
 
 def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tmp_path, monkeypatch):
-    """The v20-cookie case: cookies can't be decrypted (read_browser_session -> {}), but the
-    JWT reads from localStorage -> a JWT-only mirror session is built AND persisted, so a
-    later call needs no browser. This is exactly what Connect does on a current Chrome."""
+    """The v20-cookie case: the cookie store can't be decrypted (and the app no longer reads
+    it), but the JWT reads from localStorage -> a JWT-only mirror session is built AND
+    persisted, so a later call needs no browser. This is exactly what Connect does on a
+    current Chrome."""
     p = tmp_path / "m.json"
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: p)
     monkeypatch.setattr(mj, "_make_session", _fake_make_session)
     fresh = _jwt_in(27)
     monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: fresh)
-    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})   # v20: no cookies
     monkeypatch.setattr(mj, "refresh_jwt", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("a fresh ~27d jwt must not trigger refresh")))
     s = mj.make_mirror_session(bootstrap_from_browser=True)
@@ -568,18 +551,40 @@ def test_make_mirror_session_bootstraps_from_localstorage_jwt_without_cookies(tm
 
 
 def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
-    """--mirror-check with no stored session and no readable cookies still connects off the
-    localStorage JWT, and still never prints the token."""
+    """--mirror-check with no stored session still connects off the localStorage JWT, and
+    still never prints the token."""
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "none.json")
     browser_jwt = _jwt_in(27)
     fresh = _jwt_in(27)
     monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: browser_jwt)
-    monkeypatch.setattr(mj, "read_browser_session", lambda *a, **k: {})
     monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
     res = mj.run_mirror_check(SimpleNamespace())
     out = capsys.readouterr().out
     assert res["ok"] is True and res["source"] == "browser"
     assert browser_jwt not in out and fresh not in out
+
+
+def test_mirror_check_command_runs_on_the_jwt_reader_alone(tmp_path, monkeypatch, capsys):
+    """The `--mirror-check` command line, end to end through main(): with no stored session
+    it signs in through read_browser_jwt and nothing else. The old browser-cookie reader
+    (read_browser_session and its helpers) is gone, and an installed browser_cookie3 is never
+    asked for. Nothing is printed of the token, and nothing leaves the test: refreshToken is
+    stubbed."""
+    monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "mirror.json")
+    browser_jwt = _jwt_in(5)
+    fresh = _jwt_in(27)
+    monkeypatch.setattr(mj, "read_browser_jwt", lambda *a, **k: browser_jwt)
+    monkeypatch.setattr(mj, "refresh_jwt", lambda session, current_jwt=None: fresh)
+    monkeypatch.setitem(sys.modules, "browser_cookie3", None)   # an import of it would raise
+    monkeypatch.setattr(sys, "argv", ["prog", "--mirror-check", "--out", str(tmp_path)])
+    mj.main()
+    out = capsys.readouterr().out
+    assert "Mirror OK (source: browser)" in out
+    assert browser_jwt not in out and fresh not in out
+    assert mj.load_mirror_state()["jwt"] == fresh               # the renewed token is kept
+    for gone in ("read_browser_session", "_read_chromium_cookies_windows",
+                 "_chromium_aes_key", "_chromium_decrypt", "PIXAI_COOKIE_DOMAIN"):
+        assert not hasattr(mj, gone), gone
 
 
 # ---- ultrareview fixes (2026-08-15) ---------------------------------------------------

@@ -883,7 +883,6 @@ DELETE_OPERATION = "deleteGenerationTask"
 # Public hash; override in config.json if it rotates.
 REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
     "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
-PIXAI_COOKIE_DOMAIN = "pixai.art"
 # A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
 # own renewal and the app's refreshToken alike; the ~27 days measured in August no longer
 # holds). Renew once fewer than this many days are left -- measured in the token's real
@@ -5690,9 +5689,9 @@ def _make_session(token_val, resolve_user=True):
 #   - The JWT rides as Authorization: Bearer (~27d); a FRESH jwt is returned in the
 #     `token` response header (access-control-expose-headers: token,...).
 #   - refreshToken is a no-arg persisted mutation (REFRESH_TOKEN_HASH).
-# So: read the .pixai.art session from the local browser ONCE (cookies-from-browser),
-# then the cookies self-refresh and refreshToken rolls the JWT -- zero paste. A
-# one-time paste field is the break-glass fallback only.
+# So: read the live JWT from the local browser's localStorage ONCE (read_browser_jwt), then
+# refreshToken rolls it -- zero paste. A one-time paste field is the break-glass fallback
+# only.
 #
 # SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
 # these). The credential never leaves this machine and is never printed, logged, or
@@ -5748,123 +5747,14 @@ def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAY
     return exp - now <= threshold_days * 86400
 
 
-def read_browser_session(browsers=("chrome", "edge", "brave")):
-    """Read the current .pixai.art session cookies from the local browser store, the
-    way yt-dlp's --cookies-from-browser does. Returns {name: value} for the cookies
-    found, or {} if none could be read. NEVER raises and NEVER logs a value.
-
-    Prefers `browser_cookie3` (handles Chrome/Edge/Brave/Firefox + the Windows DPAPI +
-    AES-GCM decrypt across OSes). Falls back to the native Windows reader below. On a
-    machine with neither a browser nor the dep, returns {} and the caller degrades to
-    the stored session / the break-glass paste."""
-    jar = {}
-    try:
-        import browser_cookie3 as bc3  # optional dep; the robust path
-    except Exception:
-        bc3 = None
-    if bc3 is not None:
-        for name in browsers:
-            loader = getattr(bc3, name, None)
-            if loader is None:
-                continue
-            try:
-                cj = loader(domain_name=PIXAI_COOKIE_DOMAIN)
-                for c in cj:
-                    if PIXAI_COOKIE_DOMAIN in (c.domain or ""):
-                        jar[c.name] = c.value
-                if jar:
-                    return jar
-            except Exception:
-                continue  # locked profile, no such browser, decrypt fail -> try next
-        if jar:
-            return jar
-    try:
-        return _read_chromium_cookies_windows()
-    except Exception:
-        return {}
-
-
-def _read_chromium_cookies_windows():
-    """Native Windows Chrome/Edge cookie read: AES-GCM values decrypted with the
-    profile key from Local State (DPAPI-unprotected). Read-only; copies the
-    share-readable DB to a temp file so an open browser doesn't block it. Returns {}
-    on any failure -- a best-effort fallback, never a hard dependency. No value logged."""
-    import shutil
-    import sqlite3
-    import tempfile
-    la = os.environ.get("LOCALAPPDATA", "")
-    profiles = [
-        os.path.join(la, r"Google\Chrome\User Data"),
-        os.path.join(la, r"Microsoft\Edge\User Data"),
-    ]
-    jar = {}
-    for udir in profiles:
-        ck = os.path.join(udir, "Default", "Network", "Cookies")
-        ls = os.path.join(udir, "Local State")
-        if not (os.path.isfile(ck) and os.path.isfile(ls)):
-            continue
-        try:
-            key = _chromium_aes_key(ls)
-            if not key:
-                continue
-            tmp = os.path.join(tempfile.gettempdir(), "mg_ck_%d.db" % os.getpid())
-            shutil.copy2(ck, tmp)  # native copy succeeds even while the browser holds it
-            try:
-                con = sqlite3.connect(tmp)
-                rows = con.execute(
-                    "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
-                    ("%" + PIXAI_COOKIE_DOMAIN,),
-                ).fetchall()
-                con.close()
-            finally:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-            for name, enc in rows:
-                val = _chromium_decrypt(enc, key)
-                if val:
-                    jar[name] = val
-            if jar:
-                return jar
-        except Exception:
-            continue
-    return jar
-
-
-def _chromium_aes_key(local_state_path):
-    """The per-profile AES key from Local State, DPAPI-unprotected. Windows only."""
-    try:
-        import win32crypt  # from pywin32
-    except Exception:
-        return None
-    with open(local_state_path, "r", encoding="utf-8") as fh:
-        state = json.load(fh)
-    enc_key = base64.b64decode(state["os_crypt"]["encrypted_key"])
-    enc_key = enc_key[5:]  # strip the "DPAPI" prefix
-    return win32crypt.CryptUnprotectData(enc_key, None, None, None, 0)[1]
-
-
-def _chromium_decrypt(enc, key):
-    """AES-256-GCM decrypt of a Chromium v10/v11 cookie value. '' on failure."""
-    try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        if enc[:3] in (b"v10", b"v11"):
-            nonce, ct = enc[3:15], enc[15:]
-            return AESGCM(key).decrypt(nonce, ct, None).decode("utf-8", "replace")
-    except Exception:
-        pass
-    return ""
-
-
 # --- localStorage JWT reader ------------------------------------------------------
 # Modern Chrome (>=127) wraps the cookie store in app-bound "v20" encryption a normal
-# user process can't decrypt, so the cookie path above returns nothing there. But the
-# pixai.art frontend ALSO keeps the live JWT in localStorage, and localStorage's
-# on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we read the JWT
-# straight out of it. That's the whole reason "Connect" can work on a current Chrome
-# without a paste. The Bearer JWT alone authenticates the mirror (create rides
-# Authorization: Bearer; refreshToken renews off the Bearer), so cookies are optional.
+# user process can't decrypt, so a cookie read comes back empty there (the app no longer
+# reads cookies at all). The pixai.art frontend keeps the live JWT in localStorage, and
+# localStorage's on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we
+# read the JWT straight out of it. That's the whole reason "Connect" can work on a current
+# Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
+# Authorization: Bearer; refreshToken renews off the Bearer), so no cookie is needed.
 #
 # We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
 # library). A raw byte-scan is NOT enough: an established profile compacts its writes into
