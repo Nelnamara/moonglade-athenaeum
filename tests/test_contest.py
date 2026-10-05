@@ -21,9 +21,9 @@ import threading
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, record_own_sleeps
 

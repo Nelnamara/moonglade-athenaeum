@@ -5,8 +5,8 @@ expiry dates, `expiryCounts: [{expiresAt, count}]`; the app used to keep only th
 These pin that the dates now reach /api/account's per-type breakdown, which the credits chip's
 peach underline and its tooltip lines (and the phone's Gift box row) are drawn from. Nothing new
 is read: the summary is the same call the chip already makes. No network: the `pixai` fixture."""
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 
 

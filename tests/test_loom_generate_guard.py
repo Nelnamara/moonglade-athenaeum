@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import _account_key, create_app
+from moonglade import backup as core
+from moonglade.gallery import _account_key, create_app
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
 
 MID = "733917871331404290"
@@ -498,7 +498,7 @@ def test_a_non_json_body_neither_renders_nor_writes_a_board(rig, ctype):
     assert w.status_code == 400 and not (w.get_json() or {}).get("ok")
     assert cli.get("/api/loom/get?key=" + key).get_json()["missing"] is True, "no board was written"
     import inspect
-    import moonglade_gallery
+    from moonglade import gallery as moonglade_gallery
     src = inspect.getsource(moonglade_gallery)
     for fn in ("def loom_generate", "def loom_set"):
         i = src.index(fn)
@@ -509,7 +509,7 @@ def test_a_non_json_body_neither_renders_nor_writes_a_board(rig, ctype):
 def test_the_handoff_source_names_no_spend_call():
     import ast
     import inspect
-    import moonglade_gallery
+    from moonglade import gallery as moonglade_gallery
     src = inspect.getsource(moonglade_gallery)
     for fn in ("def loom_handoff", "def loom_submit_status", "def loom_submit_abandon"):
         i = src.index(fn)

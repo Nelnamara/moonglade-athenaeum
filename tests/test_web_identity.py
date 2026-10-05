@@ -9,7 +9,7 @@ the client it believes it is talking to, not by the credential; the app's own id
 stricter mobile-app tier. So the picker's search, its bookmark tab and a picked model's versions
 present as the website. The credential is never touched by that -- Authorization stays as built.
 """
-import moonglade_backup as core
+from moonglade import backup as core
 from tests.conftest import login_client
 
 

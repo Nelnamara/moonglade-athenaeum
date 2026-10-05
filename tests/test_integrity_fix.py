@@ -20,10 +20,10 @@ import time
 import pytest
 import requests
 
-import moonglade_backup as core
-import moonglade_gallery as g
-import moonglade_integrity as integ
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade import integrity as integ
+from moonglade.gallery import create_app
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _mp4, _png, _webp
 from tests.test_integrity_broken import _broken_library

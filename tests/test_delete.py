@@ -6,7 +6,7 @@ guards (the READ_ONLY refusal, single attempt, no retry) so they can't regress.
 """
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _post_response(mocker, status_code=200, json_body=None, text="", ssl_error=False):

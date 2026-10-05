@@ -21,8 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
+from moonglade import backup as core
+from moonglade import gallery as g
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +416,7 @@ def test_every_media_spawn_in_the_app_goes_through_the_seam():
     # literal is a call site that skipped the seam.
     pat = re.compile(r"""\[\s*["'](ffmpeg|ffprobe)["']""")
     offenders = []
-    for name in ("moonglade_backup.py", "moonglade_gallery.py"):
+    for name in ("moonglade/backup.py", "moonglade/gallery.py"):
         src = io.open(repo / name, encoding="utf-8").read()
         for m in pat.finditer(src):
             offenders.append("{}:{}".format(name, src[:m.start()].count("\n") + 1))

@@ -7,8 +7,8 @@ import zipfile
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import load_catalog
+from moonglade import backup as core
+from moonglade.gallery import load_catalog
 
 from tests.conftest import login_client
 

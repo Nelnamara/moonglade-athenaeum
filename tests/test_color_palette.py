@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 from tests.conftest import login_client
 
 T3 = "2024383379556065549"

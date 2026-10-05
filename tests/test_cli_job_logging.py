@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _patch_sync_chain(monkeypatch, calls, *, download_exc=None):

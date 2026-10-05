@@ -5,8 +5,8 @@ import json
 import tempfile
 import types
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 
 
 _SURFACE = ["inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
@@ -150,7 +150,7 @@ def test_the_local_import_paths_also_use_the_shared_builder():
     body = _function_body(src, "def run_import_local")
     assert "build_catalog_row(" in body and '{f: "" for f in CATALOG_FIELDS}' not in body
 
-    import moonglade_gallery
+    from moonglade import gallery as moonglade_gallery
     gsrc = pathlib.Path(moonglade_gallery.__file__).read_text(encoding="utf-8")
     loom = gsrc[gsrc.index("def api_loom_import_bundle"):]
     loom = loom[:loom.index("media_added")]

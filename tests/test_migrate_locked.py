@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import time
 
-import moonglade_gallery as g
+from moonglade import gallery as g
 
 
 def _fresh_unmigrated(tmp_path):

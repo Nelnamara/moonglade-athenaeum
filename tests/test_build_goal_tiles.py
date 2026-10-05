@@ -147,8 +147,8 @@ def test_a_pack_copy_under_training_is_served_and_its_absence_is_a_plain_404(tmp
     the pack carries it the route serves it; when it does not the answer is a 404, which is what
     sends the tile on to the app's own module copy. Pack v7 only has to carry the files, in the
     training role's coded folder (ROLE_CODE["training"]), where the public name now lands."""
-    import moonglade_gallery as g
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade import gallery as g
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_client
     save_catalog(tmp_path / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "1", "filename": "a.png",

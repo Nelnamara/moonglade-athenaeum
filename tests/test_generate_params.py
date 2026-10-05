@@ -3,7 +3,7 @@
 free-card id wires through. Pure; no network."""
 from types import SimpleNamespace
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _gen_args(**kw):

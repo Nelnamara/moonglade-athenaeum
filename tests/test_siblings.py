@@ -6,11 +6,11 @@ which blanks the batch column).
 import time
 from pathlib import Path
 
-import moonglade_gallery as G
+from moonglade import gallery as G
 
 
 def _seed(tmp_path, rows):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:
@@ -22,7 +22,7 @@ def _seed(tmp_path, rows):
 
 
 def _client(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     return login_test_client(create_app(tmp_path))
 
@@ -199,7 +199,7 @@ def test_strip_rejects_a_drive_letter_id(tmp_path):
     """pathlib's `/` RESETS to a drive-relative path when the right operand carries a
     drive: thumb_dir / "C:x.jpg" == Path("C:x.jpg") == the drive ROOT. A denylist of
     slashes and '..' missed it; the id is allowlisted now (numeric or local_<hex>)."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     cli = login_test_client(create_app(tmp_path))
     for bad in ("C:x", "D:anything", "a:b", "x;y", "id%20with%20space"):
@@ -209,7 +209,7 @@ def test_strip_rejects_a_drive_letter_id(tmp_path):
 
 
 def test_siblings_non_object_body_is_400_not_500(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     cli = login_test_client(create_app(tmp_path))
     for body in ('["T1"]', '"T1"', '42'):
@@ -223,7 +223,7 @@ def test_strip_recuts_a_stale_corrupt_cache_and_leaves_no_tmp(tmp_path):
     half-written left a truncated file with a FRESH mtime that the staleness rule then
     trusted). Pin: no .tmp left behind, and a strip OLDER than the 768 is re-cut."""
     import os, time
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = "555"
     _seed_768(tmp_path, mid)
@@ -243,7 +243,7 @@ def test_strip_recuts_a_stale_corrupt_cache_and_leaves_no_tmp(tmp_path):
 
 def test_strip_up_to_date_cache_is_reused_not_recut(tmp_path):
     """The second request must NOT re-cut: same file, same mtime."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = "777"
     _seed_768(tmp_path, mid)
@@ -259,7 +259,7 @@ def test_task_id_is_indexed(tmp_path):
     """task_id is the sibling key; /api/siblings and the View Batch filter query it.
     It had no index (full table scan). Pin the migration."""
     import sqlite3
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "1", "filename": "a_1.png", "task_id": "T1",
         "created_at": "2026-08-22T00:00:00Z"}])

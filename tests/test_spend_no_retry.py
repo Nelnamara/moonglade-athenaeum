@@ -31,7 +31,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # Every function that fires a credit-spending or account-mutating GraphQL call. When a new
@@ -405,10 +405,10 @@ class TestRestSpendPathsAreSingleAttempt:
         its own verb in moonglade_recipes, not a PixAIClient method, so it is pinned here beside
         the others: one bare session.delete, no loop. Read from the module's source, because
         tests/conftest.py blocks the live function for every test."""
-        import moonglade_recipes as rec
+        from moonglade import recipes as rec
         fn = next(n for n in ast.parse(inspect.getsource(rec)).body
                   if isinstance(n, ast.FunctionDef) and n.name == "_rest_delete")
         src = ast.get_source_segment(inspect.getsource(rec), fn)
         assert src.count(".delete(") == 1
         assert "for " not in src and "while " not in src, (
-            "moonglade_recipes._rest_delete grew a retry loop")
+            "moonglade.recipes._rest_delete grew a retry loop")

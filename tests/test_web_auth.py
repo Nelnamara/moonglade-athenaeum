@@ -23,8 +23,8 @@ import sys
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade.gallery import create_app
 from tests.conftest import login_existing_client
 
 
@@ -176,7 +176,7 @@ def test_verify_web_user_checks_hash(tmp_path):
 def test_cli_add_web_user_prompts_hashes_and_persists(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "hunter2-valid-pw")
-    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     core.main()
     users = core.list_web_users()
     assert users == [{"username": "alice"}]
@@ -189,7 +189,7 @@ def test_cli_add_web_user_rejects_mismatched_confirmation(tmp_path, monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     passwords = iter(["hunter2-valid-pw", "totally-different"])
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": next(passwords))
-    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     with pytest.raises(SystemExit):
         core.main()
     assert core.list_web_users() == []
@@ -200,7 +200,7 @@ def test_cli_add_web_user_enforces_the_same_password_policy(tmp_path, monkeypatc
     the web sign-in enforces -- a weak password must be refused here too."""
     monkeypatch.setattr("builtins.input", lambda prompt="": "alice")
     monkeypatch.setattr(core.getpass, "getpass", lambda prompt="": "1111")
-    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--add-web-user"])
+    monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--add-web-user"])
     with pytest.raises(SystemExit):
         core.main()
     assert core.list_web_users() == []
@@ -210,14 +210,14 @@ def test_cli_remove_web_user_flag(tmp_path, monkeypatch):
     core.add_or_update_web_user("alice", "pw-a")
     core.add_or_update_web_user("bob", "pw-b")
     monkeypatch.setattr(sys, "argv",
-                        ["moonglade_backup.py", "--remove-web-user", "alice"])
+                        ["moonglade/backup.py", "--remove-web-user", "alice"])
     core.main()
     assert {u["username"] for u in core.list_web_users()} == {"bob"}
 
 
 def test_cli_list_web_users_flag_runs_without_error(tmp_path, monkeypatch, capsys):
     core.add_or_update_web_user("alice", "pw-a")
-    monkeypatch.setattr(sys, "argv", ["moonglade_backup.py", "--list-web-users"])
+    monkeypatch.setattr(sys, "argv", ["moonglade/backup.py", "--list-web-users"])
     core.main()
     out = capsys.readouterr().out
     assert "alice" in out

@@ -2,7 +2,7 @@
 year dropdowns, and per-page (via query_catalog)."""
 import pytest
 
-from moonglade_gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
+from moonglade.gallery import (CATALOG_FIELDS, init_db, save_catalog, query_catalog,
                            catalog_years, _like_pattern, collection_health, _role_dir)
 
 
@@ -302,7 +302,7 @@ def test_source_filter(tmp_path):
 
 
 def test_collections_add_remove_filter(tmp_path):
-    from moonglade_gallery import (add_to_collection, remove_from_collection,
+    from moonglade.gallery import (add_to_collection, remove_from_collection,
                                unique_collections)
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id=m, filename=m + ".png") for m in ("a", "b", "c")])
@@ -319,7 +319,7 @@ def test_collections_add_remove_filter(tmp_path):
 
 
 def test_collection_add_route(tmp_path):
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
@@ -341,7 +341,7 @@ def test_collection_remove_route(tmp_path):
     /collection-remove form route died with the classic page; /api/collection
     action=remove is the one remove surface now): the route drops the label
     without touching the row, and never bleeds onto the other member."""
-    from moonglade_gallery import load_catalog, add_to_collection
+    from moonglade.gallery import load_catalog, add_to_collection
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
@@ -552,7 +552,7 @@ def test_collection_health_detects_duplicate(tmp_path):
 
 
 def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
-    from moonglade_gallery import duplicate_groups
+    from moonglade.gallery import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "2024-03").mkdir()
     # 111 lives in two buckets -> a group; 222 lives only in images -> not a group
@@ -569,7 +569,7 @@ def test_duplicate_groups_finds_cross_folder_copies(tmp_path):
 
 
 def test_duplicate_groups_ignores_gallery_and_quarantine(tmp_path):
-    from moonglade_gallery import duplicate_groups
+    from moonglade.gallery import duplicate_groups
     (tmp_path / "images").mkdir()
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
     (tmp_path / "_duplicates").mkdir()
@@ -585,7 +585,7 @@ def test_duplicate_groups_ignores_deleted(tmp_path):
     view) excluded gallery/ and _duplicates/ but never _deleted/ -- so a locally
     purged image is reported as a live cross-bucket duplicate of its own quarantined
     self."""
-    from moonglade_gallery import duplicate_groups, DELETED_DIRNAME
+    from moonglade.gallery import duplicate_groups, DELETED_DIRNAME
     (tmp_path / "images").mkdir()
     (tmp_path / DELETED_DIRNAME).mkdir()
     (tmp_path / "images" / "a_111.webp").write_bytes(b"d")
@@ -635,8 +635,8 @@ def test_video_row_flagged_and_serves(tmp_path):
 
 
 def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch, pixai):
-    import moonglade_backup as core
-    from moonglade_gallery import load_catalog
+    from moonglade import backup as core
+    from moonglade.gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -673,7 +673,7 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     from tests.conftest import login_client
     db = tmp_path / "catalog.db"
     save_catalog(db, [

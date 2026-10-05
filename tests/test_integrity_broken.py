@@ -16,9 +16,9 @@ The fixing half (the targeted runner) is tests/test_integrity_fix.py.
 import json
 from types import SimpleNamespace
 
-import moonglade_backup as core
-import moonglade_integrity as integ
-from moonglade_gallery import create_app, save_catalog
+from moonglade import backup as core
+from moonglade import integrity as integ
+from moonglade.gallery import create_app, save_catalog
 from tests.conftest import login_test_client, with_csrf
 from tests.test_integrity import _jpeg, _png, _row, _tree_hash
 
@@ -136,7 +136,7 @@ def test_a_reconcile_that_finds_it_again_makes_it_recoverable(tmp_path):
     out = _broken_library(tmp_path)
     assert _by_id(integ.broken_list(out, out / "catalog.db"))["109"]["state"] == "lost"
     # the next reconcile clears the flag (it rewrites deleted_remote every run)
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     rows = load_catalog(out / "catalog.db")
     for r in rows:
         if r["media_id"] == "109":
@@ -158,7 +158,7 @@ def test_an_archive_only_thumbnail_row_is_left_out_of_fix_all(tmp_path):
     """The rule is "never LOST or archive-only": a picture PixAI no longer has keeps its
     per-row Rebuild (local work on a sound file), but Fix all does not count it."""
     out = _broken_library(tmp_path)
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     rows = load_catalog(out / "catalog.db")
     for r in rows:
         if r["media_id"] == "106":
@@ -204,7 +204,7 @@ def test_no_report_is_an_empty_list(tmp_path):
 
 def test_a_row_gone_from_the_catalog_since_the_check_leaves_the_list(tmp_path):
     out = _broken_library(tmp_path)
-    from moonglade_gallery import delete_from_catalog
+    from moonglade.gallery import delete_from_catalog
     delete_from_catalog(out / "catalog.db", "102")
     assert "102" not in _by_id(integ.broken_list(out, out / "catalog.db"))
 
@@ -242,7 +242,7 @@ def test_keep_as_is_quiets_a_lost_row_until_pixai_has_it_again(tmp_path):
     integ.set_mark(out, "109", "kept")
     row = _by_id(integ.broken_list(out, out / "catalog.db"))["109"]
     assert (row["state"], row["mark"]) == ("lost", "kept")
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     rows = load_catalog(out / "catalog.db")
     for r in rows:
         if r["media_id"] == "109":

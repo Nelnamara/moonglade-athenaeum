@@ -11,12 +11,12 @@ the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
 """
 import sqlite3
 
-import moonglade_backup as core
-import moonglade_gallery as G
+from moonglade import backup as core
+from moonglade import gallery as G
 
 
 def _seed(tmp_path, rows):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:
@@ -28,7 +28,7 @@ def _seed(tmp_path, rows):
 
 
 def _client(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     return login_test_client(create_app(tmp_path))
 

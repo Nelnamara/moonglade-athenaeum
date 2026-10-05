@@ -188,9 +188,9 @@ def _collect_at_three(root, monkeypatch):
     """Run ONE generation through the real collect path (/api/task-status's done branch)
     with the clock at 03:10 local and the row PixAI-stamped 03:00 local -- the only road
     the hour-driven flag has had since 2026-10-02 (a page load no longer reads the hour)."""
-    import moonglade_backup as core
-    import moonglade_gallery as g
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade import backup as core
+    from moonglade import gallery as g
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
     from tests.conftest import login_client
 
@@ -228,7 +228,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
 
     No donor needed: this asserts the telemetry ledger, not the roster, so it holds on public
     CI as well as on a machine with the sealed definitions."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
 
     from tests.conftest import HOUR_DRIVEN_FLAG, pin_daytime_clock
 
@@ -242,7 +242,7 @@ def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path, monkey
 
     page_only = tmp_path / "page-only"
     page_only.mkdir()
-    from moonglade_gallery import save_catalog
+    from moonglade.gallery import save_catalog
     from tests.conftest import login_client
     save_catalog(page_only / "catalog.db", [])
     with mock.patch("datetime.datetime", _ThreeAM):
@@ -286,7 +286,7 @@ def test_the_clock_pin_records_one_day_even_across_midnight(tmp_path):
 
     The date STRING is deliberately not pinned. No metric reads it; they read the count and
     the streaks over the list, and both are pinned by there being one entry."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
 
     from tests.conftest import pin_daytime_clock
 
@@ -326,7 +326,7 @@ def unpinned_module_view():
     """
     from types import SimpleNamespace
 
-    import moonglade_gallery as _g
+    from moonglade import gallery as _g
     return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
                            branding_json=_g._branding_path(None))
 

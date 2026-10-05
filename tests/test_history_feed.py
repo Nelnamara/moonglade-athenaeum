@@ -13,8 +13,8 @@ import calendar
 import time
 from urllib.parse import urlencode
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 
@@ -379,7 +379,7 @@ def test_count_in_task_counts_siblings_inside_the_window(tmp_path):
 # ---------------------------------------------------------------- auth
 
 def test_history_requires_login(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     _seed(tmp_path, [])
     r = create_app(tmp_path).test_client().get("/api/history")
     assert r.status_code == 401

@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_assets
-import moonglade_backup as core
-import moonglade_container as _mc
-import moonglade_gallery as gallery
-import moonglade_paths
+from moonglade import assets as moonglade_assets
+from moonglade import backup as core
+from moonglade import container as _mc
+from moonglade import gallery
+from moonglade import paths as moonglade_paths
 
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
 # lives in source, so roster tests need a container built from this.
 _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
 
-# The checkout this suite tests, and the code folder the app's modules move into next release.
+# The checkout this suite tests, and the code folder the app's modules live in (since 3.20).
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_PACKAGE = "moonglade"
 _NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})
@@ -44,6 +44,17 @@ def first_party_sources(root=None, suffixes=(".py", ".pyw")):
             found += [Path(dirpath) / f for f in sorted(filenames)
                       if Path(f).suffix in suffixes]
     return found
+
+
+def stub_code_module(monkeypatch, name, module):
+    """Stand `module` in for `moonglade.<name>` for one test. The app imports its own modules
+    as `from moonglade import <name>`, which reads the PACKAGE's attribute first and falls
+    back to sys.modules only when that is absent -- so a sys.modules entry alone (the way the
+    flat `moonglade_<name>` modules were stubbed before 3.20) is silently ignored once the
+    real module has been imported anywhere in the session. Both are set; both are undone."""
+    import moonglade
+    monkeypatch.setitem(sys.modules, "moonglade." + name, module)
+    monkeypatch.setattr(moonglade, name, module, raising=False)
 
 
 @pytest.fixture()
@@ -615,7 +626,7 @@ def _no_live_recipes(monkeypatch):
     own for a recipe set's item -- blocked the same way -- and keeps a module-level read
     cache (categories, a model's capability, market pages) that must not carry one test's
     fake answers into the next."""
-    import moonglade_recipes
+    from moonglade import recipes as moonglade_recipes
 
     def _blocked(*a, **k):
         raise core.PixAIError("live /v2 REST blocked in tests")
@@ -625,7 +636,7 @@ def _no_live_recipes(monkeypatch):
     moonglade_recipes.clear_cache()
 
 
-import moonglade_inbox as _inbox_mod   # noqa: E402 -- beside the fixture that blocks it
+from moonglade import inbox as _inbox_mod   # noqa: E402 -- beside the fixture that blocks it
 
 # Captured before _no_live_inbox (below) swaps it, so a test can drive the real public GET
 # against a patched requests.get and see exactly what it would send.
@@ -807,7 +818,7 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     Returns the authenticated test client, ready to use exactly like
     create_app(tmp_path).test_client() used to be before the local-request bypass
     was removed."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     return login_test_client(create_app(tmp_path), username=username, password=password)
 
 

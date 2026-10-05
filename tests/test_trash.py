@@ -10,8 +10,8 @@ import json
 import os
 import time
 
-import moonglade_gallery as g
-from moonglade_gallery import (CATALOG_FIELDS, create_app, load_catalog, save_catalog,
+from moonglade import gallery as g
+from moonglade.gallery import (CATALOG_FIELDS, create_app, load_catalog, save_catalog,
                            purge_media_local)
 
 from tests.conftest import login_client

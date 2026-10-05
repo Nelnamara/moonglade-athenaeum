@@ -15,8 +15,8 @@ import json
 import re
 from pathlib import Path
 
-import moonglade_backup as core
-from moonglade_gallery import (CATALOG_FIELDS, load_catalog, save_catalog,
+from moonglade import backup as core
+from moonglade.gallery import (CATALOG_FIELDS, load_catalog, save_catalog,
                                quarantine_duplicate_file, restore_quarantined_duplicate,
                                _validate_duplicate_pair)
 
@@ -554,7 +554,7 @@ def test_resolve_blocked_when_read_only(tmp_path, monkeypatch):
 
 
 def test_resolve_requires_login(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     images = tmp_path / "images"; images.mkdir()
     (images / "a_1.webp").write_bytes(b"X")
     (images / "b_2.webp").write_bytes(b"X")
@@ -633,7 +633,7 @@ def test_undo_missing_record_returns_a_clear_error(tmp_path):
 
 
 def test_undo_requires_login(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     save_catalog(tmp_path / "catalog.db", [])
     cli = create_app(tmp_path).test_client()
     r = cli.post("/api/duplicates/undo",

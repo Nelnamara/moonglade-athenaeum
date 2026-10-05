@@ -4,7 +4,7 @@ a percentage bonus tied to an Extra Package (credit-pack) purchase, not a free g
 Pure/mocked -- no live network (conftest blocks _rest_get/_rest_post), no spend."""
 from types import SimpleNamespace
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # ---- list_extra_package_boosts: GET /v2/extra-package-boosts, soft-fail ----

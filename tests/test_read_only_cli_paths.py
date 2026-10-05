@@ -31,7 +31,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _args(tmp_path, **extra):

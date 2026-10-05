@@ -25,9 +25,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_gallery as g
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog, load_catalog
+from moonglade import gallery as g
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog, load_catalog
 
 from tests.conftest import login_test_client
 from tests.fake_pixai import FakePixAI

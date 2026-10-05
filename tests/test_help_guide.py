@@ -13,8 +13,8 @@ import io
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
+from moonglade import backup as core
+from moonglade import gallery as g
 from tests.conftest import login_client
 
 
@@ -191,7 +191,7 @@ def test_an_old_pack_left_beside_the_new_one_says_so_on_about(tmp_path):
     """A start that finds the pack under both names never deletes the old one; About's
     art-pack line says so in plain words instead. Read from the disk each time, so the note
     leaves the moment the old copy does, without a restart. No old copy, no note."""
-    import moonglade_assets as ma
+    from moonglade import assets as ma
     (tmp_path / "pack").mkdir()
     new = tmp_path / "pack" / "moonglade.mgpack"
     new.write_bytes(b"x")

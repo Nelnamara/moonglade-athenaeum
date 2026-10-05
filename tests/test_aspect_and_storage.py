@@ -19,9 +19,9 @@ from urllib.parse import quote
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import (
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import (
     CATALOG_FIELDS, collection_health, loom_render_ids, query_catalog, save_catalog,
     storage_breakdown,
 )

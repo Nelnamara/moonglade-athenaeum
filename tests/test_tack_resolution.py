@@ -4,7 +4,7 @@ these tests pin that contract directly (not through a route stub, which can't se
 function's internals). Regression coverage for ultrareview 2026-08-06 bug_004: a fuzzy
 `edges[0]` fallback used to attach whatever ranked first in PixAI's search (e.g. typing
 "moon" silently became "moonlight") with zero signal in the preview or confirm sheet."""
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _fake_tacks(pixai, edges_by_query):

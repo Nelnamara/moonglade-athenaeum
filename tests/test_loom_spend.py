@@ -13,7 +13,7 @@ Collapse any two of those and the ledger starts reporting deleted files as free 
 """
 import json
 
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 

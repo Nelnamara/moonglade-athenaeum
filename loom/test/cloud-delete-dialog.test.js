@@ -202,7 +202,7 @@ describe("a task strip says what the task actually is", () => {
    delete. The route counts what it knows (live artworkIds, else the catalog's artwork_id);
    the dialog says so in ONE more sentence of its own text -- no badge, no thumbnail marker --
    in the same words as the per-image dialog (moonglade_gallery.published_delete_note). */
-const server = readFileSync(path.resolve(__dirname, "../../moonglade_gallery.py"), "utf8")
+const server = readFileSync(path.resolve(__dirname, "../../moonglade/gallery.py"), "utf8")
   .replace(/\r\n/g, "\n");
 
 describe("the published-artwork sentence", () => {

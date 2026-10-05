@@ -12,8 +12,8 @@ The owner's ruling (walk, 2026-10-03): warn, don't block. Keeping them back was 
   * the grid card, the duplicate members and the detail read carry `archive_only` so the gallery
     can badge them and the confirms can count them.
 """
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
 from tests.conftest import login_client
 

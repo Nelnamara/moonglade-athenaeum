@@ -11,9 +11,9 @@ No network: the frame handler is driven through app.extensions["mg_watch_on_even
 is the `pixai` fixture's FakePixAI."""
 import pytest
 
-import moonglade_backup as core
-import moonglade_inbox as inbox
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import backup as core
+from moonglade import inbox
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 
 

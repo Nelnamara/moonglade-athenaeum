@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def test_suggest_prompt_returns_output(monkeypatch):
@@ -61,7 +61,7 @@ def test_run_suggest_prompt_local_file_uploads_first(monkeypatch, tmp_path, pixa
 # early with a clear message instead of surfacing that raw 500.
 
 def test_run_suggest_prompt_refuses_a_known_video_media_id(tmp_path, monkeypatch):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "9001", "is_video": "1", "filename": "2025-01/v_9001.mp4"}])
     # Proves the gate fires BEFORE any session/network setup -- not just before the

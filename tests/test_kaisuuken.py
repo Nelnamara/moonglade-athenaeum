@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # ---- _normalize_kaisuuken: the real summary template-row shape ----

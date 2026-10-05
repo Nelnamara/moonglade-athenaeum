@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 
@@ -325,7 +325,7 @@ def test_the_login_shell_does_not_leak_the_marker(tmp_path):
     template), and the marker placed in a shared head instead would render as literal text
     to every anonymous visitor. (Was the /health//panel//dupes BASE_HTML check before the
     classic cut deleted those pages.)"""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     r = create_app(tmp_path).test_client().get("/login")
     assert r.status_code == 200
     assert "__UPSCALE_CONST__" not in r.get_data(as_text=True)

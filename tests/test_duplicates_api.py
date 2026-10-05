@@ -6,7 +6,7 @@ and compute_dhash() in isolation), and the same_seed_groups() SQL helper in
 isolation. Route-tier declaration itself (LOGIN, anonymous refusal) is covered
 structurally by tests/test_route_tiers.py -- this file proves the handler's actual
 output shape and detection logic."""
-from moonglade_gallery import CATALOG_FIELDS, save_catalog, same_seed_groups
+from moonglade.gallery import CATALOG_FIELDS, save_catalog, same_seed_groups
 
 from tests.conftest import login_client
 

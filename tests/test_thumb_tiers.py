@@ -15,7 +15,7 @@ import time
 
 from PIL import Image
 
-import moonglade_gallery as G
+from moonglade import gallery as G
 
 
 def _seed(tmp_path, mids):

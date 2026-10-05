@@ -28,7 +28,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-import moonglade_backup as core  # noqa: E402
+from moonglade import backup as core  # noqa: E402
 
 DELETED_AT = "2026-09-06T11:22:33.000Z"
 

@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_container as _mc
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import container as _mc
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import clear_sealed_caches, login_client

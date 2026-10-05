@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-import moonglade_narrator as nar
+from moonglade import narrator as nar
 
 DAY = 86400.0
 

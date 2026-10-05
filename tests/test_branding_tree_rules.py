@@ -37,9 +37,9 @@ import time
 
 import pytest
 
-import moonglade_container as mc
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import container as mc
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 

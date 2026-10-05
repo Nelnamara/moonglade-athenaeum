@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, create_app, media_dims, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, create_app, media_dims, save_catalog
 from tests.conftest import login_test_client
 
 T3 = "2024383379556065549"          # Tsubaki.3, MMDIT26B_MODEL
@@ -113,7 +113,7 @@ def test_the_config_reader_is_the_one_blocked_helper():
     named reader, blocked by an autouse fixture, is what keeps the suite offline."""
     with pytest.raises(core.PixAIError):
         core._config_get("trainLoraModels")
-    src = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
+    src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert src.count("CONFIG_API_BASE +") == 1, "a second /config reader appeared"
     conftest = (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
     assert '"_config_get"' in conftest and "_config_cache.clear()" in conftest
@@ -481,8 +481,8 @@ def test_a_failed_pause_read_proceeds_as_today(tmp_path, monkeypatch):
 
 
 def test_the_training_docs_no_longer_say_the_price_cannot_be_quoted():
-    gallery = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
-    backup = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
+    gallery = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
+    backup = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert "this app CANNOT say how many" not in gallery
     assert not re.search(r"is NOT reachable through any documented endpoint", backup)
 

@@ -26,7 +26,7 @@ const row = readFileSync(
 const css = readFileSync(
   path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
 const server = readFileSync(
-  path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
+  path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
 
 describe("a website run is marked as one, and marked nowhere else", () => {
   test("the row shows a 'website' mark when the job's source is pixai", () => {

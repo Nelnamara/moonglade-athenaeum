@@ -6,9 +6,9 @@ No network: PixAI is the `pixai` fixture's FakePixAI, and the module's own DELET
 (`moonglade_inbox._rest_delete`) is blocked by conftest unless a test swaps in its own."""
 import pytest
 
-import moonglade_backup as core
-import moonglade_inbox as inbox
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import backup as core
+from moonglade import inbox
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_test_client
 
 ART = "1788621522581677948"

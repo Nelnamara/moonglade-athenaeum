@@ -11,9 +11,9 @@ These tests drive the real functions with the download stubbed to "skip", which 
 exact live shape: the file is already on disk, so nothing is fetched -- and the row is
 rebuilt and written anyway.
 """
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, load_catalog, save_catalog
 
 from tests.conftest import login_test_client
 

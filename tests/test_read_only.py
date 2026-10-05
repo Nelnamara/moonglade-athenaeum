@@ -12,7 +12,7 @@ createGenerationTask call instead of calling through these choke points and, unt
 READ_ONLY at all -- see tests/test_read_only_cli_paths.py for that half."""
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def test_read_only_defaults_to_false():
@@ -60,7 +60,7 @@ class TestDeleteTaskGqlReadOnly:
         --delete-task is gone), so this is the end-to-end proof: the real route with the REAL
         delete_task_gql behind it. READ_ONLY refuses up front, with one plain 403 and no job,
         and not one request reaches PixAI -- not the delete, not a read before it."""
-        from moonglade_gallery import CATALOG_FIELDS, save_catalog
+        from moonglade.gallery import CATALOG_FIELDS, save_catalog
         from tests.conftest import login_client
         row = {f: "" for f in CATALOG_FIELDS} | {
             "media_id": "m1", "task_id": "T1", "filename": "m1.png"}

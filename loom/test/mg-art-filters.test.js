@@ -105,7 +105,7 @@ describe("recipe data integrity (baked from PixAI's public imageArtFilters confi
 // ("moonglade") is the `:root` block of DESIGN_TOKENS_CSS; the other four are
 // `html[data-skin="..."]` overrides after it. Read straight out of the app so a retinted
 // skin fails the cross-check below instead of quietly drifting from its filter.
-const APP_PY = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
+const APP_PY = readFileSync(path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
 
 function skinPalette(skin) {
   const start = skin === "moonglade"

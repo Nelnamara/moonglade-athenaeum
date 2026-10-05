@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 
@@ -164,7 +164,7 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
 
 @needs_donor
 def test_points_rung_scaled_feats_zero_and_aggregates():
-    from moonglade_gallery import compute_achievements, achievement_points, _roster
+    from moonglade.gallery import compute_achievements, achievement_points, _roster
     by_id = {a["id"]: a for a in _roster()}
     # the Archive (images) ladder reproduces the owner's locked example exactly
     seq = ["first-light", "archivist", "hoardsmith", "loremaster", "the-great-library"]
@@ -462,7 +462,7 @@ def test_new_sql_metrics(tmp_path):
 
 
 def test_time_capsule_only_fires_on_old_insert(tmp_path):
-    import moonglade_backup as core
+    from moonglade import backup as core
     core._check_time_capsule("2020-01-01T00:00:00", tmp_path)
     assert g.telemetry_metrics(tmp_path)["old_piece_backed_up"] == 1
     (tmp_path / "telemetry.json").unlink()
@@ -475,7 +475,7 @@ def test_time_capsule_only_fires_on_old_insert(tmp_path):
 
 @needs_donor
 def test_achievement_criteria_pure():
-    from moonglade_gallery import achievement_criteria
+    from moonglade.gallery import achievement_criteria
     c = achievement_criteria({"tools": ["edit", "fix"], "video_modes": ["i2v"]})
     assert {x["key"]: x["done"] for x in c["full-toolbox"]} == {
         "edit": True, "enhance": False, "fix": True}
@@ -490,7 +490,7 @@ def test_achievement_criteria_pure():
 
 @needs_donor
 def test_compute_attaches_criteria_only_with_sets():
-    from moonglade_gallery import compute_achievements
+    from moonglade.gallery import compute_achievements
     r = compute_achievements({"tools_used": 2}, sets={"tools": ["edit", "enhance"]})
     by = {a["id"]: a for a in r["achievements"]}
     assert {x["key"]: x["done"] for x in by["full-toolbox"]["criteria"]} == {
@@ -647,7 +647,7 @@ def test_enhance_tools_complete(tmp_path, monkeypatch):
     tips it to 6 ONLY once every emotion in the universe has been used -- a partial emotion set
     leaves it at 5. Everything counts at TERMINAL success (deferred), so a reaped/failed enhance
     never counts. The retired bridge_enhance_distinct metric is gone."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     _arm_mirror_bridge(monkeypatch, core)
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
@@ -704,7 +704,7 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     """Doorwarden (scenes_used) defers to terminal success exactly like enhance, and the collect
     choke marks gen_days + active_days (Seven Candles / Long Vigil). Nothing counts at submit or
     on a failure."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "mirror_enabled", lambda: True)
     monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
@@ -739,7 +739,7 @@ def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
     merely ROUTES through the mirror is not a tool use, so it counts either way the mirror
     toggle is set. This replaces the earlier reading, where mirror-on made every plain gen
     a bridge gen and the metric measured traffic instead of tool use."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
@@ -760,7 +760,7 @@ def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
     """The first of the two writers that survive the narrowing. Deferred to terminal
     success like everything else on this path, and recorded as a distinct task id so a
     re-poll cannot inflate it."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     _arm_mirror_bridge(monkeypatch, core)
     monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
@@ -795,7 +795,7 @@ def test_a_train_submit_alone_counts_no_lora_trained(tmp_path, monkeypatch):
     read -- tests/test_training_advanced.py), not accepted submits, since 2026-10-02: a
     submit that fails, is retried or is replayed must not count. Uses the same CSRF +
     validate/quota/submit stubbing shape test_panel already uses."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "validate_training", lambda *a, **k: "nel druid")
     monkeypatch.setattr(core, "training_free_quota", lambda s: 9)

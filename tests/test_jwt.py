@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-import moonglade_backup as mj
+from moonglade import backup as mj
 
 # read_browser_jwt resolves *Windows* browser profiles (LOCALAPPDATA +
 # backslash Chrome/Edge/Brave paths). Tests that build a real on-disk profile layout and call the
@@ -275,7 +275,7 @@ def test_gitignore_covers_credential_temp_files():
     config.json.tmp-<pid> (+ PIXAI_API_KEY) untracked; a git add would commit a live
     credential. The .gitignore must cover the temp variants, not just the exact names."""
     import pathlib
-    gi = (pathlib.Path(mj.__file__).resolve().parent / ".gitignore").read_text(encoding="utf-8")
+    gi = (pathlib.Path(mj.__file__).resolve().parents[1] / ".gitignore").read_text(encoding="utf-8")
     assert "mirror_session.json.*" in gi and "config.json.*" in gi
 
 
@@ -930,7 +930,7 @@ def test_the_price_probe_never_touches_the_mirror_while_it_is_off(tmp_path, monk
 def test_the_renew_tick_does_nothing_without_the_background_gate(tmp_path, monkeypatch):
     """The suite's conftest turns the background gate off (MOONGLADE_DISABLE_WATCH), exactly as
     for the release check and the contest sweep: the tick must then never reach the core."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     monkeypatch.setattr(mj, "mirror_renew_tick", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("the renew tick ran with the background gate off")))
     app = g.create_app(tmp_path)
@@ -941,7 +941,7 @@ def test_the_renew_tick_rides_the_scheduler_heartbeat_and_adds_no_thread():
     """No timer thread of its own: it joins the one sixty-second heartbeat, outside the
     standing order's try/continue chain, gated like _update_check_tick and _contest_win_tick."""
     import inspect
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     src = inspect.getsource(g.create_app)
     loop = src[src.index("def _scheduler_loop():"):]
     body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]

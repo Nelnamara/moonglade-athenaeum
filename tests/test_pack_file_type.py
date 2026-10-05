@@ -12,9 +12,9 @@ import logging
 
 import pytest
 
-import moonglade_container as mc
-import moonglade_gallery as g
-import moonglade_paths
+from moonglade import container as mc
+from moonglade import gallery as g
+from moonglade import paths as moonglade_paths
 
 ICO = b"\x00\x00\x01\x00fake-ico"          # bytes only; nothing here decodes an icon
 PNG = bytes.fromhex(

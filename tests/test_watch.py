@@ -6,7 +6,7 @@ import json
 
 import websockets
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 class _FakeWS:
@@ -288,7 +288,7 @@ def test_a_stale_reconnect_does_not_wait_out_the_long_backoff():
     whole minute). Since #60 the wait is decided by one rule for every way a connection ends
     (watch_reconnect_plan), so this pin moved from the stale branch's own `backoff = 5` to the
     rule: a connection that lived a stale window is a healthy one, and reconnects at once."""
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     assert mg.watch_reconnect_plan(60, core._WS_STALE_TIMEOUT) == (1, 5)
 
 
@@ -308,7 +308,7 @@ def test_mirror_and_reconcile_agree_on_what_done_means():
     ROW the frames produce, while this pins the one line that decides whether the FILE gets
     collected at all -- a branch whose failure mode is silence, not a wrong row."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
+    src = _p.Path(__file__).resolve().parent.parent / "moonglade" / "gallery.py"
     text = src.read_text(encoding="utf-8")
 
     i = text.index("def _watch_on_event(ev):")
@@ -338,7 +338,7 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     actually run. _watch_catchup is invoked only from a background thread the suite never starts
     (MOONGLADE_DISABLE_WATCH), so both angles are worth keeping."""
     import pathlib as _p
-    src = _p.Path(__file__).resolve().parent.parent / "moonglade_gallery.py"
+    src = _p.Path(__file__).resolve().parent.parent / "moonglade" / "gallery.py"
     text = src.read_text(encoding="utf-8")
 
     assert "def _watch_catchup(reason):" in text
@@ -413,8 +413,8 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     (The live stop-server / generate-while-down / restart recipe stays the owner's to run;
     this pins the logic that recipe exercises so it can't silently regress.)"""
     import time
-    import moonglade_gallery as mg
-    from moonglade_gallery import create_app
+    from moonglade import gallery as mg
+    from moonglade.gallery import create_app
 
     app = create_app(tmp_path)
     catchup = app.extensions["mg_watch_catchup"]        # the new seam
@@ -482,7 +482,7 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
 def _watch_app(tmp_path):
     """A create_app instance for the frame-handler seam. conftest's MOONGLADE_DISABLE_WATCH
     keeps the real watcher thread (and therefore the real socket) from ever starting."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     save_catalog(tmp_path / "catalog.db",
                  [{f: "" for f in CATALOG_FIELDS} | {
                      "media_id": "1", "filename": "a_1.png",
@@ -605,7 +605,7 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     was closed, and a row arriving at 'running' would sit there until the orphan sweep got
     round to it."""
     import time
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     app = _watch_app(tmp_path)
     catchup = app.extensions["mg_watch_catchup"]
 
@@ -641,7 +641,7 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     run's is), so the second writer finds the first one's row and adds none. Two rows for one
     generation is the failure that derivation exists to prevent."""
     import time
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     app = _watch_app(tmp_path)
     _sync_threads(monkeypatch)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
@@ -766,8 +766,8 @@ def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path,
     that matter, on nodes shaped like the live `TaskSummary`: id / status / mediaId /
     batchMediaIds / i2vProModel, no `outputs` -- because the summary genuinely has none."""
     import time
-    import moonglade_gallery as mg
-    from moonglade_gallery import create_app
+    from moonglade import gallery as mg
+    from moonglade.gallery import create_app
 
     app = create_app(tmp_path)
     catchup = app.extensions["mg_watch_catchup"]
@@ -841,7 +841,7 @@ def test_reconnect_plan_table():
     least a heartbeat (WATCH_HEALTHY_S) reconnects after 1 s and resets the ladder; anything
     faster -- a refused handshake, a drop seconds after subscribing -- climbs 5/15/45/60, so a
     reconnect storm is bounded at about one connect a minute."""
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     plan = mg.watch_reconnect_plan
     assert plan(5, 900) == (1, 5)            # healthy drop: at once
     assert plan(60, 900) == (1, 5)           # ...even after the ladder had climbed to 60
@@ -860,7 +860,7 @@ def test_catchup_plan_table():
     start is unobservable) and at least 60 s after the previous sweep started, then reads. The
     periodic backstop keeps its 300 s rule against the last SUCCESSFUL sweep, and never stacks
     on a fresh attempt."""
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     P = mg.catchup_plan
     # a reconnect waits out the settle delay after its subscribe...
     assert P("reconnect", 100.0, None, None, 102.0) == ("wait", 2.0)
@@ -1050,7 +1050,7 @@ def test_a_failed_read_is_not_coverage(tmp_path, monkeypatch):
 def test_a_failed_collect_is_retried_after_300s_not_every_sweep(tmp_path, monkeypatch):
     """A task whose collect fails is left alone for 300 s (WATCH_COLLECT_RETRY_S), so a broken
     task cannot turn every reconnect into a re-download attempt; afterwards it is retried."""
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     app = _watch_app(tmp_path)
     clock = {"t": 1000.0}
     _cycle_rig(app, monkeypatch, clock)
@@ -1083,7 +1083,7 @@ def test_a_task_the_sweep_collected_is_not_mirrored_again_by_a_late_frame(tmp_pa
     `_watch_backed` half: a task the sweep collected joins _watch_backed (only after a
     SUCCESSFUL collect), so a late `completed` frame for it does not start a mirror thread."""
     import threading
-    import moonglade_gallery as mg
+    from moonglade import gallery as mg
     app = _watch_app(tmp_path)
     clock = {"t": 1000.0}
     _cycle_rig(app, monkeypatch, clock)

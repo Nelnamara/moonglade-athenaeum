@@ -22,7 +22,7 @@ import time
 
 import pytest
 
-from moonglade_gallery import create_app, port_owner
+from moonglade.gallery import create_app, port_owner
 
 
 def _free_port():

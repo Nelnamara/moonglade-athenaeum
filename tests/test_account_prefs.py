@@ -14,9 +14,9 @@ import time
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import (
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import (
     ACCOUNT_LOCAL,
     ACCOUNT_PREF_VALUE_MAX,
     ACCOUNT_PREFS_DOC_MAX,

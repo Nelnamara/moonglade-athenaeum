@@ -36,7 +36,7 @@ const glmCss = src("styles/gallery-mobile.css");
 const idmCss = src("styles/image-details-mobile.css");
 const fmCss = src("styles/folio-mobile.css");
 const iconCss = src("styles/icons.css");
-const server = repo("moonglade_gallery.py");
+const server = repo("moonglade/gallery.py");
 const devShell = repo("gallery/index.html");
 
 // ------------------------------------------------------------------ 1. the Back gesture

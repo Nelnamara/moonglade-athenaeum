@@ -21,9 +21,9 @@ import sqlite3
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import (
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import (
     CATALOG_FIELDS, CurationError, add_to_collection, delete_collection, load_catalog,
     merge_collections, ordered_members, query_catalog, remove_from_collection, rename_collection,
     save_catalog, save_smart_collection, set_collection_order, list_media_ids,

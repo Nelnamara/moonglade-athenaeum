@@ -6,8 +6,8 @@ from unittest import mock
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, _SEALED_DONOR
 
@@ -194,7 +194,7 @@ def test_earned_skin_survives_an_undressed_window(tmp_path, monkeypatch):
     unreadable, _skin_ids() collapses to the free skins. An earned skin the user
     picked must NOT be coerced to the default and persisted -- that was permanent
     loss of a cosmetic choice the art container has nothing to do with."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     monkeypatch.setattr(g, "_skin_ids", lambda: {"moonglade", "nightfallen"})  # undressed
     g.save_ach_state(tmp_path, {"seen": [], "skin": "ember"})   # an earned skin, now unvalidatable
     assert g.load_ach_state(tmp_path)["skin"] == "ember"        # preserved, not reset
@@ -310,7 +310,7 @@ def test_malformed_sealed_roster_degrades_not_500(tmp_path):
     finding: build_container validates only top-level keys, so a bad donor could ship a
     container that opens fine but derives badly, and _sealed_defs only wrapped json.loads.)"""
     import json as _json
-    import moonglade_container as mc
+    from moonglade import container as mc
     cpath = g._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
     # "roster" is a string -> `a["id"] for a in roster` iterates characters -> TypeError.
     for bad in (_json.dumps({"roster": "not-a-list"}).encode(),

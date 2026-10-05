@@ -16,8 +16,8 @@ import re
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client
 

@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BACKUP = ROOT / "moonglade_backup.py"
+BACKUP = ROOT / "moonglade" / "backup.py"
 WIKI = ROOT / "wiki"
 
 # Flags deliberately kept out of the public wiki. Keep this EMPTY unless a flag is

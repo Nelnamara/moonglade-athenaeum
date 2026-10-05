@@ -11,7 +11,7 @@ is escaped by hand with markupsafe.escape. These are the CI-safe regression guar
 surface: they fetch the actual served bytes with a crafted payload and pin that it comes
 back as inert entities, so a future edit that drops an escape() call fails here.
 """
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 
 

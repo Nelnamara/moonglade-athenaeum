@@ -1,6 +1,6 @@
 """Model/LoRA search surfaces a directly-displayable cover thumbnail for the picker
 (so you don't need the PixAI website open to browse LoRAs)."""
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def test_model_preview_url_picks_thumb_variant():

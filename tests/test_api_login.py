@@ -10,8 +10,8 @@ was wrong fails loudly. (The classic /login form route and the cross-route
 parity tests that compared both endpoints were removed with the classic UI;
 the wording pins and the counter's session-independence coverage were ported
 to stand alone here.)"""
-import moonglade_backup as core
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade.gallery import create_app
 
 
 def _client(tmp_path):

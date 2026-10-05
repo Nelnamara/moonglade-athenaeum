@@ -8,9 +8,9 @@ named by exactly one line of code, the one-time rename's own constant
 writing a file the app no longer looks at."""
 from pathlib import Path
 
-import moonglade_assets as ma
-import moonglade_gallery as g
-import moonglade_paths
+from moonglade import assets as ma
+from moonglade import gallery as g
+from moonglade import paths as moonglade_paths
 from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -76,7 +76,7 @@ def test_no_code_path_but_the_rename_names_the_old_file():
             if _OLD in line:
                 hits.append((path.relative_to(_REPO).as_posix(), n, line.strip()))
     allowed = [h for h in hits
-               if h[0] == "moonglade_assets.py" and h[2].startswith("LEGACY_NAME = ")]
+               if h[0] == "moonglade/assets.py" and h[2].startswith("LEGACY_NAME = ")]
     stray = [h for h in hits if h not in allowed]
     assert not stray, "code still names the old pack file:\n" + "\n".join(
         "  %s:%d  %s" % h for h in stray)

@@ -12,8 +12,8 @@ all survived unchanged. The session CSRF token is fetched off /api/panel/summary
 JSON (the field the React overlay itself uses) instead of scraped from the dead
 page's inline `var CSRF = "..."`.
 """
-import moonglade_backup as core
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade.gallery import create_app
 
 from tests.conftest import login_client
 

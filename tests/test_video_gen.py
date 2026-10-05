@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def test_build_video_parameters_matches_real_submit():
@@ -456,7 +456,7 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
         p = Path(str(stem)); p.parent.mkdir(parents=True, exist_ok=True)
         p = p.with_suffix(p.suffix or ".bin"); p.write_bytes(b"data"); return "ok", p
     monkeypatch.setattr(core, "download", _fake_download)
-    monkeypatch.setattr("moonglade_gallery.make_thumbnail",
+    monkeypatch.setattr("moonglade.gallery.make_thumbnail",
                         lambda src, dst: (Path(dst).write_bytes(b"jpg"), True)[1])
 
     called = []
@@ -483,7 +483,7 @@ def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp
 
     Pins the fix: a catalog id whose file we hold on disk must be uploaded, and the
     UPLOADED id is what reaches PixAI."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -533,7 +533,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
     referenced twice. Was "upload once per media_id"; PROBED 2026-08-22 (10 of the owner's own
     completed R2V tasks): referenceImageMediaIds accepts in-library ids, so uploading only
     re-ran PixAI's content scan on art it already hosts (the 403 NSFW refusals)."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -558,7 +558,7 @@ def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypat
 
 
 def _seed_one(tmp_path, mid="733917871331404290"):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
     (tmp_path / "2025-01" / ("s_%s.png" % mid)).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
@@ -579,7 +579,7 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch, p
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     seen = {}
@@ -624,7 +624,7 @@ def test_pricing_never_uploads(tmp_path, monkeypatch):
     """/api/price only needs the SHAPE to compute a cost. Resolving there would upload
     the same file over and over while the user types, so _edit_params_from_payload
     takes `session` only on the real submit path."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path, "555111222333")
     uploads = []
@@ -784,7 +784,7 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
     Asserts the params are logged too, not just the message -- the shape (model, quality mode,
     duration) is the diagnosis for this class of failure."""
     import logging
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -820,7 +820,7 @@ def test_a_failed_generation_is_logged_with_its_params(tmp_path, monkeypatch, ca
 def test_the_failure_log_never_breaks_the_error_path(tmp_path, monkeypatch, pixai):
     """A diagnostic that can break the error path it reports on is worse than none. Params that
     refuse to serialise must not turn a clean error response into a 500."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
     (tmp_path / "2025-01").mkdir(parents=True, exist_ok=True)
@@ -949,7 +949,7 @@ def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, mon
     name, invalid_reference_image_media_id, the route uploads and retries exactly once -- the
     same insurance i2v has for invalid_media_id. Pins the R2V-specific error string, because the
     fallback used to be gated to i2v only and would have re-raised this."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     calls, uploaded, submitted = [], [], {}
@@ -981,7 +981,7 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
     the thumbnail upload away and sending the base64 blob as a media id (adversarial
     review 2026-08-22)."""
     import base64
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     thumb = "data:image/png;base64," + base64.b64encode(bytes([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]) + b"" * 32).decode()
@@ -1015,7 +1015,7 @@ def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeyp
 def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp_path, monkeypatch, pixai):
     """The fallback is exactly-once: if the retry is ALSO rejected, the route stops at two
     submits and reports the error -- never a loop. Spend guard."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     calls = []
@@ -1037,7 +1037,7 @@ def test_loom_generate_lost_response_never_retries(tmp_path, monkeypatch, pixai)
     submit exactly ONCE and must not upload-and-retry. Only a GraphQL rejection PixAI
     actually answered (a PixAIError carrying invalid_*_media_id) may retry."""
     import requests
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
     calls, uploaded = [], []

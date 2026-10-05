@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import (scan_library, files_for, media_id_of, bucket_of,
+from moonglade import gallery as g
+from moonglade.gallery import (scan_library, files_for, media_id_of, bucket_of,
                                find_files_for_media_id, MediaEntry,
                                QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
                                IMPORT_EXCLUDE, BRANDING_DIRNAME)
@@ -277,7 +277,7 @@ def test_entry_fields(library):
 def test_bucket_of_is_the_one_classifier():
     """The classifier moonglade_backup._bucket_of now aliases, and that this
     module used to re-type inline in collection_health and duplicate_groups."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     assert core._bucket_of is bucket_of
     assert bucket_of("images/x.webp") == "images"
     assert bucket_of("batches/some_batch/01_x.webp") == "batches"
@@ -370,7 +370,7 @@ def test_embeddable_is_a_strict_subset_of_image(library):
 def test_callers_ride_the_scan(library):
     """Spot-check three real callers against the table's expectations rather than
     against their own reimplementations."""
-    import moonglade_backup as core
+    from moonglade import backup as core
 
     # the audit's generator yields exactly its table row
     assert {str(rel).replace("\\", "/")

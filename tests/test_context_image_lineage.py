@@ -13,8 +13,8 @@ ids, sizes and flags are the wire's own). Fully offline."""
 import sqlite3
 import types
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, load_catalog, migrate, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, load_catalog, migrate, save_catalog
 
 T3 = "2024383379556065549"          # Tsubaki.3
 FLASH = "2050048243034896798"       # Tsubaki.3 Flash
@@ -176,7 +176,7 @@ def test_a_repair_that_failed_is_not_marked_done_and_runs_next_time(tmp_path, mo
     """migrate() swallows every OperationalError, so a repair UPDATE that hit a locked file
     must not be followed by its marker -- the marker is conditional on the repair's own
     postcondition. The next process then runs it."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     db = _pre_release_catalog(tmp_path, [_row("m1", "t1", T3, lineage_checked="1")])
     real_connect = g.sqlite3.connect
 

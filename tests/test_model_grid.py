@@ -2,8 +2,8 @@
 conftest blocks live /v2; no network, no spend."""
 from types import SimpleNamespace
 
-import moonglade_gallery
-import moonglade_backup as core
+from moonglade import gallery as moonglade_gallery
+from moonglade import backup as core
 
 _SEARCH = {"data": [
     {"id": "1982880136609467518", "title": "Tsubaki.2", "type": "MMDIT26A_MODEL",

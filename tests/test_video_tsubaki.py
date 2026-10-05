@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog, load_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog, load_catalog
 
 TBKV = ("tbkv1.0", "tbkv1.0.1")
 TBKV_IDS = {"tbkv1.0": "2042030623542642408", "tbkv1.0.1": "2054378086834851904"}

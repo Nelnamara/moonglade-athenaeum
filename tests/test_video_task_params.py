@@ -17,8 +17,8 @@ adversarial-review contract, inverted where the two recipes differ:
 
 Patch seam mirrors test_task_params.py: _gen_session hands back the moonglade_backup module
 itself, so task_detail_gql is patched on `core`, with _make_session stubbed."""
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 
 VID_TID = "8000000000000009001"

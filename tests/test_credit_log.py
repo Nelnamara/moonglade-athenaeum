@@ -5,7 +5,7 @@ NOT the same endpoint as kaisuuken_logs or extra_package_boosts. Verified live 2
 Pure/mocked -- no live network (conftest blocks gql_adhoc), no spend."""
 from types import SimpleNamespace
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _node(ref_id="r-1", amount=-2100, type_="task_cost", extra=None,

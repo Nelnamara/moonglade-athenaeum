@@ -21,8 +21,8 @@ UNITS, and the ?series=<sid> filter that "opens a stack" to one series' members.
 """
 import json
 
-import moonglade_gallery as G
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as G
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 

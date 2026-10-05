@@ -41,7 +41,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 P_TURBO, P_HIGH, P_LOW = core.PRIORITY_TURBO, core.PRIORITY_HIGH, core.PRIORITY_LOW
 

@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
@@ -97,7 +97,7 @@ def test_sync_that_reached_the_end_says_so_and_marks_the_first_sync(
         monkeypatch, tmp_path, capsys):
     """A walk that saw the oldest page reports the distance it covered, and only THEN is
     first_sync_done set -- the flag the achievement-toast gate (first_sync_complete) reads."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     calls = []
     _patch_chain(monkeypatch, calls)
 
@@ -121,7 +121,7 @@ def test_sync_that_only_caught_up_says_so_and_withholds_the_first_sync_flag(
     """The interrupted-first-backup shape: nothing has proven the end of history, so the
     line says 'caught up' and first_sync_done stays unset. Before the fix it was set on
     EVERY --sync exit, which told the gallery a mostly-empty library was fully backed up."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     calls = []
     _patch_chain(monkeypatch, calls)              # the stub returns None: no end reached
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])

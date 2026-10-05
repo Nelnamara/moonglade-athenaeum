@@ -15,8 +15,8 @@ import json
 
 from PIL import Image, ImageDraw
 
-import moonglade_container as _mc
-import moonglade_gallery as g
+from moonglade import container as _mc
+from moonglade import gallery as g
 
 from tests.conftest import clear_sealed_caches
 
@@ -61,7 +61,7 @@ def seed(container_path, poke_lines=None, ladder_feat=False, **kw):
     ladder_feat  True points the synthetic trigger feat at the metric the narrator's ladder
                  feeds, at the ladder's own final count -- the way a real pack's feat is
                  wired -- so the last poke can earn it."""
-    import moonglade_narrator as nar
+    from moonglade import narrator as nar
     ros = roster(**kw)
     if ladder_feat:
         for a in ros:

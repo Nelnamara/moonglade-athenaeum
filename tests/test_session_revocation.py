@@ -43,8 +43,8 @@ cookie string.
 """
 import threading
 
-import moonglade_backup as core
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade.gallery import create_app
 from tests.conftest import _do_login, extract_login_csrf
 
 LAN = "203.0.113.5"

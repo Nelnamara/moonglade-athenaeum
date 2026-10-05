@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-import moonglade_integrity as integrity
-import moonglade_logging as mlog
-import moonglade_paths as paths
-import moonglade_runs as runs
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade import integrity
+from moonglade import logs as mlog
+from moonglade import paths
+from moonglade import runs
 from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -107,8 +107,8 @@ def test_the_integrity_reports_follow_reports_path(tmp_path, moved):
 def test_the_curation_import_snapshot_follows_reports_path(tmp_path, moved):
     """The undo file a curation import writes before it changes anything is a report, like
     the organize undo list: it goes where reports_path() says, beside nothing else."""
-    import moonglade_curation_io as cio
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade import curation_io as cio
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"}])
@@ -186,7 +186,7 @@ def test_no_code_builds_a_record_path_by_hand():
     consts = _record_constants(trees.values())
     assert {"JOBS_LOG_NAME", "RUNS_DB", "REPORT_CSV", "RECONCILE_STAMP"} <= consts, \
         "the lint lost track of the record constants -- it would check nothing"
-    stray = [h for p, t in trees.items() if p.name != "moonglade_paths.py"
+    stray = [h for p, t in trees.items() if p.relative_to(_REPO).as_posix() != "moonglade/paths.py"
              for h in _hand_built(p, t, consts)]
     assert not stray, ("build a library record's path with moonglade_paths.state_path() / "
                        "reports_path():\n  " + "\n  ".join(stray))

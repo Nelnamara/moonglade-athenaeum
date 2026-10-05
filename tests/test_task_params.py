@@ -14,8 +14,8 @@ Pins the contract the 2026-08-13 adversarial review demanded:
 Patch seam (see tests/test_loom_import_frames.py's header): _gen_session is a
 closure handing back the moonglade_backup module itself, so the functions are
 patched on `core`, with _make_session stubbed."""
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 
 TID = "9000000000000007041"
@@ -167,7 +167,7 @@ def test_redactor_scrubs_foreign_user_homes_any_os(tmp_path):
     path under any OTHER username used to sail through. The generic user-home
     pass must scrub the home prefix on every OS's layout -- and only the
     prefix, so the tail stays readable -- without eating ordinary text."""
-    from moonglade_gallery import _redact_host_paths_cli
+    from moonglade.gallery import _redact_host_paths_cli
     red = lambda m: _redact_host_paths_cli(tmp_path, m)
     assert "gwilkins" not in red(r"open C:\Users\gwilkins\secret\x failed")
     assert "gwilkins" not in red("open C:/Users/gwilkins/secret/x failed")

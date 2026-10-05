@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery
+from moonglade import backup as core
+from moonglade import gallery as moonglade_gallery
 
 from tests.conftest import login_client
 
@@ -59,7 +59,7 @@ def test_no_art_filter_submit_path_survives():
     Asserted against the SOURCE as well as the module namespace: a builder that survives under
     another name, or a stray `pixai-image-filter` model literal, is the same defect back."""
     assert not hasattr(core, "build_filter_parameters")
-    for mod in ("moonglade_gallery.py", "moonglade_backup.py"):
+    for mod in ("moonglade/gallery.py", "moonglade/backup.py"):
         src = (ROOT / mod).read_text(encoding="utf-8")
         assert "pixai-image-filter" not in src, mod + " still names the paid filter model"
         assert "filterId" not in src, mod + " still builds a filter task's inputs"
@@ -76,7 +76,7 @@ def test_the_enhance_command_is_gone_from_the_cli(monkeypatch, capsys):
     a flag accepted no matter what the source around run_enhance looks like. main() is pure
     argparse up to parse_args(), so no command runs and no network is touched."""
     assert not hasattr(core, "run_enhance")
-    monkeypatch.setattr("sys.argv", ["moonglade_backup.py", "--enhance", "--src", "1",
+    monkeypatch.setattr("sys.argv", ["moonglade/backup.py", "--enhance", "--src", "1",
                                      "--filter-id", "filter-v1-m2", "--strength", "0.77"])
     with pytest.raises(SystemExit) as ex:
         core.main()
@@ -118,7 +118,7 @@ def test_panelplugin_surface_restored_mirror_gated():
     restored builder. The CLI flag that fed the API-key path stays gone (the Bridge is web-only)."""
     assert hasattr(core, "build_panelplugin_parameters")
     assert hasattr(core, "workflow_catalog")
-    core_src = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
+    core_src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert "pixai-panelplugin" in core_src, "the restored builder must name the panelplugin model"
     assert "workflowId" in core_src, "the restored builder must address a panelplugin workflow"
     # LEFT INTACT: the CLI --workflow-id flag stays deleted -- the Bridge is web-route-only, and a
@@ -148,7 +148,7 @@ def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
     resurrect it as a way back into a panelplugin submit. hand-fix and face-fix are superseded
     by the real, working box-based /api/fix (submit_fixer)."""
     assert not hasattr(moonglade_gallery, "ENHANCE_PLUGINS")
-    src = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
+    src = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
     assert "ENHANCE_PLUGINS" not in src
     assert 'p.get("plugin")' not in src
 

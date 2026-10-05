@@ -19,8 +19,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-import moonglade_backup as core  # noqa: E402
-from moonglade_gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR, LIBRARY_DIR_KEY,  # noqa: E402
+from moonglade import backup as core  # noqa: E402
+from moonglade.gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR, LIBRARY_DIR_KEY,  # noqa: E402
                            resolve_library_dir, save_catalog)
 
 from tests.conftest import login_client  # noqa: E402
@@ -120,7 +120,7 @@ def test_the_folder_setting_never_offers_to_move_anything():
     (The classic /panel page that stated this in copy is gone with the classic UI; the
     enforcement half -- the handler source must never touch files -- is what matters and
     stays pinned here.)"""
-    src = (ROOT / "moonglade_gallery.py").read_text(encoding="utf-8")
+    src = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
     body = src[src.index("def api_library_path("):]
     body = body[:body.index("@app.route(\"/api/server/restart\"")]
     for danger in ("shutil.move", "shutil.copytree", "os.rename", "os.replace", ".unlink("):

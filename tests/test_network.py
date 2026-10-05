@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-import moonglade_backup as core
+from moonglade import backup as core
 from tests.fake_pixai import FakePixAI
 
 
@@ -189,7 +189,7 @@ def test_variant_detection_cluster_is_gone():
     dead_names = ("detect_variant", "test_variant", "media_url", "MEDIA_TMPL", "VARIANT_CANDIDATES")
     for name in dead_names:
         assert not hasattr(core, name), name
-    src = (Path(__file__).resolve().parents[1] / "moonglade_backup.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / "moonglade" / "backup.py").read_text(encoding="utf-8")
     for name in dead_names:
         # word-boundary, not substring -- "_media_url" (a live dict key elsewhere) must not
         # false-fail this on "media_url".
@@ -372,7 +372,7 @@ def test_resume_ignores_quarantined_deleted_file(tmp_path, mocker):
     about _deleted/ (only 'gallery'/'_duplicates') -- so a media_id purged locally
     (moved to _deleted/ by purge_media_local) is still indexed as 'already done' and
     resume/--update silently never re-downloads it, exactly as if it were a live file."""
-    from moonglade_gallery import DELETED_DIRNAME
+    from moonglade.gallery import DELETED_DIRNAME
     qdir = tmp_path / DELETED_DIRNAME
     qdir.mkdir(parents=True)
     (qdir / "x_known.webp").write_bytes(b"img")
@@ -561,7 +561,7 @@ def test_update_walks_to_the_end_while_the_marker_is_absent(tmp_path, mocker):
     disk, nothing older is. The next Sync must page all the way to the true end and fill the
     tail. FAILS before the fix -- the two known pages tripped `update_grace` and pages 3-5
     were never even requested, so only the Advanced 'Full re-walk' could ever finish it."""
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
     (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
@@ -676,7 +676,7 @@ def test_download_skips_video_task_posters(tmp_path, mocker):
     """A video task's node (i2vProModel set) must NOT be catalogued as an image -- its
     mediaId is the video's poster still (handled by run_sync_videos). Regression for the
     138 phantom poster-image duplicate rows."""
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     dl = _patch_download_layer(mocker)
     img_node = {"id": "task_img", "mediaId": "IMG1", "batchMediaIds": [],
                 "createdAt": "2024-01-01T00:00:00", "promptsPreview": "p", "status": "ok"}
@@ -700,7 +700,7 @@ def test_download_skips_video_task_posters(tmp_path, mocker):
 def test_populated_catalog_skips_network_count(tmp_path, mocker):
     # With a populated catalog, the progress total comes from the catalog size --
     # no full-history _quick_count network walk.
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "old", "filename": "x_old.webp"}])
@@ -808,7 +808,7 @@ def _views_sweep(pixai, views=None):
 
 
 def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "m1", "filename": "x_m1.png"}])
@@ -835,7 +835,7 @@ def test_sync_artworks_tags_the_animation_video_row(tmp_path, mocker, pixai):
     artwork node carries the still as `mediaId` and the mp4 as `videoMediaId`. The sync must tag
     the video row via videoMediaId, or the Animations tab (WHERE artwork_id!='') stays empty."""
     from types import SimpleNamespace
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     # the ONLY local row is the video (the mp4); no separate poster row was downloaded
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
@@ -862,7 +862,7 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     key, so run_sync_artworks builds the session FIRST, then proceeds. Regression for the web
     Control Panel error 'USER_ID missing from config.json'."""
     from types import SimpleNamespace
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "")                 # config has no user id
@@ -888,7 +888,7 @@ def test_artwork_detail_hash_config_key_is_gone():
     assert not hasattr(core, "ARTWORK_DETAIL_HASH")
     assert hasattr(core, "ARTWORK_LIST_HASH")   # the live sibling must be untouched
     repo_root = Path(__file__).resolve().parents[1]
-    src = (repo_root / "moonglade_backup.py").read_text(encoding="utf-8")
+    src = (repo_root / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert "ARTWORK_DETAIL_HASH" not in src
     example_cfg = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
     assert "ARTWORK_DETAIL_HASH" not in example_cfg
@@ -900,7 +900,7 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
     resume check on find_files_for_media_id's default _IMAGE_EXTS-only matcher -- no
     .mp4 ever matches, so it's a guaranteed-False no-op for videos. Every video fired a
     full resolve_media round trip on every single run, even one already on disk."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} |
                                            {"media_id": "unrelated", "filename": "x_unrelated.png"}])
     (tmp_path / "videos").mkdir()
@@ -936,7 +936,7 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
     complete-looking total for what is actually a partial sync. FAILS before the
     fix: run_sync_artworks's return dict has no 'fail' key at all, so res['fail']
     raises KeyError."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "u1")
@@ -961,7 +961,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     'Videos saved/present: N of M' console tally with no return-value or job-status
     signal at all. FAILS before the fix for the same reason as the pagination
     test: no 'fail' key in the return dict."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "u1")
@@ -1009,7 +1009,7 @@ def test_needs_model_fix():
 
 
 def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "a.png",
@@ -1053,7 +1053,7 @@ def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
 def test_progress_counter_does_not_double_count(tmp_path, mocker):
     # Regression: the progress counter must NOT be seeded with the on-disk count
     # (that double-counted already-downloaded items and overshot 100%).
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": m, "filename": "x_%s.webp" % m} for m in ("a", "b")])
@@ -1195,7 +1195,7 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pi
     - --with-credit (mirroring --with-loras) re-processes rows whose meta is already
       complete but whose paid_credit is blank, without touching their existing meta.
     """
-    from moonglade_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
 
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -1248,7 +1248,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
     added there later shows up here as a failure instead of silently going unwritten.
     """
     import pathlib
-    from moonglade_gallery import CATALOG_FIELDS
+    from moonglade.gallery import CATALOG_FIELDS
 
     task = {
         "id": "T1", "createdAt": "2026-07-26T00:00:00Z", "status": "completed",
@@ -1265,7 +1265,7 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
                 if k in CATALOG_FIELDS and str(v or "").strip()}
     expected |= {"loras"}          # "" by design out of extract_full_meta; caller resolves it
     src = (pathlib.Path(__file__).resolve().parent.parent
-           / "moonglade_backup.py").read_text(encoding="utf-8")
+           / "moonglade" / "backup.py").read_text(encoding="utf-8")
     # _download_image_task is the SHARED downloader: collect_generation (the web
     # app + job tracker) goes through it, so it is the path that matters most.
     # Since issue #19 it hands the fields to build_catalog_row as KEYWORDS rather than
@@ -1307,7 +1307,7 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
     """One number covered two unrelated things: the fetch threw, or it returned fine and
     simply carried no prompt (a deleted task, or a kind that records none). Those have
     completely different answers, and a single "157 failed" had us guessing twice."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
 
     base = {f: "" for f in CATALOG_FIELDS}
     save_catalog(tmp_path / "catalog.db",
@@ -1389,7 +1389,7 @@ def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys, pixai):
     """The summary is by REASON, not just a total, and a majority-failure run says plainly
     that re-running it unchanged repeats it -- while making clear nothing already fetched is
     lost, because the backfill is resumable."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
 
     base = {f: "" for f in CATALOG_FIELDS}
     save_catalog(tmp_path / "catalog.db",
@@ -1423,7 +1423,7 @@ def test_full_metadata_is_the_default_on_a_pull(monkeypatch, tmp_path):
 
     def parsed(argv):
         seen.clear()
-        monkeypatch.setattr("sys.argv", ["moonglade_backup.py", "--catalog-stats",
+        monkeypatch.setattr("sys.argv", ["moonglade/backup.py", "--catalog-stats",
                                          "--out", str(tmp_path)] + argv)
         core.main()
         return seen["ns"]
@@ -1446,7 +1446,7 @@ def test_catalog_stats_reports_metadata_coverage(tmp_path, capsys):
     column blank too, so a blank one cannot be told apart from one never fetched, and
     reporting it would send you re-fetching tasks that are already complete.
     """
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
 
     base = {f: "" for f in CATALOG_FIELDS}
     save_catalog(tmp_path / "catalog.db", [
@@ -1479,7 +1479,7 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     before this changed: 788 of 800 rows had a prompt, 5 had a model id, and a backfill was
     a no-op. The model id is not cosmetic -- an image-view upscale submits i2i and needs it.
     """
-    from moonglade_gallery import save_catalog, load_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
 
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -1521,7 +1521,7 @@ def test_gallery_starts_an_ipv6_loopback_companion():
     hosts only (an explicit LAN --host must not sprout extra listeners), and
     fails soft when the machine has no IPv6 stack."""
     import pathlib
-    src = pathlib.Path("moonglade_gallery.py").read_text(encoding="utf-8")
+    src = pathlib.Path("moonglade/gallery.py").read_text(encoding="utf-8")
     assert 'if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):' in src
     assert '_make_server6("::1", args.port, app' in src
     assert src.index('_make_server6("::1"') < src.index(
@@ -1568,7 +1568,7 @@ def test_gallery_serves_gracefully_not_via_os_exit():
         as the no-server-stashed fallback);
       - main() returns the pending exit code (0 stop / 42 restart) for `sys.exit(main())`."""
     import pathlib
-    src = pathlib.Path("moonglade_gallery.py").read_text(encoding="utf-8")
+    src = pathlib.Path("moonglade/gallery.py").read_text(encoding="utf-8")
     assert "srv = _make_server(args.host, args.port, app" in src
     assert "srv.serve_forever()" in src
     assert "app.run(host=args.host, port=args.port" not in src,         "app.run() fire-and-forget must be gone -- it cannot be shut down or cleaned up after"
@@ -1587,7 +1587,7 @@ def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
     import threading
     import urllib.request
 
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     from werkzeug.serving import make_server
 
     def app(environ, start_response):
@@ -1624,8 +1624,8 @@ def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
 def test_resolve_server_settings_precedence_and_bonjour_defaults(monkeypatch):
     """config.json fills host/port/Bonjour when the CLI did not; an explicit --host/--port wins;
     Bonjour defaults OFF (broadcast is opt-in, flipped on from the chip)."""
-    import moonglade_gallery as g
-    import moonglade_backup as core
+    from moonglade import gallery as g
+    from moonglade import backup as core
 
     monkeypatch.setattr(core, "_load_config", lambda: {})
     assert g.resolve_server_settings(None, None) == {

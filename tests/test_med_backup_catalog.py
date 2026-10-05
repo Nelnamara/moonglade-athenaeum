@@ -22,9 +22,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as gallery
-from moonglade_gallery import DELETED_DIRNAME, load_catalog
+from moonglade import backup as core
+from moonglade import gallery
+from moonglade.gallery import DELETED_DIRNAME, load_catalog
 
 
 # ---------------------------------------------------------------------------

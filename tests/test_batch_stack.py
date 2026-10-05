@@ -17,8 +17,8 @@ batch answers as a series of ONE run. Pins:
   * the route is a pure catalog read: no network, and it does not answer for a
     deleted-file row (the catalog's `filename != ''` survivor rule).
 """
-import moonglade_gallery as G
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as G
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 

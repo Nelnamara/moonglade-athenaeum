@@ -18,7 +18,7 @@ BEFORE any of them is reachable.
 """
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # --- the table ---------------------------------------------------------------

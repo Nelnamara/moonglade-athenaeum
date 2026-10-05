@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 from tests.conftest import login_client
 
@@ -1430,9 +1430,9 @@ def test_no_code_path_requests_the_claim_route():
     """The app never claims Unlimited Mode (§1: an account action the owner takes on PixAI's
     site). Grep over every shipped module and client source: the only road to the entitlement
     is the status GET, and no path under it -- the claim among them -- is ever built."""
-    shipped = [ROOT / n for n in ("moonglade_backup.py", "moonglade_gallery.py",
-                                  "moonglade_mcp.py", "moonglade_similar.py",
-                                  "moonglade_container.py", "moonglade_assets.py")]
+    shipped = [ROOT / n for n in ("moonglade/backup.py", "moonglade/gallery.py",
+                                  "moonglade/mcp_server.py", "moonglade/similar.py",
+                                  "moonglade/container.py", "moonglade/assets.py")]
     for folder, globs in ((ROOT / "gallery" / "src", ("*.js", "*.jsx")),
                           (ROOT / "loom", ("*.jsx",)), (ROOT / "loom" / "src", ("*.js",))):
         for g in globs:
@@ -1444,6 +1444,6 @@ def test_no_code_path_requests_the_claim_route():
         hits += ["{}:{}".format(f.name, i) for i, line in enumerate(text.splitlines(), 1)
                  if route.search(line)]
     assert hits == [], "a path under the Unlimited Mode route is built: {}".format(hits)
-    src = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
+    src = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
     assert src.count('"/infinite-mode"') == 1, "the status GET is the one read of the route"
 

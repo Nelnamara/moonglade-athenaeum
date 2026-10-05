@@ -15,11 +15,11 @@ replicated server-side, plus the two LOGIN-tier reads that expose it
   * route hygiene mirroring /api/siblings (400 on non-list/non-object, 200-id
     cap).
 """
-import moonglade_gallery as G
+from moonglade import gallery as G
 
 
 def _seed(tmp_path, rows):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     full = []
     for r in rows:
@@ -31,7 +31,7 @@ def _seed(tmp_path, rows):
 
 
 def _client(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     return login_test_client(create_app(tmp_path))
 

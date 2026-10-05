@@ -13,7 +13,7 @@ REAL `{"profiles": [...]}` shape and the real parse. All network is mocked at `_
 `gql_mutate` -- no live calls, no optional-dep imports (CI curated-deps rule)."""
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _dit_profiles(default="lite"):

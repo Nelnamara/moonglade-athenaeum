@@ -19,9 +19,9 @@ import time
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_contest_wins as cw
-import moonglade_gallery as g
+from moonglade import backup as core
+from moonglade import contest_wins as cw
+from moonglade import gallery as g
 from tests.conftest import login_client, record_own_sleeps
 
 DAY = 86400.0

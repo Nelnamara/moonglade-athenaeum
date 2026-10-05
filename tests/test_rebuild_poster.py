@@ -4,11 +4,11 @@ redone without a whole --rebuild-thumbs pass (owner, 2026-08-22). Videos only.
 """
 from pathlib import Path
 
-import moonglade_gallery as G
+from moonglade import gallery as G
 
 
 def _seed(tmp_path, mid, is_video):
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     (tmp_path / "videos").mkdir(parents=True, exist_ok=True)
     name = ("videos/clip_%s.mp4" if is_video else "videos/pic_%s.png") % mid
     (tmp_path / name).write_bytes(b"\x00" * 64)
@@ -18,7 +18,7 @@ def _seed(tmp_path, mid, is_video):
 
 
 def test_rebuild_poster_regenerates_a_video_thumb(tmp_path, monkeypatch):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "555", is_video=True)
     calls = []
@@ -41,7 +41,7 @@ def test_rebuild_poster_regenerates_a_video_thumb(tmp_path, monkeypatch):
 
 
 def test_rebuild_poster_refuses_an_image(tmp_path, monkeypatch):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "777", is_video=False)
     monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
@@ -52,7 +52,7 @@ def test_rebuild_poster_refuses_an_image(tmp_path, monkeypatch):
 
 
 def test_rebuild_poster_unknown_id_is_404(tmp_path):
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "555", is_video=True)
     cli = login_test_client(create_app(tmp_path))
@@ -61,7 +61,7 @@ def test_rebuild_poster_unknown_id_is_404(tmp_path):
 
 def test_rebuild_poster_reports_ffmpeg_failure_softly(tmp_path, monkeypatch):
     """ffmpeg missing / extract failing is a soft {ok:false,error}, never a 500."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     _seed(tmp_path, "555", is_video=True)
     monkeypatch.setattr(G, "make_video_thumbnail", lambda *a, **k: False)
@@ -76,7 +76,7 @@ def test_rebuild_poster_finds_a_moved_video_via_the_matcher(tmp_path, monkeypatc
     """The catalog row's filename is stale (the clip was moved by --organize); the route must
     fall back to find_files_for_media_id told to look for VIDEO extensions. Pins the fallback
     branch -- a NameError hid there once because the happy path never reached it."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
     (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
     # the real file sits where organize put it; the row still names the old path

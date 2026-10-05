@@ -26,9 +26,9 @@ import inspect
 import json
 from unittest import mock
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 from tests.conftest import login_client
 
 
@@ -253,7 +253,7 @@ def test_the_cli_dedup_counts_each_duplicated_picture_once(tmp_path):
     """--dedup --apply keys each swept copy by what it duplicated, so copying the same file
     back and sweeping it again is not a second piece."""
     import types
-    from moonglade_gallery import init_db
+    from moonglade.gallery import init_db
 
     def _dup_and_sweep():
         (tmp_path / "images").mkdir(exist_ok=True)

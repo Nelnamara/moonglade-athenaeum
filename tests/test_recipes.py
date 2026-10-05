@@ -12,9 +12,9 @@ import json
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_recipes as rec
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import backup as core
+from moonglade import recipes as rec
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 from tests.conftest import login_client, login_test_client
 from tests.fake_pixai import FakePixAI
 

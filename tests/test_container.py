@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-import moonglade_container as mc
-import moonglade_gallery as g
+from moonglade import container as mc
+from moonglade import gallery as g
 
 from tests.conftest import login_client
 

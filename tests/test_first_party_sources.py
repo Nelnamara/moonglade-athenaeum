@@ -8,22 +8,25 @@ never wanders into tests/ or node_modules/, and that each guard really uses it.
 """
 from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 
-# Every first-party module today. The move into moonglade/ renames them, and this list moves
-# with them -- which is the point: a collector that stops finding the code fails HERE, instead
-# of every guard that trusts it passing over nothing.
+# Every first-party module today, by its path from the repo root: the launcher, the three root
+# stand-ins 3.20 keeps for one release, and the moonglade/ package the code moved into. The list
+# moves with the code -- which is the point: a collector that stops finding the code fails HERE,
+# instead of every guard that trusts it passing over nothing.
 _TODAY = (
     "Serve Gallery.pyw",
-    "moonglade_assets.py", "moonglade_backup.py", "moonglade_bonjour.py",
-    "moonglade_container.py", "moonglade_contest_wins.py", "moonglade_curation_io.py",
-    "moonglade_gallery.py", "moonglade_inbox.py", "moonglade_integrity.py",
-    "moonglade_logging.py", "moonglade_mcp.py", "moonglade_narrator.py",
-    "moonglade_paths.py", "moonglade_recipes.py", "moonglade_runs.py",
-    "moonglade_similar.py",
+    "moonglade_backup.py", "moonglade_gallery.py", "moonglade_mcp.py",
+    "moonglade/__init__.py", "moonglade/__main__.py",
+    "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
+    "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py",
+    "moonglade/gallery.py", "moonglade/inbox.py", "moonglade/integrity.py",
+    "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/narrator.py",
+    "moonglade/paths.py", "moonglade/recipes.py", "moonglade/runs.py",
+    "moonglade/similar.py",
 )
 
 
 def test_it_finds_every_module_there_is_today():
-    names = {p.name for p in first_party_sources()}
+    names = {p.relative_to(REPO_ROOT).as_posix() for p in first_party_sources()}
     missing = [n for n in _TODAY if n not in names]
     assert not missing, "the collector no longer finds: " + ", ".join(missing)
 

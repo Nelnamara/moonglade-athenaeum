@@ -18,9 +18,9 @@ import json
 
 import pytest
 
-import moonglade_container as mc
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import container as mc
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import login_client, login_test_client
 

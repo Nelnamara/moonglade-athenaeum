@@ -8,9 +8,9 @@ import contextlib
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local, create_app)
 
 from tests.conftest import login_client
@@ -115,7 +115,7 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
 
 
 def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypatch, pixai):
-    import moonglade_backup as core
+    from moonglade import backup as core
     db = _seed(tmp_path, [
         _row(media_id="100", task_id="T1", filename="100.png"),
         _row(media_id="101", task_id="T1", filename="101.png"),   # same task, NOT selected
@@ -153,7 +153,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
     route exists to prevent, and silent, because the job card is the only place it
     would ever show."""
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     db = _seed(tmp_path, [
         _row(media_id="300", task_id="TA", filename="300.png"),
         _row(media_id="400", task_id="TB", filename="400.png"),
@@ -192,7 +192,7 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
 def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch, pixai):
     """The async delete registers a 'delete' job that shows in /api/jobs and reaches 'done'."""
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     _seed(tmp_path, [_row(media_id="a1", task_id="TA", filename="a1.png")], {"a1.png": b"x"})
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
 
@@ -352,7 +352,7 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch, pixai):
     invariants below (nothing fired, nothing deleted) are unchanged from when
     this covered the classic /delete-tasks-bulk form route."""
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
     fired = []
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
@@ -379,7 +379,7 @@ def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypat
     already covered this shape. Flagged by adversarial review and fixed 2026-07-19;
     ported to the surviving JSON route when the classic form route died 2026-08-08."""
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
     fired = []
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))

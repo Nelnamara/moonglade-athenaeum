@@ -10,7 +10,7 @@ pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt
 # running plain `pytest`. CLAUDE.md's --ignore=tests/test_similar.py flag is still the
 # documented way to exclude this file explicitly; this is the fallback for someone who
 # doesn't know that yet.
-import moonglade_similar as S
+from moonglade import similar as S
 
 
 def test_pgserver_start_timeout_is_widened(monkeypatch):
@@ -158,7 +158,7 @@ def test_similar_excludes_self_and_limits_k(monkeypatch):
 def test_api_similar_route(tmp_path, monkeypatch):
     """Hydrates neighbours like /api/gallery-images, drops ids no longer in the catalog,
     and soft-404s an unknown media_id — the sidecar itself is mocked."""
-    from moonglade_gallery import save_catalog, CATALOG_FIELDS
+    from moonglade.gallery import save_catalog, CATALOG_FIELDS
     from tests.conftest import login_client
 
     def row(**kw):
@@ -170,7 +170,7 @@ def test_api_similar_route(tmp_path, monkeypatch):
     ])
     (tmp_path / "q.png").write_bytes(b"x")   # so find_image_file resolves the query
 
-    import moonglade_similar
+    from moonglade import similar as moonglade_similar
     monkeypatch.setattr(moonglade_similar, "similar",
                         lambda p, k=24, exclude_media_id=None: [("n1", 0.9), ("gone", 0.8)])
 
@@ -196,7 +196,7 @@ def test_run_sync_similar_tops_up_and_never_rebuilds(tmp_path, monkeypatch):
 
     rebuild is stubbed to RAISE rather than merely counted: if this entry point is ever rewired
     through it, the test fails loudly at the call instead of on a subtle assertion afterwards."""
-    import moonglade_backup as core
+    from moonglade import backup as core
 
     calls = []
 
@@ -227,7 +227,7 @@ def test_run_sync_similar_reports_an_already_complete_index(tmp_path, monkeypatc
     """Adding nothing is a normal, successful outcome -- the index was already complete. It must
     read that way rather than looking like a job that silently did nothing, which is exactly how
     the empty-index bug hid for three days on the /api/similar route."""
-    import moonglade_backup as core
+    from moonglade import backup as core
 
     def fake_sync(items, progress=None, batch=400):
         return 0

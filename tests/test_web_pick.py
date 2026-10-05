@@ -7,8 +7,8 @@ import json
 import os
 from pathlib import Path
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 
 from tests.conftest import login_client, login_existing_client, with_csrf
 from tests.csshelp import css_rules, element, winning
@@ -647,7 +647,7 @@ def test_one_account_cannot_see_or_clobber_anothers_snippets(tmp_path):
     """Same split saved views already got (test_view_presets.py), same reason: prompt
     snippets were install-wide (one shared prompt_snippets.json), so any signed-in
     account could read AND wholesale-overwrite every other account's saved snippets."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -671,7 +671,7 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
     though account identity is case-SENSITIVE (same alice/bob split as above, just
     unlucky enough to collide on disk). FAILS before the fix on this filesystem:
     nel's snippets read/save clobbers Nel's."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     app = create_app(tmp_path)
 
@@ -739,7 +739,7 @@ def test_suggest_prompt_route(tmp_path, monkeypatch, pixai):
 
 
 def test_rows_for_media_ids_preserves_order_drops_missing():
-    import moonglade_gallery as g
+    from moonglade import gallery as g
 
     class FakeCon:
         def execute(self, sql, params):
@@ -799,7 +799,7 @@ def test_contact_sheet_photo_and_strip(tmp_path):
 
 def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch, pixai):
     """Frame handoff: find the shot's clip -> extract last frame -> upload -> media_id."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     (tmp_path / "videos").mkdir()
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
@@ -830,7 +830,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
     """A trimmed previous shot must hand off the frame at its trimOut (the point the cut
     ends on), not the untrimmed clip's real final frame -- else the continuity chain shows
     a frame the edit never plays."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     (tmp_path / "videos").mkdir()
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
@@ -934,7 +934,7 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch, pixai):
     so a purged clip could be extracted and uploaded to seed the next (paid) shot.
     No catalog row for this media_id, so the fast path can't shortcut past the
     fallback -- this exercises exactly the buggy branch."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     qdir = tmp_path / g.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
@@ -953,7 +953,7 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch, pixai
     """B17 (audit 2026-07-21): the fallback glob had no media_id_of(p) == mid check,
     so a SHORTER media_id could match as a substring of a longer, UNRELATED one's
     filename -- e.g. a request for 'V9' resolving to a clip whose real id is '9V9'."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
 
@@ -1004,7 +1004,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     """Same B17 quarantine contract as /api/loom/handoff (shared resolver,
     _find_local_video_file): a file sitting under _deleted/ must not be probed as if
     it were a live survivor."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     qdir = tmp_path / g.DELETED_DIRNAME
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
@@ -1076,7 +1076,7 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
     """Same split saved views/snippets/Loom storyboards already got: Toolbox presets
     were install-wide (one shared toolbox_presets.json), so any signed-in account
     could read AND wholesale-overwrite every other account's imported presets."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "alice-scene",
@@ -1105,7 +1105,7 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
     _view_presets_path's exact quote(username, safe="") keying -- inheriting the same
     case-collision bug. FAILS before the fix on this filesystem: nel's presets
     read/save clobbers Nel's."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "upper-scene",
@@ -1303,7 +1303,7 @@ def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, p
 
 
 def test_catalog_counts(tmp_path):
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00",
              collections="faves,wips"),
@@ -1316,7 +1316,7 @@ def test_catalog_counts(tmp_path):
 
 
 def test_distinct_task_count(tmp_path):
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     g.save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", task_id="tA", filename="a_1.png", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", task_id="tA", filename="b_2.png", created_at="2025-01-02T00:00:00"),  # same task (batch)
@@ -1414,7 +1414,7 @@ def test_your_art_ranks_published_and_reads_swept_views(tmp_path, pixai):
 
     The totals are the other half of the change: `views` here is a real lifetime sum over
     every published row, not the twelve-row subtotal the old `views_top` could manage."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     cli = _authed_client(tmp_path, [
         _row(media_id="1", artwork_id="aw1", filename="a_1.png", is_published="1",
              liked_count="4", comment_count="2", views="500",
@@ -1944,7 +1944,7 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixa
 
     cli.post("/api/import-task", json={"task_id": tid})
 
-    from moonglade_backup import _reconstruct_jobs
+    from moonglade.backup import _reconstruct_jobs
     jobs_by_id, _order, _n = _reconstruct_jobs(tmp_path)
     assert jobs_by_id[tid]["status"] == "running"       # untouched
     assert jobs_by_id[tid]["dismissed"] is True

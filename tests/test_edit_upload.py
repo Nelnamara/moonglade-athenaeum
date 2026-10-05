@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # ---- build_chat_edit_parameters (pinned to the captured Edit-Pro submit) ----
@@ -216,7 +216,7 @@ def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
     """The badge's /api/price and the /api/edit spend must build the SAME chat block for an
     Auto edit -- no aspectRatio on either, nothing else different (the owner's two wire edits
     paid the 2K price, 8,000, with no aspectRatio)."""
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
                                                 media_id="1", filename="a_1.png")])
@@ -373,7 +373,7 @@ def test_edit_v4_sends_ten_inputs_no_quality_and_no_aspect_on_auto():
 
 
 def test_the_priced_v4_edit_is_the_submitted_one(tmp_path, monkeypatch):
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
                                                 media_id="1", filename="a_1.png")])
@@ -460,7 +460,7 @@ def test_an_edit_pro_v2_edit_is_catalogued_under_its_own_label():
 
 
 def test_the_priced_edit_pro_v2_edit_is_the_submitted_one(tmp_path, monkeypatch):
-    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
                                                 media_id="1", filename="a_1.png")])

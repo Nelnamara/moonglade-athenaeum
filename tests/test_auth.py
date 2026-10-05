@@ -1,6 +1,6 @@
 """Auth simplification: persisted hashes ship with working defaults and USER_ID
 auto-resolves from the API key, so setup needs only PIXAI_API_KEY."""
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def test_persisted_hashes_have_builtin_defaults():

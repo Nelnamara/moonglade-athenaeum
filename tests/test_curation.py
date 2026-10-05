@@ -21,9 +21,9 @@ import sqlite3
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import (
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import (
     CATALOG_FIELDS, CurationError, curate_apply, curate_restore, delete_collection,
     list_media_ids, list_group_rows, load_catalog, merge_collections, normalize_tag,
     personal_get, query_catalog, rename_collection, save_smart_collection, save_catalog,
@@ -602,7 +602,7 @@ def test_an_import_into_a_smart_collection_is_refused_before_any_file_lands(clie
 
 def test_the_mcp_add_tool_refuses_a_smart_collection(db, monkeypatch):
     pytest.importorskip("fastmcp")
-    import moonglade_mcp as m
+    from moonglade import mcp_server as m
     monkeypatch.setattr(m, "DB", str(db))
     save_smart_collection(db, "keeper", name="Keepers")
     out = m.add_to_collection(["1"], "Keepers")

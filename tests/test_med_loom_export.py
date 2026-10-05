@@ -30,8 +30,8 @@ import zipfile
 
 from PIL import Image
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
 
@@ -60,7 +60,7 @@ def _mock_export_ffmpeg(monkeypatch):
     unconditionally would drop a stray file named HEAD into the repo root."""
     import io as _io
     import subprocess
-    import moonglade_backup as core
+    from moonglade import backup as core
     # ffmpeg present, ffprobe absent -- the export asks media_tools now, not
     # shutil.which. "ffmpeg" stays the resolved path so argv[0] keeps reading "ffmpeg".
     monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
@@ -192,7 +192,7 @@ def test_an_unreadable_file_among_silent_shots_degrades_instead_of_refusing(tmp_
     the cut is written without an audio track rather than refused. Refusing here would cost
     the owner the whole export to protect a track of silence."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    import moonglade_backup as core
+    from moonglade import backup as core
     # ffprobe IS installed here -- that is this test's whole premise. Only ffprobe is
     # re-pinned; ffmpeg_path stays "ffmpeg" from _mock_export_ffmpeg so the FakeProc
     # guard and _ffmpeg_call() still recognise the spawned command.
@@ -422,7 +422,7 @@ def test_a_failed_export_says_what_ffmpeg_said_not_only_its_exit_code(tmp_path, 
     import io as _io
     import subprocess
     import time
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(core, "ffprobe_path", lambda: "")
     monkeypatch.setattr(g, "probe_has_audio", lambda path: False)

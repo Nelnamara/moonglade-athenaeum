@@ -74,7 +74,7 @@ def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc
     as `message=`) -- so what this pins is the DECLARATION, not the old
     statement. tests/test_route_tiers.py proves the enforcement itself against a
     live authenticated LAN request."""
-    src = _read("moonglade_gallery.py")
+    src = _read("moonglade/gallery.py")
     start = src.index('"is_local": True')
     window = src[start:start + 200]
     assert re.search(r'"is_true_local":\s*_is_local_request\(\)', window), (
@@ -107,7 +107,7 @@ def test_task_detail_query_docstring_names_its_real_caller_and_the_two_that_bypa
     proof it never reaches this function's fallback), and both call sites in
     run_download's --full-meta branch (parallel and serial) call task_detail_gql
     directly. collect_generation is the only real caller of _task_detail_query."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     doc = core._task_detail_query.__doc__ or ""
     assert "collect_generation" in doc, (
         "docstring doesn't name its one real caller (collect_generation)")

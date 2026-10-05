@@ -19,8 +19,8 @@ import json
 import pytest
 from PIL import Image
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests import synthetic_feats as sf
 from tests.conftest import login_client

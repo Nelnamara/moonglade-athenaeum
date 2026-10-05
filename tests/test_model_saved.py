@@ -11,8 +11,8 @@ a test swaps in a fake.
 import pytest
 import requests
 
-import moonglade_backup as core
-import moonglade_recipes as rec
+from moonglade import backup as core
+from moonglade import recipes as rec
 from tests.conftest import login_client
 
 OWNER = "4242"

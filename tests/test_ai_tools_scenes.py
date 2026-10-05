@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import save_catalog
 
 from tests.conftest import login_client
 
@@ -204,7 +204,7 @@ def test_an_empty_answer_is_not_cached():
 # --- the route -----------------------------------------------------------------------
 
 def _armed(monkeypatch, up):
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "mirror_enabled", lambda: True)
     monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "chat_editing_scenes", up)
@@ -226,7 +226,7 @@ def test_api_scenes_serves_every_live_scene_with_its_tile_fields(tmp_path, monke
 
 
 def test_api_scenes_refuses_when_the_mirror_is_not_armed(tmp_path, monkeypatch):
-    import moonglade_backup as core
+    from moonglade import backup as core
     monkeypatch.setattr(core, "mirror_enabled", lambda: False)
     save_catalog(tmp_path / "catalog.db", [])
     r = login_client(tmp_path).get("/api/scenes")

@@ -9,7 +9,7 @@ import zipfile
 
 from PIL import Image
 
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_existing_client, login_test_client
 
@@ -270,7 +270,7 @@ def test_import_bundle_skips_every_entry_that_is_not_a_plain_picture_or_video(tm
     with a plain id is stored; everything else is skipped unread and catalogs nothing."""
     import io
     import zipfile
-    from moonglade_gallery import create_app, save_catalog
+    from moonglade.gallery import create_app, save_catalog
     from tests.conftest import login_test_client
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_test_client(create_app(tmp_path))

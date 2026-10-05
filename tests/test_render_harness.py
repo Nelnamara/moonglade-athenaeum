@@ -93,11 +93,11 @@ import threading
 import os
 import pytest
 
-from tests.conftest import _SEALED_DONOR
+from tests.conftest import _SEALED_DONOR, stub_code_module
 
-import moonglade_backup as core
-import moonglade_paths
-from moonglade_gallery import (
+from moonglade import backup as core
+from moonglade import paths as moonglade_paths
+from moonglade.gallery import (
     CATALOG_FIELDS, create_app, load_catalog, save_catalog,
     achievement_metrics, compute_achievements, save_ach_state,
     telem_flag, telemetry_metrics, load_telemetry,
@@ -141,7 +141,7 @@ def _seed_guide_seen(root, username=_USERNAME):
     welcome card (.mgguide-root) -- and on the phone it sits over the grid and takes the
     click an ordinary test makes on a tile. A test that is ABOUT the guide opts in to a
     never-guided account instead: logged_in_page(fresh_account=True)."""
-    import moonglade_gallery as _gallery
+    from moonglade import gallery as _gallery
     _gallery.account_prefs_update(
         root, username, set_={"guide." + s: "done" for s in _guide_surfaces()})
 
@@ -273,7 +273,7 @@ def render_server(tmp_path_factory):
 
     from werkzeug.serving import make_server
 
-    import moonglade_gallery as _gallery
+    from moonglade import gallery as _gallery
     from tests.conftest import (clear_sealed_caches, pin_daytime_clock,
                                 seed_sealed_container)
 
@@ -1541,7 +1541,7 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
 
     from werkzeug.serving import make_server
 
-    import moonglade_gallery as _gallery
+    from moonglade import gallery as _gallery
     from tests.conftest import (clear_sealed_caches, pin_daytime_clock,
                                 seed_sealed_container)
 
@@ -1813,8 +1813,8 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     sidecar is stubbed (see _fake_similar_module).
     """
     import sys
-    monkeypatch.setitem(sys.modules, "moonglade_similar",
-                        _fake_similar_module([("101", 0.91), ("102", 0.88), ("103", 0.77)]))
+    stub_code_module(monkeypatch, "similar",
+                     _fake_similar_module([("101", 0.91), ("102", 0.88), ("103", 0.77)]))
 
     page = logged_in_page(**PHONE)
     _visit(page, "/")
@@ -1919,8 +1919,8 @@ def test_phone_similar_is_dismissed_by_the_back_gesture_too(logged_in_page, monk
     walking out of the app.
     """
     import sys
-    monkeypatch.setitem(sys.modules, "moonglade_similar",
-                        _fake_similar_module([("104", 0.8), ("105", 0.7)]))
+    stub_code_module(monkeypatch, "similar",
+                     _fake_similar_module([("104", 0.8), ("105", 0.7)]))
 
     page = logged_in_page(**PHONE)
     _visit(page, "/")
@@ -3012,8 +3012,8 @@ def test_a_completion_leaves_the_similar_view_alone_even_at_page_1(
     monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
     # Neighbours that really exist in this catalog, so api_similar's own get_row lookups
     # resolve and real result tiles render.
-    monkeypatch.setitem(sys.modules, "moonglade_similar",
-                        _fake_similar_module([("1118", 0.93), ("1117", 0.87)]))
+    stub_code_module(monkeypatch, "similar",
+                     _fake_similar_module([("1118", 0.93), ("1117", 0.87)]))
 
     ctx = render_browser.new_context(
         viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
@@ -4476,8 +4476,8 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
     toast to wait for. The adoption half -- the part with no coverage at all -- runs either
     way.
     """
-    import moonglade_gallery as _g
-    from moonglade_gallery import list_slot_assets, load_ach_state
+    from moonglade import gallery as _g
+    from moonglade.gallery import list_slot_assets, load_ach_state
 
     slot = "banner_main"
     sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
@@ -6248,8 +6248,8 @@ def _dress_role_pack():
     Written at the PER-TEST container path: conftest's autouse fixture has re-pointed it."""
     import io as _io
     import json as _json
-    import moonglade_container as _mc
-    import moonglade_gallery as _g
+    from moonglade import container as _mc
+    from moonglade import gallery as _g
     from PIL import Image
     from tests.conftest import _seed_assets, clear_sealed_caches
 
@@ -6279,7 +6279,7 @@ def _open_roles_section(page):
 
 def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_pack_untouched(
         logged_in_page, tmp_path, sealed_donor_present):
-    import moonglade_gallery as _g
+    from moonglade import gallery as _g
     _dress_role_pack()
     pack_before = _g._container_path().read_bytes()
     page = logged_in_page(**DESKTOP)
@@ -6379,7 +6379,7 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
     """The pack's own login companion is an animated WebP, so the editor must tick one as acceptable
     ("animated" shown, Use this open) and upload it kept animated; an animated file for a role that
     allows only stills is refused on the device, in the same words as the server's."""
-    import moonglade_gallery as _g
+    from moonglade import gallery as _g
     from PIL import Image, ImageDraw
 
     def disc(size, tint):
@@ -6637,7 +6637,7 @@ _POWER_MODEL = {"model_id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "versio
 
 
 def _seed_power_account(root, extra_models=0):
-    import moonglade_gallery as _gallery
+    from moonglade import gallery as _gallery
     models = [{"id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "type": "MMDIT26B_MODEL", "hint": ""}]
     favs = [{"id": "fav-%d" % i, "title": "Fav model %d" % i, "thumb": "", "type": "SDXL_MODEL", "hint": ""}
             for i in range(extra_models)]
@@ -6662,7 +6662,7 @@ def _seed_power_account(root, extra_models=0):
 
 
 def _clear_power_account(root):
-    import moonglade_gallery as _gallery
+    from moonglade import gallery as _gallery
     _gallery.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
 
 
@@ -6828,7 +6828,7 @@ class _MatrixFixture:
     def __init__(self, root):
         import sqlite3
         import time
-        import moonglade_runs as runs
+        from moonglade import runs
         self.root = root
         self.db = root / "catalog.db"
         self.run_id = "b" * 32

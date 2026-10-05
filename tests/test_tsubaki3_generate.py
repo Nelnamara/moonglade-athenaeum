@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 from tests.test_tsubaki3_image_gate import (
     FLASH, MODELS, SDXL, SIZE_CONFIG, T3, T3_PROFILES, FakeRest, features, T3_STATUS,
 )

@@ -25,7 +25,7 @@ lapses quietly).
 import re
 from pathlib import Path
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -45,7 +45,7 @@ def _newest_cut():
 def test_version_constant_matches_newest_changelog_cut():
     newest_cut, _ = _newest_cut()
     assert core.__version__ == newest_cut, (
-        "moonglade_backup.__version__ is {!r} but CHANGELOG.md's newest cut "
+        "moonglade.backup.__version__ is {!r} but CHANGELOG.md's newest cut "
         "release is [{}] -- the banner and Panel footer render __version__, so "
         "bump the constant in the same commit that cuts the release.".format(
             core.__version__, newest_cut))

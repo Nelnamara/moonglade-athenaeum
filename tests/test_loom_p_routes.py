@@ -33,9 +33,9 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
 from tests.conftest import _TEST_USERNAME, login_test_client
 
 REPO = Path(__file__).resolve().parent.parent
@@ -340,7 +340,7 @@ _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adh
 
 
 def test_no_new_route_function_names_a_render_or_pixai():
-    tree = ast.parse((REPO / "moonglade_gallery.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name in _NEW_FUNCS:
@@ -1143,7 +1143,7 @@ _READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
 def test_the_frame_thumbs_route_names_nothing_that_spends_or_uploads():
     """It needs a PixAI session (the media read), so it is not in _NEW_FUNCS' no-session list;
     it must still name no submit, no gql and no upload."""
-    tree = ast.parse((REPO / "moonglade_gallery.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO / "moonglade" / "gallery.py").read_text(encoding="utf-8"))
     found = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name in _READ_ONLY_FUNCS:

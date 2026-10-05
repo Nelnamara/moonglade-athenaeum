@@ -4,9 +4,9 @@ nothing touches a real Desktop or PowerShell."""
 import json
 import pathlib
 
-import moonglade_gallery as g
-import moonglade_paths
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade import paths as moonglade_paths
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_existing_client, login_test_client
 
@@ -208,7 +208,7 @@ def test_branding_root_is_the_app_folder_not_the_library(tmp_path):
     Deliberately calls the CAPTURED resolver: conftest redirects the module attribute to tmp_path
     for every other test, so asserting through the module here would only re-test the fixture."""
     root = _REAL_BRANDING_ROOT()
-    app_dir = pathlib.Path(g.__file__).resolve().parent
+    app_dir = pathlib.Path(g.__file__).resolve().parents[1]      # the app root, above moonglade/
 
     assert root == app_dir / g._GOODS_ROOT_NAME
     # The point of the move: it does NOT live under any library, including this test's.
@@ -733,7 +733,7 @@ def test_legacy_crop_manifest_migrates_to_transform(tmp_path):
     surfaces as the equivalent zoom/cropX/cropY -- an existing install's banners
     keep displaying unchanged until re-tuned."""
     import json as _json
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     sdir = g._role_dir("banner_main")
     sdir.mkdir(parents=True)
     (sdir / "abcd1234.png").write_bytes(_png_bytes())
@@ -789,7 +789,7 @@ def _build_box(assets):
     """(Re)build this install's art pack around `assets` and drop the read
     cache, so the new content is seen immediately (the cache keys on mtime, which
     can collide with conftest's own seed inside the filesystem's resolution)."""
-    import moonglade_container as mc
+    from moonglade import container as mc
     mc.write_container(g._container_path(), assets, {})
     g._container_cache.update(path=None, mtime=None, box=None)
 

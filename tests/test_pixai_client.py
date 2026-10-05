@@ -25,7 +25,7 @@ import json
 import pytest
 import requests
 
-import moonglade_backup as core
+from moonglade import backup as core
 from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 
 

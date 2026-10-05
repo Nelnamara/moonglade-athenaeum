@@ -25,8 +25,8 @@ import io
 import pytest
 from PIL import Image, ImageSequence
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 from tests.conftest import STARFALL_EVENT, ach_event, login_client
 
@@ -278,7 +278,7 @@ def test_a_larger_still_is_cut_down_to_the_size_asked(tmp_path, monkeypatch):
 def test_the_in_memory_cut_never_upscales_either(tmp_path, monkeypatch):
     """A pack-only master and a cache folder that cannot be written: the cut is made in
     memory and handed back as bytes -- under the same never-larger rule."""
-    import moonglade_container as mc
+    from moonglade import container as mc
     cli = _client(tmp_path)
     _only_badges(monkeypatch, "syn-small")
     buf = io.BytesIO()

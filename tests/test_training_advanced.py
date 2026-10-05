@@ -22,8 +22,8 @@ import threading
 import pytest
 import requests
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, TrainGuard, create_app, save_catalog
 from tests.conftest import login_test_client
 
 T3 = "2024383379556065549"          # Tsubaki.3 (MMDIT26B), Recommended
@@ -171,7 +171,7 @@ def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
     been a PixAIRestError and definite_refusal would have called every PixAI 4xx on a spend
     "may have started". There is one now, on every /v2 verb, and it carries both vocabularies:
     status/code/data (the training refusals) and http_status/body (the recipe refusals)."""
-    import moonglade_backup
+    from moonglade import backup as moonglade_backup
     assert len(re.findall(r"^def _rest_error\(", inspect.getsource(moonglade_backup), re.M)) == 1
     body = {"code": "INSUFFICIENT_BALANCE", "data": {"mediaIds": ["5"]}}
     for verb in ("rest_get", "rest_post", "rest_put", "rest_patch"):
@@ -551,7 +551,7 @@ def test_finished_runs_are_what_the_academy_counts(tmp_path, pixai):
     a draft, a running or a failed run adds nothing, a second read adds nothing, and the
     light read (the pinned strip) still records a finished basic run. (owner 2026-10-02:
     evidence-based counts; a submit, a retry or a replayed request is not a LoRA trained.)"""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     cli, _ = _app(tmp_path)
     pixai.on("/training-task/in-progress", {"tasks": [
         {"id": "702", "status": "running", "title": "x", "baseModelId": T3, "mediaCount": 3,

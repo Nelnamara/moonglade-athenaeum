@@ -6,8 +6,8 @@ in isolation. The route-level near_duplicate tier itself (real files, real catal
 rows, is_keeper/reclaimable_bytes) is covered in tests/test_duplicates_api.py."""
 from types import SimpleNamespace
 
-import moonglade_backup as core
-from moonglade_gallery import CATALOG_FIELDS, compute_dhash, near_duplicate_groups, save_catalog
+from moonglade import backup as core
+from moonglade.gallery import CATALOG_FIELDS, compute_dhash, near_duplicate_groups, save_catalog
 
 
 def _row(**kw):
@@ -169,7 +169,7 @@ def test_backfill_phash_fills_missing_rows_image_only(tmp_path):
     assert out["filled"] == 1                  # only row "1" needed filling
     assert out["unresolved"] == 0 and out["unreadable"] == 0
 
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     rows = {r["media_id"]: r for r in load_catalog(tmp_path / "catalog.db")}
     assert rows["1"]["phash"] and len(rows["1"]["phash"]) == 16
     assert rows["2"]["phash"] == "deadbeefdeadbeef"     # untouched, already had one
@@ -186,7 +186,7 @@ def test_backfill_phash_respects_max_cap(tmp_path):
                                                   progress=None))
     assert out["filled"] == 1                  # capped to 1 of the 3 rows needing it
 
-    from moonglade_gallery import load_catalog
+    from moonglade.gallery import load_catalog
     rows = load_catalog(tmp_path / "catalog.db")
     filled = [r for r in rows if r["phash"]]
     assert len(filled) == 1
@@ -224,7 +224,7 @@ def test_backfill_phash_nothing_to_do_is_safe(tmp_path):
 
 def test_migration_adds_phash_to_existing_db_without_data_loss(tmp_path):
     import sqlite3
-    from moonglade_gallery import migrate, load_catalog
+    from moonglade.gallery import migrate, load_catalog
 
     assert "phash" in CATALOG_FIELDS
     pre_fields = [f for f in CATALOG_FIELDS if f != "phash"]

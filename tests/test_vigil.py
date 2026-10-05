@@ -12,7 +12,7 @@ import datetime as dt
 
 import pytest
 
-import moonglade_gallery as g
+from moonglade import gallery as g
 
 from tests.test_achievement_progress import _client, _get
 

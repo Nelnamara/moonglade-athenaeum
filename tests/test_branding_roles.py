@@ -23,8 +23,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import moonglade_gallery as g
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade import gallery as g
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import clear_sealed_caches, login_test_client, session_csrf
 

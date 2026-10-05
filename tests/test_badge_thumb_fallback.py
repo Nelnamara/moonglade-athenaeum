@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image
 
-import moonglade_gallery as G
+from moonglade import gallery as G
 
 
 def test_badge_thumb_returns_bytes_when_cache_unwritable(monkeypatch, tmp_path):

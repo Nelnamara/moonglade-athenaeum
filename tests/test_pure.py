@@ -1,7 +1,7 @@
 """Tests for pure / stateless functions (no network, no filesystem)."""
 import pytest
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +494,8 @@ def test_make_progress_marker_is_strip_safe():
     Control Panel parses into a bar; in a terminal it draws the 
  bar (no marker). The marker
     prefix must survive str.strip() (it must NOT start with a whitespace-classified char)."""
-    import io, os, contextlib, moonglade_backup as core
+    import io, os, contextlib
+    from moonglade import backup as core
     os.environ.pop("MOONGLADE_PROGRESS", None)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("fastmcp")   # CI installs no fastmcp -> skip, never fail
 
-import moonglade_gallery as g
-import moonglade_mcp as m
+from moonglade import gallery as g
+from moonglade import mcp_server as m
 
 
 def _row(**kw):
@@ -104,14 +104,14 @@ def test_find_duplicates_wraps_the_helper(monkeypatch):
 
 
 def test_tag_suggest_wraps_suggest_prompt(monkeypatch):
-    import moonglade_backup as mb
+    from moonglade import backup as mb
     monkeypatch.setattr(m, "_SESSION", "SESSION")   # skip building a real session
     monkeypatch.setattr(mb, "suggest_prompt", lambda session, mid: ["1girl", "night elf, moonlight"])
     assert m.tag_suggest("x9") == {"media_id": "x9", "suggestions": ["1girl", "night elf, moonlight"]}
 
 
 def test_tag_suggest_reports_error_not_raises(monkeypatch):
-    import moonglade_backup as mb
+    from moonglade import backup as mb
     monkeypatch.setattr(m, "_SESSION", "SESSION")
 
     def boom(session, mid):

@@ -23,10 +23,10 @@ import zlib
 from datetime import datetime
 from pathlib import Path
 
-import moonglade_backup as core
-import moonglade_gallery as g
-import moonglade_integrity as integ
-from moonglade_gallery import CATALOG_FIELDS, save_catalog
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade import integrity as integ
+from moonglade.gallery import CATALOG_FIELDS, save_catalog
 
 
 def _row(**kw):

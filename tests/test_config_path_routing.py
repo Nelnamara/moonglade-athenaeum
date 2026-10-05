@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-import moonglade_paths as paths
+from moonglade import backup as core
+from moonglade import paths
 from tests.conftest import first_party_sources, login_client
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -38,7 +38,7 @@ def routed(tmp_path, monkeypatch):
     (decoy / "config.json").write_text(json.dumps({"DECOY": True}), encoding="utf-8")
     monkeypatch.setattr(core, "_config_path", lambda: cfg)
     monkeypatch.setattr(paths, "config_path", lambda: cfg)
-    monkeypatch.setattr(core, "__file__", str(decoy / "moonglade_backup.py"))
+    monkeypatch.setattr(core, "__file__", str(decoy / "moonglade" / "backup.py"))
     return cfg
 
 
@@ -131,7 +131,7 @@ def _hand_built_config_paths(path):
 
 def test_no_module_but_moonglade_paths_builds_the_config_json_path():
     modules = first_party_sources()       # the root, and the moonglade/ code folder
-    assert any(p.name == "moonglade_gallery.py" for p in modules)
-    stray = [h for p in modules if p.name != "moonglade_paths.py"
+    assert any(p.relative_to(_REPO).as_posix() == "moonglade/gallery.py" for p in modules)
+    stray = [h for p in modules if p.relative_to(_REPO).as_posix() != "moonglade/paths.py"
              for h in _hand_built_config_paths(p)]
     assert not stray, "ask core._config_path() for config.json:\n  " + "\n  ".join(stray)

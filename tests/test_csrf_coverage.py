@@ -39,11 +39,11 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_backup as core
-from moonglade_gallery import LOCALHOST, _account_key, create_app, route_tier
+from moonglade import backup as core
+from moonglade.gallery import LOCALHOST, _account_key, create_app, route_tier
 from tests.conftest import login_test_client, session_csrf, with_csrf
 
-_GALLERY = Path(__file__).resolve().parents[1] / "moonglade_gallery.py"
+_GALLERY = Path(__file__).resolve().parents[1] / "moonglade" / "gallery.py"
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 _REFUSAL = "Your session expired. Reload the page and try again."
 

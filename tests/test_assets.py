@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-import moonglade_assets as ma
+from moonglade import assets as ma
 from tests.conftest import login_client
 
 REAL_BYTES = b"\x89PNG" + b"X" * 4093   # a stand-in "container": size/hash matter, not content
@@ -111,7 +111,7 @@ def test_needs_download_present_no_marker_but_readable_is_false(tmp_path):
     """A REAL container that exists but never went through the downloader
     (hand-copied, pre-downloader install) counts as satisfied -- it opens and
     dresses the app; only a version mismatch re-triggers a fetch."""
-    import moonglade_container as mc
+    from moonglade import container as mc
     c = tmp_path / "c.dat"
     mc.write_container(str(c), {"_seed.txt": b"x"}, {})
     manifest = _manifest_for(c.read_bytes())
@@ -126,7 +126,7 @@ def test_needs_download_present_no_marker_size_mismatch_is_true(tmp_path):
     than trust it forever. Regression guard for 2026-09-08: a D: install carried
     the v3 pack under a v4 manifest and never re-fetched, because a markerless
     readable pack was trusted regardless of size."""
-    import moonglade_container as mc
+    from moonglade import container as mc
     c = tmp_path / "c.dat"
     mc.write_container(str(c), {"_seed.txt": b"x"}, {})
     real = _manifest_for(c.read_bytes())
@@ -400,7 +400,7 @@ def test_assets_fetch_route_admits_a_signed_in_lan_session(tmp_path):
 def test_assets_fetch_route_still_refuses_an_anonymous_lan_caller(tmp_path):
     """LOGIN is not PUBLIC: dropping the localhost half must not drop the
     session half with it."""
-    from moonglade_gallery import create_app
+    from moonglade.gallery import create_app
     client = create_app(tmp_path).test_client()
     r = client.post("/api/assets/fetch", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 401
@@ -560,7 +560,7 @@ def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
     setup_logging. Its root ceiling is WARNING and only the app's own loggers are let through
     below it, so a line logged anywhere else at INFO never reaches the file: each outcome --
     the rename itself included -- must be findable there afterwards."""
-    import moonglade_logging as ml
+    from moonglade import logs as ml
     library, app = tmp_path / "library", tmp_path / "app"
     app.mkdir()
     _old_pack(app, manifest=_manifest_for(REAL_BYTES))

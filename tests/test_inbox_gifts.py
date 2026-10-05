@@ -6,9 +6,9 @@ Contract (probe 2026-10-03): the prefix is /v2/user/me/official-dm; the claim is
 POST .../messages/{id}/claim with no body. No network: the `pixai` fixture's FakePixAI."""
 import pytest
 
-import moonglade_backup as core
-import moonglade_inbox as inbox
-from moonglade_gallery import create_app
+from moonglade import backup as core
+from moonglade import inbox
+from moonglade.gallery import create_app
 from tests.conftest import login_test_client
 
 GIFT = "01a0ef92-5e73-7a47-8c83-8ed07d723f66"      # official-DM ids are UUIDs (contract: q())

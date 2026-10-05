@@ -1,7 +1,7 @@
 """Change Emotion wiring: the staged-options list endpoint + the picked-emotion pass-through
 into the panelplugin submit (and only for that one preset)."""
-import moonglade_backup as core
-import moonglade_gallery as g
+from moonglade import backup as core
+from moonglade import gallery as g
 from tests.conftest import login_client
 
 

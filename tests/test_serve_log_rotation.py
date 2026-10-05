@@ -12,7 +12,7 @@ import ast
 
 import pytest
 
-import moonglade_logging as mlog
+from moonglade import logs as mlog
 from tests.conftest import REPO_ROOT
 
 MB = 1024 * 1024

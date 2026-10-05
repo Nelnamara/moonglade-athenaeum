@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_container as mc
+from moonglade import container as mc
 
 
 def test_roundtrip_assets_payloads_and_read_contract(tmp_path):

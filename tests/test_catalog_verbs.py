@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_gallery as g
-from moonglade_gallery import (CATALOG_FIELDS, catalog, migrate, save_catalog,
+from moonglade import gallery as g
+from moonglade.gallery import (CATALOG_FIELDS, catalog, migrate, save_catalog,
                                init_db, task_media, task_media_count,
                                delete_targets, delete_preview_rows, myart_items,
                                artwork_row, publish_state, lineage, sibling_media,

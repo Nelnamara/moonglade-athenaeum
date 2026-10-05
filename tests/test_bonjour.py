@@ -6,7 +6,7 @@ ServiceInfo shape. The one live-network property -- that a phone actually sees m
 is the owner's real-device pass, not a unit test.
 """
 
-import moonglade_bonjour as mb
+from moonglade import bonjour as mb
 
 
 def test_is_lan_bind():
@@ -135,7 +135,7 @@ def test_main_wires_bonjour_gated_on_lan_bind_with_a_goodbye():
     source-check pattern): register only when enabled AND a real LAN bind, after the socket is
     bound but before serve_forever blocks; unregister (goodbye) in the finally step 1 made run."""
     import pathlib
-    src = pathlib.Path("moonglade_gallery.py").read_text(encoding="utf-8")
+    src = pathlib.Path("moonglade/gallery.py").read_text(encoding="utf-8")
     assert '_srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host)' in src
     assert '_bonjour.start(_srv["bonjour_name"], args.port, scheme)' in src
     assert 'b = _SERVER_CONTROL.get("bonjour")' in src and "b.stop()" in src
@@ -148,8 +148,8 @@ def test_bonjour_status_and_settings_routes(tmp_path, monkeypatch):
     validates + writes config.json. (Tier enforcement -- status LOGIN, settings LOCALHOST -- is
     pinned by test_route_tiers' generated snapshot, not re-tested here.)"""
     from tests.conftest import login_client
-    import moonglade_backup as core
-    import moonglade_gallery as g
+    from moonglade import backup as core
+    from moonglade import gallery as g
     # no live server in a unit test -> keep the route off the real zeroconf path
     monkeypatch.setitem(g._SERVER_CONTROL, "bonjour", None)
     monkeypatch.setitem(g._SERVER_CONTROL, "serving", None)
@@ -180,7 +180,7 @@ def test_the_qr_addresses_are_bare_urls_with_nothing_appended(tmp_path, monkeypa
     scheme, the host and the port -- and the phone signs in the normal way when it gets there."""
     import re
     from tests.conftest import login_client
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     monkeypatch.setitem(g._SERVER_CONTROL, "bonjour", None)
     monkeypatch.setitem(g._SERVER_CONTROL, "serving", {"host": "0.0.0.0", "port": 5757, "scheme": "https"})
     monkeypatch.setattr(mb, "lan_ip", lambda: "192.168.0.5")

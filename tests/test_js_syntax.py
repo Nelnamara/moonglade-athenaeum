@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client
 

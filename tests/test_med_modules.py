@@ -21,8 +21,9 @@ import types
 
 import pytest
 
-import moonglade_gallery as g
-import moonglade_logging
+from tests.conftest import stub_code_module
+from moonglade import gallery as g
+from moonglade import logs as moonglade_logging
 
 
 # --- moonglade_mcp import shim --------------------------------------------------
@@ -62,7 +63,7 @@ try:                       # prefer the real package wherever it IS installed
 except ImportError:
     _install_fastmcp_stub()
 
-import moonglade_mcp as M   # noqa: E402  (must follow the stub install)
+from moonglade import mcp_server as M   # noqa: E402  (must follow the stub install)
 
 
 def _fn(tool):
@@ -221,8 +222,8 @@ def test_similar_reports_stale_index_entries_instead_of_a_short_count(mcp_out, m
     silence, so a limit:24 request answered count:1 with nothing to distinguish
     "the index is stale" from "there is only one similar image in the library"."""
     mcp_out(["q", "n1"])
-    monkeypatch.setitem(sys.modules, "moonglade_similar",
-                        _fake_similar_module([("n1", 0.9), ("gone1", 0.8), ("gone2", 0.7)]))
+    stub_code_module(monkeypatch, "similar",
+                     _fake_similar_module([("n1", 0.9), ("gone1", 0.8), ("gone2", 0.7)]))
 
     d = _fn(M.similar)("q", limit=24)
 
@@ -238,8 +239,8 @@ def test_similar_says_zero_stale_when_the_index_is_clean(mcp_out, monkeypatch):
     """A healthy index must not grow an explanatory note -- the note is the signal that
     something needs maintenance, so it has to mean something when it appears."""
     mcp_out(["q", "n1", "n2"])
-    monkeypatch.setitem(sys.modules, "moonglade_similar",
-                        _fake_similar_module([("n1", 0.9), ("n2", 0.8)]))
+    stub_code_module(monkeypatch, "similar",
+                     _fake_similar_module([("n1", 0.9), ("n2", 0.8)]))
 
     d = _fn(M.similar)("q", limit=24)
 
@@ -253,7 +254,7 @@ def test_similar_requested_reflects_the_clamped_limit(mcp_out, monkeypatch):
     """`requested` has to be the k actually asked of the index (limit is clamped to
     1..96), or comparing it against `count` misleads at the boundaries."""
     mcp_out(["q"])
-    monkeypatch.setitem(sys.modules, "moonglade_similar", _fake_similar_module([]))
+    stub_code_module(monkeypatch, "similar", _fake_similar_module([]))
 
     assert _fn(M.similar)("q", limit=500)["requested"] == 96
     assert _fn(M.similar)("q", limit=0)["requested"] == 1

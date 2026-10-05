@@ -12,9 +12,9 @@ import types
 
 import pytest
 
-from moonglade_gallery import CATALOG_FIELDS, load_catalog, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, load_catalog, save_catalog
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 
 def _args(tmp_path):
