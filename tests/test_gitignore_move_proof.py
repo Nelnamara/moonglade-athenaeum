@@ -1,12 +1,14 @@
 """.gitignore is move-proof (Wave 4 groundwork, 3.19.0).
 
 Several ignore lines are unanchored on purpose -- `gallery/`, `images/`, `videos/`,
-`imported/`, `_duplicates/`, `private/`, `catalog.db`, `config.json`, `serve.*` -- so a library
-or a stray runtime file is kept out of git wherever it sits. The same lines would also hide
-files of the code folder the modules move into next release (a `moonglade/gallery/` package,
-say), so nothing under /moonglade/ may be ignored except Python's byte-code caches. The future
-runtime folders are ignored already: `/local/` (the machine files) at the app root, and a
-library's own `_moonglade/` wherever the library is.
+`imported/`, `_duplicates/`, `private/`, `catalog.db`, `config.json`, `serve.txt`, `serve.log`
+-- so a library or a stray runtime file is kept out of git wherever it sits. The same lines
+would also hide files of the code folder the modules move into next release (a
+`moonglade/gallery/` package, say), so the code under /moonglade/ is never ignored -- while
+Python's byte-code caches and every secret or runtime file (config.json, the mirror token, a
+token, .env, the launcher's files, a catalog, the art pack, a library, `local/`) stay ignored
+there too. The future runtime folders are ignored already: `/local/` (the machine files) at
+the app root, and a library's own `_moonglade/` wherever the library is.
 
 Asked of git itself (`git check-ignore --no-index`), on paths that need not exist, so the
 answer is the rule's, not the working tree's.
@@ -36,6 +38,8 @@ NEVER_IGNORED = (
     "moonglade/images/__init__.py", "moonglade/videos/x.py", "moonglade/imported/x.py",
     "moonglade/_duplicates/x.py", "moonglade/private/x.py", "moonglade/env/x.py",
     "moonglade/_moonglade/x.py",
+    # a module merely NAMED like a runtime file is still code (serve.* would hide it)
+    "moonglade/serve.py", "moonglade/config.py", "moonglade/local.py",
     # and the repo-root front end stays tracked, as before
     "gallery/src/main.jsx", "gallery/dist/app.js",
 )
@@ -55,6 +59,15 @@ ALWAYS_IGNORED = (
     "serve.log", "serve.txt", "mirror_session.json", "moonglade.mgpack",
     "serve.log.1", "serve.log.2", "serve.log.3", "local/serve.log.1",
     "branding.json", "0x676F6F6473/README.txt",
+    # secrets and runtime files stay out even inside the code folder: the re-include must
+    # never turn a stray config.json, token or log there into something git would commit
+    "moonglade/config.json", "moonglade/config.json.tmp-123", "moonglade/sub/config.json",
+    "moonglade/mirror_session.json", "moonglade/mirror_session.json.tmp-1-ab",
+    "moonglade/token.txt", "moonglade/.env", "moonglade/serve.txt", "moonglade/serve.log",
+    "moonglade/serve.log.2", "moonglade/catalog.db", "moonglade/pixai_backup/catalog.db",
+    "moonglade/pixai_backup/images/a.png", "moonglade/moonglade.mgpack",
+    "moonglade/moonglade.mgpack.version", "moonglade/local/serve.log",
+    "moonglade/local/branding.json",
     # Python's caches stay ignored, inside the code folder too
     "moonglade/__pycache__/gallery.cpython-314.pyc", "moonglade/server/__pycache__/x.pyc",
     "moonglade/gallery.pyc",
