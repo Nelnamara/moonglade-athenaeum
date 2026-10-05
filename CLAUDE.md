@@ -337,7 +337,9 @@ recently within hours of a "correction." All tests must pass before merging to m
   build. `earned_at` is the one that catches people: since pin-once it is authoritative, so
   clearing the flag alone un-earns nothing.
 - **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
-  that needs branding art or a sealed roster pins its own `branding_root()` and seeds its
+  that needs branding art or a sealed roster pins its own `branding_root()` AND
+  `moonglade_paths.local_path()` (the pack, `branding.json` and the other machine files go
+  through that, not through the tree's parent) and seeds its
   own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
   and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full

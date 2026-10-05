@@ -170,3 +170,24 @@ static/_mockup_*.html
 # sweeping a spoiler or a large binary into this PUBLIC repo (adversarial, 2026-08-22).
 /_backups/
 /_2000/
+
+# ---- The folders the next release moves runtime files into (Wave 4) ----
+# The machine files' folder: the art pack and its marker, branding.json, branding_slots.json,
+# mirror_session.json, serve.txt, serve.log and the icon cache. Machine-local, never committed.
+# Anchored: only the app root's.
+/local/
+# The app's own records INSIDE a library (its state files, jobs, logs and reports).
+# Unanchored, like the library guards above, so a library anywhere is covered.
+_moonglade/
+
+# ---- The code folder: nothing in it is ever ignored (KEEP THIS BLOCK LAST) ----
+# The modules move into moonglade/ next release. Several lines above are unanchored on purpose
+# -- `gallery/`, `images/`, `videos/`, `imported/`, `_duplicates/`, `private/`, `catalog.db`,
+# `config.json`, `serve.*` -- so they keep a library or a stray runtime file out of git wherever
+# it sits; they would hide package files of the same names just as well (a `moonglade/gallery/`
+# sub-package would never reach git). git takes the LAST pattern that matches a path, so this
+# re-include must stay below every other line. The one exception is Python's own byte-code
+# cache, which is never source. tests/test_gitignore_move_proof.py asks git itself.
+!/moonglade/**
+/moonglade/**/__pycache__/
+/moonglade/**/*.py[cod]

@@ -14,6 +14,7 @@ import pytest
 
 import moonglade_container as mc
 import moonglade_gallery as g
+import moonglade_paths
 
 ICO = b"\x00\x00\x01\x00fake-ico"          # bytes only; nothing here decodes an icon
 PNG = bytes.fromhex(
@@ -146,6 +147,7 @@ def test_the_icon_is_the_desktop_shortcuts_copied_to_one_place_outside_any_insta
     other = tmp_path / "second-install"
     other.mkdir()
     monkeypatch.setattr(g, "branding_root", lambda: other / "branding")
+    monkeypatch.setattr(moonglade_paths, "local_path", lambda name: other / name)
     _install_pack(other)
     g.register_pack_file_type(other, winreg=reg, platform="win32")
     assert reg.table()[icon_key] == str(_icon_file(lad)) + ",0"

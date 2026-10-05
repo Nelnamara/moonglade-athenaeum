@@ -12,11 +12,38 @@ import moonglade_assets
 import moonglade_backup as core
 import moonglade_container as _mc
 import moonglade_gallery as gallery
+import moonglade_paths
 
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
 # lives in source, so roster tests need a container built from this.
 _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
+
+# The checkout this suite tests, and the code folder the app's modules move into next release.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CODE_PACKAGE = "moonglade"
+_NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})
+
+
+def first_party_sources(root=None, suffixes=(".py", ".pyw")):
+    """Every first-party Python source of the app, sorted: the modules at the repo root, and
+    every one at any depth under a `moonglade/` code folder if one exists. Never tests/,
+    node_modules/, .git/ or __pycache__/.
+
+    THE one collector for every guard that reads the app's own code -- the spoiler and
+    pack-name guards, and the path lints. They used to glob the root flat (`moonglade_*.py`,
+    `*.py`), which would keep passing after the code moves into `moonglade/` while checking
+    nothing at all. tests/test_first_party_sources.py holds that it finds every module there
+    is today, so it can never silently find nothing."""
+    root = Path(root) if root is not None else REPO_ROOT
+    found = sorted(p for p in root.iterdir() if p.is_file() and p.suffix in suffixes)
+    package = root / CODE_PACKAGE
+    if package.is_dir():
+        for dirpath, dirnames, filenames in os.walk(package):
+            dirnames[:] = sorted(d for d in dirnames if d not in _NOT_FIRST_PARTY)
+            found += [Path(dirpath) / f for f in sorted(filenames)
+                      if Path(f).suffix in suffixes]
+    return found
 
 
 @pytest.fixture()
@@ -210,6 +237,10 @@ def pin_daytime_clock(mp):
 # guard below compares against this Path object instead of re-calling the resolver, so a
 # test that leaves the resolver patched cannot point the guard at a decoy.
 _REAL_CODED_ROOT = gallery.branding_root()
+# The real machine files' folder and the real pack, resolved the same way and for the same
+# reason: the pack and branding.json are moonglade_paths.local_path() files, NOT the coded
+# tree's siblings, so pinning branding_root() alone no longer keeps a test away from them.
+_REAL_LOCAL_PACK = moonglade_paths.local_path("moonglade.mgpack")
 
 
 def _snapshot_coded_tree():
@@ -272,6 +303,8 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     root = tmp_path_factory.mktemp("session-branding")
     mp.setattr(gallery, "branding_root", lambda: root / "branding")
+    # ...and the machine files (the pack among them), which no longer derive from the tree.
+    mp.setattr(moonglade_paths, "local_path", lambda name: root / name)
     seed_sealed_container(gallery._container_path())
     try:
         yield root
@@ -390,8 +423,12 @@ def _isolated_auth_config(tmp_path, monkeypatch):
     test_load_config_missing_returns_empty already write to / expect via their own
     tmp_path, so this fixture is a no-op improvement for them (it just replaces
     their __file__-based resolution with an equivalent tmp_path-based one) rather
-    than a second, conflicting source of truth."""
+    than a second, conflicting source of truth.
+
+    moonglade_paths.config_path() (the rule core._config_path() delegates to) is pinned to
+    the same file, so a caller that asks the rule directly cannot reach the real one either."""
     monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(moonglade_paths, "config_path", lambda: tmp_path / "config.json")
 
 
 class _RealRegistryRefused(OSError):
@@ -439,6 +476,19 @@ def _isolated_branding(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_local_files(tmp_path, monkeypatch):
+    """The machine files -- the pack and its .version marker, branding.json,
+    branding_slots.json, mirror_session.json, serve.txt, serve.log and the icon cache --
+    resolve through moonglade_paths.local_path(), which is the app folder: the real checkout.
+    Same hazard and remedy as _isolated_branding above, and the same folder it already gave
+    them: they used to be derived as branding_root()'s siblings, so every test was written
+    against tmp_path/branding.json and tmp_path/moonglade.mgpack. Pinned separately because
+    the art tree and the machine files are separate concepts now (Wave 4): a test that
+    re-points one does not move the other."""
+    monkeypatch.setattr(moonglade_paths, "local_path", lambda name: tmp_path / name)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_asset_manifest(tmp_path, monkeypatch):
     """moonglade_manifest.json (the first-run asset downloader's manifest,
     2026-08-10) resolves from __file__ in moonglade_assets.py -- same hazard,
@@ -459,8 +509,8 @@ def _isolated_asset_manifest(tmp_path, monkeypatch):
 def _sealed_roster_container(request, tmp_path):
     """Ship the sealed achievement roster to every test. The definitions live in
     the art pack now (not source), so without a container the roster is empty and every
-    roster-dependent test fails. _isolated_branding points branding_root() at
-    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.mgpack -- write a
+    roster-dependent test fails. _isolated_local_files points local_path() at tmp_path, so
+    _container_path() resolves to tmp_path/moonglade.mgpack -- write a
     sealed container there from the private donor. Skips silently when the donor is absent
     (public CI without the companion repo): roster tests then see the empty fallback and
     are expected to skip, not fail. The sealed-defs cache is cleared around each test so no

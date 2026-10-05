@@ -5,7 +5,8 @@ Reuses moonglade_gallery.py's catalog helpers + moonglade_similar.similar() -- n
 reimplemented here. Catalog writes are set_rating / add_to_collection / remove_from_collection; tag_suggest is the first tool to reach the PixAI account (free, read-only).
 
 Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
-"D:\\path\\to\\pixai_backup"). Falls back to ./pixai_backup next to this file.
+"D:\\path\\to\\pixai_backup"). Falls back to pixai_backup in the app's folder
+(moonglade_paths.default_library_path()).
 
 Register in Claude Code:
     claude mcp add moonglade -e MOONGLADE_OUT="D:\\path\\to\\pixai_backup" \\
@@ -24,8 +25,9 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
 import moonglade_gallery as g   # catalog helpers -- the single source of truth for SQL
+import moonglade_paths as _paths
 
-OUT = Path(os.environ.get("MOONGLADE_OUT") or (Path(__file__).resolve().parent / "pixai_backup"))
+OUT = Path(os.environ.get("MOONGLADE_OUT") or _paths.default_library_path())
 DB = str(OUT / "catalog.db")
 
 mcp = FastMCP("moonglade-athenaeum")

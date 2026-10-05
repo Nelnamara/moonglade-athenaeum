@@ -35,6 +35,7 @@ from pathlib import Path
 import moonglade_assets
 import moonglade_container
 import moonglade_contest_wins as contest_wins
+import moonglade_paths as _paths
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -3755,8 +3756,13 @@ def branding_root():
     SCOPE_bundle-v2-contract.md): the on-disk tree is coded end
     to end -- role names never appear as folder names -- while the browser keeps
     requesting the friendly /branding/<role>/... URLs and the serve route
-    translates once at the boundary (_public_rel_to_coded below)."""
-    return Path(__file__).resolve().parent / _GOODS_ROOT_NAME
+    translates once at the boundary (_public_rel_to_coded below).
+
+    The path itself is moonglade_paths.art_root(), the one place app-root paths are derived.
+    The machine files that used to be this folder's siblings by derivation (the pack,
+    branding.json, branding_slots.json, the icon cache) go through moonglade_paths.local_path()
+    instead, so the art tree and they can move separately."""
+    return _paths.art_root()
 
 
 # ---------------------------------------------------------------------------
@@ -3771,7 +3777,7 @@ def branding_root():
 # deny + the builder's exclusion stay as belt-and-braces for a stale cache left
 # behind by an older build -- never coded, never packed, never served.
 # ---------------------------------------------------------------------------
-_GOODS_ROOT_NAME = "0x676F6F6473"      # hex "goods" -- the on-disk branding root folder name
+_GOODS_ROOT_NAME = _paths.GOODS_ROOT_NAME  # hex "goods" -- the on-disk branding root folder name
 _GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
 # The pre-2026-08-21 badge-thumb cache folder, as a path SEGMENT at any depth --
 # the same shape tools/build_container.py's EXCLUDED_DIRS uses, and the reason
@@ -3897,11 +3903,10 @@ def _public_rel_to_coded(rel):
 
 
 def _branding_path(out_dir):
-    # Sibling of the art directory, which preserves EXACTLY the arrangement this had inside
-    # the library (branding.json next to branding/). Anyone moving an existing setup keeps
-    # the same two entries in the same relationship, so the move is a drag of both rather
-    # than a reshuffle -- and .gitignore covers the pair with two lines.
-    return branding_root().parent / "branding.json"
+    # A machine file (the chosen mark and animation), so it goes through local_path() -- not
+    # through the art tree's parent, so the two can move separately. Today both sit at the
+    # app root, where .gitignore covers them.
+    return _paths.local_path("branding.json")
 
 
 # ---------------------------------------------------------------------------
@@ -3932,12 +3937,12 @@ def _branding_path(out_dir):
 # ---------------------------------------------------------------------------
 def _container_path():
     """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
-    a type of its own). Sibling of branding/ and branding.json -- the same app-root,
-    machine-local tree. Every code path that reads, fetches, checks or builds the pack asks
-    this; its `.version` marker is derived from it (moonglade_assets._version_marker_path).
-    The pack's pre-v7 name is read only by the one-time rename a real start runs
-    (moonglade_assets.migrate_legacy_name, from main())."""
-    return branding_root().parent / "moonglade.mgpack"
+    a type of its own). A machine file, beside branding.json: moonglade_paths.local_path(),
+    not the art tree's parent. Every code path that reads, fetches, checks or builds the
+    pack asks this; its `.version` marker is derived from it
+    (moonglade_assets._version_marker_path). The pack's pre-v7 name is read only by the
+    one-time rename a real start runs (moonglade_assets.migrate_legacy_name, from main())."""
+    return _paths.local_path("moonglade.mgpack")
 
 
 _container_cache = {"path": None, "mtime": None, "box": None}
@@ -4749,11 +4754,11 @@ def list_slot_assets(out_dir, slot):
 
 
 def _slot_active_path(out_dir):
-    # Sibling of branding.json/branding/, same machine-local git-ignored tree --
-    # kept in its OWN file rather than folded into branding.json so that file's
-    # existing read-modify-write cycle (load_branding/save_branding, mark+anim
-    # only) can never clobber slot-active state it doesn't know about.
-    return branding_root().parent / "branding_slots.json"
+    # A machine file beside branding.json (local_path(), git-ignored) -- kept in its OWN
+    # file rather than folded into branding.json so that file's existing
+    # read-modify-write cycle (load_branding/save_branding, mark+anim only) can never
+    # clobber slot-active state it doesn't know about.
+    return _paths.local_path("branding_slots.json")
 
 
 def _recorded_slot_active(out_dir):
@@ -6669,15 +6674,16 @@ def _mark_ico_path(mark_id):
     cut. The Desktop launcher (make_launcher_shortcut) and the pack's Explorer file type
     (register_pack_file_type) both point Windows at it, and Windows reads an icon only off
     disk: a loose cut in the coded tree wins; a pack-shipped one is materialized into a
-    git-ignored, regenerable cache. (The cache subfolder keeps its plain 'marks' name -- it
-    lives outside the goods root, so it is not part of the coded tree.)"""
+    git-ignored, regenerable cache, a machine file (moonglade_paths.icon_cache_dir()). (The
+    cache subfolder keeps its plain 'marks' name -- it lives outside the goods root, so it
+    is not part of the coded tree.)"""
     ico = _role_dir("marks") / (str(mark_id) + ".ico")
     if ico.exists():
         return ico
     raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
     if raw is None:
         return None
-    cache = branding_root().parent / "_container_cache" / "marks"
+    cache = _paths.icon_cache_dir()
     try:
         cache.mkdir(parents=True, exist_ok=True)
         ico = cache / (str(mark_id) + ".ico")
@@ -6697,8 +6703,8 @@ def make_launcher_shortcut(out_dir, mark_id):
     ico = _mark_ico_path(mark_id)
     if ico is None:
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
-    repo = Path(__file__).resolve().parent
-    pyw = repo / "Serve Gallery.pyw"
+    repo = _paths.APP_ROOT
+    pyw = _paths.launcher_path()
     if not pyw.exists():
         raise RuntimeError("Serve Gallery.pyw not found next to the server")
     pythonw = Path(sys.executable).with_name("pythonw.exe")
@@ -7271,7 +7277,7 @@ def claim_job_label(claimed, credits):
 
 
 def _ach_state_path(out_dir):
-    return Path(out_dir) / "achievements.json"
+    return _paths.state_path(out_dir, "achievements.json")
 
 
 def load_ach_state(out_dir):
@@ -7426,7 +7432,7 @@ _TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no
 
 
 def _telemetry_path(out_dir):
-    return Path(out_dir) / "telemetry.json"
+    return _paths.state_path(out_dir, "telemetry.json")
 
 
 def set_telemetry_out(out_dir):
@@ -11783,7 +11789,7 @@ def _build_stamp():
         import subprocess
         sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(Path(__file__).resolve().parent),
+            cwd=str(_paths.APP_ROOT),
             stderr=subprocess.DEVNULL, timeout=4,
             creationflags=_NO_WINDOW).decode().strip()
     except Exception:
@@ -11844,13 +11850,13 @@ _wiki_online_lock = threading.Lock()
 
 
 def wiki_dir():
-    """The wiki/ folder beside this module -- the one shipped with this install."""
-    return Path(__file__).resolve().parent / "wiki"
+    """The wiki/ folder shipped with this install (moonglade_paths.wiki_dir())."""
+    return _paths.wiki_dir()
 
 
 def changelog_path():
-    """CHANGELOG.md beside this module -- this install's own history."""
-    return Path(__file__).resolve().parent / "CHANGELOG.md"
+    """This install's own CHANGELOG.md (moonglade_paths.changelog_path())."""
+    return _paths.changelog_path()
 
 
 def md_plain(text):
@@ -12163,7 +12169,7 @@ def wiki_online_differs(slug, local_md, behind, opener=None, now=None):
 
 
 LIBRARY_DIR_KEY = "LIBRARY_DIR"
-DEFAULT_LIBRARY_DIR = "pixai_backup"
+DEFAULT_LIBRARY_DIR = _paths.DEFAULT_LIBRARY_DIR    # relative: resolves against run_dir()
 
 
 def resolve_library_dir(explicit=None):
@@ -12513,7 +12519,7 @@ def _git(args, timeout=180):
     missing git is a refusal with a reason, not a 500."""
     import subprocess
     try:
-        p = subprocess.run(["git"] + list(args), cwd=str(Path(__file__).resolve().parent),
+        p = subprocess.run(["git"] + list(args), cwd=str(_paths.APP_ROOT),
                            capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace",
                            creationflags=_NO_WINDOW)
@@ -12689,10 +12695,10 @@ def _pip_install():
     """pip install -r requirements.txt against THIS interpreter (sys.executable -- never a
     bare `pip`, which on Windows can easily be a different environment's)."""
     import subprocess
-    root = Path(__file__).resolve().parent
+    root = _paths.APP_ROOT
     try:
         p = subprocess.run([sys.executable, "-m", "pip", "install", "-r",
-                            str(root / "requirements.txt")],
+                            str(_paths.requirements_path())],
                            cwd=str(root), capture_output=True, text=True, timeout=900,
                            encoding="utf-8", errors="replace",
                            creationflags=_NO_WINDOW)
@@ -12803,7 +12809,7 @@ def account_prefs_path(out_dir, account):
         key = _account_key(account)
     else:
         raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
-    return Path(out_dir) / ACCOUNT_PREFS_DIRNAME / (key + ".json")
+    return _paths.state_path(out_dir, ACCOUNT_PREFS_DIRNAME) / (key + ".json")
 
 
 def _account_prefs_read(p):
@@ -12964,7 +12970,7 @@ def account_state_path(out_dir, account):
     landing on some shared file."""
     if not (isinstance(account, str) and account.strip()):
         raise ValueError("account state needs a signed-in account")
-    return Path(out_dir) / ACCOUNT_STATE_DIRNAME / (_account_key(account) + ".json")
+    return _paths.state_path(out_dir, ACCOUNT_STATE_DIRNAME) / (_account_key(account) + ".json")
 
 
 @contextmanager
@@ -13076,7 +13082,7 @@ def _redact_host_paths_cli(out_dir, msg):
     # in the loop is the second, independent guard for candidates this
     # function doesn't construct.
     candidates = [str(Path(out_dir).resolve()), os.path.expanduser("~"),
-                 tempfile.gettempdir(), sys.prefix, os.getcwd()]
+                 tempfile.gettempdir(), sys.prefix, str(_paths.run_dir())]
     seen, out = set(), str(msg)
     for path in sorted(set(candidates), key=len, reverse=True):
         if not path or len(path) < 4 or path in seen:
@@ -13673,7 +13679,9 @@ def watch_close_info(exc, redact=None):
 
 
 def create_app(out_dir: Path):
-    app = Flask(__name__)
+    # static_folder named explicitly: Flask's default is a folder beside this MODULE, and
+    # /static/ belongs to the app folder (moonglade_paths), wherever the module sits.
+    app = Flask(__name__, static_folder=str(_paths.static_dir()))
 
     # A job the SERVER owns cannot outlive the server, so anything still marked running when we
     # boot is from a process that is gone -- nothing will ever report it finished. Sweep those to
@@ -13795,8 +13803,8 @@ def create_app(out_dir: Path):
     # the unmodified CLI script's own print output streams straight to the
     # Jobs card) with cwd = the checkout dir (where config.json lives).
     # ------------------------------------------------------------------
-    _cli_path = str(Path(__file__).resolve().parent / "moonglade_backup.py")
-    _cli_dir = str(Path(__file__).resolve().parent)
+    _cli_path = str(_paths.backup_script_path())
+    _cli_dir = str(_paths.APP_ROOT)
     # catalog media_id -> upload-kind media_id, for references sent from the gallery.
     # PixAI refuses a generation-output id as an input (see resolve_img), so each
     # referenced image is uploaded once and reused. Process-lifetime only and
@@ -14220,7 +14228,7 @@ def create_app(out_dir: Path):
             pass
 
     def _sched_path():
-        return out_dir / "schedule.json"
+        return _paths.state_path(out_dir, "schedule.json")
 
     def _load_sched():
         """schedule.json, normalized. The legacy quartet (enabled/action/interval_hours/
@@ -16298,7 +16306,8 @@ def create_app(out_dir: Path):
             # Stored absolute: the server's working directory is the launcher's folder, and
             # a relative path stored here would silently mean somewhere else the moment
             # anything started it from elsewhere (a scheduled task, a terminal, a shortcut).
-            target = target.resolve() if target.is_absolute() else (Path.cwd() / target).resolve()
+            target = (target.resolve() if target.is_absolute()
+                      else (_paths.run_dir() / target).resolve())
         except (OSError, ValueError) as e:
             return jsonify({"error": "That path isn't usable: {}".format(e)[:160]}), 200
         if target.exists() and not target.is_dir():
@@ -20092,7 +20101,10 @@ def create_app(out_dir: Path):
             if "401" in msg or "Unauthorized" in msg:
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
-        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        # THE config.json path (core._config_path(), i.e. moonglade_paths.config_path()) --
+        # never rebuilt by hand: a hand-built copy is how a test once wrote the checkout's real
+        # file (2026-08-02), and it would stop matching the moment the code left the app folder.
+        cfg_path = core._config_path()
         # Serialize against the account writers on core._accounts_lock. This is the only
         # config.json read-modify-write in the app that doesn't go through core's account
         # helpers (deliberately -- see the note above about the module-cached _cfg), which
@@ -20233,7 +20245,7 @@ def create_app(out_dir: Path):
     _snips_lock = threading.Lock()
 
     def _snips_dir():
-        d = out_dir / "prompt_snippets"
+        d = _paths.state_path(out_dir, "prompt_snippets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -21599,7 +21611,7 @@ def create_app(out_dir: Path):
     _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
                            "answer clearly. Check Runs before trying again (this guard clears "
                            "by itself after 15 minutes). Nothing was sent.")
-    train_guard = TrainGuard(out_dir / "train_guard.json")
+    train_guard = TrainGuard(_paths.state_path(out_dir, "train_guard.json"))
     _runs_cache = {"full": None, "light": None}
 
     def _runs_dirty():
@@ -22799,7 +22811,9 @@ def create_app(out_dir: Path):
         other config writers."""
         import moonglade_backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
-        cfg_path = Path(core.__file__).resolve().parent / "config.json"
+        # The SAME file _save_config() writes below (core._config_path()): reading one path and
+        # writing another would put that file's contents over the real auth block.
+        cfg_path = core._config_path()
         with core._accounts_lock:
             try:
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
@@ -23410,7 +23424,7 @@ def create_app(out_dir: Path):
     # presets. The legacy shared file stays a READ-ONLY fallback for an account with no
     # file of its own yet -- same no-migration-flag contract as _load_view_presets.
     def _toolbox_dir():
-        d = out_dir / "toolbox_presets"
+        d = _paths.state_path(out_dir, "toolbox_presets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -23511,7 +23525,7 @@ def create_app(out_dir: Path):
     # For the case this feature was built for -- one owner, desktop and tablet, same
     # account against one server -- per-account behaves identically. Nothing is lost.
     def _view_presets_dir():
-        d = out_dir / "view_presets"
+        d = _paths.state_path(out_dir, "view_presets")
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -25345,7 +25359,7 @@ def create_app(out_dir: Path):
     # one path. Design lock + suite-shell rationale:
     # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
     # Auth: covered by the global _enforce_front_door() hook like every route.
-    _GALLERY_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
+    _GALLERY_DIST = _paths.gallery_dist()
 
     # No vanilla web components ride along anymore: the video Generate drawer and
     # its cost badge became the React <VideoDrawer>/<CostBadge> in the 2026-08-08
@@ -25996,7 +26010,7 @@ __DESIGN_TOKENS__
         files 404. Not gated by _is_authorized_request() -- these are static library
         files, not gallery data, and /loom itself already enforces authorization above."""
         from flask import send_from_directory, abort
-        vdir = (Path(__file__).resolve().parent / "loom" / "vendor").resolve()
+        vdir = _paths.loom_vendor().resolve()
         try:
             target = (vdir / fname).resolve()
             target.relative_to(vdir)          # reject path traversal
@@ -26015,7 +26029,7 @@ __DESIGN_TOKENS__
         loom() below treats a missing bundle as 'not built yet' and says so (503).
         max_age=0 (unlike the vendor libs) since this output changes every rebuild."""
         from flask import send_from_directory, abort
-        ddir = (Path(__file__).resolve().parent / "loom" / "dist").resolve()
+        ddir = _paths.loom_dist().resolve()
         try:
             target = (ddir / fname).resolve()
             target.relative_to(ddir)          # reject path traversal
@@ -26038,7 +26052,7 @@ __DESIGN_TOKENS__
         engine, ...) are plain imports esbuild resolves, with no hand-inlining. A checkout
         that hasn't built the bundle gets a clear message, not a silent fallback; the
         committed bundle + the CI staleness guard keep it current."""
-        loom_dir = Path(__file__).resolve().parent / "loom"
+        loom_dir = _paths.loom_dir()
         bundle_file = loom_dir / "dist" / "master-storyboard.bundle.js"
         if not bundle_file.is_file():
             return ("The Loom bundle is not built. Run `npm run build` in loom/ to "

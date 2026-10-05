@@ -39,6 +39,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import moonglade_paths as _paths
+
 # ---------------------------------------------------------------------------------------
 # The template (NOTES 1, page M1 + M6)
 # ---------------------------------------------------------------------------------------
@@ -625,7 +627,7 @@ class RunsStore(object):
     yet: the file grows with every run (reported as still to do)."""
 
     def __init__(self, out_dir):
-        self.path = Path(out_dir) / RUNS_DB
+        self.path = _paths.state_path(out_dir, RUNS_DB)
         self._lock = threading.Lock()
 
     def _connect(self, create):

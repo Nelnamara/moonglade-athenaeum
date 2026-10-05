@@ -56,6 +56,7 @@ from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import moonglade_paths as _paths
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
@@ -246,14 +247,13 @@ CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
 def _config_path():
-    """Resolve config.json's path: prefer a copy next to the script file, then the
-    current working directory (same order _load_config() has always read in). If
-    neither exists yet (first run / a fresh write), default to creating it next to
-    the script -- the natural "this install's config" location."""
-    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
-        if cfg_path.exists():
-            return cfg_path
-    return Path(__file__).resolve().parent / "config.json"
+    """config.json's path -- THE call every reader and writer of it makes. The rule lives in
+    moonglade_paths.config_path(): the copy beside the app first, then the current working
+    directory (same order _load_config() has always read in); if neither exists yet (first
+    run / a fresh write), the one beside the app. Kept as this module's function because
+    the test suite pins it per test (tests/conftest.py's _isolated_auth_config), so no test
+    can reach the real file."""
+    return _paths.config_path()
 
 
 def _load_config():
@@ -932,7 +932,7 @@ def load_token(cli_token=None):
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
-    for f in (Path(__file__).resolve().parent / "token.txt", Path("token.txt")):
+    for f in _paths.token_paths():
         if f.exists():
             return f.read_text(encoding="utf-8").strip()
     raise PixAIError("No credential found. Add PIXAI_API_KEY to config.json (preferred), "
@@ -1071,7 +1071,7 @@ _jobs_compact_lock = threading.Lock()
 
 
 def _jobs_path(out_dir):
-    return Path(out_dir) / JOBS_LOG_NAME
+    return _paths.state_path(out_dir, JOBS_LOG_NAME)
 
 
 def append_job_event(out_dir, job_id, status=None, **fields):
@@ -5123,7 +5123,7 @@ def cmd_audit(args, out):
         _fmt_bytes(t["reclaimable_bytes"])))
 
     # Write detailed CSV
-    report_path = out / "audit_report.csv"
+    report_path = _paths.reports_path(out, "audit_report.csv")
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
@@ -5321,7 +5321,7 @@ def cmd_verify_dupes(args, out):
     print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
 
     if res["differs"] or res["orphan"]:
-        report = out / "verify_report.csv"
+        report = _paths.reports_path(out, "verify_report.csv")
         with open(report, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["status", "quarantined_file", "surviving_keeper"])
@@ -5443,7 +5443,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Nothing to do -- everything already organized.")
         return
 
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     mf_new = not manifest_path.exists()
     mf = open(manifest_path, "a", newline="", encoding="utf-8")
     mw = csv.writer(mf)
@@ -5573,7 +5573,7 @@ def cmd_undo_organize(args, out):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
     then clears the manifest. Lets a re-normalize be undone if you don't like it."""
     db_path = _ensure_db(out)
-    manifest_path = out / ORGANIZE_MANIFEST
+    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
     if not manifest_path.exists():
         print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
         return
@@ -6337,10 +6337,11 @@ _mirror_renewal_reset()
 
 def _mirror_state_path():
     """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
-    git-ignored file beside config.json. Deliberately NOT config.json -- the JWT
-    rotates on every refresh, and a write there must never risk clobbering the API
-    key (a test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
-    return _config_path().parent / "mirror_session.json"
+    git-ignored machine file (moonglade_paths.local_path(); today beside config.json in the
+    app folder). Deliberately NOT config.json -- the JWT rotates on every refresh, and a
+    write there must never risk clobbering the API key (a test once overwrote the real
+    PIXAI_API_KEY; a separate file can't)."""
+    return _paths.local_path("mirror_session.json")
 
 
 def load_mirror_state():
@@ -14831,7 +14832,7 @@ def run_watch(args):
         return
     seconds = getattr(args, "watch_seconds", 0) or None
     do_backup = bool(getattr(args, "watch_backup", False))
-    out_dir = getattr(args, "out", "pixai_backup") or "pixai_backup"
+    out_dir = getattr(args, "out", _paths.DEFAULT_LIBRARY_DIR) or _paths.DEFAULT_LIBRARY_DIR
     enc = (sys.stdout.encoding or "utf-8")
 
     def _safe(t):
@@ -15873,7 +15874,7 @@ def run_suggest_prompt(args):
                 "video file (PixAI's image-to-prompt endpoint doesn't support "
                 "video).".format(src))
     else:
-        out = getattr(args, "out", "") or "pixai_backup"
+        out = getattr(args, "out", "") or _paths.DEFAULT_LIBRARY_DIR
         row = next((r for r in load_catalog(Path(out) / "catalog.db")
                     if r.get("media_id") == src), None)
         if row and row.get("is_video") == "1":
@@ -16300,7 +16301,7 @@ def _stamp_reconcile(out, flagged, cleared):
     reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
-    dest = Path(out) / RECONCILE_STAMP
+    dest = _paths.state_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
         tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
@@ -17252,7 +17253,7 @@ def run_download(args, progress=None):
     """
     out = Path(args.out)
     img_dir = out / "images"
-    raw_path = out / "raw_tasks.jsonl"
+    raw_path = _paths.state_path(out, "raw_tasks.jsonl")
     db_path  = out / "catalog.db"
 
     # Ensure the catalog db exists + is schema-migrated (raises if none; no CSV auto-seed, #19)
@@ -17863,7 +17864,7 @@ def main():
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
-    ap.add_argument("--out", default="pixai_backup",
+    ap.add_argument("--out", default=_paths.DEFAULT_LIBRARY_DIR,
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")

@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 import moonglade_backup as core
+import moonglade_paths
+
+# The real config.json resolvers, captured before conftest's per-test pins exist: the
+# _load_config tests below exercise the real rule against a tmp app folder.
+_REAL_CORE_CONFIG_PATH = core._config_path
+_REAL_PATHS_CONFIG_PATH = moonglade_paths.config_path
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +64,8 @@ def isolated_creds(tmp_path, monkeypatch):
     config.json (loaded into core._cfg at import) short-circuits every fallback
     and these tests fail on machines that have a live config."""
     monkeypatch.setattr(core, "_cfg", {})
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "moonglade_backup.py"))
+    # The app folder is where token.txt is looked for first (moonglade_paths.token_paths()).
+    monkeypatch.setattr(moonglade_paths, "APP_ROOT", tmp_path)
     monkeypatch.chdir(tmp_path)            # no config.json / token.txt in CWD
     monkeypatch.delenv("PIXAI_API_KEY", raising=False)
     monkeypatch.delenv("PIXAI_TOKEN", raising=False)
@@ -93,24 +100,26 @@ def test_load_token_raises_when_none(isolated_creds):
 # _load_config
 # ---------------------------------------------------------------------------
 
-def test_load_config_reads_file(tmp_path):
+@pytest.fixture
+def real_config_rule(tmp_path, monkeypatch):
+    """The real config.json rule, with the app folder pointed at tmp_path (and the cwd too,
+    so the cwd fallback cannot find a real config.json)."""
+    monkeypatch.setattr(core, "_config_path", _REAL_CORE_CONFIG_PATH)
+    monkeypatch.setattr(moonglade_paths, "config_path", _REAL_PATHS_CONFIG_PATH)
+    monkeypatch.setattr(moonglade_paths, "APP_ROOT", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_load_config_reads_file(real_config_rule):
     cfg = {"USER_ID": "u1", "U3T": "t1", "PERSISTED_QUERY_HASH": "h1"}
-    (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-    monkeypath_module_file = str(tmp_path / "moonglade_backup.py")
-    # Temporarily redirect module __file__ and reload config
-    orig = core.__file__
-    try:
-        core.__file__ = monkeypath_module_file
-        result = core._load_config()
-    finally:
-        core.__file__ = orig
+    (real_config_rule / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    result = core._load_config()
     assert result["USER_ID"] == "u1"
     assert result["U3T"] == "t1"
 
 
-def test_load_config_missing_returns_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "__file__", str(tmp_path / "moonglade_backup.py"))
-    monkeypatch.chdir(tmp_path)  # prevent CWD fallback from finding a real config.json
+def test_load_config_missing_returns_empty(real_config_rule):
     result = core._load_config()
     assert result == {}
 

@@ -61,6 +61,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+import moonglade_paths as _paths
+
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
 REPORT_FORMAT = "moonglade-integrity"
@@ -220,7 +222,7 @@ REPORT_LOCK_WAIT_S = 60
 
 class _ReportLock:
     def __init__(self, out):
-        self.path = Path(out) / REPORT_LOCK
+        self.path = _paths.reports_path(out, REPORT_LOCK)
         self.held = False
 
     def __enter__(self):
@@ -410,15 +412,16 @@ def _write_reports(out, lines, summary):
     w.writerow(["media_id", "problem", "path", "size", "recoverable"])
     for mid, problem, path, size, rec in lines:
         w.writerow([csv_safe(mid), problem, csv_safe(path), size, rec])
-    _write_atomic(out / REPORT_CSV, buf.getvalue().encode("utf-8"))
-    _write_atomic(out / REPORT_JSON, json.dumps(summary, indent=2, sort_keys=True).encode("utf-8"))
+    _write_atomic(_paths.reports_path(out, REPORT_CSV), buf.getvalue().encode("utf-8"))
+    _write_atomic(_paths.reports_path(out, REPORT_JSON),
+                  json.dumps(summary, indent=2, sort_keys=True).encode("utf-8"))
 
 
 def read_summary(out_dir):
     """The last run's integrity_report.json, or None when there is none (or it is not one).
     A file read, never a walk: Health calls this on every recompute."""
     try:
-        doc = json.loads((Path(out_dir) / REPORT_JSON).read_text(encoding="utf-8"))
+        doc = json.loads(_paths.reports_path(out_dir, REPORT_JSON).read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(doc, dict) or doc.get("format") != REPORT_FORMAT:
@@ -519,7 +522,7 @@ def read_lines(out_dir):
     """The last check's report lines, as (media_id, problem, path, size, recoverable) with
     size an int ("" when the report has none). [] when there is no report."""
     try:
-        text = (Path(out_dir) / REPORT_CSV).read_text(encoding="utf-8")
+        text = _paths.reports_path(out_dir, REPORT_CSV).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
     rows = list(csv.reader(io.StringIO(text)))
@@ -539,7 +542,7 @@ def read_lines(out_dir):
 def read_marks(out_dir):
     """{media_id: {"mark": "lost" | "kept", "at": utc}} -- the owner's local flags."""
     try:
-        doc = json.loads((Path(out_dir) / MARKS_FILE).read_text(encoding="utf-8"))
+        doc = json.loads(_paths.reports_path(out_dir, MARKS_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return {}
     marks = doc.get("marks") if isinstance(doc, dict) else None
@@ -566,7 +569,7 @@ def set_mark(out_dir, media_id, mark):
         else:
             marks.pop(mid, None)
         doc = {"format": MARKS_FORMAT, "marks": marks}
-        _write_atomic(Path(out_dir) / MARKS_FILE,
+        _write_atomic(_paths.reports_path(out_dir, MARKS_FILE),
                       json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
     return prev
 
@@ -576,7 +579,8 @@ def reconciled_at(out_dir):
     archive-only flags, or None before the first stamped one."""
     import moonglade_backup as core                  # lazy, like _write_atomic's
     try:
-        doc = json.loads((Path(out_dir) / core.RECONCILE_STAMP).read_text(encoding="utf-8"))
+        doc = json.loads(_paths.state_path(out_dir, core.RECONCILE_STAMP)
+                         .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
     at = doc.get("reconciled_at") if isinstance(doc, dict) else None
