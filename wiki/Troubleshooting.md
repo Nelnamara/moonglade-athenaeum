@@ -101,8 +101,10 @@ shortcut you make now uses `local\cache`.
 back beside the program, or 3.19 downloads the pack again. Move `local\mirror_session.json`
 back too, or sign the Mirror in again, and `pixai_backup\_moonglade\train_guard.json` back to
 `pixai_backup\`, so a training run that may already have started is still guarded. Everything
-else 3.19 reads is still where it was. (Anything you change while on 3.19 stays in the old
-places; when you come back to 3.20, the copies in the new places win.)
+else 3.19 reads is still where it was. When you come back to 3.20, the pack, the Mirror's
+sign-in and the spend guard you moved back are read from there and moved into place again.
+Anything else you change while on 3.19 stays in the old places, and About stops calling
+those old copies safe to delete.
 
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you

@@ -2915,8 +2915,15 @@ class TrainGuard:
     AMBIGUOUS_RETRY_WINDOW = 24 * 3600.0
 
     def __init__(self, path):
-        self.path = Path(path)
+        # `path` may be a callable, asked at each use (the server's own guard): the library's
+        # records can be brought across, or moved back by a round trip to 3.19, while the
+        # server runs, and the guard must never keep writing where nobody reads.
+        self._where = path if callable(path) else (lambda p=Path(path): p)
         self._lock = threading.Lock()
+
+    @property
+    def path(self):
+        return Path(self._where())
 
     def _load(self):
         try:
@@ -21633,7 +21640,7 @@ def create_app(out_dir: Path):
     _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
                            "answer clearly. Check Runs before trying again (this guard clears "
                            "by itself after 15 minutes). Nothing was sent.")
-    train_guard = TrainGuard(_paths.state_path(out_dir, "train_guard.json"))
+    train_guard = TrainGuard(lambda: _paths.state_path(out_dir, "train_guard.json"))
     _runs_cache = {"full": None, "light": None}
 
     def _runs_dirty():
@@ -29291,7 +29298,7 @@ def main():
     # logs/ folder there. Also after the port check: a refused start must not move the spend
     # guard out from under the server already running.
     from moonglade import migrate as moonglade_migrate
-    moonglade_migrate.open_library(out_dir)
+    moonglade_migrate.open_library(out_dir, move_guard=True)
     moonglade_migrate.tidy_app_folder()
 
     # One-time, and only on a REAL start: move any rendered banner flat still

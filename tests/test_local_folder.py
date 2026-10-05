@@ -377,3 +377,25 @@ def test_main_tidies_after_the_port_check_and_before_anything_reads_the_files():
                   "register_pack_file_type", "create_app"):
         assert at < names.index(later), later
     assert "migrate_legacy_name" not in names     # 3.18's rename runs inside the tidy now
+
+
+# ---- review round: a round trip to 3.19 and back -----------------------------------------
+
+def test_the_moved_files_survive_a_round_trip_to_3_19(old_layout):
+    """The rollback note moves the pack, its marker and the Mirror's sign-in back for 3.19,
+    which keeps using them. Back on 3.20 they are read where they are, moved again, and never
+    listed on About as safe to delete -- whatever MOVED.json already says."""
+    app = old_layout
+    mig.migrate_local()                                              # 3.20
+    for name in (PACK, MARKER, "mirror_session.json"):              # the rollback
+        os.replace(app / "local" / name, app / name)
+    (app / "mirror_session.json").write_text('{"jwt": "renewed-on-3.19"}', encoding="utf-8")
+    # back on 3.20, before the start's tidy: read where they are
+    assert g._container_path() == app / PACK
+    assert core.load_mirror_state() == {"jwt": "renewed-on-3.19"}
+    assert not [n for _, n in mig.leftovers() if n in (PACK, MARKER, "mirror_session.json")]
+    mig.migrate_local()                                              # 3.20's next start
+    for name in (PACK, MARKER, "mirror_session.json"):
+        assert (app / "local" / name).is_file() and not (app / name).exists(), name
+    assert core.load_mirror_state() == {"jwt": "renewed-on-3.19"}
+    assert g._container_path() == app / "local" / PACK

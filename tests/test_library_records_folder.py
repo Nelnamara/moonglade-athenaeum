@@ -179,7 +179,7 @@ def test_the_old_layout_is_copied_into_moonglade(old_library):
 
 def test_train_guard_is_moved_and_exists_in_exactly_one_place(old_library):
     lib = old_library
-    mig.migrate_library(lib)
+    mig.migrate_library(lib, move_guard=True)
     found = [p for p in lib.rglob("train_guard.json")]
     assert found == [lib / "_moonglade" / "train_guard.json"]
     assert json.loads(found[0].read_text()) == {"basic": {}}
@@ -196,7 +196,7 @@ def test_the_library_itself_is_never_touched(old_library):
 
 def test_the_manifest_records_what_moved(old_library):
     lib = old_library
-    mig.migrate_library(lib)
+    mig.migrate_library(lib, move_guard=True)
     doc = json.loads((lib / "_moonglade" / "MOVED.json").read_text(encoding="utf-8"))
     by = {e["name"]: e for e in doc["entries"]}
     assert by["train_guard.json"]["action"] == "moved"
@@ -225,7 +225,7 @@ def test_downgrade_safety_what_3_19_reads_is_still_there(old_library):
     """Every old record a 3.19 reader needs is still where it was, except the one moved
     on purpose (train_guard.json)."""
     lib = old_library
-    mig.migrate_library(lib)
+    mig.migrate_library(lib, move_guard=True)
     for name in STATE_FILES + LEGACY_PRESETS + REPORTS + ("runs.db", SNAPSHOT):
         assert (lib / name).is_file(), name
     for name in STATE_FOLDERS:
@@ -263,7 +263,7 @@ def test_a_reader_with_an_unmigrated_library_still_works(old_library):
 
 def test_after_the_migration_readers_use_moonglade(old_library):
     lib = old_library
-    mig.migrate_library(lib)
+    mig.migrate_library(lib, move_guard=True)
     rec = lib / "_moonglade"
     assert paths.state_path(lib, "achievements.json") == rec / "achievements.json"
     assert paths.state_path(lib, "train_guard.json") == rec / "train_guard.json"
@@ -339,13 +339,13 @@ def test_a_locked_train_guard_stays_put_and_is_still_read(old_library, monkeypat
             raise PermissionError("in use")
         return real(src, dst)
     monkeypatch.setattr(os, "replace", replace)
-    out = mig.migrate_library(lib)
+    out = mig.migrate_library(lib, move_guard=True)
     assert [f[0] for f in out.failed] == ["train_guard.json"]
     assert (lib / "train_guard.json").is_file()
     assert not (lib / "_moonglade" / "train_guard.json").exists()     # still ONE place
     assert paths.state_path(lib, "train_guard.json") == lib / "train_guard.json"
     monkeypatch.setattr(os, "replace", real)
-    again = mig.migrate_library(lib)
+    again = mig.migrate_library(lib, move_guard=True)
     assert [e["name"] for e in again.done] == ["train_guard.json"]
     assert [p for p in lib.rglob("train_guard.json")] == [lib / "_moonglade" / "train_guard.json"]
 
@@ -439,3 +439,70 @@ def test_the_command_line_opens_the_library_before_any_command_runs():
     for first in ("set_telemetry_out", "_ensure_db"):
         if first in names:
             assert at < names.index(first), first
+
+
+# ---- review round: the spend guard after a round trip to 3.19, and beside the CLI -------
+
+def _guard_files(lib):
+    return sorted(str(p.relative_to(lib)).replace("\\", "/") for p in lib.rglob("train_guard.json"))
+
+
+def test_the_spend_guard_survives_a_round_trip_to_3_19(old_library):
+    """3.20 moves the guard; the rollback note says to move it back for 3.19; 3.19 writes it;
+    3.20 starts again. MOVED.json already names it -- yet the guard must be read, and moved
+    again, from where 3.19 left it, never from an empty new path."""
+    lib = old_library
+    mig.migrate_library(lib, move_guard=True)                       # 3.20's first start
+    assert _guard_files(lib) == ["_moonglade/train_guard.json"]
+    os.replace(lib / "_moonglade" / "train_guard.json", lib / "train_guard.json")   # rollback
+    (lib / "train_guard.json").write_text('{"basic": {"armed-on-3.19": 1}}', encoding="utf-8")
+    # back on 3.20, before its start has run: read where it is
+    assert paths.state_path(lib, "train_guard.json") == lib / "train_guard.json"
+    mig.migrate_library(lib, move_guard=True)                       # 3.20's next start
+    assert _guard_files(lib) == ["_moonglade/train_guard.json"]
+    guard = g.TrainGuard(paths.state_path(lib, "train_guard.json"))
+    assert guard._load()["basic"] == {"armed-on-3.19": 1}
+    assert "train_guard.json" not in [n for _, n in mig.leftovers(lib)]
+
+
+def test_the_command_line_never_moves_the_spend_guard(old_library):
+    """Only the server's start moves the guard, before its TrainGuard exists. A command-line
+    run beside a running server copies the other records and leaves the guard alone."""
+    lib = old_library
+    mig.open_library(lib)                                           # what the CLI calls
+    assert _guard_files(lib) == ["train_guard.json"]
+    assert paths.state_path(lib, "train_guard.json") == lib / "train_guard.json"
+    assert (lib / "_moonglade" / "achievements.json").is_file()     # the rest came across
+
+
+def test_the_server_reads_the_guard_where_it_is_at_each_use(old_library):
+    """The server's guard is asked for its path at each use, so a start that later moves it
+    (or a round trip) never leaves the server writing where nobody reads."""
+    lib = old_library
+    guard = g.TrainGuard(lambda: paths.state_path(lib, "train_guard.json"))
+    assert guard.path == lib / "train_guard.json"
+    mig.migrate_library(lib, move_guard=True)
+    assert guard.path == lib / "_moonglade" / "train_guard.json"
+    guard._save({"basic": {"k": 1}, "retried": {}, "paid": {}})
+    assert _guard_files(lib) == ["_moonglade/train_guard.json"]
+
+
+def test_create_app_builds_its_guard_on_a_path_asked_at_each_use():
+    tree = ast.parse(textwrap.dedent(inspect.getsource(g.create_app)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "id", None) == "TrainGuard"]
+    assert len(calls) == 1 and isinstance(calls[0].args[0], ast.Lambda), \
+        "the server's TrainGuard must take a callable, not a path resolved once"
+
+
+def test_only_the_servers_start_moves_the_guard():
+    names = _calls(g.main)
+    assert "open_library" in names
+    tree = ast.parse(textwrap.dedent(inspect.getsource(g.main)))
+    call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and getattr(n.func, "attr", None) == "open_library")
+    assert {k.arg: ast.unparse(k.value) for k in call.keywords}.get("move_guard") == "True"
+    tree = ast.parse(textwrap.dedent(inspect.getsource(core.main)))
+    call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and getattr(n.func, "attr", None) == "open_library")
+    assert "move_guard" not in {k.arg for k in call.keywords}

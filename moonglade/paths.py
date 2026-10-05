@@ -80,6 +80,12 @@ ICON_CACHE_NAME = "cache"
 OLD_ICON_CACHE_NAME = "_container_cache"
 # The file the mirror's login lives in (a rotating token): beside config.json before 3.20.
 MIRROR_SESSION_NAME = "mirror_session.json"
+# The files a migration MOVES rather than copies, because two copies would diverge: the art
+# pack and its marker, the Mirror's rotating token, the training spend guard. A rollback to
+# 3.19 moves them back, so wherever one is missing from its new place and present in its old
+# one, it is read there -- whatever MOVED.json says -- and the next start moves it again.
+MOVED_NAMES = frozenset({"moonglade.mgpack", "moonglade.mgpack.version", MIRROR_SESSION_NAME,
+                         "train_guard.json"})
 
 
 def local_dir():
@@ -141,12 +147,16 @@ def moved_names(manifest):
 
 def _settled(new_dir, name, old, manifest):
     """The new place for `name`, unless it is missing there, present in its old place `old`,
-    and not recorded in `manifest`: then the old place. A recorded name is never looked for
-    in its old place again, so deleting the new copy can never bring back a stale old one."""
+    and either a MOVED kind (MOVED_NAMES: its only copy may be in the old place again after a
+    round trip to 3.19) or not recorded in `manifest`: then the old place. A recorded COPY is
+    never looked for in its old place again, so deleting the new copy can never bring back a
+    stale old one."""
     new = Path(new_dir) / name
     try:
         if new.exists() or not old.exists():
             return new
+        if name in MOVED_NAMES:
+            return old
         if name in moved_names(manifest):
             return new
     except OSError:

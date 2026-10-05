@@ -204,8 +204,11 @@ def _size(p):
 def _bring(name, src, dest, how, root, outcome, recorded):
     """Bring one name across `how` ("moved", "copied" or "fresh"). Returns the manifest entry
     it wrote down, or None when there was nothing to do (already recorded, nothing in the old
-    place, or both places already hold it) or it failed (noted in `outcome`)."""
-    if name in recorded:
+    place, or both places already hold it) or it failed (noted in `outcome`).
+
+    A MOVED kind is moved again whenever it is back in its old place alone, recorded or not:
+    a rollback to 3.19 moves it back, and MOVED.json must never leave the only copy unread."""
+    if name in recorded and how != "moved":
         return None
     try:
         if not src.exists():
@@ -262,7 +265,7 @@ def _write_manifest(manifest, outcome):
 def _legacy_pack_rename(old_pack, new_pack, recorded, outcome):
     """3.18's one-time rename, at the OLD place, for an install whose pack still has its
     pre-v7 name: then the move below carries the renamed pack across like any other."""
-    if PACK_NAME in recorded or new_pack.exists():
+    if new_pack.exists():
         return
     from moonglade import assets as _assets
     if _assets.migrate_legacy_name(old_pack) == "both":
@@ -321,10 +324,14 @@ def _library_plan(out):
         yield name, _paths.old_state_path(out, name), reports / name, "copied"
 
 
-def migrate_library(out_dir):
+def migrate_library(out_dir, move_guard=False):
     """Bring the library `out_dir`'s records across into its _moonglade/ folder. A folder
     that is not there yet (a first run's library) is left alone. Returns an Outcome; never
-    raises for a record it could not bring."""
+    raises for a record it could not bring.
+
+    `move_guard`: only the server's start passes True, before its TrainGuard exists. The
+    training spend guard is moved by nothing else -- a command-line run beside a running
+    server must never move it out from under that server."""
     out = Path(out_dir)
     outcome = Outcome("the library " + str(out))
     if not out.is_dir():
@@ -338,18 +345,20 @@ def migrate_library(out_dir):
     manifest = _paths.records_manifest(out)
     recorded = _paths.moved_names(manifest)
     for name, src, dest, how in _library_plan(out):
+        if name in MOVED_RECORDS and not move_guard:
+            continue
         _bring(name, src, dest, how, out, outcome, recorded)
     _write_manifest(manifest, outcome)
     return outcome
 
 
-def open_library(out_dir):
+def open_library(out_dir, move_guard=False):
     """Every entry point's one call for its library, once logging is set up and before
     anything reads a record: bring the records across, re-point the file log at the new
     logs/ (moonglade.logs.reopen), then log what happened, once -- in the new log. Never
-    raises."""
+    raises. `move_guard`: True from the server's start only (see migrate_library)."""
     try:
-        outcome = migrate_library(out_dir)
+        outcome = migrate_library(out_dir, move_guard=move_guard)
     except Exception as e:                       # noqa: BLE001 -- a start must go on
         outcome = Outcome("the library " + str(out_dir))
         outcome.failed.append(("the library's records", _reason(e)))
