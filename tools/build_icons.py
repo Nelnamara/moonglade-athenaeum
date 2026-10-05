@@ -137,8 +137,6 @@ export default function Icon({ name, size = "1em", title, className, style }) {
     </svg>
   );
 }
-
-export const ICON_NAMES = Object.keys(GLYPHS);
 '''
 
 

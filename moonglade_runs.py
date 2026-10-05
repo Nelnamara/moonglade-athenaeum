@@ -53,7 +53,6 @@ _BIG = 1000000                # above this the over-cap message stops counting
 
 LISTS_KEY = "gen.lists"       # the account store key the Lists sheet writes: {name: [items]}
 LIST_NAME_RE = re.compile(r"^[a-z0-9_]{1,32}$")
-MAX_LISTS = 50
 MAX_LIST_ITEMS = 200
 LIST_ITEM_MAX = 200
 

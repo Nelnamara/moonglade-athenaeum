@@ -72,7 +72,6 @@ export function bindDock(b) {
   _dock = next;
   if (!same) _emit();
 }
-export function getDock() { return _dock; }
 
 /** For lane w2-gen's dock: the request it prices (buildPayload's output) -- the picker
     reads its prompt length and prices a candidate recipe against it. */

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUpload } from "../../api.js";
 import {
   CAPTION_MAX, GOALS, LONG_TRIGGER_ARCHS, MAX_IMAGES, MIN_IMAGES, acceptCostField, advancedGates,
-  archTabs, basicFooterCost, countedItems, defaultBase, imageProblem, loraForDock, markRejected,
+  archTabs, basicFooterCost, countedItems, defaultBase, imageProblem, markRejected,
   mergeImages, reuseCandidate, roomLeft, triggerCheck,
 } from "../../gen/trainCore.js";
 import { LIBRARY } from "../../apiRoutes.js";
@@ -22,8 +22,6 @@ import { LIBRARY } from "../../apiRoutes.js";
    guarded here by a busy flag, and on the server by a per-run lock and, for a Basic start or a
    retry, an on-disk guard. */
 
-export const USE_LORA_EVENT = "mg-use-lora";
-
 /* Advanced's focus view owns Escape (handoff 3c: "Esc returns to the grid"), the way the
    Control Panel owns its own ladder: while it is up, App.jsx's capture-phase overlay closer
    stands aside (it reads this), and the focus view's own listener takes the grid back. */
@@ -33,14 +31,6 @@ export function holdTrainEscape() {
   escOwners += 1;
   let held = true;
   return () => { if (held) { held = false; escOwners -= 1; } };
-}
-
-/* "Use" (handoff 5c): a trained LoRA into the Generate dock (desktop) or the Create tab
-   (phone). The hosts listen; this only announces. */
-export function useLoraInDock(row, archOf) {
-  const detail = loraForDock(row, archOf);
-  if (!detail) return;
-  window.dispatchEvent(new CustomEvent(USE_LORA_EVENT, { detail }));
 }
 
 function bootCsrf() {

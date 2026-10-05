@@ -224,7 +224,6 @@ export function confirmTitle(held) {
 }
 export const CONFIRM_BODY = "Tsubaki.3 can't use LoRAs, a recipe, a palette or a negative prompt "
   + "with context images. They stay where they are and come back when you switch.";
-export const HELD_NOTE = "Held · not sent with context images";
 
 /* Does switching to the Context side need the confirm card first? Only the first switch of a
    session, and only while something would be held. */

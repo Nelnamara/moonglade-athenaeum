@@ -2713,15 +2713,12 @@ def apply_artwork_meta(db_path, metas):
     return changed
 
 
-# The four view columns, folded by their own verb rather than by ARTWORK_META_FIELDS.
-# Deliberately NOT part of the meta list: the meta fields ride the fifteen-minute
-# living-library sweep, and reading a view count on PixAI ADDS one to it (PROBE_2026-09-06
-# measured it: a page that selects `views` moves every row it returns by +1). So views are
-# read ONCE per deliberate --sync-artworks and never on the sweep's cadence -- a rule that
-# only holds while the two writes stay two separate statements.
-ARTWORK_VIEW_FIELDS = ("views", "views_prev", "views_at", "views_prev_at")
-
-
+# The four view columns (views, views_prev, views_at, views_prev_at) are folded by their own
+# verb rather than by ARTWORK_META_FIELDS. Deliberately NOT part of the meta list: the meta
+# fields ride the fifteen-minute living-library sweep, and reading a view count on PixAI ADDS
+# one to it (PROBE_2026-09-06 measured it: a page that selects `views` moves every row it
+# returns by +1). So views are read ONCE per deliberate --sync-artworks and never on the
+# sweep's cadence -- a rule that only holds while the two writes stay two separate statements.
 def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
     """Fold a bulk views sweep onto the catalog rows it names, one narrow UPDATE each,
     keyed by artwork_id (the id the sweep returns; media_id is what the row is keyed by).
