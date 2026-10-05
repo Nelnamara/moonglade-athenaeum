@@ -176,22 +176,36 @@ SERVE_LOG_KEEP = 3
 def rotate_by_size(path, max_bytes=SERVE_LOG_MAX_BYTES, keep=SERVE_LOG_KEEP):
     """Run before the file is opened for appending: when `path` is over `max_bytes`, it
     becomes `<name>.1`, the older ones shift up to `<name>.<keep>` and the oldest is dropped.
-    Returns True when it rotated. Best effort: a missing file, or a rename the system refuses
-    (another process holding the file open), leaves everything as it was and returns False --
-    a log must never stop the app starting."""
+    Returns True when it rotated; never raises -- a log must never stop the app starting.
+
+    The order is what keeps a refused rotation from losing anything. The usual refusal is the
+    log itself being held open by another process (Windows will not rename an open file), so
+    the log is moved aside to a temporary name FIRST: if that is refused, nothing has been
+    touched. Only then do the old logs shift up, and the moved-aside log becomes `.1`. If a
+    shift is refused half-way, the log is put back where the launcher appends and the
+    rotation is abandoned, the old logs still there."""
     p = Path(path)
     try:
         if p.stat().st_size <= max_bytes:
             return False
     except OSError:
         return False
+    aside = p.with_name("%s.rotating-%d" % (p.name, os.getpid()))
+    try:
+        os.replace(p, aside)
+    except OSError:
+        return False                       # held open elsewhere: nothing was touched
     try:
         for n in range(max(1, int(keep)) - 1, 0, -1):
             older = p.with_name("%s.%d" % (p.name, n))
             if older.exists():
                 os.replace(older, p.with_name("%s.%d" % (p.name, n + 1)))
-        os.replace(p, p.with_name(p.name + ".1"))
+        os.replace(aside, p.with_name(p.name + ".1"))
     except OSError:
+        try:
+            os.replace(aside, p)           # back where the launcher appends
+        except OSError:
+            pass
         return False
     return True
 
