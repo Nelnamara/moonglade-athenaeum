@@ -238,7 +238,7 @@ describe("The Gallery page opens in plain words", () => {
     const next = blocks.findIndex((b, i) => i > term && b.type === "h");
     const code = blocks.slice(term + 1, next).filter((b) => b.type === "code");
     assert.equal(code.length, 1);
-    assert.match(code[0].text, /python moonglade_gallery\.py --out pixai_backup/);
+    assert.match(code[0].text, /python -m moonglade\.gallery --out pixai_backup/);
     assert.ok(!blocks.slice(0, term).some((b) => b.type === "code"));
   });
 });

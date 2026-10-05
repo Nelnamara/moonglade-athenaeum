@@ -11,9 +11,9 @@ image file, thumbnail, and catalog row).
 Requirements:
     pip install flask pillow
 
-Usage:
-    python moonglade_gallery.py
-    python moonglade_gallery.py --out pixai_backup --port 5000
+Usage (from the app's folder; normally the launcher, Serve Gallery, starts it):
+    python -m moonglade.gallery
+    python -m moonglade.gallery --out pixai_backup --port 5000
 """
 
 import argparse
@@ -13710,7 +13710,7 @@ def create_app(out_dir: Path):
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
     # SESSION_COOKIE_SECURE is deliberately left False: this app is typically served
-    # over plain HTTP on a LAN (`python moonglade_gallery.py`, no TLS terminator). A Secure
+    # over plain HTTP on a LAN (`python -m moonglade.gallery`, no TLS terminator). A Secure
     # cookie would just get silently dropped by the browser over http:// and break
     # login entirely. Real hardening of this flag needs HTTPS, which means putting a
     # reverse proxy (nginx/Caddy) in front of this process -- out of scope for a
@@ -18382,7 +18382,7 @@ def create_app(out_dir: Path):
         below). Deliberately has NO localhost/loopback bypass -- login is
         required on every path, localhost hostname or IP included; no request
         address is a trusted tier. A fresh install creates its
-        first account either via `python moonglade_backup.py --add-web-user`
+        first account either via `python -m moonglade --add-web-user`
         or, while no accounts exist yet, through /login's own local-only
         bootstrap_mode form -- see login()'s docstring below for the real,
         shipped web-based bootstrap flow; account creation is NOT CLI-only.
@@ -18437,7 +18437,7 @@ def create_app(out_dir: Path):
     # lockout threshold becomes (workers x _LOGIN_MAX_FAILS) instead of the real
     # one -- a genuine multi-worker deployment would need a shared store (Redis, a
     # DB table) instead. Fine as-is for this app's normal deployment: one process,
-    # `python moonglade_gallery.py`.
+    # `python -m moonglade.gallery`.
     _login_lock = threading.Lock()
     _login_attempts = {}   # ip -> {"fails": int, "first_fail": epoch, "locked_until": epoch|None}
     _LOGIN_MAX_FAILS = 5
@@ -29127,7 +29127,7 @@ def port_owner(host, port, timeout=0.4):
 
     `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
     servers is already up here" before launching. That check lived ONLY in the
-    launcher, so `python moonglade_gallery.py --port N` -- how every script, test
+    launcher, so `python -m moonglade.gallery --port N` -- how every script, test
     harness and background agent starts this thing -- walked straight past it.
     Same probe, moved to where it cannot be bypassed.
 
@@ -29157,7 +29157,9 @@ def port_owner(host, port, timeout=0.4):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Local PixAI gallery server.")
+    # prog: the usage line names the command as it is typed (3.20).
+    ap = argparse.ArgumentParser(prog="python -m moonglade.gallery",
+                                 description="Local PixAI gallery server.")
     # default=None, not "pixai_backup": argparse cannot tell "the user typed the default"
     # from "the user typed nothing", and the managed launcher used to always pass the
     # literal default -- which made config.json's LIBRARY_DIR permanently unreachable no

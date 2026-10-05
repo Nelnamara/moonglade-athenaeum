@@ -8,10 +8,10 @@ for prune / reconcile (see [Deleting & Sync](Deleting)).
 ## Running it from a terminal
 
 ```bash
-python moonglade_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
-python moonglade_gallery.py --out pixai_backup --port 5757
-python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
-python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
+python -m moonglade.gallery --out pixai_backup                 # http://127.0.0.1:5000
+python -m moonglade.gallery --out pixai_backup --port 5757
+python -m moonglade.gallery --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
+python -m moonglade.gallery --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
 ```
 
 Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
@@ -379,7 +379,7 @@ so you can bookmark one, and the browser's Back button closes it.
   *Filter by model* is called that on the phone too.
 
   Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
-  with `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
+  with `python -m moonglade --rebuild-similar` (run that while the gallery isn't
   serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
   view just tells you so; nothing else breaks.
 

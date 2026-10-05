@@ -129,12 +129,12 @@ this as **Rate 1–5**.
 
 Your ratings, collections (and their manual order), smart collections, tags, keeper/reject
 marks and notes live only in `catalog.db`. **Control Panel → ⬇ Download curation (JSON)**, or
-`python moonglade_backup.py --export-curation [FILE]`, saves them as one small file keyed by
+`python -m moonglade --export-curation [FILE]`, saves them as one small file keyed by
 media id. If you ever rebuild the catalog from a fresh pull, put them back:
 
 ```bash
-python moonglade_backup.py --import-curation curation.json            # dry run: what it would do
-python moonglade_backup.py --import-curation curation.json --apply    # do it
+python -m moonglade --import-curation curation.json                   # dry run: what it would do
+python -m moonglade --import-curation curation.json --apply           # do it
 ```
 
 - **Nothing is written without `--apply`.** The dry run prints exactly what would change.

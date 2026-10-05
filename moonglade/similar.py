@@ -298,6 +298,6 @@ def scan_dir(root, cap=None):
             return
 
 
-# This module must be IMPORTED, never run as `python moonglade_similar.py` — Pixeltable rejects
+# This module must be IMPORTED, never run as `python -m moonglade.similar` — Pixeltable rejects
 # UDFs defined in the __main__ namespace. Drive builds via a runner that does
-# `import moonglade_similar; moonglade_similar.sync(moonglade_similar.scan_dir(root))` or the gallery/panel.
+# `from moonglade import similar; similar.sync(similar.scan_dir(root))` or the gallery/panel.

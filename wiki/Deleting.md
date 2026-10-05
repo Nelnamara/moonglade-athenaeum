@@ -158,7 +158,7 @@ the sixty-day **Full re-walk** — and they reach it only on rows they were re-f
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and
 prune those orphans:
 
-1. Run **`python moonglade_backup.py --reconcile-deleted`** (it's also the last step of
+1. Run **`python -m moonglade --reconcile-deleted`** (it's also the last step of
    `--sync`, and one of the jobs that runs itself weekly). It pages your live feed (~1–2 min) and flags catalog
    rows whose task is gone.
 2. Gallery → **Source → "Deleted on PixAI"** lists them, each badged **ARCHIVE**.
@@ -175,7 +175,7 @@ turns up in your feed again loses it.
 ## CLI
 
 ```bash
-python moonglade_backup.py --reconcile-deleted     # flag cloud-deleted orphans
+python -m moonglade --reconcile-deleted            # flag cloud-deleted orphans
 ```
 
 **There is no command-line delete.** `--delete-task` was deprecated on 2026-09-06 and has been

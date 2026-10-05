@@ -1,17 +1,21 @@
-"""moonglade_mcp.py -- MCP server exposing the Moonglade Athenaeum catalog for
+"""moonglade/mcp_server.py -- MCP server exposing the Moonglade Athenaeum catalog for
 AI-assisted curation of the local PixAI backup. LOCAL stdio, owner-only.
 
-Reuses moonglade_gallery.py's catalog helpers + moonglade_similar.similar() -- no SQL is
+Reuses moonglade/gallery.py's catalog helpers + moonglade.similar.similar() -- no SQL is
 reimplemented here. Catalog writes are set_rating / add_to_collection / remove_from_collection; tag_suggest is the first tool to reach the PixAI account (free, read-only).
 
 Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
 "D:\\path\\to\\pixai_backup"). Falls back to pixai_backup in the app's folder
-(moonglade_paths.default_library_path()).
+(moonglade.paths.default_library_path()).
 
-Register in Claude Code:
+Register in Claude Code (PYTHONPATH names the app's folder, so `-m` finds the package
+wherever the client starts the server):
     claude mcp add moonglade -e MOONGLADE_OUT="D:\\path\\to\\pixai_backup" \\
-        -- python "C:\\Users\\<you>\\source\\repos\\pixai-gallery-backup\\moonglade_mcp.py"
+        -e PYTHONPATH="C:\\Users\\<you>\\source\\repos\\pixai-gallery-backup" \\
+        -- python -m moonglade.mcp_server
 Then restart Claude Code; tools appear as moonglade:search_catalog, moonglade:similar, ...
+A registration made before 3.20 runs the app folder's moonglade_mcp.py by path: a stand-in
+that runs this module and goes in 3.21, so re-register before then.
 
 NOTE: the Similar tool loads the Pixeltable index (embedded Postgres). Don't run a
 Similar-heavy MCP session at the same time as `--rebuild-similar` -- both touch the

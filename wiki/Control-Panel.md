@@ -43,7 +43,7 @@ smart collections, tags, keeper/reject marks and notes — as one file that goes
 
 ## Running a maintenance job
 
-Click a button and the job starts as a background run of `moonglade_backup.py`:
+Click a button and the job starts as a background run of the command-line tool (`python -m moonglade`):
 
 - **One job runs at a time.** While one is running the other buttons are disabled, and a
   second request comes back with *"a job is already running"*.
@@ -215,11 +215,17 @@ they stay buttons, with their confirm and their server's-own-machine gate exactl
 ### The rest of the rules
 
 - It's an **in-process timer, not an OS cron**: jobs fire only while the gallery is running.
-  For always-on backups, point Windows Task Scheduler at the CLI instead:
+  For always-on backups, point Windows Task Scheduler at the CLI instead. The action runs
+  `python` with the arguments below, and its **Start in** is the app's folder (the one
+  holding `config.json`), which is where `python -m moonglade` finds the app:
 
 ```bash
-python moonglade_backup.py --out pixai_backup --update
+python -m moonglade --out pixai_backup --update
 ```
+
+  A task made before 3.20 runs `python moonglade_backup.py ...`. That keeps working for one
+  release (a stand-in runs the new code and says so); change the task to the line above
+  before 3.21.
 
 - **One job at a time**, as always. A job whose turn arrives while another is running simply
   waits for the next minute.
@@ -354,7 +360,7 @@ Things worth knowing:
   single create per submit, and if the session isn't usable it **refuses and spends
   nothing** rather than quietly falling back to your API key. See
   [Trust & Safety](Trust-and-Safety).
-- `python moonglade_backup.py --mirror-check` verifies the renewal loop from the command
+- `python -m moonglade --mirror-check` verifies the renewal loop from the command
   line without spending anything.
 
 ## Server

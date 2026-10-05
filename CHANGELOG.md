@@ -16,6 +16,12 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### The app moves into its own folder
+- **The command line is now `python -m moonglade`.** The app's code moved into a `moonglade/` folder, so a command that began `python moonglade_backup.py` is now `python -m moonglade` (for example `python -m moonglade --sync`), run from the app's folder as before. The web server is `python -m moonglade.gallery`, though the launcher (`Serve Gallery`) is still the way to start it. The README, the wiki, the help text and **Copy as CLI** in a run's **Inspect** all say it the new way. (2026-10-05)
+- **The old commands keep working for one release.** `python moonglade_backup.py ...` (an old habit, a Windows Task Scheduler entry, an old copy of the docs) still runs, with the same arguments and exit code, and says once what to type instead. An MCP registration that names `moonglade_mcp.py` keeps working too. Both stand-ins go in 3.21, so move a scheduled task to the new line before then (the Control Panel wiki page shows it). (2026-10-05)
+- **After this update, close Moonglade and open it again once.** The launcher that was running when you pressed **Update now** still starts the server by the old file name, which keeps working for now. The app says so in the corner, once each time the server starts: "Moonglade moved into its new folder. Close it and open it again once to finish." Until you do, **Update now** refuses with the same words, so the next release can never leave the app unable to restart. (2026-10-05)
+- Nothing else moved: your library, `config.json`, the art and the launcher are where they were. Only the art pack's manifest moved with the code, to `moonglade/manifest.json`. (2026-10-05)
+
 ## [3.19.0] - 2026-10-05 — Clearing the Ground
 
 ### Groundwork for the folder tidy

@@ -5,8 +5,8 @@ because Health counts a file that exists, whatever is in it. This pass looks at 
 catalogued file and names the broken ones, one report line per broken row, and stamps when it
 last ran.
 
-    python moonglade_backup.py --verify-library                 # quick tier
-    python moonglade_backup.py --verify-library --verify-deep   # + structural checks
+    python -m moonglade --verify-library                        # quick tier
+    python -m moonglade --verify-library --verify-deep          # + structural checks
 
   quick tier   ONE scan_library() walk of the library (sizes come free off the directory read)
                and ONE scandir of gallery/thumbs/:

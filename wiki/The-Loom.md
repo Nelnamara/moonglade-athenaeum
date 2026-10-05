@@ -7,7 +7,7 @@ on the same PixAI video engine.
 Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
 
 ```bash
-python moonglade_gallery.py --out pixai_backup      # then http://127.0.0.1:5000/loom
+python -m moonglade.gallery --out pixai_backup      # then http://127.0.0.1:5000/loom
 ```
 
 **A storyboard has its own address.** `/loom` opens whichever board you had open last, as it

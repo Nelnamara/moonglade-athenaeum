@@ -80,7 +80,7 @@ request once, then either quote it or spend it, both reading the same `parameter
 There is one road for every mode (image, edit, fix, video, enhance), and the mode dispatch
 lives in exactly one place.
 
-**Library scan** — the one walk of the library folder: `moonglade_gallery.py`'s LIBRARY SCAN
+**Library scan** — the one walk of the library folder: `moonglade/gallery.py`'s LIBRARY SCAN
 section, `scan_library()` for the whole tree and `files_for()` for a single media id. It owns
 what a walk skips (the `.part` temp files, the thumbnail and quarantine folders), which file
 extensions count (`kinds`), and how a path becomes a bucket and a media id. A caller asks for
@@ -95,7 +95,7 @@ flat folder), `batches` (legacy batch folders), `month` (a `YYYY-MM/` folder or
 Buckets are how a duplicate is spotted (the same media id in more than one bucket) and how the
 keeper is chosen when one is — most-organized wins.
 **Media tools** — the one seam every ffmpeg and ffprobe invocation passes through: the
-delimited `media_tools` section of `moonglade_backup.py`. It answers "is the binary
+delimited `media_tools` section of `moonglade/backup.py`. It answers "is the binary
 installed" (once, cached, per binary), supplies the no-window flag and the timeout, and
 returns a **tool result** instead of raising. Video thumbnails, the faststart remux, the
 frame handoff, clip duration, audio detection and the Loom export are all callers of it,
@@ -121,7 +121,7 @@ from the serving machine's own loopback address. One `before_request` gate reads
 declaration off the endpoint and enforces all three, and an app whose routes do not all
 declare one refuses to start.
 **Catalog verb** — one named question the app asks of `catalog.db`, living beside the other
-catalog helpers in `moonglade_gallery.py`'s CATALOG VERBS section: `task_media`, `lineage`,
+catalog helpers in `moonglade/gallery.py`'s CATALOG VERBS section: `task_media`, `lineage`,
 `publish_state`, `history_page`, `delete_preview_rows` and the rest. A verb takes a `db_path`,
 holds the SQL, and returns **plain data** — dicts, lists, ints, never a `sqlite3.Row` and never a
 live connection. What the data becomes — a JSON payload, a `/thumbs/<id>.jpg` URL, a truncated
@@ -146,7 +146,7 @@ no body error becomes `{error: "<status> <statusText>"}`, and a transport failur
 contract needs a distinction that rule deliberately collapses.
 
 **PixAI client** — `PixAIClient`, in the delimited `pixai_client` section of
-`moonglade_backup.py`: the one seam every byte this app exchanges with PixAI leaves through.
+`moonglade/backup.py`: the one seam every byte this app exchanges with PixAI leaves through.
 Five verbs — `query` / `mutate` (the ad-hoc GraphQL POST), `persisted` (the persisted-hash
 GET the personal-history operations ride), `rest_get` / `rest_post` (the oRPC `/v2` road) —
 plus `for_create()`, which picks the browser-JWT mirror session over the API key when the

@@ -71,7 +71,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   left, never the credential itself. And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
-  ask. `python moonglade_backup.py --mirror-check` verifies the session without spending.
+  ask. `python -m moonglade --mirror-check` verifies the session without spending.
 - **Charge you twice for one generation.** A submit is sent **once**, never re-sent. That
   sounds obvious, but it isn't free: the tool retries ordinary *reads* when the network
   hiccups, and until **2026-07-26** a submit was treated the same way. The danger is that a

@@ -12,7 +12,7 @@ pip install -r requirements.txt
 |---|---|
 | `requests` | all network operations (required) |
 | `pillow` | thumbnails, conversion, metadata embedding |
-| `flask` | the local web gallery (`moonglade_gallery.py`) |
+| `flask` | the local web gallery (`moonglade/gallery.py`) |
 | `websockets` | `--watch` / `--watch-backup`, and the web gallery's auto-starting live-mirror thread |
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
 | `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
@@ -62,9 +62,14 @@ optional overrides; leave them blank. More detail: [How It Works](How-It-Works).
 
 ## 3. First run
 
+Run every command in this guide from the app's folder (the one holding `config.json`):
+`python -m moonglade` finds the app from there. Before 3.20 the commands named the files
+(`python moonglade_backup.py ...`); those still work for one release, and say what to type
+instead.
+
 Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
 ```bash
-python moonglade_gallery.py --out pixai_backup
+python -m moonglade.gallery --out pixai_backup
 ```
 
 **Create your login (v2.0.0+).** The gallery requires an account on every path, including on
@@ -105,7 +110,7 @@ can't cover: you're locked out of the *only* account, so you can't sign in to re
 Panel at all.
 
 **Locked out, or resetting a forgotten password.** On the server machine,
-`python moonglade_backup.py --add-web-user` prompts for a username (typed normally) and a
+`python -m moonglade --add-web-user` prompts for a username (typed normally) and a
 password (hidden — never echoed) and writes the hash straight to `config.json`. It *adds or updates*, so it doubles
 as a password reset for an existing name. Companions: `--list-web-users` shows who exists,
 `--remove-web-user <name>` deletes one — including the *last* one, which is the point: the count
@@ -118,10 +123,10 @@ gallery (and supervises it) without a terminal window.
 
 Headless:
 ```bash
-python moonglade_backup.py --probe   # connection sanity check
-python moonglade_backup.py --count   # how many images you have
-python moonglade_backup.py --max 40  # small test download
-python moonglade_backup.py           # download everything
+python -m moonglade --probe          # connection sanity check
+python -m moonglade --count          # how many images you have
+python -m moonglade --max 40         # small test download
+python -m moonglade                  # download everything
 ```
 
 Everything lands in `pixai_backup/` (git-ignored). Next: **[Backing Up](Backing-Up)**.

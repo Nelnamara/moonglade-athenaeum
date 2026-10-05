@@ -30,9 +30,9 @@ QUICK START
 --------------------------------------------------------------------------------
   pip install requests truststore
   set PIXAI_TOKEN ...   (your OS's way)
-  python moonglade_backup.py --probe     # resolve full-res media URL, sanity-check
-  python moonglade_backup.py             # download everything (backward)
-  python moonglade_backup.py --max 40    # small test first
+  python -m moonglade --probe            # resolve full-res media URL, sanity-check
+  python -m moonglade                    # download everything (backward)
+  python -m moonglade --max 40           # small test first
 """
 
 __version__ = "3.19.0"
@@ -1116,7 +1116,7 @@ def append_job_event(out_dir, job_id, status=None, **fields):
 
 # ---------------------------------------------------------------------------
 # CLI-side job logging: gives a command run straight from a terminal
-# (python moonglade_backup.py --sync / --update / --generate / ...) the SAME
+# (python -m moonglade --sync / --update / --generate / ...) the SAME
 # jobs.jsonl activity trail a panel-spawned subprocess already gets from
 # moonglade_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
 # delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
@@ -1676,7 +1676,7 @@ class PixAIClient:
         if not sha:
             raise PixAIError(
                 "no persisted hash is known for operation {!r} -- pass sha256=... or add "
-                "it to config.json (see RECAPTURE at the bottom of moonglade_backup.py)."
+                "it to config.json (see RECAPTURE at the bottom of moonglade/backup.py)."
                 .format(op_name))
         params = {
             "operation": op_name,
@@ -17627,7 +17627,10 @@ def run_list_web_users(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Back up your own PixAI gallery.")
+    # prog: the usage line names the command as it is typed (3.20), whether it came in by
+    # `python -m moonglade` or through the root moonglade_backup.py stand-in.
+    ap = argparse.ArgumentParser(prog="python -m moonglade",
+                                 description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
     ap.add_argument("--rebuild-thumbs", action="store_true",
                     help="regenerate EVERY image thumbnail at the current size/quality "
@@ -18123,7 +18126,7 @@ def main():
 
     if args.probe and args.count:
         print("Note: --probe exits before --count runs. Run them separately:\n"
-              "  python moonglade_backup.py --count\n"
+              "  python -m moonglade --count\n"
               "Continuing with --probe only.\n")
 
     # Web-login account management: no PixAI token/network/out-dir needed at all,

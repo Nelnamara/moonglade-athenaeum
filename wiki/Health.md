@@ -51,7 +51,7 @@ numbers?* below).
 no row in `catalog.db` at all — the mirror image of "missing files" (a catalog row with
 no file). This happens when files land on disk outside the normal backup flow. When the
 count is nonzero, Health shows a note pointing at the fix: the gallery's **↑ Import**
-button, or `python moonglade_backup.py --import-local` from the CLI — both catalog
+button, or `python -m moonglade --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
 **Opening a row whose file is gone tells you that.** A catalog row can outlive its file —
@@ -111,7 +111,7 @@ out of **Missing files**. Three tiles cover that:
   says it plainly instead.
 - **Missing thumbs** and **Last verified** — read from the last integrity check: **Control
   Panel → Check — read-only → Verify library integrity → run ▸** (or
-  `python moonglade_backup.py --verify-library`). They show "—" and "never" until it has run once.
+  `python -m moonglade --verify-library`). They show "—" and "never" until it has run once.
 
 The check looks at every catalogued file: missing, empty, no thumbnail (or, for a video, no
 poster), an empty thumbnail, files with no catalog row, and thumbnails with no row. The Panel's
@@ -216,7 +216,7 @@ isn't). Health resolves video/local rows by filename, so they aren't reported as
 false "missing". Regenerate thumbnails any time:
 
 ```bash
-python moonglade_gallery.py --out pixai_backup --rebuild-thumbs
+python -m moonglade.gallery --out pixai_backup --rebuild-thumbs
 ```
 
 ---

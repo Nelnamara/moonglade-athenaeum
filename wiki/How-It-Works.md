@@ -3,28 +3,39 @@
 The Python modules below sit around one SQLite catalog, with the Loom's JS surface and the gallery's React front end on top.
 
 ```
-moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
-moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
-moonglade_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
-moonglade_mcp.py          local stdio MCP server: curation tools over the catalog, a duplicate
+moonglade/                the app's code (since 3.20), one package:
+  backup.py               CLI engine: download, organize, generate, sync, delete, reconcile
+                          (run it as `python -m moonglade`)
+  gallery.py              Flask web gallery + ALL SQLite catalog helpers (the shared base)
+                          (the launcher, Serve Gallery, runs it as `python -m moonglade.gallery`)
+  similar.py              "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
+  mcp_server.py           local stdio MCP server: curation tools over the catalog, a duplicate
                           finder, and a read-only PixAI tag-suggestion tool
-moonglade_recipes.py      PixAI recipes: the market, Mine and Sets, the creator, and attaching
+  recipes.py              PixAI recipes: the market, Mine and Sets, the creator, and attaching
                           recipes to a generation
-moonglade_inbox.py        PixAI's inbox (the ✉ button) and the gift box's gifts and current
+  inbox.py                PixAI's inbox (the ✉ button) and the gift box's gifts and current
                           event (🎁), a published work's comments and your replies
-moonglade_runs.py         the prompt template (`{a|b}` variables, saved lists), Random and Matrix
+  runs.py                 the prompt template (`{a|b}` variables, saved lists), Random and Matrix
                           runs, and the Runs store behind Inspect
-moonglade_contest_wins.py what counts as a verified contest win and when it is checked
-moonglade_integrity.py    the read-only library integrity check (--verify-library) behind
+  contest_wins.py         what counts as a verified contest win and when it is checked
+  integrity.py            the read-only library integrity check (--verify-library) behind
                           Health's Zero-byte / Missing thumbs / Last verified tiles, and
                           Health's Broken files list: its local marks and its targeted
                           re-download / thumbnail-rebuild run
-moonglade_curation_io.py  the curation sidecar: --export-curation / --import-curation and the
+  curation_io.py          the curation sidecar: --export-curation / --import-curation and the
                           Control Panel's Download curation (JSON)
+  paths.py                where the app's own files are: every app-folder path comes from here
+  logs.py                 the always-on log file, logs/moonglade.log in the library
+  manifest.json           which art pack this build wants, and where to fetch it
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
-The CLI engine and the MCP server both import `moonglade_gallery.py` for catalog access — so
+Before 3.20 these were flat files beside the launcher (`moonglade_backup.py`,
+`moonglade_gallery.py` and so on). Three of those names still sit there for one release as
+stand-ins that run the new code, so an old command, scheduled task or MCP registration keeps
+working; they go in 3.21.
+
+The CLI engine and the MCP server both import `moonglade/gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
 the Loom, Control Panel, achievements, collections, and contact sheet are browser-only.
 `--watch` and `--claims` have web equivalents too, not CLI-only surfaces: the gallery runs
@@ -69,7 +80,7 @@ Task summaries carry `mediaId` / `batchMediaIds`, not URLs. Full-res comes from
 
 ## The catalog (`catalog.db`)
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
-`moonglade_gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
+`moonglade/gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
 the `_CREATE_TABLE` DDL, and `_MIGRATIONS`. `migrate()` runs them once per process, on the first `catalog()`
 open for a path and memoized after, so existing DBs still auto-upgrade on first touch. Columns span identity/timing, full meta (prompt/seed/steps/sampler/
 cfg/model/loras/negative/clip-skip), published-artwork data, video fields, `source`

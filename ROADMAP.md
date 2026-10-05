@@ -134,15 +134,15 @@ why this section exists.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner
   already likes. Low priority, deliberately unscoped — owner to walk it. The items on record are
   listed as an agenda in the Loom-in-the-gallery workshop prep (2026-10-02).
-- **Split the two megamodules (`moonglade_backup.py` / `moonglade_gallery.py`).** They are the
+- **Split the two megamodules (`moonglade/backup.py` / `moonglade/gallery.py`).** They are the
   repo's two largest, highest-complexity, most-churned modules — the top regression-risk / hotspot
   / refactor targets (Flare tracks the live scores). Split into cohesive modules to cut the risk.
   This is SPEND-PATH code, so it's **its own project with a design + adversarial review, NOT a side
   effect of the naming/tidy pass** — naming is a moving axis, this is a splitting axis. **The premise
   shifted (2026-08-24):** the architecture refactor did **not** split either file, so the item stands — but
   it carved named internal seams *within* both that a future split can lift out cleanly. In
-  `moonglade_backup.py`: the `pixai_client` (PixAIClient) and `media_tools` sections and the
-  `build_request`/`GenerationRequest` payload road; in `moonglade_gallery.py`: the `LIBRARY SCAN`,
+  `moonglade/backup.py`: the `pixai_client` (PixAIClient) and `media_tools` sections and the
+  `build_request`/`GenerationRequest` payload road; in `moonglade/gallery.py`: the `LIBRARY SCAN`,
   `CATALOG VERBS`, and catalog-road (`catalog()` / `migrate()`) sections. The seams are the hard part of a
   split, so the work is more tractable than it was — but still unbuilt, and still its own reviewed effort.
   The smaller god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,

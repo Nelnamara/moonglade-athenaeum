@@ -6,10 +6,10 @@ smart_collections (saved searches) and collection_order (a hand-picked collectio
 order). The CSV export carries the first two and has no import. This file is the round trip: a
 small JSON keyed by media id, so a catalog rebuilt from a fresh re-pull gets its curation back.
 
-    python moonglade_backup.py --export-curation [FILE]
-    python moonglade_backup.py --import-curation FILE                    # dry run: the plan
-    python moonglade_backup.py --import-curation FILE --apply            # fill-only
-    python moonglade_backup.py --import-curation FILE --apply --curation-overwrite
+    python -m moonglade --export-curation [FILE]
+    python -m moonglade --import-curation FILE                           # dry run: the plan
+    python -m moonglade --import-curation FILE --apply                   # fill-only
+    python -m moonglade --import-curation FILE --apply --curation-overwrite
 
 The gallery's Control Panel offers the same export as a download (GET /export-curation).
 

@@ -52,7 +52,7 @@ whole files. A few conventions that matter more than usual here:
 
 - **A file is located by its `media_id`** (the last `_`-chunk of the filename stem), not by
   a stored absolute path — and since 2026-08-23 that really is centralized. The **LIBRARY
-  SCAN** section of `moonglade_gallery.py` owns the one walk of the library folder
+  SCAN** section of `moonglade/gallery.py` owns the one walk of the library folder
   (`scan_library()`) and the one media-id lookup (`files_for()`, behind the historical name
   `find_files_for_media_id()`), along with the exclusion vocabulary, the `.part` skip, the
   extension taxonomy, `bucket_of()` and `media_id_of()`. Resume, the audit, `--organize`,
@@ -64,7 +64,7 @@ whole files. A few conventions that matter more than usual here:
   deliberate ones already recorded there — a private copy is how this drifted twice before.
 - **Catalog schema changes** touch three places together: `CATALOG_FIELDS`, the `_CREATE_TABLE`
   DDL, and the `_MIGRATIONS` list (so existing databases pick up the column automatically).
-  All three live in `moonglade_gallery.py`.
+  All three live in `moonglade/gallery.py`.
 - **Never commit `config.json`** or anything with a real API key, user id, or hash in it.
   `config.example.json` is the template; it ships with placeholder values only.
 - **HTTPS verification stays on.** Don't add `verify=False` anywhere, even temporarily.

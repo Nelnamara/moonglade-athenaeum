@@ -115,11 +115,11 @@ effect if they're in the file that loads every session.)*
   on how much — a full pixel source (Figma frame / Claude Design / locked mockup) for a real
   surface, a quick workshop for something small — but never build a visual change straight from
   prose. Verify against whatever that source was.
-- **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`,
-  never `python moonglade_gallery.py` bare. Only the launcher sets supervised mode, and without
-  it `/api/server/restart` 409s, silently removing the owner's Restart button. Machine-local
-  flags live in the git-ignored `serve.txt` beside it; the `--out` pin matters (an unpinned C:
-  launch resolves `LIBRARY_DIR` and serves the D: install).
+- **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`:
+  never `python -m moonglade.gallery` bare; use the launcher. Only the launcher sets supervised
+  mode, and without it `/api/server/restart` 409s, silently removing the owner's Restart
+  button. Machine-local flags live in the git-ignored `serve.txt` beside it; the `--out` pin
+  matters (an unpinned C: launch resolves `LIBRARY_DIR` and serves the D: install).
 - **The D: install is the owner's domain.** He tests branches live there, so the D: run-copy and
   the C: repo drift by design — that is normal operation, not corruption. Never mass-commit to
   "reconcile" them. If D: looks badly behind, **say so and let him drive**; a periodic heads-up is
@@ -258,7 +258,7 @@ single-image generation.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `moonglade_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
+- `moonglade/logs.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -338,7 +338,7 @@ recently within hours of a "correction." All tests must pass before merging to m
   clearing the flag alone un-earns nothing.
 - **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
   that needs branding art or a sealed roster pins its own `branding_root()` AND
-  `moonglade_paths.local_path()` (the pack, `branding.json` and the other machine files go
+  `moonglade.paths.local_path()` (the pack, `branding.json` and the other machine files go
   through that, not through the tree's parent) and seeds its
   own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
@@ -385,45 +385,49 @@ merge to master with `--no-ff`, tag releases.
 
 ## Quick command reference
 
+Run from the app's folder (the one holding `config.json`). Since 3.20 the code is the
+`moonglade/` package; the old `python moonglade_backup.py ...` form still works through a
+root stand-in until 3.21.
+
 ```
-python moonglade_backup.py --probe                    # connection sanity check
-python moonglade_backup.py --count                    # tally tasks + images
-python moonglade_backup.py --max 40                   # small test download
-python moonglade_backup.py                            # full download (4 workers, 250/page)
-python moonglade_backup.py --update                   # fast incremental: stop at already-downloaded history
-python moonglade_backup.py --update --workers 8       # incremental + higher concurrency
-python moonglade_backup.py --workers 8 --page-size 500  # fast full backfill
-python moonglade_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
-python moonglade_backup.py --backfill-full-meta       # fill existing rows
-python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
-python moonglade_backup.py --backfill-full-meta --with-surface --workers 8   # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
-python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
-python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible)
-python moonglade_backup.py --catalog-stats            # summarize catalog.db
-python moonglade_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
-python moonglade_backup.py --audit                    # read-only duplicate report → audit_report.csv
-python moonglade_backup.py --audit --no-content       # fast: same-media_id location dupes only
-python moonglade_backup.py --dedup                    # dry-run dedup plan (nothing changes)
-python moonglade_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
-python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
-python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
-"Serve Gallery.pyw"                                   # launch the gallery (double-click; never bare `python moonglade_gallery.py` -- see the standing rule above; machine-local flags live in serve.txt)
-python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
-python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
-python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes
-python moonglade_backup.py --contests                 # list live PixAI contests (read-only)
+python -m moonglade --probe                           # connection sanity check
+python -m moonglade --count                           # tally tasks + images
+python -m moonglade --max 40                          # small test download
+python -m moonglade                                   # full download (4 workers, 250/page)
+python -m moonglade --update                          # fast incremental: stop at already-downloaded history
+python -m moonglade --update --workers 8              # incremental + higher concurrency
+python -m moonglade --workers 8 --page-size 500       # fast full backfill
+python -m moonglade --no-full-meta                    # faster pull, but rows land with no prompt/seed/model
+python -m moonglade --backfill-full-meta              # fill existing rows
+python -m moonglade --sync                            # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
+python -m moonglade --backfill-full-meta --with-surface --workers 8  # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
+python -m moonglade --organize --dry-run              # preview month-folder normalize
+python -m moonglade --organize                        # normalize into YYYY-MM/ (reversible)
+python -m moonglade --catalog-stats                   # summarize catalog.db
+python -m moonglade --sync-artworks                   # merge published-artwork metadata (title/likes/tags) by media_id
+python -m moonglade --audit                           # read-only duplicate report → audit_report.csv
+python -m moonglade --audit --no-content              # fast: same-media_id location dupes only
+python -m moonglade --dedup                           # dry-run dedup plan (nothing changes)
+python -m moonglade --dedup --apply                   # quarantine redundant copies to _duplicates/
+python -m moonglade --dedup --apply --dedup-delete    # delete instead of quarantine
+python -m moonglade --verify-dupes                    # confirm _duplicates/ is safe to delete
+"Serve Gallery.pyw"                                   # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in serve.txt)
+python -m moonglade -v --update                       # verbose: per-page / per-image timing diagnostics
+python -m moonglade --watch                           # live event stream (WS push): watch tasks complete
+python -m moonglade --watch --watch-backup            # + auto-collect each finished gen as it completes
+python -m moonglade --contests                        # list live PixAI contests (read-only)
 # --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
-python moonglade_backup.py --account                  # read-only credits/membership dashboard
-python moonglade_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
-python moonglade_backup.py --claims                   # read-only claimable rewards (daily credits, stamina)
-python moonglade_backup.py --claim all --confirm      # claim ready rewards (gated; grants to your account)
-python moonglade_backup.py --suggest-prompt <id|file> # image-to-prompt: tags + description (free)
-python moonglade_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
-python moonglade_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
-python moonglade_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
-python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
-python moonglade_backup.py --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
-python moonglade_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
+python -m moonglade --account                         # read-only credits/membership dashboard
+python -m moonglade --cards                           # read-only free-card (kaisuuken) balances + ids
+python -m moonglade --claims                          # read-only claimable rewards (daily credits, stamina)
+python -m moonglade --claim all --confirm             # claim ready rewards (gated; grants to your account)
+python -m moonglade --suggest-prompt <id|file>        # image-to-prompt: tags + description (free)
+python -m moonglade --upload path/to/image.png        # local file -> media_id (free; S3 upload)
+python -m moonglade --generate --prompt "..."         # preview an image gen (add --confirm to spend)
+python -m moonglade --generate-video --image <media_id> --prompt "..."  # preview i2v (EXPENSIVE; --confirm)
+python -m moonglade --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
+python -m moonglade --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
+python -m moonglade --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
 ```
 
 **Free cards auto-apply** (shipped 2026-07-03): on `--confirm`, `_apply_kaisuuken` calls PixAI's
