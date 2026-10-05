@@ -12812,19 +12812,6 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
     return {"media_ids": mids, "saved": len(saved), "is_video": False}
 
 
-def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll_timeout=240):
-    """Synchronous submit -> wait -> download+catalog (used by tests / any blocking caller).
-    The async gallery routes use submit_generation + generation_status + collect_generation
-    instead. Returns {task_id, media_ids, saved, paid_credit}."""
-    task_id = submit_generation(session, params)
-    paid = _poll_task_status(session, task_id, poll_timeout, interval=3,
-                             label="generate", fail_noun="generation")
-    got = collect_generation(session, task_id, out_dir,
-                             name_length=name_length, name_sep=name_sep)
-    return {"task_id": task_id, "media_ids": got["media_ids"],
-            "saved": got["saved"], "paid_credit": paid}
-
-
 def _i2v_cli_unsent_notes(args):
     """The receipts for what --generate-video was asked for and does not send (the CLI's half
     of the receipts rule; build_request records the web road's). A Tsubaki engine has no

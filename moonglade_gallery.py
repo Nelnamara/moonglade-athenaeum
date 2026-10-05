@@ -2882,11 +2882,6 @@ def recent_train_task_page(db_path, limit=18, before=None, q=""):
     return tasks, nxt
 
 
-def recent_train_tasks(db_path, limit=18):
-    """The first page of recent_train_task_page: the newest `limit` tasks."""
-    return recent_train_task_page(db_path, limit)[0]
-
-
 class TrainGuard:
     """The two spend guards the training routes keep ON DISK (train_guard.json in the library
     folder), so neither a restart nor a second tab can clear them (spend review 2026-09-28,
@@ -3165,12 +3160,6 @@ def _series_clause_list(text):
             seen.add(c)
             out.append(c)
     return out
-
-
-def _series_clauses(text):
-    """The validated clause SET for a prompt (#34) -- set semantics drop pure
-    reorderings for free, which is exactly what the validated Jaccard saw."""
-    return set(_series_clause_list(text))
 
 
 def _series_ts(created_at):
@@ -8928,15 +8917,6 @@ def living_clamp_interval(action, value, default=None):
     return max(floor, min(v, LIVING_MAX_INTERVAL_S))
 
 
-def living_defaults():
-    """The shipped job list as plain, saveable dicts (action / enabled / interval_s /
-    last_run). Static defaults are a tuple of frozen specs; this is the mutable copy
-    schedule.json stores and the owner edits."""
-    return [{"action": j["action"], "enabled": bool(j["enabled"]),
-             "interval_s": float(j["interval_s"]), "last_run": None}
-            for j in LIVING_ALL]
-
-
 def living_merge(saved):
     """Normalize whatever is in schedule.json against the shipped list.
 
@@ -9314,20 +9294,6 @@ def unique_models(db_path):
             "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
         ).fetchall()
         return [r[0] for r in rows]
-
-
-def catalog_model_options(db_path):
-    """Return [(name, model_id)] for distinct models in the catalog, most-used
-    first. model_id is the version id used in real generations, so it's a valid,
-    guaranteed-working value for --generate's --model -- the basis of the model
-    picker dropdown."""
-    with catalog(db_path) as con:
-        rows = con.execute(
-            "SELECT COALESCE(NULLIF(model_name,''), model_id) AS nm, model_id, COUNT(*) c "
-            "FROM catalog WHERE COALESCE(model_id,'') != '' AND model_id GLOB '[0-9]*' "
-            "GROUP BY model_id ORDER BY c DESC"
-        ).fetchall()
-        return [(r[0], r[1]) for r in rows]
 
 
 def backfill_batches(out_dir, db_path):

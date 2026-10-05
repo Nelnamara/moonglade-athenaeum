@@ -268,19 +268,6 @@ def test_media_type_filter(tmp_path):
     assert query_catalog(db, media_type="")[1] == 3  # all
 
 
-def test_catalog_model_options_most_used_first(tmp_path):
-    from moonglade_gallery import catalog_model_options
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [
-        _row(media_id="1", filename="a.png", model_name="Tsubaki", model_id="111"),
-        _row(media_id="2", filename="b.png", model_name="Tsubaki", model_id="111"),
-        _row(media_id="3", filename="c.png", model_name="Dreamix", model_id="222"),
-    ])
-    opts = catalog_model_options(db)
-    assert opts[0] == ("Tsubaki", "111")           # most-used first
-    assert ("Dreamix", "222") in opts
-
-
 def test_source_surfaced_per_item_in_library_api(tmp_path):
     """Ported from the classic grid's source badges (classic cut 2026-08-08):
     the per-row `source` the "sbadge gen/loc" markup rendered from must still
