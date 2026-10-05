@@ -130,18 +130,22 @@ def launcher_path():
     return APP_ROOT / "Serve Gallery.pyw"
 
 
-# The web server's entry script, by its path under APP_ROOT. The launcher joins it onto its
-# own os.path.abspath folder, so the path it runs is byte-for-byte what 3.18 ran.
+# The web server's OLD entry script, by its path under APP_ROOT: since 3.20 the root stand-in
+# a launcher from before the move still runs (moonglade_gallery.py; it stays for good). No app
+# code runs it any more -- the launcher runs `-m moonglade.gallery` -- and only the tests that
+# hold every path where it was (tests/test_app_paths.py) ask for it.
 GALLERY_SCRIPT = "moonglade_gallery.py"
 
 
 def gallery_script_path():
-    """The web server's entry script, which the launcher runs."""
+    """The root moonglade_gallery.py stand-in an old launcher runs. Test-only: the app itself
+    starts the server as `python -m moonglade.gallery`."""
     return APP_ROOT / GALLERY_SCRIPT
 
 
 def backup_script_path():
-    """The command-line tool's entry script, which the Control Panel runs for its jobs."""
+    """The root moonglade_backup.py stand-in for old command lines (goes in 3.21). Test-only:
+    the Control Panel runs its jobs as `python -m moonglade`."""
     return APP_ROOT / "moonglade_backup.py"
 
 

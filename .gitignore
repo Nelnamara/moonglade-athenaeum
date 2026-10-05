@@ -183,7 +183,7 @@ static/_mockup_*.html
 _moonglade/
 
 # ---- The code folder: its code is never ignored (KEEP THIS BLOCK LAST) ----
-# The modules move into moonglade/ next release. Several lines above are unanchored on purpose
+# The app's modules live in moonglade/ (since 3.20). Several lines above are unanchored on purpose
 # -- `gallery/`, `images/`, `videos/`, `imported/`, `_duplicates/`, `private/`, `catalog.db`,
 # `config.json`, `serve.txt`, `serve.log` -- so they keep a library or a stray runtime file out
 # of git wherever it sits; they would hide package files of the same names just as well (a
