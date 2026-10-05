@@ -6337,11 +6337,12 @@ _mirror_renewal_reset()
 
 def _mirror_state_path():
     """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated
-    git-ignored machine file (moonglade_paths.local_path(); today beside config.json in the
-    app folder). Deliberately NOT config.json -- the JWT rotates on every refresh, and a
-    write there must never risk clobbering the API key (a test once overwrote the real
-    PIXAI_API_KEY; a separate file can't)."""
-    return _paths.local_path("mirror_session.json")
+    git-ignored file beside config.json -- beside wherever _config_path() found it, exactly
+    as in 3.18 (it joins the machine files, moonglade_paths.local_path(), next release).
+    Deliberately NOT config.json -- the JWT rotates on every refresh, and a write there must
+    never risk clobbering the API key (a test once overwrote the real PIXAI_API_KEY; a
+    separate file can't)."""
+    return _config_path().parent / "mirror_session.json"
 
 
 def load_mirror_state():

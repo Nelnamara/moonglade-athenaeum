@@ -26,13 +26,15 @@ import threading
 import time
 import webbrowser
 
-# Bootstrap: this file's own folder on sys.path, so moonglade_paths imports however the
-# launcher was started. Every path after that comes from moonglade_paths, the one place an
-# app-root path is derived.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# This file's own folder IS the app folder (moonglade_paths.APP_ROOT), spelled by
+# os.path.abspath as it always was here -- not resolve(), which would turn a mapped or subst
+# drive into its target -- so the working directory and the child script's path stay
+# byte-for-byte what they were. It goes on sys.path first so moonglade_paths imports however
+# the launcher was started; every other path comes from moonglade_paths.
+here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, here)
 import moonglade_paths as _paths    # noqa: E402
 
-here = str(_paths.APP_ROOT)
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
 # No --out here on purpose. The server resolves its own folder (an explicit --out, then
@@ -108,7 +110,7 @@ if _moonglade_on_port(PORT):
         pass
     sys.exit(0)
 
-cmd = [sys.executable, str(_paths.gallery_script_path())] + SERVE_ARGS
+cmd = [sys.executable, os.path.join(here, _paths.GALLERY_SCRIPT)] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 

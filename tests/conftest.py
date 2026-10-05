@@ -478,8 +478,10 @@ def _isolated_branding(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_local_files(tmp_path, monkeypatch):
     """The machine files -- the pack and its .version marker, branding.json,
-    branding_slots.json, mirror_session.json, serve.txt, serve.log and the icon cache --
-    resolve through moonglade_paths.local_path(), which is the app folder: the real checkout.
+    branding_slots.json, serve.txt, serve.log and the icon cache -- resolve through
+    moonglade_paths.local_path(), which is the app folder: the real checkout.
+    (mirror_session.json still sits beside config.json this release, so _isolated_auth_config
+    above is what keeps it in tmp_path.)
     Same hazard and remedy as _isolated_branding above, and the same folder it already gave
     them: they used to be derived as branding_root()'s siblings, so every test was written
     against tmp_path/branding.json and tmp_path/moonglade.mgpack. Pinned separately because

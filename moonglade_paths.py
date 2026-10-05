@@ -9,9 +9,10 @@ named helper here, so moving a group of files is a change to one line in this mo
   APP_ROOT          the folder holding the launcher and config.json.
   config_path()     config.json: beside the app first, then the working directory.
   local_path(name)  the machine files: the art pack and its .version marker, branding.json,
-                    branding_slots.json, mirror_session.json, serve.txt, serve.log and the
-                    icon cache. They belong to this machine, not to the code, the art tree
-                    or the library.
+                    branding_slots.json, serve.txt, serve.log and the icon cache. They belong
+                    to this machine, not to the code, the art tree or the library.
+                    (mirror_session.json joins them next release; this release it keeps
+                    3.18's rule, beside wherever config.json was found.)
   art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
                     from local_path(): the art tree and the machine files move separately.
   state_path(out_dir, name)    one of the app's own records inside a library: its state
@@ -62,8 +63,8 @@ def token_paths():
 
 def local_path(name):
     """A machine file by name: `moonglade.mgpack` (+ `.version`), `branding.json`,
-    `branding_slots.json`, `mirror_session.json`, `serve.txt`, `serve.log`, the icon cache.
-    Today it is APP_ROOT / name."""
+    `branding_slots.json`, `serve.txt`, `serve.log`, the icon cache. Today it is
+    APP_ROOT / name."""
     return APP_ROOT / name
 
 
@@ -129,9 +130,14 @@ def launcher_path():
     return APP_ROOT / "Serve Gallery.pyw"
 
 
+# The web server's entry script, by its path under APP_ROOT. The launcher joins it onto its
+# own os.path.abspath folder, so the path it runs is byte-for-byte what 3.18 ran.
+GALLERY_SCRIPT = "moonglade_gallery.py"
+
+
 def gallery_script_path():
     """The web server's entry script, which the launcher runs."""
-    return APP_ROOT / "moonglade_gallery.py"
+    return APP_ROOT / GALLERY_SCRIPT
 
 
 def backup_script_path():

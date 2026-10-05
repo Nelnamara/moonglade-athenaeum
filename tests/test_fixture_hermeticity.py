@@ -327,10 +327,8 @@ def unpinned_module_view():
     from types import SimpleNamespace
 
     import moonglade_gallery as _g
-    import moonglade_paths as _p
     return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
-                           branding_json=_g._branding_path(None),
-                           mirror=_p.local_path("mirror_session.json"))
+                           branding_json=_g._branding_path(None))
 
 
 def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_module_view):
@@ -359,9 +357,7 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
         "a module-scoped fixture resolved _container_path() to the pack beside the checkout "
         "at {} -- its achievement state would be whatever that file happens to hold on this "
         "machine".format(real_pack))
-    # The other machine files resolve through the same helper, and hold real secrets
-    # (mirror_session.json is a login token): none may be the checkout's own.
-    for name in ("branding_json", "mirror"):
-        p = getattr(unpinned_module_view, name)
-        assert p.parent != real_local, (
-            "a module-scoped fixture resolved a machine file to the checkout's own {}".format(p))
+    # The other machine files resolve through the same helper: none may be the checkout's.
+    assert unpinned_module_view.branding_json.parent != real_local, (
+        "a module-scoped fixture resolved branding.json to the checkout's own {}"
+        .format(unpinned_module_view.branding_json))
