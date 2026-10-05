@@ -6,9 +6,13 @@ layout across, once, when a real start runs it (moonglade.gallery's main(), the 
 its own two files, and the command line, `python -m moonglade`, for the library it is pointed
 at). The rules:
 
+  * THIS MODULE OUTLIVES 3.21. An install on 3.17-3.19 can update straight past 3.20 (the
+    reason the root moonglade_gallery.py stand-in is permanent, DECISIONS 2026-10-05), so it
+    may meet this move in any later release. It goes only when the oldest version that can
+    update directly is past 3.19, which is a release decision of its own.
   * NOTHING OF THE OWNER'S IS EVER DELETED. What is left in an old place is named on the About
     card as safe to delete (leftovers()); the app never removes it.
-  * Small files are COPIED (folders included) and the old copy left for one release, so going
+  * Small files are COPIED (folders included) and the old copy left where it was, so going
     back to 3.19 still works. Two are MOVED instead, because two copies would diverge:
     mirror_session.json (a rotating login token) and train_guard.json (a spend guard: a stale
     copy could let a training spend slip it). A SQLite file is copied with SQLite's own
