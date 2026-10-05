@@ -12042,7 +12042,12 @@ def changelog_entries(text=None):
 def art_pack_info(container_path):
     """{installed, version} for the About card's "art pack vN". The version comes from the
     installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so."""
+    the pack on disk is the one this build expects; a missing pack says so.
+
+    Plus `note`, only when there is one to give: a pack still under its pre-v7 name beside
+    the one in use. A start that finds both never deletes the old copy (a stray asset copy is
+    the owner's to remove), so About says so in plain words. Read from the disk on each ask,
+    so the note leaves the moment the old copy does."""
     try:
         present = Path(container_path).exists()
     except OSError:
@@ -12051,13 +12056,22 @@ def art_pack_info(container_path):
         return {"installed": False, "version": ""}
     marker = moonglade_assets._read_marker(Path(container_path)) or {}
     if marker.get("version"):
-        return {"installed": True, "version": str(marker["version"])}
-    man = moonglade_assets.read_manifest()
+        info = {"installed": True, "version": str(marker["version"])}
+    else:
+        man = moonglade_assets.read_manifest()
+        try:
+            current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
+        except Exception:                        # noqa: BLE001 -- a label, never a failure
+            current = False
+        info = {"installed": True, "version": str(man["version"]) if current else ""}
     try:
-        current = bool(man) and not moonglade_assets.needs_download(Path(container_path), man)
-    except Exception:                            # noqa: BLE001 -- a label, never a failure
-        current = False
-    return {"installed": True, "version": str(man["version"]) if current else ""}
+        old_copy = Path(container_path).with_name(moonglade_assets.LEGACY_NAME).is_file()
+    except OSError:
+        old_copy = False
+    if old_copy:
+        info["note"] = ("An old %s is still beside the pack. It's safe to delete."
+                        % moonglade_assets.LEGACY_NAME)
+    return info
 
 
 def about_payload(version, container_path, entries=None):
@@ -29212,7 +29226,11 @@ def main():
     # so a matching pack never downloads again and an outdated one is replaced in place by
     # the usual verified download. After the port check on purpose: a start refused above
     # must not move the pack out from under the server that is already running.
-    moonglade_assets.migrate_legacy_name(_container_path())
+    pack_rename = moonglade_assets.migrate_legacy_name(_container_path())
+    if pack_rename == "both":
+        # Logged too; About's art-pack line says it as well (art_pack_info's note).
+        print("An old {} is still beside the art pack. It's safe to delete.".format(
+            moonglade_assets.LEGACY_NAME))
 
     # One-time, and only on a REAL start: move any rendered banner flat still
     # sitting at the coded root into this install's banner cache. Here rather
