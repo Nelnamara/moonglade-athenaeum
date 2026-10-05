@@ -16,10 +16,14 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-10-04 — Travelling Light
+
 ### Art pack v7
 - **The art pack's file is now `moonglade.mgpack`.** An install that still has the old `moonglade.dat` renames it by itself, with its version note, the next time the app starts, so a pack that is already current is never downloaded again; when the new pack is newer, the usual checked download then replaces it in place, leaving one file. If both files are there, the old one is left untouched, and About says an old `moonglade.dat` is still beside the pack and is safe to delete. (2026-10-04)
 - **On Windows, Explorer shows the pack's type as "Moonglade art pack", with the app's icon.** The app sets this for your own Windows account when it starts, and only rewrites what has changed; nothing machine-wide. The pack isn't meant to be opened; the app reads it by itself (double-click one and Windows asks which app to use). (2026-10-04)
-- **The pack's animations are smaller.** Every animation in it (the mascots, the animated badges, the marks and the sign-in companion) is 360 px tall and plays every second frame over the same time, so the pack downloads at about half its old size. The badge pictures keep their full colour. (2026-10-04)
+- **The pack's animations are smaller.** Every animation in it (the mascots, the animated badges, the marks and the sign-in companion) is 360 px tall and plays every second frame over the same time, so the pack is 438 MB instead of 827 MB. The badge pictures keep their full colour. (2026-10-04)
+- **Animated badges without a gray square.** Some animated badges' source art had a flat gray background, which showed as a square behind the medallion once the smaller animations played on a phone. In the new pack they carry real transparency, keeping their glow and any motion past the ring. (2026-10-04)
+- **Broken files: the repair no longer trips over Windows.** When one repair finished its report at the same moment another started, Windows could briefly refuse the report's lock file and the second repair stopped without updating the list. It now waits and tries again. (2026-10-04)
 - **The login companion's role in Branding takes art from 360 px tall**, the size of the pack's own sign-in animation now. (2026-10-04)
 
 ### Under the hood
