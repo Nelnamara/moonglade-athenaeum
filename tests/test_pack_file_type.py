@@ -253,3 +253,17 @@ def test_a_real_start_registers_the_file_type_after_the_pack_is_settled():
     i = names.index("register_pack_file_type")
     assert names.index("migrate_legacy_name") < i
     assert names.index("ensure_branding_discovery_tree") < i < names.index("create_app")
+
+
+def test_no_test_can_reach_the_real_registry(tmp_path, lad, told):
+    """conftest swaps the module a plain `import winreg` hands back for a stub that refuses
+    every use, so a test that forgets to pass a fake can never touch the real registry: the
+    function reaches the registry first, fails there, and writes nothing -- not even the
+    icon copy."""
+    import winreg
+    with pytest.raises(OSError):
+        winreg.HKEY_CURRENT_USER
+    _install_pack(tmp_path)
+    assert g.register_pack_file_type(tmp_path, platform="win32") is False
+    assert not _icon_file(lad).exists()
+    assert told == []

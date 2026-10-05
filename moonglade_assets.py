@@ -125,7 +125,9 @@ def migrate_legacy_name(container_path):
         lost a race to the other, which has done the rename. That is "renamed", quietly, and
         the marker the other start moved is left alone (a marker is only ever dropped while
         the new pack is really absent).
-      - the old name absent: nothing to do.
+      - the old name absent: nothing to do, except that a marker left under the old name
+        beside the moved pack (a rename whose marker could not follow) is removed. It is a
+        few bytes about a file that is not there, not an asset copy.
 
     Returns "renamed", "both", "failed" or "none". Never raises. Every outcome but "none" is
     written to the log file (_LOG)."""
@@ -133,6 +135,13 @@ def migrate_legacy_name(container_path):
     new = Path(container_path)
     old = new.with_name(LEGACY_NAME)
     if not old.is_file():
+        stray = _version_marker_path(old)
+        try:
+            if stray.is_file() and new.is_file():
+                os.remove(stray)
+                log.info("art pack: removed %s, a marker left by the old name", stray.name)
+        except OSError:
+            pass                                   # a few bytes; tried again next start
         return "none"
     if new.exists():
         log.warning("art pack: an old copy remains at %s beside %s. It is left untouched; "

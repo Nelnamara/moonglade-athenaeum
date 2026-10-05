@@ -613,3 +613,18 @@ def test_two_starts_at_once_the_late_one_finds_the_rename_done(tmp_path, monkeyp
     assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
     assert _names(tmp_path) == [_NEW, _NEW + ".version"]
     assert ma.needs_download(new, manifest) is False
+
+
+def test_a_marker_left_under_the_old_name_is_tidied_once_the_pack_has_moved(tmp_path):
+    """A rename whose marker could not follow leaves moonglade.dat.version behind. Once the
+    old pack is gone and the pack under the new name exists, that marker is a few bytes about
+    a file that is not there (not an asset copy), so a start removes it. With no pack under
+    either name there is nothing to say it is stray, and it is left."""
+    stray = tmp_path / (ma.LEGACY_NAME + ".version")
+    stray.write_text('{"version": "6", "sha256": "ab"}', encoding="utf-8")
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "none"
+    assert stray.exists()
+    new.write_bytes(REAL_BYTES)
+    assert ma.migrate_legacy_name(new) == "none"
+    assert _names(tmp_path) == [_NEW]

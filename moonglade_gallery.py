@@ -6740,8 +6740,8 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
 
     The icon is a per-user copy of the current mark's .ico, the Desktop shortcut's picture
     (_pack_type_icon). With no .ico to copy, or a copy that failed, the icon value is left as
-    it is. There is deliberately NO open command:
-    the pack is data the app reads, not a document, so double-clicking one does nothing.
+    it is. There is deliberately NO open command: the pack isn't meant to be opened; the
+    app reads it by itself (double-click one and Windows asks which app to open it with).
 
     Each value is read first and written only when it differs, so a start that finds them in
     place writes nothing (and only a start that wrote asks Explorer to refresh). A no-op off

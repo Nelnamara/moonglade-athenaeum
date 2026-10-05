@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -390,6 +392,31 @@ def _isolated_auth_config(tmp_path, monkeypatch):
     their __file__-based resolution with an equivalent tmp_path-based one) rather
     than a second, conflicting source of truth."""
     monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
+
+
+class _RealRegistryRefused(OSError):
+    """What a test meets when it reaches the real Windows registry."""
+
+
+class _NoRealRegistry(types.ModuleType):
+    """Stands in for `winreg` while a test runs: every name refuses with _RealRegistryRefused
+    (an OSError, so code that already tolerates a missing key degrades the same way)."""
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise _RealRegistryRefused(
+            "a test reached the real Windows registry (winreg.%s); pass a fake winreg" % name)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_registry(monkeypatch):
+    """No test may read or write the real Windows registry. The app's one registry write
+    (moonglade_gallery.register_pack_file_type) does a plain `import winreg`, so the module
+    that import hands back is swapped for a stub that refuses every use; tests that pass a
+    fake registry never import it and are untouched. Off Windows there is no real winreg to
+    protect, and the stub stands in all the same."""
+    monkeypatch.setitem(sys.modules, "winreg", _NoRealRegistry("winreg"))
 
 
 @pytest.fixture(autouse=True)
