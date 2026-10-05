@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Groundwork for the folder tidy
+- Behind the scenes, every file the app keeps in its own folder (`config.json`, the art pack, `branding.json`, `serve.log`, the wiki, the built pages and the rest) is now found through one place in the code, ready for the next release's tidy. Nothing moved, and nothing you see changes. (2026-10-04)
+
 ## [3.18.0] - 2026-10-04 — Travelling Light
 
 ### Art pack v7

@@ -96,6 +96,7 @@ import pytest
 from tests.conftest import _SEALED_DONOR
 
 import moonglade_backup as core
+import moonglade_paths
 from moonglade_gallery import (
     CATALOG_FIELDS, create_app, load_catalog, save_catalog,
     achievement_metrics, compute_achievements, save_ach_state,
@@ -250,9 +251,10 @@ def render_server(tmp_path_factory):
     server never sees this machine's real config, credentials, coded tree or pack:
     `MOONGLADE_DISABLE_WATCH=1` (no live-mirror WebSocket), `core._config_path` (so
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
-    checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the coded tree
-    `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
-    `moonglade.mgpack`, land under this fixture's own root). The same MonkeyPatch carries the
+    checkout), an empty `core._cfg`, `gallery.branding_root` (so the coded tree
+    `create_app()` builds lands under this fixture's own root) and `moonglade_paths.local_path`
+    (so the machine files -- `_container_path()`'s `moonglade.mgpack` among them -- land
+    there too; they no longer derive from the tree's parent). The same MonkeyPatch carries the
     clock pin -- `pin_daytime_clock`, below -- so the state this install reports is the
     state it would report at any hour.
 
@@ -290,6 +292,7 @@ def render_server(tmp_path_factory):
     # BEFORE anything below reads achievement state (and before create_app() builds a
     # coded tree): this fixture's own coded tree, and its own sealed pack beside it.
     mp.setattr(_gallery, "branding_root", lambda: root / "branding")
+    mp.setattr(moonglade_paths, "local_path", lambda name: root / name)
     # ...and before the server can answer a single request: the clock this install reads,
     # pinned to a fixed daytime weekday instant (tests/conftest.py::pin_daytime_clock).
     pin_daytime_clock(mp)
@@ -1554,6 +1557,7 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # BEFORE create_app() builds a coded tree, and before anything reads achievement
     # state: this fixture's own coded tree, and its own sealed pack beside it.
     monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
+    monkeypatch.setattr(moonglade_paths, "local_path", lambda name: root / name)
     seed_sealed_container(_gallery._container_path())
     # ...and the clock, before the server can answer anything. "Fresh" here means no key and
     # no catalog, which is what the Setup Wizard is measured against; it also has to mean an

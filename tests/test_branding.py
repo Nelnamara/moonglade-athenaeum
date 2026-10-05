@@ -5,6 +5,7 @@ import json
 import pathlib
 
 import moonglade_gallery as g
+import moonglade_paths
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_existing_client, login_test_client
@@ -216,22 +217,21 @@ def test_branding_root_is_the_app_folder_not_the_library(tmp_path):
     assert _REAL_BRANDING_ROOT.__code__.co_argcount == 0
 
 
-def test_branding_json_sits_beside_the_art_directory():
-    """branding.json is a SIBLING of branding/, preserving the arrangement it had inside the
-    library. Someone moving an existing setup keeps both entries in the same relationship, and
-    .gitignore covers the pair. Guards the `.parent` derivation in _branding_path() -- if that
-    ever changes to nest the file inside branding/, an existing install's selections go missing
-    silently and the app just renders defaults.
+def test_branding_json_is_a_machine_file_not_inside_the_art_directory():
+    """branding.json is one of the machine files (moonglade_paths.local_path()): today it sits
+    at the app root beside the art tree, where .gitignore covers it, and it never nests inside
+    the tree -- if it did, an existing install's selections would go missing silently and the
+    app would just render defaults. It no longer DERIVES from the tree's parent (Wave 4), so the
+    machine files and the art tree can move separately; tests/test_app_paths.py pins the split
+    and the absolute location.
 
-    Asserts the RELATIONSHIP rather than an absolute path, resolving both sides through the module
-    so it holds wherever branding_root() points -- the app root in production, tmp_path under
-    conftest's fixture. test_branding_root_is_the_app_folder_not_the_library above is what pins
-    the absolute location; mixing the two concerns here just re-tested the fixture."""
+    Resolved through the module, so it holds wherever local_path() points -- the app root in
+    production, tmp_path under conftest's fixture."""
     cfg = g._branding_path(pathlib.Path("/some/unrelated/library"))
 
-    assert cfg == g.branding_root().parent / "branding.json"
-    assert cfg.parent == g.branding_root().parent      # siblings, not nested
-    assert "library" not in str(cfg)                   # the argument is genuinely ignored
+    assert cfg == moonglade_paths.local_path("branding.json")
+    assert g.branding_root() not in cfg.parents          # never inside the art tree
+    assert "library" not in str(cfg)                     # the argument is genuinely ignored
 
 
 def _png_bytes(color=(200, 30, 30)):
@@ -393,6 +393,7 @@ def test_discovery_tree_creates_empty_slot_folders_and_one_readme(tmp_path, monk
     # one-liner (the real cryptic content is a sealed asset -- spoiler hygiene
     # keeps it out of source, so the fallback is the only text pin possible).
     monkeypatch.setattr(g, "branding_root", lambda: tmp_path / "fresh" / "branding")
+    monkeypatch.setattr(moonglade_paths, "local_path", lambda name: tmp_path / "fresh" / name)
     g.ensure_branding_discovery_tree()
     crumb2 = tmp_path / "fresh" / "branding" / g._role_rel("breadcrumb", "README.txt")
     assert crumb2.read_text(encoding="utf-8") == g._BRANDING_README

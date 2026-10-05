@@ -10,6 +10,7 @@ from pathlib import Path
 
 import moonglade_assets as ma
 import moonglade_gallery as g
+import moonglade_paths
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -38,7 +39,7 @@ def _code_files():
 def test_the_pack_is_moonglade_mgpack_beside_the_program():
     p = g._container_path()
     assert p.name == "moonglade.mgpack"
-    assert p.parent == g.branding_root().parent
+    assert p == moonglade_paths.local_path("moonglade.mgpack")    # a machine file
 
 
 def test_the_version_marker_follows_the_pack_name():

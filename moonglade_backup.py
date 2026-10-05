@@ -56,6 +56,7 @@ from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import moonglade_paths as _paths
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
@@ -246,14 +247,13 @@ CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
 def _config_path():
-    """Resolve config.json's path: prefer a copy next to the script file, then the
-    current working directory (same order _load_config() has always read in). If
-    neither exists yet (first run / a fresh write), default to creating it next to
-    the script -- the natural "this install's config" location."""
-    for cfg_path in (Path(__file__).resolve().parent / "config.json", Path("config.json")):
-        if cfg_path.exists():
-            return cfg_path
-    return Path(__file__).resolve().parent / "config.json"
+    """config.json's path -- THE call every reader and writer of it makes. The rule lives in
+    moonglade_paths.config_path(): the copy beside the app first, then the current working
+    directory (same order _load_config() has always read in); if neither exists yet (first
+    run / a fresh write), the one beside the app. Kept as this module's function because
+    the test suite pins it per test (tests/conftest.py's _isolated_auth_config), so no test
+    can reach the real file."""
+    return _paths.config_path()
 
 
 def _load_config():
@@ -932,7 +932,7 @@ def load_token(cli_token=None):
     env = os.environ.get("PIXAI_TOKEN")
     if env:
         return env.strip()
-    for f in (Path(__file__).resolve().parent / "token.txt", Path("token.txt")):
+    for f in _paths.token_paths():
         if f.exists():
             return f.read_text(encoding="utf-8").strip()
     raise PixAIError("No credential found. Add PIXAI_API_KEY to config.json (preferred), "
@@ -14831,7 +14831,7 @@ def run_watch(args):
         return
     seconds = getattr(args, "watch_seconds", 0) or None
     do_backup = bool(getattr(args, "watch_backup", False))
-    out_dir = getattr(args, "out", "pixai_backup") or "pixai_backup"
+    out_dir = getattr(args, "out", _paths.DEFAULT_LIBRARY_DIR) or _paths.DEFAULT_LIBRARY_DIR
     enc = (sys.stdout.encoding or "utf-8")
 
     def _safe(t):
@@ -15873,7 +15873,7 @@ def run_suggest_prompt(args):
                 "video file (PixAI's image-to-prompt endpoint doesn't support "
                 "video).".format(src))
     else:
-        out = getattr(args, "out", "") or "pixai_backup"
+        out = getattr(args, "out", "") or _paths.DEFAULT_LIBRARY_DIR
         row = next((r for r in load_catalog(Path(out) / "catalog.db")
                     if r.get("media_id") == src), None)
         if row and row.get("is_video") == "1":
@@ -17863,7 +17863,7 @@ def main():
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
-    ap.add_argument("--out", default="pixai_backup",
+    ap.add_argument("--out", default=_paths.DEFAULT_LIBRARY_DIR,
                     help="output folder for images and catalog (default: pixai_backup)")
     ap.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")

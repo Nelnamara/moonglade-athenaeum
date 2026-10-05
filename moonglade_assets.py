@@ -33,6 +33,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import moonglade_paths as _paths
+
 _CHUNK = 1 << 20    # 1 MiB per read -- coarse enough for real throughput,
                     # fine enough for smooth progress and quick cancel response.
 
@@ -55,7 +57,7 @@ def _friendly_error(exc):
 
 
 def manifest_path():
-    return Path(__file__).resolve().parent / "moonglade_manifest.json"
+    return _paths.manifest_path()
 
 
 def read_manifest():

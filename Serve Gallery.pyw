@@ -26,9 +26,14 @@ import threading
 import time
 import webbrowser
 
-here = os.path.dirname(os.path.abspath(__file__))
+# Bootstrap: this file's own folder on sys.path, so moonglade_paths imports however the
+# launcher was started. Every path after that comes from moonglade_paths, the one place an
+# app-root path is derived.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import moonglade_paths as _paths    # noqa: E402
+
+here = str(_paths.APP_ROOT)
 os.chdir(here)                     # so config.json / pixai_backup resolve here
-sys.path.insert(0, here)
 
 # No --out here on purpose. The server resolves its own folder (an explicit --out, then
 # config.json's LIBRARY_DIR, then pixai_backup), and a hardcoded flag here would always beat
@@ -42,7 +47,7 @@ RESTART_CODE = 42                           # child exit code that means "relaun
 # put extra flags in an untracked "serve.txt" next to this launcher, e.g. one line:
 #     --host 0.0.0.0 --port 5757
 # (LAN access + a custom port). Whitespace-separated; blank/missing = defaults.
-_serve_txt = os.path.join(here, "serve.txt")
+_serve_txt = str(_paths.local_path("serve.txt"))
 if os.path.exists(_serve_txt):
     try:
         SERVE_ARGS += open(_serve_txt, encoding="utf-8").read().split()
@@ -103,7 +108,7 @@ if _moonglade_on_port(PORT):
         pass
     sys.exit(0)
 
-cmd = [sys.executable, os.path.join(here, "moonglade_gallery.py")] + SERVE_ARGS
+cmd = [sys.executable, str(_paths.gallery_script_path())] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 
@@ -131,7 +136,7 @@ def _open_when_ready():
 # Capture the child's stdout/stderr to serve.log so a boot failure isn't silent under pythonw
 # (no console). stdin=DEVNULL so the headless child never blocks on input.
 try:
-    _log = open(os.path.join(here, "serve.log"), "a", buffering=1, encoding="utf-8")
+    _log = open(str(_paths.local_path("serve.log")), "a", buffering=1, encoding="utf-8")
 except OSError:
     _log = subprocess.DEVNULL
 
