@@ -269,10 +269,10 @@ def test_apply_refuses_unsupervised(tmp_path, monkeypatch):
 
 def test_apply_refuses_while_an_old_launcher_is_in_charge(tmp_path, monkeypatch):
     """3.20: a server the root moonglade_gallery.py stand-in started belongs to a launcher
-    from before the move, which only knows that path. The next release deletes the
-    stand-in, so an update applied now would restart into nothing and the app would stop.
-    The refusal says what fixes it, in the words of the one-time notice
-    (tests/test_standin_notice.py), before git is asked anything."""
+    from before the move, which only knows that path. The update waits until Moonglade has
+    been stopped once and started from its shortcut, so the install is on the new launcher
+    before it takes another release. The refusal says what to do, in the words of the
+    one-time notice (tests/test_standin_notice.py), before git is asked anything."""
     git = _apply_ready(monkeypatch)
     monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
     asked = []

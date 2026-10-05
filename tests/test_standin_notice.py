@@ -3,12 +3,13 @@
 A server the root moonglade_gallery.py stand-in started (it sets MOONGLADE_VIA_STANDIN=1) was
 started by a launcher that was already running when the install updated into the moonglade/
 folder. That old launcher only knows the old path. So the server:
-  * asks, once per server start, for Moonglade to be stopped once and started again (which starts the
-    new launcher), through the /api/jobs poll every open tab already runs -- the client shows
-    it as the existing corner toast (gallery/src/notify/serverNotice.js);
+  * asks, once per server start, for Moonglade to be stopped once and started again (which
+    starts the new launcher), through the /api/jobs poll every open tab already runs -- the
+    client shows it as the existing corner toast (gallery/src/notify/serverNotice.js);
   * says `via_standin` in the update status;
-  * refuses to update until that has happened (tests/test_updater.py), because the next
-    release deletes the stand-in the old launcher would need to restart into it.
+  * refuses to update until that has happened (tests/test_updater.py), so an install that
+    passes through 3.20 is on the new launcher before it takes another release. (The
+    stand-in itself stays for good: an install can skip 3.20 and never meet this gate.)
 A server the new launcher started says none of this.
 """
 import os

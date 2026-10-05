@@ -1,12 +1,15 @@
-"""The root stand-ins (3.20, "the move"): the three old entry scripts keep working for one
-release, each by running its module in the moonglade/ package as the main module.
+"""The root stand-ins (3.20, "the move"): the three old entry scripts keep working, each by
+running its module in the moonglade/ package as the main module.
 
-  moonglade_gallery.py  MANDATORY. A launcher that was already running when the install
-                        updated relaunches this exact path after the update's restart (exit
-                        code 42); without it the app stops. It sets MOONGLADE_VIA_STANDIN=1.
+  moonglade_gallery.py  MANDATORY, and PERMANENT (DECISIONS 2026-10-05). A launcher from before
+                        3.20 relaunches this exact path after an update's restart (exit code
+                        42); without it the app stops. An install on 3.17-3.19 can update
+                        straight past 3.20 and never meet its gate, so this one never goes.
+                        It sets MOONGLADE_VIA_STANDIN=1.
   moonglade_backup.py   old habits, Task Scheduler entries, old docs. One line on stderr.
+                        Goes in 3.21.
   moonglade_mcp.py      the existing MCP registrations name this path. Silent: an MCP
-                        server's stdout is the protocol.
+                        server's stdout is the protocol. Goes in 3.21.
 
 Each is run here the way its caller runs it: by path, in a fresh interpreter. Arguments and
 exit codes pass straight through.
@@ -43,10 +46,16 @@ def _run(script, *args, cwd=REPO_ROOT, **env):
 
 
 @pytest.mark.parametrize("name", _STANDINS)
-def test_each_stand_in_is_a_few_lines_that_say_why_and_when_it_goes(name):
+def test_each_stand_in_is_a_few_lines_that_say_why_and_how_long_it_stays(name):
     src = (REPO_ROOT / name).read_text(encoding="utf-8")
     doc = ast.get_docstring(ast.parse(src)) or ""
-    assert "3.21" in doc, name + " must say which release removes it"
+    if name == "moonglade_gallery.py":
+        # Permanent: an old launcher can meet it after ANY later update (DECISIONS 2026-10-05).
+        assert "stays for good" in doc and "3.17" in doc and "skip" in doc, (
+            name + " must say it is permanent, and why")
+        assert "3.21" not in doc, name + " must not promise a removal that will not happen"
+    else:
+        assert "3.21" in doc, name + " must say which release removes it"
     code = [ln for ln in src.split('"""')[-1].splitlines() if ln.strip()]
     assert len(code) <= 8, code
     assert 'run_name="__main__", alter_sys=True' in src

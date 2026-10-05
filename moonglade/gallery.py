@@ -12211,12 +12211,16 @@ def _supervised():
 # STOP AND START ONCE (3.20, the move into the moonglade/ folder). A launcher that was already
 # running when the install updated across the move built its command line before the move, as
 # `python <app folder>/moonglade_gallery.py`, and after the update's restart it runs that path
-# again. The root stand-in of that name keeps it working for one release and sets
-# MOONGLADE_VIA_STANDIN=1. Such a server asks, once per start, for Moonglade to be stopped once
-# and started again from its shortcut (which starts the new launcher, which runs the package
-# directly), and refuses
-# the next update until that has happened: that update deletes the stand-in, and the old
-# launcher would restart into nothing. The same words do both jobs.
+# again. The root stand-in of that name keeps it working and sets MOONGLADE_VIA_STANDIN=1.
+# Such a server asks, once per start, for Moonglade to be stopped once and started again from
+# its shortcut (which starts the new launcher, which runs the package directly), and refuses
+# the next update until that has happened, so an install that passes through 3.20 is on the
+# new launcher before it takes another release. The same words do both jobs.
+#
+# THE STAND-IN STAYS FOR GOOD (DECISIONS 2026-10-05). An update pulls the newest release, so
+# an install on 3.17-3.19 can skip 3.20 entirely, never meet this notice or this gate, and
+# still have its old launcher relaunch the old path after that update's restart. Only the
+# other two root stand-ins (moonglade_backup.py, moonglade_mcp.py) go, in 3.21.
 STANDIN_NOTICE_TITLE = "Moonglade moved into its new folder."
 # Not "close it": closing the browser leaves the server running, the shortcut then finds the
 # port taken and only opens a tab, and Restart goes back through the old launcher. The
@@ -16428,9 +16432,11 @@ def create_app(out_dir: Path):
           * supervised              -- without the managed launcher, exit 42 stops the
                                        server instead of relaunching it: an update would
                                        be indistinguishable from "the app vanished"
-          * not via the stand-in    -- a launcher from before 3.20 restarts the server
-                                       through the root stand-in the NEXT release deletes:
-                                       it must be stopped once and started again first
+          * not via the stand-in    -- a launcher from before 3.20 still restarts the
+                                       server through the root stand-in: it must be
+                                       stopped once and started again first, so the
+                                       install is on the new launcher before it takes
+                                       another release
           * no running panel job    -- same rule Restart uses; a pull under a running job
                                        swaps the code out from under it
           * on master               -- the recovered scope's own out-of-scope rule: a
