@@ -6736,10 +6736,11 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
         .mgpack                                 (default)          MoongladeAthenaeum.ArtPack
         MoongladeAthenaeum.ArtPack              (default)          Moonglade art pack
                                                 FriendlyTypeName   Moonglade art pack
-        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <the launcher's .ico>,0
+        MoongladeAthenaeum.ArtPack\\DefaultIcon  (default)          <_pack_type_icon()>,0
 
-    The icon is the current mark's, the same file the Desktop shortcut uses (_mark_ico_path);
-    with no .ico cut the type is written without one. There is deliberately NO open command:
+    The icon is a per-user copy of the current mark's .ico, the Desktop shortcut's picture
+    (_pack_type_icon). With no .ico to copy, or a copy that failed, the icon value is left as
+    it is. There is deliberately NO open command:
     the pack is data the app reads, not a document, so double-clicking one does nothing.
 
     Each value is read first and written only when it differs, so a start that finds them in
@@ -6752,23 +6753,22 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
     try:
         if winreg is None:
             import winreg
-        classes = "Software\\Classes\\"
+        hkcu = winreg.HKEY_CURRENT_USER      # first: a registry that is not there fails here,
+        classes = "Software\\Classes\\"     # before any file is written
         want = [(classes + _container_path().suffix, "", PACK_PROGID),
                 (classes + PACK_PROGID, "", PACK_TYPE_NAME),
                 (classes + PACK_PROGID, "FriendlyTypeName", PACK_TYPE_NAME)]
-        icon = _mark_ico_path(load_branding(out_dir)["mark"])
+        icon, wrote = _pack_type_icon(out_dir)
         if icon is not None:
             want.append((classes + PACK_PROGID + "\\DefaultIcon", "", str(icon) + ",0"))
-        wrote = False
         for key_path, name, value in want:
             try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                with winreg.OpenKey(hkcu, key_path) as key:
                     if winreg.QueryValueEx(key, name)[0] == value:
                         continue                   # already right: leave it alone
             except OSError:
                 pass                               # not there yet: write it below
-            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key_path, 0,
-                                    winreg.KEY_WRITE) as key:
+            with winreg.CreateKeyEx(hkcu, key_path, 0, winreg.KEY_WRITE) as key:
                 winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
             wrote = True
         if wrote:
@@ -6779,6 +6779,33 @@ def register_pack_file_type(out_dir, winreg=None, platform=None):
         _logging.getLogger(__name__).warning(
             "art pack: could not register its Explorer file type (%s); carrying on.", e)
         return False
+
+
+def _pack_type_icon(out_dir):
+    """(path, rewritten) for the pack's Explorer icon: %LOCALAPPDATA%\\Moonglade Athenaeum\\
+    mgpack.ico, a copy of the current mark's .ico (the Desktop shortcut's picture, read the
+    same loose-then-pack way). One fixed per-user place, outside every install, so the D: and
+    C: installs point Explorer at the same path and moving or deleting an install never leaves
+    it pointing at a file that is gone. Rewritten only when its bytes differ. (None, False)
+    when the mark has no .ico, or when the copy fails -- logged once, and the caller then
+    leaves the registry's icon as it was."""
+    raw = _branding_bytes(_role_rel("marks", str(load_branding(out_dir)["mark"]) + ".ico"))
+    if raw is None:
+        return None, False
+    try:
+        dst = Path(os.environ["LOCALAPPDATA"]) / "Moonglade Athenaeum" / "mgpack.ico"
+        if dst.is_file() and dst.read_bytes() == raw:
+            return dst, False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + ".tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, dst)                   # whole, never half-written under Explorer
+        return dst, True
+    except (KeyError, OSError) as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "art pack: could not copy its Explorer icon (%r); the icon is left as it was.", e)
+        return None, False
 
 
 def _tell_explorer_file_types_changed():
