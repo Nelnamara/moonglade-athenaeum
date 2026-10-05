@@ -793,12 +793,19 @@ class TestTheMyEntriesPayload:
         assert row["check"]["state"] == "settled"
 
     def test_a_pending_contest_reports_when_it_is_next_checked_and_when_it_stops(self, tmp_path, pixai):
-        _setup_contest(tmp_path, pixai, [])
-        g.contest_win_pass(tmp_path, now=T0 + 60, pause=0)
+        # The My-entries route runs on the real clock (api_contest_mine's time.time(), through
+        # _cw_check_view to contest_wins.effective_status), and a pending row reads "expired"
+        # once now is past its 14-day window. A fixed T0 ended that window on 2026-10-05 and
+        # the row expired, so the result time is a day before now, as in
+        # test_a_check_after_the_fact_settles_the_schedule_it_belongs_to (v3.17.0). Whole
+        # seconds: the board carries the result time to the second.
+        t0 = float(int(time.time() - DAY))
+        _setup_contest(tmp_path, pixai, [], result_ts=t0)
+        g.contest_win_pass(tmp_path, now=t0 + 60, pause=0)
         (row,) = login_client(tmp_path).get("/api/contest/mine").get_json()["contests"]
         assert row["won"] is False
-        assert row["check"] == {"state": "pending", "last_at": T0 + 60, "next_at": T0 + 60 + DAY,
-                                "until": T0 + 14 * DAY, "decided": False}
+        assert row["check"] == {"state": "pending", "last_at": t0 + 60, "next_at": t0 + 60 + DAY,
+                                "until": t0 + 14 * DAY, "decided": False}
 
     def test_a_contest_the_check_has_not_met_yet_says_none(self, tmp_path, pixai):
         _enter(tmp_path, "c1:aw1")
