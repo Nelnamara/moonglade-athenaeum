@@ -218,20 +218,22 @@ def test_about_shows_the_packs_note_in_its_own_stamp_style():
                      r'\{about\.pack\.note\}</div>', src), "About does not show the pack's note"
 
 
-def test_a_real_start_keeps_what_the_rename_found():
-    """main() keeps the rename's result rather than dropping it: a start that finds both
-    names says so on the console it was started from, beside the About card's note."""
-    import ast
-    import inspect
-    import textwrap
-    tree = ast.parse(textwrap.dedent(inspect.getsource(g.main)))
-    kept = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
-            and isinstance(n.value, ast.Call)
-            and getattr(n.value.func, "attr", None) == "migrate_legacy_name"]
-    assert kept, "main() drops what the rename found"
-    name = kept[0].targets[0].id
-    assert any(isinstance(n, ast.Compare) and getattr(n.left, "id", None) == name
-               for n in ast.walk(tree)), "main() keeps the result but never looks at it"
+def test_a_real_start_keeps_what_the_rename_found(tmp_path, monkeypatch, capsys):
+    """main()'s tidy keeps the rename's result rather than dropping it: a start that finds
+    the pack under both names says so on the console it was started from, beside the About
+    card's note."""
+    from moonglade import assets as ma
+    from moonglade import migrate as mig
+    from moonglade import paths
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / ma.LEGACY_NAME).write_bytes(b"an older pack")
+    (app / "moonglade.mgpack").write_bytes(b"the pack")
+    monkeypatch.setattr(paths, "local_dir", lambda: app / "local")
+    monkeypatch.setattr(paths, "old_local_path", lambda name: app / name)
+    mig.tidy_app_folder()
+    said = capsys.readouterr().out
+    assert ma.LEGACY_NAME in said and "safe to delete" in said
 
 
 def test_the_running_version_has_a_changelog_entry():

@@ -19,8 +19,8 @@ _TODAY = (
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
     "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py",
     "moonglade/gallery.py", "moonglade/inbox.py", "moonglade/integrity.py",
-    "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/narrator.py",
-    "moonglade/paths.py", "moonglade/recipes.py", "moonglade/runs.py",
+    "moonglade/logs.py", "moonglade/mcp_server.py", "moonglade/migrate.py",
+    "moonglade/narrator.py", "moonglade/paths.py", "moonglade/recipes.py", "moonglade/runs.py",
     "moonglade/similar.py",
 )
 

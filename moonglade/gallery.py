@@ -29262,16 +29262,15 @@ def main():
                   file=sys.stderr)
             return 2
 
-    # Pack v7 renamed the art pack. An install still holding it under the old name has it
-    # moved here, once and logged, before anything below asks whether the pack is current --
-    # so a matching pack never downloads again and an outdated one is replaced in place by
-    # the usual verified download. After the port check on purpose: a start refused above
-    # must not move the pack out from under the server that is already running.
-    pack_rename = moonglade_assets.migrate_legacy_name(_container_path())
-    if pack_rename == "both":
-        # Logged too; About's art-pack line says it as well (art_pack_info's note).
-        print("An old {} is still beside the art pack. It's safe to delete.".format(
-            moonglade_assets.LEGACY_NAME))
+    # 3.20 keeps the machine files in local/ (the pack and its marker, branding.json,
+    # branding_slots.json, mirror_session.json, serve.txt, serve.log, the icon cache). An
+    # install still holding them at the app root has them brought across here, once and
+    # logged, before anything below reads them (a pack under its pre-v7 name is renamed
+    # first) -- so a matching pack never downloads again. After the port check on purpose: a
+    # start refused above must not move the pack out from under the server already running.
+    # Never stops the start: what could not move is read where it is (moonglade.migrate).
+    from moonglade import migrate as moonglade_migrate
+    moonglade_migrate.tidy_app_folder()
 
     # One-time, and only on a REAL start: move any rendered banner flat still
     # sitting at the coded root into this install's banner cache. Here rather

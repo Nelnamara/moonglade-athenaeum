@@ -327,8 +327,11 @@ def unpinned_module_view():
     from types import SimpleNamespace
 
     from moonglade import gallery as _g
+    from moonglade import paths as _p
     return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
-                           branding_json=_g._branding_path(None))
+                           branding_json=_g._branding_path(None),
+                           local_dir=_p.local_dir(),
+                           old_pack=_p.old_local_path("moonglade.mgpack"))
 
 
 def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_module_view):
@@ -361,3 +364,35 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
     assert unpinned_module_view.branding_json.parent != real_local, (
         "a module-scoped fixture resolved branding.json to the checkout's own {}"
         .format(unpinned_module_view.branding_json))
+    # 3.20: the folder a start brings the machine files INTO, and the old places it brings
+    # them FROM -- a module-scoped fixture that ran a real start's tidy with either one
+    # unpinned would move the checkout's own pack.
+    from tests.conftest import _REAL_APP_ROOT, _REAL_LOCAL_DIR
+    assert unpinned_module_view.local_dir != _REAL_LOCAL_DIR, (
+        "a module-scoped fixture resolved local_dir() to the checkout's own {}"
+        .format(_REAL_LOCAL_DIR))
+    assert unpinned_module_view.old_pack.parent != _REAL_APP_ROOT, (
+        "a module-scoped fixture resolved the pack's old place to the checkout's own {}"
+        .format(unpinned_module_view.old_pack))
+
+
+def test_the_machine_files_guard_sees_a_real_tidy(tmp_path, monkeypatch):
+    """conftest's `_real_machine_files_untouched` is the backstop for the tidy a real start
+    runs (moonglade_migrate): pointed at an app folder of this test's own, its census must
+    change when that tidy moves the pack into local/ -- or it would watch nothing."""
+    from moonglade import migrate as mig
+    from moonglade import paths
+    import tests.conftest as c
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "moonglade.mgpack").write_bytes(b"a pack")
+    monkeypatch.setattr(c, "_REAL_APP_ROOT", app)
+    monkeypatch.setattr(c, "_REAL_LOCAL_DIR", app / "local")
+    monkeypatch.setattr(c, "_REAL_DEFAULT_LIBRARY", app / "pixai_backup")
+    before = c._snapshot_machine_files()
+    monkeypatch.setattr(paths, "local_dir", lambda: app / "local")
+    monkeypatch.setattr(paths, "old_local_path", lambda name: app / name)
+    mig.migrate_local()
+    after = c._snapshot_machine_files()
+    assert not before["local/"] and after["local/"]
+    assert before["moonglade.mgpack"] and not after["moonglade.mgpack"]

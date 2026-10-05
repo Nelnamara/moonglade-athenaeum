@@ -22,6 +22,8 @@ from tests.conftest import first_party_sources, login_client
 
 _REPO = Path(__file__).resolve().parents[1]
 _REAL_LOCAL_PATH = paths.local_path
+_REAL_LOCAL_DIR = paths.local_dir
+_REAL_OLD_LOCAL_PATH = paths.old_local_path
 _REAL_CORE_CONFIG_PATH = core._config_path
 _REAL_PATHS_CONFIG_PATH = paths.config_path
 
@@ -90,23 +92,32 @@ def test_core_config_path_is_the_paths_rule(monkeypatch, tmp_path):
     assert core._config_path() == tmp_path / "x" / "config.json"
 
 
-# ---- mirror_session.json stays beside config.json this release ---------------------------
+# ---- mirror_session.json is a machine file: local/ (3.20) --------------------------------
 
-def test_mirror_session_sits_beside_config_json(routed, tmp_path, monkeypatch):
-    """3.18's rule, kept exactly for this release: beside wherever config_path() found
-    config.json. It joins the machine files (local_path) next release, in one place."""
+def test_mirror_session_is_a_machine_file(routed, tmp_path, monkeypatch):
+    """It goes through local_path() like the other machine files, not config.json's folder."""
     monkeypatch.setattr(paths, "local_path", lambda name: tmp_path / "local" / name)
-    assert core._mirror_state_path() == routed.parent / "mirror_session.json"
+    assert core._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
 
 
-def test_mirror_session_is_where_it_was(monkeypatch):
-    """Nothing moved: on a real install it is beside config.json in the app folder."""
+def test_mirror_session_is_in_local_on_a_real_install(monkeypatch, tmp_path):
+    """On a real install it is local/mirror_session.json -- path arithmetic only: the old
+    place a not-yet-moved install would still be read from is pointed at an empty folder, so
+    the answer cannot depend on what this machine's checkout holds."""
     monkeypatch.setattr(paths, "local_path", _REAL_LOCAL_PATH)
+    monkeypatch.setattr(paths, "local_dir", _REAL_LOCAL_DIR)
+    monkeypatch.setattr(paths, "old_local_path", lambda name: tmp_path / "nothing" / name)
+    assert core._mirror_state_path() == _REPO / "local" / "mirror_session.json"
+
+
+def test_mirror_session_was_beside_config_json(monkeypatch):
+    """Where 3.19 kept it -- beside wherever config_path() found config.json -- is where a
+    start moves it from."""
+    monkeypatch.setattr(paths, "old_local_path", _REAL_OLD_LOCAL_PATH)
     monkeypatch.setattr(core, "_config_path", _REAL_CORE_CONFIG_PATH)
     monkeypatch.setattr(paths, "config_path", _REAL_PATHS_CONFIG_PATH)
     monkeypatch.chdir(_REPO)
-    assert core._mirror_state_path() == _REPO / "mirror_session.json"
-    assert core._mirror_state_path().parent == core._config_path().parent
+    assert paths.old_local_path("mirror_session.json") ==         core._config_path().parent / "mirror_session.json"
 
 
 # ---- the lint: nobody spells config.json's path but the helper ----------------------------

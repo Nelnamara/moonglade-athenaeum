@@ -8,11 +8,12 @@ named helper here, so moving a group of files is a change to one line in this mo
 
   APP_ROOT          the folder holding the launcher and config.json.
   config_path()     config.json: beside the app first, then the working directory.
-  local_path(name)  the machine files: the art pack and its .version marker, branding.json,
-                    branding_slots.json, serve.txt, serve.log and the icon cache. They belong
-                    to this machine, not to the code, the art tree or the library.
-                    (mirror_session.json joins them next release; this release it keeps
-                    3.18's rule, beside wherever config.json was found.)
+  local_path(name)  the machine files, in APP_ROOT/local/ since 3.20: the art pack and its
+                    .version marker, branding.json, branding_slots.json, mirror_session.json,
+                    serve.txt, serve.log and the icon cache (local/cache/). They belong to
+                    this machine, not to the code, the art tree or the library. Until an
+                    install's own files have been brought across (moonglade.migrate), a file
+                    found only in its old place (old_local_path()) is read there.
   art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
                     from local_path(): the art tree and the machine files move separately.
   state_path(out_dir, name)    one of the app's own records inside a library: its state
@@ -26,10 +27,11 @@ named helper here, so moving a group of files is a change to one line in this mo
 Nothing here imports another app module, so every module (and the launcher, before it has
 anything else) can import it first.
 
-The test suite pins `config_path` and `local_path` to each test's own folder
-(tests/conftest.py), and tests/test_app_paths.py holds every helper against the exact path
-it resolved to before this module existed.
+The test suite pins `config_path`, `local_path`, `local_dir` and `old_local_path` to each
+test's own folder (tests/conftest.py), and tests/test_app_paths.py holds every helper against
+the exact path it resolves to.
 """
+import json
 from pathlib import Path
 
 # The folder holding the launcher (Serve Gallery.pyw) and config.json: the parent of the
@@ -61,17 +63,93 @@ def token_paths():
     return (APP_ROOT / "token.txt", Path("token.txt"))
 
 
+# ---- 3.20: the machine files' folder, and the library's records folder -------------------
+# The machine files' folder under APP_ROOT.
+LOCAL_DIRNAME = "local"
+# The app's own records inside a library, and its reports inside that.
+RECORDS_DIRNAME = "_moonglade"
+REPORTS_DIRNAME = "reports"
+# What a migration brought across, written beside what it brought (moonglade.migrate): one
+# entry per name, with where it came from, where it went, copied or moved, when and how big.
+# A name it records is never looked for in its old place again.
+MOVED_NAME = "MOVED.json"
+# The icon cache: local/cache/ now, the app root's _container_cache/ before 3.20.
+ICON_CACHE_NAME = "cache"
+OLD_ICON_CACHE_NAME = "_container_cache"
+# The file the mirror's login lives in (a rotating token): beside config.json before 3.20.
+MIRROR_SESSION_NAME = "mirror_session.json"
+
+
+def local_dir():
+    """The machine files' folder: APP_ROOT/local."""
+    return APP_ROOT / LOCAL_DIRNAME
+
+
+def old_local_path(name):
+    """Where 3.19 kept the machine file `name`: the app folder itself, except the icon cache
+    (`_container_cache/`) and mirror_session.json (beside wherever config.json was found).
+    The migration's source, and a reader's fallback until the file has been brought across."""
+    if name == ICON_CACHE_NAME:
+        return APP_ROOT / OLD_ICON_CACHE_NAME
+    if name == MIRROR_SESSION_NAME:
+        return config_path().parent / name
+    return APP_ROOT / name
+
+
 def local_path(name):
     """A machine file by name: `moonglade.mgpack` (+ `.version`), `branding.json`,
-    `branding_slots.json`, `serve.txt`, `serve.log`, the icon cache. Today it is
-    APP_ROOT / name."""
-    return APP_ROOT / name
+    `branding_slots.json`, `mirror_session.json`, `serve.txt`, `serve.log`, the icon cache
+    (`cache`). It is local_dir() / name, except while the file is still only in its old
+    place and the migration has not recorded it (an install not yet started on 3.20, or a
+    move that was refused): then it is read, and written, where it is."""
+    return _settled(local_dir(), name, old_local_path(name), local_dir() / MOVED_NAME)
 
 
 def icon_cache_dir():
     """The regenerable cache of pack-shipped .ico files that Windows must read off disk (the
     Desktop shortcut's icon). A machine file, so it goes through local_path()."""
-    return local_path("_container_cache") / "marks"
+    return local_path(ICON_CACHE_NAME) / "marks"
+
+
+# The manifest's recorded names, read once per change of the file (path -> (stamp, names)).
+_moved_names_cache = {}
+
+
+def moved_names(manifest):
+    """The names a migration manifest records as brought across (copied, moved or started
+    fresh). An absent or unreadable manifest records nothing."""
+    manifest = Path(manifest)
+    try:
+        st = manifest.stat()
+    except OSError:
+        return frozenset()
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _moved_names_cache.get(str(manifest))
+    if hit and hit[0] == stamp:
+        return hit[1]
+    try:
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        names = frozenset(e["name"] for e in doc.get("entries", [])
+                          if isinstance(e, dict) and isinstance(e.get("name"), str))
+    except (OSError, ValueError, AttributeError, TypeError):
+        names = frozenset()
+    _moved_names_cache[str(manifest)] = (stamp, names)
+    return names
+
+
+def _settled(new_dir, name, old, manifest):
+    """The new place for `name`, unless it is missing there, present in its old place `old`,
+    and not recorded in `manifest`: then the old place. A recorded name is never looked for
+    in its old place again, so deleting the new copy can never bring back a stale old one."""
+    new = Path(new_dir) / name
+    try:
+        if new.exists() or not old.exists():
+            return new
+        if name in moved_names(manifest):
+            return new
+    except OSError:
+        return new
+    return old
 
 
 def art_root():

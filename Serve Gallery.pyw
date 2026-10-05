@@ -46,10 +46,21 @@ os.chdir(here)                     # so config.json / pixai_backup resolve here
 SERVE_ARGS = []                             # base args. Extra flags go in serve.txt (below).
 RESTART_CODE = 42                           # child exit code that means "relaunch me"
 
+# 3.20 keeps the machine files in local/. The launcher brings its own two across first --
+# serve.txt copied (the old one stays, for 3.19), serve.log started fresh in local/ -- and
+# the server brings the rest. Best effort: nothing here can stop the app starting, and a file
+# that could not be brought across is read where it is.
+try:
+    from moonglade import migrate as _migrate
+    _tidy = _migrate.tidy_launcher_files()
+except Exception:
+    _tidy = None
+
 # Machine-local overrides WITHOUT editing this tracked file (so `git pull` never conflicts):
-# put extra flags in an untracked "serve.txt" next to this launcher, e.g. one line:
+# put extra flags in an untracked "serve.txt" in local\ beside this launcher, e.g. one line:
 #     --host 0.0.0.0 --port 5757
-# (LAN access + a custom port). Whitespace-separated; blank/missing = defaults.
+# (LAN access + a custom port). Whitespace-separated; blank/missing = defaults. (An install
+# not yet brought across still has it beside this launcher, and it is read there.)
 _serve_txt = str(_paths.local_path("serve.txt"))
 if os.path.exists(_serve_txt):
     try:
@@ -158,6 +169,12 @@ try:
     _log = open(str(_serve_log), "a", buffering=1, encoding="utf-8")
 except OSError:
     _log = subprocess.DEVNULL
+# What the tidy above did, in the one log the launcher has.
+try:
+    if _tidy is not None and _tidy.summary() and _log is not subprocess.DEVNULL:
+        _log.write("[launcher] " + _tidy.summary() + "\n")
+except Exception:
+    pass
 
 first = True
 while True:
