@@ -26,15 +26,16 @@ import sys
 import threading
 from pathlib import Path
 
-import moonglade_paths as _paths
+from moonglade import paths as _paths
 
 LOGGER_NAME = "moonglade"
 
-# The web server's OWN module logger, under both names it can have. moonglade_gallery.py's
+# The web server's OWN module logger, under both names it can have. moonglade/gallery.py's
 # background workers do not use get_logger() -- they use logging.getLogger(__name__), which
-# resolves to "__main__" when the server runs as a script (which is how it always runs in
-# production: "Serve Gallery.pyw" launches `python moonglade_gallery.py` as a child) and to
-# "moonglade_gallery" when it is imported. Neither name is LOGGER_NAME, so until 2026-09-07
+# resolves to "__main__" when the server runs as the main module (which is how it always runs
+# in production: "Serve Gallery.pyw" launches `python -m moonglade.gallery` as a child) and to
+# "moonglade.gallery" when it is imported. Before 3.20 the imported name was the flat
+# "moonglade_gallery", and neither name was under LOGGER_NAME, so until 2026-09-07
 # every one of those lines inherited root's WARNING ceiling and reached the file only if it
 # happened to be a warning. The live mirror is the case that made it matter: its whole
 # lifecycle -- "connected and subscribed", "task N reported completed -- mirroring",
@@ -43,7 +44,7 @@ LOGGER_NAME = "moonglade"
 # that generation finished?" after the fact. Both names are levelled because both are real:
 # the script name in production, the module name under the test suite and anything that
 # imports the app.
-GALLERY_LOGGER_NAMES = ("moonglade_gallery", "__main__")
+GALLERY_LOGGER_NAMES = ("moonglade.gallery", "__main__")
 
 _configured = False
 _file_handler = None

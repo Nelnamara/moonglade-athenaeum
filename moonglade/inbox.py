@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 
 import requests
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 # ---------------------------------------------------------------------------------------
 # The credential

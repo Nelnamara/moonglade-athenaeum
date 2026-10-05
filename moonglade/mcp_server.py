@@ -24,8 +24,8 @@ from pathlib import Path
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
-import moonglade_gallery as g   # catalog helpers -- the single source of truth for SQL
-import moonglade_paths as _paths
+from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
+from moonglade import paths as _paths
 
 OUT = Path(os.environ.get("MOONGLADE_OUT") or _paths.default_library_path())
 DB = str(OUT / "catalog.db")
@@ -47,7 +47,7 @@ _SESSION = None
 def _session():
     global _SESSION
     if _SESSION is None:
-        import moonglade_backup as mb
+        from moonglade import backup as mb
         _SESSION = mb._make_session(None)
     return _SESSION
 
@@ -133,7 +133,7 @@ def similar(media_id: str, limit: int = 24) -> dict:
         return {"error": "image file not on disk", "neighbors": []}
     k = max(1, min(limit, 96))
     try:
-        import moonglade_similar as ps
+        from moonglade import similar as ps
         hits = ps.similar(str(path), k=k, exclude_media_id=media_id)
     except Exception as e:
         return {"error": "similar index unavailable: {}".format(e), "neighbors": []}
@@ -307,7 +307,7 @@ def tag_suggest(media_id: str) -> dict:
     seed a search. FREE and read-only -- no credits, no mutation -- but it is the first
     tool that reaches the PixAI ACCOUNT, so it needs the session (config.json's
     PIXAI_API_KEY). Returns {media_id, suggestions:[...]} or {..., error} on failure."""
-    import moonglade_backup as mb
+    from moonglade import backup as mb
     try:
         out = mb.suggest_prompt(_session(), str(media_id))
     except Exception as e:

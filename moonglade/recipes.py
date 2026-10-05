@@ -28,7 +28,7 @@ import re
 import threading
 import time
 
-import moonglade_backup as core
+from moonglade import backup as core
 
 MAX_RECIPES = 10                 # recipeIds per task (the site's .slice(0, 10), stepUp qr)
 MAX_SLOTS = 8                    # payload.slots

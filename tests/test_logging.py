@@ -10,7 +10,7 @@ import logging.handlers
 
 import pytest
 
-import moonglade_logging
+from moonglade import logs as moonglade_logging
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ def test_setup_logging_is_idempotent(tmp_path):
 def test_vlog_reaches_the_file_regardless_of_verbose_flag(tmp_path):
     """FAILS before the fix: vlog() only ever printed to stdout when _VERBOSE
     was on: it had no path to the persistent logger at all, verbose or not."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     moonglade_logging.setup_logging(tmp_path, verbose=False)
     core.set_verbose(False)     # console stays silent...
     core.vlog("a diagnostic line nobody's watching the terminal for")
@@ -106,16 +106,17 @@ def test_werkzeug_request_lines_reach_the_file_regardless_of_root_ceiling(tmp_pa
 def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
     """FAILS before 2026-09-07: the live mirror's whole life -- "connected and subscribed",
     "task N reported completed -- mirroring", "disconnected cleanly; reconnecting" -- is
-    logged from inside moonglade_gallery.py through logging.getLogger(__name__), which is
-    "__main__" when the server runs as a script (how it always runs: "Serve Gallery.pyw"
-    launches `python moonglade_gallery.py`) and "moonglade_gallery" when it is imported.
-    Neither name is LOGGER_NAME, so both inherited root's WARNING ceiling and every one of
+    logged from inside the web server's module through logging.getLogger(__name__), which is
+    "__main__" when the server runs as the main module (how it always runs: "Serve Gallery.pyw"
+    launches `python -m moonglade.gallery`) and its module name when it is imported (since
+    3.20 "moonglade.gallery"; the flat "moonglade_gallery" before). Neither name was
+    LOGGER_NAME's then, so both inherited root's WARNING ceiling and every one of
     those INFO lines was absent from moonglade.log -- the one record that could answer "was
     the socket up when that generation finished?" after the fact.
 
     The module name is read off the module itself rather than typed as a string, so renaming
     the file cannot leave this passing against a logger nothing uses."""
-    import moonglade_gallery
+    from moonglade import gallery as moonglade_gallery
 
     moonglade_logging.setup_logging(tmp_path, verbose=False)
     for name in (moonglade_gallery.__name__, "__main__"):

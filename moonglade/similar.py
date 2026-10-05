@@ -288,7 +288,7 @@ def scan_dir(root, cap=None):
     only runs one way at import time: the gallery imports THIS module lazily,
     inside its /api/similar handler.
     """
-    from moonglade_gallery import scan_library, QUARANTINE_EXCLUDE_ANYWHERE
+    from moonglade.gallery import scan_library, QUARANTINE_EXCLUDE_ANYWHERE
     n = 0
     for e in scan_library(root, kinds=("embeddable",),
                           exclude=QUARANTINE_EXCLUDE_ANYWHERE):

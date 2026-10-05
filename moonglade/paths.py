@@ -32,10 +32,10 @@ it resolved to before this module existed.
 """
 from pathlib import Path
 
-# The folder holding the launcher (Serve Gallery.pyw) and config.json. Today that is this
-# module's own folder. When the code moves into a package folder this becomes that
-# folder's parent -- the only line that changes.
-APP_ROOT = Path(__file__).resolve().parent
+# The folder holding the launcher (Serve Gallery.pyw) and config.json: the parent of the
+# moonglade/ code folder this module sits in. The code moved down a folder in 3.20, and every
+# app-root path still follows from this one line.
+APP_ROOT = Path(__file__).resolve().parent.parent
 
 # The coded art tree's folder name ("goods" in hex). The tree sits beside the launcher, not
 # in the library or the code (DECISIONS 2026-07-26).
@@ -82,7 +82,7 @@ def art_root():
 def manifest_path():
     """The pack manifest, committed with the code: which pack this build wants and where to
     fetch it."""
-    return APP_ROOT / "moonglade_manifest.json"
+    return APP_ROOT / "moonglade" / "manifest.json"
 
 
 def wiki_dir():

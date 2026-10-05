@@ -32,10 +32,10 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-import moonglade_assets
-import moonglade_container
-import moonglade_contest_wins as contest_wins
-import moonglade_paths as _paths
+from moonglade import assets as moonglade_assets
+from moonglade import container as moonglade_container
+from moonglade import contest_wins
+from moonglade import paths as _paths
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -7781,7 +7781,7 @@ def telemetry_metrics(out_dir, telem=None):
     # from core -- never hardcoded -- and ONLY the computed count is exposed (the underlying tool
     # keys and emotion keys never leave the store). Silent-soft: an absent/bad core resolves to 0.
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         _non_emotion = set()
         for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
             _k = str(pp.get("key") or "").strip()
@@ -8055,7 +8055,7 @@ def _contest_detection_sync(out_dir, force=False):
         if age < CONTEST_SYNC_RECENT_S:
             return True
     try:
-        import moonglade_backup as core
+        from moonglade import backup as core
         session = core._make_session(None)
         uid = str(core._client_of(session).user_id or "")
         if not uid:
@@ -8236,7 +8236,7 @@ def contest_win_pass(out_dir, now=None, pause=None):
     read ONCE, `_CW_PAUSE` apart. A failed read is logged, pushed an hour out and never
     retried in a loop; one bad contest does not stop the pass."""
     import logging as _logging
-    import moonglade_backup as core
+    from moonglade import backup as core
     log = _logging.getLogger(__name__)
     out = {"ran": False, "checked": [], "recorded": 0, "errors": 0}
     clock = (lambda: now) if now is not None else time.time
@@ -8356,7 +8356,7 @@ def contest_win_check(out_dir, body, now=None):
     the linked artwork in -- in that order (moonglade_contest_wins.plan_manual). Then ONE GET
     of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
     """
-    import moonglade_backup as core
+    from moonglade import backup as core
     cw = contest_wins
     now = time.time() if now is None else now
     url_text = str((body or {}).get("url") or "").strip()
@@ -8617,7 +8617,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     here to the gallery's loaders."""
     import logging as _logging
     import uuid as _uuid
-    import moonglade_backup as core
+    from moonglade import backup as core
     log = _logging.getLogger(__name__)
     now = time.time() if now is None else now
     if not force and (now - _artworks_state["at"]) < ARTWORKS_SWEEP_S:
@@ -9504,7 +9504,7 @@ def collection_health(out_dir, db_path):
     # The last integrity pass (--verify-library / the Panel's "Verify library integrity"):
     # a read of its integrity_report.json, never a walk of its own. None until one has run.
     try:
-        import moonglade_integrity
+        from moonglade import integrity as moonglade_integrity
         _last = moonglade_integrity.read_summary(out_dir)
     except Exception:                                    # noqa: BLE001 -- Health never fails on it
         _last = None
@@ -10636,7 +10636,7 @@ def make_thumbnail(img_path, thumb_path):
         return False
     tmp = None
     try:
-        import moonglade_backup as core
+        from moonglade import backup as core
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
         # Same directory (os.replace is only atomic within one filesystem) and pid-tagged,
         # so two processes rebuilding the same library cannot collide on one temp name.
@@ -10680,7 +10680,7 @@ def make_video_thumbnail(video_path, thumb_path):
     availability probe, one place that owns the no-window flag, the timeouts and the
     "never raises" rule. This used to run its own uncached shutil.which() per file
     and two differently-shaped subprocess.run() calls."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     import tempfile
     if Image is None or not core.ffmpeg_path():
         return False
@@ -10724,7 +10724,7 @@ def _find_quarantined_file(out_dir, media_id):
     media_id as the real file (its stem IS the media_id), so this explicitly
     restricts the extension to real media -- a naive media_id_of() match alone would
     pick either file depending on directory order."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return None
@@ -10762,7 +10762,7 @@ def list_quarantined(out_dir, page=1, page_size=60):
     wrote one before this feature existed). Only os.scandir() + stat() (metadata
     only, no content read) touches every file in the backlog; JSON parsing is
     bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return [], 0, 0
@@ -10884,7 +10884,7 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
     orphans, not "needed to make the file visible again".
 
     Returns {"ok": True, "media_id":, "filename":} or {"ok": False, "error":}."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     out_dir = Path(out_dir)
     src = _find_quarantined_file(out_dir, media_id)
     if not src:
@@ -10965,7 +10965,7 @@ def empty_trash(out_dir, thumb_dir):
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
         return 0
-    import moonglade_backup as core
+    from moonglade import backup as core
     media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
     removed = 0
     for p in list(qdir.glob("*")):
@@ -11042,7 +11042,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
     pointing at a keeper that survives elsewhere). No-op if nothing changed, and
     a no-op if the media_id has no surviving file at all (that case is the
     caller's row-delete branch instead, not this function's job)."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     matches = find_files_for_media_id(out_dir, media_id)
     if not matches:
         return
@@ -11092,7 +11092,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
 
     Returns {"ok": True, "media_id", "original_path", "quarantine_path", "size",
     "row_deleted"} or {"ok": False, "error": "..."} -- never raises."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     try:
         core._check_read_only("quarantine a duplicate file (Duplicate Review resolve)")
     except core.PixAIError as e:
@@ -11184,7 +11184,7 @@ def restore_quarantined_duplicate(out_dir, thumb_dir, db_path, quarantine_path):
 
     Returns {"ok": True, "media_id", "restored_path"} or
     {"ok": False, "error": "..."} -- never raises."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     try:
         core._check_read_only("undo a duplicate quarantine (Duplicate Review undo)")
     except core.PixAIError as e:
@@ -11254,7 +11254,7 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
     linked to the chosen keeper is refused here as a known, documented
     simplification -- resolving it means picking a keeper it IS directly close
     to, not a gap in the detection logic."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     out_dir = Path(out_dir)
 
     def _real(entry):
@@ -11338,7 +11338,7 @@ def probe_has_audio(path, timeout=None):
     is the two-way one, so the unanswerable case reads as silent -- deliberately, and in
     this one place rather than at each of the export's own branches. `timeout=None` takes
     media_tools' probe policy; the number does not live here any more."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     return bool(core.has_audio(path, timeout=timeout))
 
 
@@ -11349,7 +11349,7 @@ def probe_duration(path, timeout=None):
     Gallery-side face of moonglade_backup's `media_tools.duration` -- see it for why
     there is only one implementation of this question now, and why it answers at full
     precision. `timeout=None` takes media_tools' probe policy."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     return core.duration(path, timeout=timeout)
 
 
@@ -11364,7 +11364,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
     ffmpeg frame-extract instead of staying blank forever. `force` deliberately
     does NOT overwrite an existing video thumb -- the poster came from the
     network and can't be regenerated from the local file."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     if Image is None:
         print("Warning: Pillow not installed -- thumbnails will not be generated.")
         return
@@ -11524,7 +11524,7 @@ def _upscale_const_js():
     since the classic cut (2026-08-08) removed the INDEX/DETAIL pages it was
     originally built for.
     """
-    import moonglade_backup as core
+    from moonglade import backup as core
     return ("<script>window.MG_UPSCALE={};window.MG_LORA={};</script>".format(
         json.dumps({
             "enlargeModels": list(core.ENLARGE_MODELS),
@@ -11743,7 +11743,7 @@ def _build_stamp():
     startup. If you pull without restarting, this keeps showing the OLD sha -- which
     is precisely how you tell a stale server from a fresh one. Fails soft."""
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         ver = getattr(_core, "__version__", "?")
     except Exception:
         ver = "?"
@@ -12148,7 +12148,7 @@ def resolve_library_dir(explicit=None):
     if explicit:
         return str(explicit)
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "").strip()
     except Exception:                                   # noqa: BLE001
         stored = ""
@@ -12175,7 +12175,7 @@ def resolve_server_settings(host_arg=None, port_arg=None):
     reason resolve_library_dir is: the Panel writes config then restarts."""
     cfg = {}
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         cfg = _core._load_config() or {}
     except Exception:                                   # noqa: BLE001
         cfg = {}
@@ -12891,7 +12891,7 @@ def account_prefs_update(out_dir, account, set_=None, unset=None):
                     "is {:,}).".format(len(data), ACCOUNT_PREFS_DOC_MAX))
             if state == "corrupt":
                 _account_prefs_set_aside(p)
-            import moonglade_backup as core
+            from moonglade import backup as core
             tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
             try:
                 tmp.write_bytes(data)
@@ -12972,7 +12972,7 @@ def account_state_read(p):
 
 def account_state_write(p, doc):
     """Atomically replace `p` with `doc`. Raises OSError."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     p.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(doc, sort_keys=True, allow_nan=False,
                       separators=(",", ":")).encode("utf-8")
@@ -13662,7 +13662,7 @@ def create_app(out_dir: Path):
     # logger either; moonglade_logging.setup_logging() configures the root logger.
     import logging as _logging
     try:
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         _swept = _core.resolve_interrupted_local_jobs(out_dir)
         if _swept:
             _logging.getLogger(__name__).info(
@@ -13677,7 +13677,7 @@ def create_app(out_dir: Path):
     # so restarting the server doesn't silently log everyone out. See
     # _is_authorized_request() below for the gate this session backs, and
     # /login /logout for the routes that populate it.
-    import moonglade_backup as _core_auth
+    from moonglade import backup as _core_auth
     app.secret_key = _core_auth.get_or_create_secret_key()
     app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS can never read the session cookie
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # blocks cross-site POST/nav CSRF vectors
@@ -13799,7 +13799,7 @@ def create_app(out_dir: Path):
     # _fire_enhance_telemetry uses this at TERMINAL success to record WHICH enhance tool was
     # exercised (enhance_tools) -- never at submit, so a reaped/failed enhance never counts. Only
     # the six known presets map; a non-preset enhance resolves to nothing and records no tool.
-    import moonglade_backup as _mb_bridge
+    from moonglade import backup as _mb_bridge
     _BRIDGE_PRESET_KEY_BY_NAME = {
         n: k for n, k in (
             (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
@@ -14188,7 +14188,7 @@ def create_app(out_dir: Path):
         """Append a job event to out_dir/jobs.jsonl for the Jobs card. Fails soft --
         activity logging must never break the request that triggered it."""
         try:
-            import moonglade_backup as _core
+            from moonglade import backup as _core
             _core.append_job_event(out_dir, job_id, **fields)
         except Exception:
             pass
@@ -14447,7 +14447,7 @@ def create_app(out_dir: Path):
         if not _bg_release_check:
             return
         try:
-            import moonglade_backup as _core
+            from moonglade import backup as _core
             run_update_tick(_core.__version__)
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
@@ -14489,7 +14489,7 @@ def create_app(out_dir: Path):
             return
         try:
             import logging as _logging
-            import moonglade_backup as _core
+            from moonglade import backup as _core
             out = _core.mirror_renew_tick()
             _log = _logging.getLogger(__name__)
             if out == "renewed":
@@ -14809,7 +14809,7 @@ def create_app(out_dir: Path):
         cannot raise into _watch_mirror's daemon thread: mirroring must never break,
         or lose its 'mirrored' count, because logging did."""
         try:
-            import moonglade_backup as _core
+            from moonglade import backup as _core
             mids = (got or {}).get("media_ids") or []
             if not mids:
                 return
@@ -14850,7 +14850,7 @@ def create_app(out_dir: Path):
         exception only ever reached last_error. A restart cleared the symptom (fresh
         process, fresh attempt) without anyone learning the cause."""
         import logging as _logging
-        import moonglade_backup as core
+        from moonglade import backup as core
         _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
@@ -14886,7 +14886,7 @@ def create_app(out_dir: Path):
         THIS function exactly -- what changed on 2026-09-07 is that a website run now HAS a
         row by the time this runs, written by _website_job_seen below off the same event.
         So this closes a website row without knowing or caring that it is one."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
             j = next((x for x in core.read_jobs(out_dir)
@@ -14983,7 +14983,7 @@ def create_app(out_dir: Path):
 
         Fails soft. This runs on the WebSocket's own event loop and in the catch-up's daemon
         thread, and neither may die because logging did."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             tid = str(tid or "")
             if not tid:
@@ -15029,7 +15029,7 @@ def create_app(out_dir: Path):
         about at all -- see resolve_orphan_jobs()'s and JOBS_ORPHAN_SWEEP_AGE's own
         docstrings for why 0 there would be wrong (re-checks a live video gen on every
         poll) and why --poll-timeout's 300s would ALSO be wrong (false-flags one)."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         box = {"s": None}
         def _status(tid):
             if box["s"] is None:
@@ -15105,7 +15105,7 @@ def create_app(out_dir: Path):
         Never raises -- a failed catch-up must not kill the thread that called it."""
         import logging as _logging
         import time as _time
-        import moonglade_backup as core
+        from moonglade import backup as core
         _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
@@ -15291,7 +15291,7 @@ def create_app(out_dir: Path):
         /api/jobs. No network here (this runs on the socket's event loop), and it can never
         be the mirror's problem."""
         try:
-            import moonglade_inbox
+            from moonglade import inbox as moonglade_inbox
             if ev.get("__meta__") == "subscribed":
                 moonglade_inbox.note_connected()
             elif ev.get("newNotification"):
@@ -15313,7 +15313,7 @@ def create_app(out_dir: Path):
         with it."""
         import logging as _logging
         import time as _time
-        import moonglade_backup as core
+        from moonglade import backup as core
         _log = _logging.getLogger(__name__)
         _watch_inbox(ev)
         if ev.get("__meta__") == "subscribed":
@@ -15385,7 +15385,7 @@ def create_app(out_dir: Path):
         import asyncio
         import logging as _logging
         import time as _time
-        import moonglade_backup as core
+        from moonglade import backup as core
         _log = _logging.getLogger(__name__)
         clock = state["clock"]
         attempt = {"subscribed_at": None}
@@ -15549,7 +15549,7 @@ def create_app(out_dir: Path):
         /login credential POST and the local-only first-account bootstrap POST
         below (factored out so the two paths can never drift apart on what a
         session looks like)."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         session.clear()
         session["user"] = username
         session["sess_epoch"] = core.get_web_user_session_epoch(username)
@@ -15570,7 +15570,7 @@ def create_app(out_dir: Path):
         sign-in (an account exists), local bootstrap-create (no_accounts + is_local),
         or the LAN-first-run safety message (no_accounts + NOT is_local)."""
         next_url = _safe_next(request.values.get("next", "")) or ""
-        import moonglade_backup as core
+        from moonglade import backup as core
         no_accounts = not core.list_web_users()
         is_local = _is_local_request()
         # setdefault, NEVER a fresh mint on GET: the front door redirects every
@@ -15625,7 +15625,7 @@ def create_app(out_dir: Path):
         and the classic form must never be distinguishable to an attacker by
         their error text."""
         body = request.get_json(silent=True) or {}
-        import moonglade_backup as core
+        from moonglade import backup as core
 
         def _fail(error):
             # Every failed POST rotates the session token, exactly like classic
@@ -15734,7 +15734,7 @@ def create_app(out_dir: Path):
         caller (React) does that purge itself in JS on a successful response,
         then navigates to /login. See LoginPage.jsx / App.jsx's logout
         handler."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         body = request.get_json(silent=True) or {}
         user = session.get("user")
         # ORDER MATTERS, same as logout(): read `user` before any call that
@@ -15877,8 +15877,8 @@ def create_app(out_dir: Path):
         """The Broken files list: the last check's broken rows with each one's pill, the one
         action that applies, its chip and its local mark, plus what Fix all would do.
         `read_only` says whether re-downloads are off (READ_ONLY in config.json)."""
-        import moonglade_backup as core
-        import moonglade_integrity
+        from moonglade import backup as core
+        from moonglade import integrity as moonglade_integrity
         doc = moonglade_integrity.broken_list(out_dir, db_path,
                                               avg_bytes=health_avg_file_bytes())
         doc["read_only"] = bool(core.READ_ONLY or core._read_only_now())
@@ -15892,7 +15892,7 @@ def create_app(out_dir: Path):
         or "" to clear it) and answer the mark it had before, which Undo sends back. Only a
         row on the list can take a mark; clearing is allowed for any row that has one.
         Body: {csrf, media_id, mark}."""
-        import moonglade_integrity
+        from moonglade import integrity as moonglade_integrity
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -15914,7 +15914,7 @@ def create_app(out_dir: Path):
     # Health never stops it. It refuses an archive-only row BY ITSELF (redownload_one reads the
     # catalog, whatever the client sent), READ_ONLY blocks its re-downloads but not its local
     # thumbnail rebuilds, and it deletes nothing. Test seam: app.extensions["mg_integrity_fix"].
-    import moonglade_integrity as _integ
+    from moonglade import integrity as _integ
     _fix_runner = _integ.FixRunner(out_dir, db_path, log_job=_log_job)
     app.extensions["mg_integrity_fix"] = _fix_runner
 
@@ -15974,7 +15974,7 @@ def create_app(out_dir: Path):
                        for k, v in PANEL_ACTIONS.items()]
         actions = [a for a, (k, v) in zip(all_actions, PANEL_ACTIONS.items())
                   if v.get("panel_visible", True) and (panel_is_local or not v["destructive"])]
-        import moonglade_backup as core
+        from moonglade import backup as core
         session.setdefault("csrf", secrets.token_hex(16))
         try:
             sweep_branding_drops(out_dir)   # see api_branding()'s own GET for why
@@ -16061,7 +16061,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
         confirm = str(body.get("confirm") or "")
@@ -16119,7 +16119,7 @@ def create_app(out_dir: Path):
         username = str(body.get("username") or "").strip()
         if username != session.get("user") and not _is_local_request():
             return jsonify({"error": "localhost-only to remove another account"}), 403
-        import moonglade_backup as core
+        from moonglade import backup as core
         result = core.remove_web_user_guarded(username)
         if result == "not_found":
             return jsonify({"error": "No such account."}), 404
@@ -16167,7 +16167,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         me = session.get("user")
         local = _is_local_request()
         target = str(body.get("username") or "").strip() or me
@@ -16245,7 +16245,7 @@ def create_app(out_dir: Path):
         next start; the old folder is left exactly as it is. That is the whole contract, and
         it is why there is no "migrate" option here to get wrong.
         """
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         if request.method == "GET":
             local = _is_local_request()
             # BOTH path fields are withheld from a non-local caller, not just the first.
@@ -16343,7 +16343,7 @@ def create_app(out_dir: Path):
 
         This route only ever ANSWERS. Applying an update is /api/update/apply, behind the
         modal's explicit confirm -- nothing here can reach it."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         if str(request.args.get("fresh") or "").lower() in ("1", "true", "yes"):
             return jsonify(check_for_update_fresh(core.__version__))
         payload = check_for_update(core.__version__)
@@ -16418,7 +16418,7 @@ def create_app(out_dir: Path):
         if not body.get("confirm"):
             return jsonify({"error": "confirm required — the update is never applied silently",
                             "kind": "failed"}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         if core.READ_ONLY or core._read_only_now():
             return jsonify({"error": "READ_ONLY is set in config.json — refusing to update "
                                      "this install. Remove it (or set it to false) to allow "
@@ -16519,8 +16519,8 @@ def create_app(out_dir: Path):
         name, at which reachable URLs, and is zeroconf even installed. Login required (local or
         LAN) -- reading the broadcast state is safe for a LAN device; only WRITING the settings
         (below) is localhost-only."""
-        import moonglade_backup as _core
-        import moonglade_bonjour
+        from moonglade import backup as _core
+        from moonglade import bonjour as moonglade_bonjour
         cfg = _core._load_config() or {}
         serving = _SERVER_CONTROL.get("serving") or {}
         adv = _SERVER_CONTROL.get("bonjour")
@@ -16556,8 +16556,8 @@ def create_app(out_dir: Path):
         so those return restart_needed. LOCALHOST-only on write: a LAN device may SEE the state
         but only the server box may change how the server is exposed. config.json holds auth
         state, so this rides _accounts_lock like every other writer of it."""
-        import moonglade_backup as _core
-        import moonglade_bonjour
+        from moonglade import backup as _core
+        from moonglade import bonjour as moonglade_bonjour
         body = request.get_json(silent=True) or {}
         cfg = _core._load_config() or {}
         enabled = bool(body["enabled"]) if "enabled" in body else bool(cfg.get(BONJOUR_ENABLED_KEY, False))
@@ -16654,7 +16654,7 @@ def create_app(out_dir: Path):
         It goes back in with `--import-curation` (dry run by default)."""
         import io
         import datetime
-        import moonglade_curation_io as cio
+        from moonglade import curation_io as cio
         mem = io.BytesIO(cio.dumps(cio.export_curation(db_path)).encode("utf-8"))
         mem.seek(0)
         return send_file(mem, mimetype="application/json", as_attachment=True,
@@ -16734,7 +16734,7 @@ def create_app(out_dir: Path):
         action instead of resurrecting it with a new event). Fails soft: the recovery
         itself must succeed even if this bookkeeping doesn't."""
         try:
-            import moonglade_backup as _core
+            from moonglade import backup as _core
             jobs_by_id, _order, _n = _core._reconstruct_jobs(out_dir)
             orig = jobs_by_id.get(tid)
             if orig and not orig.get("dismissed") and orig.get("status") not in _core._JOBS_TERMINAL:
@@ -17091,7 +17091,7 @@ def create_app(out_dir: Path):
         library's whole record of what left it stops depending on which button was used. The
         PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
-        import moonglade_backup as core          # lazy: avoid import cycle
+        from moonglade import backup as core          # lazy: avoid import cycle
         import uuid
         body = request.get_json(silent=True) or {}
         if "confirm" not in body:
@@ -17280,7 +17280,7 @@ def create_app(out_dir: Path):
 
         Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
         generation record is gone and there is nothing left to read."""
-        import moonglade_backup as core   # lazy: avoid import cycle
+        from moonglade import backup as core   # lazy: avoid import cycle
         keep = {str(r["media_id"]) for r in rows
                 if str(r.get("cloud_deleted_at") or "").strip()}
         try:
@@ -17352,7 +17352,7 @@ def create_app(out_dir: Path):
         `artworkIds` -- batch_size being the task's image count ON PIXAI -- (the
         published-artwork count the dialog words, SCOPE_2026-09-26 E5; a task missing from it
         falls back to the catalog, see api_delete_preview)."""
-        import moonglade_backup as core   # lazy: avoid import cycle
+        from moonglade import backup as core   # lazy: avoid import cycle
         ids = [str(t) for t in task_ids]
         try:
             session = core._make_session(None)
@@ -17618,7 +17618,7 @@ def create_app(out_dir: Path):
         cloud side they would otherwise be pure local purges -- exactly what the
         flag says not to do."""
         import uuid
-        import moonglade_backup as core   # lazy: avoid import cycle
+        from moonglade import backup as core   # lazy: avoid import cycle
         if not purge_local:
             local_only = []
         total = len(task_ids) + len(local_only)
@@ -17726,7 +17726,7 @@ def create_app(out_dir: Path):
         _check_read_only fires HERE, before the job even starts, on top of the one
         inside delete_task_gql: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
-        import moonglade_backup as core   # lazy: avoid import cycle
+        from moonglade import backup as core   # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
         purge_local = bool(body.get("purge_local", True))
         task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
@@ -17888,7 +17888,7 @@ def create_app(out_dir: Path):
         # set is images only).
         src = out_dir / str(row.get("filename") or "")
         if not (row.get("filename") and src.is_file()):
-            import moonglade_backup as core   # lazy, like every other gallery use of it
+            from moonglade import backup as core   # lazy, like every other gallery use of it
             files = find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
             if not files:
                 return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
@@ -18219,7 +18219,7 @@ def create_app(out_dir: Path):
         import zipfile
         import shutil
         import tempfile
-        import moonglade_backup as core
+        from moonglade import backup as core
         # Two entry points: a curated SELECTION (media_ids from the grid) or a whole
         # COLLECTION by name. For a collection we resolve its FULL membership here in SQL
         # (up to the same 2000 cap) rather than trusting the rendered checkboxes -- "download
@@ -18381,7 +18381,7 @@ def create_app(out_dir: Path):
         user = session.get("user")
         if user is None:
             return False
-        import moonglade_backup as core
+        from moonglade import backup as core
         current_epoch = core.get_web_user_session_epoch(user)
         if current_epoch is None or current_epoch != session.get("sess_epoch"):
             session.clear()   # stale/revoked -- drop it so later requests short-circuit above
@@ -18483,7 +18483,7 @@ def create_app(out_dir: Path):
             _login_attempts.pop(ip, None)
 
     def _gen_session():
-        import moonglade_backup as core
+        from moonglade import backup as core
         return core, core._make_session(None)
 
     # Membership is not stored anywhere -- it is a live GraphQL read per call -- and
@@ -19081,7 +19081,7 @@ def create_app(out_dir: Path):
         if not img_path:
             return jsonify({"images": [], "total": 0, "error": "image file not found"}), 200
         try:
-            import moonglade_similar
+            from moonglade import similar as moonglade_similar
             hits = moonglade_similar.similar(str(img_path), k=k, exclude_media_id=media_id)
         except Exception as e:
             return jsonify({"images": [], "total": 0,
@@ -19549,7 +19549,7 @@ def create_app(out_dir: Path):
         /duplicates page and api_health. Members are shaped identically across all four
         tiers (media_id/thumb/dims/rating/date/path/bucket/size/is_keeper) so the client
         never has to special-case by matchType."""
-        import moonglade_backup as core
+        from moonglade import backup as core
 
         def _member(mid, row, path, bucket, size, is_keeper):
             row = row or {}
@@ -20050,7 +20050,7 @@ def create_app(out_dir: Path):
         key = (body.get("api_key") or "").strip()
         if not key:
             return jsonify({"error": "paste your API key first"}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         import requests as _requests
         test_session = _requests.Session()
         test_session.headers.update({
@@ -21375,7 +21375,7 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         media_ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else []
         media_ids = [str(m) for m in media_ids if str(m).strip()]
         base_model_id = str(body.get("base_model_id") or "").strip()
@@ -21588,7 +21588,7 @@ def create_app(out_dir: Path):
         return body, _check_csrf(body)
 
     def _train_refusal(e, status=502):
-        import moonglade_backup as core
+        from moonglade import backup as core
         if isinstance(e, core.PixAIRestError):
             payload = {"error": core.training_error_words(e), "code": e.code}
             ids = e.data.get("mediaIds")
@@ -21921,7 +21921,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         refused = _read_only_refusal(core, "create a LoRA training draft")
         if refused:
             return refused
@@ -21949,7 +21949,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid = str(task_id or "").strip()
         ids = body.get("media_ids") if isinstance(body.get("media_ids"), list) else None
         if not tid.isdigit() or ids is None:
@@ -21985,7 +21985,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid, mid = str(task_id or "").strip(), str(media_id or "").strip()
         text = str(body.get("text") or "").strip()
         if not tid.isdigit() or not mid.isdigit():
@@ -22022,7 +22022,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid = str(task_id or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "not a training task"}), 400
@@ -22107,7 +22107,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid = str(task_id or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "not a training task"}), 400
@@ -22184,7 +22184,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid = str(task_id or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "not a training task"}), 400
@@ -22254,7 +22254,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         tid = str(task_id or "").strip()
         vis = str(body.get("visibility") or "")
         rebate = "join" if body.get("rebate") in (True, "join") else "decline"
@@ -22320,7 +22320,7 @@ def create_app(out_dir: Path):
         body, ok = _train_csrf_body()
         if not ok:
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_backup as core
+        from moonglade import backup as core
         mid = str(model_id or "").strip()
         acks = body.get("acknowledged") if isinstance(body.get("acknowledged"), list) else []
         join = body.get("rebate") in (True, "join")
@@ -22710,7 +22710,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Expected a JSON object."}), 400
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
-        import moonglade_narrator as _nar
+        from moonglade import narrator as _nar
         pools = _nar.clean_pools(_poke_lines())
         now, today = _narrator_clock()
         try:
@@ -22753,7 +22753,7 @@ def create_app(out_dir: Path):
         the token's own life, never iat to exp) and `renewal` (core.mirror_renewal_status: ok,
         failed, paused, expired, off), so the tile warns only when a renewal actually failed
         or cannot run, not whenever the token sits in its normal renewal window."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         state = core.load_mirror_state()
         jwt = (state.get("jwt") or "")
         left_s, span_s = core.mirror_token_span(state)
@@ -22775,7 +22775,7 @@ def create_app(out_dir: Path):
         wipe _save_config's docstring exists to prevent -- _load_config()'s ValueError->{}
         cannot tell a corrupt file from an empty one). Serialized on _accounts_lock with the
         other config writers."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
         # The SAME file _save_config() writes below (core._config_path()): reading one path and
         # writing another would put that file's contents over the real auth block.
@@ -22810,7 +22810,7 @@ def create_app(out_dir: Path):
         machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
         days-left -- NEVER the token (review F13). No credential crosses the network: the
         server reads its own local browser store. LOGIN tier."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             core._check_read_only("connect the PixAI mirror")   # refreshToken is account-mutating
             # A press (#71): re-read the browser even for a usable stored token, keep the
@@ -23275,7 +23275,7 @@ def create_app(out_dir: Path):
         import tempfile
         import shutil
         from types import SimpleNamespace
-        import moonglade_backup as core
+        from moonglade import backup as core
         files = request.files.getlist("files")
         if not files:
             return jsonify({"error": "no files"}), 400
@@ -23375,7 +23375,7 @@ def create_app(out_dir: Path):
         the same helper the CLI's --reference-video uses against --out. A pure local read,
         cached per media id for this app's life: /api/price runs it on every keystroke, and
         the quote, the drawer's spend and the Loom's spend all read one cached answer."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         if not _video_len_cache:
             _video_len_cache.append(core.make_video_duration_lookup(out_dir, db_path))
         return _video_len_cache[0](media_id)
@@ -23664,7 +23664,7 @@ def create_app(out_dir: Path):
     def api_help_index():
         """The guide's page list (sidebar order, with each page's headings for the search),
         the Glossary's terms, and the version stamp the overlay prints."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         return jsonify({
             "version": core.__version__,
             "display_version": display_version(core.__version__),
@@ -23719,7 +23719,7 @@ def create_app(out_dir: Path):
         """The About card: this version's CHANGELOG entry, the release's size (which decides
         between the what's-new sheet and About after an update), the art pack, the earlier
         entries. Whether a newer release is out is /api/update/check's to say, not this."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         return jsonify(about_payload(core.__version__, _container_path()))
 
     def _log_gen_failure(where, exc, params=None):
@@ -23918,7 +23918,7 @@ def create_app(out_dir: Path):
             # Lane w2-recipes: PixAI's RECIPE_UNAVAILABLE / RECIPE_INCOMPATIBLE, structured
             # (which recipes, why, in plain words) so the dock can mark the chip. Nothing
             # was created; the raw text is in the log above.
-            import moonglade_recipes as _recipes
+            from moonglade import recipes as _recipes
             refusal = _recipes.refusal_from(e)
             if refusal:
                 return jsonify({"error": refusal["copy"], "recipe_error": refusal}), 200
@@ -23944,7 +23944,7 @@ def create_app(out_dir: Path):
 
     def _single_send_refusal(body):
         """Why /api/generate refuses this body (review F2), or None. Local, no network."""
-        import moonglade_runs as runs
+        from moonglade import runs
         raw = body.get("count")
         if runs.strict_int(1 if raw is None else raw, 1, 1) is None:
             return _SINGLE_COUNT_WORDS
@@ -23955,7 +23955,7 @@ def create_app(out_dir: Path):
         return None
 
     def _strip_request(params):
-        import moonglade_runs as runs
+        from moonglade import runs
         if params is None:
             return None
         return runs.strip_secrets(params, redact=_redact_host_paths)
@@ -23965,7 +23965,7 @@ def create_app(out_dir: Path):
         Inspect. Fail-soft: nothing here can touch the spend that already happened."""
         try:
             import uuid
-            import moonglade_runs as runs
+            from moonglade import runs
             user = str(session.get("user") or "")
             if not user or not task_id:
                 return
@@ -24021,7 +24021,7 @@ def create_app(out_dir: Path):
         ids = (built[0]["req"].parameters or {}).get("recipeIds")
         if not ids:
             return
-        import moonglade_recipes as rec
+        from moonglade import recipes as rec
         try:
             cards = rec.batch(gsession, ids)
         except Exception:                                    # noqa: BLE001
@@ -24046,7 +24046,7 @@ def create_app(out_dir: Path):
         """Step 5, local and without a network call: var_mode, count, the run seed, and the
         template expanded against the account's own lists (never lists from the request).
         Returns (plan, run_seed, dock_seed); raises _RunRefused."""
-        import moonglade_runs as runs
+        from moonglade import runs
         vm = body.get("var_mode")
         if vm not in ("random", "matrix"):
             raise _RunRefused("Pick Random or Matrix for this run.")
@@ -24102,8 +24102,8 @@ def create_app(out_dir: Path):
         rules, entitlements, one build per job through THE ONE road, the per-route checks,
         the recipes' prompt budget, and -- with `quote` -- the price and the free cards.
         Raises _RunRefused; writes nothing."""
-        import moonglade_runs as runs
-        import moonglade_recipes as rec
+        from moonglade import runs
+        from moonglade import recipes as rec
         plan, run_seed, dock_seed = _run_expand(body, user)
         # Settled 2: never a card on a queued matrix cell -- a matrix of 2+ cells. A one-cell
         # matrix is an ordinary single send and its card applies as for any single send
@@ -24219,7 +24219,7 @@ def create_app(out_dir: Path):
 
     def _plan_public(core, planned, cells=False):
         """The plan as the dock reads it (no GenerationRequest objects)."""
-        import moonglade_runs as runs
+        from moonglade import runs
         keys = ("mode", "count", "jobs", "each", "covered", "total", "card", "card_note",
                 "unlimited", "digest", "adjusted")
         out = {k: planned[k] for k in keys if k in planned}
@@ -24285,14 +24285,14 @@ def create_app(out_dir: Path):
         acknowledgement against that fresh quote -> every job row written -> the sends, one
         at a time, the first failure stopping the rest. A count of 1 needs no
         acknowledgement: it is a single send (no quote, the card auto-applies, review F11)."""
-        import moonglade_runs as runs
+        from moonglade import runs
         user = str(session.get("user") or "")
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "Expected a JSON object."}), 400
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
         except core.PixAIError as e:
@@ -24342,7 +24342,7 @@ def create_app(out_dir: Path):
                 _run_inflight.clear()
 
     def _run_send(core, store, run_id, body, user):
-        import moonglade_runs as runs
+        from moonglade import runs
         try:
             # Step 5, local: expand and count before any network call.
             plan, _rs, _ds = _run_expand(body, user)
@@ -24474,7 +24474,7 @@ def create_app(out_dir: Path):
         """A run's recorded state, for the dock whose POST answer was lost (review F4): 404
         while this server has not received it (or it is another account's), else the run --
         'planning' / 'sending' while it goes, then sent / stopped / refused."""
-        import moonglade_runs as runs
+        from moonglade import runs
         user = str(session.get("user") or "")
         rid = str(run_id or "")
         if not _RUN_ID_RE.match(rid):
@@ -24498,7 +24498,7 @@ def create_app(out_dir: Path):
         caller's own account made it; for a task this library holds with no record anywhere,
         PixAI's stored task (source "pixai"). Another account's record is never served, and
         never falls back to PixAI either (review F9). Writes nothing."""
-        import moonglade_runs as runs
+        from moonglade import runs
         user = str(session.get("user") or "")
         tid = str(task_id or "").strip()
         if not tid.isdigit():
@@ -24509,7 +24509,7 @@ def create_app(out_dir: Path):
             # Review N7: the record may be another account's; with the store unreadable,
             # nothing is served and PixAI is not asked (review F9).
             return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
-        import moonglade_backup as core
+        from moonglade import backup as core
         if found is not None:
             run, job = found
             if run.get("account") != user:
@@ -24543,7 +24543,7 @@ def create_app(out_dir: Path):
         """Review F14: a run job's charged credits beside what the confirm expected. Returns
         the expected figure (None when it is not a run job with one). Fail-soft."""
         try:
-            import moonglade_runs as runs
+            from moonglade import runs
             store = runs.RunsStore(out_dir)
             found = store.find_task(tid)
             if not found:
@@ -24643,7 +24643,7 @@ def create_app(out_dir: Path):
         case this reports it truthfully. Fails soft: price=null when the mirror can't be reached
         (the slab only renders armed, but a price probe must never 500). LOGIN tier; read-only,
         spends nothing."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         now = time.time()
         cached = _enh_price_cache["presets"]
         if cached is not None and (now - _enh_price_cache["at"]) < _ENH_PRICE_TTL:
@@ -24698,7 +24698,7 @@ def create_app(out_dir: Path):
         live browser session, the only credential that dispatches one. The gate is the FIRST
         thing here, before any input upload / card check / builder / submit, so a mirror-off
         request creates nothing and spends nothing."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         # [BLOCKER] Backend mirror gate, before _input_media_id / build_panelplugin_parameters /
         # _apply_kaisuuken / submit_generation. Do NOT lean on submit_generation's own
         # _session_for_create gate: its mirror-OFF branch intentionally falls back to the API-key
@@ -24760,7 +24760,7 @@ def create_app(out_dir: Path):
         LOGIN tier; read-only, spends nothing. Disk/container scans are CODED;
         the emitted URLs keep the PUBLIC /branding/bridge/emotion/ form the
         front-end knows (the /branding/ route translates them back)."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         exts = (".webp", ".png", ".jpg", ".jpeg")
         emo_prefix = (_role_rel("emotion") + "/").lower()
         found = {}
@@ -24796,7 +24796,7 @@ def create_app(out_dir: Path):
         28 and could not see daily-fortune, daily-setlog or mini-mart-ad at all (issue #36).
         Mirror-gated exactly like /api/enhance -- the AI-Tools tier only exists when the
         Bridge is armed. LOGIN tier; read-only, spends nothing."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         if not core.mirror_enabled() or core.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409
         try:
@@ -24814,7 +24814,7 @@ def create_app(out_dir: Path):
         panelplugin presets), so this refuses unless the mirror is armed with a live session and
         routes the submit through the JWT. Body: {scene_id, media_ids[], preset, custom?,
         selector_values?}. Login required; returns {task_id}."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         if not core.mirror_enabled() or core.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to run AI Tools — "
                                      "nothing was submitted, no credits spent"}), 409
@@ -25444,7 +25444,7 @@ __DESIGN_TOKENS__
         # an anonymous LAN visitor from ever reaching this line at all; a signed-in LAN
         # session sees the same wizard an owner does, and the real write endpoints
         # (/api/setup/save-key) enforce their own localhost-only check independently.
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         _fresh_cfg = _core._load_config()
         needs_key = not bool(_fresh_cfg.get("PIXAI_API_KEY") or _fresh_cfg.get("U3T"))
         catalog_empty = not needs_key and (stats["images"] + stats["videos"]) == 0
@@ -25738,7 +25738,7 @@ __DESIGN_TOKENS__
 
     def _run_for_task(task_id):
         try:
-            import moonglade_runs as runs
+            from moonglade import runs
             found = runs.RunsStore(out_dir).find_task(task_id)
         except Exception:                                    # noqa: BLE001
             return None
@@ -25794,7 +25794,7 @@ __DESIGN_TOKENS__
         _build_where's own idiom. Day boundaries are computed HERE so the indexed
         window is exactly N local days and the empty days / `next_before` cursor are
         deterministic (and pytest-able) rather than a client-side guess."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         from collections import Counter
         from datetime import datetime, timedelta, timezone
         try:
@@ -26195,7 +26195,7 @@ __DESIGN_TOKENS__
         # Spend review N2 (the verdict on open call 3): the upload below is free but it is a
         # WRITE to the PixAI account, so READ_ONLY refuses it -- first, before the session's
         # USER_ID lookup, so a READ_ONLY install talks to nobody (as /api/loom/generate does).
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         try:
             _core._check_read_only("upload a hand-off frame to your PixAI account")
         except _core.PixAIError as e:
@@ -26299,7 +26299,7 @@ __DESIGN_TOKENS__
             vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
-            import moonglade_backup as core
+            from moonglade import backup as core
             _dur = core.duration(str(vid))   # 2dp is this route's display choice, not the probe's
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
@@ -26387,7 +26387,7 @@ __DESIGN_TOKENS__
         vid = _loom_complete_clip(mid)
         if vid is None:
             return jsonify({"error": "that clip is not on this machine"}), 404
-        import moonglade_backup as core
+        from moonglade import backup as core
         fdir.mkdir(parents=True, exist_ok=True)
         tag = secrets.token_hex(6)
         raw = fdir / ".raw-{}-{}.png".format(tag, frame)
@@ -26607,7 +26607,7 @@ __DESIGN_TOKENS__
              the shot for a second paid render while the first may exist.
         A body with none of the keys (the gallery's own Video tab) skips 4-6 and 8 and is
         today's request."""
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         p = request.get_json(silent=True) or {}
         target = p.pop("loom_target", None)
         submit_id = p.pop("submit_id", None)
@@ -26954,7 +26954,7 @@ __DESIGN_TOKENS__
         FLAG from media_tools (cmd[0] is core.ffmpeg_path(), set by the caller), so the
         two things that drifted between call sites are still decided in one place."""
         import subprocess, collections, re as _re
-        import moonglade_backup as core
+        from moonglade import backup as core
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -27059,7 +27059,7 @@ __DESIGN_TOKENS__
             return jsonify({"error": _redact_host_paths(str(e))[:120]}), 500
         dur = None
         try:
-            import moonglade_backup as core
+            from moonglade import backup as core
             d = core.duration(str(_loom_beds_dir(user) / name))
             dur = round(d, 3) if d else None
         except Exception:
@@ -27283,7 +27283,7 @@ __DESIGN_TOKENS__
         it either drops the audio track entirely (when there was no real audio anywhere, so
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
-        import moonglade_backup as core
+        from moonglade import backup as core
         if not core.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
         # ffprobe deliberately is NOT gated here alongside ffmpeg -- media_tools resolves the
@@ -27769,7 +27769,7 @@ __DESIGN_TOKENS__
         import time
         import zipfile
 
-        import moonglade_backup as core
+        from moonglade import backup as core
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -28058,7 +28058,7 @@ __DESIGN_TOKENS__
         the Loom's landTake records the clip's true length. None when no complete file is here
         or ffprobe cannot read it. Local only: never PixAI. It never raises: the task IS done,
         and a measurement that went wrong must not turn that answer into a failure or a retry."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             for mid in media_ids or []:
                 vid = _loom_complete_clip(str(mid))
@@ -28080,7 +28080,7 @@ __DESIGN_TOKENS__
         # and an except expression is evaluated while handling the exception -- so if
         # _gen_session() were the thing that raised, a try-scoped name would turn a
         # handled error into a NameError.
-        import moonglade_backup as _core
+        from moonglade import backup as _core
         tid = (request.args.get("task_id") or "").strip()
         if not tid:
             return jsonify({"phase": "failed", "error": "task_id required"}), 400
@@ -28216,7 +28216,7 @@ __DESIGN_TOKENS__
         the hourly tick already found, and never fetches. Announce-only -- a client reading
         it can light the version stamp and say so, and applying is still the Panel's
         Update button and its confirm."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         try:
             _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
             jobs = core.read_jobs(out_dir)
@@ -28228,7 +28228,7 @@ __DESIGN_TOKENS__
         # (R2c). Both read process memory only -- this poll never asks PixAI for them.
         inbox_live = None
         try:
-            import moonglade_inbox
+            from moonglade import inbox as moonglade_inbox
             inbox_live = moonglade_inbox.live_state()
             for j in jobs:
                 says = moonglade_inbox.pixai_says(j.get("job_id"))
@@ -28284,7 +28284,7 @@ __DESIGN_TOKENS__
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
-        import moonglade_backup as core
+        from moonglade import backup as core
         body = request.get_json(silent=True) or {}
         if body.get("finished"):
             try:
@@ -28324,7 +28324,7 @@ __DESIGN_TOKENS__
     # are the account's own prefs until the user publishes.
 
     def _recipes():
-        import moonglade_recipes
+        from moonglade import recipes as moonglade_recipes
         return moonglade_recipes
 
     def _recipe_fail(e, **extra):
@@ -28789,7 +28789,7 @@ __DESIGN_TOKENS__
     # browser and are never written to the catalog, a file or a log line.
 
     def _inbox():
-        import moonglade_inbox
+        from moonglade import inbox as moonglade_inbox
         return moonglade_inbox
 
     def _inbox_fail(e, **extra):
@@ -28800,7 +28800,7 @@ __DESIGN_TOKENS__
         return jsonify(out), 200
 
     def _inbox_read_only():
-        import moonglade_backup as core
+        from moonglade import backup as core
         return bool(core.READ_ONLY or core._read_only_now())
 
     def _inbox_local_media(items):
@@ -28821,7 +28821,7 @@ __DESIGN_TOKENS__
         if not tasks:
             return
         try:
-            import moonglade_backup as core
+            from moonglade import backup as core
             jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
             for add in _inbox().task_activity(tasks, jobs_by_id):
                 _log_job(add["job_id"], status="done", type="generate", label=add["label"],
@@ -29159,7 +29159,7 @@ def main():
     args.host, args.port = _srv["host"], _srv["port"]
 
     out_dir = Path(resolve_library_dir(args.out))
-    import moonglade_logging
+    from moonglade import logs as moonglade_logging
     moonglade_logging.setup_logging(out_dir, verbose=args.verbose)
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
@@ -29309,7 +29309,7 @@ def main():
     # finally below -- which now actually runs, thanks to step 1's graceful shutdown. The
     # advertiser (and the running host/port/scheme with it) is stashed so the Control Panel's
     # Bonjour chip can toggle or re-point it live, no restart.
-    import moonglade_bonjour
+    from moonglade import bonjour as moonglade_bonjour
     _bonjour = moonglade_bonjour.BonjourAdvertiser()
     _SERVER_CONTROL["bonjour"] = _bonjour
     _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": scheme}

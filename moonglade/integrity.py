@@ -61,7 +61,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-import moonglade_paths as _paths
+from moonglade import paths as _paths
 
 REPORT_CSV = "integrity_report.csv"
 REPORT_JSON = "integrity_report.json"
@@ -199,7 +199,7 @@ def _write_atomic(path, data):
     try:
         tmp.write_bytes(data)
         try:
-            import moonglade_backup as core          # lazy: the Windows sharing-violation retry
+            from moonglade import backup as core          # lazy: the Windows sharing-violation retry
             core._atomic_replace(tmp, path)
         except ImportError:
             os.replace(tmp, path)
@@ -347,7 +347,7 @@ def _line_for(r, check, g):
 def verify_library(out_dir, db_path, deep=False, progress=None):
     """Run the pass, write both reports, return the summary (the JSON document) with the
     report lines under "lines" as (media_id, problem, path, size, recoverable) tuples."""
-    import moonglade_gallery as g                     # lazy: the catalog verbs and the walk
+    from moonglade import gallery as g                     # lazy: the catalog verbs and the walk
     out = Path(out_dir)
     rows = g.integrity_rows(db_path) if Path(db_path).exists() else []
     index = _index(out, g)
@@ -577,7 +577,7 @@ def set_mark(out_dir, media_id, mark):
 def reconciled_at(out_dir):
     """When the last reconcile (moonglade_backup.run_reconcile_deleted) rewrote the
     archive-only flags, or None before the first stamped one."""
-    import moonglade_backup as core                  # lazy, like _write_atomic's
+    from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
         doc = json.loads(_paths.state_path(out_dir, core.RECONCILE_STAMP)
                          .read_text(encoding="utf-8"))
@@ -631,7 +631,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
               redownload_bytes, an estimate (the cut-short file's own size or the library's
               average file size, `avg_bytes`, whichever is larger), None without an average.
     """
-    import moonglade_gallery as g                     # lazy: the catalog verbs
+    from moonglade import gallery as g                     # lazy: the catalog verbs
     out = Path(out_dir)
     summary = read_summary(out)
     lines = [ln for ln in read_lines(out) if ln[1] in LIST_KIND]
@@ -803,7 +803,7 @@ def missing_target(out_dir, row):
       5. a file name that carries this row's media id, so the file is found as this picture
          again and never lands under another picture's name.
     "occupied": something is already at that path. It is never overwritten."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     mid = str(row.get("media_id") or "").strip()
     raw = str(row.get("filename") or "").strip().replace("\\", "/")
     if not mid or not raw or "\x00" in raw or ":" in raw or raw.startswith("/"):
@@ -884,7 +884,7 @@ def _download_session():
     """The session a fix run downloads with -- made once per run (FixRunner), and without the
     USER_ID lookup: media reads never use the user id, and that `me` query retries three
     times."""
-    import moonglade_backup as core
+    from moonglade import backup as core
     return core._make_session(None, resolve_user=False)
 
 
@@ -924,8 +924,8 @@ def _live_check(out, row, index, g):
 def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None, on_bytes=None):
     """Re-download ONE broken file over itself. Returns a result dict (media_id, action, ok,
     refused, error, note, bytes). See the section comment for the order of the checks."""
-    import moonglade_backup as core
-    import moonglade_gallery as g
+    from moonglade import backup as core
+    from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
     row = g.get_row(db_path, mid) if mid else None
@@ -1023,7 +1023,7 @@ def redownload_one(out_dir, db_path, media_id, session_factory=None, index=None,
 def rebuild_one(out_dir, db_path, media_id, index=None):
     """Rebuild ONE missing or empty thumbnail from the file on disk. Local only: no network,
     and READ_ONLY does not stop it. Refuses when the file itself is broken."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     out = Path(out_dir)
     mid = str(media_id or "").strip()
     row = g.get_row(db_path, mid) if mid else None
@@ -1056,7 +1056,7 @@ def fix_one(out_dir, db_path, media_id, session_factory=None, index=None, on_byt
     When the file has changed since the check so that today's fix is a different one, nothing
     runs: a Rebuild the owner pressed never turns into a network re-download, nor the other
     way round (review finding 3)."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     mid = str(media_id or "").strip()
     marks = read_marks(out_dir) if marks is None else marks
     row = g.get_row(db_path, mid) if mid else None
@@ -1081,7 +1081,7 @@ def reverify(out_dir, db_path, media_ids):
     old row lines go, the lines a fresh check finds come in, and the counts follow. Every
     other line stays as the full check wrote it, and so does its `verified_at`; this run is
     stamped `reverified_at`. Returns the new summary, or None when there is no report."""
-    import moonglade_gallery as g
+    from moonglade import gallery as g
     out = Path(out_dir)
     ids = {str(m) for m in media_ids if str(m).strip()}
     index = _index(out, g)                             # the walk, before the lock is taken
@@ -1217,7 +1217,7 @@ class FixRunner:
                 cur["bytes"], cur["expect"] = int(n), int(total or 0)
 
     def _run(self, job_id, items):
-        import moonglade_gallery as g
+        from moonglade import gallery as g
         touched = []
         err = ""
         made = []

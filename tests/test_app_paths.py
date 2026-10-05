@@ -1,8 +1,9 @@
 """moonglade_paths: the one place an app-root path is derived (Wave 4 groundwork, 3.19.0).
 
 Three claims, each with its own test:
-  * NOTHING MOVED. Every helper, and every app function that now asks one, resolves to the
-    exact path it resolved to before the helpers existed (the table below);
+  * NOTHING MOVED but the code. Every helper, and every app function that now asks one,
+    resolves to the exact path it resolved to before the helpers existed (the table below),
+    except the pack manifest, which 3.20 moved into moonglade/ with the code;
   * the machine files and the art tree are separate concepts: the pack, branding.json,
     branding_slots.json and the icon cache follow local_path(), never the art tree's parent;
   * no first-party module but moonglade_paths derives an app-root path from `__file__`.
@@ -16,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-import moonglade_assets as ma
-import moonglade_backup as core
-import moonglade_gallery as g
-import moonglade_paths as paths
+from moonglade import assets as ma
+from moonglade import backup as core
+from moonglade import gallery as g
+from moonglade import paths
 from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -72,8 +73,9 @@ _TABLE = [
     ("the art tree, helper", lambda: paths.art_root(), lambda: _REPO / g._GOODS_ROOT_NAME),
     ("the legacy art folder", lambda: g.branding_root().parent / "branding",
      lambda: _REPO / "branding"),
+    # The one location that moved in 3.20: the manifest is committed with the code.
     ("the pack manifest", lambda: ma.manifest_path(),
-     lambda: _REPO / "moonglade_manifest.json"),
+     lambda: _REPO / "moonglade" / "manifest.json"),
     ("wiki/", lambda: g.wiki_dir(), lambda: _REPO / "wiki"),
     ("CHANGELOG.md", lambda: g.changelog_path(), lambda: _REPO / "CHANGELOG.md"),
     ("gallery/dist", lambda: paths.gallery_dist(), lambda: _REPO / "gallery" / "dist"),
@@ -83,6 +85,7 @@ _TABLE = [
     ("static/", lambda: paths.static_dir(), lambda: _REPO / "static"),
     ("requirements.txt", lambda: paths.requirements_path(), lambda: _REPO / "requirements.txt"),
     ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Serve Gallery.pyw"),
+    # The two old entry scripts: since 3.20 the root stand-ins, kept for one release.
     ("the server script", lambda: paths.gallery_script_path(),
      lambda: _REPO / "moonglade_gallery.py"),
     ("the CLI script", lambda: paths.backup_script_path(),
@@ -157,7 +160,7 @@ def test_machine_files_follow_local_path_not_the_art_tree(monkeypatch, tmp_path)
 
 def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
     """A pack-shipped .ico is materialized under local_path(), not beside the art tree."""
-    import moonglade_container as mc
+    from moonglade import container as mc
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     local.mkdir()
     monkeypatch.setattr(g, "branding_root", lambda: art)
@@ -179,7 +182,7 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
 # A module that genuinely needs its own __file__, with the reason. Everything else asks
 # moonglade_paths.
 _FILE_ALLOWED = {
-    "moonglade_paths.py": "it IS the app-root definition",
+    "moonglade/paths.py": "it IS the app-root definition",
     "Serve Gallery.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
                          "on sys.path so moonglade_paths imports however the launcher was "
                          "started, and it is the cwd and the child script's folder, byte-for-"
@@ -190,6 +193,11 @@ _FILE_ALLOWED = {
 
 def _first_party_modules():
     return first_party_sources()          # the root, and the moonglade/ code folder
+
+
+def _rel(path):
+    """A module's path from the repo root, as _FILE_ALLOWED names it ("moonglade/paths.py")."""
+    return path.relative_to(_REPO).as_posix()
 
 
 def _file_uses_in(text, filename="<src>"):
@@ -213,10 +221,10 @@ def _file_uses(path):
 
 def test_no_module_but_moonglade_paths_derives_an_app_root_path_from_its_file():
     modules = _first_party_modules()
-    assert any(p.name == "moonglade_gallery.py" for p in modules), "found no modules to check"
+    assert any(_rel(p) == "moonglade/gallery.py" for p in modules), "found no modules to check"
     stray = []
     for path in modules:
-        if path.name in _FILE_ALLOWED:
+        if _rel(path) in _FILE_ALLOWED:
             continue
         stray += ["%s:%d  %s" % (path.name, n, line) for n, line in _file_uses(path)]
     assert not stray, ("derive app-root paths through moonglade_paths, not __file__:\n  "
@@ -264,7 +272,7 @@ def _cwd_reads(path):
 
 def test_no_module_but_moonglade_paths_reads_the_working_directory():
     """The cwd-relative anchors name their dependence: paths.run_dir()."""
-    stray = [h for p in _first_party_modules() if p.name != "moonglade_paths.py"
+    stray = [h for p in _first_party_modules() if _rel(p) != "moonglade/paths.py"
              for h in _cwd_reads(p)]
     assert not stray, "ask moonglade_paths.run_dir():\n  " + "\n  ".join(stray)
 
@@ -277,7 +285,7 @@ def test_a_relative_library_serves_from_the_app_folder(tmp_path, monkeypatch):
     (`pixai_backup`) is relative, so a thumbnail and a video must come from APP_ROOT/<library>
     -- not from wherever moonglade_gallery.py sits, which stops being the app folder when
     the code moves. Here the app folder is a tmp one and the module is not in it."""
-    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    from moonglade.gallery import CATALOG_FIELDS, save_catalog
     from tests.conftest import login_client
     app_root = tmp_path / "app"
     lib = app_root / "lib"

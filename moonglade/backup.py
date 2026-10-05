@@ -56,8 +56,8 @@ from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import moonglade_paths as _paths
-from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
+from moonglade import paths as _paths
+from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
                             # The row-level artwork write (see run_sync_artworks): one
                             # narrow UPDATE of the eleven PixAI-owned columns, keyed by
@@ -223,7 +223,7 @@ def vlog(msg):
     passed -- this is the one call site touched to give every existing vlog()
     caller file-logging for free, rather than threading a logger through ~100
     of them individually."""
-    import moonglade_logging
+    from moonglade import logs as moonglade_logging
     moonglade_logging.get_logger().debug(msg)
     if not _VERBOSE:
         return
@@ -1915,7 +1915,7 @@ def migrate_local_filenames(out, db_path, thumb_dir):
     Deliberately never deletes: a destination that already exists holds the same
     content (the name contains the content hash), so the row is left exactly as it
     is for a human to look at rather than resolved by removing one of them."""
-    from moonglade_gallery import delete_from_catalog
+    from moonglade.gallery import delete_from_catalog
     out = Path(out)
     thumb_dir = Path(thumb_dir)
     renamed = skipped = 0
@@ -5210,7 +5210,7 @@ def cmd_dedup(args, out, db_path):
     if culled_keys:
         try:      # The Great Sweep: each redundant copy once, keyed by what it duplicated --
             # copying a file back and deduping it again is not a second piece swept
-            from moonglade_gallery import telem_set_add_many
+            from moonglade.gallery import telem_set_add_many
             telem_set_add_many("culled_keys", culled_keys, out_dir=out)
         except Exception:
             pass
@@ -5560,7 +5560,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Embedded metadata into {:,} images.".format(embedded))
     print("Reversible manifest: {}  (run --undo-organize to revert)".format(manifest_path))
     try:      # Keeper of Order: a real (non-dry-run) organize completed
-        from moonglade_gallery import telem_bump
+        from moonglade.gallery import telem_bump
         telem_bump("organize_runs", out_dir=out)
     except Exception:
         pass
@@ -7125,7 +7125,7 @@ def run_sync_videos(args):
 
     # Generate a gallery poster thumbnail for a video (keyed by the VIDEO media
     # id) from its still frame, so previews work without a separate image backup.
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     poster_tmp = out / "gallery" / "_postertmp"
 
@@ -7539,7 +7539,7 @@ def video_poster_thumb(video_path, thumb_path):
     guard stays here because import-local and sync-videos gate on it."""
     if not ffmpeg_path():
         return False
-    from moonglade_gallery import make_video_thumbnail
+    from moonglade.gallery import make_video_thumbnail
     return make_video_thumbnail(video_path, thumb_path)
 
 
@@ -7737,7 +7737,7 @@ def run_import_local(args):
     safe to re-run. Images get a gallery thumbnail; videos play via the catalog
     filename (no still to thumbnail, so they show a placeholder + the video badge)."""
     import shutil
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
@@ -8733,7 +8733,7 @@ def make_video_duration_lookup(out_dir, db_path=None):
     The answer is cached per media id for the life of the returned callable (one per gallery
     app, one per CLI run), so a quote and the spend that follows it read the same number even
     if a file lands in between, and a miss does not re-walk the library per keystroke."""
-    from moonglade_gallery import find_local_video_file, get_row
+    from moonglade.gallery import find_local_video_file, get_row
     out = Path(out_dir)
     dbp = Path(db_path) if db_path else out / "catalog.db"
     cache = {}
@@ -9740,7 +9740,7 @@ def run_generate(args):
         session = _make_session(getattr(args, "token", None))
     _print_gate_receipt(adjusted, gated=True)
     thumb_dir = out / "gallery" / "thumbs"
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
 
     if existing_task:
         # Recover an already-created generation by id (no new credits). Tool/API
@@ -9926,7 +9926,7 @@ def run_generate(args):
     # never moved (M16, 2026-07-27).
     if existing_task and (rows or videos):
         try:
-            from moonglade_gallery import telem_bump
+            from moonglade.gallery import telem_bump
             telem_bump("recover_events", out_dir=out)
         except Exception:
             pass
@@ -10006,7 +10006,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
     model_id, model_name = _video_row_model(session, result, params, sent, fm)
 
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     vdir = out / "videos"
@@ -10162,7 +10162,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     outputs = result.get("outputs") or {}
     media = _task_image_media(outputs)
     _outputs_or_raise(result, media, "task completed but no media ids found")
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
     img_dir = out / "images"
     db_path = out / "catalog.db"
@@ -10246,7 +10246,7 @@ def _bump_card_use(params):
     (a card attached to a rejected submit was never spent). Fail-soft no-op."""
     if isinstance(params, dict) and params.get("kaisuukenId"):
         try:
-            from moonglade_gallery import telem_bump
+            from moonglade.gallery import telem_bump
             telem_bump("free_cards_applied")
         except Exception:
             pass
@@ -10657,7 +10657,7 @@ def _check_context_images(session, p):
     if p.get("recipeIds"):
         # ONE wording for this refusal wherever it fires (the build, this gate, the send's
         # backstop): the recipe lane's, which tells the user how to send them.
-        import moonglade_recipes as _recipes
+        from moonglade import recipes as _recipes
         raise PixAIError(_recipes.HELD_WITH_CONTEXT)
     if p.get("modelStyle"):
         raise PixAIError("A style can't ride with context images — PixAI would drop the images")
@@ -11336,7 +11336,7 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     params = _gate_params_for_model(session, params)
     # Lane w2-recipes: the dict about to go out may not carry recipes beside context images
     # (a reference the backstop gate just converted), a lane or an upscale. No network.
-    import moonglade_recipes as _recipes
+    from moonglade import recipes as _recipes
     _recipes.check_params(params)
     if not exact:
         # Already known to be turbo-refused? use Low. A run job (exact) never: the run applied
@@ -12114,7 +12114,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     # list, a gateless road, and recipes beside context images or on the Upscale road.
     # Returns `params` itself when the payload names none. Design:
     # design/notes/recipes/BUILD-w2-recipes.md.
-    import moonglade_recipes as _recipes
+    from moonglade import recipes as _recipes
     params = _recipes.attach_to_built(params, p, gated=rs.gate is not None)
     # Session H decision 5 -- the creativity stop, shaped at BUILD on the architecture the
     # gate itself reads (rs.features, the same cached /features; review B3). The gate's G6 then
@@ -12175,7 +12175,7 @@ def _image_refs(prompt):
 
 def _recipes_in(params):
     """True when the built params carry recipes, read by the recipe lane's one parser."""
-    import moonglade_recipes as _recipes
+    from moonglade import recipes as _recipes
     return bool(_recipes.recipe_ids_from(params))
 
 
@@ -12300,7 +12300,7 @@ def _price_answer(session, req):
     if recipes:
         # Lane w2-recipes: a failed quote with recipes is PixAI's refusal (RECIPE_*) or
         # "couldn't verify" -- and the card check is skipped, so FREE needs a read price.
-        import moonglade_recipes as _recipes
+        from moonglade import recipes as _recipes
         verdict = _recipes.price_verdict(session, req.parameters, cost)
         if verdict is not None:
             return verdict
@@ -12421,7 +12421,7 @@ def send_run(session, jobs, *, hooks, budget=None, gap_s=None, sleep=None):
     never reached -> not_sent; after it, a definite refusal (a GraphQL error, a 401, a local
     refusal) -> refused; anything else (a timeout, a dropped connection, a 5xx, no task id)
     -> may_have_started, never resent and never counted as refused."""
-    import moonglade_recipes as _recipes
+    from moonglade import recipes as _recipes
     gap = RUN_SEND_GAP_S if gap_s is None else gap_s
     pause = sleep if sleep is not None else time.sleep
     out = []
@@ -12915,7 +12915,7 @@ def run_edit_image(args):
     init_db(db_path)
     session = _make_session(getattr(args, "token", None))
     thumb_dir = out / "gallery" / "thumbs"
-    from moonglade_gallery import make_thumbnail
+    from moonglade.gallery import make_thumbnail
 
     params = {}
     if existing_task:
@@ -14773,7 +14773,7 @@ def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
         if page >= total_page:
             break
         if page >= max_pages:
-            import moonglade_logging
+            from moonglade import logs as moonglade_logging
             moonglade_logging.get_logger().warning(
                 "contest board: stopped at the %d-page ceiling; the board reports %d pages, "
                 "so its oldest %d page(s) were not read", max_pages, total_page,
@@ -15811,7 +15811,7 @@ def run_claims(args):
             print("Failed to claim {}: {}".format(r["id"], str(e)[:150]))
     if claimed:
         try:      # Claimant: the Void pays a small stipend
-            from moonglade_gallery import telem_bump
+            from moonglade.gallery import telem_bump
             telem_bump("claims", claimed)
         except Exception:
             pass
@@ -16234,7 +16234,7 @@ def run_rebuild_similar(args):
     marker). No network; needs torch/pixeltable. Run it when the gallery is NOT serving
     Similar queries (both touch the same embedded Postgres)."""
     try:
-        import moonglade_similar as ps
+        from moonglade import similar as ps
     except Exception as e:
         sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
     if not ps.is_available():
@@ -16267,7 +16267,7 @@ def run_sync_similar(args):
     (duplicate/corrupt), not merely incomplete. No network; needs torch/pixeltable. Run it while
     the gallery is NOT serving Similar queries -- both use the same embedded Postgres."""
     try:
-        import moonglade_similar as ps
+        from moonglade import similar as ps
     except Exception as e:
         sys.exit("Similar index unavailable (pixeltable/torch not installed): {}".format(e))
     if not ps.is_available():
@@ -16930,7 +16930,7 @@ def run_backfill_phash(args):
     run_backfill_full_meta's docstring already explains."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade_gallery import load_catalog, save_catalog, compute_dhash, find_image_file
+    from moonglade.gallery import load_catalog, save_catalog, compute_dhash, find_image_file
 
     rows = load_catalog(db_path)
     videos = [r for r in rows if str(r.get("is_video") or "") == "1"]
@@ -17000,7 +17000,7 @@ def _check_time_capsule(created_at, out_dir):
         if not s:
             return
         if (datetime.now() - datetime.fromisoformat(s)).days > 730:
-            from moonglade_gallery import telem_flag
+            from moonglade.gallery import telem_flag
             telem_flag("old_piece_backed_up", out_dir=out_dir)
     except Exception:
         pass
@@ -17024,7 +17024,7 @@ WALK_END_FLAG = "walk_reached_end"
 def walk_end_reached(out_dir):
     """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
     try:
-        import moonglade_gallery as _mg
+        from moonglade import gallery as _mg
         return bool(_mg.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
     except Exception:
         return False
@@ -17033,7 +17033,7 @@ def walk_end_reached(out_dir):
 def mark_walk_end_reached(out_dir):
     """Record that a pass walked all the way to the oldest page. Idempotent."""
     try:
-        import moonglade_gallery as _mg
+        from moonglade import gallery as _mg
         _mg.telem_flag(WALK_END_FLAG, out_dir=out_dir)
     except Exception:
         pass
@@ -17551,7 +17551,7 @@ def run_rebuild_thumbs(args):
     and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
-    from moonglade_gallery import build_thumbnails, load_catalog
+    from moonglade.gallery import build_thumbnails, load_catalog
     thumb_dir = out / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     rows = load_catalog(db_path)
@@ -18114,7 +18114,7 @@ def main():
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
     set_verbose(getattr(args, "verbose", False))
-    import moonglade_logging
+    from moonglade import logs as moonglade_logging
     moonglade_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
     # Give every command a progress callback (terminal bar, or Control Panel markers under
     # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
@@ -18142,7 +18142,7 @@ def main():
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
-        from moonglade_gallery import set_telemetry_out
+        from moonglade.gallery import set_telemetry_out
         set_telemetry_out(out)
     except Exception:
         pass
@@ -18251,7 +18251,7 @@ def main():
             return
         if getattr(args, "verify_library", False):
             # Read-only (moonglade_integrity.py): no _check_read_only, nothing to gate.
-            import moonglade_integrity
+            from moonglade import integrity as moonglade_integrity
             _job = _cli_job_start(out, "Verify library integrity")
             try:
                 moonglade_integrity.run_cli(out, db_path, deep=getattr(args, "verify_deep", False),
@@ -18263,11 +18263,11 @@ def main():
             return
         if getattr(args, "export_curation", None) is not None:
             # Local catalog only (moonglade_curation_io.py); no PixAI call.
-            import moonglade_curation_io
+            from moonglade import curation_io as moonglade_curation_io
             moonglade_curation_io.run_export_cli(out, db_path, args.export_curation)
             return
         if getattr(args, "import_curation", ""):
-            import moonglade_curation_io
+            from moonglade import curation_io as moonglade_curation_io
             try:
                 moonglade_curation_io.run_import_cli(
                     out, db_path, args.import_curation, apply=args.apply,
@@ -18368,7 +18368,7 @@ def main():
                 # told first_sync_complete() the first sync was done when most of the library
                 # was still missing. Now the flag means what its name says.
                 try:
-                    import moonglade_gallery as _mg
+                    from moonglade import gallery as _mg
                     if walk_end_reached(out):
                         _mg.telem_flag("first_sync_done", out_dir=out)
                 except Exception:

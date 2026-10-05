@@ -33,7 +33,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import moonglade_paths as _paths
+from moonglade import paths as _paths
 
 _CHUNK = 1 << 20    # 1 MiB per read -- coarse enough for real throughput,
                     # fine enough for smooth progress and quick cancel response.
@@ -175,7 +175,7 @@ def _container_readable(container_path):
     build understands. A v1/foreign/corrupt `.dat` opens as None. Reads the
     header and table of contents, never the whole payload."""
     try:
-        import moonglade_container as _mc
+        from moonglade import container as _mc
         return _mc.open_container(str(container_path)) is not None
     except Exception:
         return False

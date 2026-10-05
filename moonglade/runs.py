@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import moonglade_paths as _paths
+from moonglade import paths as _paths
 
 # ---------------------------------------------------------------------------------------
 # The template (NOTES 1, page M1 + M6)
