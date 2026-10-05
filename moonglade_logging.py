@@ -21,6 +21,7 @@ when imported) without this module needing to know or care which.
 """
 import logging
 import logging.handlers
+import os
 import sys
 import threading
 from pathlib import Path
@@ -162,6 +163,37 @@ def _install_crash_hook(logger):
 def log_path(out_dir):
     """The current log file's path, for a future --show-logs/Panel affordance."""
     return _paths.state_path(out_dir, "logs") / "moonglade.log"
+
+
+# serve.log, the launcher's capture of the server's console (Serve Gallery.pyw), is appended
+# to on every start. It is trimmed at start instead of by a logging handler: the server's
+# stdout and stderr are written straight into the file by the OS, so nothing in Python sees
+# the lines go by.
+SERVE_LOG_MAX_BYTES = 1024 * 1024
+SERVE_LOG_KEEP = 3
+
+
+def rotate_by_size(path, max_bytes=SERVE_LOG_MAX_BYTES, keep=SERVE_LOG_KEEP):
+    """Run before the file is opened for appending: when `path` is over `max_bytes`, it
+    becomes `<name>.1`, the older ones shift up to `<name>.<keep>` and the oldest is dropped.
+    Returns True when it rotated. Best effort: a missing file, or a rename the system refuses
+    (another process holding the file open), leaves everything as it was and returns False --
+    a log must never stop the app starting."""
+    p = Path(path)
+    try:
+        if p.stat().st_size <= max_bytes:
+            return False
+    except OSError:
+        return False
+    try:
+        for n in range(max(1, int(keep)) - 1, 0, -1):
+            older = p.with_name("%s.%d" % (p.name, n))
+            if older.exists():
+                os.replace(older, p.with_name("%s.%d" % (p.name, n + 1)))
+        os.replace(p, p.with_name(p.name + ".1"))
+    except OSError:
+        return False
+    return True
 
 
 def get_logger():

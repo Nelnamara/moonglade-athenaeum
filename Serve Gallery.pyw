@@ -135,8 +135,19 @@ def _open_when_ready():
 
 # Capture the child's stdout/stderr to serve.log so a boot failure isn't silent under pythonw
 # (no console). stdin=DEVNULL so the headless child never blocks on input.
+#
+# The log trims itself, once per launcher start (not on a Restart): over 1 MB it becomes
+# serve.log.1, the older ones shift to .2 and .3, and the oldest is dropped. After the
+# single-instance check above, so a second launcher never touches a running server's log.
+# Best effort: nothing here can stop the app starting.
+_serve_log = _paths.local_path("serve.log")
 try:
-    _log = open(str(_paths.local_path("serve.log")), "a", buffering=1, encoding="utf-8")
+    import moonglade_logging as _mlog
+    _mlog.rotate_by_size(_serve_log)
+except Exception:
+    pass
+try:
+    _log = open(str(_serve_log), "a", buffering=1, encoding="utf-8")
 except OSError:
     _log = subprocess.DEVNULL
 
