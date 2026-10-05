@@ -155,11 +155,11 @@ def test_each_roles_base_rules_and_each_images_effective_rule():
     assert base("power_poses") == {"formats": ["PNG"], "transparent": True, "animated_formats": [],
                                    "min_axis": "side", "min_px": 256}
     eff = g.role_image_spec
-    # the login default is 488 x 480 and animated: shape within 8 % of it, and the drawn 600 px
-    # minimum gives way to the default's own 480
+    # the login default is 366 x 360 and animated (pack v7 re-encoded every animation 360 px
+    # tall): shape within 8 % of it, and the drawn 600 px minimum gives way to the default's own 360
     assert eff("login_companion", "companion") == {
         "formats": ["WEBP", "PNG"], "transparent": True, "animated_formats": ["WEBP"],
-        "aspect": [488, 480], "aspect_tolerance": 0.08, "min_axis": "height", "min_px": 480}
+        "aspect": [366, 360], "aspect_tolerance": 0.08, "min_axis": "height", "min_px": 360}
     shapes = {("tracker_mascots", "spinner"): [566, 560], ("tracker_mascots", "done"): [329, 364],
               ("tracker_mascots", "failed"): [324, 365], ("tracker_mascots", "empty"): [402, 356],
               ("reward_icons", "claim"): [128, 128], ("reward_icons", "gift"): [128, 119],
@@ -327,9 +327,9 @@ REFUSALS = [
     ("too small", "reward_icons", "claim", _img((48, 48)),
      ["size"], ["at least 64 px"], ["48 px"],
      "Refused: the Reward icons must be at least 64 px. This one is 48 px. Your current art is unchanged."),
-    ("too short", "login_companion", "companion", _img((470, 470)),
-     ["size"], ["at least 480 px tall"], ["470 px tall"],
-     "Refused: the Login companion must be at least 480 px tall. This one is 470 px tall. "
+    ("too short", "login_companion", "companion", _img((350, 350)),
+     ["size"], ["at least 360 px tall"], ["350 px tall"],
+     "Refused: the Login companion must be at least 360 px tall. This one is 350 px tall. "
      "Your current art is unchanged."),
     ("two things wrong", "tracker_mascots", "done", _img((96, 64)),
      ["aspect", "size"], ["about 9:10 to square", "at least 128 px"], ["3:2", "64 px"],
@@ -361,8 +361,8 @@ def test_the_boundaries_pass(tmp_path):
     cli = _client(tmp_path)
     assert _post(cli, "reward_icons", "gift", _img((64, 64))).status_code == 200            # 64 px, 7 % off 128 x 119
     assert _post(cli, "tracker_mascots", "spinner", _img((566, 560))).status_code == 200     # the owner's spinner
-    assert _post(cli, "login_companion", "companion", _img((480, 480))).status_code == 200   # exactly 480 tall
-    assert _post(cli, "login_companion", "companion", _img((488, 480))).status_code == 200   # the pack's own size
+    assert _post(cli, "login_companion", "companion", _img((360, 360))).status_code == 200   # exactly 360 tall
+    assert _post(cli, "login_companion", "companion", _img((366, 360))).status_code == 200   # the pack's own size
     # power_poses/restart is 406 x 401 (1.0125): 7.6 % wider is in, 8.8 % wider is out
     assert _post(cli, "power_poses", "restart", _img((279, 256))).status_code == 200
     r = _post(cli, "power_poses", "restart", _img((282, 256)))
@@ -825,7 +825,7 @@ def test_the_everyday_formats_still_open_and_a_jpeg_is_refused_by_name(tmp_path)
 
 # ---- restore never deletes the only copy ------------------------------------------------------------
 # The legacy branding migration moved an old install's loose files into these exact paths, and
-# moonglade.dat may be absent. With no pack default to go back to, the install's file IS the only
+# the art pack may be absent. With no pack default to go back to, the install's file IS the only
 # copy: restore refuses (409) and leaves it.
 
 def test_restore_keeps_the_only_copy_when_the_pack_holds_no_default(tmp_path):

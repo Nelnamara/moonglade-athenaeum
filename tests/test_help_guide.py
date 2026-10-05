@@ -164,7 +164,7 @@ def test_a_highlight_names_its_surface_by_mark_or_by_its_words():
 
 def test_about_reads_the_running_versions_entry_not_the_newest(tmp_path):
     es = g.changelog_entries(CHANGELOG)
-    a = g.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.dat", entries=es)
+    a = g.about_payload("3.14.1", tmp_path / "nopack" / "moonglade.mgpack", entries=es)
     assert (a["version"], a["display_version"], a["kind"]) == ("3.14.1", "3.14.1", "patch")
     assert (a["date"], a["title"]) == ("2026-09-27", "Small Mend")
     assert [i["lead"] for i in a["items"]] == ["A fix"]
@@ -181,10 +181,57 @@ def test_release_size_and_display_version():
 
 def test_the_pack_version_reads_the_installed_marker(tmp_path):
     (tmp_path / "pack").mkdir()
-    dat = tmp_path / "pack" / "moonglade.dat"
+    dat = tmp_path / "pack" / "moonglade.mgpack"
     dat.write_bytes(b"x")
-    (tmp_path / "pack" / "moonglade.dat.version").write_text('{"version": "7", "sha256": "ab"}')
+    (tmp_path / "pack" / "moonglade.mgpack.version").write_text('{"version": "7", "sha256": "ab"}')
     assert g.art_pack_info(dat) == {"installed": True, "version": "7"}
+
+
+def test_an_old_pack_left_beside_the_new_one_says_so_on_about(tmp_path):
+    """A start that finds the pack under both names never deletes the old one; About's
+    art-pack line says so in plain words instead. Read from the disk each time, so the note
+    leaves the moment the old copy does, without a restart. No old copy, no note."""
+    import moonglade_assets as ma
+    (tmp_path / "pack").mkdir()
+    new = tmp_path / "pack" / "moonglade.mgpack"
+    new.write_bytes(b"x")
+    assert "note" not in g.art_pack_info(new)
+    old = tmp_path / "pack" / ma.LEGACY_NAME
+    old.write_bytes(b"an older pack")
+    assert g.art_pack_info(new)["note"] == (
+        "An old moonglade.dat is still beside the pack. It's safe to delete.")
+    assert g.about_payload("3.14.1", new)["pack"]["note"] == g.art_pack_info(new)["note"]
+    old.unlink()
+    assert "note" not in g.art_pack_info(new)
+    new.unlink()
+    old.write_bytes(b"an older pack")            # no pack in use: nothing to say "beside"
+    assert g.art_pack_info(new) == {"installed": False, "version": ""}
+
+
+def test_about_shows_the_packs_note_in_its_own_stamp_style():
+    """The note is one more line in the About card's existing stamp style, under the
+    "app x.y.z · art pack vN" line -- no new element, and the card names no file itself."""
+    import pathlib
+    import re
+    src = pathlib.Path("gallery/src/help/AboutLayers.jsx").read_text(encoding="utf-8")
+    assert re.search(r'\{about\.pack && about\.pack\.note \? \(?\s*<div className="mgab-stamp">'
+                     r'\{about\.pack\.note\}</div>', src), "About does not show the pack's note"
+
+
+def test_a_real_start_keeps_what_the_rename_found():
+    """main() keeps the rename's result rather than dropping it: a start that finds both
+    names says so on the console it was started from, beside the About card's note."""
+    import ast
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(g.main)))
+    kept = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+            and isinstance(n.value, ast.Call)
+            and getattr(n.value.func, "attr", None) == "migrate_legacy_name"]
+    assert kept, "main() drops what the rename found"
+    name = kept[0].targets[0].id
+    assert any(isinstance(n, ast.Compare) and getattr(n.left, "id", None) == name
+               for n in ast.walk(tree)), "main() keeps the result but never looks at it"
 
 
 def test_the_running_version_has_a_changelog_entry():

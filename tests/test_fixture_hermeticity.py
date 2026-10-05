@@ -105,7 +105,7 @@ def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
     So the pin is asserted directly, at the only level that survives the mask: the
     fixture's own source must (a) setattr `branding_root` and (b) call conftest's
     `seed_sealed_container`. Both, because either alone is a half-pin -- a pinned root
-    with no seeded pack points `_container_path()` at a `moonglade.dat` nobody wrote,
+    with no seeded pack points `_container_path()` at a pack nobody wrote,
     and a seeded pack with no pinned root writes it beside the checkout.
 
     `paged_library_server` is deliberately NOT in this list: it is function-scoped, so
@@ -337,7 +337,7 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
     "the resolver was not pinned"."""
     from tests.conftest import _REAL_CODED_ROOT
 
-    real_pack = _REAL_CODED_ROOT.parent / "moonglade.dat"
+    real_pack = _REAL_CODED_ROOT.parent / "moonglade.mgpack"
     assert unpinned_module_view.root != _REAL_CODED_ROOT, (
         "a module-scoped fixture resolved branding_root() to the checkout's own coded tree "
         "at {}".format(_REAL_CODED_ROOT))

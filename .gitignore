@@ -126,11 +126,16 @@ static/_mockup_*.html
 # is the very secret the coding exercise hides, so it must never reach this PUBLIC repo. Regenerable.
 /0x676F6F6473/
 
-# The asset container (tools/build_container.py -> moonglade.dat). NOT committed BY DECISION
+# The asset container, the art pack (tools/build_container.py -> moonglade.mgpack), and the
+# .version marker the downloader writes beside it. NOT committed BY DECISION
 # (docs/DECISIONS.md "The asset container, re-scoped from scratch", 2026-08-10): delivery is a
 # GitHub Release asset fetched on first run -- Releases have no bandwidth caps, git/LFS does.
-# This entry implements that decision; it is not a privacy call.
+# This entry implements that decision; it is not a privacy call. moonglade.dat is the pack's
+# name before pack v7; a checkout can still hold one (and its marker).
+/moonglade.mgpack
+/moonglade.mgpack.version
 /moonglade.dat
+/moonglade.dat.version
 # Materialized-from-container cache for things needing a REAL file on disk (the Desktop-shortcut
 # writer's .ico -- PowerShell reads IconLocation off disk). Regenerable, like branding/_thumbs/.
 /_container_cache/

@@ -15,7 +15,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.17.0 — Mail Call,
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.18.0 — Travelling Light,
   2026-10-04), per the rule at the top of this file.
 
 ---
@@ -84,15 +84,6 @@ why this section exists.
   fan-out each), and **Phase C**, triage + re-verify of B's findings. Scope and severity scale:
   `../moonglade-internal/scopes/SCOPE_2026-08-26_surface-audit.md`. Not dropped; run when scheduled.
 
-- **Retire the `/next` name: remove the old `/api/next/*` aliases (Phase 2).** *(owner, 2026-09-29)*
-  Phase 1 renamed the app's data routes to `/api/library`, `/api/detail/<id>` and `/api/history` and
-  kept the old `/api/next/*` paths as aliases on the same views, so a page still running an older cached
-  bundle keeps working. One release after that ships, remove the aliases, with a test that the old paths
-  404 for a real logged-in session (anonymously every unrouted path redirects to `/login`, so an anonymous
-  probe proves nothing). The `/next/assets/` static prefix stays for good: installed phone apps read their
-  icons from it. Scope and tests:
-  `../moonglade-internal/scopes/SCOPE_2026-09-29_retire-the-next-namespace.md`.
-
 ## Design-pass reworks — rescope, don't just build
 
 - None right now.
@@ -145,14 +136,6 @@ why this section exists.
   the Windows-native WS-Discovery — would surface it as a device/link in Explorer's Network.
   Different protocol from Bonjour, its own dependency; cosmetic/convenience, not reachability. Low
   priority.
-- **Give the asset pack a real file type.** In Explorer `moonglade.dat` shows a blank Type column and
-  a generic icon (owner nitpick, 2026-08-22). `.dat` is too generic to claim system-wide, so the clean
-  fix is an app-specific extension (`.mgpack` or similar) plus a ProgID the app registers for the
-  current user on first run / from the launcher-shortcut path (friendly name "Moonglade asset pack",
-  the app icon) — the same per-user registry spot the Desktop-shortcut code already writes. Touches the
-  manifest/downloader file name, `_container_path()`, the builder's default `--out`, and the Release
-  asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority. Owner,
-  2026-10-02: yes to the extension and to the per-user registry entry, in pack v7.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added. Sources scouted in July (recovered 2026-10-02 from the deleted STATE
   notes): Kenney, the Sonniss GDC bundles, freesound and OpenGameArt (free/CC0 libraries), or Stable

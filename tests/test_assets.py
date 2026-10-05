@@ -7,6 +7,7 @@ engine doesn't know or care about.
 """
 import hashlib
 import json
+import logging
 import time
 
 import pytest
@@ -182,7 +183,7 @@ def _wait_done(job, timeout=_WAIT_DONE_TIMEOUT):
 
 
 def test_successful_fetch_writes_verified_file_and_marker(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES)
     job = ma.AssetFetchJob(target)
     started = job.start(manifest=manifest, opener=_opener(REAL_BYTES))
@@ -232,7 +233,7 @@ def test_the_progress_fixture_stays_well_inside_its_deadline():
 
 
 def test_progress_updates_during_download(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     data = _PROGRESS_DATA
     manifest = _manifest_for(data)
     job = ma.AssetFetchJob(target)
@@ -265,7 +266,7 @@ def test_progress_updates_during_download(tmp_path):
 
 
 def test_checksum_mismatch_fails_and_leaves_no_partial_file(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES)
     job = ma.AssetFetchJob(target)
     # opener serves DIFFERENT bytes than the manifest promises -- checksum must catch it.
@@ -277,7 +278,7 @@ def test_checksum_mismatch_fails_and_leaves_no_partial_file(tmp_path):
 
 
 def test_mirror_fallback_tries_next_url_on_failure(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=["https://dead.invalid/a", "https://good.invalid/b"])
     job = ma.AssetFetchJob(target)
     opener = _opener(REAL_BYTES, fail_first_n=1)
@@ -289,7 +290,7 @@ def test_mirror_fallback_tries_next_url_on_failure(tmp_path):
 
 
 def test_all_mirrors_failing_reports_the_last_error(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=["https://a.invalid", "https://b.invalid"])
     job = ma.AssetFetchJob(target)
     job.start(manifest=manifest, opener=_opener(REAL_BYTES, fail_first_n=99))
@@ -299,7 +300,7 @@ def test_all_mirrors_failing_reports_the_last_error(tmp_path):
 
 
 def test_no_urls_configured_fails_cleanly_not_a_crash(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES, urls=[])
     job = ma.AssetFetchJob(target)
     started = job.start(manifest=manifest, opener=_opener(REAL_BYTES))
@@ -309,14 +310,14 @@ def test_no_urls_configured_fails_cleanly_not_a_crash(tmp_path):
 
 
 def test_no_manifest_fails_cleanly(tmp_path):
-    job = ma.AssetFetchJob(tmp_path / "moonglade.dat")
+    job = ma.AssetFetchJob(tmp_path / "moonglade.mgpack")
     started = job.start(manifest=None, opener=_opener(REAL_BYTES))
     assert started is False
     assert job.status()["status"] == "failed"
 
 
 def test_single_flight_second_start_is_a_noop_while_running(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES * 200)   # big enough to still be running
     job = ma.AssetFetchJob(target)
     slow_opener = _opener(REAL_BYTES * 200, chunk=16)   # tiny chunks -> stays "running" a while
@@ -328,7 +329,7 @@ def test_single_flight_second_start_is_a_noop_while_running(tmp_path):
 
 
 def test_cancel_stops_the_download_and_leaves_no_partial(tmp_path):
-    target = tmp_path / "moonglade.dat"
+    target = tmp_path / "moonglade.mgpack"
     manifest = _manifest_for(REAL_BYTES * 500)
     job = ma.AssetFetchJob(target)
     # A per-chunk delay, not a small chunk, is what keeps this download running at the
@@ -404,3 +405,226 @@ def test_assets_fetch_route_still_refuses_an_anonymous_lan_caller(tmp_path):
     r = client.post("/api/assets/fetch", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 401
     assert r.get_json() == {"error": "authentication required"}
+
+
+# ---------------------------------------------------------------------------
+# The one-time rename (pack v7): the pack's pre-v7 name -> moonglade.mgpack. A real start
+# runs it before anything asks whether the pack is current (main(); its call site is held in
+# tests/test_pack_file_name.py). Every case below works in its own folder, so the install
+# shape under test is exactly the one written here.
+# ---------------------------------------------------------------------------
+_NEW = "moonglade.mgpack"
+
+
+def _old_pack(folder, data=REAL_BYTES, manifest=None):
+    """An install's pack under its pre-v7 name, plus the marker a verified download wrote
+    beside it when `manifest` is given."""
+    old = folder / ma.LEGACY_NAME
+    old.write_bytes(data)
+    if manifest is not None:
+        ma._write_marker(old, manifest)
+    return old
+
+
+def _names(folder):
+    return sorted(p.name for p in folder.iterdir())
+
+
+def _warnings(caplog):
+    return [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_rename_moves_the_pack_and_its_marker_and_nothing_downloads(tmp_path):
+    """The marker matches the manifest: renamed, marker moved with it, and the check that
+    follows asks for no download -- an 800 MB pack is never fetched again for a new name."""
+    manifest = _manifest_for(REAL_BYTES)
+    _old_pack(tmp_path, manifest=manifest)
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "renamed"
+    assert new.read_bytes() == REAL_BYTES
+    assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+    assert ma.needs_download(new, manifest) is False
+
+
+def test_rename_then_a_newer_manifest_downloads_over_it_leaving_one_pack(tmp_path):
+    """A v6 marker against a v7 manifest: renamed first, then the ordinary verified download
+    replaces the renamed file in place. One pack and one marker remain, no orphan copy."""
+    v6 = _manifest_for(REAL_BYTES)
+    _old_pack(tmp_path, manifest=v6)
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "renamed"
+    v7_bytes = b"v7 art" * 900
+    v7 = dict(_manifest_for(v7_bytes), version="7")
+    assert ma.needs_download(new, v7) is True
+    job = ma.AssetFetchJob(new)
+    assert job.start(manifest=v7, opener=_opener(v7_bytes)) is True
+    assert _wait_done(job)["status"] == "done"
+    assert new.read_bytes() == v7_bytes
+    assert ma._read_marker(new) == {"version": "7", "sha256": v7["sha256"]}
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+
+
+def test_both_names_present_leaves_the_old_copy_untouched_and_says_so(tmp_path, caplog):
+    """A pack already under the new name AND one under the old: nothing moves, nothing is
+    deleted (a stray asset copy is the owner's to remove), and one warning says it is there."""
+    manifest = _manifest_for(REAL_BYTES)
+    _old_pack(tmp_path, data=b"an older pack", manifest=manifest)
+    new = tmp_path / _NEW
+    new.write_bytes(REAL_BYTES)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in tmp_path.iterdir()}
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "both"
+    after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in tmp_path.iterdir()}
+    assert after == before
+    warned = _warnings(caplog)
+    assert len(warned) == 1 and ma.LEGACY_NAME in warned[0].getMessage()
+
+
+def test_neither_name_present_is_a_normal_fresh_download(tmp_path):
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "none"
+    assert _names(tmp_path) == []
+    manifest = _manifest_for(REAL_BYTES)
+    assert ma.needs_download(new, manifest) is True
+    job = ma.AssetFetchJob(new)
+    assert job.start(manifest=manifest, opener=_opener(REAL_BYTES)) is True
+    assert _wait_done(job)["status"] == "done"
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+
+
+def test_a_rename_refused_by_a_read_only_folder_logs_and_the_start_carries_on(
+        tmp_path, monkeypatch, caplog):
+    """A folder the app may not write in refuses the rename with a PermissionError (driven
+    here at os.replace, the one call that moves anything, since a read-only folder cannot be
+    made portably). One warning, nothing lost or half-moved, no exception -- and the start
+    goes on exactly as before the rename existed: no pack under the new name, so the check
+    offers the download."""
+    manifest = _manifest_for(REAL_BYTES)
+    old = _old_pack(tmp_path, manifest=manifest)
+
+    def _refuse(src, dst):
+        raise PermissionError(13, "Access is denied", str(src))
+    monkeypatch.setattr(ma.os, "replace", _refuse)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(tmp_path / _NEW) == "failed"
+    monkeypatch.undo()
+    assert old.read_bytes() == REAL_BYTES
+    assert _names(tmp_path) == [ma.LEGACY_NAME, ma.LEGACY_NAME + ".version"]
+    assert len(_warnings(caplog)) == 1
+    assert ma.needs_download(tmp_path / _NEW, manifest) is True
+
+
+def test_a_marker_left_under_the_new_name_never_vouches_for_the_renamed_pack(tmp_path):
+    """A marker can outlive its pack (the pack deleted by hand, the marker not). It describes
+    a file that is gone, so it must not vouch for the old pack renamed into its place: the
+    renamed pack is judged as unverified (size and readability), never as current."""
+    v7_bytes = b"v7 art" * 900
+    v7 = dict(_manifest_for(v7_bytes), version="7")
+    new = tmp_path / _NEW
+    ma._write_marker(new, v7)                              # left behind, no pack beside it
+    _old_pack(tmp_path)                                    # an old pack with no marker
+    assert ma.migrate_legacy_name(new) == "renamed"
+    assert _names(tmp_path) == [_NEW]
+    assert ma.needs_download(new, v7) is True              # a different size: fetch v7
+
+
+def test_a_marker_that_cannot_follow_its_pack_never_leaves_a_stale_one_vouching(
+        tmp_path, monkeypatch, caplog):
+    """The pack moves but its own marker cannot (a locked file), while a marker left by a
+    pack that is gone sits under the new name. That stale marker must not survive to vouch
+    for the moved pack: it is dropped first, so the pack is judged unverified."""
+    v7_bytes = b"v7 art" * 900
+    v7 = dict(_manifest_for(v7_bytes), version="7")
+    new = tmp_path / _NEW
+    ma._write_marker(new, v7)                              # left behind, no pack beside it
+    _old_pack(tmp_path, manifest=_manifest_for(REAL_BYTES))
+    real_replace = ma.os.replace
+
+    def _markers_locked(src, dst):
+        if str(src).endswith(".version"):
+            raise PermissionError(13, "The process cannot access the file", str(src))
+        return real_replace(src, dst)
+    monkeypatch.setattr(ma.os, "replace", _markers_locked)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "renamed"
+    monkeypatch.undo()
+    assert ma._read_marker(new) is None
+    assert ma.needs_download(new, v7) is True
+    assert len(_warnings(caplog)) == 1
+
+
+@pytest.mark.parametrize("case", ["renamed", "both", "failed"])
+def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
+    """The start's only record is out_dir/logs/moonglade.log, written through the real
+    setup_logging. Its root ceiling is WARNING and only the app's own loggers are let through
+    below it, so a line logged anywhere else at INFO never reaches the file: each outcome --
+    the rename itself included -- must be findable there afterwards."""
+    import moonglade_logging as ml
+    library, app = tmp_path / "library", tmp_path / "app"
+    app.mkdir()
+    _old_pack(app, manifest=_manifest_for(REAL_BYTES))
+    if case == "both":
+        (app / _NEW).write_bytes(REAL_BYTES)
+    if case == "failed":
+        def _refuse(src, dst):
+            raise PermissionError(13, "Access is denied", str(src))
+        monkeypatch.setattr(ma.os, "replace", _refuse)
+    ml._reset_for_tests()
+    try:
+        ml.setup_logging(library)
+        assert ma.migrate_legacy_name(app / _NEW) == case
+        log = ml.log_path(library)
+        text = log.read_text(encoding="utf-8") if log.exists() else ""
+    finally:
+        ml._reset_for_tests()
+    want = {"renamed": "renamed %s to %s" % (ma.LEGACY_NAME, _NEW),
+            "both": "an old copy remains",
+            "failed": "could not rename"}[case]
+    assert want in text, "%r is not in the log file:\n%s" % (want, text)
+
+
+def test_two_starts_at_once_the_late_one_finds_the_rename_done(tmp_path, monkeypatch, caplog):
+    """Two starts race. Both find the old pack; the other one renames it, marker and all,
+    just after this one has checked that the new name is free. This start's own move then
+    finds the old file gone and the new one there: that is the rename done, not a failure.
+    No "could not rename" warning, and the marker the other start just moved is left alone.
+    (The other start is run at the first marker-path lookup, which comes right after the
+    both-names check.)"""
+    manifest = _manifest_for(REAL_BYTES)
+    old = _old_pack(tmp_path, manifest=manifest)
+    new = tmp_path / _NEW
+    real_marker_path, real_replace = ma._version_marker_path, ma.os.replace
+    raced = []
+
+    def _marker_path(p):
+        if not raced:
+            raced.append(1)
+            real_replace(old, new)                                 # the other start's move
+            real_replace(real_marker_path(old), real_marker_path(new))
+        return real_marker_path(p)
+    monkeypatch.setattr(ma, "_version_marker_path", _marker_path)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "renamed"
+    monkeypatch.undo()
+    assert raced
+    assert _warnings(caplog) == []
+    assert new.read_bytes() == REAL_BYTES
+    assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
+    assert _names(tmp_path) == [_NEW, _NEW + ".version"]
+    assert ma.needs_download(new, manifest) is False
+
+
+def test_a_marker_left_under_the_old_name_is_tidied_once_the_pack_has_moved(tmp_path):
+    """A rename whose marker could not follow leaves moonglade.dat.version behind. Once the
+    old pack is gone and the pack under the new name exists, that marker is a few bytes about
+    a file that is not there (not an asset copy), so a start removes it. With no pack under
+    either name there is nothing to say it is stray, and it is left."""
+    stray = tmp_path / (ma.LEGACY_NAME + ".version")
+    stray.write_text('{"version": "6", "sha256": "ab"}', encoding="utf-8")
+    new = tmp_path / _NEW
+    assert ma.migrate_legacy_name(new) == "none"
+    assert stray.exists()
+    new.write_bytes(REAL_BYTES)
+    assert ma.migrate_legacy_name(new) == "none"
+    assert _names(tmp_path) == [_NEW]

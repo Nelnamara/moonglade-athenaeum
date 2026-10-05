@@ -11,8 +11,11 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   and as the last page of the guide. See [Control Panel](Control-Panel#updates-and-about).
 - **AI Tools** — the **✦ AI Tools** catalog in the gallery header: PixAI's one-click workflow tools,
   one card each. The entry only appears once **Mirror to PixAI** is armed.
-- **the art pack** — the file the app's own art ships in, `moonglade.dat`, sitting beside the
-  program. Also called the dat, the container, or just the pack.
+- **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, sitting beside the
+  program. Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
+  next time it starts. On Windows, Explorer lists its type as *Moonglade art pack*, with the
+  app's icon (set for your own Windows account only). Also called the container, or just the
+  pack.
 - **anchor** — where a Loom shot's spliced opening frame came from: the shot and the take before
   it. When that shot changes take, the card says **⚠ anchor changed** and offers **Re-anchor** or
   **Keep**. See [The Loom](The-Loom#re-anchor).

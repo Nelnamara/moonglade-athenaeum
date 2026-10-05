@@ -39,7 +39,7 @@ import { apiGet } from "../api.js";
    the Edit stack's, and the Edit stack is what the right column actually holds. */
 
 // Real preset thumbnails, packaged like every other branding-class asset in this app: NOT
-// committed to the repo -- they live in the shipped asset container (moonglade.dat) as
+// committed to the repo -- they live in the shipped art pack (moonglade.mgpack) as
 // bridge/preset_*.webp, resolved loose-then-container and served via /branding/<path>. On a box
 // without the container (or a fresh install before its download), the route 404s and onError
 // hides the <img> so the tile still reads (initial + name + cost), matching the branding contract.

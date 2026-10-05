@@ -77,7 +77,7 @@ def _png_bytes(color=(200, 30, 30), w=80, h=20):
 
 
 def _build_box(tmp_path, assets):
-    """(Re)build this install's moonglade.dat and drop the read cache so the new
+    """(Re)build this install's art pack and drop the read cache so the new
     content is seen immediately (the cache keys on mtime, which can collide with
     conftest's own seed within the filesystem's resolution)."""
     mc.write_container(g._container_path(), assets, {})
@@ -94,7 +94,7 @@ def _mkdir(p):
 
 
 def _no_container(tmp_path):
-    """Strip the moonglade.dat conftest seeds for the sealed roster, so the test
+    """Strip the art pack conftest seeds for the sealed roster, so the test
     runs against an install that genuinely has no pack. Behaviour must be
     identical either way -- that is the point of the baseline."""
     try:
@@ -319,7 +319,7 @@ def test_shipped_art_the_legacy_migration_left_loose_is_not_a_find(tmp_path, wit
 
     Run BOTH ways on purpose. The previous mechanism dismissed a candidate by
     asking the shipped pack "did you ship this?", which answers nothing at all
-    on an install that has no pack -- so a legacy install with no moonglade.dat
+    on an install that has no pack -- so a legacy install with no art pack
     self-earned off art it had been carrying for months. The baseline asks a
     question the pack is not party to, so the two runs must agree exactly."""
     manifest = json.dumps(
@@ -535,7 +535,7 @@ def test_a_stale_legacy_badge_thumb_cache_is_not_a_find(tmp_path):
 
 
 def test_system_chrome_is_not_a_find_even_with_no_container(tmp_path):
-    """A bare install has no moonglade.dat to ask about anything, and the app's
+    """A bare install has no art pack to ask about anything, and the app's
     chrome (the bare-name system files the translation's rule 2 owns, the ee_*
     starfall art rule 3 owns) sits loose on any install the legacy migration
     ran against. It was on disk before anyone looked, so it is a default."""

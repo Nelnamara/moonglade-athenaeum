@@ -756,3 +756,22 @@ def test_an_interrupted_run_is_closed_at_the_next_start(tmp_path):
     core.append_job_event(tmp_path, "integrity-abc", status="running", type="integrity",
                           label="Fixing 3 files", done=1, total=3)
     assert core.resolve_interrupted_local_jobs(tmp_path) == 1
+
+
+def test_the_report_lock_retries_when_windows_answers_permission_denied(tmp_path, monkeypatch):
+    """While another writer's lock file is being deleted, Windows answers EACCES (PermissionError)
+    to an exclusive create, not EEXIST. That is "busy": the lock waits and tries again rather than
+    crashing the re-check thread (seen in the full run, 2026-10-04)."""
+    real_open = integ.os.open
+    calls = {"n": 0}
+
+    def flaky_open(path, flags, *a):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *a)
+
+    monkeypatch.setattr(integ.os, "open", flaky_open)
+    with integ._ReportLock(tmp_path) as lk:
+        assert lk.held and (tmp_path / integ.REPORT_LOCK).exists()
+    assert calls["n"] == 2 and not (tmp_path / integ.REPORT_LOCK).exists()

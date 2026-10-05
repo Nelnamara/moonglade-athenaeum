@@ -311,7 +311,7 @@ def test_malformed_sealed_roster_degrades_not_500(tmp_path):
     container that opens fine but derives badly, and _sealed_defs only wrapped json.loads.)"""
     import json as _json
     import moonglade_container as mc
-    cpath = g._container_path()          # tmp_path/moonglade.dat via _isolated_branding
+    cpath = g._container_path()          # tmp_path/moonglade.mgpack via _isolated_branding
     # "roster" is a string -> `a["id"] for a in roster` iterates characters -> TypeError.
     for bad in (_json.dumps({"roster": "not-a-list"}).encode(),
                 _json.dumps({"roster": [{"name": "x"}]}).encode()):     # entry lacks "id"

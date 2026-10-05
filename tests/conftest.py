@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -270,7 +272,7 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     root = tmp_path_factory.mktemp("session-branding")
     mp.setattr(gallery, "branding_root", lambda: root / "branding")
-    seed_sealed_container(root / "moonglade.dat")
+    seed_sealed_container(gallery._container_path())
     try:
         yield root
     finally:
@@ -392,6 +394,31 @@ def _isolated_auth_config(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_config_path", lambda: tmp_path / "config.json")
 
 
+class _RealRegistryRefused(OSError):
+    """What a test meets when it reaches the real Windows registry."""
+
+
+class _NoRealRegistry(types.ModuleType):
+    """Stands in for `winreg` while a test runs: every name refuses with _RealRegistryRefused
+    (an OSError, so code that already tolerates a missing key degrades the same way)."""
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise _RealRegistryRefused(
+            "a test reached the real Windows registry (winreg.%s); pass a fake winreg" % name)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_registry(monkeypatch):
+    """No test may read or write the real Windows registry. The app's one registry write
+    (moonglade_gallery.register_pack_file_type) does a plain `import winreg`, so the module
+    that import hands back is swapped for a stub that refuses every use; tests that pass a
+    fake registry never import it and are untouched. Off Windows there is no real winreg to
+    protect, and the stub stands in all the same."""
+    monkeypatch.setitem(sys.modules, "winreg", _NoRealRegistry("winreg"))
+
+
 @pytest.fixture(autouse=True)
 def _isolated_branding(tmp_path, monkeypatch):
     """Branding art moved OUT of the library folder and into the app root on 2026-07-26, so
@@ -431,9 +458,9 @@ def _isolated_asset_manifest(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _sealed_roster_container(request, tmp_path):
     """Ship the sealed achievement roster to every test. The definitions live in
-    moonglade.dat now (not source), so without a container the roster is empty and every
+    the art pack now (not source), so without a container the roster is empty and every
     roster-dependent test fails. _isolated_branding points branding_root() at
-    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.dat -- write a
+    tmp_path/branding, so _container_path() resolves to tmp_path/moonglade.mgpack -- write a
     sealed container there from the private donor. Skips silently when the donor is absent
     (public CI without the companion repo): roster tests then see the empty fallback and
     are expected to skip, not fail. The sealed-defs cache is cleared around each test so no
@@ -446,7 +473,7 @@ def _sealed_roster_container(request, tmp_path):
     if "test_assets" in request.node.nodeid:
         yield
         return
-    seed_sealed_container(tmp_path / "moonglade.dat")
+    seed_sealed_container(tmp_path / gallery._container_path().name)
     yield
     clear_sealed_caches()
 

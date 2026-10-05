@@ -228,6 +228,14 @@ class _ReportLock:
         while True:
             try:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except PermissionError:
+                # Windows answers EACCES, not EEXIST, while another writer's lock is being
+                # deleted (delete pending). That is "busy", so wait and try again, bounded by
+                # the same deadline as a held lock.
+                if time.time() > deadline:
+                    raise TimeoutError("the integrity reports are busy")
+                time.sleep(0.05)
+                continue
             except FileExistsError:
                 try:
                     if time.time() - self.path.stat().st_mtime > REPORT_LOCK_STALE_S:
