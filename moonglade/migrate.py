@@ -362,6 +362,90 @@ def open_library(out_dir):
     return outcome
 
 
+# ---- what is left in the old places: About's list ----------------------------------------
+
+# How many rotated serve logs the launcher keeps (moonglade_logging.SERVE_LOG_KEEP).
+_OLD_SERVE_LOGS = ("serve.log.1", "serve.log.2", "serve.log.3")
+# The library-side branding.json: the old home of the branding choice, read by nothing since
+# branding moved to the app folder (2026-07). Named on About, never brought across.
+_UNUSED_LIBRARY_FILES = ("branding.json",)
+
+
+def _shown(p):
+    """A leftover by the name it has on disk; a folder's ends in a separator."""
+    return p.name + os.sep if p.is_dir() else p.name
+
+
+def leftovers(out_dir=None):
+    """Every old copy the app no longer reads, as (where, name) -- where is "app" (the app
+    folder) or "library" (the top of `out_dir`); a folder's name ends in a separator. Read
+    from the disk on each ask, so a name leaves the moment its file is deleted.
+
+    A copy is left over when it is still in its old place but the resolver now answers
+    somewhere else: an install not yet brought across has nothing left over (everything is
+    still read where it is). Never raises."""
+    found = []
+    try:
+        from moonglade import assets as _assets
+        pack_in_use = _paths.local_path(PACK_NAME)
+        app_names = [_assets.LEGACY_NAME, _assets.LEGACY_NAME + ".version"]
+        app_names += [n for n, _ in LOCAL_PLAN] + list(_OLD_SERVE_LOGS)
+        for name in app_names:
+            if name == _paths.ICON_CACHE_NAME:
+                continue        # still in use: an old Desktop shortcut takes its icon from it
+            old = _paths.old_local_path(name)
+            if not old.exists():
+                continue
+            if name.startswith(_assets.LEGACY_NAME):
+                gone = pack_in_use.exists()          # the pack in use has the new name
+            elif name in _OLD_SERVE_LOGS:
+                gone = _paths.local_path("serve.log") != _paths.old_local_path("serve.log")
+            else:
+                gone = _paths.local_path(name) != old
+            if gone:
+                found.append(("app", _shown(old)))
+    except OSError:
+        pass
+    if out_dir is None:
+        return found
+    out = Path(out_dir)
+    try:
+        for name, src, _dest, _how in _library_plan(out):
+            if not src.exists():
+                continue
+            ask = _paths.state_path if name in _paths.STATE_NAMES else _paths.reports_path
+            if ask(out, name) != src:
+                found.append(("library", _shown(src)))
+        for name in _UNUSED_LIBRARY_FILES:
+            p = _paths.old_state_path(out, name)
+            if p.is_file() and p != _paths.local_path(name):     # never the one in use
+                found.append(("library", name + " (unused)"))
+    except OSError:
+        pass
+    return found
+
+
+def _and(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+_WHERE = (("app", "in the app folder"), ("library", "in the library folder"),
+          ("pack", "beside the pack"))
+
+
+def leftovers_note(items):
+    """About's one line for `items` ((where, name) pairs, leftovers()'s shape), or "" when
+    there are none: what is safe to delete, and where."""
+    parts = []
+    for where, label in _WHERE:
+        names = [n for w, n in items if w == where]
+        if names:
+            parts.append("%s %s" % (_and(names), label))
+    if not parts:
+        return ""
+    return "Safe to delete once you've checked this version works: %s." % "; ".join(parts)
+
+
 def tidy_app_folder():
     """main()'s one call, once logging is set up and the port is known to be free: bring the
     machine files across, say anything worth saying on the console, and log what happened,

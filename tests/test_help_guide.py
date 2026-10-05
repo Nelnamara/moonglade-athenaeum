@@ -189,8 +189,10 @@ def test_the_pack_version_reads_the_installed_marker(tmp_path):
 
 def test_an_old_pack_left_beside_the_new_one_says_so_on_about(tmp_path):
     """A start that finds the pack under both names never deletes the old one; About's
-    art-pack line says so in plain words instead. Read from the disk each time, so the note
-    leaves the moment the old copy does, without a restart. No old copy, no note."""
+    art-pack line says so in plain words instead (since 3.20 as one entry of the list of old
+    copies that are safe to delete: tests/test_about_leftovers.py). Read from the disk each
+    time, so the note leaves the moment the old copy does, without a restart. No old copy,
+    no note."""
     from moonglade import assets as ma
     (tmp_path / "pack").mkdir()
     new = tmp_path / "pack" / "moonglade.mgpack"
@@ -199,7 +201,7 @@ def test_an_old_pack_left_beside_the_new_one_says_so_on_about(tmp_path):
     old = tmp_path / "pack" / ma.LEGACY_NAME
     old.write_bytes(b"an older pack")
     assert g.art_pack_info(new)["note"] == (
-        "An old moonglade.dat is still beside the pack. It's safe to delete.")
+        "Safe to delete once you've checked this version works: moonglade.dat beside the pack.")
     assert g.about_payload("3.14.1", new)["pack"]["note"] == g.art_pack_info(new)["note"]
     old.unlink()
     assert "note" not in g.art_pack_info(new)
