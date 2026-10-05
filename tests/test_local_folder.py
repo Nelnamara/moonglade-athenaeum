@@ -94,8 +94,13 @@ def _moved_doc(app):
 def test_the_machine_files_folder_is_local_under_the_app_folder(app):
     assert paths.local_dir() == app / "local"
     for name in (PACK, MARKER, "branding.json", "branding_slots.json", "serve.txt",
-                 "serve.log", "mirror_session.json"):
+                 "mirror_session.json"):
         assert paths.local_path(name) == app / "local" / name, name
+    # the launcher's log goes to local/ as soon as there is a local/ (the launcher's own tidy
+    # makes it), and beside the launcher on an install that could not make one
+    assert paths.local_path("serve.log") == app / "serve.log"
+    (app / "local").mkdir()
+    assert paths.local_path("serve.log") == app / "local" / "serve.log"
 
 
 def test_the_icon_cache_is_local_cache(app):
@@ -148,8 +153,9 @@ def test_the_manifest_records_what_moved(old_layout):
     by = {e["name"]: e for e in doc["entries"]}
     assert {n: by[n]["action"] for n in by} == {
         PACK: "moved", MARKER: "moved", "mirror_session.json": "moved", "cache": "copied",
-        "branding.json": "copied", "branding_slots.json": "copied", "serve.txt": "copied",
-        "serve.log": "fresh"}
+        "branding.json": "copied", "branding_slots.json": "copied", "serve.txt": "copied"}
+    # (serve.log is recorded once the new launcher's own log exists:
+    # test_serve_log_is_recorded_only_once_the_new_one_is_real)
     pack = by[PACK]
     assert pack["source"] == PACK and pack["dest"] == "local/" + PACK
     assert pack["size"] == 256
@@ -318,7 +324,7 @@ def test_tidy_never_raises(monkeypatch):
 def test_the_launchers_tidy_brings_only_its_own_files(old_layout):
     app = old_layout
     out = mig.tidy_launcher_files()
-    assert {e["name"] for e in out.done} == {"serve.txt", "serve.log"}
+    assert {e["name"] for e in out.done} == {"serve.txt"}     # its new serve.log comes next
     assert (app / "local" / "serve.txt").read_text() == "--host 0.0.0.0 --port 5757"
     assert (app / PACK).is_file()                      # the pack waits for main()
     assert paths.local_path("serve.txt") == app / "local" / "serve.txt"
@@ -445,3 +451,34 @@ def test_a_pack_renamed_in_the_same_pass_is_recorded_from_its_old_name(app):
     assert by[PACK]["source"] == _OLD_NAME
     assert by[MARKER]["source"] == _OLD_NAME + ".version"
     assert by[PACK]["dest"] == "local/" + PACK
+
+
+# ---- review round: serve.log belongs to whichever launcher is writing it -----------------
+
+def test_serve_log_is_recorded_only_once_the_new_one_is_real(old_layout):
+    """The launcher opens local/serve.log AFTER its tidy. Until that file exists the old
+    serve.log is still the live log, so nothing records it as left behind."""
+    app = old_layout
+    mig.migrate_local()
+    assert "serve.log" not in paths.moved_names(app / "local" / "MOVED.json")
+    assert paths.local_path("serve.log") == app / "local" / "serve.log"   # where it will go
+    _write(app / "local" / "serve.log", "the new launcher's first line\n")
+    mig.migrate_local()
+    entries = paths.moved_entries(app / "local" / "MOVED.json")
+    assert entries["serve.log"]["action"] == "fresh"
+    assert entries["serve.log.1"]["action"] == "fresh"
+
+
+def test_serve_log_is_never_recorded_while_an_old_launcher_is_in_charge(old_layout,
+                                                                         monkeypatch):
+    app = old_layout
+    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
+    _write(app / "local" / "serve.log", "")
+    mig.migrate_local()
+    assert "serve.log" not in paths.moved_names(app / "local" / "MOVED.json")
+
+
+def test_the_launcher_writes_local_serve_log_from_its_first_start(old_layout):
+    app = old_layout
+    mig.tidy_launcher_files()
+    assert paths.local_path("serve.log") == app / "local" / "serve.log"

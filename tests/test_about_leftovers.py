@@ -74,7 +74,13 @@ def test_nothing_is_left_over_before_the_move(app, lib):
     assert _names(items, "library") == ["branding.json (unused)"]
 
 
+def _launcher_started(app):
+    """What the new launcher does after its tidy: open its fresh local/serve.log."""
+    _w(app / "local" / "serve.log", "")
+
+
 def test_after_the_move_the_old_copies_are_listed(app, lib):
+    _launcher_started(app)
     mig.migrate_local()
     mig.migrate_library(lib)
     items = mig.leftovers(lib)
@@ -107,6 +113,7 @@ def test_the_list_is_read_live_and_empties_as_files_are_deleted(app, lib):
 
 
 def test_the_note_is_one_plain_line(app, lib):
+    _launcher_started(app)
     mig.migrate_local()
     mig.migrate_library(lib)
     note = mig.leftovers_note(mig.leftovers(lib))
@@ -201,3 +208,14 @@ def test_an_old_copy_changed_since_the_move_is_not_called_safe_to_delete(app, li
     assert len([m for m in said if "logs" in m]) == 1
     note = mig.leftovers_note(mig.leftovers(lib))
     assert "achievements" not in note and "changed" not in note
+
+
+def test_the_root_serve_log_is_never_offered_while_an_old_launcher_writes_it(app, lib,
+                                                                             monkeypatch):
+    """After an update the launcher that was already running keeps appending to the root
+    serve.log until Moonglade is closed and opened again (MOONGLADE_VIA_STANDIN)."""
+    _w(app / "local" / "serve.log", "")            # an earlier new launcher's log
+    mig.migrate_local()
+    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
+    names = _names(mig.leftovers(), "app")
+    assert not [n for n in names if n.startswith("serve.log")], names

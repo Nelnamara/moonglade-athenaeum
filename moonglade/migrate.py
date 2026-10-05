@@ -65,10 +65,19 @@ LOCAL_PLAN = (
     ("branding_slots.json", "copied"),
     ("serve.txt", "copied"),
     ("serve.log", "fresh"),
+    ("serve.log.1", "fresh"),
+    ("serve.log.2", "fresh"),
+    ("serve.log.3", "fresh"),
     (_paths.ICON_CACHE_NAME, "copied"),       # kept: old Desktop shortcuts use it
 )
-# The launcher's own two files: it brings these across itself, before it reads serve.txt.
-LAUNCHER_NAMES = ("serve.txt", "serve.log")
+# The launcher's own files: it brings these across itself, before it reads serve.txt.
+LAUNCHER_NAMES = ("serve.txt", "serve.log", "serve.log.1", "serve.log.2", "serve.log.3")
+
+
+def _via_standin():
+    """True while the launcher that started this server is one from before 3.20 (it came in
+    through the root stand-in): that launcher is still appending to the root serve.log."""
+    return os.environ.get("MOONGLADE_VIA_STANDIN") == "1"
 
 
 class Outcome:
@@ -366,6 +375,10 @@ def migrate_local(only=None):
             renamed = _legacy_pack_rename(src, dest, outcome)
         if name == PACK_MARKER_NAME and not _marker_may_follow(local, outcome, entries):
             continue                                 # the marker stays with its own pack
+        if how == "fresh" and (_via_standin() or not (local / "serve.log").exists()):
+            # The old serve.log is left behind only once the new one is real -- the launcher
+            # opens it after its own tidy -- and never while an old launcher still writes it.
+            continue
         entry = _bring(name, src, dest, how, root, outcome, recorded)
         if entry is not None and entry["action"] == "moved" and name in renamed:
             entry["source"] = _rel(renamed[name], root)      # renamed from its pre-v7 name
@@ -447,8 +460,6 @@ def open_library(out_dir, move_guard=False):
 
 # ---- what is left in the old places: About's list ----------------------------------------
 
-# How many rotated serve logs the launcher keeps (moonglade_logging.SERVE_LOG_KEEP).
-_OLD_SERVE_LOGS = ("serve.log.1", "serve.log.2", "serve.log.3")
 # The library-side branding.json: the old home of the branding choice, read by nothing since
 # branding moved to the app folder (2026-07). Named on About, never brought across.
 _UNUSED_LIBRARY_FILES = ("branding.json",)
@@ -505,17 +516,17 @@ def leftovers(out_dir=None):
         pack_in_use = _paths.local_path(PACK_NAME)
         local_entries = _paths.moved_entries(_paths.local_dir() / _paths.MOVED_NAME)
         app_names = [_assets.LEGACY_NAME, _assets.LEGACY_NAME + ".version"]
-        app_names += [n for n, _ in LOCAL_PLAN] + list(_OLD_SERVE_LOGS)
+        app_names += [n for n, _ in LOCAL_PLAN]
         for name in app_names:
             if name == _paths.ICON_CACHE_NAME:
                 continue        # still in use: an old Desktop shortcut takes its icon from it
+            if name.startswith("serve.log") and _via_standin():
+                continue        # the launcher in charge is an old one, still writing there
             old = _paths.old_local_path(name)
             if not old.exists():
                 continue
             if name.startswith(_assets.LEGACY_NAME):
                 gone = pack_in_use.exists()          # the pack in use has the new name
-            elif name in _OLD_SERVE_LOGS:
-                gone = _paths.local_path("serve.log") != _paths.old_local_path("serve.log")
             else:
                 gone = (name in local_entries and _paths.local_path(name) != old
                         and _unchanged(name, old, local_entries[name]))

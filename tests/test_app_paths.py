@@ -77,7 +77,10 @@ _TABLE = [
     ("mirror_session.json", lambda: core._mirror_state_path(),
      lambda: _LOCAL / "mirror_session.json"),
     ("serve.txt", lambda: paths.local_path("serve.txt"), lambda: _LOCAL / "serve.txt"),
-    ("serve.log", lambda: paths.local_path("serve.log"), lambda: _LOCAL / "serve.log"),
+    # a fresh one in local/ whenever local/ exists; beside the launcher when it could not be
+    # made (that old place is pointed at an empty folder by real_paths)
+    ("serve.log", lambda: paths.local_path("serve.log"),
+     lambda: (_LOCAL if _LOCAL.is_dir() else _REPO / "no-such-folder-before-3.20") / "serve.log"),
     ("the icon cache", lambda: paths.icon_cache_dir(), lambda: _LOCAL / "cache" / "marks"),
     ("what moved, recorded", lambda: paths.local_dir() / paths.MOVED_NAME,
      lambda: _LOCAL / "MOVED.json"),

@@ -104,12 +104,20 @@ def old_local_path(name):
     return APP_ROOT / name
 
 
+# The launcher's console log is never brought across: a fresh one starts in local/ as soon as
+# local/ exists, and the old ones stay where they are.
+FRESH_NAMES = ("serve.log",)
+
+
 def local_path(name):
     """A machine file by name: `moonglade.mgpack` (+ `.version`), `branding.json`,
     `branding_slots.json`, `mirror_session.json`, `serve.txt`, `serve.log`, the icon cache
     (`cache`). It is local_dir() / name, except while the file is still only in its old
     place and the migration has not recorded it (an install not yet started on 3.20, or a
-    move that was refused): then it is read, and written, where it is."""
+    move that was refused): then it is read, and written, where it is. serve.log is
+    local/serve.log whenever local/ exists (FRESH_NAMES)."""
+    if name in FRESH_NAMES:
+        return local_dir() / name if local_dir().is_dir() else old_local_path(name)
     return _settled(local_dir(), name, old_local_path(name), local_dir() / MOVED_NAME)
 
 
