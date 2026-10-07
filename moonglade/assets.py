@@ -118,8 +118,11 @@ def migrate_legacy_name(container_path):
         A marker already under the new name belongs to a pack that is not there, so it is
         dropped first: it describes other bytes and must never vouch for these. A moved pack
         whose own marker could not follow is then judged unverified (size, readability).
-      - both names present: nothing moves and the old file is NEVER deleted. One warning
-        says an old copy remains; a stray asset copy is the owner's to remove.
+      - both names present: the pack under the new name wins. Once it is VERIFIED (its own
+        .version marker, which only a download whose sha256 passed writes, matches the
+        manifest), the old copy and its marker are deleted: "removed". Until then nothing is
+        deleted on a guess and one warning says an old copy remains: "both". The app removes
+        its own old file; it never asks a person to.
       - the rename refused (a read-only folder, a locked file): one warning, and the start
         carries on as it did before this existed (no pack under the new name: the check
         offers the download).
@@ -131,8 +134,8 @@ def migrate_legacy_name(container_path):
         beside the moved pack (a rename whose marker could not follow) is removed. It is a
         few bytes about a file that is not there, not an asset copy.
 
-    Returns "renamed", "both", "failed" or "none". Never raises. Every outcome but "none" is
-    written to the log file (_LOG)."""
+    Returns "renamed", "removed", "both", "failed" or "none". Never raises. Every outcome
+    but "none" is written to the log file (_LOG)."""
     log = logging.getLogger(_LOG)
     new = Path(container_path)
     old = new.with_name(LEGACY_NAME)
@@ -146,8 +149,20 @@ def migrate_legacy_name(container_path):
             pass                                   # a few bytes; tried again next start
         return "none"
     if new.exists():
-        log.warning("art pack: an old copy remains at %s beside %s. It is left untouched; "
-                    "delete it yourself once you no longer need it.", old, new.name)
+        if _verified(new):
+            try:
+                os.remove(old)
+                stray = _version_marker_path(old)
+                if stray.is_file():
+                    os.remove(stray)
+            except OSError as e:
+                log.warning("art pack: could not remove the old copy at %s (%s); tried again "
+                            "at the next start.", old, e)
+                return "both"
+            log.info("art pack: removed the old copy %s; %s is verified", old.name, new.name)
+            return "removed"
+        log.warning("art pack: an old copy remains at %s beside %s; it is removed once %s is "
+                    "verified.", old, new.name, new.name)
         return "both"
     old_marker, new_marker = _version_marker_path(old), _version_marker_path(new)
     try:
@@ -168,6 +183,16 @@ def migrate_legacy_name(container_path):
                         "the pack is checked by its size instead.", new.name, e)
     log.info("art pack: renamed %s to %s", old.name, new.name)
     return "renamed"
+
+
+def _verified(container_path):
+    """True when the pack at `container_path` is the one a verified download wrote: its own
+    .version marker (written only after the download's sha256 passed) names the sha256 the
+    manifest names. Without a manifest, or without a marker, nothing is verified."""
+    marker = _read_marker(Path(container_path))
+    manifest = read_manifest()
+    return bool(marker and manifest and marker.get("sha256")
+                and marker.get("sha256") == manifest.get("sha256"))
 
 
 def _container_readable(container_path):

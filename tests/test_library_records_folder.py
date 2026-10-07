@@ -462,7 +462,6 @@ def test_the_spend_guard_survives_a_round_trip_to_3_19(old_library):
     assert _guard_files(lib) == ["_moonglade/train_guard.json"]
     guard = g.TrainGuard(paths.state_path(lib, "train_guard.json"))
     assert guard._load()["basic"] == {"armed-on-3.19": 1}
-    assert "train_guard.json" not in [n for _, n in mig.leftovers(lib)]
 
 
 def test_the_command_line_never_moves_the_spend_guard(old_library):
@@ -534,7 +533,6 @@ def test_a_locked_file_mid_folder_leaves_the_folder_where_it_was(old_library, mo
     assert not [p for p in (lib / "_moonglade").iterdir() if ".copying-" in p.name]
     assert "account_prefs" not in paths.moved_names(paths.records_manifest(lib))
     assert paths.state_path(lib, "account_prefs") == lib / "account_prefs"
-    assert "account_prefs" + os.sep not in [n for _, n in mig.leftovers(lib)]
     monkeypatch.setattr(mig.shutil, "copy2", real)
     mig.migrate_library(lib)
     assert (lib / "_moonglade" / "account_prefs" / "second.json").read_text() == '{"b": 2}'
@@ -559,15 +557,6 @@ def test_an_unreadable_subfolder_aborts_the_folder(old_library, monkeypatch):
     assert "account_state" in [f[0] for f in out.failed]
     assert not (lib / "_moonglade" / "account_state").exists()
     assert "account_state" not in paths.moved_names(paths.records_manifest(lib))
-
-
-def test_about_lists_only_what_the_migration_recorded(old_library):
-    """A new copy the migration did not make (put there by hand, or by a run that died before
-    writing MOVED.json) is not enough to call the old one safe to delete."""
-    lib = old_library
-    (lib / "_moonglade").mkdir()
-    (lib / "_moonglade" / "achievements.json").write_text('{"earned": {}}', encoding="utf-8")
-    assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]
 
 
 # ---- review round: a start that died after its copies but before MOVED.json --------------
@@ -595,7 +584,6 @@ def test_copies_a_dead_start_left_are_recorded_as_kept(old_library, monkeypatch)
     assert {"achievements.json", "logs", "organize_manifest.csv"} <= kept
     e = entries["achievements.json"]
     assert e["source_print"] == e["dest_print"]                    # a finished copy
-    assert "achievements.json" in [n for _, n in mig.leftovers(lib)]
 
 
 def test_after_a_dead_start_the_organize_undo_never_falls_back_to_the_stale_list(
@@ -621,7 +609,6 @@ def test_both_places_holding_different_things_is_kept_but_never_offered(old_libr
     mig.migrate_library(lib)
     e = paths.moved_entries(paths.records_manifest(lib))["achievements.json"]
     assert e["action"] == "kept" and e["source_print"] != e["dest_print"]
-    assert "achievements.json" not in [n for _, n in mig.leftovers(lib)]
 
 
 # ---- review round: one migration at a time per folder, and About only looks --------------
@@ -688,19 +675,3 @@ def test_moved_json_is_read_and_written_under_the_lock(old_library, monkeypatch)
     mig.migrate_library(lib)
     assert ("read", True) in seen and ("write", True) in seen
     assert ("read", False) not in seen and ("write", False) not in seen
-
-
-def test_abouts_lookup_never_creates_the_records_folders(old_library):
-    """leftovers() only looks: it never makes _moonglade/ or its reports/ folder, even for a
-    library whose reports folder the owner removed."""
-    import shutil
-    lib = old_library
-    mig.migrate_library(lib)
-    shutil.rmtree(lib / "_moonglade" / "reports")
-    mig.leftovers(lib)
-    assert not (lib / "_moonglade" / "reports").exists()
-    bare = lib.parent / "never-opened"
-    bare.mkdir()
-    (bare / "achievements.json").write_text("{}", encoding="utf-8")
-    mig.leftovers(bare)
-    assert not (bare / "_moonglade").exists()

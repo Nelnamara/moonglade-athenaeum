@@ -465,13 +465,15 @@ def test_rename_then_a_newer_manifest_downloads_over_it_leaving_one_pack(tmp_pat
     assert _names(tmp_path) == [_NEW, _NEW + ".version"]
 
 
-def test_both_names_present_leaves_the_old_copy_untouched_and_says_so(tmp_path, caplog):
-    """A pack already under the new name AND one under the old: nothing moves, nothing is
-    deleted (a stray asset copy is the owner's to remove), and one warning says it is there."""
+def test_both_names_with_the_new_pack_unverified_deletes_nothing_and_says_so(tmp_path, caplog):
+    """A pack already under the new name AND one under the old, the new one not (yet) the
+    verified download: nothing moves and nothing is deleted on a guess. One warning says an
+    old copy remains -- and never asks anyone to delete it."""
     manifest = _manifest_for(REAL_BYTES)
+    ma.write_manifest(manifest["version"], manifest["sha256"], manifest["size"])
     _old_pack(tmp_path, data=b"an older pack", manifest=manifest)
     new = tmp_path / _NEW
-    new.write_bytes(REAL_BYTES)
+    new.write_bytes(REAL_BYTES)                       # no marker of its own: unverified
     before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in tmp_path.iterdir()}
     with caplog.at_level(logging.INFO):
         assert ma.migrate_legacy_name(new) == "both"
@@ -479,6 +481,69 @@ def test_both_names_present_leaves_the_old_copy_untouched_and_says_so(tmp_path, 
     assert after == before
     warned = _warnings(caplog)
     assert len(warned) == 1 and ma.LEGACY_NAME in warned[0].getMessage()
+    assert "yourself" not in warned[0].getMessage()
+
+
+def test_both_names_with_the_new_pack_verified_removes_the_old_copy(tmp_path, caplog):
+    """The pack under the new name is the verified download (its own marker names the
+    manifest's sha256): the app deletes the old copy and its marker itself (DECISIONS
+    2026-10-05: deleting dead files is never left to the person)."""
+    manifest = _manifest_for(REAL_BYTES)
+    ma.write_manifest(manifest["version"], manifest["sha256"], manifest["size"])
+    _old_pack(tmp_path, data=b"an older pack", manifest=_manifest_for(b"an older pack"))
+    new = tmp_path / _NEW
+    new.write_bytes(REAL_BYTES)
+    ma._write_marker(new, manifest)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "removed"
+    assert not (tmp_path / ma.LEGACY_NAME).exists()
+    assert not (tmp_path / (ma.LEGACY_NAME + ".version")).exists()
+    assert ma._read_marker(new) == {"version": "1", "sha256": manifest["sha256"]}
+    assert new.read_bytes() == REAL_BYTES
+    assert not _warnings(caplog)
+    assert any("removed the old copy" in r.getMessage() for r in caplog.records)
+
+
+def test_a_marker_for_another_pack_never_verifies_the_new_one(tmp_path):
+    """A marker that names a different sha256 than the manifest (an older verified pack, or
+    a manifest bumped since) is not this build's verified pack: the old copy stays."""
+    manifest = _manifest_for(REAL_BYTES)
+    ma.write_manifest(manifest["version"], manifest["sha256"], manifest["size"])
+    _old_pack(tmp_path, data=b"an older pack")
+    new = tmp_path / _NEW
+    new.write_bytes(b"some other pack")
+    ma._write_marker(new, _manifest_for(b"some other pack"))
+    assert ma.migrate_legacy_name(new) == "both"
+    assert (tmp_path / ma.LEGACY_NAME).is_file()
+
+
+def test_with_no_manifest_nothing_is_verified_and_nothing_deleted(tmp_path):
+    _old_pack(tmp_path, data=b"an older pack")
+    new = tmp_path / _NEW
+    new.write_bytes(REAL_BYTES)
+    ma._write_marker(new, _manifest_for(REAL_BYTES))
+    assert ma.read_manifest() is None
+    assert ma.migrate_legacy_name(new) == "both"
+    assert (tmp_path / ma.LEGACY_NAME).is_file()
+
+
+def test_an_old_copy_that_cannot_be_removed_is_tried_again_next_start(tmp_path, monkeypatch,
+                                                                     caplog):
+    manifest = _manifest_for(REAL_BYTES)
+    ma.write_manifest(manifest["version"], manifest["sha256"], manifest["size"])
+    old = _old_pack(tmp_path, data=b"an older pack")
+    new = tmp_path / _NEW
+    new.write_bytes(REAL_BYTES)
+    ma._write_marker(new, manifest)
+
+    def _locked(path):
+        raise PermissionError(13, "The process cannot access the file", str(path))
+    monkeypatch.setattr(ma.os, "remove", _locked)
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "both"
+    monkeypatch.undo()
+    assert old.is_file()
+    assert len(_warnings(caplog)) == 1
 
 
 def test_neither_name_present_is_a_normal_fresh_download(tmp_path):

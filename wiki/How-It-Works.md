@@ -124,9 +124,8 @@ Beside the program, the machine's own files sit in `local/`: the art pack
 `mirror_session.json`, `serve.txt`, `serve.log` and the icon cache (`local/cache/`), with
 `local/MOVED.json`. `config.json` stays beside the program. A 3.19 install has these at the
 top of each folder; the first 3.20 start brings them across (copied, except the pack, the
-Mirror's sign-in and the training spend guard, which are moved), and About lists the old
-copies that are safe to delete -- never the old icon cache, `_container_cache/`, which a
-Desktop shortcut made before 3.20 still takes its icon from.
+Mirror's sign-in and the training spend guard, which are moved). The app removes its own
+old copies itself; it never hands you a list of files to delete.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

@@ -392,8 +392,7 @@ About opens leading with a card that reads *"v3.7.3 is out"* (with the release's
 running the stamp reads *updating…* and opens the window that is reporting it.
 
 **About** is the app's own "what am I running" card. It shows Nel, the name, and a line such
-as *app 3.15.0 · art pack v6 · 2026-10-01* (with a line under it when an old `moonglade.dat`
-is still beside the art pack: it is safe to delete), then **this version's changelog** — the headline
+as *app 3.15.0 · art pack v6 · 2026-10-01*, then **this version's changelog** — the headline
 changes of the release you are running, and a short *Under the hood* line for the rest.
 **Earlier versions ›** lists the older entries in this install's changelog; click one to read
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the

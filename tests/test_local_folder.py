@@ -244,12 +244,14 @@ def test_a_pack_under_its_old_name_is_renamed_then_moved(app):
 
 
 def test_both_pack_names_leave_the_old_one_and_move_the_new(app):
+    """The new pack here is not the verified download, so the old one is not deleted on a
+    guess -- and nobody is asked to delete it either (tests/test_assets.py)."""
     _write(app / _OLD_NAME, b"OLDPACK")
     _write(app / PACK, b"NEWPACK")
     out = mig.migrate_local()
     assert (app / "local" / PACK).read_bytes() == b"NEWPACK"
-    assert (app / _OLD_NAME).read_bytes() == b"OLDPACK"     # never deleted
-    assert any(_OLD_NAME in n for n in out.notes)
+    assert (app / _OLD_NAME).read_bytes() == b"OLDPACK"     # not deleted on a guess
+    assert not out.notes
 
 
 # ---- failure never stops a start ---------------------------------------------------------
@@ -375,7 +377,6 @@ def test_the_moved_files_survive_a_round_trip_to_3_19(old_layout):
     # back on 3.20, before the start's tidy: read where they are
     assert g._container_path() == app / PACK
     assert core.load_mirror_state() == {"jwt": "renewed-on-3.19"}
-    assert not [n for _, n in mig.leftovers() if n in (PACK, MARKER, "mirror_session.json")]
     mig.migrate_local()                                              # 3.20's next start
     for name in (PACK, MARKER, "mirror_session.json"):
         assert (app / "local" / name).is_file() and not (app / name).exists(), name

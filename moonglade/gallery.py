@@ -12049,36 +12049,17 @@ def changelog_entries(text=None):
     return entries
 
 
-def art_pack_info(container_path, out_dir=None):
+def art_pack_info(container_path):
     """{installed, version} for the About card's "art pack vN". The version comes from the
     installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so.
-
-    Plus `note`, only when there is one to give: the old copies left in the old places that
-    the app no longer reads (moonglade_migrate.leftovers(): what 3.20 copied into local/ and
-    the library's _moonglade/, the old serve logs, the library-side branding.json nothing
-    reads, a pack still under its pre-v7 name). Nothing is ever deleted for the owner, so
-    About names them in plain words as safe to delete. Read from the disk on each ask, so a
-    name leaves the moment its file does."""
-    from moonglade import migrate as moonglade_migrate
+    the pack on disk is the one this build expects; a missing pack says so. (About never
+    lists old copies for a person to delete: the app removes its own old files itself.)"""
     try:
         present = Path(container_path).exists()
     except OSError:
         present = False
-    items = moonglade_migrate.leftovers(out_dir)
-    if present:
-        try:
-            beside = Path(container_path).with_name(moonglade_assets.LEGACY_NAME)
-            if beside.is_file() and beside != _paths.old_local_path(beside.name):
-                items.append(("pack", beside.name))
-        except OSError:
-            pass
-    note = moonglade_migrate.leftovers_note(items)
     if not present:
-        info = {"installed": False, "version": ""}
-        if note:
-            info["note"] = note
-        return info
+        return {"installed": False, "version": ""}
     marker = moonglade_assets._read_marker(Path(container_path)) or {}
     if marker.get("version"):
         info = {"installed": True, "version": str(marker["version"])}
@@ -12089,12 +12070,10 @@ def art_pack_info(container_path, out_dir=None):
         except Exception:                        # noqa: BLE001 -- a label, never a failure
             current = False
         info = {"installed": True, "version": str(man["version"]) if current else ""}
-    if note:
-        info["note"] = note
     return info
 
 
-def about_payload(version, container_path, entries=None, out_dir=None):
+def about_payload(version, container_path, entries=None):
     """What the About card, the post-update toast and the what's-new sheet read: this
     version's CHANGELOG entry (the running version's, not the newest in the file), the
     release's size (major/minor/patch), the art pack, and the earlier entries for "Earlier
@@ -12112,7 +12091,7 @@ def about_payload(version, container_path, entries=None, out_dir=None):
         "title": (cur or {}).get("title", ""),
         "items": (cur or {}).get("items", []),
         "earlier": earlier,
-        "pack": art_pack_info(container_path, out_dir=out_dir),
+        "pack": art_pack_info(container_path),
         "releases_url": RELEASES_WEB_URL,
         "issues_url": ISSUES_WEB_URL,
         "wiki_url": WIKI_WEB_URL,
@@ -23757,7 +23736,7 @@ def create_app(out_dir: Path):
         between the what's-new sheet and About after an update), the art pack, the earlier
         entries. Whether a newer release is out is /api/update/check's to say, not this."""
         from moonglade import backup as core
-        return jsonify(about_payload(core.__version__, _container_path(), out_dir=out_dir))
+        return jsonify(about_payload(core.__version__, _container_path()))
 
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a

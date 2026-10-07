@@ -9,8 +9,7 @@ at). The rules:
   * THIS MODULE OUTLIVES 3.21. An install on 3.17-3.19 can update straight past 3.20, so it
     may meet this move in any later release. It goes only when the oldest version that can
     update directly is past 3.19, which is a release decision of its own.
-  * NOTHING OF THE OWNER'S IS EVER DELETED. What is left in an old place is named on the About
-    card as safe to delete (leftovers()); the app never removes it.
+  * NOTHING OF THE OWNER'S IS EVER DELETED, and no old copy is handed to the owner to delete.
   * Small files are COPIED (folders included) and the old copy left where it was, so going
     back to 3.19 still works. Two are MOVED instead, because two copies would diverge:
     mirror_session.json (a rotating login token) and train_guard.json (a spend guard: a stale
@@ -24,12 +23,11 @@ at). The rules:
     rename first (moonglade.assets.migrate_legacy_name).
   * The icon cache (_container_cache/) is COPIED to local/cache/ and the old one is kept:
     a Desktop shortcut made before 3.20 takes its icon from _container_cache/marks/, and
-    would turn plain if it went. New shortcuts and the code use local/cache/. It is never
-    named on About as a leftover, since an old shortcut may still be using it.
+    would turn plain if it went. New shortcuts and the code use local/cache/.
   * serve.log is not copied: a fresh one starts in local/ and the old ones stay.
   * config.json stays at the app root and is never touched.
   * EVERY STEP IS SAFE TO RUN AGAIN. A name already recorded is skipped; a name present in
-    both places is left alone (the new copy wins, the old one is a leftover).
+    both places is left alone (the new copy wins).
   * A FAILURE NEVER STOPS THE APP STARTING. It is logged once, on the app's own logger (which
     moonglade.logs lets through to the file at every level), and tried again at the next
     start; meanwhile moonglade.paths keeps reading anything not brought across where it is.
@@ -394,9 +392,6 @@ def _legacy_pack_rename(old_pack, new_pack, outcome):
     legacy_marker = legacy.with_name(legacy.name + ".version")
     had_marker = legacy_marker.exists()
     result = _assets.migrate_legacy_name(old_pack)
-    if result == "both":
-        outcome.notes.append("An old %s is still in the app folder. It's safe to delete."
-                             % _assets.LEGACY_NAME)
     if result != "renamed":
         return {}
     renamed = {PACK_NAME: legacy}
@@ -537,121 +532,6 @@ def open_library(out_dir, move_guard=False):
         pass
     outcome.log()
     return outcome
-
-
-# ---- what is left in the old places: About's list ----------------------------------------
-
-# The library-side branding.json: the old home of the branding choice, read by nothing since
-# branding moved to the app folder (2026-07). Named on About, never brought across.
-_UNUSED_LIBRARY_FILES = ("branding.json",)
-
-
-def _shown(p):
-    """A leftover by the name it has on disk; a folder's ends in a separator."""
-    return p.name + os.sep if p.is_dir() else p.name
-
-
-# Old copies already reported as changed since they were brought across, so the log says it
-# once per process rather than on every About.
-_conflicts_said = set()
-
-
-def _unchanged(name, old, entry):
-    """True while the old copy at `old` is still exactly what the migration recorded bringing
-    across. One that changed since (edited on 3.19 after a rollback, or by an older install
-    still using the same folder) may now be NEWER than the copy in use: it is never called
-    safe to delete, and the log says so once."""
-    want = (entry or {}).get("source_print")
-    try:
-        now = fingerprint(old)
-    except OSError:
-        return False
-    # "kept": both places held it when it was recorded -- a finished copy only if the two
-    # were the same then.
-    same_then = (entry or {}).get("action") != "kept" or entry.get("dest_print") == want
-    if want is not None and now == want and same_then:
-        return True
-    if str(old) not in _conflicts_said and not name.startswith("serve.log"):
-        _conflicts_said.add(str(old))
-        logging.getLogger(LOGGER_NAME).warning(
-            "The old copy of %s at %s has changed since 3.20 brought it across; the app "
-            "keeps using the new one and leaves the old one alone (About does not offer it "
-            "for deletion).", name, old)
-    return False
-
-
-def leftovers(out_dir=None):
-    """Every old copy the app no longer reads, as (where, name) -- where is "app" (the app
-    folder) or "library" (the top of `out_dir`); a folder's name ends in a separator. Read
-    from the disk on each ask, so a name leaves the moment its file is deleted.
-
-    A copy is left over when the migration RECORDED bringing it across (MOVED.json) and the
-    resolver now answers somewhere else: an install not yet brought across, a copy the
-    migration did not make, or a folder it could not finish, has nothing left over. (Two
-    names predate the migration and are named without a record: a pack still under its
-    pre-v7 name beside the one in use, and the library-side branding.json nothing reads.)
-    Never raises."""
-    found = []
-    try:
-        from moonglade import assets as _assets
-        pack_in_use = _paths.local_path(PACK_NAME)
-        local_entries = _paths.moved_entries(_paths.local_dir() / _paths.MOVED_NAME)
-        app_names = [_assets.LEGACY_NAME, _assets.LEGACY_NAME + ".version"]
-        app_names += [n for n, _ in LOCAL_PLAN]
-        for name in app_names:
-            if name == _paths.ICON_CACHE_NAME:
-                continue        # still in use: an old Desktop shortcut takes its icon from it
-            old = _paths.old_local_path(name)
-            if not old.exists():
-                continue
-            if name.startswith(_assets.LEGACY_NAME):
-                gone = pack_in_use.exists()          # the pack in use has the new name
-            else:
-                gone = (name in local_entries and _paths.local_path(name) != old
-                        and _unchanged(name, old, local_entries[name]))
-            if gone:
-                found.append(("app", _shown(old)))
-    except OSError:
-        pass
-    if out_dir is None:
-        return found
-    out = Path(out_dir)
-    try:
-        entries = _paths.moved_entries(_paths.records_manifest(out))
-        for name, src, _dest, _how in _library_plan(out):
-            if name not in entries or not src.exists():
-                continue
-            ask = _paths.state_path if name in _paths.STATE_NAMES else _paths.reports_path
-            if ask(out, name, make=False) != src and _unchanged(name, src, entries[name]):
-                found.append(("library", _shown(src)))
-        for name in _UNUSED_LIBRARY_FILES:
-            p = _paths.old_state_path(out, name)
-            if p.is_file() and p != _paths.local_path(name):     # never the one in use
-                found.append(("library", name + " (unused)"))
-    except OSError:
-        pass
-    return found
-
-
-def _and(names):
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
-_WHERE = (("app", "in the app folder"), ("library", "in the library folder"),
-          ("pack", "beside the pack"))
-
-
-def leftovers_note(items):
-    """About's one line for `items` ((where, name) pairs, leftovers()'s shape), or "" when
-    there are none: what is safe to delete, and where."""
-    parts = []
-    for where, label in _WHERE:
-        names = [n for w, n in items if w == where]
-        if names:
-            parts.append("%s %s" % (_and(names), label))
-    if not parts:
-        return ""
-    return "Safe to delete once you've checked this version works: %s." % "; ".join(parts)
 
 
 def tidy_app_folder():
