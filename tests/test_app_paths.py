@@ -209,6 +209,9 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
 # moonglade_paths.
 _FILE_ALLOWED = {
     "moonglade/paths.py": "it IS the app-root definition",
+    "moonglade/__main__.py": "run as a folder (`python <app>\\moonglade`) it has no package yet, "
+                             "so it finds the app's folder from its own file to put the package "
+                             "on sys.path (tests/test_folder_run.py)",
     "Moonglade Launcher.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
                          "on sys.path so the moonglade package imports however the launcher "
                          "was started, and it is the cwd the server runs from (`-m "
