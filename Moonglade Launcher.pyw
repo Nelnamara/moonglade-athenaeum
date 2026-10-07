@@ -38,6 +38,57 @@ from moonglade import paths as _paths    # noqa: E402
 
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
+
+def _stop(message):
+    """Say plainly why Moonglade cannot start, where a person will see it, and stop. Under
+    pythonw there is no console, so it is a Windows message box (and a line in serve.log when
+    that can be written); elsewhere, stderr."""
+    text = "Moonglade couldn't get ready to start.\n\n" + message
+    try:
+        with open(str(_paths.local_path("serve.log")), "a", encoding="utf-8") as f:
+            f.write("[launcher] " + text.replace("\n\n", " ") + "\n")
+    except Exception:                                   # noqa: BLE001 -- the box still shows
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, text, "Moonglade Athenaeum", 0x10)
+        except Exception:                               # noqa: BLE001
+            pass
+    try:
+        sys.stderr.write(text + "\n")                   # None under pythonw
+    except Exception:                                   # noqa: BLE001
+        pass
+    sys.exit(1)
+
+
+def _prepare():
+    """moonglade.setup.prepare("launcher"): before anything reads a setting, merge the settings
+    and bring this install's own files into their homes (under the install's lock), then the
+    library's half (under the library's). Every entry point runs it first. Returns what it
+    returned, or None in a build that has no moonglade.setup -- only the module itself being
+    absent is tolerated: anything failing inside it stops the start."""
+    import importlib
+    try:
+        setup = importlib.import_module("moonglade.setup")
+    except ModuleNotFoundError as e:
+        if e.name == "moonglade.setup":
+            return None
+        raise
+    return setup.prepare("launcher")
+
+
+# A start that could not get ready never carries on: it would read settings the move had not
+# brought across yet (a lock another start held past its wait, a disk that refused).
+try:
+    _ready = _prepare()
+except SystemExit as e:
+    if e.code in (None, 0):
+        raise
+    _stop(e.code if isinstance(e.code, str) else "It stopped with code %s." % e.code)
+except Exception as e:                                  # noqa: BLE001 -- said, then stopped
+    _stop(str(e) or e.__class__.__name__)
+
 # No --out here on purpose. The server resolves its own folder (an explicit --out, then
 # config.json's LIBRARY_DIR, then pixai_backup), and a hardcoded flag here would always beat
 # the stored setting -- which is precisely why the Control Panel's folder field could not
@@ -45,16 +96,6 @@ os.chdir(here)                     # so config.json / pixai_backup resolve here
 # launcher pinned to a folder regardless of the setting; it still wins.
 SERVE_ARGS = []                             # base args. Extra flags go in serve.txt (below).
 RESTART_CODE = 42                           # child exit code that means "relaunch me"
-
-# 3.20 keeps the machine files in local/. The launcher brings its own two across first --
-# serve.txt copied (the old one stays, for 3.19), serve.log started fresh in local/ -- and
-# the server brings the rest. Best effort: nothing here can stop the app starting, and a file
-# that could not be brought across is read where it is.
-try:
-    from moonglade import migrate as _migrate
-    _tidy = _migrate.tidy_launcher_files()
-except Exception:
-    _tidy = None
 
 # Machine-local overrides WITHOUT editing this tracked file (so `git pull` never conflicts):
 # put extra flags in an untracked "serve.txt" in local\ beside this launcher, e.g. one line:
@@ -166,11 +207,12 @@ try:
     _log = open(str(_serve_log), "a", buffering=1, encoding="utf-8")
 except OSError:
     _log = subprocess.DEVNULL
-# What the tidy above did, in the one log the launcher has.
+# What getting ready did, in the one log the launcher has, when it has a line to say.
 try:
-    if _tidy is not None and _tidy.summary() and _log is not subprocess.DEVNULL:
-        _log.write("[launcher] " + _tidy.summary() + "\n")
-except Exception:
+    _said = _ready.summary() if hasattr(_ready, "summary") else ""
+    if _said and _log is not subprocess.DEVNULL:
+        _log.write("[launcher] " + str(_said) + "\n")
+except Exception:                                       # noqa: BLE001 -- a log line only
     pass
 
 first = True

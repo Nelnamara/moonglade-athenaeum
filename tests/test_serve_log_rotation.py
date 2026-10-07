@@ -113,7 +113,11 @@ def _launcher():
 
 
 def _top_index(tree, pred):
+    """The first top-level statement that RUNS something matching `pred` (a def runs nothing
+    where it stands: the launcher's _stop() appends to serve.log only when a start fails)."""
     for i, node in enumerate(tree.body):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
         if any(pred(n) for n in ast.walk(node)):
             return i
     return None

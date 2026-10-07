@@ -331,30 +331,6 @@ def test_the_launchers_tidy_brings_only_its_own_files(old_layout):
     assert paths.local_path("serve.log") == app / "local" / "serve.log"
 
 
-def _launcher():
-    src = (REPO_ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
-    return src, ast.parse(src)
-
-
-def _first_top_level(tree, pred):
-    for i, node in enumerate(tree.body):
-        if any(pred(n) for n in ast.walk(node)):
-            return i
-    return None
-
-
-def test_the_launcher_tidies_its_files_before_it_reads_serve_txt():
-    src, tree = _launcher()
-    tidy = _first_top_level(tree, lambda n: isinstance(n, ast.Attribute)
-                            and n.attr == "tidy_launcher_files")
-    reads = _first_top_level(tree, lambda n: isinstance(n, ast.Constant)
-                             and n.value == "serve.txt")
-    assert tidy is not None and reads is not None and tidy < reads
-    # inside a try: a tidy that fails can never stop the launcher
-    assert isinstance(tree.body[tidy], ast.Try)
-    assert 'local_path("serve.txt")' in src and 'local_path("serve.log")' in src
-
-
 def test_the_launcher_reads_local_serve_txt_falling_back_to_the_root(old_layout):
     """What the launcher asks, before and after its tidy."""
     app = old_layout
