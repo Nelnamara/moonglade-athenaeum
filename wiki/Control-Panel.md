@@ -223,9 +223,12 @@ they stay buttons, with their confirm and their server's-own-machine gate exactl
 python -m moonglade --out pixai_backup --update
 ```
 
-  A task made before 3.20 runs `python moonglade_backup.py ...`. That keeps working for one
-  release (a stand-in runs the new code and says so); change the task to the line above
-  before 3.21.
+  The code folder also runs on its own, which suits a task with no **Start in**:
+  `python "C:\path\to\app\moonglade" --update` works from any folder.
+
+  A task made before 3.20 names `moonglade_backup.py`, which is gone. Moonglade finds such a
+  task when it starts and says so in the corner: **Fix them** rewrites it to the code-folder
+  line, with the same arguments.
 
 - **One job at a time**, as always. A job whose turn arrives while another is running simply
   waits for the next minute.

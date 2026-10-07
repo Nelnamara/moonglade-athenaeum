@@ -126,9 +126,6 @@ if _moonglade_on_port(PORT):
 # package through the working directory, which is why cwd=here below matters.
 cmd = [sys.executable, "-m", "moonglade.gallery"] + SERVE_ARGS
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
-# The root moonglade_gallery.py stand-in sets this for a server an OLD launcher started (one
-# still running from before 3.20). This launcher is the new one, so it never hands it on.
-env.pop("MOONGLADE_VIA_STANDIN", None)
 
 
 def _open_when_ready():

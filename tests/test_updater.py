@@ -267,28 +267,6 @@ def test_apply_refuses_unsupervised(tmp_path, monkeypatch):
     assert r.status_code == 409 and "managed launcher" in r.get_json()["error"]
 
 
-def test_apply_refuses_while_an_old_launcher_is_in_charge(tmp_path, monkeypatch):
-    """3.20: a server the root moonglade_gallery.py stand-in started belongs to a launcher
-    from before the move, which only knows that path. The update waits until Moonglade has
-    been stopped once and started from its shortcut, so the install is on the new launcher
-    before it takes another release. The refusal says what to do, in the words of the
-    one-time notice (tests/test_standin_notice.py), before git is asked anything."""
-    git = _apply_ready(monkeypatch)
-    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
-    asked = []
-    monkeypatch.setattr(g, "_git", lambda args, **k: (asked.append(args), git(args, **k))[1])
-    cli = _client(tmp_path)                 # built BEFORE the Thread patch, as above
-    started = _started(monkeypatch)         # an apply that got through never really runs
-    r = _apply(cli)
-    assert started["n"] == 0
-    assert r.status_code == 409
-    assert r.get_json() == {"error": "Moonglade moved into its new folder. Stop it once "
-                                     "(Control Panel → Server → ■ Stop, and confirm), then "
-                                     "start it again from its shortcut.", "kind": "failed"}
-    assert asked == []
-    assert g.update_state()["phase"] == "idle"
-
-
 def test_apply_refuses_while_a_job_runs(tmp_path, monkeypatch):
     """Same rule Restart uses: a pull that swaps the code out from under a running job is
     how you get a half-old, half-new process. The refusal names the job in the way."""
@@ -464,14 +442,6 @@ def _refuse_unsupervised(tmp_path, monkeypatch):
     return _apply(_client(tmp_path))
 
 
-def _refuse_via_standin(tmp_path, monkeypatch):
-    _apply_ready(monkeypatch)
-    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
-    cli = _client(tmp_path)                 # built BEFORE the Thread patch, as above
-    _started(monkeypatch)
-    return _apply(cli)
-
-
 def _refuse_busy_job(tmp_path, monkeypatch):
     _apply_ready(monkeypatch)
     save_catalog(tmp_path / "catalog.db", [
@@ -511,22 +481,21 @@ def _refuse_already_running(tmp_path, monkeypatch):
     (_refuse_no_confirm, "failed"),
     (_refuse_read_only, "failed"),
     (_refuse_unsupervised, "failed"),
-    (_refuse_via_standin, "failed"),
     (_refuse_busy_job, "busy"),
     (_refuse_off_master, "failed"),
     (_refuse_dirty_tracked, "failed"),
     (_refuse_untracked_collision, "failed"),
     (_refuse_already_running, "busy"),
-], ids=["no-csrf", "no-confirm", "read-only", "unsupervised", "via-standin", "busy-job",
+], ids=["no-csrf", "no-confirm", "read-only", "unsupervised", "busy-job",
         "off-master", "dirty-tracked", "untracked-collision", "already-running"])
 def test_every_refusal_carries_a_kind_the_modal_can_dispatch_on(
         tmp_path, monkeypatch, setup, expected):
     """Each refusal /api/update/apply can reach names itself as "busy" or "failed".
 
     COVERED, one case per refusal the route can be driven into with the fixtures this
-    file already has: no CSRF, no confirm, READ_ONLY, unsupervised, an old launcher still in
-    charge (3.20's stand-in), a panel job in the way, off master, a tracked edit, an
-    untracked file at an incoming path, and a second apply while one is already running.
+    file already has: no CSRF, no confirm, READ_ONLY, unsupervised, a panel job in the way, off
+    master, a tracked edit, an untracked file at an incoming path, and a second apply while
+    one is already running.
 
     NOT COVERED here, because each needs a git seam that fails rather than answers and
     the fixtures above have no shape for one: the three "couldn't read this checkout"

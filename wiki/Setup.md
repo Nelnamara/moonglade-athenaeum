@@ -64,9 +64,9 @@ optional overrides; leave them blank. More detail: [How It Works](How-It-Works).
 ## 3. First run
 
 Run every command in this guide from the app's folder (the one holding `config.json`):
-`python -m moonglade` finds the app from there. Before 3.20 the commands named the files
-(`python moonglade_backup.py ...`); those still work for one release, and say what to type
-instead.
+`python -m moonglade` finds the app from there. From any other folder, name the code folder
+instead: `python "C:\path\to\app\moonglade" --sync`. Before 3.20 the commands named the
+files (`python moonglade_backup.py ...`); those files are gone.
 
 Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
 ```bash

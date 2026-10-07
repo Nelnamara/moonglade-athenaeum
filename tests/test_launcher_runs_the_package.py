@@ -77,8 +77,7 @@ def launch(monkeypatch, tmp_path):
     return _launch
 
 
-def test_it_starts_the_server_as_the_package_from_the_app_folder(launch, monkeypatch):
-    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")     # never handed on: see below
+def test_it_starts_the_server_as_the_package_from_the_app_folder(launch):
     run = launch(codes=[0], serve_txt="--host 0.0.0.0 --port 5757\n")
     assert len(run.started) == 1
     child = run.started[0]
@@ -86,8 +85,6 @@ def test_it_starts_the_server_as_the_package_from_the_app_folder(launch, monkeyp
                          "--host", "0.0.0.0", "--port", "5757"]
     assert os.path.samefile(child.cwd, paths.APP_ROOT)
     assert child.env["MOONGLADE_SUPERVISED"] == "1"
-    # The stand-in flag says "an OLD launcher started this server". This one is new.
-    assert "MOONGLADE_VIA_STANDIN" not in child.env
     assert child.stdin is subprocess.DEVNULL
     assert getattr(child.stdout, "name", None) == str(paths.local_path("serve.log"))
     assert run.probed == ["http://localhost:5757/api/ping"]

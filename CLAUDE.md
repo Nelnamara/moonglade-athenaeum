@@ -387,8 +387,8 @@ merge to master with `--no-ff`, tag releases.
 ## Quick command reference
 
 Run from the app's folder (the one holding `config.json`). Since 3.20 the code is the
-`moonglade/` package; the old `python moonglade_backup.py ...` form still works through a
-root stand-in until 3.21.
+`moonglade/` package; from any other folder, `python "<app folder>\moonglade" ...` runs the
+same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone.
 
 ```
 python -m moonglade --probe                           # connection sanity check

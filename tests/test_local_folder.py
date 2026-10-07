@@ -469,15 +469,6 @@ def test_serve_log_is_recorded_only_once_the_new_one_is_real(old_layout):
     assert entries["serve.log.1"]["action"] == "fresh"
 
 
-def test_serve_log_is_never_recorded_while_an_old_launcher_is_in_charge(old_layout,
-                                                                         monkeypatch):
-    app = old_layout
-    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")
-    _write(app / "local" / "serve.log", "")
-    mig.migrate_local()
-    assert "serve.log" not in paths.moved_names(app / "local" / "MOVED.json")
-
-
 def test_the_launcher_writes_local_serve_log_from_its_first_start(old_layout):
     app = old_layout
     mig.tidy_launcher_files()

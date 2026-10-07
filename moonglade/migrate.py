@@ -6,8 +6,7 @@ layout across, once, when a real start runs it (moonglade.gallery's main(), the 
 its own two files, and the command line, `python -m moonglade`, for the library it is pointed
 at). The rules:
 
-  * THIS MODULE OUTLIVES 3.21. An install on 3.17-3.19 can update straight past 3.20 (the
-    reason the root moonglade_gallery.py stand-in is permanent, DECISIONS 2026-10-05), so it
+  * THIS MODULE OUTLIVES 3.21. An install on 3.17-3.19 can update straight past 3.20, so it
     may meet this move in any later release. It goes only when the oldest version that can
     update directly is past 3.19, which is a release decision of its own.
   * NOTHING OF THE OWNER'S IS EVER DELETED. What is left in an old place is named on the About
@@ -76,12 +75,6 @@ LOCAL_PLAN = (
 )
 # The launcher's own files: it brings these across itself, before it reads serve.txt.
 LAUNCHER_NAMES = ("serve.txt", "serve.log", "serve.log.1", "serve.log.2", "serve.log.3")
-
-
-def _via_standin():
-    """True while the launcher that started this server is one from before 3.20 (it came in
-    through the root stand-in): that launcher is still appending to the root serve.log."""
-    return os.environ.get("MOONGLADE_VIA_STANDIN") == "1"
 
 
 class Outcome:
@@ -455,10 +448,9 @@ def migrate_local(only=None):
                 renamed = _legacy_pack_rename(src, dest, outcome)
             if name == PACK_MARKER_NAME and not _marker_may_follow(local, outcome, entries):
                 continue                             # the marker stays with its own pack
-            if how == "fresh" and (_via_standin() or not (local / "serve.log").exists()):
+            if how == "fresh" and not (local / "serve.log").exists():
                 # The old serve.log is left behind only once the new one is real -- the
-                # launcher opens it after its own tidy -- and never while an old launcher
-                # still writes it.
+                # launcher opens it after its own tidy.
                 continue
             entry = _bring(name, src, dest, how, root, outcome, recorded)
             if entry is not None and entry["action"] == "moved" and name in renamed:
@@ -609,8 +601,6 @@ def leftovers(out_dir=None):
         for name in app_names:
             if name == _paths.ICON_CACHE_NAME:
                 continue        # still in use: an old Desktop shortcut takes its icon from it
-            if name.startswith("serve.log") and _via_standin():
-                continue        # the launcher in charge is an old one, still writing there
             old = _paths.old_local_path(name)
             if not old.exists():
                 continue

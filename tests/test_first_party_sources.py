@@ -8,13 +8,12 @@ never wanders into tests/ or node_modules/, and that each guard really uses it.
 """
 from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 
-# Every first-party module today, by its path from the repo root: the launcher, the three root
-# stand-ins 3.20 keeps for one release, and the moonglade/ package the code moved into. The list
+# Every first-party module today, by its path from the repo root: the launcher (the one
+# Python-family file at the root) and the moonglade/ package the code moved into. The list
 # moves with the code -- which is the point: a collector that stops finding the code fails HERE,
 # instead of every guard that trusts it passing over nothing.
 _TODAY = (
     "Moonglade Launcher.pyw",
-    "moonglade_backup.py", "moonglade_gallery.py", "moonglade_mcp.py",
     "moonglade/__init__.py", "moonglade/__main__.py",
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",
     "moonglade/container.py", "moonglade/contest_wins.py", "moonglade/curation_io.py",

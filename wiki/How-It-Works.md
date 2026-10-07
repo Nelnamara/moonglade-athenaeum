@@ -31,10 +31,10 @@ loom/                     The Loom's JS surface: esbuild bundle + its own `node 
 ```
 
 Before 3.20 these were flat files beside the launcher (`moonglade_backup.py`,
-`moonglade_gallery.py` and so on). Three of those names still sit there as stand-ins that run
-the new code. `moonglade_gallery.py` stays for good: a launcher started before 3.20 restarts the
-server by that name. `moonglade_backup.py` and `moonglade_mcp.py` keep an old command, scheduled
-task or MCP registration working until 3.21.
+`moonglade_gallery.py` and so on). They are gone: the launcher is the one Python file left
+beside the program. A scheduled task, a Claude tools registration or a shortcut that still
+names an old file is found by the app, which offers to fix it (**Fix them** on its notice), and
+a shortcut to the old launcher is re-pointed by itself the first time the new launcher starts.
 
 The CLI engine and the MCP server both import `moonglade/gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:

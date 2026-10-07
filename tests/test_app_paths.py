@@ -111,11 +111,6 @@ _TABLE = [
     ("static/", lambda: paths.static_dir(), lambda: _REPO / "static"),
     ("requirements.txt", lambda: paths.requirements_path(), lambda: _REPO / "requirements.txt"),
     ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Moonglade Launcher.pyw"),
-    # The two old entry scripts: since 3.20 the root stand-ins, kept for one release.
-    ("the server script", lambda: paths.gallery_script_path(),
-     lambda: _REPO / "moonglade_gallery.py"),
-    ("the CLI script", lambda: paths.backup_script_path(),
-     lambda: _REPO / "moonglade_backup.py"),
     ("the MCP server's default library", lambda: paths.default_library_path(),
      lambda: _REPO / "pixai_backup"),
     ("the default library (relative)", lambda: g.DEFAULT_LIBRARY_DIR, lambda: "pixai_backup"),
@@ -132,8 +127,7 @@ def test_the_shipped_files_are_really_there(real_paths):
     """The table's tracked entries name files a checkout has, so a typo in a helper cannot
     hide behind a path that merely looks right."""
     for p in (ma.manifest_path(), g.wiki_dir(), g.changelog_path(), paths.loom_dir(),
-              paths.static_dir(), paths.requirements_path(), paths.launcher_path(),
-              paths.gallery_script_path(), paths.backup_script_path()):
+              paths.static_dir(), paths.requirements_path(), paths.launcher_path()):
         assert p.exists(), p
 
 

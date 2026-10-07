@@ -23,8 +23,8 @@ named helper here, so moving a group of files is a change to one line in this mo
                     catalog.db, the pictures, loom/, gallery/, _deleted/ and _duplicates/
                     are the library itself, not records, and never go through these.
   the rest          the shipped files the app reads: the pack manifest, wiki/, the
-                    CHANGELOG, gallery/dist, loom/, static/, requirements.txt, the launcher
-                    and the two entry scripts.
+                    CHANGELOG, gallery/dist, loom/, static/, requirements.txt and the
+                    launcher.
 
 Nothing here imports another app module, so every module (and the launcher, before it has
 anything else) can import it first.
@@ -240,25 +240,6 @@ def launcher_path():
     """Moonglade Launcher.pyw, the launcher every shortcut the app makes points at (it was
     "Serve Gallery.pyw" through 3.19)."""
     return APP_ROOT / LAUNCHER_NAME
-
-
-# The web server's OLD entry script, by its path under APP_ROOT: since 3.20 the root stand-in
-# a launcher from before the move still runs (moonglade_gallery.py; it stays for good). No app
-# code runs it any more -- the launcher runs `-m moonglade.gallery` -- and only the tests that
-# hold every path where it was (tests/test_app_paths.py) ask for it.
-GALLERY_SCRIPT = "moonglade_gallery.py"
-
-
-def gallery_script_path():
-    """The root moonglade_gallery.py stand-in an old launcher runs. Test-only: the app itself
-    starts the server as `python -m moonglade.gallery`."""
-    return APP_ROOT / GALLERY_SCRIPT
-
-
-def backup_script_path():
-    """The root moonglade_backup.py stand-in for old command lines (goes in 3.21). Test-only:
-    the Control Panel runs its jobs as `python -m moonglade`."""
-    return APP_ROOT / "moonglade_backup.py"
 
 
 def default_library_path():
