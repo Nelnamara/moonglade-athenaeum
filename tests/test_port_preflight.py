@@ -11,7 +11,7 @@ answer with no error anywhere.
 That has burned this project twice. Both times the "fix that didn't work" had in fact
 worked perfectly, in a process nobody was talking to.
 
-`Serve Gallery.pyw` already probed the X-Moonglade header before launching, but that
+`Moonglade Launcher.pyw` already probed the X-Moonglade header before launching, but that
 check lived only in the launcher -- and `python moonglade_gallery.py --port N`, which is
 how every script, harness and background process starts this thing, walked past it.
 port_owner() is that probe moved somewhere it cannot be bypassed.
@@ -159,7 +159,7 @@ def test_launcher_reads_port_from_config_when_serve_txt_is_silent():
     otherwise moving the port in the chip binds the server there but still opens the browser at
     :5000. Source-level guard: the .pyw runs on import, so it can't be imported."""
     import pathlib
-    src = pathlib.Path("Serve Gallery.pyw").read_text(encoding="utf-8")
+    src = pathlib.Path("Moonglade Launcher.pyw").read_text(encoding="utf-8")
     assert '"--port" in SERVE_ARGS' in src, "an explicit --port in serve.txt must still win"
     i = src.index('"--port" in SERVE_ARGS')
     tail = src[i:i + 800]

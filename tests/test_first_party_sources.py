@@ -13,7 +13,7 @@ from tests.conftest import CODE_PACKAGE, REPO_ROOT, first_party_sources
 # moves with the code -- which is the point: a collector that stops finding the code fails HERE,
 # instead of every guard that trusts it passing over nothing.
 _TODAY = (
-    "Serve Gallery.pyw",
+    "Moonglade Launcher.pyw",
     "moonglade_backup.py", "moonglade_gallery.py", "moonglade_mcp.py",
     "moonglade/__init__.py", "moonglade/__main__.py",
     "moonglade/assets.py", "moonglade/backup.py", "moonglade/bonjour.py",

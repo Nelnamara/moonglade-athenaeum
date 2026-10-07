@@ -365,7 +365,7 @@ Things worth knowing:
 
 ## Server
 
-- **↻ Restart server** — needs the managed **`Serve Gallery`** launcher (it relaunches the
+- **↻ Restart server** — needs the managed launcher, **`Moonglade Launcher`** (it relaunches the
   process); the button is disabled when the server was started headlessly.
 - **■ Stop server** — shuts it down cleanly from the browser. No Task Manager.
 

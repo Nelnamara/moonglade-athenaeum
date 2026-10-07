@@ -123,7 +123,7 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
     argv = captured["argv"]
     assert argv[0] == "powershell"
     assert "CreateShortcut" in argv[-1] and "mark_4.ico" in argv[-1]
-    assert "Serve Gallery.pyw" in argv[-1]
+    assert "Moonglade Launcher.pyw" in argv[-1]
     # LAN can't write shortcuts onto the owner's Desktop even for THIS already-logged-in
     # session -- it passes the global front door (real session) but is then refused by
     # the route's OWN, stricter _is_local_request() re-check (403), same property

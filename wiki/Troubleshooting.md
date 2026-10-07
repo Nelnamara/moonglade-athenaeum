@@ -109,7 +109,7 @@ those old copies safe to delete.
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you
 updated **by hand** with `git pull`, **restart the gallery server** so it loads the new code
-— Stop/Restart from the browser, or relaunch **`Serve Gallery.pyw`**. Either way, if a page
+— Stop/Restart from the browser, or relaunch **`Moonglade Launcher.pyw`**. Either way, if a page
 still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
 the service worker).
 
@@ -132,7 +132,7 @@ offline — nothing was attempted), **gold** means come back in a moment (someth
 running), and **red** means this install will keep refusing until something is changed. The
 window names the reason either way. The usual ones:
 
-- **The server wasn't started through `Serve Gallery.pyw`.** Only the launcher relaunches the
+- **The server wasn't started through `Moonglade Launcher.pyw`.** Only the launcher relaunches the
   app after an update — without it the server would simply stop.
 - **A Control Panel job is still running.** Let it finish or cancel it; changing the code
   under a running job is how you get half-old, half-new behavior.

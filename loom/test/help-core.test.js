@@ -232,7 +232,7 @@ describe("The Gallery page opens in plain words", () => {
     assert.ok(firstSection > 1, "an introduction under the title");
     assert.ok(blocks.slice(1, firstSection).every((b) => b.type === "p"),
       "the introduction is paragraphs only, no command block");
-    assert.match(blocks.slice(1, firstSection).map((b) => spansText(b.spans)).join(" "), /Serve Gallery\.pyw/);
+    assert.match(blocks.slice(1, firstSection).map((b) => spansText(b.spans)).join(" "), /Moonglade Launcher\.pyw/);
     const term = blocks.findIndex((b) => b.type === "h" && b.anchor === "running-it-from-a-terminal");
     assert.equal(term, firstSection, "the terminal section follows the introduction");
     const next = blocks.findIndex((b, i) => i > term && b.type === "h");

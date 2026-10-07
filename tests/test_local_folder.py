@@ -332,7 +332,7 @@ def test_the_launchers_tidy_brings_only_its_own_files(old_layout):
 
 
 def _launcher():
-    src = (REPO_ROOT / "Serve Gallery.pyw").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
     return src, ast.parse(src)
 
 

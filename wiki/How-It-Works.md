@@ -7,7 +7,7 @@ moonglade/                the app's code (since 3.20), one package:
   backup.py               CLI engine: download, organize, generate, sync, delete, reconcile
                           (run it as `python -m moonglade`)
   gallery.py              Flask web gallery + ALL SQLite catalog helpers (the shared base)
-                          (the launcher, Serve Gallery, runs it as `python -m moonglade.gallery`)
+                          (the launcher, Moonglade Launcher, runs it as `python -m moonglade.gallery`)
   similar.py              "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
   mcp_server.py           local stdio MCP server: curation tools over the catalog, a duplicate
                           finder, and a read-only PixAI tag-suggestion tool

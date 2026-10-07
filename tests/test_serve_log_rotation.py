@@ -108,7 +108,7 @@ def test_a_refused_rename_never_stops_the_start(app, monkeypatch):
 # ---- the launcher uses it, at start, on the machine file -------------------------------
 
 def _launcher():
-    src = (REPO_ROOT / "Serve Gallery.pyw").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
     return src, ast.parse(src)
 
 

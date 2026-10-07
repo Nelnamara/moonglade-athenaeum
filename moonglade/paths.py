@@ -36,7 +36,7 @@ the exact path it resolves to.
 import json
 from pathlib import Path
 
-# The folder holding the launcher (Serve Gallery.pyw) and config.json: the parent of the
+# The folder holding the launcher (Moonglade Launcher.pyw) and config.json: the parent of the
 # moonglade/ code folder this module sits in. The code moved down a folder in 3.20, and every
 # app-root path still follows from this one line.
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -231,9 +231,15 @@ def requirements_path():
     return APP_ROOT / "requirements.txt"
 
 
+# The launcher's file name: the one Python-family file at the install root (DECISIONS
+# 2026-10-07, pick 2).
+LAUNCHER_NAME = "Moonglade Launcher.pyw"
+
+
 def launcher_path():
-    """Serve Gallery.pyw, the launcher the Desktop shortcut points at."""
-    return APP_ROOT / "Serve Gallery.pyw"
+    """Moonglade Launcher.pyw, the launcher every shortcut the app makes points at (it was
+    "Serve Gallery.pyw" through 3.19)."""
+    return APP_ROOT / LAUNCHER_NAME
 
 
 # The web server's OLD entry script, by its path under APP_ROOT: since 3.20 the root stand-in

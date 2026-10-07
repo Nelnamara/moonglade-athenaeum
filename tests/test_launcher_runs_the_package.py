@@ -1,6 +1,6 @@
 """The launcher runs the package (3.20, "the move").
 
-`Serve Gallery.pyw` starts the web server as `python -m moonglade.gallery` from the app's
+`Moonglade Launcher.pyw` starts the web server as `python -m moonglade.gallery` from the app's
 folder. Everything else it does is exactly as before: the serve.txt flags ride along, an exit
 code of 42 relaunches the same command, anything else ends it, a server already answering on
 the port means it only opens the browser and bows out, and the port comes from config.json
@@ -30,7 +30,7 @@ import pytest
 from moonglade import paths
 from tests.conftest import REPO_ROOT
 
-LAUNCHER = REPO_ROOT / "Serve Gallery.pyw"
+LAUNCHER = REPO_ROOT / "Moonglade Launcher.pyw"
 
 
 class _NoThread:

@@ -594,7 +594,7 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                   </button>
                 </div>
                 {!summary.supervised && (
-                  <div className="mgcp-tilenote">Restart needs the managed launcher (Serve Gallery). Stop still works.</div>
+                  <div className="mgcp-tilenote">Restart needs the managed launcher (Moonglade Launcher). Stop still works.</div>
                 )}
               </div>
 

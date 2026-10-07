@@ -1156,7 +1156,7 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     """
     # Restart is disabled client-side unless the server reports itself supervised
     # (summary.supervised, from _supervised() -- os.environ["MOONGLADE_SUPERVISED"]).
-    # This harness's server isn't launched via Serve Gallery, so without this the Restart
+    # This harness's server isn't launched via Moonglade Launcher, so without this the Restart
     # button would be a disabled no-op and this test could never reach it for real.
     monkeypatch.setenv("MOONGLADE_SUPERVISED", "1")
 

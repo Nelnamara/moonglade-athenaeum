@@ -119,7 +119,7 @@ drops to zero and the first-run bootstrap re-opens on the server machine, a deli
 hatch rather than a bug. The Panel's **Remove** button deliberately won't do that from any
 address, loopback included, so emptying the roster on purpose stays a CLI act you have to mean.
 
-Prefer a double-click, no-console launcher? Use **`Serve Gallery.pyw`** — it starts the web
+Prefer a double-click, no-console launcher? Use **`Moonglade Launcher.pyw`** — it starts the web
 gallery (and supervises it) without a terminal window.
 
 Headless:

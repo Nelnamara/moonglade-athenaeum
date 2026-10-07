@@ -11,7 +11,7 @@ image file, thumbnail, and catalog row).
 Requirements:
     pip install flask pillow
 
-Usage (from the app's folder; normally the launcher, Serve Gallery, starts it):
+Usage (from the app's folder; normally the launcher, Moonglade Launcher, starts it):
     python -m moonglade.gallery
     python -m moonglade.gallery --out pixai_backup --port 5000
 """
@@ -6688,7 +6688,7 @@ def _mark_ico_path(mark_id):
 
 def make_launcher_shortcut(out_dir, mark_id):
     """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
-    chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
+    chosen mark's .ico, targeting Moonglade Launcher.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost."""
     import subprocess
     # PowerShell's CreateShortcut reads IconLocation straight off disk, so a
@@ -6699,7 +6699,7 @@ def make_launcher_shortcut(out_dir, mark_id):
     repo = _paths.APP_ROOT
     pyw = _paths.launcher_path()
     if not pyw.exists():
-        raise RuntimeError("Serve Gallery.pyw not found next to the server")
+        raise RuntimeError("Moonglade Launcher.pyw not found next to the server")
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     target = pythonw if pythonw.exists() else Path(sys.executable)
     lnk = Path.home() / "Desktop" / "Moonglade Athenaeum.lnk"
@@ -12227,7 +12227,7 @@ def resolve_server_settings(host_arg=None, port_arg=None):
 
 
 def _supervised():
-    """True when the server was started by the managed launcher (Serve Gallery), which sets
+    """True when the server was started by the managed launcher (Moonglade Launcher), which sets
     MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
     return os.environ.get("MOONGLADE_SUPERVISED") == "1"
 
@@ -16373,11 +16373,11 @@ def create_app(out_dir: Path):
     @app.route("/api/server/restart", methods=["POST"])
     @tier(LOGIN)
     def api_server_restart():
-        """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
+        """Restart the server from the browser. Needs the managed launcher (Moonglade Launcher),
         which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
-                                     "'Serve Gallery'. (Stop still works.)"}), 409
+                                     "'Moonglade Launcher'. (Stop still works.)"}), 409
         # An update restarts the server ITSELF when it is done; a restart in the middle of
         # one would land the process on half-pulled code. (The updater's own restart does
         # not come through here -- see _update_busy.)
@@ -16497,7 +16497,7 @@ def create_app(out_dir: Path):
                                      "this.", "kind": "failed"}), 409
         if not _supervised():
             return jsonify({"error": "Updating needs the managed launcher — start via "
-                                     "'Serve Gallery'. (Without it the server would stop "
+                                     "'Moonglade Launcher'. (Without it the server would stop "
                                      "instead of restarting into the new version.)",
                             "kind": "failed"}), 409
         if _via_standin():
@@ -29116,7 +29116,7 @@ __DESIGN_TOKENS__
     @app.after_request
     def _identify_server(resp):
         # Stamp EVERY response -- including the front door's 401 short-circuit -- with a
-        # stable marker the "Serve Gallery" launcher uses to tell "our server is already
+        # stable marker the "Moonglade Launcher" uses to tell "our server is already
         # on this port" from "some other service is" (or nothing). It MUST ride the auth
         # gate: the launcher probes /api/ping without a session and now gets a 401, not a
         # 200, so a status-based check can't identify us. A fixed value, not __version__:
@@ -29161,7 +29161,7 @@ def port_owner(host, port, timeout=0.4):
     costing a debugging session chasing a "fix that didn't work" which had in fact
     worked perfectly in a process nobody was talking to.
 
-    `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
+    `Moonglade Launcher.pyw` already probes the X-Moonglade header to decide "one of our
     servers is already up here" before launching. That check lived ONLY in the
     launcher, so `python -m moonglade.gallery --port N` -- how every script, test
     harness and background agent starts this thing -- walked straight past it.
@@ -29225,7 +29225,7 @@ def main():
     ap.add_argument("--open-browser", action="store_true",
                     help="open the gallery in your default browser ~1.5s after the server "
                          "starts (manual convenience for a terminal launch; the double-click "
-                         "'Serve Gallery' launcher does NOT pass this -- it polls the server "
+                         "'Moonglade Launcher' does NOT pass this -- it polls the server "
                          "until it actually answers and opens the browser itself)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="show INFO-level log lines (request activity, startup steps) on the "

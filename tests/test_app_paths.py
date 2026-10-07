@@ -55,7 +55,7 @@ def real_paths(monkeypatch):
 
 def test_app_root_is_the_folder_holding_the_launcher():
     assert paths.APP_ROOT == _REPO
-    assert (paths.APP_ROOT / "Serve Gallery.pyw").is_file()
+    assert (paths.APP_ROOT / "Moonglade Launcher.pyw").is_file()
 
 
 _LOCAL = _REPO / "local"
@@ -110,7 +110,7 @@ _TABLE = [
     ("loom/vendor", lambda: paths.loom_vendor(), lambda: _REPO / "loom" / "vendor"),
     ("static/", lambda: paths.static_dir(), lambda: _REPO / "static"),
     ("requirements.txt", lambda: paths.requirements_path(), lambda: _REPO / "requirements.txt"),
-    ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Serve Gallery.pyw"),
+    ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Moonglade Launcher.pyw"),
     # The two old entry scripts: since 3.20 the root stand-ins, kept for one release.
     ("the server script", lambda: paths.gallery_script_path(),
      lambda: _REPO / "moonglade_gallery.py"),
@@ -209,7 +209,7 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
 # moonglade_paths.
 _FILE_ALLOWED = {
     "moonglade/paths.py": "it IS the app-root definition",
-    "Serve Gallery.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
+    "Moonglade Launcher.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
                          "on sys.path so the moonglade package imports however the launcher "
                          "was started, and it is the cwd the server runs from (`-m "
                          "moonglade.gallery` finds the package through it), byte-for-byte as "
@@ -263,8 +263,8 @@ def test_the_launcher_finds_its_own_folder_once_and_byte_for_byte():
     folder is what goes on sys.path, what it changes into and the folder the server runs from
     (since 3.20 as `-m moonglade.gallery`, which finds the package through the working
     directory). tests/test_launcher_runs_the_package.py runs the launcher for the rest."""
-    src = (_REPO / "Serve Gallery.pyw").read_text(encoding="utf-8")
-    uses = _file_uses(_REPO / "Serve Gallery.pyw")
+    src = (_REPO / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
+    uses = _file_uses(_REPO / "Moonglade Launcher.pyw")
     assert [u[1] for u in uses] == ["here = os.path.dirname(os.path.abspath(__file__))"], uses
     assert "sys.path.insert(0, here)" in src
     assert "os.chdir(here)" in src

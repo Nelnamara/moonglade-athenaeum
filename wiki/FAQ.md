@@ -161,13 +161,13 @@ version the note also names the release and carries a **What's new** button (a o
 for a feature release, **About** for a patch); see
 [Control Panel → Updates and About](Control-Panel#updates-and-about).
 
-The one-click path needs the managed launcher (**`Serve Gallery.pyw`**) — without it the
+The one-click path needs the managed launcher (**`Moonglade Launcher.pyw`**) — without it the
 server would stop instead of restarting into the new version — and a clean checkout on
 `master`. If yours is a working copy with local edits, or on a branch, the Panel says so
 rather than touching it.
 
 **By hand**, always available: `git pull`, then **restart the gallery server** so it loads
-the new code (Stop/Restart, or relaunch `Serve Gallery.pyw`) and hard-refresh the browser —
+the new code (Stop/Restart, or relaunch `Moonglade Launcher.pyw`) and hard-refresh the browser —
 see [Troubleshooting](Troubleshooting).
 
 **Something broke after a PixAI change.**
