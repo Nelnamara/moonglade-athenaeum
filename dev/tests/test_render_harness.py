@@ -6441,13 +6441,21 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
     page.click(".mgcp-rl-primary:has-text('Use this')")
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.def')
+    # The ask opens DURING this row's own fold (its .35 s exit, BrandRoles.jsx's fold()): the
+    # default picture is there the moment the save lands, and the fold's end used to drop every
+    # ask on the row, even one opened after the fold began -- after the next click on a quiet
+    # machine, between the two clicks below on a loaded one (the xdist run). A page-side timer
+    # queued now fires after the fold's own, so this looks once the fold is over, on any machine.
+    login.locator("button.mgcp-rl-art.def").click()
+    page.evaluate("() => new Promise((done) => setTimeout(done, 500))")
+    ask = page.locator(".mgcp-rl-ask")
+    assert ask.count() == 1, "the login companion's fold dropped the ask opened during it"
     sizes = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl[data-role="login_companion"] .mgcp-rl-row .mgcp-rl-art')]
         .map(a => ({w: Math.round(a.getBoundingClientRect().width), cls: a.className}))""")
     assert [s["w"] for s in sizes] == [28, 34]
     assert "def" in sizes[0]["cls"] and "yours" in sizes[1]["cls"]
+    page.mouse.move(0, 0)   # off the default picture just clicked: its :hover reads .8, not its resting .45
     assert page.evaluate("() => getComputedStyle(document.querySelector('.mgcp-rl-art.def')).opacity") == "0.45"
-    login.locator("button.mgcp-rl-art.def").click()
-    ask = page.locator(".mgcp-rl-ask")
     assert ask.inner_text().startswith("Go back to the default Login companion?\nYour image is removed from this install.")
     ask.locator("button:has-text('Keep mine')").click()
     assert _g._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
