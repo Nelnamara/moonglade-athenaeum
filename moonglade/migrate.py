@@ -2780,7 +2780,7 @@ class _Plan:
         self.ours = False        # the folder is a Moonglade library (_is_moonglade_library)
 
 
-# The Loom's own entries in its folder (3.17-3.19's <library>\loom\): the boards (kv\, and the
+# The Loom's own entries in its folder (3.10-3.19's <library>\loom\): the boards (kv\, and the
 # store.json they were split from), the render journal, the music beds, frames, uploads and
 # exports. A loom\ holding none of these is not the Loom's, and is left where it is.
 LOOM_ENTRIES = ("kv", "_submits", "_beds", "_frames", "_uploads", "exports", "_exports",

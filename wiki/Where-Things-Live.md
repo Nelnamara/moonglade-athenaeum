@@ -84,7 +84,10 @@ library once with its own install's launcher (updated to 3.20), then run the com
 **It says an older Moonglade is still using the library.**
 Something wrote to the library's old places after the move: usually an older install pointed at
 the same library. Close it (its window, its scheduled tasks and its Claude tools), then start this
-one again. It brings in what the older one wrote, and nothing is lost.
+one again. It brings in what the older one wrote, and nothing is lost. When it says another
+program has the library's old `logs\moonglade.log` open, that is usually the older install still
+running (its window, or one of its scheduled tasks, on this PC or another Windows PC); a program
+reading that log holds it too.
 
 ## Updating from 3.19 or older
 
@@ -108,12 +111,15 @@ Any install from 3.10 onward updates this way.
   the log says so.
 - **Linked folders move as links.** A Windows junction or folder link you made (for example, Loom
   exports kept on another drive) is moved as the link itself. Its target is never copied, moved or
-  deleted.
+  deleted. A symbolic link that points by a relative path (as `ln -s ../LoomData loom` makes) is
+  made again in its new place so it still points at the same folder; on Windows the start asks
+  you to make it point by its full path first.
 - **A library two installs share:** update both before using it again. If an older Moonglade is
-  still open on the library, the first start of 3.20 stops and asks you to close it. Windows can
-  tell; on Linux and macOS, close every older install yourself first. If an older install writes
-  to the library later, the next start keeps everything already in the new homes and merges in what
-  the older one added.
+  still open on the library, 3.20 stops and asks you to close it. Windows can tell only when that
+  older install also runs on Windows: if one runs on a Linux or macOS machine (or a NAS) that
+  shares the library, close it yourself first. If an older install writes to the library later,
+  the next start keeps everything already in the new homes and merges in what the older one
+  added.
 
 Going back to an earlier version after 3.20 isn't supported, because it won't find your records
 or settings.
