@@ -67,6 +67,15 @@ describe("requestPrice: a parsed body is a RESPONSE, whatever it says", () => {
     assert.equal(calls.length, 1);
   });
 
+  test("a non-200 status with a parseable body is a RESPONSE, and is never re-asked", async () => {
+    // The status is not a road: a 502 that still carries a body was answered. And it is never a
+    // retry trigger either -- a status-keyed second fetch would be a second POST on a paid road.
+    stubFetch(async () => ({ ok: false, status: 502, json: async () => ({ error: "bad gateway" }) }));
+    const out = await requestPrice({ mode: "image" });
+    assert.deepEqual(out.response, { error: "bad gateway" });
+    assert.equal(calls.length, 1);
+  });
+
   test("it POSTs /api/price once, as JSON, with the payload it was handed", async () => {
     stubFetch(async () => jsonResponse({ cost: 0, free: true }));
     await requestPrice({ mode: "fix", source: "m1", boxes: [{ x: 1 }] });
@@ -115,6 +124,7 @@ describe("requestPrice: the could-not-verify road", () => {
     c.abort();
     const out = await requestPrice({ mode: "image" }, { signal: c.signal });
     assert.equal(out.failed, true);
+    assert.equal(calls.length, 1);
   });
 
   test("a hung request times out and resolves {failed} -- the verdict always settles", async () => {

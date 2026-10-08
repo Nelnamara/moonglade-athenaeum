@@ -2,6 +2,7 @@ import React, {
   forwardRef, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { adjustedText } from "../gen/genCore.js";
+import { classify, isShort } from "../gen/costBadgeCore.js";
 import "../styles/cost-badge.css";
 
 /* CostBadge — the React port of static/mg-cost-badge.js's <mg-cost-badge> custom element:
@@ -113,39 +114,10 @@ function cardCount(v) {
   return (isFinite(n) && n >= 0) ? Math.floor(n) : null;
 }
 
-// The SHORT case (issue #15): the server matched a card but the account holds fewer tickets
-// than this job costs -> nothing is attached, the FULL price is charged. The server's
-// `card_short` flag (= matched and NOT card_covers) is THE verdict, and `free` (= card_covers)
-// stays authoritative the other way: a response is never short when the server said free.
-// This used to also re-derive held<needed as a "belt" that could override free:true -- but
-// cards_held/cards_needed and card_short shipped in the same commit (no response ever carried
-// the counts without the flag), and the belt made THIS badge disagree with the Loom's
-// priceIsShort (which defers to free) on the identical response: two spend surfaces, two
-// verdicts, one page (review 2026-08-16). One rule now, same as loom-core: server decides.
-function isShort(d) {
-  if (!d || d.free) return false;
-  return d.card_short === true;
-}
-
-// The setPrice branch logic, verbatim: resp === null/undefined means THE CHECK ITSELF FAILED
-// (fetch threw, JSON unparseable) — the could-not-verify state on purpose. A host that wants
-// "not priced yet" calls clear() instead. Conflating the two is the bug this exists to prevent.
-function classify(resp) {
-  const d = (resp && typeof resp === "object") ? resp : null;
-  if (!d) return { state: "error", note: "", msg: "", raw: null };
-  if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
-  // `free` and `card_short` are mutually exclusive on the wire (free = card_covers, short =
-  // matched-and-not-covered), and isShort() defers to free -- so a free response renders free
-  // and a short one can never reach this branch. FREE while the submit charges was the exact
-  // bug of issue #15; the guard is the server verdict, read once, the same way loom-core reads it.
-  if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
-  // Checked BEFORE `note` so a response carrying both can never hide a real cost behind a hint.
-  if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
-  if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
-  // free:false, cost:null, no note, no error — nothing was priced. Honest answer is "we don't
-  // know", NOT a neutral silence and certainly not "0 credits".
-  return { state: "error", note: "", msg: "", raw: d };
-}
+// isShort (the card-short verdict, issue #15) and classify (a parsed /api/price response -> one
+// of the five states; null/undefined = the check itself failed = error, never idle) live in
+// gen/costBadgeCore.js, so the rule is testable without a mounted badge. setPrice feeds every
+// response straight through classify.
 
 // Pure: (view, props) -> everything the render and the mg-cost detail both need. Kept out of
 // the component so the onCost effect can rebuild the exact text the DOM shows.

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { apiGet, apiPost } from "../api.js";
-import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply, toLoraSide, versionPatch } from "./genCore.js";
+import {
+  buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeOnVersion, toLoraSide, versionPatch,
+} from "./genCore.js";
 import {
   LAST_KEY, MODEL_GONE, NEG_KEY, PRESETS_KEY, QUICK_KEY, chipWeight, defaultsFromPrefs, deletePreset,
   entryFromRow, familyOf, favIds, lastNote, negativeOnSwitch, presetNote, presetsFromPrefs,
@@ -8,7 +10,7 @@ import {
   toggleDefault, toggleFav, baseHintOf, FAMILIES,
 } from "./powerCore.js";
 import {
-  SEED_PROMPT, TSUBAKI3, contextMax, profileLocked, profileRows, renumberAfterRemove,
+  SEED_PROMPT, TSUBAKI3, contextMax, renumberAfterRemove,
 } from "./tsubakiCore.js";
 import { GEN_PREFS_KEY, prefsFromState, stateFromPrefs } from "./genPrefs.js";
 import { accountCsrf, accountPrefs } from "../hooks/useAccountPrefs.js";
@@ -224,7 +226,7 @@ export default function useGenerate({ costRef, isMember }) {
           // carried in on a model switch would still be priced and still be submitted,
           // then silently re-run on the model's default tier -- the very divergence the
           // dimming closes (red team 2026-09-07).
-          mode: rowSafeMode(modeAfterApply(old.mode, model.profiles), model, old.member),
+          mode: modeOnVersion(old.mode, model, old.member),
           negative: sw.negative, note: sw.note,
           ...presetPatch(latest),
         };
@@ -262,7 +264,7 @@ export default function useGenerate({ costRef, isMember }) {
           ? { ...old.boosters, hires: false } : old.boosters,
         // Same reset as applyModelRow: picking another VERSION of the same model changes
         // the offered profile set too (Tsubaki.2 -> .3 is one model, two sets).
-        mode: rowSafeMode(modeAfterApply(old.mode, model.profiles), model, old.member),
+        mode: modeOnVersion(old.mode, model, old.member),
         negative: sw.negative, note: sw.note || old.note,
         ...presetPatch(v),
       };
@@ -538,7 +540,7 @@ export default function useGenerate({ costRef, isMember }) {
         // for more than one while it is on.
         ...(old.unlimited ? { count: 1, varMode: "random" } : {}),
         loras: [],
-        mode: rowSafeMode(modeAfterApply(snap.mode, old.model && old.model.profiles), old.model, old.member),
+        mode: modeOnVersion(snap.mode, old.model, old.member),
         note: modelGone ? note + " " + MODEL_GONE : note,
       }));
       for (const l of snap.loras) {
@@ -601,13 +603,5 @@ export default function useGenerate({ costRef, isMember }) {
                   // The Inspector's "preview · not sent yet" for a dock with no open
                   // confirm: /plan is read-only and writes nothing.
                   preview: () => apiPost("/api/generate/plan", { ...runBody(), csrf: accountCsrf() }) } };
-}
-
-/* T1a: a members-only profile row is never picked for an account PixAI reports as non-member,
-   so a mode carried in from a member session drops back to `auto` when a version applies. */
-function rowSafeMode(mode, model, member) {
-  const rows = profileRows(model);
-  const row = rows && rows.find((r) => String(r.name).toLowerCase() === String(mode || "").toLowerCase());
-  return row && profileLocked(row, member) ? "auto" : mode;
 }
 

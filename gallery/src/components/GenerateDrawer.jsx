@@ -143,6 +143,31 @@ function TintedPrompt({ value, lists, rows, placeholder, onChange }) {
   );
 }
 
+/* The TUNING slab's five mode bars, for the selected model (s.model). A bar for a profile this
+   model does not offer is DIMMED, never removed (SCOPE 2026-08-17 §4b) -- same disabled-control
+   precedent as the STEPS row below it. modeOffered fails open: `auto` always stands, and an
+   unknown profile set (m.profiles null) dims nothing. Its own component so a static render
+   (loom/test/mg-mode-bar-profile-gate.test.js) can draw the bars the dock draws. */
+function ModeBars({ s, set }) {
+  const m = s.model;
+  return (
+    <div className="mgdock-modebars">
+      {MODES.map(([v, l], i) => {
+        // Unlimited Mode on: the bar is fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3).
+        const lanePinned = s.unlimited && v !== "pro";
+        const off = !modeOffered(v, m && m.profiles) || lanePinned;
+        return (
+          <button key={v} type="button"
+            title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
+            disabled={off}
+            className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
+            onClick={() => set({ mode: v })} />
+        );
+      })}
+    </div>
+  );
+}
+
 /* MEMOIZED at the foot of this file. The drawer NEVER unmounts (App.jsx's dock host keeps
    it mounted so the shared video component's poll timers survive a close), so it was being
    re-rendered by every unrelated setState in the shell -- an overlay opening, a page
@@ -1178,26 +1203,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
               <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
                 <div className="mgdock-lbl">TUNING{rows ? "" : " · " + (MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
                 {creative && <CreativityStops s={s} set={set} />}
-                {/* A bar for a profile this model does not offer is DIMMED, never removed
-                    (SCOPE 2026-08-17 §4b) -- same disabled-control precedent as the STEPS
-                    row just below. modeOffered fails open: `auto` always stands, and an
-                    unknown profile set (m.profiles null) dims nothing. */}
-                {!rows && (
-                  <div className="mgdock-modebars">
-                    {MODES.map(([v, l], i) => {
-                      // Unlimited Mode on: the bar is fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3).
-                      const lanePinned = s.unlimited && v !== "pro";
-                      const off = !modeOffered(v, m && m.profiles) || lanePinned;
-                      return (
-                        <button key={v} type="button"
-                          title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
-                          disabled={off}
-                          className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
-                          onClick={() => set({ mode: v })} />
-                      );
-                    })}
-                  </div>
-                )}
+                {/* The mode bars dim, never vanish, for a profile this model does not offer
+                    (ModeBars, above GenerateDrawer). */}
+                {!rows && <ModeBars s={s} set={set} />}
                 {!(creative && m && m.compat_steps === false) && (
                   <div className="mgdock-sliderrow">
                     <span className="mgdock-lbl">STEPS</span>

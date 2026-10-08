@@ -82,6 +82,22 @@ export function modeAfterApply(mode, profiles) {
   return modeOffered(mode, profiles) ? mode : "auto";
 }
 
+/* T1a: a members-only profile row is never picked for an account PixAI reports as non-member,
+   so a mode carried in from a member session drops back to `auto` when a version applies. */
+export function rowSafeMode(mode, model, member) {
+  const rows = profileRows(model);
+  const row = rows && rows.find((r) => String(r.name).toLowerCase() === String(mode || "").toLowerCase());
+  return row && profileLocked(row, member) ? "auto" : mode;
+}
+
+/* The mode a selection keeps when a model VERSION lands on `model` -- the one rule every seam
+   of useGenerate's that sets a model runs (applyModelRow: a new model; pickVersion: another
+   version of the same one; a restore: a saved mode onto the model now selected):
+   modeAfterApply's offered-set reset, then rowSafeMode's members-only drop. */
+export function modeOnVersion(mode, model, member) {
+  return rowSafeMode(modeAfterApply(mode, model && model.profiles), model, member);
+}
+
 // The classic's blank-steps fallback: `+el('gen-steps').value||25`.
 export const STEPS_FALLBACK = 25;
 

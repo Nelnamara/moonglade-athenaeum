@@ -5424,6 +5424,21 @@ ${"=".repeat(48)}
     return e;
   }
 
+  // ../gallery/src/gen/costBadgeCore.js
+  function isShort(d) {
+    if (!d || d.free) return false;
+    return d.card_short === true;
+  }
+  function classify(resp) {
+    const d = resp && typeof resp === "object" ? resp : null;
+    if (!d) return { state: "error", note: "", msg: "", raw: null };
+    if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
+    if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
+    if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
+    if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
+    return { state: "error", note: "", msg: "", raw: d };
+  }
+
   // ../gallery/src/components/CostBadge.jsx
   function fmt3(n) {
     return Number(n).toLocaleString();
@@ -5445,19 +5460,6 @@ ${"=".repeat(48)}
     if (v == null || v === "") return null;
     const n = Number(v);
     return isFinite(n) && n >= 0 ? Math.floor(n) : null;
-  }
-  function isShort(d) {
-    if (!d || d.free) return false;
-    return d.card_short === true;
-  }
-  function classify(resp) {
-    const d = resp && typeof resp === "object" ? resp : null;
-    if (!d) return { state: "error", note: "", msg: "", raw: null };
-    if (d.error) return { state: "error", note: "", msg: String(d.error), raw: d };
-    if (d.free && !isShort(d)) return { state: "free", note: "", msg: "", raw: d };
-    if (d.cost != null && isFinite(Number(d.cost))) return { state: "paid", note: "", msg: "", raw: d };
-    if (d.note) return { state: "idle", note: String(d.note), msg: "", raw: d };
-    return { state: "error", note: "", msg: "", raw: d };
   }
   function build(view, props) {
     const { state: state2, note: note3, msg, raw } = view;
