@@ -126,8 +126,8 @@ Any install from 3.10 onward updates this way.
   folder (a shared folder or a NAS share). If either runs on Linux or macOS, close every older
   install on the library yourself before the first start. A library kept in step by OneDrive,
   Dropbox or another sync tool is a separate copy on each PC, so close every older install on it
-  yourself first, as on Linux and macOS. If an older install writes to the library later, the next start keeps everything already in the
-  new homes and merges in what the older one added. The achievement counts an older install makes
+  yourself first, as on Linux and macOS. If an older install writes to the library later, even after a first start that stopped
+  part-way, the next start keeps everything already in the new homes and merges in what the older one added. The achievement counts an older install makes
   after the move aren't added.
 
 Going back to an earlier version after 3.20 isn't supported, because it won't find your records

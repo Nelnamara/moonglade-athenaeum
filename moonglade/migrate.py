@@ -30,7 +30,12 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     journal says the move made is trusted. Every swap (_replace) waits out a refusal Windows
     gives for a moment (a scan, the indexer, OneDrive), as every delete does.
   * CONFLICTS, AT THE FIRST MOVE. A copy in the new place wins only when the journal says the
-    move made it (and the old copy is still the very bytes it copied). Any other two-copy case:
+    move made it: the old copy is still the very bytes it copied (and is simply removed), or
+    was written after the move made the new home -- it sits at the very old place the move
+    took the home from, or its time is later than the journal's -- as when a first move cut
+    short is followed by an older install writing the old homes it emptied. Such a copy is
+    folded in by the rules for after the move (below), and a home the move made is never set
+    aside for it. Any other two-copy case:
     JSONL and other append-only line files are merged (lines the other lacks are appended); the
     counters and sets of telemetry.json, achievements.json and the spend guard are merged where
     the format allows; anything else keeps the newer copy and parks the other in
@@ -70,7 +75,9 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     stops and says so, rather than sweep its records out from under it. Started again with
     nothing more written there and no old log held (the person stopped it: Stop server in its
     Control Panel, since closing its browser tab leaves it serving), the move brings in what it
-    wrote, and the new homes keep everything they hold. A held log is seen only when both
+    wrote, and the new homes keep everything they hold. Before the first move has finished (one
+    cut short), an old-layout file written after the move made its own new home counts the
+    same way. A held log is seen only when both
     installs run on Windows and open the same folder (a shared folder or a NAS share). If
     either runs on Linux or macOS, nothing is held; and a library that OneDrive, Dropbox or
     another sync tool keeps in step is a separate copy on each PC, whose log the other PC's
@@ -333,8 +340,8 @@ class Report:
 # ---- the journal and the lock -------------------------------------------------------------------
 class Journal:
     """One half's journal: {format, started, finished, settings_merged, snapshot,
-    clean_starts, items: {destination: {src, src_sha256, sha256, state, time}}}. Written
-    whole, through a temp flushed to disk."""
+    clean_starts, items: {destination: {src, src_sha256, sha256, state, time, made_ns}}}.
+    Written whole, through a temp flushed to disk."""
 
     def __init__(self, folder):
         self.path = Path(folder) / _paths.JOURNAL_NAME
@@ -345,6 +352,14 @@ class Journal:
         except (OSError, ValueError):
             doc = {"format": JOURNAL_FORMAT, "started": None, "finished": None, "items": {}}
         self.doc = doc
+        self.saved_ns = self._disk_ns()
+
+    def _disk_ns(self):
+        """The journal file's own time as the disk wrote it, or None."""
+        try:
+            return self.path.stat().st_mtime_ns
+        except OSError:
+            return None
 
     @property
     def items(self):
@@ -353,6 +368,17 @@ class Journal:
     def save(self):
         _write_bytes(self.path, (json.dumps(self.doc, indent=1, sort_keys=True) + "\n")
                      .encode("utf-8"))
+        self.saved_ns = self._disk_ns()
+
+    def made(self, key, **extra):
+        """Journal the item at `key` made, and save. made_ns is the disk's time of the save
+        that journalled it under way: the move had the item by then, so an old-layout copy at
+        its old place written later was written after the move took it (_written_since)."""
+        entry = self.items[key]
+        entry.update(state="made", **extra)
+        if self.saved_ns:
+            entry["made_ns"] = self.saved_ns
+        self.save()
 
     def finish(self):
         """Stamp the half finished, and remember the journal file's own time as the disk
@@ -1430,13 +1456,15 @@ class _Half:
         at its new place and gone from its old one; forgotten, when it never left (the next
         move tries again). Returns True when the journal changed."""
         changed = False
+        # The last save before the cut is the one that journalled the rename under way.
+        stamp = {"made_ns": self.journal.saved_ns} if self.journal.saved_ns else {}
         for key, entry in list(self.journal.items.items()):
             if not isinstance(entry, dict) or entry.get("state") != "renaming":
                 continue
             dest, src = self.path_of(key), self.path_of(entry.get("src") or "")
             if entry.get("how") == "link":       # a link renamed as itself (_bring_link)
                 if os.path.lexists(dest) and not os.path.lexists(src):
-                    entry["state"] = "made"
+                    entry.update(state="made", **stamp)
                     changed = True
                 elif os.path.lexists(src) and not os.path.lexists(dest):
                     del self.journal.items[key]
@@ -1453,11 +1481,11 @@ class _Half:
                         _unlink_link(src)
                     except OSError:
                         continue
-                    entry["state"] = "made"
+                    entry.update(state="made", **stamp)
                     changed = True
                 continue
             if dest.is_file() and not src.exists():
-                entry.update(state="made", how="renamed")
+                entry.update(state="made", how="renamed", **stamp)
                 changed = True
             elif src.is_file() and not dest.exists():
                 del self.journal.items[key]
@@ -2058,8 +2086,7 @@ def _swap_in(tmp, dest, half, key, src_hash, merged_sha):
     half.journal.save()
     _replace(tmp, dest)
     _fsync_dir(dest.parent)
-    half.journal.items[key]["state"] = "made"
-    half.journal.save()
+    half.journal.made(key)
 
 
 def _replace_with(dest, data, half, key, src_hash):
@@ -2105,8 +2132,8 @@ def _fold_db(src, dest, half, key, src_hash):
         return None
     added, clashes = _fold_db_rows(dest, src)
     half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": None,
-                               "state": "made", "time": _now(), "merged": True}
-    half.journal.save()
+                               "time": _now(), "merged": True}
+    half.journal.made(key)
     return added, clashes
 
 
@@ -2203,7 +2230,9 @@ def _merged_log(src, dest):
 def _two_copies(src, dest, kind, half, vouched):
     """Both the old place and the new hold the item. Returns what was done. "Newer" is each
     copy's own modified time: the move keeps a copy's time (_keep_times), so a copy it made
-    is as old as what it copied."""
+    is as old as what it copied. A new home the journal says this move made is never set
+    aside for an old-layout copy written after it (_written_after_made): that copy is folded
+    in, the new home winning, as after a finished move."""
     key = half.rel(dest)
     entry = half.journal.items.get(key) or {}
     item = half.report.item
@@ -2217,8 +2246,7 @@ def _two_copies(src, dest, kind, half, vouched):
                                             and entry.get("sha256") == dest_hash)
     if made and entry.get("src_sha256") == src_hash:
         if entry.get("state") != "made":     # it died between the swap and the journal
-            half.journal.items[key]["state"] = "made"
-            half.journal.save()
+            half.journal.made(key)
         _remove(src)                         # the move's own source, not yet deleted
         item("Removed %s: it was already moved to %s.", half.rel(src), half.rel(dest))
         return "removed"
@@ -2238,8 +2266,10 @@ def _two_copies(src, dest, kind, half, vouched):
         _remove(src)
         item("Removed an older Mirror sign-in at %s.", half.rel(src))
         return "removed"
-    if half.settled:
-        # Written after the library's move finished: the new home always wins (A).
+    if half.settled or (made and _written_after_made(src, entry, half)):
+        # Written after the library's move finished, or after this move made the new home (a
+        # first move cut short, then an older install wrote its emptied old home): the new home
+        # always wins (A). A home the move made is never set aside for such a copy.
         return _fold_in(src, dest, kind, half, key, src_hash)
     # The first move.
     data = None
@@ -2324,8 +2354,7 @@ def _bring_link(src, dest, half):
             # start removes it (settle_renames).
             raise _Failed("couldn't remove the old link %s (%s)" % (src, _reason(e)), e)
     _fsync_dir(dest.parent)
-    half.journal.items[key]["state"] = "made"
-    half.journal.save()
+    half.journal.made(key)
     half.tick()
     if target is None:
         half.report.item("Moved the link %s to %s (what it points at was not touched).",
@@ -2371,8 +2400,7 @@ def _bring(src, dest, kind, half, vouched=False):
                 half.journal.items.pop(key, None)        # copy it instead, below
             else:
                 _fsync_dir(dest.parent)
-                half.journal.items[key].update(state="made", how="renamed")
-                half.journal.save()
+                half.journal.made(key, how="renamed")
                 half.tick()
                 half.report.item("Moved %s to %s.", half.rel(src), half.rel(dest))
                 return "moved"
@@ -2387,8 +2415,7 @@ def _bring(src, dest, kind, half, vouched=False):
         half.journal.save()
         _replace(tmp, dest)
         _fsync_dir(dest.parent)
-        half.journal.items[key]["state"] = "made"
-        half.journal.save()
+        half.journal.made(key)
         _remove(src)
         half.tick()
         half.report.item("Moved %s to %s (copied, checked, then removed from the old place).",
@@ -3703,17 +3730,46 @@ def _mtime_ns(p):
         return None
 
 
-def _written_since(journal, plan, shared):
+def _made_at(entry):
+    """When the move made the new home a journal entry names, in seconds on the disk's clock
+    (made_ns), else by the entry's own stamp; None for an entry the move hasn't made."""
+    if not isinstance(entry, dict) or entry.get("state") not in ("made", "verified"):
+        return None
+    ns = entry.get("made_ns")
+    if isinstance(ns, int) and ns > 0:
+        return ns / 1e9
+    try:
+        return float(calendar.timegm(time.strptime(entry.get("time"), "%Y-%m-%dT%H:%M:%SZ")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _written_after_made(src, entry, half):
+    """Was the old-layout copy `src` written after the move made its new home (`entry`)? It was
+    when it sits at the very old place the move took that home from (the move emptied it), or
+    when its own time is later than the home's (_made_at)."""
+    if entry.get("src") is not None and entry.get("src") == half.rel(src):
+        return True
+    t, ns = _made_at(entry), _mtime_ns(src)
+    return t is not None and ns is not None and ns / 1e9 > t + WRITTEN_SINCE_SLACK_S
+
+
+def _written_since(half, plan, shared):
     """[(path, mtime_ns)] of old-layout files written after this library's move last
     finished: an older Moonglade still using the library writes its old homes (its
-    moonglade.log and its records), and nothing of this version ever does."""
-    since = journal.finished_at()
-    if since is None:
-        return []
+    moonglade.log and its records), and nothing of this version ever does. Before the first
+    move has finished (one cut short), an old-layout file written after the move made its own
+    new home counts the same way."""
+    since = half.journal.finished_at()
+    if since is not None:
+        times = [(s, since) for s, _d, _k, _v in plan.moves] + [(p, since) for p in shared]
+    else:
+        times = [(s, _made_at(half.journal.items.get(half.rel(d))))
+                 for s, d, _k, _v in plan.moves]
     out = []
-    for p in [s for s, _d, _k, _v in plan.moves] + list(shared):
+    for p, t in times:
         ns = _mtime_ns(p)
-        if ns is not None and ns / 1e9 > since + WRITTEN_SINCE_SLACK_S:
+        if t is not None and ns is not None and ns / 1e9 > t + WRITTEN_SINCE_SLACK_S:
             out.append((Path(p), ns))
     return out
 
@@ -3911,7 +3967,7 @@ def prepare_library(out_dir, report, moves, named=False, wait=None):
     plan = _plan_library(out, app, CopyFirst(app / OLD_RECORD), logins, look)
     shared = _shared_files(out, app) if plan.ours else []
     if not moves:
-        written = _written_since(look.journal, plan, shared)
+        written = _written_since(look, plan, shared)
         if written:
             raise MoveStopped(_older_live_words(out, [p for p, _ns in written], look, False))
         if _old_layout_records(plan, shared):
@@ -3982,7 +4038,7 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # more" is every file written since being one the stop named, with the same time: a
     # bring-in cut short has already folded some of them in. held_back stays until this run
     # finishes, so a start after one cut short carries on rather than blame an older install.
-    written = _written_since(j, plan, shared)
+    written = _written_since(half, plan, shared)
     if written:
         files = {half.rel(p): ns for p, ns in written}
         held = j.doc.get("held_back")
@@ -4015,12 +4071,12 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # The safety snapshot: the small records about to move, the shared preset files, the
     # banner renders that may be the only copy, and 3.20's record.
     snap = list(plan.snap) + [(p, half.rel(p)) for p in shared]
-    if half.settled:
-        # A fold writes telemetry.json's new home in place: its own copy goes into this run's
-        # zip first, beside the older copy.
-        homes = {Path(d) for s, d, k, _v in plan.moves
-                 if k == "json:telemetry" and _movable(s) and Path(d).is_file()}
-        snap += [(d, half.rel(d)) for d in sorted(homes)]
+    # A fold writes telemetry.json's new home in place: its own copy goes into this run's zip
+    # first, beside the older copy (after the move, or where this move already made it).
+    homes = {Path(d) for s, d, k, _v in plan.moves
+             if k == "json:telemetry" and _movable(s) and Path(d).is_file()
+             and (half.settled or _made_at(j.items.get(half.rel(d))) is not None)}
+    snap += [(d, half.rel(d)) for d in sorted(homes)]
     bfolder = out / "gallery" / "cache" / "_banners"
     for name in BANNER_FLATS.values():
         for p in (bfolder / name, bfolder / (name + ".json")):

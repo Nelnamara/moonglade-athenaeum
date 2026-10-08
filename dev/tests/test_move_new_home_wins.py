@@ -914,3 +914,139 @@ def test_what_can_t_be_merged_is_set_aside_and_named_and_the_new_home_stays(r):
     said = _said(done)
     assert "Kept _moonglade/records/verify_report.csv, the new home" in said
     assert "verify_report.csv" in said and "set aside" in said
+
+
+# ---- a first move cut short, then an older install writes its old homes -------------------------
+# Two PCs on one library: this one's first move stops part-way (a file held past its retries, a
+# crash, a full disk), after the records, decisions and per-login stores are already in their new
+# homes, and says "Nothing was lost." The other PC, still on 3.19, is then used: its old homes are
+# empty, so it writes fresh ones there -- a one-run runs.db, a marks file holding one mark, a prefs
+# file holding one key. Those must never become the new homes: a home the journal says this move
+# made always wins, exactly as after a finished move, and what the older copy adds is folded in.
+
+def _cut_short_after_the_records(r, monkeypatch):
+    """The first start stops at the Loom's render journal (held by another program past its
+    retries), after the records, decisions and per-login stores have moved."""
+    real = migrate._bring
+
+    def held(src, dest, kind, half, vouched=False):
+        if "_submits" in str(src):
+            raise migrate._Failed("couldn't move %s (another program has it open)" % src)
+        return real(src, dest, kind, half, vouched=vouched)
+    monkeypatch.setattr(migrate, "_bring", held)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    monkeypatch.setattr(migrate, "_bring", real)
+    assert "Nothing was lost" in str(e.value)
+    journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())
+    assert not journal["finished"], "the first move is still under way"
+
+
+def _library_before_the_first_move(r):
+    """D:'s 3.17 shape, with a real 3.19 runs.db (two runs) and two integrity marks."""
+    from tests.move_layouts import layout_317
+    layout_317(r)
+    (r.lib / "runs.db").unlink()
+    old = _old_store(r)
+    old.reserve("run-A", "Nel", status="sent", covered=2)
+    old.put_jobs("run-A", [{"cell": 0, "prompt": "a0", "paid": 1}])
+    old.reserve("run-B", "Nel", status="planning")
+    write(r.lib / "integrity_marks.json", {"format": 1, "marks": {
+        "m1": {"mark": "lost", "at": "2026-10-01T10:00:00Z"},
+        "m2": {"mark": "kept", "at": "2026-10-01T10:01:00Z"}}})
+
+
+def _new_homes(r):
+    acc = r.lib / "_moonglade" / "accounts" / KEY_NEL
+    store = runs.RunsStore(r.lib)
+    return {"runs": sorted(row[0] for row in _rows(store.path, "SELECT run_id FROM runs")),
+            "run-A": store.get("run-A"),
+            "marks": integrity.read_marks(r.lib),
+            "prefs": json.loads((acc / "prefs.json").read_text())}
+
+
+def _a_3_19_install_writes_its_old_homes(r, later=True):
+    """What 3.19 writes into old homes the move emptied: RunsStore makes a fresh runs.db for one
+    Run, set_mark a marks file holding only the mark it set, a pref change a prefs file holding
+    only that key."""
+    old = _old_store(r)
+    assert not old.path.exists()
+    old.reserve("run-C", "Nel", status="planning")
+    paths = [old.path,
+             write(r.lib / "integrity_marks.json", {"format": 1, "marks": {
+                 "m9": {"mark": "lost", "at": "2026-10-08T09:00:00Z"}}}),
+             write(r.lib / "account_prefs" / (KEY_NEL + ".json"), {"grid.size": "large"})]
+    for p in paths:
+        if later:
+            _later(p)
+        else:                                    # a copy tool, or a clock behind the disk's
+            os.utime(p, (1_600_000_000, 1_600_000_000))
+    return paths
+
+
+def _swept(r):
+    """The five clean starts after which the app deletes the safety copy (and two more)."""
+    for _ in range(migrate.CLEAN_STARTS + 2):
+        start(r, "server").count_clean_start()
+    assert not (r.lib / "_moonglade" / ".snapshot").exists()
+
+
+def test_a_first_move_cut_short_never_gives_the_new_home_to_an_older_install_s_fresh_files(
+        r, monkeypatch):
+    _library_before_the_first_move(r)
+    _cut_short_after_the_records(r, monkeypatch)
+    before = _new_homes(r)
+    assert before["runs"] == ["run-A", "run-B"]
+    assert set(before["marks"]) == {"m1", "m2"}
+    assert before["prefs"] == {"guide.gallery": "done"}
+    _a_3_19_install_writes_its_old_homes(r)
+
+    # It stops once, as after a finished move: an older Moonglade wrote the old homes since.
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    said = str(e.value)
+    assert "An older Moonglade is still using the library" in said
+    for name in ("runs.db", "integrity_marks.json", "account_prefs/"):
+        assert name in said, said
+    done = start(r)                                   # closed: the move brings it in
+
+    after = _new_homes(r)
+    assert after["runs"] == ["run-A", "run-B", "run-C"], "every run kept, the older one's added"
+    assert after["run-A"] == before["run-A"], "the new home's reservation is untouched"
+    assert after["marks"]["m1"] == before["marks"]["m1"]
+    assert after["marks"]["m2"] == before["marks"]["m2"]
+    assert after["marks"]["m9"]["mark"] == "lost"
+    assert after["prefs"] == {"guide.gallery": "done", "grid.size": "large"}
+    assert not (r.lib / "runs.db").exists() and not (r.lib / "integrity_marks.json").exists()
+    assert not (r.lib / "account_prefs").exists()
+    assert _parked(r) == [], "no new home was set aside"
+    assert "kept the newer one" not in _said(done)
+    journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())
+    assert journal["finished"] and "held_back" not in journal
+    assert (r.lib / "_moonglade" / "loom" / "_submits" / (KEY_NEL + ".jsonl")).is_file()
+
+    _swept(r)
+    assert _new_homes(r) == after, "every row, mark and pref survives the clean-start sweep"
+
+
+def test_a_home_this_move_made_is_never_set_aside_whatever_the_older_copy_s_time(
+        r, monkeypatch):
+    """The older install's files carry a time from before the move (a copy tool kept the
+    original's, or that PC's clock is behind the disk's): nothing says they were written since,
+    so the start doesn't stop -- but they sit at the very old place the move took each home
+    from, and a home the move made is still never set aside for them."""
+    _library_before_the_first_move(r)
+    _cut_short_after_the_records(r, monkeypatch)
+    before = _new_homes(r)
+    _a_3_19_install_writes_its_old_homes(r, later=False)
+    done = start(r)
+    after = _new_homes(r)
+    assert after["runs"] == ["run-A", "run-B", "run-C"]
+    assert after["run-A"] == before["run-A"]
+    assert {k: after["marks"][k] for k in ("m1", "m2")} == before["marks"]
+    assert set(after["marks"]) == {"m1", "m2", "m9"}
+    assert after["prefs"] == {"guide.gallery": "done", "grid.size": "large"}
+    assert _parked(r) == []
+    assert "kept the newer one" not in _said(done)
+    _swept(r)
+    assert _new_homes(r) == after
