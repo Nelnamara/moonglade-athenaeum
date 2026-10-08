@@ -113,9 +113,13 @@ Any install from 3.10 onward updates this way.
   the log says so.
 - **Linked folders move as links.** A Windows junction or folder link you made (for example, Loom
   exports kept on another drive) is moved as the link itself. Its target is never copied, moved or
-  deleted. A symbolic link that points by a relative path (as `ln -s ../LoomData loom` makes) is
-  made again in its new place so it still points at the same folder; on Windows the start asks
-  you to make it point by its full path first.
+  deleted. A link whose relative path already points at the right place from its new home (the
+  Loom's `exports\latest` pointing at a month folder beside it, say) moves as it is. Another one
+  that points by a relative path (as `ln -s ../LoomData loom` makes) is made again in its new
+  place so it still points at the same folder; on Windows the start asks you to make it point by
+  its full path first. A link into a folder the move empties or takes to its new home (a junction
+  to a Loom exports folder, say) would be left pointing at the emptied old place, so on every
+  system the start stops before anything moves and says how to make it again afterwards.
 - **A library two installs share:** update both before using it again. If an older Moonglade is
   still running on the library, 3.20 stops and asks you to stop it (**Stop server** in its
   Control Panel). Moonglade can tell only when both installs run on Windows and open the same

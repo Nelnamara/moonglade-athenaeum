@@ -87,10 +87,13 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     entry itself renamed on the same drive (_bring_link); a symbolic link whose target is
     written relative to its own folder is made again at its deeper new home with its target
     rewritten, so it still points at the same place (off Windows) -- and one that can't be
-    (its new home taken or on another drive, a relative one on Windows) is left where it is
-    while the start stops with a plain sentence, before anything moves. A cache that is a
-    link goes as the link alone; a logs\\ or branding\\ that is one is left, and so is a
-    banner cache holding a linked render, and anything inside a link.
+    (its new home taken or on another drive, a relative one on Windows that would have to
+    change, one pointing by its full path -- every junction -- into something the same move
+    takes or empties) is left where it is while the start stops with a plain sentence, before
+    anything moves. Links move before any file, so a start cut short never leaves a link
+    whose target's files have already gone. A cache that is a link goes as the link alone; a
+    logs\\ or branding\\ that is one is left, and so is a banner cache holding a linked
+    render, and anything inside a link.
   * PER-LOGIN DATA. Every login key's files move into accounts\\<key>\\, whether or not this
     install's config.json lists the login (another install may share the library). A file
     named by a login's plain name (before the hashed keys) goes to that login's folder when
@@ -1013,11 +1016,17 @@ def _through_the_plan(aim, homes, removed):
 
 
 def _plan_link_targets(moves, removals):
-    """For each relative symbolic link the plan moves: ({old path: the target it must hold
-    at its new home, or None when its text already points right from there}, {old path:
-    why it can't}). A target the same plan moves is followed to its new place (#9: the Loom's
-    exports\\latest -> 2026-10 keeps its text, its inner layout unchanged); one the move
-    empties with no one new place can't be pointed at, and stops the start."""
+    """For each link the plan moves: ({old path: the target a relative symbolic link must
+    hold at its new home, or None when its text already points right from there}, {old path:
+    (why it can't, what to do)}).
+
+    A relative target the same plan moves is followed to its new place (#9: the Loom's
+    exports\\latest -> 2026-10 keeps its text, its inner layout unchanged); one the move empties
+    with no one new place can't be pointed at, and stops the start. A full-path target -- every
+    junction, and a symbolic link written with one -- is renamed as it is, so it keeps naming
+    the very place it names: right while the plan leaves that place alone, and pointing at an
+    emptied, pruned old folder when the plan takes it (round 3 #9). That one stops the start,
+    before anything moves."""
     homes = {os.path.normcase(_real_entry(s)): _real_entry(d)
              for s, d, _k, _v in moves if _movable(s)}
     removed = {os.path.normcase(_real_entry(p)) for p in removals}
@@ -1025,15 +1034,36 @@ def _plan_link_targets(moves, removals):
     for src, dest, kind, _v in moves:
         if not (kind == "link" or _is_link(src)):
             continue
+        k = os.path.normcase(str(src))
         text = _symlink_text(src)
-        if not text or os.path.isabs(text):
+        if text is None or os.path.isabs(text):
+            full = _link_target(src)             # a junction's, without Windows' \\?\ prefix
+            if not full or not os.path.isabs(full):
+                continue                         # can't be read: renamed as it is
+            # Where it points, its folders resolved -- and as written, for a path that goes
+            # through a link the plan moves whole (the link's own old place goes).
+            there = None
+            for aim in dict.fromkeys((_real_entry(full), os.path.normpath(full))):
+                there = _through_the_plan(aim, homes, removed)
+                if there is not None:
+                    break
+            if there is None:
+                continue                         # the plan leaves it where it is
+            if there is False:
+                why[k] = ("it points by its full path at %s, which the move empties" % aim,
+                          _FULL_LINK_ADVICE)
+            else:
+                why[k] = ("it points by its full path at %s, which the move takes to %s, so "
+                          "from its new home it would point at the emptied old place" % (
+                              aim, there), _FULL_LINK_ADVICE)
+            continue
+        if not text:
             continue
         aim = os.path.normpath(os.path.join(os.path.realpath(Path(src).parent), text))
         new_dir = os.path.realpath(Path(dest).parent)
         there = _through_the_plan(aim, homes, removed)
-        k = os.path.normcase(str(src))
         if there is False:
-            why[k] = "it points at %s, which the move empties" % aim
+            why[k] = ("it points at %s, which the move empties" % aim, _RELATIVE_LINK_ADVICE)
             continue
         there = aim if there is None else there
         if os.path.normcase(os.path.normpath(os.path.join(new_dir, text))) == \
@@ -1043,7 +1073,8 @@ def _plan_link_targets(moves, removals):
         try:
             targets[k] = os.path.relpath(there, new_dir)
         except ValueError:                       # another drive: no relative path reaches it
-            why[k] = "it points at %s, which no relative path reaches from there" % there
+            why[k] = ("it points at %s, which no relative path reaches from there" % there,
+                      _RELATIVE_LINK_ADVICE)
     return targets, why
 
 
@@ -1083,6 +1114,9 @@ _RELATIVE_LINK_WHY = ("it points by a path written from where it sits (%s), so f
                       "home it would point somewhere else")
 _RELATIVE_LINK_ADVICE = ("Make the link point by its full path, or put the real folder or file "
                          "in its place, then start Moonglade again.")
+_FULL_LINK_ADVICE = ("Delete the link itself, not what is in it (deleting a link in File "
+                     "Explorer leaves what it points at, which then moves with the rest), start "
+                     "Moonglade again, then make the link again pointing at the new place.")
 
 
 def _unlink_link(p):
@@ -3090,17 +3124,32 @@ def _install_links_stuck(moves, old, local, same_folder):
     """The install half's links that can't move as links (_link_stuck), checked before
     anything moves: the Mirror's sign-in, and the art pack and its marker when they would be
     brought (a pack already in local\\ means the old one, link or not, is only removed; the
-    marker's new home is cleared before it comes)."""
-    stuck, seen = [], set()
+    marker's new home is cleared before it comes). A sign-in that is a link, with another of
+    its old places holding something for the same home (#11: config.json found in the working
+    directory gives it two), could only arrive after that one took the home: it stops the
+    start here too, before the settings merge."""
+    stuck, seen, tokens = [], set(), []
     for src, dest, kind in moves:
-        if kind != "token" or not _is_link(src) or _same(src, dest):
+        if kind != "token" or not _movable(src) or _same(src, dest):
             continue
         k = os.path.normcase(os.path.abspath(src))
         if k in seen:
             continue
         seen.add(k)
+        tokens.append((src, dest))
+    for src, dest in tokens:
+        if not _is_link(src):
+            continue
+        home = os.path.normcase(os.path.abspath(dest))
+        others = [s for s, d in tokens
+                  if s is not src and os.path.normcase(os.path.abspath(d)) == home]
         why = _link_stuck(src, dest)
-        if why:
+        if why is not None and why[2] == "that place is already taken":
+            stuck.append(why)
+        elif others:
+            stuck.append((src, dest, "another copy of it (%s) goes to that place too"
+                          % others[0]))
+        elif why:
             stuck.append(why)
     if not same_folder:
         old_pack, new_pack = old / PACK_NAME, local / PACK_NAME
@@ -3497,7 +3546,8 @@ def _plan_library(out, app, copyfirst, logins, half):
     # A link that can't move as a link stops the start before anything moves: its new home is
     # taken, or another planned source goes there too (it could only arrive after that one
     # took it), or it is on another drive, or it points by a relative path the move can't
-    # keep right (the target it would need is worked out through the plan itself, #9), or on
+    # keep right (the target it would need is worked out through the plan itself, #9), or by
+    # a full path into something the plan takes or empties (a junction included), or on
     # Windows a relative path that would have to change. Any source that is a link counts,
     # whatever kind the plan gave it (a record, a decision or a curation file can be one).
     plan.link_targets, cant = _plan_link_targets(plan.moves, plan.removals)
@@ -3519,7 +3569,7 @@ def _plan_library(out, app, copyfirst, logins, half):
             plan.stuck.append((src, dest, "another copy of it (%s) goes to that place too"
                                % others[0]))
         elif k in cant:
-            plan.stuck.append((src, dest, cant[k], _RELATIVE_LINK_ADVICE))
+            plan.stuck.append((src, dest) + tuple(cant[k]))
         elif stuck is not None:
             plan.stuck.append(stuck)
     return plan
@@ -3977,13 +4027,19 @@ def _library_half(half, out, app, copyfirst, logins, report):
             if p.is_file():
                 snap.append((p, half.rel(p)))
     _make_snapshot(half, snap)
+    # Links first (#10): each was planned against its target's files where they are now, so
+    # it moves before any of them do. A start cut short between the two then never finds a
+    # link whose target's files have already left (it would see an emptied folder, and stop
+    # or point the link at the old place the move then prunes).
+    links_first = sorted(plan.moves, key=lambda m: 0 if (m[2] == "link" or _is_link(m[0]))
+                         else 1)
     moved = 0
-    for src, dest, kind, vouched in plan.moves:
+    for src, dest, kind, vouched in links_first:
         if _bring_or_say(src, dest, kind, half, vouched=vouched) == "moved":
             moved += 1
     if plan.dead:
-        parked = [p for p in plan.dead if _movable(p)]
-        for p in parked:
+        set_aside = []
+        for p in [p for p in plan.dead if _movable(p)]:
             if p in plan.dead_unlink and _is_link(p):
                 _remove(p)
                 report.item("Removed the link %s: the safety copy is on another drive, so it "
@@ -3991,10 +4047,11 @@ def _library_half(half, out, app, copyfirst, logins, report):
                             half.rel(p))
                 continue
             _park(p, half, said=False)
-        if parked:
+            set_aside.append(p)
+        if set_aside:
             report.info("Set aside the library's old branding folder (%s) with the safety copy: "
                         "nothing uses it any more, and it goes when the safety copy does.",
-                        _names(parked, half, most=10))
+                        _names(set_aside, half, most=10))
     for p in plan.kept:
         if _movable(p):
             report.warn("Left %s where it is: no login in config.json goes by that name.",

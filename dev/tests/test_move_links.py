@@ -360,7 +360,7 @@ def test_a_linked_moonglade_log_is_probed_through_what_it_points_at(r, monkeypat
     assert probed == [str(real_log)]
 
 
-# ---- a relative link whose target the same plan moves (round 2, #9) ------------------------------
+# ---- a link whose target the same plan moves (round 2 #9; round 3 #9, #10) ----------------------
 
 def _pretend_relative(monkeypatch, link, text):
     """The junction `link` reports `text` as a relative target (a real relative symbolic link
@@ -370,25 +370,40 @@ def _pretend_relative(monkeypatch, link, text):
                         os.path.normcase(str(link)) else None)
 
 
-def test_a_relative_link_to_a_sibling_the_loom_also_moves_keeps_its_text(r, monkeypatch):
-    """loom\\exports\\latest -> 2026-10: both move into _moonglade\\loom\\exports with the Loom's
-    inner layout unchanged, so the link's text already points at the right place from its new
-    home. It is renamed as it is -- never rewritten to the old place the move empties -- and
-    on Windows it no longer stops the start."""
+def test_a_junction_into_a_folder_the_loom_also_moves_stops_before_anything_moves(r):
+    """#9: a junction (mklink /J, the usual way to make loom\\exports\\latest) always points by
+    its full path. Renamed as it is, it would point at the old folder the move empties and
+    prunes, while the log said what it points at was not touched. It stops the start before
+    anything moves, names where its target is going, and still points where it did."""
     _a_library(r)
     write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, {"b": 1})
     write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
-    link = _junction(r.lib / "loom" / "exports" / "latest",
-                     r.lib / "loom" / "exports" / "2026-10")
-    _pretend_relative(monkeypatch, link, "2026-10")
-    done = start(r)
-    new = r.lib / "_moonglade" / "loom" / "exports"
-    assert (new / "2026-10" / "cut.mp4").read_bytes() == b"VIDEO"
-    assert migrate._is_link(new / "latest"), "the link moved as a link"
-    assert not os.path.lexists(r.lib / "loom")
-    said = " ".join(line for _lvl, line in done.report.all_lines())
-    assert "Moved the link loom/exports/latest to _moonglade/loom/exports/latest" in said
-    assert "its target written as" not in said
+    _junction(r.lib / "loom" / "exports" / "latest", r.lib / "loom" / "exports" / "2026-10")
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    text = str(e.value)
+    assert "latest is a link" in text and "points by its full path" in text
+    assert os.path.join("_moonglade", "loom", "exports", "2026-10") in text, "where it goes"
+    assert "Delete the link itself" in text
+    assert (r.lib / "jobs.jsonl").is_file() and (r.lib / "loom" / "kv").is_dir(), \
+        "nothing moved before the stop"
+    assert (r.lib / "loom" / "exports" / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
+
+
+def test_a_junction_into_a_folder_the_move_empties_stops_before_anything_moves(r):
+    """A junction into a login store, whose files go one by one into each login's own folder,
+    has no one new place to point at: it stops the start before anything moves."""
+    _a_library(r)
+    write(r.lib / "account_prefs" / (KEY_NEL + ".json"), {"guide": "done"})
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, {"b": 1})
+    _junction(r.lib / "loom" / "exports" / "prefs", r.lib / "account_prefs")
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    text = str(e.value)
+    assert "prefs is a link" in text and "points by its full path" in text
+    assert "which the move empties" in text
+    assert (r.lib / "account_prefs" / (KEY_NEL + ".json")).is_file()
+    assert (r.lib / "jobs.jsonl").is_file()
 
 
 def test_a_relative_link_to_a_folder_the_move_empties_stops_before_anything_moves(
@@ -408,6 +423,39 @@ def test_a_relative_link_to_a_folder_the_move_empties_stops_before_anything_move
     assert (r.lib / "jobs.jsonl").is_file() and (r.lib / "loom" / "kv").is_dir()
 
 
+def test_a_start_cut_short_after_the_links_moved_finishes_without_a_stop(r, monkeypatch):
+    """#10: links move before any file, so a start cut short never leaves a link whose target's
+    files have already gone: the next start plans the files alone and finishes. (Planned the
+    other way round, the resumed start saw an emptied folder and stopped, or remade the link
+    pointing at the folder the move then pruned.) loom\\exports\\latest -> 2026-10 reports a
+    relative target here; test_move_symlinks.py follows a real one to its file."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, {"b": 1})
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    link = _junction(r.lib / "loom" / "exports" / "latest",
+                     r.lib / "loom" / "exports" / "2026-10")
+    _pretend_relative(monkeypatch, link, "2026-10")
+    real = migrate._bring
+
+    def die_at_the_first_file(src, dest, kind, half, vouched=False):
+        if kind != "link" and not migrate._is_link(src):
+            raise migrate._Failed("cut short")
+        return real(src, dest, kind, half, vouched=vouched)
+    monkeypatch.setattr(migrate, "_bring", die_at_the_first_file)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert migrate._is_link(new / "latest"), "the link moved first"
+    assert (r.lib / "loom" / "exports" / "2026-10" / "cut.mp4").is_file(), "no file yet"
+    monkeypatch.setattr(migrate, "_bring", real)
+    done = start(r)
+    assert (new / "2026-10" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert migrate._is_link(new / "latest")
+    assert not os.path.lexists(r.lib / "loom")
+    said = " ".join(line for _lvl, line in done.report.all_lines())
+    assert "is a link" not in said
+
+
 # ---- the install half checks its links before the settings merge (round 2, #10) ----------------
 
 def test_a_linked_mirror_sign_in_whose_home_is_taken_stops_before_the_settings_merge(r):
@@ -423,6 +471,32 @@ def test_a_linked_mirror_sign_in_whose_home_is_taken_stops_before_the_settings_m
     assert "mirror_session.json is a link" in str(e.value) and "already taken" in str(e.value)
     assert (r.app / "serve.txt").read_text() == "--port 5757\n"
     assert (r.app / "branding.json").is_file()
+    assert migrate._is_link(r.app / "mirror_session.json")
+
+
+def test_a_linked_mirror_sign_in_beside_a_real_one_stops_before_the_settings_merge(
+        r, monkeypatch):
+    """#11: with config.json found in another folder (the working directory), the Mirror's
+    sign-in has two old places, both going to local\\mirror_session.json. A real one in one and
+    a link in the other: the link could only arrive after the real one took its home, so it
+    stops the start before step 1 -- serve.txt is still there and settings.json unwritten."""
+    from moonglade import backup as core
+    from moonglade import paths
+    here = r.app.parent / "where-it-was-run"
+    write(here / "config.json", {"PIXAI_API_KEY": "sk-test-not-real", "AUTH_SECRET_KEY": "s",
+                                 "AUTH_USERS": [{"username": "Nel", "password_hash": "x"}]})
+    monkeypatch.setattr(paths, "config_path", lambda: here / "config.json")
+    monkeypatch.setattr(core, "_config_path", lambda: here / "config.json")
+    write(r.app / "serve.txt", "--port 5757\n")
+    write(here / "mirror_session.json", {"jwt": "the live one"})
+    _junction(r.app / "mirror_session.json", _elsewhere(r, "session"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        msetup.prepare("cli")
+    text = str(e.value)
+    assert "mirror_session.json is a link" in text and "goes to that place too" in text
+    assert (r.app / "serve.txt").read_text() == "--port 5757\n", "step 1 never ran"
+    assert not (r.local / "settings.json").exists()
+    assert json.loads((here / "mirror_session.json").read_text()) == {"jwt": "the live one"}
     assert migrate._is_link(r.app / "mirror_session.json")
 
 
@@ -477,3 +551,7 @@ def test_a_dead_branding_link_on_another_drive_from_the_safety_copy_is_removed_i
     assert (art / "marks" / "mark_2.png").read_bytes() == b"PNG"
     said = " ".join(line for _lvl, line in done.report.all_lines())
     assert "Removed the link branding/marks" in said
+    [summary] = [line for _lvl, line in done.report.lines
+                 if line.startswith("Set aside the library's old branding folder")]
+    assert "branding/logo.png" in summary
+    assert "branding/marks" not in summary, "#13: only what was really set aside is named"

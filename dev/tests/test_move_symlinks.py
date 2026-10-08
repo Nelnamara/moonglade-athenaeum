@@ -6,7 +6,9 @@ nothing, while the log said it was moved.
 
   * Off Windows the link is made again at its new home with its target rewritten -- still
     relative -- so it points at the same place, and the old entry is removed. A full-path
-    target is renamed as it is. What a link points at is never copied, moved or deleted.
+    target is renamed as it is, unless it points into what the same move takes or
+    empties: that stops the start before anything moves. Links move before any file. What
+    a link points at is never copied, moved or deleted.
   * On Windows, where making a link needs a privilege, a relative one stops the start before
     anything moves, with a plain sentence (dev/tests/test_move_links.py covers that path on
     any Windows machine; the real-link test here runs where links can be made).
@@ -243,3 +245,46 @@ def test_a_relative_link_to_a_folder_the_loom_also_moves_keeps_its_text(r):
     assert _same_place(new / "latest", new / "2026-10")
     assert (new / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
     assert not os.path.lexists(str(r.lib / "loom"))
+
+
+@posix
+def test_a_start_cut_short_after_the_link_moved_still_points_it_at_its_file(r, monkeypatch):
+    """#10: links move before any file, so a start cut short between the two leaves a link
+    already at its new home, its text pointing where its target's files are going; the next
+    start moves the files, and the link reaches them."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink("2026-10", str(r.lib / "loom" / "exports" / "latest"))
+    real = migrate._bring
+
+    def die_at_the_first_file(src, dest, kind, half, vouched=False):
+        if kind != "link" and not migrate._is_link(src):
+            raise migrate._Failed("cut short")
+        return real(src, dest, kind, half, vouched=vouched)
+    monkeypatch.setattr(migrate, "_bring", die_at_the_first_file)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert os.path.islink(str(new / "latest")) and os.readlink(str(new / "latest")) == "2026-10"
+    monkeypatch.setattr(migrate, "_bring", real)
+    start(r)
+    assert (new / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert not os.path.lexists(str(r.lib / "loom"))
+
+
+@posix
+def test_a_full_path_link_into_a_folder_the_move_takes_stops_before_anything_moves(r):
+    """#9: a full-path link is renamed as it is, so one pointing into a folder the same move
+    takes would point at the emptied old place: the start stops before anything moves, and
+    the link still reaches its file."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink(str(r.lib / "loom" / "exports" / "2026-10"),
+               str(r.lib / "loom" / "exports" / "latest"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "latest is a link" in str(e.value) and "points by its full path" in str(e.value)
+    assert (r.lib / "jobs.jsonl").is_file()
+    assert (r.lib / "loom" / "exports" / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
