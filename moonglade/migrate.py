@@ -70,9 +70,11 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     stops and says so, rather than sweep its records out from under it. Started again with
     nothing more written there and no old log held (the person stopped it: Stop server in its
     Control Panel, since closing its browser tab leaves it serving), the move brings in what it
-    wrote, and the new homes keep everything they hold. A held log is seen only when this
-    install and the older one both run on Windows; if either runs on Linux or macOS (or the
-    older one on a NAS), nothing is held, and the person closes every older install first.
+    wrote, and the new homes keep everything they hold. A held log is seen only when both
+    installs run on Windows and open the same folder (a shared folder or a NAS share). If
+    either runs on Linux or macOS, nothing is held; and a library that OneDrive, Dropbox or
+    another sync tool keeps in step is a separate copy on each PC, whose log the other PC's
+    install never holds. In both cases the person closes every older install first.
   * ONLY WHAT IS MOONGLADE'S, BY ITS CONTENT. An old home's name is not enough: a folder that
     isn't a Moonglade library is left exactly as it is (_is_moonglade_library), and in one that
     is, each old home passes its own check -- the logs only moonglade.log*, the Loom only its
@@ -3646,7 +3648,8 @@ def _refusal_words(out, named):
 # The sentence when something still holds a library's old log open (#12): at the first move,
 # and before bringing in what an older Moonglade wrote after it -- before anything moves, so
 # an older install's records are never taken from under it. Filled with the log, then the
-# library. Moonglade can tell only when this install and the older one both run on Windows.
+# library. Moonglade can tell only when both installs run on Windows and open the same folder
+# (a shared folder or a NAS share), never a sync tool's separate copy on another PC.
 OLDER_RUNNING_WORDS = (
     "Another program has %s open, so Moonglade can't tidy the library %s yet. It may be an "
     "older Moonglade still running on that library, on this PC or another Windows PC: stop it "

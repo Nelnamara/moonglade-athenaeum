@@ -459,15 +459,24 @@ def test_an_older_install_holding_its_log_open_stops_the_first_move(r):
 
 # ---- what the stop sentences and the pages read before the move tell the person to do ---------
 
-_WIKI = Path(__file__).resolve().parents[2] / "wiki"
+_ROOT = Path(__file__).resolve().parents[2]
+_WIKI = _ROOT / "wiki"
 _BOTH_ON_WINDOWS = (
-    "Moonglade can tell only when this install and the older one both run on Windows. If either "
-    "runs on Linux or macOS (or the older one on a NAS), close every older install on the "
-    "library yourself before the first start.")
+    "Moonglade can tell only when both installs run on Windows and open the same folder (a "
+    "shared folder or a NAS share). If either runs on Linux or macOS, close every older install "
+    "on the library yourself before the first start. A library kept in step by OneDrive, "
+    "Dropbox or another sync tool is a separate copy on each PC, so close every older install "
+    "on it yourself first, as on Linux and macOS.")
 
 
 def _page(name):
     return " ".join((_WIKI / name).read_text(encoding="utf-8").split())
+
+
+def _unreleased():
+    text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    text = text[text.index("## [Unreleased]"):]
+    return " ".join(text[:text.index("\n## [", 1)].split())
 
 
 def test_the_stop_sentences_name_what_actually_stops_an_older_install(r):
@@ -491,9 +500,32 @@ def test_the_stop_sentences_name_what_actually_stops_an_older_install(r):
 
 def test_the_pages_say_windows_tells_only_when_both_installs_run_on_it():
     """Read before an irreversible move: an install on Linux or macOS sees no older install
-    anywhere, and none sees one running on Linux, macOS or a NAS."""
+    anywhere, and none sees one running on Linux or macOS. A library a sync tool keeps in step
+    is a separate copy on each PC, whose log the other PC's install never holds: those readers
+    close every older install themselves."""
     for name in ("Where-Things-Live.md", "How-It-Works.md"):
         assert _BOTH_ON_WINDOWS in _page(name), name
+
+
+def test_the_release_notes_and_the_move_s_own_rules_say_the_same():
+    """CHANGELOG [Unreleased] (the release notes are cut from it) and the move's docstring: the
+    stop at the first move and later, Stop server rather than "close it", and the same
+    Windows-and-one-folder limit, sync tools named."""
+    notes = _unreleased()
+    entry = notes[notes.index("**An older Moonglade still using the library stops the start"):]
+    entry = entry[:entry.index(" - **")]
+    for want in ("at the first move", "**Stop server** in its Control Panel",
+                 "closing its browser tab doesn't stop it",
+                 "both installs run on Windows and open the same folder",
+                 "(a shared folder or a NAS share)", "OneDrive, Dropbox or another sync tool",
+                 "a separate copy on each PC", "close every older install"):
+        assert want in entry, want
+    assert "Close that one" not in notes
+    rules = " ".join(migrate.__doc__.split())
+    for want in ("both installs run on Windows and open the same folder (a shared folder or a "
+                 "NAS share)", "OneDrive, Dropbox or another sync tool",
+                 "a separate copy on each PC"):
+        assert want in rules, want
 
 
 def test_the_pages_name_stop_server_and_the_held_log_has_its_own_entry():

@@ -20,7 +20,8 @@ folder; whatever is in the old one stays exactly where it is. If you want to bri
 library along, move the folder yourself first, then point the setting at its new home. If the
 folder you point it at is a library from an older Moonglade, the next start brings it into the
 3.20 layout (its records go into its `_moonglade` folder). So don't point it at a library an
-older install is still using: update that install first, or close it.
+older install is still using: update that install first, or stop it with **Stop server** in its
+Control Panel (closing its browser tab doesn't stop it).
 
 The gallery picks its folder in this order:
 

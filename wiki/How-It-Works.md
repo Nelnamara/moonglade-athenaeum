@@ -141,8 +141,10 @@ the gallery once it has served for ten minutes or was stopped cleanly. Only the 
 gallery move a library's files, and only the library this install uses; the command line and the
 MCP server refuse a library still in an older layout, and every start stops when an older install
 is still writing a library's old places, or still holds its old log open. Moonglade can tell only
-when this install and the older one both run on Windows. If either runs on Linux or macOS (or the
-older one on a NAS), close every older install on the library yourself before the first start.
+when both installs run on Windows and open the same folder (a shared folder or a NAS share). If
+either runs on Linux or macOS, close every older install on the library yourself before the first
+start. A library kept in step by OneDrive, Dropbox or another sync tool is a separate copy on each
+PC, so close every older install on it yourself first, as on Linux and macOS.
 [Where Things Live](Where-Things-Live) answers the everyday questions.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**

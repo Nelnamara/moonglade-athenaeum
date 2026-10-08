@@ -117,10 +117,12 @@ Any install from 3.10 onward updates this way.
   made again in its new place so it still points at the same folder; on Windows the start asks
   you to make it point by its full path first.
 - **A library two installs share:** update both before using it again. If an older Moonglade is
-  still open on the library, 3.20 stops and asks you to close it. Moonglade can tell only when
-  this install and the older one both run on Windows. If either runs on Linux or macOS (or the
-  older one on a NAS), close every older install on the library yourself before the first start.
-  If an older install writes to the library later, the next start keeps everything already in the
+  still running on the library, 3.20 stops and asks you to stop it (**Stop server** in its
+  Control Panel). Moonglade can tell only when both installs run on Windows and open the same
+  folder (a shared folder or a NAS share). If either runs on Linux or macOS, close every older
+  install on the library yourself before the first start. A library kept in step by OneDrive,
+  Dropbox or another sync tool is a separate copy on each PC, so close every older install on it
+  yourself first, as on Linux and macOS. If an older install writes to the library later, the next start keeps everything already in the
   new homes and merges in what the older one added. The achievement counts an older install makes
   after the move aren't added.
 
