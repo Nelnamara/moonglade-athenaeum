@@ -220,8 +220,12 @@ they stay buttons, with their confirm and their server's-own-machine gate exactl
   holding `config.json`), which is where `python -m moonglade` finds the app:
 
 ```bash
-python -m moonglade --out pixai_backup --update
+python -m moonglade --update
 ```
+
+  The task uses the library folder set in the Control Panel. Add `--out <folder>` only for a
+  task that should use another library: a run that names its own library never moves one, and
+  refuses a library still in an older layout.
 
   The code folder also runs on its own, which suits a task with no **Start in**:
   `python "C:\path\to\app\moonglade" --update` works from any folder.

@@ -15,14 +15,18 @@ By default everything goes in `pixai_backup/` next to the app. To keep it somewh
 big drive, an external disk — set the folder in **Control Panel ▸ Library at a glance**. It
 takes effect when the server next starts, and it offers to restart for you.
 
-**Changing it never moves anything.** It points Moonglade at a different folder; whatever is
-in the old one stays exactly where it is. If you want to bring an existing library along, move
-the folder yourself first, then point the setting at its new home.
+**Changing it never moves files from one folder to another.** It points Moonglade at a different
+folder; whatever is in the old one stays exactly where it is. If you want to bring an existing
+library along, move the folder yourself first, then point the setting at its new home. If the
+folder you point it at is a library from an older Moonglade, the next start brings it into the
+3.20 layout (its records go into its `_moonglade` folder). So don't point it at a library an
+older install is still using: update that install first, or close it.
 
 The gallery picks its folder in this order:
 
 1. `--out <folder>` on the command line — always wins, so a one-off launch or a second
-   install can point anywhere without disturbing the setting.
+   install can point anywhere without disturbing the setting. A run that names its own
+   library never moves one, and refuses a library still in an older layout.
 2. The library folder in `local\settings.json` — what the Control Panel writes.
 3. `pixai_backup` — the default.
 
@@ -33,8 +37,9 @@ older Moonglade's layout is refused until its own launcher has opened it once. Y
 the library (in its `_moonglade` folder), so they follow it. See
 [Where Things Live](Where-Things-Live).
 
-By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
-`raw_tasks.jsonl`, and — once organized — `YYYY-MM/` month folders.
+By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db` and — once
+organized — `YYYY-MM/` month folders, with the app's records (`raw_tasks.jsonl` included) in
+`_moonglade/records/`.
 
 ## Fast downloads & incremental updates
 
@@ -456,6 +461,6 @@ under its **On disk** heading.
 
 > **A note on where your library lives.** By default `pixai_backup/` sits *inside* the
 > install folder, which is why the app directory looks enormous. Nothing requires that —
-> `--out` points anywhere you like, and keeping the library on a separate path (or drive)
-> makes the app folder itself small, easy to back up, and easy to replace wholesale when you
-> update.
+> the Control Panel's library folder points anywhere you like (`--out` does it for one run),
+> and keeping the library on a separate path (or drive) makes the app folder itself small, easy
+> to back up, and easy to replace wholesale when you update.

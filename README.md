@@ -33,7 +33,7 @@ pip install requests pillow flask truststore websockets
    ```
 3. Go:
    ```bash
-   python -m moonglade.gallery --out pixai_backup   # launch the web gallery (browse · generate · curate)
+   python -m moonglade.gallery              # launch the web gallery (browse · generate · curate)
    python -m moonglade --count              # …or headless: how many images you have
    python -m moonglade                      # back up everything
    ```

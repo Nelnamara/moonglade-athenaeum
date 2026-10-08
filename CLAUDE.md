@@ -396,8 +396,10 @@ Run from the app's folder (the one holding `config.json`). Since 3.20 the code i
 `moonglade/` package; from any other folder, `python "<app folder>\moonglade" ...` runs the
 same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone. Every command
 opens the library `local\settings.json` names (the Control Panel's library folder) unless it
-passes `--out`. The MCP server runs as `python -P -m moonglade.mcp_server` with
-`PYTHONPATH=<app folder>` (and `MOONGLADE_OUT` to name another library).
+passes `--out`. A run that names its own library (`--out`, `MOONGLADE_OUT`) never moves one,
+and refuses a library still in an older layout. The MCP server runs as
+`python -P -m moonglade.mcp_server` with `PYTHONPATH=<app folder>` (and `MOONGLADE_OUT` to
+name another library).
 
 ```
 python -m moonglade --probe                           # connection sanity check
