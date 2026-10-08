@@ -39,8 +39,9 @@ loom/                     The Loom's JS surface: esbuild bundle + its own `node 
 Before 3.20 these were flat files beside the launcher (`moonglade_backup.py`,
 `moonglade_gallery.py` and so on). They are gone: the launcher is the one Python file left
 beside the program. A scheduled task, a Claude tools registration or a shortcut that still
-names an old file is found by the app, which offers to fix it (**Fix them** on its notice), and
-a shortcut to the old launcher is re-pointed by itself the first time the new launcher starts.
+names an old file is found by the app, which offers to fix it (**Fix it** or **Fix them** on its
+notice), and a shortcut to the old launcher is re-pointed by itself the first time the new
+launcher starts.
 
 The CLI engine and the MCP server both import `moonglade/gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
@@ -128,11 +129,19 @@ is the only copy), `cache/` (badge thumbnails, masks and banner renders, all reb
 what a person types: the key, the logins, `READ_ONLY` and the overrides.
 
 An older install (3.17 to 3.19) is brought into this layout the first time 3.20 starts: the
-settings are merged into `settings.json`, then each file is copied beside its new home, checked
+settings are merged into `settings.json` (each step of the merge journalled, so a cut-short
+merge resumes with what `settings.json` holds), then each file is moved. On one drive that is a
+single rename, journalled first; across drives each file is copied beside its new home, checked
 (sha256; a database by `PRAGMA integrity_check` and its row counts), swapped in and recorded in a
 journal, and only then deleted from its old place, so an interrupted start is finished by the
-next. A safety snapshot of the small records is taken first and deleted by the app after five
-clean starts. [Where Things Live](Where-Things-Live) answers the everyday questions.
+next. A copy keeps its file's own time, so where two copies meet, "keep the newer" means the one
+really changed last. Before every start that moves anything, a safety snapshot of the small
+records it touches is zipped; the app deletes the snapshot after five clean starts, counted by
+the gallery once it has served for ten minutes or was stopped cleanly. Only the launcher and the
+gallery move a library's files, and only the library this install uses; the command line and the
+MCP server refuse a library still in an older layout, and every start stops when an older install
+is still writing a library's old places. [Where Things Live](Where-Things-Live) answers the
+everyday questions.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

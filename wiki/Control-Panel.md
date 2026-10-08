@@ -227,7 +227,7 @@ python -m moonglade --out pixai_backup --update
   `python "C:\path\to\app\moonglade" --update` works from any folder.
 
   A task made before 3.20 names `moonglade_backup.py`, which is gone. Moonglade finds such a
-  task when it starts and says so in the corner: **Fix them** rewrites it to the code-folder
+  task when it starts and says so in the corner: **Fix it** rewrites it to the code-folder
   line, with the same arguments.
 
 - **One job at a time**, as always. A job whose turn arrives while another is running simply

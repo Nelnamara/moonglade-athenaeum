@@ -28,7 +28,8 @@ The gallery picks its folder in this order:
 
 **A command you type reads the same setting** (since 3.20). `python -m moonglade …` opens the
 library the Control Panel names, as the gallery and the Claude tools do; add `--out <folder>`
-for a run that should use another one. Your presets, Loom boards and achievements live inside
+for a run that should use another one. A command never moves a library's files: one still in an
+older Moonglade's layout is refused until its own launcher has opened it once. Your presets, Loom boards and achievements live inside
 the library (in its `_moonglade` folder), so they follow it. See
 [Where Things Live](Where-Things-Live).
 
@@ -381,27 +382,19 @@ saved session; it spends nothing and never prints the credential, only the days 
 
 ## Reclaiming disk space
 
-A mature backup accumulates things that are safe to remove. Nothing below touches your
+A mature backup accumulates things you may want to remove. Nothing below touches your
 images — but read the notes, because two of these are *regenerable* rather than *disposable*,
 which is a different promise.
 
-### Safe to delete outright
+The app's own leftovers are never yours to clear: since 3.20 it removes them itself (the old
+desktop app's `pixai_gui_settings.json`, an empty stray `catalog.db` beside the program, the
+legacy `catalog.csv`), and its logs keep themselves small.
 
-These are either regenerated on demand or superseded by something newer.
+### Yours to choose
 
 | Path | What it is |
 |---|---|
-| `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
-| `pixai_backup/catalog.csv` | The **legacy** catalog format from the OG backup tool. Nothing reads or writes it any more — the silent auto-seed and the CLI `--export-csv` dump were both retired 2026-08-24; `catalog.db` is the source of truth, so deleting this loses nothing. (The **⬇ Download catalog (CSV)** button in the gallery is a separate in-browser download.) |
-| `local/logs/serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). The app's own rotating log, `moonglade.log`, sits beside it in `local/logs/`. |
-| `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
-| `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
-| A `0`-byte `catalog.db` in the *install root* | Not your catalog — that lives at `pixai_backup/catalog.db`. An empty stray file at the top level is an artefact of an old run. Check the size before deleting: if it isn't 0 bytes, stop and ask. |
-
-```bash
-# check before you delete -- the real catalog should be tens of MB, the stray one 0
-ls -l catalog.db pixai_backup/catalog.db
-```
+| `pixai_backup/catalog.db.bak*` | Copies of the catalog someone saved before a risky change. The live catalog is `catalog.db`; Moonglade never makes or reads these, so it leaves them to you. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
 
 ### Safe once verified
 

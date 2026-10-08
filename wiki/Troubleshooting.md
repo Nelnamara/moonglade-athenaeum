@@ -90,10 +90,29 @@ there by itself. [Where Things Live](Where-Things-Live) has the whole map.
   guards and reports in `records\`, and the `--organize` undo list and your Mark-lost choices in
   `decisions\`.
 
-Each file is copied, checked byte for byte, and only then deleted from its old place. A start
-that was interrupted is finished by the next one. Before it moves anything the app keeps a safety
-copy of the small files it moves, and deletes that copy by itself after five clean starts. Nothing
-is left for you to delete. `local\logs\moonglade.log` says what was brought across.
+On the same drive each file is moved in one step; across drives it is copied, checked byte for
+byte, and only then deleted from its old place. A start that was interrupted is finished by the
+next one. Before it moves anything the app keeps a safety copy of the small files it moves, and
+deletes that copy by itself after five clean starts (a start counts once the gallery has run for
+ten minutes or was stopped from the Control Panel). Nothing is left for you to delete.
+`local\logs\moonglade.log` has a line for each file it brought across.
+
+**A start stopped with a sentence instead of opening.** It says why, and what to do:
+
+- *"The library … is still in an older Moonglade's layout."* A command line or the Claude tools
+  never move a library's files. Open the library once with its own install's launcher (updated
+  to 3.20), then run the command again.
+- *"An older Moonglade is still using the library …"* An older install wrote to the library's
+  old places after the move. Close it (its window, its scheduled tasks and its Claude tools) and
+  start again: the move then brings in what it wrote.
+- *"Moonglade's settings file … is damaged"* or *"can't read its settings file"*: Moonglade
+  won't guess which library to open, or write over the file. Close whatever has
+  `local\settings.json` open, or fix the file (it is plain JSON), and start again.
+- *"… another program has it open"*, *"… read-only"* or *"the disk is full"*: close that
+  program (OneDrive, a virus scan, an editor), make the folder writable, or free some space, and
+  start again. Nothing was lost.
+
+When the gallery can't start, the launcher shows that sentence in a message box.
 
 **The app closed right after the update.** That's expected when you update from 3.19 or older:
 the launcher that was running can't find the files it used to start. Double-click **Moonglade
@@ -107,11 +126,15 @@ one later, stop Moonglade and add it to that list, for example `"launch_args": [
 Panel shows. The one-off switches (`--rebuild-thumbs`, `--open-browser`) were dropped.
 
 **A scheduled backup or the Claude tools stopped working.** They still name the old files. The
-app finds them when it starts, and the notice in the corner offers **Fix them**, which rewrites
-each to the new command line and says what it fixed. A task that runs with a saved Windows
-password is reported rather than rewritten, because only you can enter the password: open it in
-Task Scheduler and change its action to `python "C:\path\to\app\moonglade"` followed by the same
-arguments. On Linux and macOS, edit a service script by hand: the server is
+app finds them when it starts, and the notice in the corner offers **Fix it** (or **Fix them**),
+which rewrites each to the new command line and says what it fixed. A task that runs with a saved
+Windows password is reported rather than rewritten, because only you can enter the password: open
+it in Task Scheduler and change its action to `python "C:\path\to\app\moonglade"` followed by the
+same arguments. After the Claude tools are fixed, restart Claude to use them. A registration that
+runs them through another program (such as `uv run`), whose Python can't run them, or that names
+the old file without saying which folder it starts in is left as it is, and the notice gives the
+command line to use: your Python with `-m moonglade.mcp_server` (and `-P` before `-m` on Python
+3.11 or later), with `PYTHONPATH` set to the program's folder. On Linux and macOS, edit a service script by hand: the server is
 `python -m moonglade.gallery`, started in the program's folder, and the command line is
 `python /path/to/app/moonglade` followed by the same arguments.
 

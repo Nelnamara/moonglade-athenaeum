@@ -71,18 +71,31 @@ Point the Control Panel's library folder at it. Your presets, boards and achieve
 because they live inside the library.
 
 **How do I know the move finished?**
-The log says so. `local\logs\moonglade.log` lists what was brought across, and says when the
-program's folder and the library are tidy. If a start was interrupted, the next one finishes it.
+The log says so. `local\logs\moonglade.log` has a line for each file brought across (moved,
+merged, set aside or removed), and says when the program's folder and the library are tidy. If a
+start was interrupted, the next one finishes it.
+
+**A command or the Claude tools say my library is "still in an older Moonglade's layout".**
+Only the launcher moves a library's files, so a command line or the Claude tools never pull a
+library out from under an older install that may still be using it. Open the library once with
+its own install's launcher (updated to 3.20), then run the command again.
+
+**It says an older Moonglade is still using the library.**
+Something wrote to the library's old places after the move: usually an older install pointed at
+the same library. Close it (its window, its scheduled tasks and its Claude tools), then start this
+one again. It brings in what the older one wrote, and nothing is lost.
 
 ## Updating from 3.19 or older
 
-The first start of 3.20 moves everything into the homes above by itself. Each file is copied,
-checked byte for byte, and only then deleted from its old place. Before it moves anything it keeps
-a safety copy of the small files it moves (never your pictures, the catalog or the art pack), and
-it deletes that safety copy by itself after five clean starts. You never need to delete anything.
+The first start of 3.20 moves everything into the homes above by itself. On the same drive each
+file is moved in one step; across drives it is copied, checked byte for byte, and only then
+deleted from its old place. Before it moves anything it keeps a safety copy of the small files it
+moves (never your pictures, the catalog or the art pack), and it deletes that safety copy by itself
+after five clean starts: a start counts once the gallery has run for ten minutes or was stopped
+from the Control Panel. You never need to delete anything.
 
 Once the update is in, the app closes: the launcher that was running can't find the files it
 used to start. Double-click **Moonglade Launcher** in the program's folder once. That start
 re-points your Desktop and Start-menu shortcuts to it, icon and all. A Windows Task Scheduler job
 or a Claude tools registration that still names an old file is found too, and the notice in the
-corner offers **Fix them**. More in [Troubleshooting](Troubleshooting#after-updating-to-320-where-did-my-files-go).
+corner offers **Fix it** (or **Fix them**). More in [Troubleshooting](Troubleshooting#after-updating-to-320-where-did-my-files-go).
