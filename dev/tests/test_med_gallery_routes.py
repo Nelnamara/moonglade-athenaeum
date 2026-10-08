@@ -236,17 +236,6 @@ def _video_app(tmp_path, rows):
     return login_test_client(create_app(tmp_path))
 
 
-def test_video_file_serves_a_clip_that_is_on_disk(tmp_path):
-    """The everyday path: catalog filename is right, the file is there, bytes come back."""
-    (tmp_path / "videos").mkdir()
-    (tmp_path / "videos" / "dance_HERE.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42FAKE")
-    cli = _video_app(tmp_path, [_row(media_id="HERE", filename="videos/dance_HERE.mp4",
-                                     is_video="1", prompt_preview="a real clip")])
-    served = cli.get("/video-file/HERE")
-    assert served.status_code == 200
-    assert served.data.endswith(b"FAKE")
-
-
 def test_an_imported_m4v_counts_as_present(tmp_path):
     """_find_local_video_file's hand-written extension tuple was missing .m4v, which
     core.run_import_local copies in and catalogs as is_video='1'. The resolver reads

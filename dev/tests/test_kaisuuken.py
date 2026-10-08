@@ -426,14 +426,6 @@ def _video_params(duration=15):
     return {"modelId": "vid-model", "i2vPro": {"duration": duration}}
 
 
-def test_match_sends_version_2_generation_task(pixai):
-    pixai.on("/kaisuuken/check", {"matches": [_v2_match()], "total": 16})
-    core.match_kaisuuken(pixai, {"modelId": "m"})
-    body = pixai.calls[0].body
-    assert body["type"] == "generation-task"
-    assert body["version"] == 2 and isinstance(body["version"], int)
-
-
 @pytest.mark.parametrize("raw,need", [
     (_ABSENT, 1),   # absent -> v1 semantic: one job, one ticket
     (None, 1),      # explicit null

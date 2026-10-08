@@ -70,12 +70,6 @@ test("A: the strip's CSS exists and matches the DC's geometry (flex row, gap 8, 
   assert.match(css, /\.p-seeall \{[^}]*var\(--lavender/);
 });
 
-test("A: NO SimilarModal open-button in the Details record any more -- the modal is gone from DetailsView", () => {
-  assert.doesNotMatch(details, /SimilarModal/);
-  assert.doesNotMatch(details, /setSimilarOpen|similarOpen/);
-  assert.doesNotMatch(details, />✧ Similar</);                          // the old footer button
-});
-
 test("A: desktop shares the mobile strip's data path -- one useSimilar hook, /api/similar?k=48", () => {
   assert.match(hook, /export default function useSimilar\(mediaId\)/);
   assert.match(hook, /"\/api\/similar\/" \+ encodeURIComponent\(mediaId\) \+ "\?k=48"/);
@@ -101,9 +95,7 @@ test("B: the strip is gated on the route's availability signal -- empty images =
 
 // ---------------------------------------------------------------- C. the Lightbox navigates
 
-test("C: the Lightbox's Similar NAVIGATES (onSimilar) -- no modal state, no SimilarModal in Lightbox.jsx", () => {
-  assert.doesNotMatch(lightbox, /SimilarModal/);
-  assert.doesNotMatch(lightbox, /setSimilarOpen|setSimilarFor|similarFor/);
+test("C: the Lightbox's Similar NAVIGATES (onSimilar)", () => {
   assert.match(lightbox, /onClick=\{\(\) => onSimilar && onSimilar\(it\.media_id\)\}>◈ Similar</);
   assert.match(lightbox, /onOpenDetails, onPublish, onSimilar,/);          // a real prop, not a global
 });

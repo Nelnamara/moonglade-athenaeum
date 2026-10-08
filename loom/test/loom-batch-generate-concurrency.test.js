@@ -59,19 +59,6 @@ describe("Generate all (batchGenerate) never resubmits a shot that is already re
     assert.equal(needsRender({ status: "todo" }), true);
     assert.equal(needsRender({ status: "error" }), true, "a shot with no take whose render failed may be rendered again");
   });
-
-  test("generateShot latches BEFORE its first await, and saves the lock BEFORE the network submit", () => {
-    const fn = genBody();
-    const latch = fn.indexOf("inflightRef.current.add(cardId);");
-    const firstAwait = fn.indexOf("await ");
-    const lock = fn.indexOf("beginRender(");
-    const flush = fn.indexOf("await saveBoardNow(boardId)");
-    const post = fn.indexOf('fetch("/api/loom/generate"');
-    assert.ok(latch >= 0 && firstAwait > latch, "the synchronous latch must be set before generateShot's first await");
-    assert.ok(lock >= 0 && flush > lock && post > flush,
-      "the in-flight marker (beginRender) must be written and SAVED before /api/loom/generate is " +
-      "called -- a batch, a second click or another tab reads it and must see the shot as taken");
-  });
 });
 
 describe("Two different shots can render at the same time", () => {

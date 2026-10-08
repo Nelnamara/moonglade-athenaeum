@@ -480,13 +480,6 @@ def test_a_failed_pause_read_proceeds_as_today(tmp_path, monkeypatch):
     assert post(dict(_BODY, confirm=True)).get_json()["submitted"] is True
 
 
-def test_the_training_docs_no_longer_say_the_price_cannot_be_quoted():
-    gallery = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
-    backup = (ROOT / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert "this app CANNOT say how many" not in gallery
-    assert not re.search(r"is NOT reachable through any documented endpoint", backup)
-
-
 # ------------------------------------------------ review fixes (2026-09-26, E7)
 
 def test_the_acknowledged_amount_must_be_this_runs_price(tmp_path, monkeypatch):

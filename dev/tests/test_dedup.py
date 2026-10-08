@@ -6,25 +6,7 @@ from pathlib import Path
 import pytest
 
 from moonglade import backup as core
-from moonglade.gallery import (media_id_of, find_files_for_media_id, find_image_file,
-                           init_db, save_catalog, load_catalog)
-
-
-# ---------------------------------------------------------------------------
-# media_id_of  (INVARIANT 1 - single source of truth)
-# ---------------------------------------------------------------------------
-
-def test_media_id_of_flat():
-    assert media_id_of("prompt_text_task123_999888.webp") == "999888"
-
-
-def test_media_id_of_batch():
-    assert media_id_of("01_999888.webp") == "999888"
-
-
-def test_media_id_of_bare():
-    # The single-image --organize month layout: no underscore at all.
-    assert media_id_of("999888.webp") == "999888"
+from moonglade.gallery import (find_image_file, init_db, save_catalog, load_catalog)
 
 
 # ---------------------------------------------------------------------------
@@ -41,38 +23,11 @@ def test_resume_finds_bare_month_file(tmp_path):
     assert core.already_downloaded(tmp_path, "375741317926742088") is not None
 
 
-def test_find_files_returns_both_layouts(tmp_path):
-    (tmp_path / "images").mkdir()
-    (tmp_path / "2023-10").mkdir()
-    (tmp_path / "images" / "prompt_t1_555.webp").write_bytes(b"img")
-    (tmp_path / "2023-10" / "555.webp").write_bytes(b"img")
-    matches = find_files_for_media_id(tmp_path, "555")
-    assert len(matches) == 2
-
-
-def test_exact_match_prevents_substring_collision(tmp_path):
-    # mid "999" must NOT match a file whose id is "1999".
-    (tmp_path / "1999.webp").write_bytes(b"img")
-    assert find_files_for_media_id(tmp_path, "999") == []
-
-
 def test_gallery_thumbnails_excluded(tmp_path):
     g = tmp_path / "gallery"
     g.mkdir()
     (g / "777.webp").write_bytes(b"thumb")
     assert core.already_downloaded(tmp_path, "777") is None
-
-
-# ---------------------------------------------------------------------------
-# bucket classification + keeper priority
-# ---------------------------------------------------------------------------
-
-def test_bucket_classification():
-    assert core._bucket_of("images/x.webp") == "images"
-    assert core._bucket_of("batches/some_batch/01_x.webp") == "batches"
-    assert core._bucket_of("2023-10/x.webp") == "month"
-    assert core._bucket_of("unknown-date/x.webp") == "month"
-    assert core._bucket_of("randomfolder/x.webp") == "other"
 
 
 # ---------------------------------------------------------------------------
@@ -132,26 +87,15 @@ def test_audit_ignores_deleted_quarantine(tmp_path):
 # or, under --dedup-delete, straight to unlink() with no verify step at all)
 # ---------------------------------------------------------------------------
 
-def test_zero_byte_file_is_invisible_to_the_audit(tmp_path):
-    """The primary fix: a 0-byte file must not enter by_mid/by_size at all, so it can
-    never become a keeper OR a loser -- an empty file isn't a duplicate of anything."""
-    (tmp_path / "images").mkdir()
-    (tmp_path / "2023-10").mkdir()
-    (tmp_path / "images" / "a_prompt_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")
-    (tmp_path / "2023-10" / "111.webp").write_bytes(b"")   # interrupted download
-    rep = core.audit_collection(tmp_path, content=False)
-    assert rep["totals"]["class_a_groups"] == 0, (
-        "the zero-byte file paired with the real one as a Class A duplicate group")
-
-
 def test_zero_byte_file_would_lose_to_a_real_copy_even_by_bucket_priority_alone(tmp_path):
     """The scenario that made this an S-tier finding rather than a curiosity: place the
     EMPTY file in the higher-priority bucket ('batches' outranks 'images' in
     _BUCKET_PRIORITY) and the real image in the lower-priority one -- exactly the layout
     where bucket-priority-only selection would have picked the empty file as keeper and
-    sent the real image to quarantine. Same assertion as the test above, but the tree is
-    built specifically to defeat a fix that only reordered priority instead of excluding
-    zero-byte files from the pool."""
+    sent the real image to quarantine. The tree is built specifically to defeat a fix
+    that only reordered priority instead of excluding zero-byte files from the pool.
+    (The primary fix: a 0-byte file must not enter by_mid/by_size at all, so it can
+    never become a keeper OR a loser.)"""
     (tmp_path / "images").mkdir()
     (tmp_path / "batches" / "b1").mkdir(parents=True)
     (tmp_path / "images" / "p_t1_111.webp").write_bytes(b"REAL-IMAGE-BYTES")

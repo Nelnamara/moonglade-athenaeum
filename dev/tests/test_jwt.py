@@ -575,10 +575,9 @@ def test_run_mirror_check_uses_localstorage_jwt(tmp_path, monkeypatch, capsys):
 
 def test_mirror_check_command_runs_on_the_jwt_reader_alone(tmp_path, monkeypatch, capsys):
     """The `--mirror-check` command line, end to end through main(): with no stored session
-    it signs in through read_browser_jwt and nothing else. The old browser-cookie reader
-    (read_browser_session and its helpers) is gone, and an installed browser_cookie3 is never
-    asked for. Nothing is printed of the token, and nothing leaves the test: refreshToken is
-    stubbed."""
+    it signs in through read_browser_jwt and nothing else. An installed browser_cookie3 is
+    never asked for. Nothing is printed of the token, and nothing leaves the test:
+    refreshToken is stubbed."""
     monkeypatch.setattr(mj, "_mirror_state_path", lambda: tmp_path / "mirror.json")
     browser_jwt = _jwt_in(5)
     fresh = _jwt_in(27)
@@ -591,9 +590,6 @@ def test_mirror_check_command_runs_on_the_jwt_reader_alone(tmp_path, monkeypatch
     assert "Mirror OK (source: browser)" in out
     assert browser_jwt not in out and fresh not in out
     assert mj.load_mirror_state()["jwt"] == fresh               # the renewed token is kept
-    for gone in ("read_browser_session", "_read_chromium_cookies_windows",
-                 "_chromium_aes_key", "_chromium_decrypt", "PIXAI_COOKIE_DOMAIN"):
-        assert not hasattr(mj, gone), gone
 
 
 # ---- ultrareview fixes (2026-08-15) ---------------------------------------------------

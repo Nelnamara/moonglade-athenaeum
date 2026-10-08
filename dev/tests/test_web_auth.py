@@ -11,7 +11,8 @@ dev/tests/test_api_login.py owns that endpoint's core contract (generic-error
 parity, lockout incl. the 5th-try report and the shared counter, csrf rotation
 incl. the returned-token flow, bootstrap policy and the local-only refusal).
 This file keeps everything that ISN'T duplicated there: the core/CLI account
-helpers, the GET /login boot flags, the front-door route matrix, session
+helpers, the GET /login boot flags, the front-door redirect's `next` handling
+(the route-by-route anonymous matrix is dev/tests/test_route_tiers.py's), session
 revocation, and the unique regressions ported off the dead form route
 (next-sanitizer bypasses, lockout-clears-on-success, the lockout race,
 incidental-GET csrf setdefault, blank-remote_addr fail-closed).
@@ -351,21 +352,6 @@ def test_bootstrap_rejects_weak_passwords(tmp_path, password, expected):
     assert core.list_web_users() == []   # nothing was created
 
 
-def test_password_policy_is_shared_by_login_and_users_tab(tmp_path):
-    """Regression guard for the duplication that used to exist: the 4-character
-    rule was written out separately in the login path and api_users_add(), so
-    tightening it in one place would silently leave the other weak. Both must
-    refuse the same password via the same core.password_problem()."""
-    weak = "11111111"
-    assert core.password_problem(weak)                    # the shared helper refuses it
-    assert core.password_problem("a-valid-password") is None
-    cli = _client(tmp_path).test_client()
-    body = _api_login(cli, {"username": "alice", "password": weak,
-                            "confirm": weak, "mode": "create"})
-    assert "one character repeated" in body["error"]
-    assert core.list_web_users() == []
-
-
 def test_bootstrap_missing_confirm_field_does_not_crash(tmp_path):
     """A malformed/short-circuited POST (e.g. a client that dropped the confirm
     field entirely, not just sent it empty) must be handled as a validation
@@ -556,30 +542,6 @@ def test_logout_clears_session(tmp_path):
 # _is_authorized_request() gate itself
 # ---------------------------------------------------------------------------
 
-def test_local_request_without_session_is_now_denied_too(tmp_path):
-    """Login is required via every path, localhost hostname or IP included.
-    Local (127.0.0.1) is NO LONGER
-    trusted by default -- this is the direct behavioral flip of the old
-    _is_local_request() bypass this test used to assert (see
-    test_nonlocal_request_without_session_is_denied for the LAN-side twin of this
-    same rule, which never changed)."""
-    cli = _client(tmp_path).test_client()
-    r = cli.get("/api/jobs")   # default test-client REMOTE_ADDR is 127.0.0.1
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}
-
-
-def test_nonlocal_request_without_session_is_denied(tmp_path):
-    cli = _client(tmp_path).test_client()
-    r = cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN})
-    # The global front-door hook (moonglade_gallery.py's _enforce_front_door()) now denies
-    # this before api_jobs()'s own body ever runs, with ONE standard JSON shape for
-    # every /api/* route rather than api_jobs()'s old bespoke {"jobs": []} fallback --
-    # see that hook's docstring for why a single shape replaced 43 bespoke ones.
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}
-
-
 def test_nonlocal_request_with_logged_in_session_is_authorized(tmp_path):
     cli = _client(tmp_path).test_client()
     login_existing_client(cli, "alice", "hunter2")
@@ -697,98 +659,11 @@ def test_empty_auth_users_makes_lan_login_impossible(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Front-door coverage: every route a prior adversarial review found reachable
-# with ZERO auth check of any kind (see _enforce_front_door()'s docstring in
-# moonglade_gallery.py) must be denied for an unauthenticated, non-local
-# request. This is the direct proof that the global gate (replacing 43
-# scattered per-route checks, and closing these routes that had never had one at
-# all) actually did what it was built for -- not just architectural confidence.
-# Classic cut, 2026-08-08: the dead classic pages/form routes left these lists;
-# where a form route's SUBJECT moved to a surviving JSON route (/rate ->
-# /api/rate, /delete-bulk -> /api/delete-local, /collection-add|remove ->
-# /api/collection, /bulk-replace-prompt -> /api/replace-prompts, /delete/<id> ->
-# /api/delete-image), the gate coverage moved with it.
-#
-# /api/gallery-images has its own, more thorough test in test_web_pick.py
-# (test_gallery_images_requires_login_over_lan_but_then_works) since it also
-# proves the LAN request works again once logged in -- not duplicated here.
+# Front-door redirect: where an anonymous caller lands, and what rides along in `next`.
+# That EVERY route refuses an anonymous caller, from a LAN address and from loopback,
+# is proven over the whole url_map by dev/tests/test_route_tiers.py
+# (test_no_route_is_reachable_without_a_session) -- not by a path list kept here.
 # ---------------------------------------------------------------------------
-
-# Routes whose contract is JSON: the front door answers 401 + the standard
-# {"error": "authentication required"} body (see _enforce_front_door()).
-_PREVIOUSLY_UNGATED_JSON_GET = [
-    "/api/similar/does-not-exist",
-    "/api/collections",
-    "/api/contests",
-    "/api/achievements",
-    "/api/your-art",
-    "/api/loom/export-status",
-    "/api/loom/export-file",
-    "/api/ping",
-]
-_PREVIOUSLY_UNGATED_JSON_POST = [
-    "/api/rate/does-not-exist",
-    "/api/edit-prompt/does-not-exist",
-    "/api/skin",
-    # LOGIN again since the 2026-09-07 nonce ruling (LOCALHOST 2026-08-26..2026-09-07).
-    # The gate proved here is the front door's, which comes FIRST for either tier, so this
-    # line held through both -- an anonymous LAN caller has never reached the handler.
-    "/api/ach-event",
-    # The surviving JSON counterparts of the cut classic form routes -- the
-    # subjects (delete/collect/replace) moved here, so the gate proof does too.
-    "/api/delete-image",
-    "/api/delete-local",
-    "/api/delete-tasks",
-    "/api/collection",
-    "/api/replace-prompts",
-]
-
-# Routes whose contract is an HTML page or a raw asset: the front door redirects
-# to /login?next=<path> instead (see _enforce_front_door()).
-_PREVIOUSLY_UNGATED_HTML_GET = [
-    "/",
-    "/contact-sheet",
-    "/thumbs/does-not-exist.jpg",
-    "/video-file/does-not-exist",
-    "/full/does-not-exist",
-    "/badge-thumb/does-not-exist.png",
-]
-_PREVIOUSLY_UNGATED_HTML_POST = [
-    "/export-zip",
-]
-
-
-@pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET)
-def test_previously_ungated_json_get_route_now_denied(tmp_path, path):
-    cli = _client(tmp_path).test_client()
-    r = cli.get(path, environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}
-
-
-@pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_POST)
-def test_previously_ungated_json_post_route_now_denied(tmp_path, path):
-    cli = _client(tmp_path).test_client()
-    r = cli.post(path, environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}
-
-
-@pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_HTML_GET)
-def test_previously_ungated_html_get_route_now_redirects_to_login(tmp_path, path):
-    cli = _client(tmp_path).test_client()
-    r = cli.get(path, environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert r.headers["Location"].startswith("/login")
-
-
-@pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_HTML_POST)
-def test_previously_ungated_html_post_route_now_redirects_to_login(tmp_path, path):
-    cli = _client(tmp_path).test_client()
-    r = cli.post(path, environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert r.headers["Location"].startswith("/login")
-
 
 def test_login_redirect_preserves_the_query_string(tmp_path):
     """#32: a logged-out hit to a DEEP LINK (?page=N / ?image=) must come back THERE after
@@ -864,38 +739,3 @@ def test_loom_serves_the_same_page_with_or_without_a_board_address(tmp_path):
     assert same(plain) != plain.get_data(), "the shell stopped carrying a per-render nonce"
     assert same(withboard) == same(plain)
     assert same(junk) == same(plain)
-
-
-@pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)
-def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, path):
-    """The loopback bypass is retired entirely -- localhost is
-    NOT special anymore, so every one of these previously-fully-ungated routes must
-    deny an anonymous LOCAL request (default test-client REMOTE_ADDR=127.0.0.1)
-    exactly the same as the LAN-address versions above
-    (test_previously_ungated_json_get_route_now_denied /
-    test_previously_ungated_html_get_route_now_redirects_to_login). This is the
-    direct behavioral flip of what this test used to assert (that localhost was
-    always exempt) -- proving the bypass's removal actually took effect everywhere,
-    not just for routes exercised via an explicit LAN REMOTE_ADDR override."""
-    cli = _client(tmp_path).test_client()
-    r = cli.get(path)   # default test-client REMOTE_ADDR is 127.0.0.1 -- deliberately no override
-    if path in _PREVIOUSLY_UNGATED_JSON_GET:
-        assert r.status_code == 401
-        assert r.get_json() == {"error": "authentication required"}
-    else:
-        assert r.status_code in (301, 302, 303, 307, 308)
-        assert r.headers["Location"].startswith("/login")
-
-
-@pytest.mark.parametrize("remote_addr", [LAN, "127.0.0.1"])
-def test_branding_stays_public_unauthenticated(tmp_path, remote_addr):
-    """Unlike every other previously-ungated route above, /branding/ was
-    deliberately put back on the public tier (it declares @tier(PUBLIC), which
-    _enforce_front_door() reads off the route): it's static cosmetic art, not
-    gallery content, and
-    the login page itself needs it to render for a not-yet-authenticated
-    visitor. A missing file still 404s (never redirects to /login) from LAN
-    or localhost, with or without a session."""
-    cli = _client(tmp_path).test_client()
-    r = cli.get("/branding/does-not-exist.png", environ_overrides={"REMOTE_ADDR": remote_addr})
-    assert r.status_code == 404

@@ -73,26 +73,6 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
     assert seen["submitted"]["modelId"] == CHOSEN
 
 
-def test_generate_still_falls_back_to_latest_when_client_version_belongs_elsewhere(tmp_path, monkeypatch, pixai):
-    """The original anti-race guarantee must survive problem 4's change: a version_id that
-    does NOT belong to model_id's own real version list (stale from a fast model switch, or
-    just wrong) is NEVER trusted -- same outcome as before this feature existed."""
-    LATEST = "V-LATEST"
-    FOREIGN = "V-FROM-A-DIFFERENT-MODEL"
-    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [{"id": LATEST, "modelType": "SDXL_MODEL"}])
-    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
-    seen = {}
-    monkeypatch.setattr(core, "_gen_parameters",
-                        lambda args: seen.update(model=args.model) or {"modelId": args.model})
-    monkeypatch.setattr(core, "submit_generation", lambda s, params: "task123")
-
-    client = login_client(tmp_path)
-    r = client.post("/api/generate", json={"model_id": "M1", "version_id": FOREIGN, "prompt": "a cat"})
-    assert r.status_code == 200, r.data
-    assert seen["model"] == LATEST
-    assert seen["model"] != FOREIGN
-
-
 def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_path, monkeypatch, pixai):
     """model_id resolves to nothing (deleted/private model) -- must not crash, and must not
     invent a version_id; args.model is left as whatever the client originally sent (matches

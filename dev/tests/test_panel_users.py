@@ -13,7 +13,6 @@ JSON (the field the React overlay itself uses) instead of scraped from the dead
 page's inline `var CSRF = "..."`.
 """
 from moonglade import backup as core
-from moonglade.gallery import create_app
 
 from tests.conftest import login_client
 
@@ -330,22 +329,6 @@ def test_concurrent_remove_of_two_different_accounts_cannot_empty_the_list(tmp_p
     refused = [v for v in results.values() if "error" in v]
     assert len(refused) == 1                       # exactly one of the two was turned away
     assert "last remaining account" in refused[0]["error"]
-
-
-def test_users_endpoints_require_login(tmp_path):
-    """Both routes need a valid session before anything else -- the SAME front-door
-    gate as every other /api/ route, no special-casing. This is a lower bar than
-    either route's own LOCALHOST-flavored check (see test_add_user_refuses_a_lan_session
-    and test_remove_user_refuses_a_lan_session_removing_someone_else): a session-less
-    caller gets refused here regardless of address, before those checks ever run."""
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = create_app(tmp_path).test_client()
-    r = cli.post("/api/users/add", environ_overrides={"REMOTE_ADDR": LAN},
-                 json={"username": "x", "password": "pw123456", "confirm": "pw123456"})
-    assert r.status_code == 401
-    r2 = cli.post("/api/users/remove", environ_overrides={"REMOTE_ADDR": LAN},
-                  json={"username": "alice"})
-    assert r2.status_code == 401
 
 
 # ---------------------------------------------------------------------------

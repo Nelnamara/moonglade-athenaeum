@@ -111,8 +111,8 @@ class TestRunReferenceVideoReadOnly:
 # TestRunEnhanceReadOnly is gone with run_enhance itself: --enhance had exactly two halves and
 # both were removed (panelplugin workflows, which PixAI never dispatches for an API-key client,
 # and art filters, which now composite in the browser for free). A guard on a deleted runner
-# would be pinning a husk -- dev/tests/test_enhance.py proves the flags no longer parse, which is
-# the property that actually keeps the spend path closed.
+# would be pinning a husk -- test_no_art_filter_submit_path_survives in dev/tests/test_enhance.py
+# keeps the paid art-filter path closed in the source, which is what actually shuts the spend road.
 
 
 class TestRunEditImageReadOnly:

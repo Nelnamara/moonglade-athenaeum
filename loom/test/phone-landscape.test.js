@@ -53,6 +53,9 @@ describe("Q4 what a phone is, sideways", () => {
 describe("Q4 the gallery's columns", () => {
   test("two upright; four sideways, three under 700 px wide", () => {
     assert.equal(phoneColumns(390, false), 2);
+    // The lagging turn (owner's walk, 2026-10-03; loom/test/phone-turn-columns.test.js): the width
+    // can still read sideways while the orientation query already says upright. Upright is two at ANY width.
+    assert.equal(phoneColumns(844, false), 2, "upright at a sideways width is still two");
     assert.equal(phoneColumns(844, true), 4);
     assert.equal(phoneColumns(700, true), 4, "700 itself is not 'under 700'");
     assert.equal(phoneColumns(699, true), 3);

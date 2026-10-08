@@ -66,16 +66,19 @@ def _build(tmp_path, assets=None, payloads=None):
 # ---------------------------------------------------------------------------
 def test_round_trip_every_asset_and_payload(tmp_path):
     assets = {"a/b.bin": b"\x00\x01\x02" * 999, "top.txt": b"hello moonglade"}
-    payloads = {"achievements": json.dumps([{"id": "x"}]).encode()}
+    payloads = {"achievements": json.dumps([{"id": "x"}]).encode(),
+                "other": b"non-sensitive-payload"}      # a payload that is not sealed
     path = tmp_path / "c.dat"
     n_a, n_p = mc.write_container(path, assets, payloads)
-    assert (n_a, n_p) == (2, 1)
+    assert (n_a, n_p) == (2, 2)
     box = mc.open_container(path)
     assert box is not None
     assert box.paths() == ["a/b.bin", "top.txt"]
     for rel, raw in assets.items():
         assert box.get(rel) == raw
     assert box.payload("achievements") == payloads["achievements"]
+    assert box.payload("other") == payloads["other"]
+    assert box.has("a/b.bin") and box.has("top.txt") and not box.has("missing.png")
     assert box.get("missing.png") is None and box.payload("nope") is None
 
 

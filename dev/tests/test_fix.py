@@ -217,19 +217,6 @@ def test_fix_price_params_refuse_a_request_with_no_usable_box():
         core.build_fixer_price_parameters("700", [])
 
 
-def test_price_task_json_encodes_the_fix_chat_block(monkeypatch):
-    """price_task only forwards keys it knows; `chat` is already in its nested set, so the
-    fixer block reaches /v2/task-price as URL-encoded JSON."""
-    seen = {}
-    monkeypatch.setattr(core, "_rest_get",
-                        lambda s, path, params=None, **k: seen.update(params=params)
-                        or {"actualPrice": 8000})
-    p = core.build_fixer_price_parameters("700", [{"x": 1, "y": 2, "width": 3, "height": 4,
-                                                  "tag": "face"}])
-    assert core.price_task(object(), p) == 8000
-    assert '"fixer"' in seen["params"]["chat"]
-
-
 def _price_client(tmp_path, monkeypatch, cost=8000):
     seen = {}
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
@@ -397,87 +384,3 @@ def test_badge_and_submit_send_the_same_boxes():
     assert src.count("scaleBoxes(boxes, scaleEl())") == 2, (
         "the price body and the submit body no longer share the one scaleBoxes call each "
         "-- the badge would price a request the server never receives")
-
-
-# Every surviving cost surface. FixTab and EditTab are the desktop fix/edit pair the
-# classic's fixCost/editCost became; the mobile Edit hook was written to the identical
-# contract (its own header says so) and shares the pin. Since 2026-08-22 all three (and
-# the three other cost lines) get their sequence guard from ONE module, so the contract is
-# pinned once against gen/usePriceProbe.js and each host is pinned as a caller of it.
-_COST_HELPERS = (
-    "components/FixTab.jsx",
-    "components/EditTab.jsx",
-    "gen/useEditGenerate.js",
-)
-
-
-def test_cost_helpers_invalidate_in_flight_requests_before_bailing_out():
-    """Found in code review 2026-07-25, and it affected BOTH classic cost helpers.
-
-    Each guards against a stale response with a sequence number: `mine = ++seq`, then the
-    handler drops its result if `mine !== seq`. In the classic, the early-return path -- no
-    source, or no boxes -- sat BEFORE that bump, so: request goes out for a real selection;
-    the user hits Clear (or changes the source); the helper re-runs, takes the early
-    return, and leaves the sequence untouched; the in-flight response then arrives, still
-    matches, passes the guard, and paints a price for boxes that no longer exist. The
-    badge shows a confident number for a request nobody made.
-
-    The bump has to happen BEFORE any return, so bailing out is itself an invalidation.
-    The React helpers were written fixed; this pins them fixed.
-
-    Since 2026-08-22 the mechanism is one module: refresh() bumps the sequence the moment a
-    re-price is scheduled -- BEFORE the debounce fires and therefore before the fire step can
-    take its nothing-to-price exit -- and it cannot be short-circuited past while an answer is
-    out (an in-flight request means an unsettled verdict, which never short-circuits). Each
-    host says only WHAT is idle; none of them can get the ordering wrong any more.
-
-    Bite: move the `seq.current++` below refresh()'s scheduling and this fails by name."""
-    probe = _probe_src()
-    refresh = probe[probe.index("const refresh = useCallback("):]
-    bump = refresh.index("seq.current++")
-    schedule = refresh.index("setTimeout(fire, PRICE_DEBOUNCE_MS)")
-    assert bump < schedule, (
-        "usePriceProbe's refresh() re-arms the debounce at char {} before invalidating the "
-        "answer in flight at char {} -- that response stays valid and repaints a stale price "
-        "after the user has cleared or changed the selection".format(schedule, bump))
-    # And the fire step's own nothing-to-price exit is downstream of that bump by construction:
-    # it only ever runs from the timer refresh() armed.
-    fire = probe[probe.index("const fire = useCallback("):probe.index("const refresh = useCallback(")]
-    assert "badge.clear()" in fire and "settledFor(key)" in fire, (
-        "the idle exit must clear the badge AND settle -- an unsettled idle would dead-disable "
-        "the submit control with no message on screen")
-    for rel in _COST_HELPERS:
-        assert "usePriceProbe" in _src(rel), rel + " no longer rides the shared probe"
-
-
-def test_cost_helpers_still_drop_a_superseded_response():
-    """The other half of the contract, so the fix above can't be 'achieved' by deleting the
-    guard: a response whose sequence no longer matches must still be discarded."""
-    probe = _probe_src()
-    fire = probe[probe.index("const fire = useCallback("):probe.index("const refresh = useCallback(")]
-    flat = fire.replace(" ", "")
-    # Re-anchored 2026-08-23: there used to be TWO guards, one in .then and one in .catch.
-    # requestPrice never rejects -- it RESOLVES onto {response} or {failed} -- so both paths
-    # now join at a single guard, which must therefore stand before EITHER of them paints.
-    # Same property, one copy of it; the bite below is what actually protects it.
-    assert flat.count("mine!==seq.current") == 1, (
-        "the answer path and the failure path must join at exactly one sequence guard")
-    guard = flat.index("mine!==seq.current")
-    assert guard < flat.index("setPrice(null)") and guard < flat.index("setPrice(d)"), (
-        "both the answer path and the failure path must consult the sequence before painting, "
-        "or a superseded response would repaint over a newer one")
-    # Each cost surface owns its OWN sequence (the classic's editCost once shared `costSeq`
-    # with the Generate tab's debouncedCost(), so an '?edit=' deep link cancelled the Generate
-    # tab's first price check before it ever fired). Ownership is structural now: the counter
-    # is a useRef INSIDE the hook, so one probe instance per host is one counter per host.
-    assert "const seq = useRef(0)" in probe, "the probe no longer owns a sequence counter"
-    assert probe.index("const seq = useRef(0)") > probe.index(
-        "export default function usePriceProbe"), (
-        "the counter must be declared INSIDE the hook -- module-level state would be shared "
-        "across every probe instance, which is the '?edit= cancelled the Generate tab's first "
-        "price check' bug all over again")
-    for rel in _COST_HELPERS:
-        src = _src(rel)
-        assert "usePriceProbe({" in src, (
-            "{} must instantiate its OWN probe rather than share another surface's".format(rel))
-        assert "costRef" in src, "{} must own the badge instance its probe drives".format(rel)

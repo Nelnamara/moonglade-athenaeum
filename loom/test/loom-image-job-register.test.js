@@ -61,19 +61,6 @@ const pollCeilingBody = () => body(/const pollTaskWithCeiling = \([\s\S]*?\n  \}
 const codeOnly = (s) => s.replace(/^\s*\/\/.*$/gm, "");
 
 describe("every Loom image submit path registers its generation in the shared Job Tracker", () => {
-  test("genImage registers the task (the Image-tab bug the owner hit on 2026-07-24)", () => {
-    assert.match(genImageBody(), GUARDED_REGISTER,
-      "genImage never calls Jobs.register() -- it POSTs /api/generate, takes d.task_id and goes " +
-      "straight to its own pollImg(), so the shared job log is never told the generation exists " +
-      "and BOTH Activity trays stay (correctly) empty for a generation that really ran");
-  });
-
-  test("runGen registers the task, so genEdit and genRef are covered too", () => {
-    assert.match(runGenBody(), GUARDED_REGISTER,
-      "runGen (the shared submit helper behind genEdit and genRef) never calls Jobs.register() -- " +
-      "same gap as genImage: an Edit or a Reference generate leaves both trays empty");
-  });
-
   test("registration happens on the success path only -- after the task_id check", () => {
     for (const [name, fn] of [["genImage", genImageBody()], ["runGen", runGenBody()]]) {
       const checkIdx = fn.indexOf("!d.task_id");

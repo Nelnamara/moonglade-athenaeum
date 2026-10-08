@@ -75,18 +75,14 @@ test("the base chips send values the collection accepts, one at a time", () => {
   assert.match(picker, /kind === "lora" && savedBase/, "base chips are the LoRA picker's only");
 });
 
-test("the source row is Market · Saved · Mine, and Bookmarked is gone", () => {
+test("the source row is Market · Saved · Mine", () => {
   assert.match(picker, /\["saved", savedTabLabel\(wide\)\]/);
-  assert.doesNotMatch(picker, /"Bookmarked"/);
-  assert.doesNotMatch(picker, /"bookmark"/);
   assert.match(picker, /kind === "lora" \? \[\["mine", "Mine"\]\]/, "Mine stays as shipped: LoRAs only");
 });
 
 test("Saved pages through the picker's own search, by set, with no market filters", () => {
   assert.match(picker, /if \(src === "saved"\) \{\s*if \(setId\) u \+= "&set=" \+ encodeURIComponent\(setId\);/);
   assert.match(picker, /const filtersHidden = market && src === "saved"/);
-  // a re-search fires when the set or the chip changes
-  assert.match(picker, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase\]\);/);
 });
 
 test("the rail is read once when Saved opens, and nothing is written on open", () => {
@@ -165,7 +161,6 @@ import { afterWrite, createSavedStore, isTransportError, keepTitle, READ_ONLY_LI
 const keepSrc = read("picker/KeepControls.jsx");
 const apiSrc = read("picker/savedApi.js");
 const menuSrc = read("recipes/RecipeSetsMenu.jsx");
-const powerCss = read("styles/power.css");
 
 test("the read-back decides the card: saved only when PixAI says so", () => {
   assert.deepEqual(afterWrite({ saved: false, item_id: "" }, { contains: true, item_id: "i1" }, true),
@@ -199,9 +194,7 @@ test("the saved-state store tells every card at once", () => {
   assert.equal(calls, 2);
 });
 
-test("the card's ☆ is retired: ★ shows state only, and quick-pick moves into the menu", () => {
-  assert.doesNotMatch(picker, /mg-fav/);
-  assert.doesNotMatch(powerCss, /\.mg-fav/);
+test("the card's ★ shows state only, and quick-pick moves into the menu", () => {
   assert.match(keepSrc, /className="mg-star"/);
   assert.match(keepSrc, /label: "★ Quick-pick", tag: "this app"/);
   assert.match(picker, /onQuick=\{onFav \? \(\) => onFav\(keep\.m\) : null\}/);

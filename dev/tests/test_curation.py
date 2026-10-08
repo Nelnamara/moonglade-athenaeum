@@ -272,14 +272,6 @@ def test_a_quoted_keeper_is_a_phrase_not_the_operator(db):
     assert "personal_meta" not in where and params == ["%keeper%", "%keeper%"]
 
 
-def test_plain_text_search_still_builds_the_legacy_sql():
-    where, params = g._build_where("night* elf", "", "", "")
-    like = ("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-            "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
-    assert where == "filename != '' AND {0} AND {0}".format(like)
-    assert params == ["%night%", "%night%", "%elf%", "%elf%"]
-
-
 def test_operator_values_are_bound_never_interpolated(db):
     q = "tag:\"x'); DROP TABLE personal_meta;--\" note:\"'; DELETE FROM catalog;--\""
     assert query_catalog(db, q=q)[1] == 0

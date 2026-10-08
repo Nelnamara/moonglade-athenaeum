@@ -217,6 +217,46 @@ def test_the_three_account_stores_check_the_token(app):
         assert walked[key] is True, key
 
 
+# The wave 2 and wave 3 lanes' own POST families (recipes, Train a LoRA, the account store
+# Help and the recipe drafts share, the narrator's poke) each check the session's CSRF token
+# before they act. Older POSTs predate the rule and are in CSRF_KNOWN_DEBT; a NEW route under
+# one of these prefixes that forgets the check fails by name. The walk above cannot say "no
+# lane route may ever be listed as debt" about its own list, so this test does.
+_LANE_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
+                  "/api/narrator",
+                  # wave 5, Session N: bulk curation and the collections manager
+                  "/api/curate", "/api/collections/manage",
+                  # wave 5, Session P: the Loom's new local routes
+                  "/api/loom/submit-abandon",
+                  # Session P, Stage B1: the music bed, the EDL export, the manual order
+                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order",
+                  # GitHub #62: the Loom fills a missing frame thumbnail
+                  "/api/loom/frame-thumbs")
+
+
+def test_every_lane_post_checks_the_token_with_zero_debt(app):
+    walked = _walk(app)
+    lane = {k: checks for k, checks in walked.items()
+            if k.endswith(" [POST]") and k.startswith(_LANE_PREFIXES)}
+    missing = sorted(k for k, checks in lane.items() if not checks)
+    assert not missing, "lane POST routes with no CSRF check: %s" % missing
+    debt = sorted(k for k in CSRF_KNOWN_DEBT if k.startswith(_LANE_PREFIXES))
+    assert not debt, (
+        "a lane route is listed as CSRF debt: {}. Lane routes check the token; give the "
+        "handler `_check_csrf(body)` instead of listing it.".format(debt))
+    # the families are really there (a renamed prefix would make this vacuous)
+    checked = set(lane)
+    assert any(k.startswith("/api/train") for k in checked), sorted(checked)
+    assert any(k.startswith("/api/recipes") for k in checked), sorted(checked)
+    assert "/api/account/prefs [POST]" in checked, sorted(checked)
+    assert "/api/narrator/poke [POST]" in checked, sorted(checked)
+    assert {"/api/curate [POST]", "/api/curate/restore [POST]",
+            "/api/collections/manage [POST]"} <= checked, sorted(checked)
+    assert {"/api/loom/bed [POST]", "/api/loom/beds/sweep [POST]",
+            "/api/loom/export-edl [POST]", "/api/collections/order [POST]",
+            "/api/loom/frame-thumbs [POST]"} <= checked, sorted(checked)
+
+
 def test_the_lists_classes_match_the_route_tiers(app):
     """`loopback` means the front door already refuses every non-local session, so it is
     only honest on a LOCALHOST route -- and every LOCALHOST debt route says so."""

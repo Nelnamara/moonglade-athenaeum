@@ -3,8 +3,7 @@
 achievement-bound art -- badge masters, the mascot ach poses, the rewards tree,
 the Konami Starfall assets -- seals to the achievement that earns it; system
 chrome (narrator, tracker art, present_* fallbacks, banners) stays open. Plus
-the mark_12 (Gem Tome) tombstone (owner ruling 2026-07-23) and the Branding-slot
-boundary (banners only -- mascots/rewards are not slots).
+the mark_12 (Gem Tome) tombstone (owner ruling 2026-07-23).
 
 Bundle-v2 (SCOPE_bundle-v2-contract.md): the on-disk tree is CODED, so every
 seed below lands at its coded rel -- built with g._role_rel/_role_dir, NEVER a
@@ -210,35 +209,6 @@ def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_pres
     assert cli.get("/badge-thumb/" + hid + ".png").status_code == 404
     assert cli.get("/badge-thumb/" + hid.upper() + ".png").status_code == 404
     assert cli.get("/badge-thumb/" + hid.title() + ".png").status_code == 404
-
-
-# ---- the Branding-slot boundary ---------------------------------------------
-
-def test_branding_slots_are_banners_only(tmp_path):
-    cli = _client(tmp_path)
-    d = cli.get("/api/branding").get_json()
-    assert set(d["slots"]) == {"banner_main", "banner_login", "banner_loom"}
-
-
-def test_slot_routes_refuse_mascots_and_rewards(tmp_path):
-    cli = _client(tmp_path)
-    for slot in ("mascots", "rewards"):
-        r = cli.post("/api/branding/slot", data={"slot": slot})
-        assert r.status_code == 400 and r.get_json()["error"] == "unknown slot"
-
-
-def test_discovery_tree_keeps_breadcrumb_folders(tmp_path):
-    """Removing mascots/rewards from BRANDING_SLOTS must not shrink the
-    tinkerer-discovery landscape: the empty folders still go down -- at their
-    CODED names (bundle-v2: role names never appear on disk), plus the GONK
-    breadcrumb README the scaffold materializes."""
-    g.ensure_branding_discovery_tree()
-    root = tmp_path / "branding"
-    for slot in ("banner_main", "banner_login", "banner_loom",
-                 "mascots", "rewards", "marks"):
-        assert g._role_dir(slot).is_dir(), slot
-        assert not (root / slot).exists(), slot   # no role-named folder anywhere
-    assert (g._role_dir("breadcrumb") / "README.txt").is_file()
 
 
 # ---- the mark_12 tombstone ---------------------------------------------------

@@ -6,13 +6,14 @@ import path from "node:path";
 
 /* Session T (Training goal-tile art, issue #61; Goal Tile Art Handoff T1a / T2b / T3c). The
    rules the goal tile's picture follows, held without a browser: which names the art goes by,
-   which source wins (pack, then the app's own module, then the flat tint), and the three
-   timings the handoff fixes. components/train/GoalTile.jsx draws them;
-   dev/tests/test_render_harness.py measures the tile in a real browser once the bundle is built. */
+   which source wins (pack, then the app's own module, then the flat tint), and the sheen's
+   3 s stop (the 1.6 s loop and the .42 s fade are CSS, held below). components/train/GoalTile.jsx
+   draws them; dev/tests/test_render_harness.py measures the tile in a real browser once the
+   bundle is built. */
 
 import { GOALS } from "../../gallery/src/gen/trainCore.js";
 import {
-  FADE_MS, PACK_DIR, SHEEN_LOOP_MS, SHEEN_STOP_MS, artSources, goalArtName, packUrl, resolveGoalArt,
+  PACK_DIR, SHEEN_STOP_MS, artSources, goalArtName, packUrl, resolveGoalArt,
 } from "../../gallery/src/lib/goalTileCore.js";
 import * as MODULE_ART from "../../gallery/src/art/goalTiles.js";
 
@@ -67,10 +68,8 @@ describe("precedence: pack, then module, then the tint", () => {
 });
 
 describe("the handoff's timings (T2b)", () => {
-  test("a 1.6 s sheen loop that stops at 3 s, and a .42 s fade", () => {
-    assert.equal(SHEEN_LOOP_MS, 1600);
+  test("the sheen stops at 3 s", () => {
     assert.equal(SHEEN_STOP_MS, 3000);
-    assert.equal(FADE_MS, 420);
   });
 });
 

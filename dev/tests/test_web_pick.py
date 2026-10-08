@@ -26,32 +26,30 @@ def _client(tmp_path, rows):
 
 def _authed_client(tmp_path, rows):
     """Like _client(), but logged in for real -- for every test below EXCEPT the
-    handful that specifically test the unauthenticated/LAN boundary itself
-    (test_gallery_images_requires_login_over_lan_but_then_works,
-    test_unauthenticated_lan_request_to_index_is_redirected_to_login, and the "mixed"
+    handful that sign in themselves on a LAN address
+    (test_gallery_images_works_over_lan_for_a_signed_in_session) and the "mixed"
     tests that check an anonymous request first before logging the SAME client in via
-    login_existing_client())."""
+    login_existing_client(). (That an anonymous request is refused is proven for every
+    route at once by dev/tests/test_route_tiers.py, not per route here.)"""
     save_catalog(tmp_path / "catalog.db", rows)
     return login_client(tmp_path)
 
 
-def test_gallery_images_requires_login_over_lan_but_then_works(tmp_path):
+def test_gallery_images_works_over_lan_for_a_signed_in_session(tmp_path):
     """/api/gallery-images used to be deliberately exempted from EVERY gate (its own
     docstring: 'NOT localhost-gated ... the gate added no protection while breaking
     the picker for the owner on a --host 0.0.0.0 server accessed via a LAN address') --
     a 0.0.0.0 server browsed via a LAN address with no login at all could still pull
-    the catalog. The front-door rewrite (2026-07-19) retires that exemption: `/api/`
-    now carries no allowlist entry of its own, so a LAN request with no session is
-    refused like every other route, and the regression this test guards becomes 'the
-    picker still works over LAN for a signed-in user' -- not 'works over LAN with no
-    auth at all', which was the whole security gap this rewrite closed."""
+    the catalog. The front-door rewrite (2026-07-19) retired that exemption, so a LAN
+    request with no session is refused like every other route (proven for the whole
+    url_map by dev/tests/test_route_tiers.py::test_no_route_is_reachable_without_a_session),
+    and the claim this test keeps is the other half: the picker still works over LAN
+    for a signed-in user."""
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="p",
              created_at="2025-01-01T00:00:00"),
     ])
     LAN = "192.168.1.50"
-    r = cli.get("/api/gallery-images", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401                        # no session -> refused
 
     # Sign in the way the real app does now (classic cut, 2026-08-08): GET /login's
     # MG_BOOT csrf -> POST /api/login (JSON), wrapped by the shared conftest helper.
@@ -130,7 +128,7 @@ def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
 def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
     every surface rendering /api/gallery-images results needs to set data-nsfw on the card
-    it builds, and body.privacy-blur needs a rule that actually blurs it -- neither existed
+    it builds, and the stylesheet needs a rule that actually blurs it -- neither existed
     for the gallery Picker, the Edit tab's single reference slot (#gen-ref-slot),
     <mg-gallery-picker> (.mg-pk-cell), or the Generate drawer's reference slots (.mgd-slot,
     all three renderers) before this pass. Source-checks since none of these are build-step
@@ -151,28 +149,21 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     # The picker is the React GalleryPicker since 2026-08-08 (ported out of
     # static/mg-gallery-picker.js); the is_nsfw/data-nsfw handling moved with it, the
     # privacy-blur CSS to gallery-picker.css (element selector -> .mg-gallery-picker class).
-    # RE-KEYED 2026-09-07: the rule used to be body-scoped, and nothing in the app has ever
-    # put a class on <body>, so it never actually fired -- the assertion below passed on a
-    # selector that could not match. It is scoped to the picker's OWN root now, and the
-    # component is pinned to carry that class (loom/test/privacy-blur-surfaces.test.js).
+    # The stylesheet half -- the rules scoped to the picker's OWN root (they were once keyed on
+    # <body>, which nothing in the app ever sets a class on, so they never fired) and the
+    # component carrying that class -- is pinned in loom/test/privacy-blur-surfaces.test.js.
     picker_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "GalleryPicker.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={m.is_nsfw === "1" ? "1" : undefined}' in picker_jsx
     assert 'is_nsfw: m.is_nsfw === "1"' in picker_jsx
-    picker_css = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "styles" / "gallery-picker.css").read_text(encoding="utf-8")
-    assert '.mg-gallery-picker.mg-blur .mg-pk-cell[data-nsfw="1"] img' in picker_css
-    assert "body.privacy-blur" not in picker_css
 
     # The video drawer is the React <VideoDrawer> since 2026-08-08 (no-vanilla port); its slot
     # nsfw handling moved with it -- one shared slotBox() sets data-nsfw, the pick-request's
     # respond() still forwards is_nsfw, and the privacy-blur CSS moved to gen-drawer.css
-    # (element selector -> .gen-drawer class). Re-keyed off <body> onto the drawer's own
-    # root 2026-09-07, same reason as the picker above.
+    # (element selector -> .gen-drawer class; its rules are pinned in
+    # loom/test/privacy-blur-surfaces.test.js, same as the picker's above).
     drawer_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "VideoDrawer.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={item && item.is_nsfw ? "1" : undefined}' in drawer_jsx
     assert "respond: (media_id, thumb, is_nsfw) =>" in drawer_jsx
-    drawer_css = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "styles" / "gen-drawer.css").read_text(encoding="utf-8")
-    assert '.gen-drawer.mg-blur .mgd-slot[data-nsfw="1"] img' in drawer_css
-    assert "body.privacy-blur" not in drawer_css
 
     loom_jsx = (Path(__file__).resolve().parents[2] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
     # onGalleryPick (the React onPick prop) forwards the media fields as m.* now -- was the
@@ -689,29 +680,6 @@ def test_snippets_are_independent_for_accounts_differing_only_by_case(tmp_path):
         "nel's save overwrote Nel's snippets -- case-collision on disk")
 
 
-def test_gallery_model_preview_hover_is_debounced_not_instant():
-    """D-11 fix, originally landed as the gallery's OWN scheduleShowPreview/cancelPreview
-    (a raw mouseenter re-triggered an instant, freshly-repositioned popup on every card the
-    mouse passed over while scanning the grid). O12 (Phase 2) moved the whole search-grid
-    -- including this debounce -- into the shared <mg-model-picker> component, so the
-    gallery gets the fix by LOADING that component now, not by hand-rolling its own copy.
-    This is fundamentally a feel/timing bug (real verification is manual, in a browser) --
-    this only guards against a future edit reverting to raw, un-debounced wiring, wherever
-    that wiring now lives."""
-    # (The classic page that used to mount this component -- and the hand-rolled copy
-    # it replaced -- died with the classic cut, 2026-08-08. The component itself was
-    # ported vanilla static/mg-model-picker.js -> React ModelPicker.jsx on 2026-08-08;
-    # the debounce moved with it near-verbatim, loaded by the React shell and the Loom.)
-    picker_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
-    # a card's mouseenter routes through the SCHEDULER (not showPreview directly)...
-    assert "onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}" in picker_jsx
-    assert "const schedulePreview = (m, anchorEl) => {" in picker_jsx
-    # ...which is a 130ms setTimeout, not an instant popup -- the whole point of the fix...
-    assert "setTimeout(() => showPreview(m, anchorEl), 130);" in picker_jsx
-    # ...and the timer is cancellable (the old _cancelPreview()) so a fast scan clears it.
-    assert "const hidePreview = () => { clearTimeout(previewTimerRef.current); setPreview(null); };" in picker_jsx
-
-
 def test_the_legacy_shared_snippets_are_given_to_each_login_by_the_move(tmp_path):
     """Upgrade path: nothing disappears when the store goes per-account. The move copies the
     old shared prompt_snippets.json into every login with no file of its own, then deletes
@@ -1019,13 +987,6 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
     assert calls == [], "probed a file quarantined under _deleted/"
     assert d["duration"] is None
-
-
-def test_loom_video_duration_requires_login(tmp_path):
-    cli = _client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
-                                   is_video="1", created_at="2025-01-01T00:00:00")])
-    r = cli.get("/api/loom/video-duration?media_id=V9")
-    assert r.status_code == 401
 
 
 def test_gen_reference_image_passthrough():
@@ -1479,21 +1440,6 @@ def test_artwork_views_route(tmp_path, monkeypatch, pixai):
     assert cli.get("/api/artwork-views").get_json()["views"] is None   # missing id -> 400/null
 
 
-def test_unauthenticated_lan_request_to_index_is_redirected_to_login(tmp_path):
-    """Before the LAN-auth front-door rewrite (2026-07-19), an unauthenticated LAN
-    request to `/` rendered a stripped-down 'read-only LAN view' (owner-only controls
-    hidden, a small banner shown instead) -- `/` had no gate of its own at all back
-    then. That whole in-between tier is retired: `/` now carries no allowlist
-    exemption from the global front-door hook (_enforce_front_door(), see
-    moonglade_gallery.py's docstring), so an unauthenticated LAN request never reaches
-    index() at all -- it's redirected to /login instead of rendering anything."""
-    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
-                                  created_at="2025-01-01T00:00:00")])
-    r = cli.get("/", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code in (301, 302, 303, 307, 308)
-    assert "/login" in r.headers["Location"]
-
-
 def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     """A LAN request carrying a valid login session is authorized exactly like the
     local owner: there is only ONE access tier behind the front door (a logged-in
@@ -1503,9 +1449,9 @@ def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     app_page() even hardcodes is_local=True in the boot blob -- so what's left to
     pin is that the shell (MG_BOOT + the app bundle) reaches a logged-in LAN session
     identically to localhost, with no read-only in-between tier. See
-    test_unauthenticated_lan_request_to_index_is_redirected_to_login for the other
-    side of the boundary, and dev/tests/test_route_tiers.py for the LOCALHOST-tier
-    exceptions (e.g. Import/setup)."""
+    dev/tests/test_route_tiers.py::test_no_route_is_reachable_without_a_session for the
+    other side of the boundary (an anonymous request to `/` is redirected to /login),
+    and the rest of that file for the LOCALHOST-tier exceptions (e.g. Import/setup)."""
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     cli = login_existing_client(cli, username="alice", password="hunter2")
@@ -1520,17 +1466,11 @@ def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
 
 def test_export_csv_downloads_as_attachment(tmp_path):
     """The web export is a real browser DOWNLOAD (attachment), not a file written into the
-    backup folder. Authorized only (owner data)."""
+    backup folder. (An anonymous request is redirected to /login: dev/tests/test_route_tiers.py.)"""
     cli = _client(tmp_path, [
         _row(media_id="1", filename="a_1.png", prompt_preview="p1", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", filename="b_2.png", prompt_preview="p2", created_at="2025-01-02T00:00:00"),
     ])
-    # An unauthorized LAN device can't pull the owner's catalog -- sent to /login
-    # (an HTML page route, so a redirect there rather than a bare 403 lets normal
-    # browser navigation work cleanly). Checked FIRST, while `cli` is still anonymous.
-    r2 = cli.get("/export-csv", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r2.status_code == 302
-    assert r2.headers["Location"].startswith("/login")
     cli = login_existing_client(cli)
     r = cli.get("/export-csv")
     assert r.status_code == 200 and r.mimetype == "text/csv"
@@ -1752,87 +1692,6 @@ def test_toasts_anchored_top_right(tmp_path):
     assert "#mg-toasts{position:fixed;right:16px;top:64px" in app_css      # the built bundle truly ships it
 
 
-def test_flyout_open_does_not_search_the_hidden_tab():
-    """Owner report 2026-07-24 ("still slow"): ensurePickers() creates AND mounts both the
-    base and LoRA pickers together the moment the flyout first opens, so both used to fire
-    a full network search immediately -- including the one nobody had asked to see yet,
-    competing with the real search for the same connection. setKind() must call
-    ensureSearched() on whichever picker just became visible instead, so only ONE search
-    fires on open."""
-    # Ported to React ModelPicker.jsx (2026-08-08): the display:none + _searched/ensureSearched
-    # dance became a `visible` prop feeding one search effect. The contract is identical -- a
-    # not-visible instance never searches, and a plain re-reveal with unchanged filters doesn't
-    # re-fire (each instance remembers its own last search key).
-    picker_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
-    # a hidden (not visible) instance bails before searching -- the old display!=='none' gate
-    assert "if (!visible) return;" in picker_jsx
-    # a re-reveal with the SAME search key short-circuits -- the old `_searched && !_stale` return
-    assert "if (key === lastKeyRef.current) return;" in picker_jsx
-    assert "lastKeyRef.current = key;" in picker_jsx
-    assert "doSearch();" in picker_jsx
-    # (The classic page's own setKind() -> ensureSearched() call site died with the
-    # classic cut, 2026-08-08; the component keeps the deferred-search contract.)
-
-
-def test_picking_a_base_model_does_not_double_search_the_hidden_lora_picker():
-    """AUDIT_2026-07-21 follow-up: the deferred-search fix closed only one of two redundant
-    requests. Picking a base model sets `base-type` on the LoRA picker -- which is normally
-    still HIDDEN, since both hosts mount base+LoRA together and reveal one -- and
-    attributeChangedCallback searched unconditionally, without ever setting `_searched`. So
-    the hidden instance fetched and built ~24 cards nobody had asked to see, and then the
-    first reveal's ensureSearched() fired the IDENTICAL request all over again.
-
-    Two halves, both required: `_search()` must own the `_searched` flag (so ANY search
-    counts), and a base-type change on a hidden instance must defer rather than search."""
-    # Ported to React ModelPicker.jsx (2026-08-08): baseType is a prop threaded into the search
-    # key (searchUrl), and the single search effect is what both the old `_search()` flag-owning
-    # and the hidden-instance deferral collapsed into.
-    picker_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
-    # 1) the search effect records its own key before firing -- the React equal of `_search()`
-    #    owning `_searched`/`_stale`, so ANY search (not just two call sites) counts and a later
-    #    reveal with the same key won't repeat it.
-    eff = picker_jsx.split("if (!visible) return;", 1)[1][:400]
-    assert "const key = searchUrl();" in eff
-    assert "lastKeyRef.current = key;" in eff and "doSearch();" in eff
-
-    # 2) a hidden instance defers: a base pick changes baseType (part of the search key below),
-    #    but the effect bails at `!visible` and only fires once on the eventual reveal.
-    assert "if (!visible) return;" in picker_jsx
-    assert 'if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);' in picker_jsx
-    # (The classic page's base-type feed into the LoRA picker died with the classic
-    # cut, 2026-08-08; the deferral contract itself lives in the component above.)
-
-
-def test_generate_drawer_blocks_submit_on_unresolved_lora():
-    """A LoRA whose /api/model-version lookup never resolves (still pending, or
-    permanently failed) used to just vanish from payload()'s loras filter -- the
-    generation submitted anyway, spending full credits on a result silently missing
-    a LoRA the user believed was included, with nothing on screen but an hourglass
-    that never explained itself (audit: fail-open, 2026-07-21). Fixed: the lookup's
-    failure path is distinguished from success (entry.failed), Go is gated on every
-    added LoRA having actually resolved, and generate() refuses to submit even if
-    something got the disabled button clicked anyway.
-
-    O12 (Phase 2): the LoRA pick/resolve lifecycle itself (the fetch that sets
-    entry.failed) moved into <mg-model-picker>'s own _toggleMulti() -- the gallery's
-    onLoraPick() only consumes the ALREADY-resolved-or-failed entry the component hands
-    it. So the failed-tracking assertions now check ModelPicker.jsx; everything that
-    still lives in moonglade_gallery.py (the Go-button gate, generate()'s submit-time guard,
-    anyLoraUnresolved() itself) is unchanged and still checked against the gallery page."""
-    # (The classic gallery's own Go-button gate / submit-time guard died with the
-    # classic cut, 2026-08-08. The component's failed-state tracking below is the
-    # surviving half of this fix -- the `failed` distinction every consumer of the
-    # picker builds its own gating on. Ported to React ModelPicker.jsx (2026-08-08):
-    # _toggleMulti()'s resolve became toggleMulti()'s /api/model-version fetch, dispatching
-    # a filled-in entry via onToggle.)
-    picker_jsx = (Path(__file__).resolve().parents[2] / "gallery" / "src" / "components" / "ModelPicker.jsx").read_text(encoding="utf-8")
-    # resolve SUCCESS path: failed iff no version_id came back (old `entry.failed = !entry.version_id;`)
-    assert "failed: !v.version_id," in picker_jsx
-    # resolve FAILURE (network catch) path: marked failed outright (old `entry.failed = true;`),
-    # so a permanently-unresolvable LoRA is never silently dropped from the payload.
-    assert "onToggle && onToggle({ ...entry, failed: true }, true);" in picker_jsx
-
-
 def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch, pixai):
     """[MAJOR] The Bridge restored an enhance surface, but /api/price still must NOT quote a
     number for it. An enhance/panelplugin task is priced by its workflow id, which is
@@ -1855,24 +1714,14 @@ def test_import_task_by_id(tmp_path, monkeypatch, pixai):
     """Panel 'Recover a task by ID' -> collect_generation. LOGIN tier (not localhost --
     see below); numeric-only; recovers edits/favorites-only tasks Sync's listing skips.
 
-    The 401 below is asserted from an ANONYMOUS client -- login_existing_client() is only
-    called on the next line -- so it proves the front door refuses an unauthenticated
-    request and nothing more. It used to be commented "# LAN refused" alongside a
-    "Localhost-gated" docstring, which claimed a tier assertion this test has never made:
-    the front door answers before any handler runs, so it would read identically whether
-    or not a localhost check existed. That exact shape is how three real gate regressions
-    shipped unnoticed this week. Relabelled rather than deleted -- the anonymous-refusal
-    check is still worth having.
-
     This route's ACTUAL tier is pinned by dev/tests/test_route_tiers.py, which drives an
-    authenticated non-local session against every registered route. It is deliberately
-    LOGIN, not localhost: recovering your own finished media spends nothing."""
+    anonymous request and an authenticated non-local session against every registered
+    route. It is deliberately LOGIN, not localhost: recovering your own finished media
+    spends nothing."""
     called = {}
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    assert cli.post("/api/import-task", json={"task_id": "123"},
-                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401   # anonymous refused by the front door
     cli = login_existing_client(cli)
     d = cli.post("/api/import-task", json={"task_id": "nope"}).get_json()
     assert d.get("error") and "tid" not in called                          # non-numeric rejected, no collect
@@ -2069,16 +1918,13 @@ def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypa
     assert d["is_member"] is None
 
 
-def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch, pixai):
+def test_claim_endpoint_claims_ready(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
     claimed = []
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    # An unauthenticated LAN request is refused -- checked first, while `cli` is still
-    # anonymous, then logged in for the real claim below.
-    assert cli.post("/api/claim", environ_overrides={"REMOTE_ADDR": "192.168.1.9"}).status_code == 401
     cli = login_existing_client(cli)
     d = cli.post("/api/claim").get_json()
     assert d["claimed"] == 1 and d["credits"] == 30000       # only the ready credit reward

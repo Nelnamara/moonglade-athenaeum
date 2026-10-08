@@ -112,6 +112,14 @@ describe("every cost line rides the probe", () => {
       assert.match(read(f), /import\s+usePriceProbe\s+from\s+["'][^"']*usePriceProbe\.js["']/,
         h + " must get its price check from the shared probe, not its own loop");
     });
+    test(h + " instantiates its OWN probe and owns the badge ref it drives", () => {
+      // One probe instance per host is one sequence counter per host. A host that borrowed another
+      // surface's probe (or badge ref) would let one surface's re-price cancel the other's.
+      const src = read(files.find((x) => rel(x) === h));
+      assert.match(src, /usePriceProbe\(\{/,
+        h + " must instantiate its OWN probe rather than share another surface's");
+      assert.ok(src.includes("costRef"), h + " must own the badge instance its probe drives");
+    });
   });
 
   test("no host keeps a private debounce constant for pricing", () => {
@@ -215,6 +223,31 @@ describe("usePriceProbe's host half of the CostBadge contract", () => {
     assert.match(hook, /costRef\.current\.setPrice\(null\);\n\s*setResponse\(null\);\n\s*put\(settledFor\(key\)\);/,
       "a failed check settles too -- fail-closed-but-live");
     assert.match(hook, /put\(settledFor\(key\)\);\n\s*return;/, "an idle build settles as well");
+    // The line above also matches the FAILED branch, so it cannot pin the idle exit by itself.
+    // Slice the idle branch alone (it ends where the fire step starts checking) and pin it there.
+    const idleAt = hook.indexOf("if (built.idle) {");
+    const idleEnd = hook.indexOf("badge.setChecking();", idleAt);
+    assert.ok(idleAt >= 0 && idleEnd > idleAt, "expected the fire step's idle branch in usePriceProbe.js");
+    const idleExit = hook.slice(idleAt, idleEnd);
+    assert.match(idleExit, /badge\.clear\(/,
+      "the idle exit must clear the badge AND settle, since an unsettled idle dead-disables the "
+      + "submit control with no message on screen");
+    assert.match(idleExit, /setResponse\(null\);\n\s*put\(settledFor\(key\)\);\n\s*return;/,
+      "the idle exit must settle for the key it judged, since an unsettled idle dead-disables the "
+      + "submit control with no message on screen");
+  });
+
+  test("the sequence counter is owned inside the hook", () => {
+    // Each cost surface owns its OWN sequence (the classic's editCost once shared `costSeq` with the
+    // Generate tab's debouncedCost(), so an '?edit=' deep link cancelled the Generate tab's first
+    // price check before it ever fired). Ownership is structural: the counter is a useRef INSIDE the
+    // hook, so one probe instance per host is one counter per host.
+    const at = hook.indexOf("const seq = useRef(0)");
+    assert.ok(at >= 0, "the probe no longer owns a sequence counter");
+    assert.ok(at > hook.indexOf("export default function usePriceProbe"),
+      "the counter must be declared INSIDE the hook -- module-level state would be shared across "
+      + "every probe instance, so an '?edit=' deep link would cancel the Generate tab's first price "
+      + "check all over again");
   });
 
   test("disabling (or unmounting) clears the timer AND aborts the request in flight", () => {

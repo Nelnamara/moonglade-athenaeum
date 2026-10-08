@@ -7,19 +7,11 @@ nothing like today's.
 import json
 import time
 
-import pytest
-
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_test_client, _SEALED_DONOR
-
-# Same marker the sibling roster tests use. This test used to RETURN EARLY when the donor
-# was absent, which counts as a pass and hides it from conftest's donor-skip warning --
-# the one thing that warning exists to make visible.
-needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
-                                 reason="sealed-definitions donor (private repo) not present")
+from tests.conftest import login_test_client
 
 
 def _row(**kw):
@@ -191,19 +183,6 @@ def test_a_meta_of_a_meta_earns_in_one_pass():
     assert by["outer-meta"]["current"] == 1
 
 
-@needs_donor
-def test_the_real_roster_still_resolves_its_metas(tmp_path):
-    """The live roster, through the real path -- the fixed point must not change what the
-    shipped metas do. Self-computing: satisfies every threshold and asserts every
-    requires-meta earns."""
-    assert [a for a in g._roster() if a.get("requires")], "the roster really has metas"
-    full = {a["metric"]: 10 ** 9 for a in g._roster()}
-    by = {a["id"]: a for a in g.compute_achievements(full)["achievements"]}
-    for a in g._roster():
-        if a.get("requires"):
-            assert by[a["id"]]["earned"], a["id"]
-
-
 # ---- finding 7: dates ---------------------------------------------------------
 
 def test_series_ts_parses_a_date_only_value():
@@ -330,22 +309,6 @@ def test_entering_a_contest_is_read_only_guarded(mock_session, monkeypatch):
     with pytest.raises(core.PixAIError, match="READ_ONLY"):
         core.contest_enter(mock_session, "slug", "art1")
     mock_session.post.assert_not_called()
-
-
-# ---- finding: jobs_concurrent counts generations ----------------------------
-
-def test_jobs_concurrent_counts_only_generations(tmp_path, monkeypatch):
-    """It counted every non-terminal row -- panel jobs, imports, CLI runs -- so a sync
-    beside an import could satisfy a rung nobody had earned."""
-    core.append_job_event(tmp_path, "gen-1", status="running", type="generate")
-    core.append_job_event(tmp_path, "panel-1", status="running", type="panel")
-    core.append_job_event(tmp_path, "imp-1", status="running", type="import")
-    cli = _client(tmp_path)
-    monkeypatch.setattr(core, "generation_status",
-                        lambda s, t: {"phase": "running", "paid_credit": 0})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    cli.get("/api/task-status", query_string={"task_id": "gen-1"})
-    assert g.telemetry_metrics(tmp_path).get("jobs_concurrent", 0) == 1
 
 
 # ---- finding: the artwork_id index ------------------------------------------

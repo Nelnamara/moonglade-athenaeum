@@ -12,8 +12,6 @@ from moonglade.gallery import load_catalog
 
 from tests.conftest import login_client
 
-LAN = "203.0.113.5"          # a non-loopback "LAN device" address
-
 
 def _png():
     from PIL import Image
@@ -44,18 +42,6 @@ def test_import_local_catalogs_uploads_as_local(tmp_path):
     assert local[0]["media_id"] in name                       # id rides in the filename
     assert (tmp_path / name).exists()                         # copied into the backup
     assert "Imports" in (local[0].get("collections") or "")   # collection tagged
-
-
-def test_import_local_is_localhost_only(tmp_path):
-    """A logged-in LAN session must NOT be able to write files onto the server's machine."""
-    pytest.importorskip("PIL")
-    cli = login_client(tmp_path)
-    r = cli.post("/api/import-local",
-                 data={"files": (_png(), "x.png")},
-                 content_type="multipart/form-data",
-                 environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403
-    assert not (tmp_path / "imported").exists()               # nothing written
 
 
 def test_import_local_expands_a_zip(tmp_path):

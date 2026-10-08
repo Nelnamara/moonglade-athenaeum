@@ -109,14 +109,6 @@ def test_a_thumb_smaller_than_the_tier_is_served_as_it_is_never_enlarged(tmp_pat
     assert _size(cli.get("/thumbs/906.jpg?s=256").data) == (120, 80)
 
 
-def test_the_256_tier_needs_a_login(tmp_path):
-    _seed(tmp_path, ["907"])
-    _seed_768(tmp_path, "907")
-    cli = G.create_app(tmp_path).test_client()                         # no session
-    r = cli.get("/thumbs/907.jpg?s=256")
-    assert r.status_code in (302, 401, 403)
-
-
 def test_head_on_full_reports_the_size_without_sending_the_image(tmp_path):
     _seed(tmp_path, ["908"])
     cli = _client(tmp_path)

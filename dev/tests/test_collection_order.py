@@ -11,7 +11,8 @@ What these pin, in the order the lane's data-safety rules gave them:
     9); a position whose picture has left the collection is ignored. Unordered hand-picked and
     smart collections read oldest first.
   * REFUSALS. A smart collection cannot be ordered (its membership is live); an id that is not a
-    member, a repeat, an unknown collection: refused, nothing written. CSRF 403, LOGIN tier.
+    member, a repeat, an unknown collection: refused, nothing written. CSRF 403; the LOGIN tier is pinned in
+    dev/tests/test_route_tiers.py.
   * N's MANAGER CARRIES IT. Rename moves the order, delete drops it, merge keeps the target's.
   * READERS. The Contact sheet (both) and the collection view's "Manual" sort use it.
   * LOCAL ONLY: nothing here reaches the network or PixAI.
@@ -255,12 +256,6 @@ def test_order_post_needs_the_csrf_token(client, db):
     assert client.post("/api/collections/order", json={"name": "Stills", "media_ids": ["2", "1"]}).status_code == 403
     assert client.post("/api/collections/order", json={"csrf": "no", "name": "Stills", "media_ids": ["2"]}).status_code == 403
     assert _order_rows(db) == []
-
-
-def test_order_routes_are_login_tier(tmp_path, db):
-    anon = g.create_app(tmp_path).test_client()
-    assert anon.get("/api/collections/order?name=Stills").status_code == 401
-    assert anon.post("/api/collections/order", json={}).status_code == 401
 
 
 def test_the_manage_route_carries_the_order(client, db):

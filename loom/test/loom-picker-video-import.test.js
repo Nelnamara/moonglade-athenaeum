@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { needsRender } from "../src/loom-takes-core.js";
-import { importedFootagePatch } from "../src/loom-mutations.js";
 
 // Regression guard for GitHub issue #3 (P1): "Loom asset picker on left side does not
 // import already rendered videos when selected." The pick->asset chain itself was fine;
@@ -178,16 +176,12 @@ describe("Footage tab: 'Browse library' imports a REAL placeable shot, not a Cas
       "generateShot's !hasInput branch should still special-case c.imported defensively");
   });
 
-  test("batchGenerate/cost-estimate treat an imported shot as done -- no accidental resubmit or spend", () => {
-    // Both gates key off needsRender (Session P, review F14 -- CHANGED ON PURPOSE from
-    // `status !== "done"`): a shot with a ★ take is finished. importedFootagePatch lands the
-    // clip as the card's take, so an imported card is excluded from "Generate all" and the
-    // standing cost pill by the SAME rule every other finished shot relies on -- no special-
-    // casing needed, and this guards that nobody adds an accidental imported-only carve-out
-    // (or, worse, an imported-only INCLUSION) later.
-    assert.match(storyboardSrc, /const todo = board\.filter\(\(e\) => needsRender\(e\.c\)\);/);
+  test("the standing cost pill skips finished and imported shots (needsRender)", () => {
+    // The pill keys off needsRender (Session P, review F14 -- CHANGED ON PURPOSE from
+    // `status !== "done"`): an imported clip lands as the card's take, so it is excluded by the
+    // SAME rule every finished shot relies on. This is the only pin of the pill's gate;
+    // batchGenerate's own `todo` gate and needsRender(imported) === false are pinned in
+    // loom-batch-generate-concurrency.test.js, importedFootagePatch in loom-mutations.test.js.
     assert.match(storyboardSrc, /const nd = boardEntries\.filter\(\(e\) => needsRender\(e\.c\)\);/);
-    assert.equal(needsRender({ id: "x", ...importedFootagePatch("gal-1", 4) }), false,
-      "an imported clip is the shot's take: nothing to render");
   });
 });

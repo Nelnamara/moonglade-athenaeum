@@ -251,29 +251,12 @@ def _seed_backup_tree(root):
 
 
 class TestM06TrashedImagesAreNotTheLibrary:
-    def test_deleted_quarantine_is_excluded_from_the_disk_totals(self, tmp_path):
-        """run_download's own scanner has skipped {gallery, _duplicates, _deleted} since B11;
-        this one skipped only the first two, so every soft-deleted image still counted as part
-        of the live library -- in both the file count and the byte total."""
-        _seed_backup_tree(tmp_path)
-        n, nbytes, thumbs = core._count_backup_images(tmp_path)
-        assert n == 1 and nbytes == 100        # the live image only -- not the 400-byte trash
-        assert thumbs == 1
-
     def test_the_trash_is_reported_rather_than_dropped(self, tmp_path):
         """Excluding it silently would just swap one wrong number for another: the totals
         would stop matching the folder with nothing on screen to explain the gap."""
         _seed_backup_tree(tmp_path)
         counts = core._count_backup_images(tmp_path)
         assert counts.trashed == 1 and counts.trashed_bytes == 400
-
-    def test_the_three_tuple_unpacking_contract_is_unchanged(self, tmp_path):
-        """Callers (and the older test pinning this) unpack exactly three values -- the
-        quarantine totals ride alongside rather than as a fourth slot."""
-        _seed_backup_tree(tmp_path)
-        counts = core._count_backup_images(tmp_path)
-        assert isinstance(counts, tuple) and len(counts) == 3
-        assert tuple(counts) == (1, 100, 1)
 
     def test_catalog_stats_does_not_count_trash_as_library(self, tmp_path, capsys):
         """The end-to-end symptom: --catalog-stats is what the wiki points at for deciding

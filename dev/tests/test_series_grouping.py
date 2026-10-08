@@ -302,18 +302,6 @@ def test_group_and_series_are_params_not_a_new_route(tmp_path):
     assert rules[0].endpoint == "api_library"
 
 
-def test_grouped_listing_inherits_the_login_tier(tmp_path):
-    """An anonymous LAN request to the grouped listing is refused exactly like the base
-    route -- group=series is not a way around the LOGIN gate -- and works once signed in."""
-    _seed_mixed(tmp_path)
-    anon = create_app(tmp_path).test_client()
-    LAN = "192.168.1.50"
-    r = anon.get("/api/library?group=series", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401
-    cli = _client(tmp_path)
-    assert cli.get("/api/library?group=series").status_code == 200
-
-
 # --- the fold, unit-tested without a request --------------------------------------------
 
 def test_fold_series_units_keys_and_order():

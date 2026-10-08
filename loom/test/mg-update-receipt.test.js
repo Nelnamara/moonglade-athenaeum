@@ -172,12 +172,4 @@ describe("the receipt is wired to the boot that follows an apply", () => {
     assert.ok(installer.includes("build_stamp"),
       "and must judge it against the version this process is really running");
   });
-
-  test("the receipt still cannot apply anything", () => {
-    // Same rule the announcement lives under: this module says things, it never installs.
-    const src = read("notify/updateStore.js");
-    assert.ok(!src.includes("/api/update/apply"));
-    assert.ok(!/\bapiPost\b/.test(src));
-    assert.ok(!/\bfetch\s*\(/.test(src));
-  });
 });

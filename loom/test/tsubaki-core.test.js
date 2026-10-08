@@ -9,7 +9,7 @@ import {
 import {
   GEN_DEFAULTS, buildPayload, goGate, sizeInfo, imageRefs, tsubakiEditState, versionPatch,
 } from "../../gallery/src/gen/genCore.js";
-import { prefsFromState, stateFromPrefs, prefsMode } from "../../gallery/src/gen/genPrefs.js";
+import { prefsFromState, stateFromPrefs } from "../../gallery/src/gen/genPrefs.js";
 
 /* Session H -- Tsubaki.3 in the Generate drawer, the client's pure half (gen/tsubakiCore.js,
    gen/genPrefs.js and what genCore builds on them). The server half is
@@ -346,7 +346,5 @@ describe("the settings that follow the account (gen.image)", () => {
     assert.deepEqual(stateFromPrefs({ creativity: "max", tier: "<x>", aspect: 99, mode: "turbo",
       recipes: [{ id: "abc" }], auto: "yes" }), { recipes: [] });
     assert.deepEqual(stateFromPrefs(null), {});
-    assert.equal(prefsMode({ mode: "pro" }), "pro");
-    assert.equal(prefsMode(undefined), "auto");
   });
 });

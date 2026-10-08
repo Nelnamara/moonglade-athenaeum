@@ -3,8 +3,9 @@ for a route to escape its auth tier unnoticed.
 
 WHY THIS FILE EXISTS
 --------------------
-dev/tests/test_web_auth.py hand-maintains four lists of paths
-(_PREVIOUSLY_UNGATED_JSON_GET / _JSON_POST / _HTML_GET / _HTML_POST). A
+dev/tests/test_web_auth.py once hand-maintained four lists of paths
+(_PREVIOUSLY_UNGATED_JSON_GET / _JSON_POST / _HTML_GET / _HTML_POST), since retired
+in favour of this file's sweep. A
 hand-maintained list is precisely what the front-door refactor
 (moonglade_gallery.py's _enforce_front_door()) was undertaken to eliminate, and those
 lists had ALREADY drifted: every credit-spending route -- /api/generate,
@@ -76,7 +77,6 @@ from moonglade.gallery import (
     LOCALHOST,
     LOGIN,
     PUBLIC,
-    TIERS,
     create_app,
     route_tier,
     assert_every_route_declares_a_tier,
@@ -637,7 +637,7 @@ def test_every_registered_route_declares_a_tier(app):
         "              PUBLIC_EXPECTED_STATUS in this file.\n"
         "This failure is not bureaucracy: every credit-spending route\n"
         "(/api/generate, /api/edit, /api/fix, /api/loom/generate) was\n"
-        "missing from the hand-maintained lists in dev/tests/test_web_auth.py\n"
+        "missing from the hand-maintained lists dev/tests/test_web_auth.py once carried\n"
         "for exactly this reason, and nothing noticed."
         .format(len(undeclared),
                 "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in undeclared)))
@@ -665,22 +665,6 @@ def test_undeclared_route_fails_at_app_creation(app):
     assert "@tier(" in message, (
         "the app-creation assertion did not tell the reader how to fix it. Got: "
         "{}".format(message))
-
-
-def test_declared_tiers_are_known_values(app):
-    """The tiers themselves stay meaningful.
-
-    tier() rejects an unknown name at decoration time, so this is belt-and-braces
-    against a declaration reaching the gate some other way -- and it is cheap.
-    Inventing a fourth tier without teaching _enforce_front_door() to enforce it
-    produces a declaration that asserts nothing.
-    """
-    bad = {(e, m): _declared_tier(app, e, m)
-           for (e, m) in _registered_pairs(app)
-           if _declared_tier(app, e, m) not in TIERS}
-    assert not bad, (
-        "unknown tier value(s) declared on route(s): {}\n"
-        "Only {} exist.".format(bad, ", ".join(TIERS)))
 
 
 # ---------------------------------------------------------------------------
@@ -897,10 +881,13 @@ def test_public_routes_are_actually_public(app, armed):
     for (endpoint, method), expected in sorted(PUBLIC_EXPECTED_STATUS.items()):
         rule = pairs[(endpoint, method)]
         path = _probe_url(rule)
-        resp = cli.open(path, method=method, environ_overrides={"REMOTE_ADDR": LAN})
-        if resp.status_code not in expected:
-            failures.append("  {} {} ({}): expected status in {}, got {}".format(
-                method, path, endpoint, sorted(expected), _describe_refusal(resp)))
+        # From the LAN AND from loopback: localhost is not special at the PUBLIC tier
+        # either (e.g. a missing /branding/ file 404s from both, never redirects to /login).
+        for addr in (LAN, "127.0.0.1"):
+            resp = cli.open(path, method=method, environ_overrides={"REMOTE_ADDR": addr})
+            if resp.status_code not in expected:
+                failures.append("  {} {} from {} ({}): expected status in {}, got {}".format(
+                    method, path, addr, endpoint, sorted(expected), _describe_refusal(resp)))
 
     assert not failures, (
         "{} PUBLIC route(s) did not answer anonymously as declared:\n{}\n\n"
@@ -1018,39 +1005,3 @@ def test_the_pilot_codename_has_no_page_route(app):
     assert "/next" not in {str(r) for r in app.url_map.iter_rules()}, (
         "a rule for /next is registered again -- see the docstring above before adding "
         "it back")
-
-
-# The wave 2 and wave 3 lanes' own POST families (recipes, Train a LoRA, the account store
-# Help and the recipe drafts share, the narrator's poke) each check the session's CSRF token before they act.
-# Older POSTs predate the rule and are not listed here; a NEW route under one of these
-# prefixes that forgets the check fails by name.
-_CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
-                  "/api/narrator",
-                  # wave 5, Session N: bulk curation and the collections manager
-                  "/api/curate", "/api/collections/manage",
-                  # wave 5, Session P: the Loom's new local routes
-                  "/api/loom/submit-abandon",
-                  # Session P, Stage B1: the music bed, the EDL export, the manual order
-                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order",
-                  # GitHub #62: the Loom fills a missing frame thumbnail
-                  "/api/loom/frame-thumbs")
-_CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
-
-
-def test_every_lane_post_checks_csrf(app):
-    import inspect
-    checked, missing = [], []
-    for rule in app.url_map.iter_rules():
-        if "POST" not in (rule.methods or ()) or not rule.rule.startswith(_CSRF_PREFIXES):
-            continue
-        src = inspect.getsource(app.view_functions[rule.endpoint])
-        (checked if any(h in src for h in _CSRF_HELPERS) else missing).append(rule.rule)
-    assert not missing, "POST routes with no CSRF check: %s" % sorted(missing)
-    # the families are really there (a renamed prefix would make this vacuous)
-    assert any(r.startswith("/api/train") for r in checked), checked
-    assert any(r.startswith("/api/recipes") for r in checked), checked
-    assert "/api/account/prefs" in checked, checked
-    assert "/api/narrator/poke" in checked, checked
-    assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
-    assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl",
-            "/api/collections/order", "/api/loom/frame-thumbs"} <= set(checked), checked

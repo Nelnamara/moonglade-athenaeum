@@ -25,8 +25,8 @@ import {
 // Since the no-vanilla port (2026-08-08) the transition logic is the PURE state layer in
 // gallery/src/gen/videoDrawerCore.js, exercised here directly -- see med-mg-generate-drawer-mode-
 // carry.test.js's header. The single-image / empty-list / omitted-key behaviors this must NOT
-// disturb are pinned by med2-mg-generate-drawer-prefill-leak.test.js; the guards below re-state
-// the two closest from this angle.
+// disturb are pinned by med2-mg-generate-drawer-prefill-leak.test.js; the guards below keep the
+// two it does not cover from this angle (r2v routing and the direct setRefs bulk send).
 
 function ref(id) { return { media_id: String(id), thumb: "/thumbs/" + id + ".jpg" }; }
 
@@ -68,20 +68,8 @@ describe("a host-stated flf prefill lands its End Frame -- and stays flf", () =>
     assert.equal(d.mode, "flf");
   });
 
-  // Guards: the behaviors this branch must NOT disturb (med2-mg-generate-drawer-prefill-leak.test.js
-  // owns the fuller versions).
-  test("one image still means Start only, End explicitly emptied", () => {
-    const d = drawer({ mode: "flf", slots: [ref("C1"), ref("C2")] });
-    applyPrefill(d, shot("flf", [ref("B_open")]));
-    assert.deepEqual(d.slots.map((s) => s && s.media_id), ["B_open", null]);
-  });
-
-  test("an empty images array still clears both frames", () => {
-    const d = drawer({ mode: "flf", slots: [ref("C1"), ref("C2")] });
-    applyPrefill(d, shot("flf", []));
-    assert.deepEqual(d.slots.map((s) => s && s.media_id), [null, null]);
-  });
-
+  // Guards: the behaviors this branch must NOT disturb. The single-image (Start only, End emptied)
+  // and empty-list (both frames cleared) cases are pinned by med2-mg-generate-drawer-prefill-leak.test.js.
   test("an r2v prefill still routes multiple images to the r2v bank", () => {
     const d = drawer({});
     applyPrefill(d, shot("r2v", [ref("R1"), ref("R2"), ref("R3")]));

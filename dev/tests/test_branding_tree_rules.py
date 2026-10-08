@@ -1038,26 +1038,6 @@ def test_the_render_is_the_same_asset_even_with_nobody_recording_it(tmp_path):
         assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"]
 
 
-def test_building_the_app_never_writes_the_slot_pick_file(tmp_path):
-    """Same rule as the flat migration above: building the app never records a
-    pick. The picks are this install's settings (settings.json, local/), and on
-    the module-scoped fixtures that conftest's per-test isolation cannot reach a
-    write there would land outside the test's own folder. Recording belongs to
-    main().
-
-    The state under test is the one that makes the record step want to write:
-    assets present, no pick recorded."""
-    _seed_catalog(tmp_path)
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
-    _drop_recorded_picks()
-
-    create_app(tmp_path)
-
-    assert "slots" not in _settings.branding(), \
-        "app construction wrote the recorded picks"
-
-
 def test_a_real_start_records_the_slot_resolution(tmp_path):
     """The record step's ONLY production call site is main() -- pinned off
     main()'s own source, the way the flat migration is, because main() parses

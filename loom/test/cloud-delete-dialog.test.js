@@ -202,9 +202,6 @@ describe("a task strip says what the task actually is", () => {
    delete. The route counts what it knows (live artworkIds, else the catalog's artwork_id);
    the dialog says so in ONE more sentence of its own text -- no badge, no thumbnail marker --
    in the same words as the per-image dialog (moonglade_gallery.published_delete_note). */
-const server = readFileSync(path.resolve(__dirname, "../../moonglade/gallery.py"), "utf8")
-  .replace(/\r\n/g, "\n");
-
 describe("the published-artwork sentence", () => {
   test("it is worded from the route's own counts, in the opening lines", () => {
     assert.match(menu, /const published = Number\(data\.published\) \|\| 0;/);
@@ -222,13 +219,6 @@ describe("the published-artwork sentence", () => {
     assert.doesNotMatch(menu, /not published on PixAI/);
   });
 
-  test("the per-image dialog says the same words", () => {
-    assert.ok(server.includes('"{} of these {} published on PixAI. Deleting the {} may remove the "'));
-    assert.ok(server.includes('"published artwork too."'));
-    assert.match(server,
-      /"Whether any of these are published on PixAI was not checked "\s*"— deleting a task may remove its published artwork too\."/);
-  });
-
   /* Part-checked (review fix, 2026-09-26): some tasks answered live and some fell back to a
      catalog the artworks sync never filled. "Whether any of these are published was not
      checked" would contradict the count just given, so the dialog names how many TASKS went
@@ -239,9 +229,6 @@ describe("the published-artwork sentence", () => {
     assert.ok(menu.includes('uncheckedTasks + " of the " + t.tasks + " tasks " + (uncheckedTasks === 1 ? "was" : "were")'));
     assert.ok(menu.includes('" not checked for published artwork"'));
     assert.ok(menu.includes('(published > 0 ? "." : " — deleting a task may remove its published artwork too.")'));
-    assert.ok(server.includes('"{} of the {} tasks {}"'));
-    assert.ok(server.includes('"{} not checked for published artwork{}"'));
-    assert.match(server, /"published_unchecked_tasks": published_unchecked_tasks,/);
   });
 
   test("no badge and no thumbnail marker: the strip is untouched", () => {

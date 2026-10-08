@@ -144,13 +144,6 @@ def test_the_launcher_rotates_serve_log_before_it_opens_it():
     assert '_paths.logs_dir() / "serve.log"' in src          # local/logs/, beside moonglade.log
 
 
-def test_the_launcher_still_supervises_and_relaunches_on_42():
-    src, _ = _launcher()
-    assert "RESTART_CODE = 42" in src
-    assert 'MOONGLADE_SUPERVISED="1"' in src
-    assert "if rc == RESTART_CODE:" in src and "continue" in src
-
-
 def _refuse_renames_of(monkeypatch, *held):
     """Make os.replace refuse to move exactly these files, as Windows refuses to rename a
     file another process holds open; every other rename really happens."""

@@ -123,30 +123,6 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
     assert.match(css, /\.mg-loadmore\.on\{display:block;\}/,
       "and the ported CSS must still reveal it on the `on` class");
   });
-
-  test("the browse-on-open search is deferred while the instance is not `visible`", () => {
-    // Owner report 2026-07-24 ("still slow"): both the Gallery and the Loom mount a
-    // kind="base" AND a kind="lora" picker TOGETHER on first flyout open, with only one
-    // actually visible -- searching the hidden one anyway meant every open fired two full
-    // searches competing for the same connection, for a tab nobody had asked to see. The
-    // vanilla element gated its browse-on-open on style.display !== 'none'; the React port
-    // gates the same search on the `visible` prop inside the browse-on-open effect.
-    assert.match(src, /useEffect\(\(\) => \{\s*\n\s*if \(!visible\) return;\s*\n\s*const key = searchUrl\(\);\s*\n\s*if \(key === lastKeyRef\.current\) return;\s*\n\s*lastKeyRef\.current = key;\s*\n\s*doSearch\(\);/,
-      "the browse-on-open (and re-search-on-filter-change) effect must early-return when " +
-      "!visible, so a hidden instance never fires a competing search");
-  });
-
-  test("re-revealing an already-searched instance is a no-op -- each keeps its own last search (the ensureSearched idempotency contract)", () => {
-    // The vanilla ensureSearched() was idempotent: once searched, switching tabs back and
-    // forth must never re-fetch, matching the "each keeps its OWN last-searched results
-    // independently" contract. The React port folds that into the browse-on-open effect:
-    // the fresh-list url is the search KEY, and an unchanged key on re-reveal is skipped.
-    // The _stale escape hatch (a base-type change while hidden) is inherent -- baseType is
-    // part of the key, so a changed base re-searches once on reveal.
-    assert.match(src, /const key = searchUrl\(\);\s*\n\s*if \(key === lastKeyRef\.current\) return;/,
-      "must skip the fetch when the fresh-list search key is unchanged since the last search " +
-      "-- a plain re-reveal must not re-fetch, only a genuine query/filter/baseType change");
-  });
 });
 
 // AUDIT_2026-07-21 follow-up (vanilla): picking a base model sets base-type on the (still
@@ -154,23 +130,12 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
 // fired the IDENTICAL request a second time. In the React port the same class of redundant
 // request is closed by the single search site (the effect) plus the key guard.
 describe("No redundant LoRA search when a base model is picked (AUDIT_2026-07-21)", () => {
-  test("the search effect owns the last-searched marker, so ANY search counts as searched", () => {
-    assert.match(src, /lastKeyRef\.current = key;\s*\n\s*doSearch\(\);/,
-      "lastKeyRef (the vanilla _searched/_stale equivalent) must be set at the ONE search " +
-      "site, immediately before doSearch() -- not at scattered call sites that happen to " +
-      "know about it. A base-type-triggered search that left the marker stale is exactly " +
-      "what made the next reveal re-run the same request in the vanilla bug");
-  });
-
   test("baseType is threaded into the search key, so a base-type change while hidden defers to the next reveal", () => {
     assert.match(src, /if \(kind === "lora" && baseType\) u \+= "&base_type=" \+ encodeURIComponent\(baseType\);/,
       "baseType must be part of the fresh-list url (the search key)");
     assert.match(src, /if \(!visible\) return;/,
       "while hidden the effect early-returns, so a base-type change does NOT search then; " +
       "because baseType is in the key, the next reveal re-searches once with it already in place");
-    // CHANGED ON PURPOSE (Session S): the Saved tab's set and LoRA base chip joined the key.
-    assert.match(src, /\}, \[kind, qDebounced, market, src, sort, category, posted, source, license, modelTypes, baseType, setId, savedBase\]\);/,
-      "searchUrl must depend on baseType, or the key would not recompute when the base changes");
   });
 
   test("a base-type change on a VISIBLE instance still re-searches immediately", () => {

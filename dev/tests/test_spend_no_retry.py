@@ -344,7 +344,8 @@ class TestRestSpendPathsAreSingleAttempt:
     one bare `session.post` with no retry loop, and the session mounts no urllib3 Retry
     adapter (requests' default HTTPAdapter is max_retries=0) -- so they are single-attempt
     by construction. Pinned rather than assumed: a retry loop added to `_rest_post` later
-    would silently make a Fix submit, a claim, and a contest entry double-fire."""
+    would silently make a Fix submit, a claim, and a contest entry double-fire. (The contest
+    entry's single POST is pinned in dev/tests/test_contest.py::TestContestEnterIsGuarded.)"""
 
     def test_submit_fixer_posts_once(self, mock_session, monkeypatch):
         posts = []
@@ -353,18 +354,6 @@ class TestRestSpendPathsAreSingleAttempt:
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
         assert core.submit_fixer(mock_session, "mid1", boxes) == "T1"
         assert posts == ["/task/fixer"]
-
-    def test_contest_enter_posts_once(self, mock_session, monkeypatch):
-        """Entering a contest is irreversible on PixAI -- there is no un-enter route -- so a
-        re-POST after a lost response would leave a second entry standing with nothing able
-        to take it back. The guard is stubbed here (its own placement is pinned in
-        dev/tests/test_read_only.py and dev/tests/test_contest.py); what this asserts is the count."""
-        posts = []
-        monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
-        monkeypatch.setattr(core, "_rest_post",
-                            lambda s, p, b, **k: posts.append((p, b)) or {"success": True})
-        assert core.contest_enter(mock_session, "slug1", "art1") == {"success": True}
-        assert posts == [("/contest/slug1/artwork", {"artworkId": "art1"})]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
         """The per-image delete's WHOLE-TASK branch calls delete_task_gql, which hand-rolls
@@ -382,6 +371,14 @@ class TestRestSpendPathsAreSingleAttempt:
             assert not loops, (
                 "{} grew a loop around a destructive delete -- a re-sent deleteGeneration"
                 "Task can fire again against a task that already changed".format(name))
+        # A comprehension or generator expression is a loop too: it can wrap the delete
+        # call without any For/While statement. Checked on the router only -- it is the
+        # function that picks the branch and must fire exactly one of them.
+        routed = ast.parse(textwrap.dedent(inspect.getsource(core.delete_image_routed)))
+        comps = [n for n in ast.walk(routed)
+                 if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))]
+        assert not comps, (
+            "delete_image_routed grew a loop around a destructive delete -- it must fire once")
 
     def test_rest_post_has_no_retry_loop(self):
         """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line

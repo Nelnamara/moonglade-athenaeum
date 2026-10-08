@@ -56,6 +56,8 @@ describe("modeOffered fails open on every uncertain input", () => {
   const TSUBAKI3 = ["pro", "ultra"];
 
   test("auto is offered by every model, whatever the profile set says", () => {
+    // The first bar is auto: the gate can never dim it, so it must stay the first bar.
+    assert.equal(MODES[0][0], "auto", "auto is no longer the first mode bar");
     for (const p of [TSUBAKI3, [], null, undefined, ["pro"], ["nonsense"]]) {
       assert.equal(modeOffered("auto", p), true);
     }
@@ -112,13 +114,6 @@ describe("the drawer's mode bars carry the gate", () => {
     assert.match(drawer, /import\s*\{[^}]*\bmodeOffered\b[^}]*\}\s*from\s*"\.\.\/gen\/genCore\.js"/,
       "GenerateDrawer.jsx no longer imports modeOffered from genCore.js");
   });
-
-  test("auto is never the mode that gets disabled", () => {
-    // Belt and braces on the two halves together: whatever the drawer passes, the first
-    // bar (auto) can never come back false.
-    assert.equal(MODES[0][0], "auto", "auto is no longer the first mode bar");
-    assert.equal(modeOffered(MODES[0][0], ["pro"]), true);
-  });
 });
 
 /* THE SELECTED MODE IS RE-CHECKED WHEN A MODEL APPLIES (red team 2026-09-07).
@@ -131,10 +126,6 @@ describe("the drawer's mode bars carry the gate", () => {
    useGenerate applies it at BOTH seams where a version lands (applyModelRow for a new model,
    pickVersion for another version of the same one). */
 describe("a mode the newly applied model does not offer falls back to auto", () => {
-  test("the brief's case: profiles [pro, ultra] while the mode is lite yields auto", () => {
-    assert.equal(modeAfterApply("lite", ["pro", "ultra"]), "auto");
-  });
-
   test("every mode the new model does not offer lands on auto, never on another paid tier", () => {
     for (const m of ["lite", "standard"]) assert.equal(modeAfterApply(m, ["pro", "ultra"]), "auto");
     for (const m of ["lite", "standard", "ultra"]) assert.equal(modeAfterApply(m, ["pro"]), "auto");

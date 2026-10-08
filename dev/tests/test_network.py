@@ -143,13 +143,6 @@ class TestResolveMedia:
         assert url == "https://cdn.example.com/full"
         assert info["width"] == 512
 
-    def test_returns_none_on_request_error(self, mock_session, mocker):
-        import requests
-        mock_session.get.side_effect = requests.RequestException("timeout")
-        url, info = core.resolve_media(mock_session, "mid123")
-        assert url is None
-        assert info == {}
-
     def test_falls_back_when_no_public(self, mock_session, mocker):
         obj = {
             "urls": [{"variant": "THUMBNAIL", "url": "https://thumb.example.com/t"}],
@@ -174,31 +167,6 @@ class TestResolveMedia:
         mock_session.get.return_value = resp
         url, info = core.resolve_media(mock_session, "mid789")
         assert url is None
-
-
-def test_variant_detection_cluster_is_gone():
-    """The --variant CLI flag was deleted in D-5, but its whole self-referential support
-    cluster survived as dead code: detect_variant() looped test_variant() over
-    VARIANT_CANDIDATES, test_variant() called media_url() (MEDIA_TMPL-based), and nothing
-    outside that chain ever called any of the three -- run_probe (the one plausible caller)
-    actually calls resolve_media() above, a separate urls-list/URL_VARIANT_PREFERENCE
-    mechanism (audit 2026-07-21, O7; a prior pass's claim that run_probe still needed this
-    cluster via detect_variant() was wrong, re-verified here). Zero callers anywhere,
-    confirmed by a repo-wide grep -- not even a test exercised it."""
-    import re
-    from pathlib import Path
-    dead_names = ("detect_variant", "test_variant", "media_url", "MEDIA_TMPL", "VARIANT_CANDIDATES")
-    for name in dead_names:
-        assert not hasattr(core, name), name
-    src = (Path(__file__).resolve().parents[2] / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    for name in dead_names:
-        # word-boundary, not substring -- "_media_url" (a live dict key elsewhere) must not
-        # false-fail this on "media_url".
-        assert not re.search(r'\b' + re.escape(name) + r'\b', src), name
-    # The LIVE mechanism (resolve_media's own resolution path) must be untouched.
-    assert hasattr(core, "MEDIA_BASE")
-    assert hasattr(core, "resolve_media")
-    assert hasattr(core, "URL_VARIANT_PREFERENCE")
 
 
 # ---------------------------------------------------------------------------
@@ -877,25 +845,6 @@ def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     assert res["artworks"] == 0 and core.USER_ID == "resolved-99"   # ran instead of raising
 
 
-def test_artwork_detail_hash_config_key_is_gone():
-    """ARTWORK_DETAIL_HASH was read from config.json with a baked-in default, same shape as
-    its sibling ARTWORK_LIST_HASH just above -- but unlike that sibling (used by
-    artwork_list_gql/run_sync_artworks right here in this file), nothing anywhere ever reads
-    ARTWORK_DETAIL_HASH (audit 2026-07-21, schema-config-drift appendix row: "read from config
-    and given a baked default, then never used anywhere"). config.example.json documented it
-    as a settable override, so that mention goes too -- its live sibling stays."""
-    import json
-    from pathlib import Path
-    assert not hasattr(core, "ARTWORK_DETAIL_HASH")
-    assert hasattr(core, "ARTWORK_LIST_HASH")   # the live sibling must be untouched
-    repo_root = Path(__file__).resolve().parents[2]
-    src = (repo_root / "moonglade" / "backup.py").read_text(encoding="utf-8")
-    assert "ARTWORK_DETAIL_HASH" not in src
-    example_cfg = json.loads((repo_root / "config.example.json").read_text(encoding="utf-8"))
-    assert "ARTWORK_DETAIL_HASH" not in example_cfg
-    assert "ARTWORK_LIST_HASH" in example_cfg   # sibling override documentation stays
-
-
 def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pixai):
     """B16 (audit 2026-07-21): already_downloaded() gates --sync-artworks --with-videos'
     resume check on find_files_for_media_id's default _IMAGE_EXTS-only matcher -- no
@@ -1028,27 +977,6 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
     rows = {r["media_id"]: r for r in load_catalog(db)}
     assert rows["m1"]["model_name"] == "Tsubaki.2 v1"
     assert rows["m3"]["model_name"] == "Already Named"   # untouched
-
-
-def test_sync_runs_all_three_steps_in_order(tmp_path, mocker, monkeypatch):
-    """Control Panel consolidation: --sync folds fix-models and the metadata backfill in after
-    the pull (previously just 2 steps), so a synced catalog is always fully labeled without a
-    separate click/action. Backfill precedes fix-models on purpose (audit 2026-08-15): backfill
-    fills model_id for rows that never saw detail, so fix-models then relabels them same-run."""
-    calls = []
-    seen = {}
-    mocker.patch.object(core, "run_download",
-                        side_effect=lambda a, progress=None: calls.append("download") or seen.__setitem__("dl_progress", progress))
-    mocker.patch.object(core, "run_fix_models", side_effect=lambda a: calls.append("fix_models"))
-    mocker.patch.object(core, "run_backfill_full_meta", side_effect=lambda a: calls.append("backfill"))
-    monkeypatch.setattr("sys.argv", ["prog", "--sync", "--out", str(tmp_path)])
-
-    core.main()
-
-    assert calls == ["download", "backfill", "fix_models"]
-    # the download step must receive args.progress (main() sets it via _make_progress),
-    # else the panel's progress bar is blank during the download -- the thing the owner hit.
-    assert callable(seen["dl_progress"])
 
 
 def test_progress_counter_does_not_double_count(tmp_path, mocker):

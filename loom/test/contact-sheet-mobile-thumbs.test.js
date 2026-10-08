@@ -4,8 +4,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { thumbSrc } from "../../gallery/src/lib/phoneCore.js";
-
 // THE PHONE CONTACT SHEET SHOWS THE PICTURES. Each card drew a gradient box where the frame's
 // thumbnail belongs, on the strength of a 2026-08-03 reading of the design's drift report ("placeholder
 // thumbnails only"). That reading was wrong, and the owner reversed it on 2026-10-02: the list is
@@ -67,12 +65,5 @@ describe("the 'deliberate, locked' comments are rewritten, not left to contradic
     assert.doesNotMatch(css, /Placeholder-quality thumbnail/);
     assert.doesNotMatch(css, /Placeholder thumbnails only/);
     assert.match(css, /2026-10-02/);
-  });
-});
-
-describe("the sizes come from the shared helper", () => {
-  test("a library thumbnail gets the saver tier only while Data saver acts", () => {
-    assert.equal(thumbSrc("/thumbs/501.jpg", false), "/thumbs/501.jpg");
-    assert.match(thumbSrc("/thumbs/501.jpg", true), /^\/thumbs\/501\.jpg\?s=\d+$/);
   });
 });

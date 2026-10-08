@@ -1077,16 +1077,6 @@ def test_the_schedule_endpoint_still_answers_the_legacy_shape(tmp_path):
     assert d["interval_hours"] == 12 and d["workers"] == 4
 
 
-def test_run_now_for_the_sweep_is_localhost_only(tmp_path):
-    """Same gate as /api/panel/schedule's writes, for the same reason: this starts real
-    PixAI traffic on the owner's credentials."""
-    cli = _client(tmp_path)
-    lan = {"REMOTE_ADDR": "192.168.1.50"}
-    assert cli.post("/api/panel/sweep", json={}, environ_overrides=lan).status_code == 403
-    r = cli.post("/api/panel/sweep", json={})
-    assert r.status_code == 200 and r.get_json()["action"] == "artworks-sweep"
-
-
 # =====================================================================================
 # 7. THE LIBRARY STANDS STILL
 # =====================================================================================

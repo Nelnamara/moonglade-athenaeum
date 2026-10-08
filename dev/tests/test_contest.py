@@ -363,18 +363,6 @@ def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai
     assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
-def test_sweep_ignores_someone_elses_win(tmp_path, monkeypatch, pixai):
-    _no_pause(monkeypatch)
-    monkeypatch.setattr(core, "list_contests",
-                        lambda s, **k: [_contest("c2", "s2", result_at=_iso(1))])
-    monkeypatch.setattr(core, "contest_my_entries", lambda s, slug, uid: [])
-    monkeypatch.setattr(core, "contest_winners",
-                        lambda s, slug: [{"authorId": "somebody-else"}])
-    g._contest_detection_sync(tmp_path)
-    m = g.telemetry_metrics(tmp_path)
-    assert m["contest_wins"] == 0 and m["contest_entries"] == 0
-
-
 def test_sweep_skips_contests_outside_the_window(tmp_path, monkeypatch, pixai):
     """Long-finished contests and undated ones are not polled: their result cannot change,
     and falling back to "poll everything" would be a request storm for nothing."""

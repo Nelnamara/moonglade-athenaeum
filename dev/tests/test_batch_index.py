@@ -1,7 +1,8 @@
 """Issue #33 -- batch identity: PixAI's own output number, recovered from getTaskById
 outputs.batch (an ORDERED array of {mediaId, seed, extra}, one per output; its index IS
 the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
-  * the batch_index / batch_size columns exist on new AND migrated catalogs;
+  * (the batch_index / batch_size columns on new AND migrated catalogs are pinned, for every
+    CATALOG_FIELDS entry, by dev/tests/test_filesystem.py);
   * the extract resolves each row's OWN index + size from the batch array, and stays
     blank (never guessed) when there is no batch array or the media id is not in it;
   * /api/siblings orders members by batch_index when EVERY member has one -- media_id
@@ -9,10 +10,7 @@ the <n> in the site's own from-PixAI-<taskId>-<n> download names). Pins:
   * deletion honesty: a missing sibling leaves a true GAP -- the survivors keep PixAI's
     original numbers, nothing is ever renumbered.
 """
-import sqlite3
-
 from moonglade import backup as core
-from moonglade import gallery as G
 
 
 def _seed(tmp_path, rows):
@@ -31,34 +29,6 @@ def _client(tmp_path):
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     return login_test_client(create_app(tmp_path))
-
-
-# ---- schema: both columns, new DB and migrated DB ------------------------------------
-
-def test_new_catalog_has_batch_identity_columns(tmp_path):
-    assert "batch_index" in G.CATALOG_FIELDS and "batch_size" in G.CATALOG_FIELDS
-    _seed(tmp_path, [{"media_id": "1", "task_id": "T1"}])
-    con = sqlite3.connect(tmp_path / "catalog.db")
-    cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)")}
-    con.close()
-    assert {"batch_index", "batch_size"} <= cols, sorted(cols)
-
-
-def test_migration_adds_batch_identity_to_an_old_catalog(tmp_path):
-    """A pre-#33 catalog gains both columns on connect (the ALTER TABLE migrations),
-    defaulting to '' -- 'not a batch output', same as every other column here."""
-    db = tmp_path / "catalog.db"
-    con = sqlite3.connect(db)
-    con.execute("CREATE TABLE catalog (media_id TEXT PRIMARY KEY, task_id TEXT)")
-    con.execute("INSERT INTO catalog VALUES ('m1', 'T1')")
-    con.commit()
-    con.close()
-    rows = G.load_catalog(db)     # _connect runs _MIGRATIONS
-    assert rows[0]["batch_index"] == "" and rows[0]["batch_size"] == ""
-    con = sqlite3.connect(db)
-    cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)")}
-    con.close()
-    assert {"batch_index", "batch_size"} <= cols, sorted(cols)
 
 
 # ---- the extract: per-row index from outputs.batch, never guessed --------------------

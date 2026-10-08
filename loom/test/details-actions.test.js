@@ -54,17 +54,6 @@ describe("the primary group: the DC's fileActions, under the hero in the picture
       "⬇ Download", "☁ Publish", "⧉ Copy prompt", "⇱ Upscale", "Delete locally",
     ]);
   });
-  test("it sits in the PICTURE column, under the frame and before the stars row -- never in the record", () => {
-    const picture = details.indexOf('<div className="placard-picture">');
-    const frame = details.indexOf('className={"placard-frame"');
-    const primary = details.indexOf('className="p-actions p-actions-primary"');
-    const stars = details.indexOf('className="p-stars-row"');
-    const record = details.indexOf('<aside className="placard-record"');
-    assert.ok(picture >= 0 && frame > picture, "the picture column opens, then the frame");
-    assert.ok(primary > frame, "primary comes after the frame");
-    assert.ok(stars > primary, "primary comes before the stars row");
-    assert.ok(record > stars, "all of it before the record column opens");
-  });
   test("(c) Download carries the shared metal face; Delete locally is the danger chip", () => {
     assert.match(g, /<a className="btn mgx-metal"[\s\S]*?>⬇ Download<\/a>/);
     assert.match(g, /<button className="btn btn-danger" disabled=\{busy\}[\s\S]*?onClick=\{deleteLocal\}>Delete locally<\/button>/);
@@ -149,10 +138,6 @@ describe("the More row: the app's actions the DC never drew, every handler kept"
 });
 
 describe("the strip is gone: three groups, styled as groups, and the reveal still lands on them", () => {
-  test("no flat .p-footer remains anywhere in the gallery", () => {
-    assert.doesNotMatch(details, /p-footer/);
-    assert.doesNotMatch(src("gallery/src/styles.css"), /p-footer/);
-  });
   test("the three containers, the DC's chip metrics, the danger outline, the quieter More row", () => {
     const css = src("gallery/src/styles.css");
     assert.match(css, /\.p-actions \{ display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px;/);

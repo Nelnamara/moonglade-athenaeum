@@ -287,6 +287,10 @@ def test_image_task_carries_local_fields(tmp_path, monkeypatch):
                               prompt="a moonlit elf")
     row = _row(tmp_path / "catalog.db", "m-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
+    # ...and the download pass still writes what it owns under a carry. _seed_local leaves seed
+    # and source blank, so these two prove the pass wrote them rather than inherited them.
+    assert row["task_id"] == TASK_ID and row["seed"] == "424242"
+    assert row["source"] == "api" and row["filename"].endswith("old.png")
 
 
 # --------------------------------------------------------------------------------------
@@ -358,6 +362,9 @@ def test_video_task_carries_local_fields(tmp_path, monkeypatch):
     core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(), {})
     row = _row(tmp_path / "catalog.db", "v-golden")
     assert {f: row[f] for f in LOCAL} == LOCAL
+    # ...and the pass's own values win over the carried row's: the seeded filename is
+    # images/old.png, the stubbed clip is videos/old.mp4, and _seed_local sets no is_video.
+    assert row["is_video"] == "1" and row["filename"].endswith("old.mp4")
 
 
 # --------------------------------------------------------------------------------------

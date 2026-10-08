@@ -222,16 +222,6 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
     assert.equal(state.search, "?page=3&image=m9");
   });
 
-  test("the retired two-step pushed TWICE, and the middle entry was a place nobody visited", () => {
-    // closeStack() then openDetails(mid) -- what the modal used to be handed. Back from
-    // the record landed on the bare library, with neither the stack nor the picture up.
-    const { pushed, setUrl } = makeShell("?page=3&series=s7");
-    setUrl({ series: null });
-    setUrl({ image: "m9" });
-    assert.equal(pushed.length, 2);
-    assert.equal(pushed[0], "/?page=3");
-  });
-
   test("App hands the modal the atomic handler, not the two-call arrow", () => {
     assert.ok(app.includes("const openDetailsFromStack = useCallback((mid) => {"));
     assert.ok(app.includes("setUrl({ series: null, image: mid });"));

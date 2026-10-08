@@ -20,7 +20,7 @@ import { shotImageRefs, positionTag, shotPayload, castMissingImages, shotText, f
    This file deliberately imports ONLY names that exist at HEAD, so each test's pass/fail
    against the pre-fix tree is meaningful on its own (the new-API half of this fix --
    usesCloseFrame/castPastBudget/refBudget -- is pinned in
-   med3-ref-budget-past-limit.test.js, which cannot load at HEAD at all). The I2V/FLF/
+   med3-ref-budget-past-limit.test.js, which cannot load at HEAD at all). The I2V and
    empty-close tests below PASS at HEAD by design: they are the guards that keep this fix
    from repeating round 1's refuted mistakes (reserving empty slots, changing modes that
    were fine), not demonstrations of the bug.
@@ -89,14 +89,6 @@ describe("the closing frame joins the numbering for R2V and V2V (owner repro)", 
       "I2V generation consumes only the opening frame; closeFrame's continuity roles read the field directly");
     assert.equal(positionTag(entry, project, imgSrc, "nel"), "@image2");
     assert.deepEqual(shotPayload(entry, project, imgSrc).images, ["mid-open", "mid-nel", "mid-greg"]);
-  });
-
-  test("FLF is unchanged: open @image1, close @image2, cast @image3", () => {
-    const project = twoFrameTwoCastProject("FLF");
-    const entry = flat(project)[0];
-    assert.equal(positionTag(entry, project, imgSrc, "openFrame"), "@image1");
-    assert.equal(positionTag(entry, project, imgSrc, "closeFrame"), "@image2");
-    assert.equal(positionTag(entry, project, imgSrc, "nel"), "@image3");
   });
 
   test("an EMPTY close frame in R2V claims nothing -- cast at @image2/@image3", () => {

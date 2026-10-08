@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
-  BEAT_KEY, BEAT, beatPlan, beatPhase, holdsOnMaintenance, tabVisible, tileState,
+  BEAT_KEY, BEAT, beatPlan, holdsOnMaintenance, tabVisible, tileState,
 } from "../../gallery/src/lib/brandingBeatCore.js";
 import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
 
@@ -74,16 +74,6 @@ describe("the timeline", () => {
     assert.deepEqual(BEAT, { TILE_MS: 400, TAB_MS: 800, TOTAL_MS: 1200 });
     assert.equal(BEAT.TILE_MS + BEAT.TAB_MS, BEAT.TOTAL_MS);
     assert.ok(BEAT.TOTAL_MS <= 1200, "the handoff's ceiling for the celebration's button is 1.2 s");
-  });
-
-  test("phases fall on the edges", () => {
-    assert.equal(beatPhase(0), "tile");
-    assert.equal(beatPhase(399), "tile");
-    assert.equal(beatPhase(400), "tab");
-    assert.equal(beatPhase(1199), "tab");
-    assert.equal(beatPhase(1200), "done");
-    assert.equal(beatPhase(-5), "tile");
-    assert.equal(beatPhase(NaN), "tile");
   });
 
   test("the tab is drawn only in its own half and after; the tile fades in only in the first", () => {

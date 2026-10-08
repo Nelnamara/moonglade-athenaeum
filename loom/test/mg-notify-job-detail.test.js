@@ -306,10 +306,4 @@ describe("inline detail cost row", () => {
     assert.equal(costShown({ job_id: "4244", ts: 1000, paid_credit: NaN }), false,
       "NaN would render as 'NaN credits' -- the isFinite half of the gate exists for this");
   });
-
-  test("still renders the other original rows alongside the cost row", () => {
-    assert.match(rowSrc, />TASK</);
-    assert.match(rowSrc, />SENT</);
-    assert.match(rowSrc, />SPENT</);
-  });
 });

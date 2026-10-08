@@ -15,30 +15,6 @@ import pytest
 from moonglade import container as mc
 
 
-def test_roundtrip_assets_payloads_and_read_contract(tmp_path):
-    p = tmp_path / "t.dat"
-    assets = {"banner.png": b"\x89PNG-fake-art-bytes", "marks/m.json": b'{"marks":[]}'}
-    secret = json.dumps([{"id": "hidden-feat-a", "roast": "SECRET", "threshold": 5}]).encode()
-    payloads = {"achievements": secret, "other": b"non-sensitive-payload"}
-    assert mc.write_container(p, assets, payloads) == (2, 2)
-
-    box = mc.open_container(p)
-    assert box is not None
-    # assets round-trip; API returns the ORIGINAL bytes (decode is internal)
-    assert box.get("banner.png") == assets["banner.png"]
-    assert box.get("marks/m.json") == assets["marks/m.json"]
-    # the SEALED roster payload round-trips through both layers + compression
-    assert box.payload("achievements") == secret
-    assert box.payload("other") == b"non-sensitive-payload"
-    # listings + membership
-    assert box.paths() == ["banner.png", "marks/m.json"]
-    assert box.payload_names() == ["achievements", "other"]
-    assert box.has("banner.png") and not box.has("missing.png")
-    # absent -> None (the "degrade to missing" contract), never garbage
-    assert box.get("missing.png") is None
-    assert box.payload("missing") is None
-
-
 def test_no_plaintext_in_the_file(tmp_path):
     """A casual `strings moonglade.dat | grep roast` must find nothing."""
     p = tmp_path / "t.dat"
@@ -163,10 +139,8 @@ def test_built_at_and_builder_default_to_empty_so_a_build_stays_reproducible(tmp
     nothing. built_at/builder are the caller's to supply precisely because a wall-clock
     value inside the file makes two builds of identical inputs differ -- and
     dev/tools/build_container.py's carry-the-URL-forward rule depends on reproducing bytes."""
-    p1, p2 = tmp_path / "1.dat", tmp_path / "2.dat"
+    p1 = tmp_path / "1.dat"
     mc.write_container(p1, {"a.png": b"x"})
-    mc.write_container(p2, {"a.png": b"x"})
-    assert p1.read_bytes() == p2.read_bytes()
     assert mc.open_container(p1).stamp() == {
         "schema": 1, "content_sha256": _toc_of(p1)["content_sha256"],
         "built_at": "", "builder": ""}

@@ -111,11 +111,9 @@ describe("both surfaces mount the real row", () => {
     });
   }
 
-  test("the row is the recipe lane's, not the stub", () => {
+  test("RecipeRow takes the props the dock hands it", () => {
     const row = src("recipes/RecipeRow.jsx");
-    assert.doesNotMatch(row, /data-stub/);
     assert.match(row, /export default function RecipeRow\(\{ recipes, onChange, held, loraCount, modelType \}\)/);
-    assert.doesNotMatch(src("styles/tsubaki.css"), /RecipeRow STUB/);
   });
 
   test("the dock publishes its request and price answer for the row and the picker", () => {

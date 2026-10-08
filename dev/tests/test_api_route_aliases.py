@@ -18,7 +18,7 @@ every unrouted path redirects to /login, which would pass just as happily agains
 """
 import pytest
 
-from moonglade.gallery import CATALOG_FIELDS, LOGIN, PUBLIC, create_app, route_tier, save_catalog
+from moonglade.gallery import CATALOG_FIELDS, PUBLIC, create_app, route_tier, save_catalog
 
 from tests.conftest import login_test_client
 
@@ -76,11 +76,6 @@ def test_no_rule_is_left_under_the_old_namespace(app):
     assert left == [], "the pilot codename is back in the url_map: %s" % left
 
 
-def test_the_plain_routes_share_one_tier(app):
-    for _rule, endpoint in ROUTES:
-        assert route_tier(app.view_functions[endpoint], "GET") == LOGIN, endpoint
-
-
 @pytest.mark.parametrize("path", RETIRED)
 def test_the_old_paths_404_for_a_logged_in_session(app, path):
     cli = login_test_client(app)
@@ -98,12 +93,6 @@ def test_the_fixture_reaches_real_rows(app):
     assert cli.get("/api/detail/m2").get_json()["row"]["media_id"] == "m2"
     days = cli.get("/api/history?days=7&tz=-420&before=2026-08-18").get_json()["days"]
     assert sum(len(d["rows"]) for d in days) == 4
-
-
-@pytest.mark.parametrize("path", ["/api/library", "/api/detail/m2", "/api/history"])
-def test_the_plain_routes_refuse_an_anonymous_lan_caller(app, path):
-    r = app.test_client().get(path, environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 401
 
 
 def test_the_assets_prefix_stays_and_stays_public(app):

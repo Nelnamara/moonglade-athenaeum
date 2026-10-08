@@ -87,9 +87,4 @@ describe("a write still invalidates its reads", () => {
     assert.equal(n, 5);
     assert.notEqual(peek(HISTORY + "?days=7&tz=-420"), null, "history is not in that list");
   });
-
-  test("an old-name prefix no longer reaches a read built from the new names", () => {
-    seed();
-    assert.equal(invalidate(["/api/next/detail/", "/api/next/library"]), 0);
-  });
 });

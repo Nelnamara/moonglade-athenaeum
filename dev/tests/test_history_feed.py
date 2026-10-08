@@ -374,13 +374,3 @@ def test_count_in_task_counts_siblings_inside_the_window(tmp_path):
     ])
     by = {r["media_id"]: r["count_in_task"] for r in _flat(_get(login_client(tmp_path), **FRAME))}
     assert by == {"a1": 2, "a2": 2, "b1": 1, "l1": 1}
-
-
-# ---------------------------------------------------------------- auth
-
-def test_history_requires_login(tmp_path):
-    from moonglade.gallery import create_app
-    _seed(tmp_path, [])
-    r = create_app(tmp_path).test_client().get("/api/history")
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}

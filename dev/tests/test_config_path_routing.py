@@ -23,8 +23,6 @@ from moonglade import settings as msettings
 from tests.conftest import first_party_sources, login_client
 
 _REPO = Path(__file__).resolve().parents[2]
-_REAL_LOCAL_PATH = paths.local_path
-_REAL_LOCAL_DIR = paths.local_dir
 _REAL_CORE_CONFIG_PATH = core._config_path
 _REAL_PATHS_CONFIG_PATH = paths.config_path
 
@@ -100,14 +98,6 @@ def test_mirror_session_is_a_machine_file(routed, tmp_path, monkeypatch):
     """It goes through local_path() like the other machine files, not config.json's folder."""
     monkeypatch.setattr(paths, "local_path", lambda name: tmp_path / "local" / name)
     assert core._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
-
-
-def test_mirror_session_is_in_local_on_a_real_install(monkeypatch):
-    """On a real install it is local/mirror_session.json, and only there -- path arithmetic
-    only: nothing reads an old place any more."""
-    monkeypatch.setattr(paths, "local_path", _REAL_LOCAL_PATH)
-    monkeypatch.setattr(paths, "local_dir", _REAL_LOCAL_DIR)
-    assert core._mirror_state_path() == _REPO / "local" / "mirror_session.json"
 
 
 def test_the_move_brings_the_mirror_session_from_beside_config_json(tmp_path, monkeypatch):

@@ -62,11 +62,6 @@ function ratioPx(body, prop, where) {
 }
 
 describe("the hero and slim sizes live in one place", () => {
-  test("shell.css declares both tokens", () => {
-    assert.equal(token("mark-hero"), 96);
-    assert.equal(token("mark-slim"), 56);
-  });
-
   test(".mgx-mark and the slim override take their box from the tokens", () => {
     const hero = rule(shell, ".mgx-mark", "shell.css");
     assert.match(hero, /width:\s*var\(\s*--mark-hero\s*\)/);

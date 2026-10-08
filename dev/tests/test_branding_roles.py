@@ -416,17 +416,6 @@ def test_the_bad_requests(tmp_path):
     assert not _override_path("power_poses", "restart").exists()
 
 
-def test_the_upload_needs_a_session(tmp_path):
-    save_catalog(tmp_path / "catalog.db", [
-        {f: "" for f in CATALOG_FIELDS} | {"media_id": "1", "filename": "a.png", "created_at": "2025-01-01T00:00:00"}])
-    anon = create_app(tmp_path).test_client()
-    r = anon.post("/api/branding/role", data={"slot": "power_poses", "key": "restart",
-                  "file": (io.BytesIO(_img()), "x.png")}, content_type="multipart/form-data")
-    assert r.status_code in (401, 302, 403)
-    assert not _override_path("power_poses", "restart").exists()
-    assert anon.post("/api/branding/role/restore", json={"slot": "power_poses", "key": "restart"}).status_code in (401, 302, 403)
-
-
 def test_the_role_routes_refuse_a_post_without_the_sessions_token(tmp_path):
     cli = _client(tmp_path)
     r = cli.post("/api/branding/role", content_type="multipart/form-data", data={

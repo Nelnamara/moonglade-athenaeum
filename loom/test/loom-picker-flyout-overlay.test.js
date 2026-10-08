@@ -21,21 +21,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
 
 describe("Image tab's Model/LoRA picker is a floating overlay, not inline (problem 2)", () => {
-  test("the old inline-mounted pickers and the loraOpen inline-toggle boolean are GONE", () => {
-    // Checks the actual STATE/CALL sites, not prose -- a comment explaining the history
-    // ("replaces the old loraOpen boolean") is expected and fine; a live declaration or
-    // call site is not.
-    assert.doesNotMatch(src, /const \[loraOpen, setLoraOpen\]/,
-      "the loraOpen useState declaration must be gone -- it drove the exact cramped-inline " +
-      "toggle behavior the owner reported");
-    assert.doesNotMatch(src, /setLoraOpen\(/, "setLoraOpen must have no remaining call sites");
-    assert.doesNotMatch(src, /\{loraOpen \?/, "no remaining conditional reads of loraOpen");
-    // the picker must not be a direct, always-inline child of the Image tab's own div --
-    // it now lives inside .lv-mpick-body, gated by the overlay's open state.
-    assert.doesNotMatch(src, /<label className="lv-lab">Model \{imgModel/,
-      "the old 'Model {imgModel...}' inline label must be replaced by the overlay-opening trigger row");
-  });
-
   test("a trigger row opens the overlay pre-selected to Models, mirroring moonglade_gallery.py's #gen-selrow", () => {
     assert.match(src, /<button type="button" className="lv-selrow" onClick=\{\(\) => \{ setPickerKind\("base"\); setPickerOpen\(true\); \}\}>/,
       "the Model row must be a clickable trigger that opens the overlay on the base segment");

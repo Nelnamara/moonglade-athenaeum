@@ -11,7 +11,6 @@ import {
   presetNegativeTail, presetsFromPrefs, quickChips, quickFromPrefs, recordSend, restorePatch,
   savePreset, snapshotFrom, snapshotOf, toggleDefault, toggleFav,
 } from "../../gallery/src/gen/powerCore.js";
-import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
 
 /* Session M (Generate power tools) NOTES 4, 5 and 6: the default negative per base family,
    ↺ Last and Presets, the quick-pick chips. The pure half -- gen/powerCore.js -- is what the
@@ -366,9 +365,10 @@ describe("quick-pick chips (NOTES 6, page M4)", () => {
 });
 
 describe("where it lives", () => {
-  test("every key is one the account store accepts, under the dock's own gen. segment", () => {
+  test("the four keys sit under the dock's gen. segment and are distinct", () => {
+    // (that the account store accepts each one is account-prefs-keys.test.js's, which runs
+    // prefKeyProblem over the dock's keys)
     for (const k of [NEG_KEY, PRESETS_KEY, LAST_KEY, QUICK_KEY]) {
-      assert.equal(prefKeyProblem(k), "", k);
       assert.ok(k.startsWith("gen."), k);
     }
     assert.equal(new Set([NEG_KEY, PRESETS_KEY, LAST_KEY, QUICK_KEY]).size, 4);

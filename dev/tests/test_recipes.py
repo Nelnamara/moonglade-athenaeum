@@ -39,12 +39,6 @@ def _refused(code, reason, ids):
 # The payload's recipeIds: parsed, never trimmed, dropped or deduplicated
 # ---------------------------------------------------------------------------
 
-def test_no_recipes_leaves_the_params_object_untouched():
-    params = {"modelId": "1", "prompts": "x"}
-    for payload in ({}, {"recipeIds": None}, {"recipeIds": []}):
-        assert rec.apply_to_params(params, payload) is params
-
-
 def test_recipes_ride_as_a_copy_in_the_order_sent():
     params = {"modelId": "1"}
     out = rec.apply_to_params(params, {"recipeIds": [RID2, RID]})

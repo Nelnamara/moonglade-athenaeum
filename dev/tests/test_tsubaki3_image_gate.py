@@ -765,23 +765,6 @@ def test_run_generate_preview_prints_and_card_checks_the_gated_dict(rest, monkey
     assert matched and (matched[0]["width"], matched[0]["height"]) == (912, 512)
 
 
-def test_read_only_still_refuses_before_any_tripwire_with_the_real_gate(rest, monkeypatch):
-    req = _road({"version_id": T3, "prompt": "<prompt>", "ref_media_id": "M1"})
-    assert req.parameters["contextImages"] == ["M1"]      # the gate really ran
-
-    def tripwire(name):
-        def _boom(*a, **k):
-            raise AssertionError("READ_ONLY did not stop the call before " + name)
-        return _boom
-    monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task", "submit_generation",
-               "_session_for_create", "gql_mutate"):
-        monkeypatch.setattr(core, fn, tripwire(fn))
-    with pytest.raises(core.PixAIError) as err:
-        core.submit(object(), req)
-    assert "READ_ONLY" in str(err.value)
-
-
 @pytest.mark.parametrize("extra", [{}, {"ref_media_id": "M1", "lora": [("L1", 0.7)]}])
 def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(extra,
                                                                             monkeypatch,

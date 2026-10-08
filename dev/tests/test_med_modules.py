@@ -196,20 +196,6 @@ def test_system_exit_in_a_thread_is_not_logged_as_a_crash(tmp_path):
     assert "Uncaught exception" not in _log_text(tmp_path)
 
 
-def test_main_thread_crash_hook_is_unchanged(tmp_path):
-    """Installing the second hook must not disturb the first one."""
-    moonglade_logging.setup_logging(verbose=False)
-    try:
-        raise RuntimeError("main-thread boom")
-    except RuntimeError:
-        sys.excepthook(*sys.exc_info())
-    _flush()
-
-    text = _log_text(tmp_path)
-    assert "Uncaught exception" in text
-    assert "RuntimeError: main-thread boom" in text
-
-
 # --- M12a: the MCP `similar` tool names its own truncation ----------------------
 
 def _fake_similar_module(hits):

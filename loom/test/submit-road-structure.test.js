@@ -97,9 +97,11 @@ describe("every spend rides submitTask", () => {
     test('no file but the road posts ' + route, () => {
       // Re-anchored 2026-08-23: with api.js as the one request module, the cheap way to sneak a
       // spend in is apiPost("<route>", ...), not fetch. Every spelling of "send this route" is
-      // the same offence, so the needle covers all of them.
+      // the same offence, so the needle covers all of them. It also tolerates whitespace after
+      // the paren and either quote, so fetch( '/api/...' is caught like fetch("/api/..."). (This
+      // is the one sweep: the python twin that used to re-check fetch( spellings was folded in.)
       const VERBS = ["fetch", "apiGet", "apiPost", "apiUpload"];
-      const asks = (src) => VERBS.some((v) => src.includes(v + '("' + route + '"'));
+      const asks = (src) => VERBS.some((v) => new RegExp(v + '\\(\\s*["\']' + route + '["\']').test(src));
       const callers = files.filter((f) => asks(read(f))).map(rel).sort();
       const strays = callers.filter((c) => c !== ROAD);
       assert.deepEqual(strays, [],

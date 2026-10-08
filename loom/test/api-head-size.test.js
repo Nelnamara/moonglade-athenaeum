@@ -57,10 +57,12 @@ describe("apiHeadSize rides request()", () => {
     assert.deepEqual(await apiGet("/api/x"), { ok: true });
   });
 
-  test("the module keeps one fetch and one body read, and the HEAD branch sits before the read", () => {
+  test("the HEAD branch sits before the body read", () => {
+    // the one-fetch / one-body-read counts are request-module-structure.test.js's; this pins the order
     const code = API.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    assert.equal((code.match(/\bfetch\(/g) || []).length, 1);
-    assert.equal((code.match(/\br\.json\(\)/g) || []).length, 1);
-    assert.ok(code.indexOf('rest.method === "HEAD"') < code.indexOf("r.json()"));
+    const head = code.indexOf('rest.method === "HEAD"');
+    const read = code.indexOf("r.json()");
+    assert.ok(head >= 0 && read >= 0, "both the HEAD branch and the body read are still in api.js");
+    assert.ok(head < read, "the HEAD branch must return before the body is read");
   });
 });

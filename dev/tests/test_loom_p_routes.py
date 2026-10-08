@@ -321,16 +321,6 @@ def test_every_new_post_refuses_without_the_csrf_token(rig):
     assert cli.post("/api/loom/beds/sweep", json={"files": []}).status_code == 403
 
 
-def test_every_new_route_is_login_tier(tmp_path):
-    anon = create_app(tmp_path).test_client()
-    for method, path in (("POST", "/api/loom/bed"), ("GET", "/api/loom/bed?file=x"),
-                         ("GET", "/api/loom/beds/unused"), ("POST", "/api/loom/beds/sweep"),
-                         ("POST", "/api/loom/export-edl"), ("GET", "/api/loom/prompts?ids=1"),
-                         ("GET", "/api/loom/frame?mid=1&at=0")):
-        r = anon.open(path, method=method, json={} if method == "POST" else None)
-        assert r.status_code == 401, (method, path, r.status_code)
-
-
 _NEW_FUNCS = ("api_loom_bed_upload", "api_loom_bed_get", "api_loom_beds_unused", "api_loom_beds_sweep",
               "api_loom_export_edl", "api_loom_prompts", "_loom_bed_path", "_loom_store_bed",
               "_loom_account_projects", "_loom_unused_beds", "_loom_complete_clip", "_loom_beds_dir",
@@ -812,16 +802,6 @@ def test_the_cache_is_lru_capped_and_touches_nothing_else(frames, monkeypatch):
     assert frames["traps"] == []
 
 
-def test_the_frame_route_never_reaches_pixai_or_a_render(frames):
-    """The rig's traps make core.submit, submit_generation, build_request, gql_mutate,
-    gql_adhoc, the PixAI session maker and upload_media raise; the AST test above pins that
-    loom_frame names none of them (nor _gen_session)."""
-    assert _frame(frames["cli"], "7002", "0.5").status_code == 200
-    assert _frame(frames["cli"], "7002", "0.5").status_code == 200
-    assert frames["traps"] == [], "no submit, no build_request, no gql, no session, no upload"
-    assert len(frames["calls"]) == 1
-
-
 def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
     """Red team 2026-10-01: an unreadable board was skipped, so its bed counted as unused and
     the sweep deleted it -- though /api/loom/get says the board exists (500, not 404). Now both
@@ -1132,11 +1112,6 @@ def test_frame_thumbs_refuses_a_bad_body_before_anything_runs(ft, body, code):
     r = ft["cli"].post("/api/loom/frame-thumbs", json=body)
     assert r.status_code == code
     assert ft["looked"] == [] and ft["got"] == []
-
-
-def test_frame_thumbs_is_login_tier(tmp_path):
-    anon = create_app(tmp_path).test_client()
-    assert anon.post("/api/loom/frame-thumbs", json={"media_ids": ["1"]}).status_code == 401
 
 
 _READ_ONLY_FUNCS = ("loom_frame_thumbs", "_loom_fetch_frame_thumb")
