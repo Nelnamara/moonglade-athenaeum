@@ -6,7 +6,7 @@ import path from "node:path";
 
 // Owner report 2026-07-24: "It scrolls about 4 extra rows and then stops on both
 // model/lora -- no continuous scroll." Root cause was server-side (see
-// tests/test_model_grid.py's cursor-pagination tests and tests/test_web_pick.py's
+// dev/tests/test_model_grid.py's cursor-pagination tests and dev/tests/test_web_pick.py's
 // threads_cursor test): has_more had been computed correctly the whole time, nothing
 // client-side ever read it or asked for a next page.
 //

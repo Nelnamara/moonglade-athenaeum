@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 /* Train a LoRA -- the two rules both train panels share with the server (SCOPE_2026-09-26 E7,
    review fixes). normalizeTrigger is the same five steps as core.normalize_trigger_words
-   (tests/test_training_parity.py holds the Python side with these same cases), and the
+   (dev/tests/test_training_parity.py holds the Python side with these same cases), and the
    counter shows its `length`: UTF-16 code units, the unit PixAI's own 256 / 30 rule counts.
    acceptCostField is what the confirm sends: the AMOUNT the ticked box named, which the
    server refuses (409) once it is no longer the run's price. */

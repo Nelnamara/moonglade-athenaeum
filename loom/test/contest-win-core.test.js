@@ -10,7 +10,7 @@ import {
 } from "../../gallery/src/lib/contestWinCore.js";
 
 /* Contest wins, VERIFIED (L3): the words and states the surfaces draw. The rules that decide
-   what IS a win live on the server (moonglade_contest_wins.py, tests/test_contest_wins.py);
+   what IS a win live on the server (moonglade_contest_wins.py, dev/tests/test_contest_wins.py);
    this pins what the row and the Check dialog say about them. Two laws run through it:
    a placement is a TIER plus the prize, never a numbered place, and a check that did not verify
    reads in peach ("warn"), never ruby -- while an empty list is undecided, never "lost". */

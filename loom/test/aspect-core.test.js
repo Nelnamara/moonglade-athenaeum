@@ -9,7 +9,7 @@ import {
 } from "../../gallery/src/curation/aspectCore.js";
 
 /* Session N7, the client half of the ar: operator. The FILTERING is the server's (see
-   tests/test_aspect_and_storage.py); these pin what the screens decide around it: which values
+   dev/tests/test_aspect_and_storage.py); these pin what the screens decide around it: which values
    are valid, the Aspect field's round trip through the search text, the suggestions while typing,
    the operator chips, and the label a card draws for its own shape. */
 
@@ -18,7 +18,7 @@ const SRC = path.join(here, "..", "..", "gallery", "src");
 const src = (rel) => readFileSync(path.join(SRC, rel), "utf8").split("\r\n").join("\n");
 
 describe("which values are valid", () => {
-  // the SAME table tests/test_aspect_and_storage.py runs against the server: the two must agree
+  // the SAME table dev/tests/test_aspect_and_storage.py runs against the server: the two must agree
   const GOOD = ["square", "portrait", "landscape", "tall", "wide", "TALL", "3:2", "9:16", "1.91:1",
     "1.5:1", ">2", "<0.5", ">.5", ">1.7"];
   const BAD = ["", "banana", "0:0", "3:", ":3", "1:0", "0:1", ">", "<", ">x", "3:2:1", "tall ", "=2", ">=2"];

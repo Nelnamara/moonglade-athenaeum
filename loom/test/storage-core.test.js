@@ -6,7 +6,7 @@ import path from "node:path";
 import { TYPE_HUES, fmtBytes, storageBars, storageFilterPatch } from "../../gallery/src/curation/storageCore.js";
 
 /* Session N6, the client half of the storage bars: the payload's `storage` block (built and
-   pinned by tests/test_aspect_and_storage.py) turned into segments, and a segment's click turned
+   pinned by dev/tests/test_aspect_and_storage.py) turned into segments, and a segment's click turned
    into the filter that opens the gallery. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));

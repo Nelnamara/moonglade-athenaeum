@@ -3,7 +3,7 @@
 // quote). The pages render a 1920 x 1080 stage whose every overlay value is a pure function of
 // one authored clock T; gallery/src/moments/momentCore.js (the player model) and scenes.js
 // (the two overlays) are that, ported number for number, and they carry no DOM, so this file
-// can pin them without a browser. The render harness (tests/test_render_harness.py) drives
+// can pin them without a browser. The render harness (dev/tests/test_render_harness.py) drives
 // the real thing; the parity pass (moonglade-internal) compares it with the pages pixel for
 // pixel. What this file adds is the NUMBERS, where a quiet drift fails in seconds:
 //

@@ -95,7 +95,7 @@ const d8 = (n) => Math.max(64, Math.min(4096, Math.round(n / 8) * 8));
    proportionally -- long side down to hi if over, then short side up to lo if under, the
    long side winning -- each side rounded half-up to the step, then clamped into [lo, hi].
    No rule (unknown architecture) -> the size as given. Pinned against the Python by
-   tests/test_tsubaki3_image_gate.py (all 32 aspect × size presets). */
+   dev/tests/test_tsubaki3_image_gate.py (all 32 aspect × size presets). */
 export function snapSize(w, h, rule) {
   if (!rule || !(Number(rule.step) > 0)) return { width: w, height: h };
   const step = Number(rule.step), lo = Number(rule.lo), hi = Number(rule.hi);

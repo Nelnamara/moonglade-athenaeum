@@ -162,7 +162,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   loopback included, and the CLI escape hatch above is the only way past it. Removing **someone
   else's** needs the server machine.
 
-  None of this is kept honest by hand. `tests/test_route_tiers.py` walks the app's own routing
+  None of this is kept honest by hand. `dev/tests/test_route_tiers.py` walks the app's own routing
   table — every route it has, not a list someone remembered to update — and fails the build if
   any of them lacks a declared tier or fails to enforce it against a live LAN request. If this
   page and the app ever disagree, that test is the tie-breaker, not this paragraph.

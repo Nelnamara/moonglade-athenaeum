@@ -8,7 +8,7 @@ import path from "node:path";
    rules the goal tile's picture follows, held without a browser: which names the art goes by,
    which source wins (pack, then the app's own module, then the flat tint), and the three
    timings the handoff fixes. components/train/GoalTile.jsx draws them;
-   tests/test_render_harness.py measures the tile in a real browser once the bundle is built. */
+   dev/tests/test_render_harness.py measures the tile in a real browser once the bundle is built. */
 
 import { GOALS } from "../../gallery/src/gen/trainCore.js";
 import {

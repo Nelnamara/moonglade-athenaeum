@@ -3,7 +3,7 @@ shipped one is the art pack, `moonglade.mgpack` (moonglade_gallery._container_pa
 
 WHAT THIS IS. One opaque file carrying the app's default identity: every branding
 asset (marks, banners, mascots, badges, rewards) plus reserved payload slots for
-non-file data (e.g. the achievement roster). Built by tools/build_container.py from
+non-file data (e.g. the achievement roster). Built by dev/tools/build_container.py from
 a real branding/ tree; read at runtime by moonglade_gallery.py's loose-then-container
 resolution layer, where a real file on disk always wins over the container (branding
 drop-in is a shipped feature and the discovery mechanic depends on it).
@@ -195,7 +195,7 @@ def write_container(out_path, assets, payloads=None, builder="", built_at=""):
     derived from the content itself and so cost the determinism above nothing -- plus
     `built_at` and `builder` exactly as GIVEN. Those two default to "" and are the caller's
     to supply, because a wall-clock timestamp baked into the file makes two builds of the
-    same inputs differ, and tools/build_container.py's release-integrity rule (carry the
+    same inputs differ, and dev/tools/build_container.py's release-integrity rule (carry the
     prior manifest URL forward only when a rebuild is byte-identical) depends on being able
     to reproduce bytes. The packer passes them; it also takes --built-at so a deliberate
     reproducible rebuild can pin the one value that is otherwise the clock."""

@@ -10,7 +10,7 @@
    Delete (DECISIONS 2026-09-28).
 
    Z: the manager rides the overlay band's free rung 418/419 (between the recipe picker and
-   the upscale panel, overlays.css's ladder, guarded by tests/test_z_ladder.py); the undo toast
+   the upscale panel, overlays.css's ladder, guarded by dev/tests/test_z_ladder.py); the undo toast
    is 427, above the contest picker so a rating pressed inside any layer can still be undone.
    ========================================================================== */
 

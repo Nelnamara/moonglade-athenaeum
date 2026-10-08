@@ -9,7 +9,7 @@ import path from "path";
    spinner."
 
    The server side of that is a real Activity row for a pixai.art run, written off the live
-   taskUpdated stream (moonglade_gallery.py's _website_job_seen; tests/test_watch.py). This
+   taskUpdated stream (moonglade_gallery.py's _website_job_seen; dev/tests/test_watch.py). This
    file is the window's half, and the whole rule it has to encode is a NEGATIVE one: a website
    run must be INDISTINGUISHABLE from an app run in the Activity window except for one small
    source mark. Same row component, same queued/running/done branches, same Nel spinner, same

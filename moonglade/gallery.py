@@ -277,7 +277,7 @@ def init_db(db_path):
 
 # The video engines that publish a numeric version id: moonglade_backup.VIDEO_MODELS' non-empty
 # `model_id`s, copied here because this module is the base the backup module imports (it cannot
-# import them back at load time). tests/test_video_tsubaki.py fails if the two drift.
+# import them back at load time). dev/tests/test_video_tsubaki.py fails if the two drift.
 # v3.0.1 and v2.7 have no id and are deliberately absent -- their rows keep the name.
 _VIDEO_NAME_TO_ID = {
     "v4.0.1": "2003969750675682808",
@@ -821,7 +821,7 @@ def _like_escape(s):
 # Injection safety: every user value is a bound SQL parameter. The only strings
 # interpolated into SQL are column names and comparison operators, and both come
 # exclusively from these hardcoded maps -- never from user input. Pinned by
-# tests/test_search_operators.py's hostile-value test.
+# dev/tests/test_search_operators.py's hostile-value test.
 _SEARCH_OPS = {
     "prompt":   ("prompt", None),
     "negative": ("text", "negative_prompt"), "negative_prompt": ("text", "negative_prompt"),
@@ -1103,7 +1103,7 @@ LOOM_BED_UNUSED_GRACE_S = 10 * 60
 # the unused-bed list and its sweep only ever see finished, content-hashed names.
 LOOM_BED_TEMP_SWEEP_AGE_S = 3600
 # THE EDL ZIP'S NAMES -- the same patterns as loom/src/loom-edl-core.js's EDL_CLIP_FILE_RE and
-# EDL_BED_NAME_RE (tests/test_loom_p_routes.py compares the two sources).
+# EDL_BED_NAME_RE (dev/tests/test_loom_p_routes.py compares the two sources).
 LOOM_EDL_CLIP_RE = re.compile(r"^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$")
 LOOM_EDL_BED_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$")
 LOOM_MEDIA_ID_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})$")
@@ -1286,7 +1286,7 @@ def loom_bed_audio_graph(bed_idx, db, cut_len, bed_dur=None, windows=(), cut_lab
     `bed_idx` is the bed's ffmpeg input index. With `cut_label` (the concatenated shots'
     audio) the two are summed by amix without normalising, so the shots keep their level;
     with cut_label=None the bed IS the cut's audio track. Returns filter chains joined by ';'.
-    Pure: tests/test_loom_p_routes.py pins the text."""
+    Pure: dev/tests/test_loom_p_routes.py pins the text."""
     cut_len = max(0.0, float(cut_len or 0))
     try:
         bd = float(bed_dur) if bed_dur not in (None, "") else None
@@ -1432,7 +1432,7 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         # (key:value -- see _SEARCH_OPS/_operator_clause above; quoted values group,
         # so model:"Ether Real" is one token); anything else is free text, whose
         # behavior is UNCHANGED from before operators existed (pinned at the SQL
-        # level by tests/test_search_operators.py): each term may use * / ?
+        # level by dev/tests/test_search_operators.py): each term may use * / ?
         # wildcards over prompt text, and a term that looks like a WHOLE task/media
         # id (all digits, long enough that a short numeric prompt word can't
         # collide -- PixAI ids run ~18-19 digits) also matches that id EXACTLY, so
@@ -1589,7 +1589,7 @@ def remove_from_collection(db_path, media_ids, name):
 # Both are additive: an existing library gains two empty tables and keeps every row.
 #
 # NOTHING HERE DELETES A PICTURE. Deleting or merging a collection rewrites LABELS on rows;
-# it never removes a row, a file or a thumbnail (tests/test_curation.py counts them).
+# it never removes a row, a file or a thumbnail (dev/tests/test_curation.py counts them).
 # ---------------------------------------------------------------------------
 
 class CurationError(ValueError):
@@ -2263,7 +2263,7 @@ def batch_member_order(rows):
     otherwise interleave numbered and unnumbered rows into an order nothing else in
     the app agrees with. Keeping the rule here means a BATCH stack lists a task's
     pictures in exactly the order its sibling strip and its series run already do.
-    Pure -- no db, so tests/test_batch_stack.py drives it directly."""
+    Pure -- no db, so dev/tests/test_batch_stack.py drives it directly."""
     def _bi(r):
         try:
             return int(str(r.get("batch_index") or "").strip())
@@ -3149,7 +3149,7 @@ def _series_text(row):
     `(prompt_full or prompt_preview or "")[:1200]` (see /api/library's item
     builder). Same fallback order, same 1200-char cap -- Mio-era prose runs ~2k
     chars, and an uncapped read yields DIFFERENT clause sets than the validated
-    board. Pinned by the >1200-char test in tests/test_series_engine.py."""
+    board. Pinned by the >1200-char test in dev/tests/test_series_engine.py."""
     return (row["prompt_full"] or row["prompt_preview"] or "")[:1200]
 
 
@@ -3485,7 +3485,7 @@ def series_index(db_path):
 # --- direction B: the grouped listing (series-as-units) --------------------------------
 # Folding a filtered, sorted row set into dial-in series UNITS for /api/library
 # ?group=series. Kept as module-level pure functions so the fold + cover choice are
-# unit-testable without a request (tests/test_series_grouping.py). The route supplies
+# unit-testable without a request (dev/tests/test_series_grouping.py). The route supplies
 # the rows (list_group_rows) and the series index (series_index); these decide only
 # unit membership, order, and which surviving member is the cover.
 
@@ -3563,7 +3563,7 @@ def fold_series_units(rows_min, by_task):
 # closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
 # inline here, readable in a public `git clone`; they now live SEALED in
 # the art pack's "achievements" payload (a dict), built from the private donor
-# ../moonglade-internal/achievements_folio_donor.json by tools/build_container.py.
+# ../moonglade-internal/achievements_folio_donor.json by dev/tools/build_container.py.
 # Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
 # A container-less install degrades to the free-skins-only fallback (empty Folio,
 # like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
@@ -3774,7 +3774,7 @@ def branding_root():
 _GOODS_ROOT_NAME = _paths.GOODS_ROOT_NAME  # hex "goods" -- the on-disk branding root folder name
 _GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
 # The pre-2026-08-21 badge-thumb cache folder, as a path SEGMENT at any depth --
-# the same shape tools/build_container.py's EXCLUDED_DIRS uses, and the reason
+# the same shape dev/tools/build_container.py's EXCLUDED_DIRS uses, and the reason
 # the container can never name one of these files. Read by the seal (deny).
 # An install that upgraded through that move still carries a folder of
 # app-rendered PNGs inside the tree; nothing here has to special-case them any
@@ -3901,7 +3901,7 @@ def _public_rel_to_coded(rel):
 # docs/DECISIONS.md "The asset container, re-scoped from scratch").
 #
 # moonglade.mgpack, the art pack (moonglade_container.py's custom format; built by
-# tools/build_container.py, delivered as a GitHub Release asset, never
+# dev/tools/build_container.py, delivered as a GitHub Release asset, never
 # committed) carries the app's DEFAULT branding so a fresh install is fully
 # dressed while branding/ itself stays empty -- that emptiness is a shipped
 # mechanic, not a gap. Resolution order everywhere below: a real loose file
@@ -4617,7 +4617,7 @@ BANNER_SLOTS = ("banner_main", "banner_login", "banner_loom")
 # is smaller (then the default's own), and an animation is allowed only where the role says its format
 # may (the login companion's default is an animated WebP). Transparency is always required. The
 # stand-in specs drawn first (3:4, square) would have refused the pack's own login companion, the
-# tracker's done / failed / empty and the gift icon; tests/test_branding_roles.py holds that every
+# tracker's done / failed / empty and the gift icon; dev/tests/test_branding_roles.py holds that every
 # pack default passes its own role's check.
 ROLE_SLOTS = {
     "login_companion": {
@@ -6685,7 +6685,7 @@ def brand_context(out_dir):
     # flat branch, because this flag has to agree with what that route answers:
     #   1. this install's RENDERED flat, in the app cache (not the coded root);
     #   2. a bare top-level flat inside the container, which a pack cut from a
-    #      pre-2026-09-10 dressed tree carries (tools/build_container.py gathers
+    #      pre-2026-09-10 dressed tree carries (dev/tools/build_container.py gathers
     #      the root recursively);
     #   3. the slot's shipped sealed default -- the route's rule-8 fallback.
     # Dropping any one of them here is how the header renders no banner while
@@ -6916,7 +6916,7 @@ def _prompt_word_counter(rows):
 # DELIBERATELY NO TIME FLOOR, unlike that cache. A floor means a catalog change is
 # bounded-stale, and one of this bundle's consumers is the ACHIEVEMENT GATE: earning
 # something unlocks its art, and "your banner appears within thirty seconds" is a bug,
-# not a bounded staleness (caught by tests/test_unlock_split.py, which earns mid-test
+# not a bounded staleness (caught by dev/tests/test_unlock_split.py, which earns mid-test
 # and asks for the art immediately). The key alone is enough for the case that was
 # actually slow -- repeatedly opening overlays against a catalog nobody is writing to,
 # which is every open outside a sync. During a sync it recomputes per request, exactly
@@ -7065,7 +7065,7 @@ _TIER_POINTS = {"common": 5, "rare": 10, "epic": 25, "legendary": 50, "feat": 0}
 # "local_gens" is a code name on screen. Every metric a ladder track uses has its words here,
 # sent on each track as `metric_words`; a metric this list does not know yet (a roster that grows
 # a track before this does) falls back to its key with the underscores spaced out, so no header
-# can ever show one. tests/test_achievements.py holds every live track to an entry here.
+# can ever show one. dev/tests/test_achievements.py holds every live track to an entry here.
 LADDER_METRIC_WORDS = {
     "images": "images",
     "videos": "videos",
@@ -7265,7 +7265,7 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
 # Every name below is one code in this app bumps (telem_bump / telem_max), plus the metrics
 # compute_achievements() resolves ITSELF in a post-pass (Skin Changer counts the skins that very
 # computation unlocked). Feat metrics are deliberately NOT listed: achievement_progress refuses
-# a feat before it ever reads this set. tests/test_achievement_progress.py pins that every
+# a feat before it ever reads this set. dev/tests/test_achievement_progress.py pins that every
 # non-feat metric in the sealed roster is either in the bundle or here, so a new honor added
 # without its metric being declared fails a test instead of silently losing its count.
 _MEASURED_METRICS = frozenset({
@@ -7401,7 +7401,7 @@ def _badge_thumb(out_dir, aid, size=256):
     NEVER LARGER THAN THE SOURCE: `size` is a ceiling, not a target. Pillow's thumbnail()
     only ever shrinks, so a master smaller than the size asked (the toast's 384 against a
     smaller drop-in) is served at its own size, never blown up; keep it that way in both
-    cuts below rather than resizing to `size` (tests/test_badge_anim.py holds it)."""
+    cuts below rather than resizing to `size` (dev/tests/test_badge_anim.py holds it)."""
     rel = _role_rel("badges", aid + ".png")
     if not _branding_exists(rel):
         return None
@@ -8551,7 +8551,7 @@ def _cw_check_view(state, now):
 # except his own hands" (DECISIONS.md, 2026-09-05, which names living-library jobs as an
 # inheritor by name). Neither half has any path to the gallery's own loaders: a finished
 # job ANNOUNCES through the toast/Activity idiom the jobs ledger already drives, and never
-# rebuilds the page, the search, the address or the selection. tests/test_living_library.py
+# rebuilds the page, the search, the address or the selection. dev/tests/test_living_library.py
 # walks these functions' source to keep it that way.
 
 ARTWORKS_SWEEP_S = 900.0        # owner call 3: "15 Works, I was going to say 20. Go with 15"
@@ -9350,7 +9350,7 @@ def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="new
     map a row to its series, created_at + is_video to pick each unit's cover (newest
     surviving image), and media_id to fetch that one cover's full row afterwards.
     Bounded work -- ids-only over the catalog (~36k rows max); measured in
-    tests/test_series_grouping.py. No `series=` param here on purpose: grouping is
+    dev/tests/test_series_grouping.py. No `series=` param here on purpose: grouping is
     the alternative to a single-series view, never combined with it."""
     q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
@@ -9448,7 +9448,7 @@ def collection_health(out_dir, db_path):
     # reads is_file/size straight off the DirEntry. branding/ is this walker's own
     # extra exclusion (named disagreement 5) and videos are its own extra kind
     # (named disagreement 4) -- both asked for here, neither imposed on the others.
-    # Guarded by tests/test_gallery_filters.py's existing health tests.
+    # Guarded by dev/tests/test_gallery_filters.py's existing health tests.
     #
     # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
     # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
@@ -9714,7 +9714,7 @@ def storage_breakdown(rows, size_by_rel, loom_ids, size_by_mid=None):
 #
 # KEYED ON THE CATALOG FILE, NO TIME FLOOR -- the same ruling as _ACH_METRICS_CACHE, for the
 # same reason (see its comment: a floor makes a real change bounded-stale, and that is what
-# broke tests/test_unlock_split.py's earn-then-read). Half the key is the catalog's
+# broke dev/tests/test_unlock_split.py's earn-then-read). Half the key is the catalog's
 # (mtime_ns, size): every write to the library goes through that file, so the instant it
 # changes the memo is invalid, and a catalog nobody is writing to -- which is every open
 # outside a sync -- is served from memory. os.stat is microseconds; the walk is seconds.
@@ -9965,7 +9965,7 @@ def same_seed_groups(db_path, limit=1000):
 # Hamming distance threshold (out of 64 bits) below which two dHashes count as a
 # near-duplicate pair. 10/64 (~84% bit agreement) is the commonly-cited rule of thumb
 # for 64-bit perceptual hashes -- comfortably wide enough to catch recompression/
-# upscaling noise (measured well under 10 in practice: see tests/test_phash.py) while
+# upscaling noise (measured well under 10 in practice: see dev/tests/test_phash.py) while
 # staying far from the ~32/64 (50%) two UNRELATED images land near.
 NEAR_DUP_HAMMING_THRESHOLD = 10
 
@@ -10162,7 +10162,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 #   3. Zero-byte. Only `files_for` (so `find_files_for_media_id`, resume, and
 #      `find_image_file`) and `run_download` treat a zero-byte file as not-there
 #      (INVARIANT 3). The audit deliberately does not -- it wants to SEE the
-#      zero-byte file so it can never pick it as a keeper (tests/test_dedup.py pins
+#      zero-byte file so it can never pick it as a keeper (dev/tests/test_dedup.py pins
 #      both halves). So the rule stays at the caller and `scan_library` reports
 #      `size` instead of deciding.
 #   4. Video. Only `collection_health` and `run_import_local` look at videos at
@@ -10440,7 +10440,7 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
     an explicit `exts` set.
 
     `exts` defaults to `_IMAGE_EXTS` (this matcher's historical, still image-only
-    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
+    default -- e.g. dev/tests/test_loom_export_bundle.py pins that video media resolves
     via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
     (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
     in moonglade_backup.py -- so the SAME exact-match + quarantine-exclusion
@@ -11597,7 +11597,7 @@ def _upscale_const_js():
     * UPSCALE_PIXEL_CEILING, so <UpscalePanel> can derive the same dynamic ratio cap
       the server clamps to WITHOUT a second hand port of max_upscale_ratio. The Generate
       drawer still carries its own ported copy (documented, and pinned against the Python
-      by tests/test_upscale_boosters.py); this exists so the new surface does not add a
+      by dev/tests/test_upscale_boosters.py); this exists so the new surface does not add a
       third place for those numbers to drift.
 
     Substituted into APP_PAGE and the Loom shells (the surfaces with upscale UI)
@@ -12459,7 +12459,7 @@ def check_for_update(current, opener=None, now=None, force=False):
 # said "I don't want that" -- auto-apply is explicitly rejected and no future
 # scope may add it under this label. Nothing in this section, and nothing the
 # scheduler tick below reaches, may touch run_update or /api/update/apply;
-# tests/test_updater.py pins that by walking the source.
+# dev/tests/test_updater.py pins that by walking the source.
 # ---------------------------------------------------------------------------
 UPDATE_TICK_SECONDS = 3600       # ~1 GitHub request an hour from the tick -- 24 a day,
                                  # against an unauthenticated budget of 60 an HOUR
@@ -13151,7 +13151,7 @@ def _redact_host_paths_cli(out_dir, msg):
 # Auth tiers -- DECLARED AT THE ROUTE, enforced in one place
 # ---------------------------------------------------------------------------
 # A route's auth tier is a property OF THE ROUTE, so it is written on the route.
-# It used to live in tests/test_route_tiers.py's ROUTE_TIERS table instead, which
+# It used to live in dev/tests/test_route_tiers.py's ROUTE_TIERS table instead, which
 # meant every route addition edited two files in two repositories' worth of
 # context -- and the table had already drifted past every credit-spending route
 # once (see that file's own header). The decorator below hangs the declaration on
@@ -13641,7 +13641,7 @@ def _hunt_by_name(fetch_page, q, size):
 # (`complete`) or with no close frame at all, whatever their ping state -- so no keep-alive can
 # prevent them. What the app controls is the gap after each one: how long it waits to reconnect,
 # and whether it reads back what finished while it was gone. Both decisions are pure functions
-# here, driven as tables by tests/test_watch.py.
+# here, driven as tables by dev/tests/test_watch.py.
 
 # A connection that subscribed and then lived at least one heartbeat (core._WS_HEARTBEAT) has
 # proved itself; when it ends, the cause is PixAI's, not ours, and the reconnect comes at once.
@@ -15006,7 +15006,7 @@ def create_app(out_dir: Path):
     # the catch-up sweep. Neither _reconcile_job nor _log_mirrored_media gained the power to
     # invent: they still touch only what they find already logged, so _watch_mirror called on
     # its own for an untracked task still writes nothing at all (pinned by
-    # tests/test_jobs.py::test_mirror_never_invents_a_job_for_a_task_we_do_not_track).
+    # dev/tests/test_jobs.py::test_mirror_never_invents_a_job_for_a_task_we_do_not_track).
     #
     # THE JOB ID IS THE TASK ID, exactly as an app run's is (see _note_gen_phase's writer and
     # _reconcile_job / _log_mirrored_media, which both look a job up by str(tid)). That is the
@@ -15139,7 +15139,7 @@ def create_app(out_dir: Path):
             # every unit test around it still passed, because those call the library
             # function directly with their own stub.
             #
-            # Guarded end-to-end by tests/test_jobs.py's
+            # Guarded end-to-end by dev/tests/test_jobs.py's
             # test_api_jobs_endpoint_marks_a_never_started_orphan_stale, which drives the
             # real endpoint rather than the library function.
             return core.generation_status(box["s"], tid)
@@ -15399,7 +15399,7 @@ def create_app(out_dir: Path):
         that a website run must be indistinguishable from an app run in the Activity window
         is a claim about a SEQUENCE of frames (waiting -> running -> completed + the mirror
         receipt), which nothing could exercise while this lived in a background thread's
-        inner loop. tests/test_watch.py's fake event stream drives it through the
+        inner loop. dev/tests/test_watch.py's fake event stream drives it through the
         mg_watch_on_event seam; the source-level pin on the collect/reconcile agreement moved
         with it."""
         import logging as _logging
@@ -15627,7 +15627,7 @@ def create_app(out_dir: Path):
         reproduction. The CR/LF variants don't even get that far: redirect() raises an
         unhandled ValueError ("Header values must not contain newline characters") instead,
         turning a real login into a 500. Regression -- see
-        tests/test_web_auth.py's safe-next tests."""
+        dev/tests/test_web_auth.py's safe-next tests."""
         _UNSAFE_NEXT_CHARS = ("\\", "\t", "\r", "\n")
         if (url and url.startswith("/") and not url.startswith("//")
                 and not any(c in url for c in _UNSAFE_NEXT_CHARS)):
@@ -16832,7 +16832,7 @@ def create_app(out_dir: Path):
         used to say "Localhost-only", which was never true of the code and is exactly the
         bait a route-gating audit warned about: a stale claim like this invites someone to
         "restore" a gate that was never there, silently breaking the LAN-recovery case.
-        The real tier is pinned by tests/test_route_tiers.py.
+        The real tier is pinned by dev/tests/test_route_tiers.py.
 
         Logs to the Activity card. Returns {saved, media_ids, is_video} or {error}."""
         tid = str((request.get_json(silent=True) or {}).get("task_id") or "").strip()
@@ -16885,7 +16885,7 @@ def create_app(out_dir: Path):
         and then watch a progress UI that never moves, across all three pollers (the Panel,
         the job tray, and the resume-on-load check). Redacting one field closes the leak
         without taking away anything a LAN caller is entitled to. The tier table entry
-        therefore correctly stays LOGIN (tests/test_route_tiers.py).
+        therefore correctly stays LOGIN (dev/tests/test_route_tiers.py).
 
         The replacement line is a real line rather than `[]` so the log area explains itself
         instead of just rendering blank, which reads as a bug -- the consumer at ~7385 does
@@ -18945,7 +18945,7 @@ def create_app(out_dir: Path):
 
         A deliberate SIBLING of /api/task-params rather than a widening of it: that
         route refuses videos (`not an image-generation task`) and its refusal test
-        pins exactly that (tests/test_task_params.py). Widening it would blur the
+        pins exactly that (dev/tests/test_task_params.py). Widening it would blur the
         two recipes' shapes; a sibling keeps each honest. Same contract otherwise:
         read-only (nothing here submits or spends; the composer's own price-identity
         gate still stands between a prefill and a paid generate), membership-checked
@@ -20326,7 +20326,7 @@ def create_app(out_dir: Path):
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
                 # The explicit token, like every other per-account write
-                # (tests/test_csrf_coverage.py): checked before anything is read or written.
+                # (dev/tests/test_csrf_coverage.py): checked before anything is read or written.
                 if not _check_csrf(body):
                     return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 snips = body.get("snippets")
@@ -22588,7 +22588,7 @@ def create_app(out_dir: Path):
         # telemetry merge, no earned_at -- so any telemetry-backed or pinned skin
         # unlock showed earned in the Folio yet 403'd here. It now runs the exact
         # recipe /api/achievements and _mark_earned() use (guarded by
-        # tests/test_achievements.py's gate-parity tests).
+        # dev/tests/test_achievements.py's gate-parity tests).
         _m = achievement_metrics(db_path)
         _m.update(telemetry_metrics(out_dir))
         result = compute_achievements(_m,
@@ -23509,7 +23509,7 @@ def create_app(out_dir: Path):
                     for k, v in presets.items()}})
             body = request.get_json(silent=True) or {}
             # The explicit token, before the import reads the task from PixAI with the
-            # owner's key (tests/test_csrf_coverage.py).
+            # owner's key (dev/tests/test_csrf_coverage.py).
             if not _check_csrf(body):
                 return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
             tid = str(body.get("task_id") or "").strip()
@@ -23615,7 +23615,7 @@ def create_app(out_dir: Path):
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
                 # The explicit token, like every other per-account write
-                # (tests/test_csrf_coverage.py): checked before the set is changed.
+                # (dev/tests/test_csrf_coverage.py): checked before the set is changed.
                 if not _check_csrf(body):
                     return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
                 if isinstance(body.get("merge"), dict):
@@ -25566,7 +25566,7 @@ __DESIGN_TOKENS__
     # The app's three data routes: /api/library, /api/detail/<media_id>, /api/history, each
     # on exactly one path. They used to answer on a second one under /api/next/, the React
     # app's pilot codename, for one release of grace; that is gone, and a page left open
-    # from before 3.17.0 needs a reload (tests/test_api_route_aliases.py pins it). The
+    # from before 3.17.0 needs a reload (dev/tests/test_api_route_aliases.py pins it). The
     # /next/assets/ prefix above is NOT part of this: installed phone apps read their icons
     # from it, so it is never dropped.
     @app.route("/api/library")
@@ -25666,7 +25666,7 @@ __DESIGN_TOKENS__
         if group == "series":
             by_task, by_sid = series_index(db_path)
             # The whole filtered set, ids + the four grouping columns only, in sort
-            # order. Bounded (measured in tests/test_series_grouping.py).
+            # order. Bounded (measured in dev/tests/test_series_grouping.py).
             unit_order, members = fold_series_units(
                 list_group_rows(db_path, **filters), by_task)
             total = len(unit_order)
@@ -27044,7 +27044,7 @@ __DESIGN_TOKENS__
     # One local audio file per storyboard, never uploaded and never sent to PixAI. These routes
     # store, stream and (only on the owner's confirmed ask) sweep bed files; putting a bed on a
     # board, levelling it and removing it are board edits the Loom saves through /api/loom/set.
-    # None of them can reach a render: tests/test_loom_p_routes.py runs every one with the
+    # None of them can reach a render: dev/tests/test_loom_p_routes.py runs every one with the
     # spend functions booby-trapped and walks their source for the names.
     @app.route("/api/loom/bed", methods=["POST"])
     @tier(LOGIN)
@@ -29147,7 +29147,7 @@ def port_owner(host, port, timeout=0.4):
 
     The header is the right signal rather than the status code: /api/ping sits
     behind the login gate and answers 401, so "did it 200" would read a live
-    gated server as a dead port (see tests/test_web_auth.py's
+    gated server as a dead port (see dev/tests/test_web_auth.py's
     test_every_response_carries_the_server_marker, which pins exactly this)."""
     import socket
     probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host

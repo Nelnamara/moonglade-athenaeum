@@ -11,8 +11,8 @@ import {
 
 /* Tsubaki.3 Unlimited Mode, the client half (SCOPE_2026-09-26_unlimited-mode C1-C5, §8
    amendments binding). The server's lane check, the entitlement and the spend choke are
-   tests/test_tsubaki3_image_gate.py and tests/test_payload_road.py; the dock's rendering is
-   tests/test_render_harness.py. This file pins the drawer's rules directly: when the payload
+   dev/tests/test_tsubaki3_image_gate.py and dev/tests/test_payload_road.py; the dock's rendering is
+   dev/tests/test_render_harness.py. This file pins the drawer's rules directly: when the payload
    carries the flag, what switching on forces, and why the switch or Generate is refused. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

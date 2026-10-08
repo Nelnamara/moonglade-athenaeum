@@ -37,7 +37,7 @@ Nothing here imports another app module, so every module (and the launcher, befo
 anything else) can import it first.
 
 The test suite pins `config_path`, `local_dir`, `local_path` and `library_anchor` to each
-test's own folder (tests/conftest.py), and tests/test_app_paths.py holds every helper against
+test's own folder (dev/tests/conftest.py), and dev/tests/test_app_paths.py holds every helper against
 the exact path it resolves to.
 """
 import hashlib

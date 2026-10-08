@@ -24,7 +24,7 @@ the owner's own reply (`delete_reply`) and claiming a gift (`claim_gift`). Each 
 function and each keeps the same four rules (brief §0, RY_COMMON rule 9):
   1. `core._check_read_only(...)` is the first thing it does, before any network call;
   2. ONE attempt: `core._rest_post` / `core._rest_put` / this module's `_rest_delete` have no
-     retry loop (tests/test_spend_no_retry.py pins all three);
+     retry loop (dev/tests/test_spend_no_retry.py pins all three);
   3. a READ-BACK decides what the user is told -- "done" only when the read-back shows it, and
      an unclear answer (a timeout, a dropped connection, a 5xx) is never reported as success;
   4. nothing calls one when a panel opens, a list scrolls or a push arrives: only a press.
@@ -925,7 +925,7 @@ def post_reply(session, artwork_id, reply_to, content):
 
 def _rest_delete(session, path, params=None, timeout=30):
     """DELETE a /v2 route. Single attempt (no loop; pinned by
-    tests/test_inbox_comments.py); raises like the transport's other verbs on a non-2xx.
+    dev/tests/test_inbox_comments.py); raises like the transport's other verbs on a non-2xx.
     Blocked in tests by conftest."""
     client = core._client_of(session)
     r = client.session.delete(core.REST_API_BASE + path, params=params, timeout=timeout)

@@ -251,7 +251,7 @@ def _config_path():
     moonglade_paths.config_path(): the copy beside the app first, then the current working
     directory (same order _load_config() has always read in); if neither exists yet (first
     run / a fresh write), the one beside the app. Kept as this module's function because
-    the test suite pins it per test (tests/conftest.py's _isolated_auth_config), so no test
+    the test suite pins it per test (dev/tests/conftest.py's _isolated_auth_config), so no test
     can reach the real file."""
     return _paths.config_path()
 
@@ -1495,7 +1495,7 @@ def _quick_count(session, page_size=500):
 #     session when the Mirror toggle is on, the API key otherwise, and a refusal
 #     rather than a silent fall-back to the key when the mirror is unavailable.
 #
-# There is a second adapter: `tests/fake_pixai.py`'s FakePixAI answers the same
+# There is a second adapter: `dev/tests/fake_pixai.py`'s FakePixAI answers the same
 # interface from registered responses and refuses any operation nobody
 # registered, so "the suite never touches the network" is structural instead of
 # a habit maintained by 300-odd private monkeypatches.
@@ -1549,7 +1549,7 @@ class PixAIClient:
     #: back instead of wrapping it. Checked with `is True` on purpose: a MagicMock answers
     #: every attribute with a truthy mock, and a mock standing in for a *Session* must
     #: still be wrapped or its `.post` would never be reached. This is what lets
-    #: tests/fake_pixai.py's FakePixAI be a real second adapter rather than a subclass --
+    #: dev/tests/fake_pixai.py's FakePixAI be a real second adapter rather than a subclass --
     #: it satisfies the interface, it does not inherit the implementation.
     _is_pixai_client = True
 
@@ -1611,7 +1611,7 @@ class PixAIClient:
         It takes **no `retries` argument on purpose** -- there is no correct value above 0
         for a spending path, so the knob is not offered rather than offered with a safe
         default a call site can override by accident. Pinned by
-        tests/test_pixai_client.py and tests/test_spend_no_retry.py."""
+        dev/tests/test_pixai_client.py and dev/tests/test_spend_no_retry.py."""
         return self._graphql_post(document, variables, 0)
 
     def _graphql_post(self, document, variables, retries):
@@ -1752,7 +1752,7 @@ class PixAIClient:
         NO retry loop, deliberately: `submit_fixer` and `claim_reward` ride this, and the
         session mounts no urllib3 Retry adapter (requests' default HTTPAdapter is
         max_retries=0), so both are single-attempt. Pinned by
-        tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
+        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
         r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
         if not r.ok:
             raise _rest_error("POST", path, r)
@@ -1772,7 +1772,7 @@ class PixAIClient:
         Single-attempt like `rest_post`, and by the same reasoning: the training routes that
         ride it (a dataset replace, a description save) change the account, and a re-send
         after a lost response can land on a task that has already moved on. Pinned alongside
-        rest_post by tests/test_spend_no_retry.py."""
+        rest_post by dev/tests/test_spend_no_retry.py."""
         r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout)
         if not r.ok:
             raise _rest_error("PUT", path, r)
@@ -1796,7 +1796,7 @@ def _client_of(session):
     PixAIClient wrapper around it otherwise.
 
     "Already is one" is the `_is_pixai_client is True` marker rather than an isinstance
-    check, so a second adapter (tests/fake_pixai.py's FakePixAI) passes through without
+    check, so a second adapter (dev/tests/fake_pixai.py's FakePixAI) passes through without
     inheriting this class's implementation.
 
     Wrapping reads NO config and resolves NO credential -- that is what lets the pasted-
@@ -2703,7 +2703,7 @@ def route_image_delete(task, media_id):
     image -- or that nothing may be sent. Returns an `ImageDeleteRoute`.
 
     Pure: a record in, a decision out. It reads nothing live and deletes nothing, so every
-    shape below is exercisable offline (tests/test_delete_routing.py).
+    shape below is exercisable offline (dev/tests/test_delete_routing.py).
 
     The rows, in the order they are checked:
 
@@ -2948,8 +2948,8 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
          doing something the user did not agree to.
       4. Fire exactly one branch. No loop wraps either call: a destructive mutation
          re-sent after a lost response can fire again against a task that has already
-         changed (tests/test_delete_routing.py pins this structurally, and
-         tests/test_spend_no_retry.py pins the primitives).
+         changed (dev/tests/test_delete_routing.py pins this structurally, and
+         dev/tests/test_spend_no_retry.py pins the primitives).
     """
     _check_read_only("delete an image from your PixAI account")
     task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
@@ -4971,7 +4971,7 @@ _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 # The bucket classifier is `moonglade_gallery.bucket_of` -- the LIBRARY SCAN
 # section's one copy. This alias keeps the private name every caller (and
-# tests/test_dedup.py's `core._bucket_of` assertions) already uses.
+# dev/tests/test_dedup.py's `core._bucket_of` assertions) already uses.
 _bucket_of = bucket_of
 
 
@@ -4986,7 +4986,7 @@ def _scan_media_files(out_dir):
     treated as the "surviving keeper" a _duplicates/ copy is compared against.
 
     Deliberately does NOT drop zero-byte files (named disagreement 3): the audit
-    has to SEE one in order to never choose it as a keeper -- tests/test_dedup.py
+    has to SEE one in order to never choose it as a keeper -- dev/tests/test_dedup.py
     pins that, and it is why the scan reports `size` rather than deciding."""
     for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
         yield e.path, e.rel, e.bucket, e.media_id
@@ -6206,7 +6206,7 @@ _mirror_lock = threading.Lock()
 #   last_ok_at         the last successful renewal; none again within MIRROR_RENEW_FLOOR_S, so
 #                      a token PixAI mints already inside the cushion can never loop;
 #   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence.
-# Module state: tests/conftest.py resets it around every test (_mirror_renewal_reset).
+# Module state: dev/tests/conftest.py resets it around every test (_mirror_renewal_reset).
 _MIRROR_REFRESH_COOLDOWN = 600      # the first backoff step after a failed renewal (seconds)
 MIRROR_RENEW_BACKOFF_CAP_S = 7200   # the longest step: a failing renewal retries every 2 h
 MIRROR_RENEW_FLOOR_S = 6 * 3600     # at most one successful renewal per 6 h, whatever is due
@@ -9063,11 +9063,11 @@ ENHANCE_EMOTION_MEMBERSHIP = frozenset({
 
 # The CLI --enhance command stays gone -- both halves of it. Only the WEB /api/enhance route
 # is restored (mirror-gated), never the CLI flag or run_enhance; see build_panelplugin_parameters
-# above for the reversal, and tests/test_enhance.py for the guards.
+# above for the reversal, and dev/tests/test_enhance.py for the guards.
 #
 # The panelplugin half's CLI entry (--workflow-id and run_enhance): NOT restored. The Bridge is
 # web-only -- its mirror gate is a route concern, and a bare CLI --workflow-id could submit a
-# panelplugin task on the API key (the reaped-at-60-min bug). tests/test_enhance.py keeps the
+# panelplugin task on the API key (the reaped-at-60-min bug). dev/tests/test_enhance.py keeps the
 # flag unparseable.
 #
 # The art-filter half (build_filter_parameters, --filter-id): that one worked, and was still
@@ -9081,7 +9081,7 @@ ENHANCE_EMOTION_MEMBERSHIP = frozenset({
 # offline, for nothing, so the paid path is deleted rather than left as a strictly worse
 # second option.
 #
-# Guarded by tests/test_enhance.py, which drives the parser to prove the --filter-id flag is
+# Guarded by dev/tests/test_enhance.py, which drives the parser to prove the --filter-id flag is
 # unaccepted and greps for the two literals a FILTER submit could not do without -- the filter
 # model's id and the filter-inputs key. Neither exact string appears above on purpose: the
 # CONCEPT is named in prose so the strings themselves stay a reliable tripwire. (The panelplugin
@@ -9212,7 +9212,7 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 #     build_chat_edit_parameters omits aspectRatio for it. Auto leaves the frame to PixAI; it
 #     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
 #     come back 2:3), so no copy anywhere may say it does.
-# editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
+# editCore.js EDIT_CAPS mirrors this table by hand; dev/tests/test_edit_upload.py's parity test
 # reads both and fails if their aspects, defaults, reference caps, resolutions or qualities
 # drift apart.
 #
@@ -9757,7 +9757,7 @@ def run_generate(args):
         # that fires BEFORE submit_generation() is even reached below, so relying only on
         # the guard inside submit_generation() would let it through first under
         # READ_ONLY -- the exact bug _check_read_only's own docstring and
-        # tests/test_read_only_cli_paths.py describe finding.
+        # dev/tests/test_read_only_cli_paths.py describe finding.
         _check_read_only("submit a generation (spends credits)")
         print("Submitting generation task...")
         _apply_kaisuuken(session, params, args)
@@ -11060,7 +11060,7 @@ UNLIMITED_VERSIONS = frozenset(("2024383379556065549",))
 # Session H (decision 2 / T3a): a Tsubaki edit runs on Tsubaki.3. It is offered on every still
 # picture -- the "Edit with Tsubaki" menu item and the Lightbox edit bar alike (owner ruling,
 # 2026-09-28), whatever model made it. gallery/src/gen/tsubakiCore.js carries the same ids
-# (tests/test_tsubaki3_generate.py pins the copies together).
+# (dev/tests/test_tsubaki3_generate.py pins the copies together).
 TSUBAKI3_MODEL_ID = "2024383378759147749"
 TSUBAKI3_VERSION_ID = "2024383379556065549"
 # The status is cached RAW, keyed by (version, the identity that creates), and the expiry is
@@ -12169,7 +12169,7 @@ _IMAGE_REF_RE = re.compile(r"@image(\d+)")
 
 def _image_refs(prompt):
     """The @imageN numbers a prompt names, in order (Session H decision 2). The same rule as
-    the drawer's tsubakiCore.AT_REF_RE -- tests/test_tsubaki3_generate.py pins the two."""
+    the drawer's tsubakiCore.AT_REF_RE -- dev/tests/test_tsubaki3_generate.py pins the two."""
     return [int(m.group(1)) for m in _IMAGE_REF_RE.finditer(str(prompt or ""))]
 
 
@@ -13297,7 +13297,7 @@ TRAIN_TRIGGER_MIN_DIT = 30
 
 # --- PixAI's public dynamic config (GET <api>/config/<key>) --------------------------------
 # The site reads a handful of keys off this road (trainLoraModels, trainLoraStatus, constants,
-# ...). It sits OUTSIDE the /v2 REST routes, so tests/conftest.py's _rest_get/_rest_post block
+# ...). It sits OUTSIDE the /v2 REST routes, so dev/tests/conftest.py's _rest_get/_rest_post block
 # never covered it: _config_get is the ONE reader, and an autouse conftest fixture blocks it, so
 # no test can reach PixAI through it. Anonymous (no credential is sent -- the 2026-09-26 probe
 # read both training keys with a plain GET), short timeout, single attempt, read-only.
@@ -14980,7 +14980,7 @@ def _rest_get(session, path, params=None, timeout=30):
 
     THIN DELEGATE onto `PixAIClient.rest_get` -- the route road lives in the pixai_client
     section. Kept under this name because a dozen call sites hand it a `session`
-    positionally and the suite patches it here (tests/conftest.py's `_no_live_card_network`
+    positionally and the suite patches it here (dev/tests/conftest.py's `_no_live_card_network`
     is what makes the /v2 API offline by default)."""
     return _client_of(session).rest_get(path, params=params, timeout=timeout)
 

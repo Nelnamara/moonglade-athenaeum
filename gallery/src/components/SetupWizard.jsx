@@ -12,7 +12,7 @@ import "../styles/setup-wizard.css";
    Real backend the whole way through, NOT new: /api/setup/save-key (key validation + the
    config.json write), POST /api/panel/run {action:'sync'} + polling /api/panel/status --
    all three already shipped and tested by classic's own "paste a key, run first sync"
-   banner (see moonglade_gallery.py's Setup JS object and tests/test_setup_wizard.py).
+   banner (see moonglade_gallery.py's Setup JS object and dev/tests/test_setup_wizard.py).
    This is a full-fidelity port of the theatrical 4-phase experience (intro carousel -> key
    entry -> sync -> ready) the DC designs, driven by those same real endpoints instead of
    classic's plainer two-banner version -- the owner's own call on seeing it live: "a bit

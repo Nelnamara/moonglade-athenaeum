@@ -469,7 +469,7 @@ when it's signed in from a tablet.
 
 The two operations that *do* turn on a username — changing your own password, removing your own
 account — aren't a privilege either: what varies is whose account is being changed, not what your
-login is allowed to do. `tests/test_route_tiers.py` is what keeps this page honest; it enumerates
+login is allowed to do. `dev/tests/test_route_tiers.py` is what keeps this page honest; it enumerates
 every route the app actually registers and fails the build if one doesn't declare and enforce its
 tier against a live LAN request.
 

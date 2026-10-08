@@ -19,7 +19,7 @@ import { apiGet, apiPost } from "../api.js";
    SYNC_STAGES animation with fabricated per-type counts are NOT ported here --
    those are Setup Wizard Mobile.dc.html's own disclosed stand-ins for a prototype
    that had no server to call, same departure desktop's own header comment already
-   made and tested (tests/test_setup_wizard.py). */
+   made and tested (dev/tests/test_setup_wizard.py). */
 
 export const SLIDES = [
   { mascot: "/branding/login_nel.webp", head: "Welcome to the Athenaeum",

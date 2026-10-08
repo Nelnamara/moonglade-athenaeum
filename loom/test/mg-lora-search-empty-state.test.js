@@ -10,7 +10,7 @@ import path from "node:path";
 // WHAT WAS WRONG. Two different things came back as one sentence. The server half of that walk
 // was the feed -- a keyword went to the trending RANKING instead of the search index, so a real
 // LoRA could be missing from a list that was never a search (fixed in moonglade_backup.py,
-// pinned by tests/test_model_grid.py). This is the other half: even with the search working, a
+// pinned by dev/tests/test_model_grid.py). This is the other half: even with the search working, a
 // base filter narrows a LoRA search server-side, so "Perfect Hands" under a DiT.2 base can
 // legitimately match nothing while the same term matches plenty with the filter off. "No results
 // — try another search." sends you to change the one thing that was already right, and never

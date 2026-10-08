@@ -64,9 +64,9 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 1. **Checkpoint** after every shipped increment (and before starting any new build). **One fact,
    one home — do not write the same status into two files:**
    - **What shipped** → `CHANGELOG.md [Unreleased]`, a dated tagline. Nowhere else.
-   - **Planned/outstanding work** → `ROADMAP.md` (Now / Next / Later, with real context).
+   - **Planned/outstanding work** → `dev/ROADMAP.md` (Now / Next / Later, with real context).
      When an item ships, **delete it from ROADMAP** and add the CHANGELOG line — moving it, not
-     annotating "done" in place. **The split rule:** the public `ROADMAP.md` is the DEFAULT home
+     annotating "done" in place. **The split rule:** the public `dev/ROADMAP.md` is the DEFAULT home
      for every item; `../moonglade-internal/ROADMAP-internal.md` may hold ONLY items matching a
      short list — hidden achievements/easter eggs, reward assignments, security or API probing.
      An item lives in exactly one file, never both.
@@ -132,7 +132,7 @@ effect if they're in the file that loads every session.)*
   — stale closures, a guard wired so it could never fire, a check structurally incapable of
   triggering.
 - **Don't archive or consolidate a doc without first moving its live items** into the current
-  trackers (`ROADMAP.md`, GitHub Issues). Archive-then-forget silently deletes real asks; it has
+  trackers (`dev/ROADMAP.md`, GitHub Issues). Archive-then-forget silently deletes real asks; it has
   happened more than once here.
 - **Historical records keep the old module names.** A v1.9 CHANGELOG entry naming `pixai_backup.py`
   is TRUE about v1.9 — don't rewrite history to current names. Live instructions (this file, the
@@ -145,10 +145,10 @@ effect if they're in the file that loads every session.)*
   docs drifted in the first place.
 - **Never write a count in prose that a command can answer** — test counts, LOCALHOST route
   counts, commit leads. Name the command or the test instead. Both of those have already drifted
-  twice, and `tests/test_docs_dont_hardcode_counts.py` fails the suite over it.
+  twice, and `dev/tests/test_docs_dont_hardcode_counts.py` fails the suite over it.
 - **Broken or unearnable achievements are not app-breaking and are not bugs.** Don't file them,
   don't put them at the top of a defect list. They're design work; the known-dead ones are
-  already tracked in `ROADMAP.md`.
+  already tracked in `dev/ROADMAP.md`.
 
 ## Architecture / request flow
 
@@ -177,7 +177,7 @@ present — fixes corporate/antivirus HTTPS interception.
 Four modules, one shared SQLite catalog, on-disk layout, and the full function/helper
 reference all live in **`../moonglade-internal/architecture.md`** — do not restate them here; that's how
 this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
-`tests/test_docs_dont_hardcode_counts.py` had to exist.
+`dev/tests/test_docs_dont_hardcode_counts.py` had to exist.
 
 ---
 
@@ -206,7 +206,7 @@ shipped bug.
   re-POST after a lost response (read timeout, dropped connection, proxy 502 *after* the
   backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
   document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
-  `gql_mutate` so the intent is reviewable. Guarded by `tests/test_spend_no_retry.py`.
+  `gql_mutate` so the intent is reviewable. Guarded by `dev/tests/test_spend_no_retry.py`.
 - **`READ_ONLY` in config.json overrides `--confirm`/`--apply`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
@@ -277,24 +277,27 @@ per-command shapes and the **Quick command reference** below for usage. The Flas
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
 Panel jobs, branding) — its structure lives in `../moonglade-internal/architecture.md`'s "The web suite"
 section; dated history in `CHANGELOG.md`. Don't restate feature detail here —
-that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode_counts.py`.
+that's how this file drifted badly enough to need `dev/tests/test_docs_dont_hardcode_counts.py`.
 
 `--sync`'s reconcile step (`run_reconcile_deleted`) is caught with a deliberately **BROAD
 `except Exception`** — do NOT narrow it to `except PixAIError`, or a transient network blip
 during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
-`tests/test_sync.py`; full rationale in `../moonglade-internal/architecture.md`.
+`dev/tests/test_sync.py`; full rationale in `../moonglade-internal/architecture.md`.
 
 Achievement/Folio-of-Honors art direction (badge style anchor, tier palette, prompt bank)
 lives in `../moonglade-internal/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite
 
-Full run instructions live in `../moonglade-internal/architecture.md`'s Testing section. **Never write the
-test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.py` fails the
+The suite, its `pytest.ini` and the developer tools live in `dev/` (since 3.20). From the repo
+root, CI's command is `python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py`; from
+inside `dev/`, a plain `python -m pytest` runs the same suite. Full run instructions live in
+`../moonglade-internal/architecture.md`'s Testing section. **Never write the
+test count in this or any live doc** — `dev/tests/test_docs_dont_hardcode_counts.py` fails the
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
 
-- **`python tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
+- **`python dev/tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
   exactly as CI invokes it, then the loom build, the stale-`loom/dist` check (via
   `git status --porcelain`, the same comparison CI makes, so a new untracked or
   already-staged file in `dist/` fails here too) and the Loom's `node --test` suite — on
@@ -341,18 +344,18 @@ recently within hours of a "correction." All tests must pass before merging to m
   that needs branding art or a sealed roster pins its own `branding_root()` AND
   `moonglade.paths.local_path()` (the pack, `branding.json` and the other machine files go
   through that, not through the tree's parent) and seeds its
-  own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
+  own container from the private donor (`dev/tests/conftest.py`'s `seed_sealed_container`) —
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
   and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
   roster on a dev box, an empty one on CI, different fixture state per machine (2026-09-10).
-  Two things hold that: `tests/conftest.py` pins `branding_root()` for the whole SESSION, so
+  Two things hold that: `dev/tests/conftest.py` pins `branding_root()` for the whole SESSION, so
   a fixture that forgets lands in a tmp dir rather than the owner's tree and the real pack;
   and its session-scoped guard snapshots that tree (files *and* folders) at session start and
   fails the run if anything in it was added, removed or modified — a run that creates it
   counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
   on a checkout where that tree already exists, an un-pinned `create_app()` writes
   nothing new and still reads the real pack. That the pin holds is itself asserted, in
-  `tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
+  `dev/tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
   self-skips without playwright and is excludable with `-m "not render"`: a suite-wide
   invariant whose only assertion can be gated away is not an invariant.
 

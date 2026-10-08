@@ -4,7 +4,7 @@
 
    The owner's ruling on the 2026-10-03 walk: WARN, DON'T BLOCK. The bulk "Delete locally" and
    Duplicate Review take only copies with the rest, and their confirm names them first. The words say
-   what really happens next, which tests/test_archive_only_guard.py proves on the server: the Trash's
+   what really happens next, which dev/tests/test_archive_only_guard.py proves on the server: the Trash's
    Restore puts the picture AND its catalog row back, and Duplicate Review's Undo does the same.
    loom/test/only-copy.test.js pins this file. */
 

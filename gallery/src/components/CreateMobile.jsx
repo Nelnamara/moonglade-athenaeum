@@ -154,7 +154,7 @@ import "../styles/create-mobile.css";
    /api/workflows are all real routes (moonglade_gallery.py), and they dispatch
    PixAI panelplugin workflows through build_panelplugin_parameters /
    workflow_catalog (moonglade_backup.py): real generations that spend real
-   credits, refused unless the PixAI mirror is armed. tests/test_enhance.py
+   credits, refused unless the PixAI mirror is armed. dev/tests/test_enhance.py
    pins that restored surface now rather than its absence (run it for the
    count). The one thing still gone for good is ENHANCE_PLUGINS -- the dead
    "detail-fix"/"hand-fix"/"face-fix" dict, which that file also pins as

@@ -1,9 +1,9 @@
 /* static/design-tokens.css -- GENERATED from moonglade_gallery.DESIGN_TOKENS_CSS by
-   tools/export_design_kit.py; do not hand-edit. The Python constant is the single
+   dev/tools/export_design_kit.py; do not hand-edit. The Python constant is the single
    source of truth (the app substitutes it directly into its own pages); this file
    exists so build tooling outside the Flask app -- the React pilot, the design-kit
    bundle pushed to claude.ai/design -- can import the same tokens instead of
-   carrying a hand-typed copy. Pinned by tests/test_design_kit_sync.py. */
+   carrying a hand-typed copy. Pinned by dev/tests/test_design_kit_sync.py. */
 
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
      components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that

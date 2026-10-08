@@ -14,7 +14,7 @@ import {
    with a 112 px rail of named sets beside it (a "Saved ▾" chooser below 640 px). The logic is
    importless (gallery/src/picker/savedCore.js) and pinned directly; the picker's wiring is
    pinned on its source, as the rest of the picker's node tests do (no React harness here).
-   The browser proof is tests/test_render_harness.py; the server half tests/test_model_saved.py. */
+   The browser proof is dev/tests/test_render_harness.py; the server half dev/tests/test_model_saved.py. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(path.join(__dirname, "../../gallery/src", p), "utf8");

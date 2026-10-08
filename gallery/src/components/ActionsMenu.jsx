@@ -21,7 +21,7 @@ import "../styles/librarybar.css";
      deliberate extra over the DC's 8.
 
    The four bulk-mutation flows are now owned HERE, against the JSON routes
-   (tests/test_api_bulk_json.py):
+   (dev/tests/test_api_bulk_json.py):
      + Add / − Remove collection  →  POST /api/collection  {action, collection, media_ids}
      Find / replace in prompts    →  POST /api/replace-prompts {find, replace, media_ids}
      Delete locally               →  POST /api/delete-local {media_ids}

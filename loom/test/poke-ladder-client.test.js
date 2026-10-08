@@ -9,7 +9,7 @@ import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
 import { UNLEASH_KEY } from "../../gallery/src/folio/unleashPref.js";
 
 /* The narrator's poke, the page's half. The ladder itself is the SERVER's (tests/
-   test_narrator_ladder.py, tests/test_narrator_route.py); what this file pins is that the page
+   test_narrator_ladder.py, dev/tests/test_narrator_route.py); what this file pins is that the page
    holds none of it: it shows the line it is told, it cannot tell a counted poke from an
    uncounted one, and the choice at the end writes the account's switch. Every line here is
    invented -- nothing names a real one. */

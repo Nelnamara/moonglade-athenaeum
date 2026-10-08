@@ -16,13 +16,13 @@ import {
 
 /* Session M (Generate power tools): the dock's copy of the template rule, its send routing, the
    one confirm's words and the run's read-back. The template half is pinned against the SAME
-   vector file the server's tests read (tests/fixtures/template_vectors.json), so the preview
+   vector file the server's tests read (dev/tests/fixtures/template_vectors.json), so the preview
    the dock draws is the set of jobs moonglade_runs.plan_jobs sends. Design:
    moonglade-internal/design/notes/generate-power-tools/BUILD-w5-m.md. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(here, "..", "..");
-const VEC = JSON.parse(readFileSync(path.join(ROOT, "tests", "fixtures", "template_vectors.json"), "utf8"));
+const VEC = JSON.parse(readFileSync(path.join(ROOT, "dev", "tests", "fixtures", "template_vectors.json"), "utf8"));
 
 describe("the shared vectors: the dock expands exactly as the server does", () => {
   for (const c of VEC.cases) {
@@ -60,7 +60,7 @@ describe("the shared vectors: the dock expands exactly as the server does", () =
   });
 });
 
-/* The same deterministic strings tests/test_generate_runs.py's _lcg_strings draws, so the two
+/* The same deterministic strings dev/tests/test_generate_runs.py's _lcg_strings draws, so the two
    halves are driven by the same inputs. */
 function lcgStrings(alphabet, count, seed, maxLen = 14) {
   let s = seed >>> 0;

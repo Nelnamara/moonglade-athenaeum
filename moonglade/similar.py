@@ -37,7 +37,7 @@ from pixeltable.func import Batch
 # binding limit is the Python subprocess.run(timeout=10) that kills pg_ctl first), so widen it
 # here. This module is the repo's SOLE pixeltable gateway, so patching at import runs before
 # the first catalog op (Env init -> get_server()). Pinned to pgserver's private pg_ctl symbol
-# -- re-check on a pixeltable_pgserver upgrade. Guarded by tests/test_similar.py.
+# -- re-check on a pixeltable_pgserver upgrade. Guarded by dev/tests/test_similar.py.
 import pixeltable_pgserver.postgres_server as _pgs
 _pgctl_orig = _pgs.pg_ctl
 def _pgctl_widened(*a, **kw):

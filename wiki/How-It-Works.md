@@ -146,7 +146,8 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
    layouts and rides the same scan.
 
 ## Testing
-Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,
-gallery routes, mocked network, embedded-JS syntax. `tests/test_similar.py` needs the
+Run `python -m pytest -q dev/tests` from the repo root (the suite and its tools live in
+`dev/`) — pure functions, filesystem, catalog, gallery routes, mocked network, embedded-JS
+syntax. `dev/tests/test_similar.py` needs the
 optional `pixeltable` dep and skips itself cleanly without it. The Loom's pure-logic
 modules have their own suite: `node --test` from `loom/`. All must pass before merging.

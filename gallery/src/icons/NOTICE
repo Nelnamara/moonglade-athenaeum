@@ -9,12 +9,12 @@ The nine .svg files in this folder are from **Glyphs**, an open icon set.
 They ship here under that licence, reproduced verbatim below (including its
 name-less copyright line, which is how upstream's own LICENSE file reads).
 
-Two mechanical edits were made to the files, both documented in tools/build_icons.py:
+Two mechanical edits were made to the files, both documented in dev/tools/build_icons.py:
 the drawn tint became `currentColor` so a skin can retint them, and stroked paths
 carry `vector-effect="non-scaling-stroke"` so the hairline outline survives at this
 app's 9-20px icon sizes. The drawings themselves are untouched.
 
-Which file is which is in tools/build_icons.py's ICONS table; the owner's picks are
+Which file is which is in dev/tools/build_icons.py's ICONS table; the owner's picks are
 recorded in moonglade-internal/design/glyphs/README.md — the Glyph Ledger ballot
 (2026-09-05) for seven of them, that day's post-audit rulings for books_path and
 history_path.

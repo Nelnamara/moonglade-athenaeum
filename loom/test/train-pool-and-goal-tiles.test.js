@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 /* A thing the owner found on screen in Train a LoRA (walk, 2026-09-29), held at the source.
-   tests/test_render_harness.py measures it in a real browser once the bundle is built; this
+   dev/tests/test_render_harness.py measures it in a real browser once the bundle is built; this
    fails first, without one.
 
    "From history" drew every picture as a sliver a few pixels tall, in Basic and Advanced,

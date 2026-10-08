@@ -33,7 +33,7 @@ const api = src("api.js");
 const menu = src("components/ActionsMenu.jsx");
 
 describe("the counts reconcile", () => {
-  /* The route's own fixture, from tests/test_purge.py's
+  /* The route's own fixture, from dev/tests/test_purge.py's
      test_delete_preview_reads_each_selected_task_back_from_pixai_once: T1={a1,a2,a3} with
      a3 already deleted on PixAI, T2={b1,b2}, and [a1,b1] selected. */
   const ROUTE = { totals: { selected: 2, tasks: 2, media: 5, unselected: 3, local_only: 0 },

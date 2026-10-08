@@ -37,7 +37,7 @@ The rules:
 
 Everything that touches the machine goes through a Machine (where the folders are, how a
 command runs, how a .lnk is saved), so the tests hand in one built on temp folders and fake
-commands; machine() builds the real one, and tests/conftest.py refuses it in every test.
+commands; machine() builds the real one, and dev/tests/conftest.py refuses it in every test.
 """
 import codecs
 import json
@@ -125,7 +125,7 @@ class Machine:
 
 def machine():
     """This machine, for real: its known folders, its Claude configs, schtasks and
-    PowerShell. tests/conftest.py replaces this with a refusal for every test."""
+    PowerShell. dev/tests/conftest.py replaces this with a refusal for every test."""
     platform = sys.platform
     home = Path.home()
     folders, configs = [], []

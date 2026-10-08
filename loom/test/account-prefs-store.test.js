@@ -12,7 +12,7 @@ import {
    the reason swrStore.js is: the behaviour worth pinning is the STORE's -- one load shared
    by every subscriber, an optimistic write, and a rollback that removes exactly the failed
    change -- and each is a plain assertion against a fake transport. The server half
-   (GET/POST /api/account/prefs) is pinned by tests/test_account_prefs.py. */
+   (GET/POST /api/account/prefs) is pinned by dev/tests/test_account_prefs.py. */
 
 // A transport whose answers the test releases by hand, so ordering is under test control.
 function manualTransport() {

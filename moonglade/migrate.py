@@ -13,7 +13,7 @@ Two halves, each with its own journal and its own lock (SPEC_3.20_REBUILD.md; DE
 
 moonglade.setup.prepare() runs both, in that order, before anything reads a setting.
 
-The rules (each one is a test in tests/test_move_*.py):
+The rules (each one is a test in dev/tests/test_move_*.py):
 
   * ONE HOME PER ITEM. After the move nothing reads an old place; only this module knows where
     an older version kept things.
@@ -139,7 +139,7 @@ _KEY_RE = re.compile(r"^(?:[0-9a-f]{16}|_local)$")
 
 def old_app_root():
     """Where an install before this layout kept its machine files: the app folder itself.
-    The tests pin this to a folder of their own (tests/conftest.py)."""
+    The tests pin this to a folder of their own (dev/tests/conftest.py)."""
     return _paths.APP_ROOT
 
 

@@ -115,8 +115,8 @@ describe("master-storyboard.jsx: mg-pick-request durably persists i2v/flf frames
       "a genuinely new video reference (past everything the shot's video bank already supplies) must persist as a real c.refs entry, not vanish on the next prefill");
   });
 
-  test("the original ephemeral-only fallback call shape survives (pinned by tests/test_web_pick.py's S5 privacy-blur regression guard)", () => {
+  test("the original ephemeral-only fallback call shape survives (pinned by dev/tests/test_web_pick.py's S5 privacy-blur regression guard)", () => {
     assert.match(src, /openPick\(\(mid, thumb, isVideo, duration, isNsfw\) => e\.detail\.respond\(mid, thumb, isNsfw\)/,
-      "tests/test_web_pick.py pins this exact one-liner call shape (is_nsfw must reach respond()) -- it must remain reachable as the final fallback for any bank/mode combination the dedicated branches don't recognize");
+      "dev/tests/test_web_pick.py pins this exact one-liner call shape (is_nsfw must reach respond()) -- it must remain reachable as the final fallback for any bank/mode combination the dedicated branches don't recognize");
   });
 });

@@ -38,7 +38,7 @@ export const BED_DUCK_DB = -12;
  *  a too-big file is refused before a byte is sent; the server enforces it regardless. */
 export const BED_MAX_BYTES = 50 * 1024 * 1024;
 /** A stored bed's name: the sha1 of its bytes and the sniffed type. The server's
- *  LOOM_BED_FILE_RE is the same pattern (tests/test_loom_p_routes.py compares them). */
+ *  LOOM_BED_FILE_RE is the same pattern (dev/tests/test_loom_p_routes.py compares them). */
 export const BED_FILE_RE = /^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$/;
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };

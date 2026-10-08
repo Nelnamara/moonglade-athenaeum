@@ -3,7 +3,7 @@
 // An animated medallion is a `<id>.webp` dropped beside the stills; the server serves it
 // through untouched and 404s when there isn't one. That 404 is the whole fallback
 // mechanism, so this module is the client half of the contract the Python side
-// (tests/test_badge_anim.py) proves from the route end:
+// (dev/tests/test_badge_anim.py) proves from the route end:
 //
 //   * animated master FIRST, still thumb second -- nothing else in the ladder;
 //   * the size bucket rides the STILL only (the animation is served whole, unresized,

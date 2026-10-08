@@ -9,7 +9,7 @@
    and lost exactly its head and search row. So the 390x844 desktop-Chromium proof passed while
    his phone did not.
 
-   The browser harness (tests/test_render_harness.py, IPHONE_PRO_MAX, WebKit when installed)
+   The browser harness (dev/tests/test_render_harness.py, IPHONE_PRO_MAX, WebKit when installed)
    measures the geometry and pins "not a descendant of .glm-body"; this file pins the source
    so a refactor that quietly un-portals the sheet, or drops the dvh line, fails here too. */
 import { test, describe } from "node:test";

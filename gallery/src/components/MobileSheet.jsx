@@ -23,7 +23,7 @@ import React from "react";
    would move all eleven; a class the one sheet asks for moves one. The scrim
    travels with the slab or it stops dimming and stops catching the tap-outside
    -- see contest-mobile.css's `.cmb-choosersheet` rung, and the scrim/host
-   pairing discipline tests/test_z_ladder.py already enforces on the desktop
+   pairing discipline dev/tests/test_z_ladder.py already enforces on the desktop
    band for the same reason. */
 export default function MobileSheet({ open, closing, onClose, title, titleEnd, className, children }) {
   if (!open) return null;

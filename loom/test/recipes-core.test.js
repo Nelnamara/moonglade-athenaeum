@@ -14,7 +14,7 @@ import {
 /* THE RECIPES' PURE HALF (lane w2-recipes, 2026-09-28): Session K and H3/H8/H10. What a
    recipe card says, whether a recipe fits the dock's request (T2b), the dock row's own
    refusal, what the creator still needs, the draft <-> PixAI body mapping. The server half
-   (moonglade_recipes.py) is pinned by tests/test_recipes.py. */
+   (moonglade_recipes.py) is pinned by dev/tests/test_recipes.py. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "gallery", "src");

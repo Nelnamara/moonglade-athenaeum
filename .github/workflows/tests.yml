@@ -16,7 +16,7 @@ jobs:
           python-version: "3.11"
 
       # pixeltable is intentionally NOT installed here: it's a heavy, optional,
-      # GPU-oriented dep, and tests/test_similar.py skips itself cleanly without it
+      # GPU-oriented dep, and dev/tests/test_similar.py skips itself cleanly without it
       # (see its own pytest.importorskip). Pulling it in just to sit unused is exactly
       # the kind of CI flakiness worth avoiding.
       - name: Install dependencies
@@ -24,7 +24,7 @@ jobs:
 
       # THE RENDERING HARNESS NEEDS A REAL BROWSER.
       #
-      # tests/test_render_harness.py drives a real chromium against the real Flask app on a
+      # dev/tests/test_render_harness.py drives a real chromium against the real Flask app on a
       # real port and measures the resulting layout, stacking and computed style. It exists
       # because the rest of the suite asserts that CSS *text* is present, never that it
       # *works* -- a green suite could not see a layout defect, because nothing in it
@@ -47,7 +47,7 @@ jobs:
       # THE GALLERY BUNDLE MUST BE THE SOURCE'S.
       #
       # The Flask app serves the COMMITTED gallery/dist (Vite build), and the render harness
-      # measures that bundle. tests/test_js_syntax.py::test_committed_gallery_bundle_matches_a_fresh_build
+      # measures that bundle. dev/tests/test_js_syntax.py::test_committed_gallery_bundle_matches_a_fresh_build
       # rebuilds gallery/src into a temp folder and compares, but it skips itself when
       # gallery/node_modules is absent -- which it was on CI until 2026-09-08, so a source edit
       # pushed without `npm run build` sailed through with the harness green against the OLD
@@ -62,8 +62,10 @@ jobs:
         run: npm ci
         working-directory: gallery
 
+      # The suite and its config live in dev/ (3.20): dev/pytest.ini is found from the
+      # dev/tests argument, so this runs from the repo root like every other step.
       - name: Run test suite
-        run: python -m pytest -q --ignore=tests/test_similar.py
+        run: python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py
 
   loom-node-tests:
     runs-on: ubuntu-latest
@@ -93,7 +95,7 @@ jobs:
       # forgetting `npm run build` silently leaves that route serving the OLD code --
       # which is exactly how the `useMemo` blank-page bug shipped: the .jsx and the
       # Babel path moved on, the committed bundle did not, and only a browser crawl
-      # found it. tests/test_js_syntax.py pins the hook preamble, but that catches
+      # found it. dev/tests/test_js_syntax.py pins the hook preamble, but that catches
       # only the one drift that happens to touch the preamble; every other kind of
       # source change leaves a stale bundle completely invisible.
       #

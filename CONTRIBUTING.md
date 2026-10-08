@@ -29,10 +29,13 @@ for how the modules fit together.
 ## Running the tests
 
 ```bash
-python -m pytest -q --ignore=tests/test_similar.py
+python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py
 ```
 
-(`tests/test_similar.py` needs the optional `pixeltable` dependency and skips itself
+That is CI's command, run from the repo root. The suite, its `pytest.ini` and the developer
+tools live in `dev/`; from inside `dev/` a plain `python -m pytest` runs the same suite.
+
+(`dev/tests/test_similar.py` needs the optional `pixeltable` dependency and skips itself
 cleanly without it — drop the `--ignore` if you have it installed.)
 
 The Loom's pure-logic modules have their own suite:

@@ -14,7 +14,7 @@ Run as a folder, Python puts THIS folder first on sys.path and gives this file n
 package is then importable only once the app's folder (this folder's parent) is on the path, so
 it takes this folder's place there: with this folder itself on the path, every module in it
 (paths, logs, assets, ...) would also be importable under its bare name, and would win over any
-other module of that name for the whole process (tests/test_code_package.py).
+other module of that name for the whole process (dev/tests/test_code_package.py).
 """
 import os
 import runpy

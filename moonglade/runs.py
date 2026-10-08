@@ -16,7 +16,7 @@ This module is the pure half and the store:
                                        brace group with no `|` literal, a backslash
                                        dropped only where it changes the parse.
                                        The dock's gallery/src/gen/templateCore.js is the same
-                                       rule in JS; tests/fixtures/template_vectors.json pins
+                                       rule in JS; dev/tests/fixtures/template_vectors.json pins
                                        both to one set of answers, so the preview the dock
                                        draws is the set of jobs the server sends.
   run_digest                           what the acknowledgement is checked against.
@@ -829,7 +829,7 @@ CLI_PREFIX = ["python", "-m", "moonglade", "--generate"]
 _PS_SINGLE_QUOTES = "'‘’‚‛"
 _MODES = ("lite", "standard", "pro", "ultra")
 # What the CLI's argparse sets when a flag is absent, for the dests _gen_parameters reads.
-# tests/test_generate_runs.py checks each against the real parser.
+# dev/tests/test_generate_runs.py checks each against the real parser.
 _CLI_DEFAULTS = dict(params_json="", prompt="", negative="", model="", width=512,
                      height=512, steps=25, cfg=7.0, count=1, seed=None, priority=None,
                      mode="auto", prompt_helper=True, lora=None, enlarge=None,
@@ -849,7 +849,7 @@ def _ps_native(arg):
     in quotes HERE, each quote inside written as the pair `""` (the runtime's in-quotes escape),
     which keeps every whitespace after an odd count so 5.1 never wraps it a second time. The
     backslashes before a quote -- the closing one included -- are doubled, the runtime's rule;
-    others stay single. Checked against real powershell.exe in tests/test_generate_runs.py."""
+    others stay single. Checked against real powershell.exe in dev/tests/test_generate_runs.py."""
     if not any(c.isspace() or c == '"' for c in arg):
         return arg
     out, bs = ['"'], 0

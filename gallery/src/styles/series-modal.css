@@ -19,7 +19,7 @@
    intent at the size it drew.
 
    Z: 414/415, the rung the retired Similar modal used to hold (see THE OVERLAY
-   LADDER in overlays.css, guarded by tests/test_z_ladder.py).
+   LADDER in overlays.css, guarded by dev/tests/test_z_ladder.py).
    ========================================================================== */
 
 @keyframes mgssIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); }

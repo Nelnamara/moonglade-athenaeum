@@ -12,7 +12,7 @@ telling every install what container it should have and where to get it:
 `urls` is an ORDERED mirror list (first that works wins); it may be EMPTY
 during development (no release cut yet) -- fetch then fails cleanly with
 "no download source configured", never a crash. Built/refreshed by
-tools/build_container.py --write-manifest, from a REAL container.
+dev/tools/build_container.py --write-manifest, from a REAL container.
 
 VERSION MARKER. <container>.version, a tiny sidecar written ONLY right after
 a download's sha256 verification passes. This is what makes a boot-time
@@ -97,7 +97,7 @@ def _write_marker(container_path, manifest):
 
 
 # The pack's file name before pack v7. Only the one-time rename below may name it; every
-# other code path asks moonglade_gallery._container_path() (tests/test_pack_file_name.py).
+# other code path asks moonglade_gallery._container_path() (dev/tests/test_pack_file_name.py).
 LEGACY_NAME = "moonglade.dat"
 
 # Where the rename writes down what it did: a child of the app's own logger, which

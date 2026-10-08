@@ -30,7 +30,7 @@ import path from "node:path";
         useEffect / useLayoutEffect callback; and a sink in a JSX prop is only ever an onClick or
         a bare pass-down to a child component whose own uses are pinned here too.
      5. PLACEMENT PINS, PURE MODULES and the DRAWER HOST API (the same walker on VideoDrawer.jsx).
-   The server half is tests/test_loom_generate_guard.py (the handoff and the new routes never
+   The server half is dev/tests/test_loom_generate_guard.py (the handoff and the new routes never
    reach core.submit). */
 
 const here = path.dirname(fileURLToPath(import.meta.url));

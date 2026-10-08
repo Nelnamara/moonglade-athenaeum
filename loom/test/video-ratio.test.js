@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 /* The Tsubaki Multi-Reference aspect ratio (reference 36, lane w2-small 2026-09-28). It changes
    what a paid referenceVideo request sends; the design and its spend review are
    moonglade-internal/design/notes/small-calls/BUILD-w2-small.md. The Python half is
-   tests/test_video_tsubaki.py (referenceVideo.ratio on the web road). */
+   dev/tests/test_video_tsubaki.py (referenceVideo.ratio on the web road). */
 
 import {
   VIDEO_RATIOS, applyMode, applyModelGating, applyPrefill, buildPayload, priceKey,

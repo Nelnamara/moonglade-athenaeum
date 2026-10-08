@@ -73,7 +73,7 @@ Babel-standalone transpile was retired on 2026-08-08 (see the comment above `loo
 
 **The bundle is committed.** If you change `master-storyboard.jsx` or anything under `loom/src/`,
 run `npm run build` and commit `dist/`. CI rebuilds it and fails on any difference, and
-`python tools/ci_local.py` runs the same check locally.
+`python dev/tools/ci_local.py` runs the same check locally.
 
 ---
 

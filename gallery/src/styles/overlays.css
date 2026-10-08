@@ -15,7 +15,7 @@
    of these overlays open FROM inside it (Publish via its chip, Upscale from Details) — so the
    whole overlay band must CLEAR 400 or it paints invisibly behind the picture (the walk caught
    Publish "doing nothing"; Similar and Upscale had the same trap).
-   Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
+   Relations, guarded by dev/tests/test_z_ladder.py — change one number, keep the ORDER:
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .mgss 414/415
      < .rcp-scrim/.rcp-host (and the phone's .rcp-m) 416/417 < the collections manager .mgcu-scrim/.mgcu-mgr 418/419
      < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < the curation undo toast .mgcu-toast 427
