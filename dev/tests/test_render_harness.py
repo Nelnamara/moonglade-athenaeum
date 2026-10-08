@@ -3886,45 +3886,67 @@ def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
 
 
 _BANNER_EXPAND_JS = """
-() => new Promise((resolve) => {
+() => {
   /* Sample the expand while it is RUNNING. Everything this measures is mid-transition, so
      nothing here may wait for it to settle: the banner's box, the mark's box, and whether
      a point inside the mark that lies BELOW the banner's own bottom edge still belongs to
      the mark. elementFromPoint is the honest test of a clip -- a clipped element keeps its
-     layout rect, so a rect alone can never see one. */
+     layout rect, so a rect alone can never see one.
+
+     ARMED BEFORE THE CLICK, and started by the expand's own commit. t=0 used to be the moment
+     this script reached the page, one round trip AFTER the click -- so on a loaded machine
+     (the xdist run, 2026-10-08) the expand was already ~40 ms into a smooth climb and its
+     "first frame" read 81.9px, failing the no-jump check on a banner that never jumped (a
+     40 ms wait between the click and this script reproduces the same numbers on a quiet
+     machine). A MutationObserver's callback runs as a microtask right after React commits
+     the class change that takes `slim` away, before the browser can paint a frame, so t=0 is
+     the expand's first state on every machine -- whether or not `expanding` arrived in the
+     same commit, which is the half of the fix frame 0 checks. The frames land in
+     window.__mgExpandFrames. */
   const bnr = document.querySelector(".mgx-bnr");
-  const mark = document.querySelector(".mgx-mark");
-  const band = document.querySelector(".mgx-bottom");
-  const frames = [];
-  const t0 = performance.now();
-  const sample = (again) => {
-    const b = bnr.getBoundingClientRect();
-    const m = mark.getBoundingClientRect();
-    const r = band.getBoundingClientRect();
-    const x = Math.round(m.left + m.width / 2);
-    const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
-    const hit = document.elementFromPoint(x, y);
-    frames.push({
-      t: Math.round(performance.now() - t0),
-      expanding: bnr.classList.contains("expanding"),
-      overflow: getComputedStyle(bnr).overflowY,
-      bandOverflow: getComputedStyle(band).overflowY,
-      bandMaxH: getComputedStyle(band).maxHeight,
-      bnrH: Math.round(b.height * 10) / 10,
-      markH: Math.round(m.height * 10) / 10,
-      markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
-      // is the point inside the mark, but below the banner's edge, still the mark's?
-      belowEdge: m.bottom > b.bottom + 2,
-      hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
-      bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+  window.__mgExpandFrames = new Promise((resolve) => {
+    const frames = [];
+    let t0 = 0, mark = null, band = null;
+    const sample = (again) => {
+      const b = bnr.getBoundingClientRect();
+      const m = mark.getBoundingClientRect();
+      const r = band.getBoundingClientRect();
+      const x = Math.round(m.left + m.width / 2);
+      const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
+      const hit = document.elementFromPoint(x, y);
+      frames.push({
+        t: Math.round(performance.now() - t0),
+        expanding: bnr.classList.contains("expanding"),
+        overflow: getComputedStyle(bnr).overflowY,
+        bandOverflow: getComputedStyle(band).overflowY,
+        bandMaxH: getComputedStyle(band).maxHeight,
+        bnrH: Math.round(b.height * 10) / 10,
+        markH: Math.round(m.height * 10) / 10,
+        markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
+        // is the point inside the mark, but below the banner's edge, still the mark's?
+        belowEdge: m.bottom > b.bottom + 2,
+        hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
+        bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+      });
+      if (!again) return;
+      if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
+      else resolve(frames);
+    };
+    const start = new MutationObserver(() => {
+      if (bnr.classList.contains("slim")) return;
+      start.disconnect();
+      clearTimeout(never);
+      mark = document.querySelector(".mgx-mark");
+      band = document.querySelector(".mgx-bottom");
+      t0 = performance.now();
+      sample(false);          // t=0, the commit itself, before a frame: where the expand starts
+      requestAnimationFrame(() => sample(true));
     });
-    if (!again) return;
-    if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
-    else resolve(frames);
-  };
-  sample(false);            // t=0, before a frame has been yielded: the pin at its tightest
-  requestAnimationFrame(() => sample(true));
-})
+    start.observe(bnr, { attributes: true, attributeFilter: ["class"] });
+    // An expand that never leaves `slim` resolves empty, and the test says the pin was never seen.
+    const never = setTimeout(() => { start.disconnect(); resolve(frames); }, 3000);
+  });
+}
 """
 
 
@@ -3956,9 +3978,9 @@ def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged
     page.wait_for_selector(".mgx-bnr.slim")
     page.wait_for_timeout(700)                        # let the collapse finish entirely
 
-    page.evaluate("() => { window.__mgFrames = null; }")
+    page.evaluate(_BANNER_EXPAND_JS)                  # armed: it starts at the expand's commit
     page.locator('.mgx-sqbtn[title="Expand the banner to its hero height"]').click()
-    frames = page.evaluate(_BANNER_EXPAND_JS)
+    frames = page.evaluate("() => window.__mgExpandFrames")
 
     pinned = [f for f in frames if f["expanding"]]
     assert len(pinned) >= 5, (
@@ -3996,10 +4018,11 @@ def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged
             [f["t"] for f in spilling]))
 
     # 5. and the expand itself is still ONE motion: it starts at the slim row, not at
-    #    content height, which is the fix this pin exists for.
-    assert pinned[0]["bnrH"] <= 80, (
-        "the expand jumped to content height in its first frame again: "
-        "{}".format([(f["t"], f["bnrH"]) for f in pinned[:4]]))
+    #    content height, which is the fix this pin exists for. Frame 0 is the commit that took
+    #    `slim` away, so this also fails a pin that arrives a commit late (Banner.jsx's note).
+    assert frames[0]["expanding"] and frames[0]["bnrH"] <= 80, (
+        "the expand jumped to content height in its first frame again (t, pinned, height): "
+        "{}".format([(f["t"], f["expanding"], f["bnrH"]) for f in frames[:4]]))
     assert max(f["bnrH"] for f in frames) > 200, "the banner never reached its hero height"
 
 
