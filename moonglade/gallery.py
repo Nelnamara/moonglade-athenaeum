@@ -16334,9 +16334,14 @@ def create_app(out_dir: Path):
         current folder to whoever can already see the Panel, and it is the same host path
         /panel already withholds from non-local callers, so it is withheld here too.
 
-        Setting this NEVER MOVES ANYTHING. It points the app at a different folder on the
-        next start; the old folder is left exactly as it is. That is the whole contract, and
-        it is why there is no "migrate" option here to get wrong.
+        Setting this moves nothing by itself, and the old folder is left exactly as it is: it
+        points the app at a different folder on the next start, and there is no "migrate"
+        option here to get wrong. That next launcher or server start does tidy the new folder
+        when it holds an older Moonglade's layout (moonglade.migrate): its records come into
+        its _moonglade folder -- only what is Moonglade's by its content; a folder of someone's
+        own that merely shares an old name (logs, loom, branding) is left alone. A folder
+        that is the program's own, or holds a Moonglade program, is refused here
+        (moonglade.migrate.library_refusal), since every start would refuse it too.
         """
         from moonglade import backup as _core
         if request.method == "GET":
@@ -16371,6 +16376,11 @@ def create_app(out_dir: Path):
             return jsonify({"error": "That path isn't usable: {}".format(e)[:160]}), 200
         if target.exists() and not target.is_dir():
             return jsonify({"error": "That path is a file, not a folder."}), 200
+        from moonglade import migrate as _migrate
+        refused = _migrate.library_refusal(target)
+        if refused:
+            return jsonify({"error": "That folder can't be a library: {}. Choose a folder of "
+                                     "its own.".format(refused)}), 200
         if not target.exists():
             if not body.get("create"):
                 return jsonify({"needs_create": True, "path": str(target),

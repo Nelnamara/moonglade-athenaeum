@@ -117,6 +117,27 @@ def test_a_file_is_refused_and_nothing_is_written(tmp_path):
     assert d.get("error")
 
 
+def test_the_program_s_own_folder_is_refused(tmp_path):
+    """#11: a library set to the program's own folder (typing "." would do it) would have its
+    Loom code taken for the Loom's data at the next start. The program's folder, and any
+    folder holding a Moonglade program, is refused, and nothing is written."""
+    from moonglade import migrate
+    cli = _authed_client(tmp_path, [_row(media_id="1", filename="a.png",
+                                         created_at="2025-01-01T00:00:00")])
+    install = migrate.old_app_root()
+    install.mkdir(parents=True, exist_ok=True)
+    d = cli.post("/api/library-path", json={"path": str(install)}).get_json()
+    assert "can't be a library" in (d.get("error") or "")
+    assert "program folder" in d["error"]
+    for marker in ("Moonglade Launcher.pyw", "moonglade/__init__.py", "local/settings.json"):
+        prog = tmp_path / ("another-install-" + marker.split("/")[0].replace(" ", "-"))
+        (prog / marker).parent.mkdir(parents=True, exist_ok=True)
+        (prog / marker).write_text("", encoding="utf-8")
+        d = cli.post("/api/library-path", json={"path": str(prog)}).get_json()
+        assert "can't be a library" in (d.get("error") or ""), marker
+    assert settings.library_dir() == "", "a refused folder is never written"
+
+
 def test_the_folder_setting_never_offers_to_move_anything():
     """The one hard promise: changing this points the app somewhere else and leaves the old
     folder untouched. There is deliberately no migrate/copy option to get wrong.
