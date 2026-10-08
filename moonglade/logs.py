@@ -59,27 +59,33 @@ _prev_excepthook = None
 _prev_threading_excepthook = None
 
 
-def setup_logging(verbose=False):
+def setup_logging(verbose=False, stream=None):
     """Idempotent -- safe to call more than once (tests, a CLI command that
     internally drives another). Only the first call attaches handlers; later
-    calls just adjust the verbosity level.
+    calls just adjust the verbosity level (and the console stream, when one is named).
 
     The file is this install's (local/logs/, git-ignored with the rest of local/), never a
     library's: the log describes this machine's server and command line, and a second library
     must not get a second log. Every entry point calls this after moonglade.setup.prepare(),
     so the move has already brought an older version's logs into that folder.
+
+    `stream` is where the console mirror writes: sys.stdout unless named. The MCP server names
+    sys.stderr -- its stdout is the JSON-RPC channel to Claude, and one log line there (a
+    warning, a crash's traceback) breaks the client's stream.
     """
     global _configured, _file_handler, _console_handler
     app_logger = logging.getLogger(LOGGER_NAME)
 
     if _configured:
         _console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
+        if stream is not None and _console_handler.stream is not stream:
+            _console_handler.setStream(stream)
         return app_logger
 
     file_handler = _file_handler_for()
     fmt = file_handler.formatter
 
-    _console_handler = logging.StreamHandler(sys.stdout)
+    _console_handler = logging.StreamHandler(sys.stdout if stream is None else stream)
     _console_handler.setFormatter(fmt)
     _console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
 

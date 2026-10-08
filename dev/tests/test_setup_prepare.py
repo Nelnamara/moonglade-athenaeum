@@ -319,6 +319,34 @@ def test_the_mcp_server_prepares_and_binds_the_settings_library(r, monkeypatch):
     assert m.main() == 0 and m.OUT == other, "MOONGLADE_OUT names one for this server alone"
 
 
+def test_the_mcp_server_never_logs_to_stdout(r, monkeypatch):
+    """#13: the MCP server's stdout is its JSON-RPC channel to Claude. Its logging must have no
+    handler on stdout -- a warning (the move's own, the catalog's 'migration deferred', a
+    thread's crash) would land in the client's stream as a line that isn't JSON."""
+    pytest.importorskip("fastmcp")
+    import io
+    import logging
+    from moonglade import mcp_server as m
+    write_config(r)
+    settings.set_values(library_dir=str(r.lib))
+    write(r.app / "_container_cache" / "marks" / "x.ico", b"ICO")   # a move with lines to log
+    channel = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", channel)
+    monkeypatch.setattr(m.mcp, "run", lambda transport=None: None)
+    monkeypatch.delenv("MOONGLADE_OUT", raising=False)
+    monkeypatch.setattr(m, "OUT", None)
+    monkeypatch.setattr(m, "DB", None)
+    mlog._reset_for_tests()
+    assert m.main() == 0
+    on_stdout = [h for h in logging.getLogger().handlers
+                 if isinstance(h, logging.StreamHandler)
+                 and getattr(h, "stream", None) in (channel, sys.__stdout__)]
+    assert on_stdout == [], "a root-logger handler writes to the MCP's stdout"
+    logging.getLogger("moonglade.gallery").warning("migration deferred: locked")
+    logging.getLogger("some.library").error("a third-party error")
+    assert channel.getvalue() == ""
+
+
 def test_the_mcp_server_never_moves_another_install_s_library(r, monkeypatch, capsys):
     """X1: C:'s Claude tools registered with MOONGLADE_OUT on D:'s live 3.17 library. The MCP
     server must not move D:'s records (its spend guard among them) out from under it."""

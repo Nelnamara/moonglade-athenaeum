@@ -11,6 +11,8 @@ moonglade.setup.prepare("mcp") first, like every other entry point: an install s
 older layout has its settings brought across, but the MCP server never moves a library's
 files. A library still in an older Moonglade's layout (or one an older Moonglade is still
 writing) stops the server with a plain sentence: open it once with its own install's launcher.
+Its log lines go to the app's log file and to stderr, never stdout: stdout is the JSON-RPC
+channel, and a stray line there breaks Claude's side of it.
 
 Register in Claude Code (PYTHONPATH names the app's folder, so `-m` finds the package
 wherever the client starts the server; -P, on Python 3.11 and later, keeps the client's own
@@ -343,7 +345,8 @@ def main():
     except moonglade_setup.MoveStopped as e:
         print(str(e), file=sys.stderr)
         return 3
-    moonglade_logging.setup_logging()
+    # Never stdout: it is the JSON-RPC channel, and a log line there breaks Claude's stream.
+    moonglade_logging.setup_logging(stream=sys.stderr)
     prepared.log()
     bind_library(prepared.library)
     mcp.run(transport="stdio")
