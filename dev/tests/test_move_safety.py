@@ -684,8 +684,12 @@ def test_a_live_holder_is_never_taken_over_after_the_clock_steps_forward(tmp_pat
     the boot time says."""
     import subprocess
     import time
+    # Every standard handle is the child's own: inheriting pytest's captured stdout/stderr made
+    # Popen fail now and then with WinError 6 (it could not duplicate a handle that was no
+    # longer valid), which failed this test for a reason that had nothing to do with the lock.
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
-                             stdin=subprocess.DEVNULL)
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
     try:
         if migrate._process_started(child.pid) is None:
             pytest.skip("this system cannot say when a process started")
