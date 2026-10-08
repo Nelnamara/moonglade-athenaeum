@@ -297,3 +297,183 @@ def test_a_junctioned_reports_folder_stops_and_nothing_moves_through_it(r):
     assert "reports is a link" in str(e.value) and "can't move as one link" in str(e.value)
     assert _tree(target) == before
     assert _all_records_still_at_the_top(r)
+
+
+# ---- an older install holding its log through a linked logs\ (round 2, #4) -----------------------
+
+def _hold_open(path):
+    """Another process holding `path` open the way 3.19's log handler does while it serves."""
+    import subprocess
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import logging, sys, time\n"
+         "h = logging.FileHandler(sys.argv[1], encoding='utf-8')\n"
+         "h.emit(logging.makeLogRecord({'msg': 'serving'}))\n"
+         "print('ready', flush=True)\n"
+         "time.sleep(60)\n", str(path)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    assert holder.stdout.readline().strip() == "ready"
+    return holder
+
+
+def test_an_idle_older_install_holding_its_log_through_a_junctioned_logs_folder_stops(r):
+    """A logs\\ that is a junction is left where it is, so no log move is planned; the probe
+    still looks at the moonglade.log files inside it. With an idle older install holding its
+    log, every start stops before any record moves (its spend guard among them)."""
+    write_config(r)
+    library_records(r.lib)
+    logs = _elsewhere(r, "logs")
+    write(logs / "moonglade.log", "3.19's log\n")
+    _junction(r.lib / "logs", logs)
+    holder = _hold_open(logs / "moonglade.log")
+    try:
+        for _ in range(2):
+            with pytest.raises(msetup.MoveStopped) as e:
+                start(r)
+            assert str(e.value) == migrate.OLDER_RUNNING_WORDS % (
+                r.lib / "logs" / "moonglade.log", r.lib)
+            assert _all_records_still_at_the_top(r)
+            assert (r.lib / "train_guard.json").is_file()
+    finally:
+        holder.kill()
+        holder.wait()
+    start(r)                                      # closed: the move goes ahead
+    assert (r.lib / "_moonglade" / "records" / "train_guard.json").is_file()
+    assert migrate._is_link(r.lib / "logs"), "the linked logs\\ itself is still left"
+
+
+def test_a_linked_moonglade_log_is_probed_through_what_it_points_at(r, monkeypatch):
+    """A moonglade.log that is itself a link is never moved: it is probed by the file it
+    points at, so a holder there still stops the start."""
+    logs = r.lib / "logs"
+    write(logs / "other.txt", "x")
+    real_log = write(_elsewhere(r, "logs") / "moonglade.log", "3.19's log\n")
+    plan = migrate._Plan()
+    plan.log_links.append(logs / "moonglade.log")
+    monkeypatch.setattr(migrate, "_is_link",
+                        lambda p: os.path.normcase(str(p)) ==
+                        os.path.normcase(str(logs / "moonglade.log")))
+    monkeypatch.setattr(migrate, "_link_file", lambda p: real_log)
+    probed = []
+    monkeypatch.setattr(migrate, "_held_open", lambda p: probed.append(str(p)) or True)
+    assert migrate._old_log_in_use(plan) == logs / "moonglade.log"
+    assert probed == [str(real_log)]
+
+
+# ---- a relative link whose target the same plan moves (round 2, #9) ------------------------------
+
+def _pretend_relative(monkeypatch, link, text):
+    """The junction `link` reports `text` as a relative target (a real relative symbolic link
+    needs a privilege to make on Windows; test_move_symlinks.py makes real ones where it can)."""
+    monkeypatch.setattr(migrate, "_symlink_text",
+                        lambda p: text if os.path.normcase(str(p)) ==
+                        os.path.normcase(str(link)) else None)
+
+
+def test_a_relative_link_to_a_sibling_the_loom_also_moves_keeps_its_text(r, monkeypatch):
+    """loom\\exports\\latest -> 2026-10: both move into _moonglade\\loom\\exports with the Loom's
+    inner layout unchanged, so the link's text already points at the right place from its new
+    home. It is renamed as it is -- never rewritten to the old place the move empties -- and
+    on Windows it no longer stops the start."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, {"b": 1})
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    link = _junction(r.lib / "loom" / "exports" / "latest",
+                     r.lib / "loom" / "exports" / "2026-10")
+    _pretend_relative(monkeypatch, link, "2026-10")
+    done = start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert (new / "2026-10" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert migrate._is_link(new / "latest"), "the link moved as a link"
+    assert not os.path.lexists(r.lib / "loom")
+    said = " ".join(line for _lvl, line in done.report.all_lines())
+    assert "Moved the link loom/exports/latest to _moonglade/loom/exports/latest" in said
+    assert "its target written as" not in said
+
+
+def test_a_relative_link_to_a_folder_the_move_empties_stops_before_anything_moves(
+        r, monkeypatch):
+    """A relative link into a folder whose files go one by one to other homes (a login store)
+    can't be pointed at its new place: it stops the start, before anything moves, and says
+    why."""
+    _a_library(r)
+    write(r.lib / "account_prefs" / (KEY_NEL + ".json"), {"guide": "done"})
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, {"b": 1})
+    link = _junction(r.lib / "loom" / "exports" / "prefs", r.lib / "account_prefs")
+    _pretend_relative(monkeypatch, link, os.path.join("..", "..", "account_prefs"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    text = str(e.value)
+    assert "prefs is a link" in text and "which the move empties" in text
+    assert (r.lib / "jobs.jsonl").is_file() and (r.lib / "loom" / "kv").is_dir()
+
+
+# ---- the install half checks its links before the settings merge (round 2, #10) ----------------
+
+def test_a_linked_mirror_sign_in_whose_home_is_taken_stops_before_the_settings_merge(r):
+    """A link in the install half that can't move as a link stops the start before step 1:
+    serve.txt and branding.json are still there, untouched, for the next start."""
+    write_config(r)
+    write(r.app / "serve.txt", "--port 5757\n")
+    write(r.app / "branding.json", {"mark": "mark_2"})
+    write(r.local / "mirror_session.json", {"jwt": "already here"})
+    _junction(r.app / "mirror_session.json", _elsewhere(r, "session"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        msetup.prepare("cli")
+    assert "mirror_session.json is a link" in str(e.value) and "already taken" in str(e.value)
+    assert (r.app / "serve.txt").read_text() == "--port 5757\n"
+    assert (r.app / "branding.json").is_file()
+    assert migrate._is_link(r.app / "mirror_session.json")
+
+
+def test_a_linked_launcher_log_is_left_where_it_is_and_never_stops_a_start(r):
+    write_config(r)
+    write(r.app / "serve.txt", "--port 5757\n")
+    write(r.local / "logs" / "serve.log", "the new log\n")
+    target = _elsewhere(r, "serve-log")
+    _junction(r.app / "serve.log", target)
+    msetup.prepare("cli")
+    assert not (r.app / "serve.txt").exists(), "the settings merge ran"
+    assert migrate._is_link(r.app / "serve.log") and target.is_dir()
+    assert msetup.prepare("cli").report.worked["install"] is False, "not work at every start"
+
+
+# ---- links the plan used to miss (round 2, #11) --------------------------------------------------
+
+def test_a_linked_record_sharing_its_home_with_another_copy_stops_before_anything_moves(r):
+    """3.20's copy-first _moonglade\\jobs.jsonl and a linked <library>\\jobs.jsonl both go to
+    one home: the link could only arrive after the other took it, so the start stops first."""
+    write_config(r)
+    library_records(r.lib)
+    (r.lib / "jobs.jsonl").unlink()
+    write(r.lib / "_moonglade" / "jobs.jsonl", '{"id": "copy-first"}\n')
+    _junction(r.lib / "jobs.jsonl", _elsewhere(r, "jobs"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "jobs.jsonl is a link" in str(e.value) and "goes to that place too" in str(e.value)
+    assert (r.lib / "_moonglade" / "jobs.jsonl").is_file(), "the other copy didn't move either"
+    assert (r.lib / "achievements.json").is_file()
+
+
+def test_a_dead_branding_link_on_another_drive_from_the_safety_copy_is_removed_in_place(
+        r, monkeypatch):
+    """A link in the library's dead branding\\ is set aside by renaming it beside the safety
+    copy; where that is on another drive it can't be renamed there, so the link entry alone is
+    removed where it is -- what it points at is never touched -- and the start goes on."""
+    _a_library(r)
+    art = _elsewhere(r, "art")
+    write(art / "marks" / "mark_2.png", b"PNG")
+    write(r.lib / "branding" / "logo.png", b"LOGO")
+    link = _junction(r.lib / "branding" / "marks", art / "marks")
+    real = migrate._same_device
+    monkeypatch.setattr(migrate, "_same_device",
+                        lambda src, dest: False if os.path.normcase(str(src)) ==
+                        os.path.normcase(str(link)) else real(src, dest))
+    done = start(r)
+    assert not os.path.lexists(r.lib / "branding")
+    parked = r.lib / "_moonglade" / ".snapshot" / "parked" / "branding"
+    assert not os.path.lexists(parked / "marks")
+    assert (parked / "logo.png").read_bytes() == b"LOGO"
+    assert (art / "marks" / "mark_2.png").read_bytes() == b"PNG"
+    said = " ".join(line for _lvl, line in done.report.all_lines())
+    assert "Removed the link branding/marks" in said

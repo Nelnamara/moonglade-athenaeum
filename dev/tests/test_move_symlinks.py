@@ -182,3 +182,64 @@ def test_a_banner_render_that_is_a_link_is_left_where_it_is(r):
     assert (r.lib / "_moonglade" / "records" / "jobs.jsonl").is_file(), "the rest moved"
     said = " ".join(line for _lvl, line in done.report.all_lines())
     assert "_banners" in said and "Left" in said
+
+
+# ---- a remade link cut short: only ever the link it journalled is removed (round 2, #8) ---------
+
+def _remade_and_cut_short(tmp_path, monkeypatch, src_text):
+    """A _Half whose journal holds a link made again at its new home, its old entry not yet
+    removed; the old entry now reads as `src_text` (None: not a symbolic link at all)."""
+    lib = tmp_path / "lib"
+    src = write(lib / "loom", "a real file an older install wrote here since")
+    dest = write(lib / "_moonglade" / "loom", "stands in for the new link")
+    half = migrate._Half("library", lib / "_moonglade", migrate._library_roots(lib),
+                         migrate.Report())
+    key = half.rel(dest)
+    half.journal.items[key] = {"src": half.rel(src), "state": "renaming", "how": "link",
+                               "target": os.path.join("..", "..", "LoomData"),
+                               "was": os.path.join("..", "LoomData")}
+    texts = {os.path.normcase(str(dest)): half.journal.items[key]["target"],
+             os.path.normcase(str(src)): src_text}
+    monkeypatch.setattr(migrate, "_symlink_text", lambda p: texts.get(os.path.normcase(str(p))))
+    removed = []
+    monkeypatch.setattr(migrate, "_unlink_link", lambda p: removed.append(os.path.normcase(str(p))))
+    return half, key, src, removed
+
+
+def test_a_real_file_at_the_old_place_of_a_remade_link_is_never_removed(tmp_path, monkeypatch):
+    half, key, src, removed = _remade_and_cut_short(tmp_path, monkeypatch, None)
+    assert half.settle_renames() is False
+    assert removed == [] and src.is_file()
+    assert half.journal.items[key]["state"] == "renaming", "left under way"
+
+
+def test_a_link_at_the_old_place_with_other_text_is_never_removed(tmp_path, monkeypatch):
+    half, key, _src, removed = _remade_and_cut_short(tmp_path, monkeypatch, "somewhere-else")
+    assert half.settle_renames() is False
+    assert removed == [] and half.journal.items[key]["state"] == "renaming"
+
+
+def test_the_old_link_it_journalled_is_removed_and_the_entry_made(tmp_path, monkeypatch):
+    half, key, src, removed = _remade_and_cut_short(tmp_path, monkeypatch,
+                                                    os.path.join("..", "LoomData"))
+    assert half.settle_renames() is True
+    assert removed == [os.path.normcase(str(src))] and half.journal.items[key]["state"] == "made"
+
+
+# ---- a relative link whose target the plan moves too (round 2, #9) -------------------------------
+
+@posix
+def test_a_relative_link_to_a_folder_the_loom_also_moves_keeps_its_text(r):
+    """loom/exports/latest -> 2026-10: both move with the Loom's inner layout unchanged, so the
+    text already points at the right place from the new home. Rewriting it for where the
+    target sits now pointed it at the old place, which the move empties."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink("2026-10", str(r.lib / "loom" / "exports" / "latest"))
+    start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert os.readlink(str(new / "latest")) == "2026-10"
+    assert _same_place(new / "latest", new / "2026-10")
+    assert (new / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert not os.path.lexists(str(r.lib / "loom"))

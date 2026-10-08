@@ -783,6 +783,114 @@ def _retarget(src, dest):
                      os.path.realpath(Path(dest).parent))
 
 
+_UNPLANNED = object()
+
+
+def _real_entry(p):
+    """`p` with the folders above it resolved (links followed), the entry itself as it is."""
+    p = Path(p)
+    return os.path.normpath(os.path.join(os.path.realpath(p.parent), p.name))
+
+
+def _under_path(p, root):
+    """`p` relative to `root` (both plain path strings), or None when it isn't under it."""
+    a, b = os.path.normcase(p), os.path.normcase(root)
+    if a == b:
+        return ""
+    if a.startswith(b.rstrip("\\/") + os.sep):
+        return p[len(root.rstrip("\\/")) + 1:]
+    return None
+
+
+def _through_the_plan(aim, homes, removed):
+    """Where the place `aim` will be once the plan has moved (a full path), None when the plan
+    leaves it where it is, or False when the move empties it and it has no one new place.
+    `homes` maps every planned source (by _real_entry, normcased) to its new home; `removed`
+    holds what the plan deletes, files and the folders it prunes once empty: only a folder at
+    or under one of those can be emptied (the library's own folder never is)."""
+    key = os.path.normcase(aim)
+    if key in homes:
+        return homes[key]
+    for src, dest in homes.items():             # inside a link the plan moves whole
+        rest = _under_path(key, src)
+        if rest and _is_link(src):
+            return os.path.join(dest, aim[len(aim) - len(rest):])
+    if not os.path.isdir(aim) or _is_link(aim):
+        return None
+    if not any(_under_path(aim, r) is not None for r in removed):
+        return None                              # a folder the move never removes stays
+    if not any(_under_path(h, aim) for h in homes):
+        return None                              # no planned source inside: never walked
+    files, links = _scan(aim)
+    inside = [(str(f), os.path.normcase(_real_entry(f))) for f in files + links]
+    if not inside or not all(k in homes or k in removed for _f, k in inside):
+        return None                              # it keeps something: it stays
+    places = {}
+    for f, k in inside:
+        dest = homes.get(k)
+        if dest is None:
+            continue                             # a transient the move deletes
+        rel = _under_path(f, aim)
+        if not rel or not os.path.normcase(dest).endswith(os.sep + os.path.normcase(rel)):
+            return False                         # its files go to homes of other names
+        place = dest[:len(dest) - len(rel) - 1]
+        places[os.path.normcase(place)] = place
+    if not places:
+        return None                              # only transients: nothing of it moves
+    if len(places) != 1:
+        return False                             # its files split between new homes
+    return next(iter(places.values()))
+
+
+def _plan_link_targets(moves, removals):
+    """For each relative symbolic link the plan moves: ({old path: the target it must hold
+    at its new home, or None when its text already points right from there}, {old path:
+    why it can't}). A target the same plan moves is followed to its new place (#9: the Loom's
+    exports\\latest -> 2026-10 keeps its text, its inner layout unchanged); one the move
+    empties with no one new place can't be pointed at, and stops the start."""
+    homes = {os.path.normcase(_real_entry(s)): _real_entry(d)
+             for s, d, _k, _v in moves if _movable(s)}
+    removed = {os.path.normcase(_real_entry(p)) for p in removals}
+    targets, why = {}, {}
+    for src, dest, kind, _v in moves:
+        if not (kind == "link" or _is_link(src)):
+            continue
+        text = _symlink_text(src)
+        if not text or os.path.isabs(text):
+            continue
+        aim = os.path.normpath(os.path.join(os.path.realpath(Path(src).parent), text))
+        new_dir = os.path.realpath(Path(dest).parent)
+        there = _through_the_plan(aim, homes, removed)
+        k = os.path.normcase(str(src))
+        if there is False:
+            why[k] = "it points at %s, which the move empties" % aim
+            continue
+        there = aim if there is None else there
+        if os.path.normcase(os.path.normpath(os.path.join(new_dir, text))) == \
+                os.path.normcase(there):
+            targets[k] = None                    # its text already points there
+            continue
+        try:
+            targets[k] = os.path.relpath(there, new_dir)
+        except ValueError:                       # another drive: no relative path reaches it
+            why[k] = "it points at %s, which no relative path reaches from there" % there
+    return targets, why
+
+
+def _link_stuck(src, dest, taken=True, link_target=_UNPLANNED):
+    """Why the link `src` can't move as a link to `dest` (_link_stop's arguments), or None:
+    its new home is taken (when `taken`), on another drive, or (on Windows) it points by a
+    path relative to where it sits that would point elsewhere from there."""
+    if taken and os.path.lexists(dest):
+        return (src, dest, "that place is already taken")
+    if not _same_device(src, dest):
+        return (src, dest, "its new home is on another drive")
+    target = _retarget(src, dest) if link_target is _UNPLANNED else link_target
+    if sys.platform == "win32" and target is not None:
+        return (src, dest, _RELATIVE_LINK_WHY % _symlink_text(src), _RELATIVE_LINK_ADVICE)
+    return None
+
+
 def _nearest_existing(p):
     p = Path(p)
     while not os.path.lexists(p) and p != p.parent:
@@ -1092,6 +1200,9 @@ class _Half:
         # The Loom's key->value folder in the new home (the library half only): its files are
         # merged by what the Loom stores in them (_loom_kv_merged).
         self.loom_kv = None
+        # The target each relative symbolic link the plan moves must hold at its new home
+        # (_plan_link_targets: None for one renamed as it is), by its old path.
+        self.link_targets = {}
 
     def rel(self, p):
         p = Path(p)
@@ -1127,9 +1238,13 @@ class _Half:
                     del self.journal.items[key]
                     changed = True
                 elif (entry.get("target") and os.path.lexists(src)
-                      and _symlink_text(dest) == entry["target"]):
+                      and _symlink_text(dest) == entry["target"]
+                      and _symlink_text(src) is not None
+                      and _symlink_text(src) == entry.get("was", _symlink_text(src))):
                     # Made again at its new home with its target rewritten, and cut short
-                    # before the old entry went: it goes now.
+                    # before the old entry went: it goes now -- only while it is still the
+                    # link it was (a real file an older install wrote there since is kept,
+                    # and the entry stays under way).
                     try:
                         _unlink_link(src)
                     except OSError:
@@ -2040,13 +2155,15 @@ def _bring_link(src, dest, half):
         raise _link_stop(src, dest, "that place is already taken")
     key = half.rel(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    target = _retarget(src, dest)
+    planned = half.link_targets.get(os.path.normcase(str(src)), _UNPLANNED)
+    target = _retarget(src, dest) if planned is _UNPLANNED else planned
     if target is not None and sys.platform == "win32":
         raise _link_stop(src, dest, _RELATIVE_LINK_WHY % _symlink_text(src),
                          _RELATIVE_LINK_ADVICE)
     entry = {"src": half.rel(src), "state": "renaming", "how": "link", "time": _now()}
     if target is not None:
         entry["target"] = target
+        entry["was"] = _symlink_text(src)        # what the old entry held (settle_renames)
     half.journal.items[key] = entry
     half.journal.save()
     try:
@@ -2688,8 +2805,12 @@ def _install_half(half, local, old, copyfirst, report):
                    old / _paths.MIRROR_SESSION_NAME]
     for src in mirror_srcs:
         moves.append((src, local / _paths.MIRROR_SESSION_NAME, "token"))
+    linked_logs = []
     for name in LAUNCHER_LOGS:
         for src in (local / name, old / name):
+            if _is_link(src):
+                linked_logs.append(src)          # left where it is: nothing reads an old log
+                continue
             moves.append((src, _paths.logs_dir() / name, "log"))
     # (An icon cache that is a junction or a link -- or sits in one -- is never walked: its
     # .ico files stay where the link points, and the leftover below removes the link alone.)
@@ -2732,8 +2853,16 @@ def _install_half(half, local, old, copyfirst, report):
         if not j.doc.get("finished"):
             j.finish()
         return
+    # A link that can't move as a link stops the start here, before the settings merge
+    # removes serve.txt and branding.json (the next start finds the state as it was).
+    stuck = _install_links_stuck(moves, old, local, same_folder)
+    if stuck:
+        raise _link_stop(*stuck[0])
     report.worked["install"] = True
     j.worked()
+    for p in linked_logs:
+        report.item("Left %s where it is: it is a link, and nothing reads an old log.",
+                    half.rel(p))
 
     # The safety snapshot: the small settings files about to go, and the config keys.
     members = []
@@ -2850,6 +2979,37 @@ def _install_half(half, local, old, copyfirst, report):
                 "local/logs/, shortcut icons in local/icons/.")
 
 
+def _install_links_stuck(moves, old, local, same_folder):
+    """The install half's links that can't move as links (_link_stuck), checked before
+    anything moves: the Mirror's sign-in, and the art pack and its marker when they would be
+    brought (a pack already in local\\ means the old one, link or not, is only removed; the
+    marker's new home is cleared before it comes)."""
+    stuck, seen = [], set()
+    for src, dest, kind in moves:
+        if kind != "token" or not _is_link(src) or _same(src, dest):
+            continue
+        k = os.path.normcase(os.path.abspath(src))
+        if k in seen:
+            continue
+        seen.add(k)
+        why = _link_stuck(src, dest)
+        if why:
+            stuck.append(why)
+    if not same_folder:
+        old_pack, new_pack = old / PACK_NAME, local / PACK_NAME
+        if old_pack.is_file() and not new_pack.is_file():
+            if _is_link(old_pack):
+                why = _link_stuck(old_pack, new_pack)
+                if why:
+                    stuck.append(why)
+            marker = old / PACK_MARKER
+            if _is_link(marker):
+                why = _link_stuck(marker, local / PACK_MARKER, taken=False)
+                if why:
+                    stuck.append(why)
+    return stuck
+
+
 # ---- the library half -------------------------------------------------------------------------
 def _library_roots(out):
     return [("", Path(out)), ("local/", _paths.local_dir())]
@@ -2885,6 +3045,11 @@ class _Plan:
         #                          move as a link (_link_stop's arguments)
         self.snap = []           # (path, name in the zip)
         self.ours = False        # the folder is a Moonglade library (_is_moonglade_library)
+        self.log_links = []      # a logs\ that is a link, or a moonglade.log* that is one: never
+        #                          moved, still probed for an older install (_old_log_in_use)
+        self.dead_unlink = []    # links in the dead branding\ that can't be set aside by a
+        #                          rename (another drive): removed where they are, as links
+        self.link_targets = {}   # {old path: the target a relative link holds at its new home}
 
 
 # The Loom's own entries in its folder (3.10-3.19's <library>\loom\): the boards (kv\, and the
@@ -3124,11 +3289,14 @@ def _plan_library(out, app, copyfirst, logins, half):
     for base, from_320 in ((app / "logs", True), (out / "logs", False)):
         if _is_link(base):
             plan.left.append(base)
+            plan.log_links.append(base)
             continue
         vouched_folder = not from_320 and copyfirst.unchanged("logs", base)
-        for p in _scan(base)[0]:
+        files, links = _scan(base)
+        for p in files:
             if p.parent == base and _APP_LOG_RE.match(p.name):
                 plan.moves.append((p, _paths.logs_dir() / p.name, "log", vouched_folder))
+        plan.log_links += [p for p in links if p.parent == base and _APP_LOG_RE.match(p.name)]
         if base.is_dir():
             plan.removals.append(base)                # pruned once empty; the rest is said
     # The Loom's own entries, into _moonglade\loom\. A loom\ that is a link (the Loom kept on
@@ -3191,6 +3359,12 @@ def _plan_library(out, app, copyfirst, logins, half):
             files, links = _scan(branding)
             plan.dead = files + links
             plan.removals.append(branding)
+            # A link is set aside by renaming it beside the safety copy; where that is on
+            # another drive it can't be, so the link entry alone is removed where it is (what
+            # it points at is never touched) -- decided now, never a stop after the records.
+            plan.dead_unlink = [
+                p for p in links if not _same_device(
+                    p, half.snapshot_dir / PARKED_DIRNAME / half.rel(p).replace(":", "_"))]
         else:
             plan.left.append(branding)
     # 3.20's bookkeeping.
@@ -3214,19 +3388,33 @@ def _plan_library(out, app, copyfirst, logins, half):
                 (c == "_banners" and _banners_linked(p)):
             plan.left.append(p)
     # A link that can't move as a link stops the start before anything moves: its new home is
-    # taken, or on another drive, or (on Windows) it points by a path relative to where it
-    # sits. Any source that is a link counts, whatever kind the plan gave it (a record, a
-    # decision or a curation file can be one).
+    # taken, or another planned source goes there too (it could only arrive after that one
+    # took it), or it is on another drive, or it points by a relative path the move can't
+    # keep right (the target it would need is worked out through the plan itself, #9), or on
+    # Windows a relative path that would have to change. Any source that is a link counts,
+    # whatever kind the plan gave it (a record, a decision or a curation file can be one).
+    plan.link_targets, cant = _plan_link_targets(plan.moves, plan.removals)
+    going = {}
+    for src, dest, _k, vouched in plan.moves:
+        # (A file 3.20 already copied, unchanged since, is only removed once its home is
+        # there: it never lands on a link.)
+        if _movable(src) and not (vouched and not _is_link(src)):
+            going.setdefault(os.path.normcase(str(dest)), []).append(src)
     for src, dest, kind, _v in plan.moves:
         if not (kind == "link" or _is_link(src)) or _same(src, dest):
             continue
-        if os.path.lexists(dest):
-            plan.stuck.append((src, dest, "that place is already taken"))
-        elif not _same_device(src, dest):
-            plan.stuck.append((src, dest, "its new home is on another drive"))
-        elif sys.platform == "win32" and _retarget(src, dest) is not None:
-            plan.stuck.append((src, dest, _RELATIVE_LINK_WHY % _symlink_text(src),
-                               _RELATIVE_LINK_ADVICE))
+        k = os.path.normcase(str(src))
+        others = [s for s in going.get(os.path.normcase(str(dest)), []) if s is not src]
+        stuck = _link_stuck(src, dest, link_target=plan.link_targets.get(k, _UNPLANNED))
+        if stuck is not None and stuck[2] == "that place is already taken":
+            plan.stuck.append(stuck)
+        elif others:
+            plan.stuck.append((src, dest, "another copy of it (%s) goes to that place too"
+                               % others[0]))
+        elif k in cant:
+            plan.stuck.append((src, dest, cant[k], _RELATIVE_LINK_ADVICE))
+        elif stuck is not None:
+            plan.stuck.append(stuck)
     return plan
 
 
@@ -3460,17 +3648,48 @@ def _same_file(a, b):
         return False
 
 
+def _link_file(p):
+    """The file the link `p` points at, by its full path, or None (not a file, or unreadable)."""
+    try:
+        real = Path(os.path.realpath(p))
+    except (OSError, ValueError):
+        return None
+    return real if real.is_file() and not _is_link(real) else None
+
+
+def _old_logs(plan):
+    """[(the file to probe, the path to name)]: every old moonglade.log* the plan moves, and
+    those it leaves because they sit in a linked logs\\ (probed through the link) or are
+    links themselves (probed by the file each points at)."""
+    out = []
+    for src, dest, kind, _v in plan.moves:
+        if kind == "log" and not _is_link(src) and Path(src).is_file() \
+                and not _same_file(src, dest):
+            out.append((Path(src), Path(src)))
+    for p in plan.log_links:
+        p = Path(p)
+        if _APP_LOG_RE.match(p.name):            # a moonglade.log that is a link
+            entries = [p]
+        else:                                     # a logs\ that is a link
+            entries = [p / n for n in sorted(_child_names(p)) if _APP_LOG_RE.match(n)]
+        for e in entries:
+            real = _link_file(e) if _is_link(e) else (e if e.is_file() else None)
+            if real is not None and not _same_file(real, _paths.logs_dir() / e.name):
+                out.append((real, e))
+    return out
+
+
 def _old_log_in_use(plan):
     """The first old-layout log another program still holds open (_held_open), or None. A
     server before 3.20 kept its log in the library's logs\\ open while it ran, on this PC or
-    another Windows PC, so a held old log means one may still be serving the library. A log
-    that is the same file as its new home (a library inside this install's own local\\) is
-    this install's own, and is skipped."""
-    for src, dest, kind, _v in plan.moves:
-        if kind != "log" or _is_link(src) or not Path(src).is_file() or _same_file(src, dest):
-            continue
-        if _held_open(src):
-            return Path(src)
+    another Windows PC, so a held old log means one may still be serving the library -- in a
+    linked logs\\ too, and through a log that is a link (renaming a file onto itself, through
+    the link or at the file it points at, changes nothing). A log that is the same file as its
+    new home (a library inside this install's own local\\) is this install's own, and is
+    skipped."""
+    for probe, named in _old_logs(plan):
+        if _held_open(probe):
+            return named
     return None
 
 
@@ -3631,6 +3850,7 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # The library's move had finished before this run: an old-layout copy now was written
     # since, and the new home always wins (A). Before that, the first move's rules hold.
     half.settled = bool(j.doc.get("finished"))
+    half.link_targets = plan.link_targets
     report.worked["library"] = True
     j.worked()
     app.mkdir(parents=True, exist_ok=True)
@@ -3656,6 +3876,12 @@ def _library_half(half, out, app, copyfirst, logins, report):
     if plan.dead:
         parked = [p for p in plan.dead if _movable(p)]
         for p in parked:
+            if p in plan.dead_unlink and _is_link(p):
+                _remove(p)
+                report.item("Removed the link %s: the safety copy is on another drive, so it "
+                            "couldn't be set aside there (what it points at was not touched).",
+                            half.rel(p))
+                continue
             _park(p, half, said=False)
         if parked:
             report.info("Set aside the library's old branding folder (%s) with the safety copy: "
