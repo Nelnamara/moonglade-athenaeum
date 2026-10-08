@@ -30,10 +30,17 @@ The rules:
     where the thing starts in this install's folder; a Claude registration that names the old
     file that way without saying it starts here is reported, never rewritten on a guess.
   * A Claude registration is rewritten only when it runs Python itself (or the old file by
-    its type). Its own Python is asked first (its version, and whether it has fastmcp): -P is
-    written only for 3.11 or later, and one that cannot run the tools is reported with the
-    command line to use, never written. "Fixed" means the file was re-read and holds the new
-    command; Claude then needs a restart to use it.
+    its type). Its own Python is asked first (its version, and whether it has fastmcp), with
+    only plain interpreter switches -- a registration carrying anything else before the old
+    file (-c code, say) is reported, never run: -P is written only for 3.11 or later, and one
+    that cannot run the tools is reported with the command line to use, never written.
+    "Fixed" means the file was re-read and holds the new command; Claude then needs a restart
+    to use it. Off Windows a "/"-rooted name is another folder's full path, never "unsure".
+  * Nothing here goes through a shell, and nothing carried over from a task, a shortcut or a
+    registration is ever read as a command: every program is run from an argument list, a
+    task's name is passed to schtasks only when it can't split, and the shortcut writer's
+    PowerShell script is fixed text that gets the shortcut's path and fields as environment
+    variables (_LNK_SCRIPT).
   * A Claude config can hold keys and tokens, so it never goes into the install's snapshot:
     a copy is kept beside it (as private as the file itself) and removed once the rewrite is
     read back. The file is re-read just before it is replaced, so a change Claude made
@@ -200,10 +207,14 @@ def _probe_python(argv):
     return {"version": (int(m.group(1)), int(m.group(2))), "fastmcp": m.group(3) == "1"}
 
 
-def _run(argv, timeout=60):
+def _run(argv, timeout=60, env=None):
+    """Run `argv` -- a list, never through a shell: each argument reaches the program as
+    itself. `env` adds variables for the child (the way a value is handed to PowerShell
+    without ever being part of its script)."""
     try:
         r = subprocess.run(argv, capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL,
-                           creationflags=_NO_WINDOW)
+                           creationflags=_NO_WINDOW,
+                           env=dict(os.environ, **env) if env else None)
     except (OSError, subprocess.SubprocessError) as e:
         return 1, b"", str(e)
     return r.returncode, r.stdout or b"", _decode(r.stderr or b"").strip()
@@ -590,6 +601,11 @@ def _why_windows_refused(text):
 
 def fix_task(item, install, m, snapshot):
     name = item.data["name"]
+    # The name goes to schtasks as one argument of a list, never through a shell; a name that
+    # carries a quote or a line break is not passed at all (it could split into two).
+    if any(c in name for c in '"\r\n\x00'):
+        return Result(item.label, False, "its name has characters the app won't pass to Task "
+                                         "Scheduler; edit the task by hand")
     rc, out, err = m.run(["schtasks", "/query", "/tn", name, "/xml"])
     if rc != 0:
         return Result(item.label, False, "Windows couldn't read it (" + (err or "no reason") + ")")
@@ -654,6 +670,18 @@ def _how_to_run(install):
             % install)
 
 
+# The interpreter options a registration may carry before the old file, which the fixer then
+# passes to that Python when it asks its version: the py launcher's version pick (-3, -3.12,
+# -3.12-64) and the plain switches that run nothing of their own.
+_PY_OPTION = re.compile(r"^-(?:\d+(?:\.\d+)?(?:-(?:32|64))?|[bBdEiIOPqsSuvx]|OO|bb|vv)$")
+
+
+def _odd_python_options(options):
+    """The options in `options` that aren't plain interpreter switches ([] when all are):
+    anything that could run code (-c, -m, a script) or that isn't text."""
+    return [str(o) for o in options if not isinstance(o, str) or not _PY_OPTION.match(o)]
+
+
 class _McpPlan:
     """What one mcpServers entry needs. `new` is the rewritten entry (None: nothing to write);
     `problem` says why an entry naming this install's old file is left as it is."""
@@ -662,11 +690,14 @@ class _McpPlan:
         self.new, self.problem = new, problem
 
 
-def _old_script_arg(args, install, cwd):
+def _old_script_arg(args, install, cwd, platform=None):
     """(index, "this" | "unsure") of the argument naming moonglade_mcp.py, or None. A full
     path counts only inside this install; a bare or .\\ name only when the registration says it
-    starts in this install (its cwd), and is otherwise "unsure": it would match every install."""
+    starts in this install (its cwd), and is otherwise "unsure": it would match every install.
+    Off Windows a name starting with "/" is a full path too (since Python 3.13 ntpath no
+    longer calls one absolute, which made another install's registration "unsure")."""
     target = ntpath.join(str(install), OLD_MCP)
+    posix = (platform or sys.platform) != "win32"
     for i, a in enumerate(args):
         if not isinstance(a, str):
             continue
@@ -676,7 +707,8 @@ def _old_script_arg(args, install, cwd):
         base = ntpath.basename(name.replace("/", "\\"))
         if base.lower() != OLD_MCP.lower():
             continue
-        if ntpath.isabs(name) or name.startswith(("\\\\", "//")):
+        if ntpath.isabs(name) or name.startswith(("\\\\", "//")) or \
+                (posix and name.startswith("/")):
             continue                                     # another folder's file
         if not cwd:
             return i, "unsure"
@@ -699,7 +731,7 @@ def rewrite_mcp_server(spec, install, python, platform, probe=None):
     if command and _same(command, target):
         interpreter, before, after = [python], [], list(args)
     else:
-        found = _old_script_arg(args, install, cwd)
+        found = _old_script_arg(args, install, cwd, platform)
         if found is None:
             return None
         i, whose = found
@@ -712,6 +744,14 @@ def rewrite_mcp_server(spec, install, python, platform, probe=None):
                 "it starts through %s, which the app won't rewrite on a guess; %s" % (
                     ntpath.basename(_clean(command)) or "another program", _how_to_run(install))))
         interpreter, before, after = [command], list(args[:i]), list(args[i + 1:])
+        odd = _odd_python_options(before)
+        if odd:
+            # Its Python is asked its version before anything is written (probe): only plain
+            # interpreter options go with it, so a registration can't have the fixer run code
+            # of its own (`-c ...`) at the press of Fix.
+            return _McpPlan(problem=(
+                "it starts Python with options the app won't run on a guess (%s); %s" % (
+                    " ".join(odd), _how_to_run(install))))
     version = None
     if probe is not None:
         info = probe(interpreter + before)
@@ -1123,19 +1163,34 @@ def fix_shortcut(item, install, m, snapshot, icons, provide_icon=None):
     return Result(item.label, True)
 
 
+# The shortcut fields the writer may set, and the environment variable each value travels in.
+_LNK_FIELDS = ("TargetPath", "Arguments", "WorkingDirectory", "IconLocation")
+_LNK_ENV = "MOONGLADE_LNK_"
+# The writer's whole script. It is the same text for every shortcut: the path and the values
+# reach it only as environment variables, never as part of the script, so nothing carried over
+# from a shortcut (its file name, its target, its arguments) is ever read as PowerShell.
+# (Quoting them into the script instead could be broken out of: PowerShell also ends a
+# single-quoted string at a typographic quote, U+2018 to U+201B.)
+_LNK_SCRIPT = (
+    "$ErrorActionPreference = 'Stop'; "
+    "$s = (New-Object -ComObject WScript.Shell).CreateShortcut([string]$env:%(e)sPATH); "
+    + "".join("if ($env:%%(e)sSET_%(f)s -eq '1') { $s.%(f)s = [string]$env:%%(e)s%(f)s }; "
+              % {"f": f} for f in _LNK_FIELDS)
+    + "$s.Save()") % {"e": _LNK_ENV}
+
+
 def _save_lnk_with_powershell(path, target, args, workdir, icon):
     """Rewrite the .lnk at `path` through the shell's own WScript.Shell, the way the app's
     shortcut button writes one (moonglade.gallery.make_launcher_shortcut). A field given as
-    None is left as the shortcut has it."""
-    def q(s):
-        return "'" + str(s).replace("'", "''") + "'"
-    ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); " % q(path)
-    for field, value in (("TargetPath", target), ("Arguments", args),
-                         ("WorkingDirectory", workdir), ("IconLocation", icon)):
+    None is left as the shortcut has it. The script is fixed (_LNK_SCRIPT): the path and the
+    values go to it as environment variables, so a crafted shortcut can't steer it."""
+    env = {_LNK_ENV + "PATH": str(path)}
+    for field, value in zip(_LNK_FIELDS, (target, args, workdir, icon)):
         if value is not None:
-            ps += "$s.%s = %s; " % (field, q(value))
-    ps += "$s.Save()"
-    rc, _out, err = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps])
+            env[_LNK_ENV + "SET_" + field] = "1"
+            env[_LNK_ENV + field] = str(value)
+    rc, _out, err = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                          _LNK_SCRIPT], env=env)
     if rc != 0:
         raise RuntimeError("Windows couldn't save it (%s)" % ((err or "PowerShell failed")[:160]))
 

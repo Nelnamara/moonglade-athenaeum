@@ -248,7 +248,9 @@ def test_the_app_made_shortcut_points_at_the_new_launcher(install):
 
 def test_a_send_to_shortcut_on_the_launcher_itself(install):
     rw = _rw(install, str(install / "Serve Gallery.pyw"))
-    assert rw.changed and rw.command == str(install / "Moonglade Launcher.pyw")
+    # A Windows path, built the way Windows builds one (a POSIX tmp path on CI is joined with
+    # a backslash, as a shortcut's target would be).
+    assert rw.changed and rw.command == ntpath.join(str(install), "Moonglade Launcher.pyw")
 
 
 def test_the_command_line_tool_becomes_the_code_folder(install):
@@ -260,7 +262,7 @@ def test_the_command_line_tool_becomes_the_code_folder(install):
 def test_a_py_file_run_by_its_type_gets_python_named(install):
     rw = _rw(install, str(install / "moonglade_backup.py"), "--update")
     assert rw.command == PY
-    assert rw.arguments == '"%s" --update' % (install / "moonglade")
+    assert rw.arguments == '"%s" --update' % ntpath.join(str(install), "moonglade")
 
 
 def test_inside_cmd_the_old_file_is_rewritten_in_place(tmp_path):
@@ -481,6 +483,70 @@ def test_another_installs_registration_is_left_alone(install, box):
     assert outside.find(install, m, kinds=("claude",)) == []
     assert outside.fix(None, install=install, m=m, snapshot=box.snapshot, icons=box.icons) == []
     assert box.claude_desktop.read_bytes() == before
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_off_windows_another_install_s_full_path_is_left_alone(install, box, platform):
+    """#21: since Python 3.13 ntpath no longer calls "/home/..." absolute, so another install's
+    registration was taken for this install's "unsure" one -- an item whose Fix could never
+    work, offered at every start. Off Windows a "/"-rooted name is a full path."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python3", "args": ["/home/someone/other-install/moonglade_mcp.py"]}}})
+    m = machine(box, platform=platform)
+    assert outside.find(install, m, kinds=("claude",)) == []
+    plan = outside.rewrite_mcp_server(
+        {"command": "python3", "args": ["/home/someone/other-install/moonglade_mcp.py"]},
+        install, PY, platform)
+    assert plan is None
+
+
+def test_a_registration_s_python_options_are_never_run_on_a_guess(install, box):
+    """E: the fixer asks the registration's own Python its version before it writes. Only
+    plain interpreter switches go with that question, so a registration carrying code of its
+    own (`-c ...`) is reported, never run, and never written."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": ["-c", "import os; os.remove('x')",
+                                      str(install / "moonglade_mcp.py")]}}})
+    before = box.claude_desktop.read_bytes()
+    probe = Probe(version=(3, 12))
+    m = machine(box, probe=probe)
+    [item] = outside.find(install, m, kinds=("claude",))
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed and "options the app won't run on a guess" in r.reason
+    assert probe.asked == [], "its Python was never started"
+    assert box.claude_desktop.read_bytes() == before
+
+
+def test_a_task_name_that_could_split_is_never_passed_to_schtasks(install, box):
+    """E: every schtasks call is a list (no shell); a name with a quote or a line break is not
+    passed at all."""
+    st = FakeSchtasks({})
+    m = machine(box, tasks=st)
+    item = outside.Item("task", 'evil" /ru SYSTEM "', "the scheduled task", {
+        "name": 'evil" /ru SYSTEM "'})
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed and "won't pass to Task Scheduler" in r.reason
+    assert st.calls == []
+
+
+def test_the_shortcut_writer_s_script_never_carries_a_value(monkeypatch, tmp_path):
+    """E: the shortcut's path and fields reach PowerShell as environment variables; the script
+    is the same text every time, so a crafted name or argument -- a quote, a typographic
+    quote (PowerShell ends a '...' string at those too), a `; command` -- is never code."""
+    seen = []
+    monkeypatch.setattr(outside, "_run", lambda argv, timeout=60, env=None:
+                        seen.append((list(argv), dict(env or {}))) or (0, b"", ""))
+    crafted = "x\u2019; Remove-Item -Recurse C:\\ ; '\" & calc"
+    outside._save_lnk_with_powershell(tmp_path / ("short\u2019cut'; calc.lnk"), crafted,
+                                      crafted, None, crafted + ",0")
+    [(argv, env)] = seen
+    assert argv[:4] == ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
+    assert argv[4] == outside._LNK_SCRIPT, "the script is fixed text"
+    assert "calc" not in " ".join(argv) and "\u2019" not in " ".join(argv)
+    assert env["MOONGLADE_LNK_PATH"] == str(tmp_path / ("short\u2019cut'; calc.lnk"))
+    assert env["MOONGLADE_LNK_TargetPath"] == crafted
+    assert env["MOONGLADE_LNK_Arguments"] == crafted
+    assert "MOONGLADE_LNK_SET_WorkingDirectory" not in env, "None leaves a field as it is"
 
 
 def test_the_registration_s_own_python_is_asked_with_its_own_options(install, box):
@@ -862,6 +928,23 @@ def test_windows_own_shortcut_writer_round_trips(install, box):
     assert now.args == '"%s\\Moonglade Launcher.pyw"' % install
     assert ntpath.normcase(now.icon) == ntpath.normcase(str(box.icons / "mark_4.ico"))
     assert sorted(p.name for p in box.desktop.iterdir()) == ["Moonglade Athenaeum.lnk"]
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not shutil.which("powershell"),
+                    reason="Windows' own shortcut writer")
+def test_a_crafted_shortcut_argument_is_saved_as_text_never_run(install, box, tmp_path):
+    """E, for real: arguments carried over from a shortcut that try to break out of the
+    writer's script (a quote, a typographic quote, `; New-Item ...`) are saved verbatim, and
+    nothing they name happens. Only this test's temp folder is written."""
+    marker = tmp_path / "ran.txt"
+    assert " " not in str(marker)                       # a bare path: no quote to double
+    crafted = '"%s\\Serve Gallery.pyw" x’; New-Item -ItemType File -Path %s; ‘' % (
+        install, marker)
+    lnk = box.desktop / "Crafted.lnk"
+    lnk.write_bytes(build_lnk(sys.executable, args="placeholder"))
+    outside._save_lnk_with_powershell(lnk, None, crafted, None, None)
+    assert not marker.exists(), "nothing in the argument ran"
+    assert outside.read_lnk(lnk).args == crafted
 
 
 # ---- words and the guard ----------------------------------------------------------------------
