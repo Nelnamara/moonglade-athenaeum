@@ -115,7 +115,7 @@ effect if they're in the file that loads every session.)*
   on how much — a full pixel source (Figma frame / Claude Design / locked mockup) for a real
   surface, a quick workshop for something small — but never build a visual change straight from
   prose. Verify against whatever that source was.
-- **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`:
+- **Treat and launch the dev server the way a plain user would** — through `Moonglade Launcher.pyw`:
   never `python -m moonglade.gallery` bare; use the launcher. Only the launcher sets supervised
   mode, and without it `/api/server/restart` 409s, silently removing the owner's Restart
   button. Machine-local flags live in the git-ignored `local/serve.txt` beside it (3.19 and
@@ -387,8 +387,8 @@ merge to master with `--no-ff`, tag releases.
 ## Quick command reference
 
 Run from the app's folder (the one holding `config.json`). Since 3.20 the code is the
-`moonglade/` package; the old `python moonglade_backup.py ...` form still works through a
-root stand-in until 3.21.
+`moonglade/` package; from any other folder, `python "<app folder>\moonglade" ...` runs the
+same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone.
 
 ```
 python -m moonglade --probe                           # connection sanity check
@@ -412,7 +412,7 @@ python -m moonglade --dedup                           # dry-run dedup plan (noth
 python -m moonglade --dedup --apply                   # quarantine redundant copies to _duplicates/
 python -m moonglade --dedup --apply --dedup-delete    # delete instead of quarantine
 python -m moonglade --verify-dupes                    # confirm _duplicates/ is safe to delete
-"Serve Gallery.pyw"                                   # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in local/serve.txt)
+"Moonglade Launcher.pyw"                              # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in local/serve.txt)
 python -m moonglade -v --update                       # verbose: per-page / per-image timing diagnostics
 python -m moonglade --watch                           # live event stream (WS push): watch tasks complete
 python -m moonglade --watch --watch-backup            # + auto-collect each finished gen as it completes

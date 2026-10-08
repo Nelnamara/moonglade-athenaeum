@@ -90,12 +90,9 @@ across the first time it starts:
 
 The pack, the Mirror's sign-in and the training spend guard were **moved**; the rest was
 **copied**, and the old copies are still in the old places. `local\MOVED.json` and
-`pixai_backup\_moonglade\MOVED.json` list what went where. **About** lists the old copies,
-which are safe to delete once you've checked this version works. A file another program held
-open is left where it is, still used there, and tried again at the next start; the log says so.
-The old icon cache, `_container_cache`, stays where it is and About never lists it: a Desktop
-shortcut made with **Put a shortcut on the Desktop** before 3.20 takes its icon from there. A
-shortcut you make now uses `local\cache`.
+`pixai_backup\_moonglade\MOVED.json` list what went where. The app removes its own old
+copies itself: it never asks you to delete one. A file another program held open is left where
+it is, still used there, and tried again at the next start; the log says so.
 
 **Going back to 3.19?** Move `moonglade.mgpack` and `moonglade.mgpack.version` from `local\`
 back beside the program, or 3.19 downloads the pack again. Move `local\mirror_session.json`
@@ -103,13 +100,12 @@ back too, or sign the Mirror in again, and `pixai_backup\_moonglade\train_guard.
 `pixai_backup\`, so a training run that may already have started is still guarded. Everything
 else 3.19 reads is still where it was. When you come back to 3.20, the pack, the Mirror's
 sign-in and the spend guard you moved back are read from there and moved into place again.
-Anything else you change while on 3.19 stays in the old places, and About stops calling
-those old copies safe to delete.
+Anything else you change while on 3.19 stays in the old places.
 
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you
 updated **by hand** with `git pull`, **restart the gallery server** so it loads the new code
-— Stop/Restart from the browser, or relaunch **`Serve Gallery.pyw`**. Either way, if a page
+— Stop/Restart from the browser, or relaunch **`Moonglade Launcher.pyw`**. Either way, if a page
 still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
 the service worker).
 
@@ -132,7 +128,7 @@ offline — nothing was attempted), **gold** means come back in a moment (someth
 running), and **red** means this install will keep refusing until something is changed. The
 window names the reason either way. The usual ones:
 
-- **The server wasn't started through `Serve Gallery.pyw`.** Only the launcher relaunches the
+- **The server wasn't started through `Moonglade Launcher.pyw`.** Only the launcher relaunches the
   app after an update — without it the server would simply stop.
 - **A Control Panel job is still running.** Let it finish or cancel it; changing the code
   under a running job is how you get half-old, half-new behavior.

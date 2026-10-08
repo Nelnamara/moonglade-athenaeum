@@ -108,7 +108,7 @@ def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
     """FAILS before 2026-09-07: the live mirror's whole life -- "connected and subscribed",
     "task N reported completed -- mirroring", "disconnected cleanly; reconnecting" -- is
     logged from inside the web server's module through logging.getLogger(__name__), which is
-    "__main__" when the server runs as the main module (how it always runs: "Serve Gallery.pyw"
+    "__main__" when the server runs as the main module (how it always runs: "Moonglade Launcher.pyw"
     launches `python -m moonglade.gallery`) and its module name when it is imported (since
     3.20 "moonglade.gallery"; the flat "moonglade_gallery" before). Neither name was
     LOGGER_NAME's then, so both inherited root's WARNING ceiling and every one of

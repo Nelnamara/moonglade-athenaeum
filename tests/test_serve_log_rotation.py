@@ -108,12 +108,16 @@ def test_a_refused_rename_never_stops_the_start(app, monkeypatch):
 # ---- the launcher uses it, at start, on the machine file -------------------------------
 
 def _launcher():
-    src = (REPO_ROOT / "Serve Gallery.pyw").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
     return src, ast.parse(src)
 
 
 def _top_index(tree, pred):
+    """The first top-level statement that RUNS something matching `pred` (a def runs nothing
+    where it stands: the launcher's _stop() appends to serve.log only when a start fails)."""
     for i, node in enumerate(tree.body):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
         if any(pred(n) for n in ast.walk(node)):
             return i
     return None

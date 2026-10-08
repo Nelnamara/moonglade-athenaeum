@@ -90,7 +90,7 @@ LAN2 = "203.0.113.9"
 
 
 def test_every_response_carries_the_server_marker(tmp_path):
-    """The `Serve Gallery` launcher decides "one of our servers is already on this port"
+    """The `Moonglade Launcher` decides "one of our servers is already on this port"
     by the X-Moonglade response header, NOT a 200 status: /api/ping now sits behind the
     login gate, so its unauthenticated probe gets a 401, and urllib raises on that. The
     marker therefore has to ride EVERY response, including the front door's 401 -- which

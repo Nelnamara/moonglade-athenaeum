@@ -83,7 +83,6 @@ def test_the_package_init_imports_nothing():
 
 def _env(**extra):
     env = dict(os.environ)
-    env.pop("MOONGLADE_VIA_STANDIN", None)
     env.update(extra)
     return env
 

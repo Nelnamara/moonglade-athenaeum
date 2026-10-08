@@ -7,7 +7,7 @@ moonglade/                the app's code (since 3.20), one package:
   backup.py               CLI engine: download, organize, generate, sync, delete, reconcile
                           (run it as `python -m moonglade`)
   gallery.py              Flask web gallery + ALL SQLite catalog helpers (the shared base)
-                          (the launcher, Serve Gallery, runs it as `python -m moonglade.gallery`)
+                          (the launcher, Moonglade Launcher, runs it as `python -m moonglade.gallery`)
   similar.py              "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
   mcp_server.py           local stdio MCP server: curation tools over the catalog, a duplicate
                           finder, and a read-only PixAI tag-suggestion tool
@@ -31,10 +31,10 @@ loom/                     The Loom's JS surface: esbuild bundle + its own `node 
 ```
 
 Before 3.20 these were flat files beside the launcher (`moonglade_backup.py`,
-`moonglade_gallery.py` and so on). Three of those names still sit there as stand-ins that run
-the new code. `moonglade_gallery.py` stays for good: a launcher started before 3.20 restarts the
-server by that name. `moonglade_backup.py` and `moonglade_mcp.py` keep an old command, scheduled
-task or MCP registration working until 3.21.
+`moonglade_gallery.py` and so on). They are gone: the launcher is the one Python file left
+beside the program. A scheduled task, a Claude tools registration or a shortcut that still
+names an old file is found by the app, which offers to fix it (**Fix them** on its notice), and
+a shortcut to the old launcher is re-pointed by itself the first time the new launcher starts.
 
 The CLI engine and the MCP server both import `moonglade/gallery.py` for catalog access — so
 catalog logic lives in exactly one place. The two surfaces are the CLI and the web gallery:
@@ -124,9 +124,8 @@ Beside the program, the machine's own files sit in `local/`: the art pack
 `mirror_session.json`, `serve.txt`, `serve.log` and the icon cache (`local/cache/`), with
 `local/MOVED.json`. `config.json` stays beside the program. A 3.19 install has these at the
 top of each folder; the first 3.20 start brings them across (copied, except the pack, the
-Mirror's sign-in and the training spend guard, which are moved), and About lists the old
-copies that are safe to delete -- never the old icon cache, `_container_cache/`, which a
-Desktop shortcut made before 3.20 still takes its icon from.
+Mirror's sign-in and the training spend guard, which are moved). The app removes its own
+old copies itself; it never hands you a list of files to delete.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

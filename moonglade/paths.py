@@ -43,8 +43,9 @@ the exact path it resolves to.
 import hashlib
 from pathlib import Path
 
-# The folder holding the launcher and config.json: the parent of the moonglade/ code folder
-# this module sits in. Every app-root path follows from this one line.
+# The folder holding the launcher (Moonglade Launcher.pyw) and config.json: the parent of the
+# moonglade/ code folder this module sits in. The code moved down a folder in 3.20, and every
+# app-root path still follows from this one line.
 APP_ROOT = Path(__file__).resolve().parent.parent
 
 # The coded art tree's folder name ("goods" in hex). The tree sits beside the launcher, not
@@ -258,28 +259,15 @@ def requirements_path():
     return APP_ROOT / "requirements.txt"
 
 
+# The launcher's file name: the one Python-family file at the install root (DECISIONS
+# 2026-10-07, pick 2).
+LAUNCHER_NAME = "Moonglade Launcher.pyw"
+
+
 def launcher_path():
-    """Serve Gallery.pyw, the launcher the Desktop shortcut points at."""
-    return APP_ROOT / "Serve Gallery.pyw"
-
-
-# The web server's OLD entry script, by its path under APP_ROOT: since 3.20 the root stand-in
-# a launcher from before the move still runs (moonglade_gallery.py; it stays for good). No app
-# code runs it any more -- the launcher runs `-m moonglade.gallery` -- and only the tests that
-# hold every path where it was (tests/test_app_paths.py) ask for it.
-GALLERY_SCRIPT = "moonglade_gallery.py"
-
-
-def gallery_script_path():
-    """The root moonglade_gallery.py stand-in an old launcher runs. Test-only: the app itself
-    starts the server as `python -m moonglade.gallery`."""
-    return APP_ROOT / GALLERY_SCRIPT
-
-
-def backup_script_path():
-    """The root moonglade_backup.py stand-in for old command lines (goes in 3.21). Test-only:
-    the Control Panel runs its jobs as `python -m moonglade`."""
-    return APP_ROOT / "moonglade_backup.py"
+    """Moonglade Launcher.pyw, the launcher every shortcut the app makes points at (it was
+    "Serve Gallery.pyw" through 3.19)."""
+    return APP_ROOT / LAUNCHER_NAME
 
 
 def library_anchor():

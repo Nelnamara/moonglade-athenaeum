@@ -11,13 +11,14 @@ moonglade.setup.prepare("mcp") first, like every other entry point, so a library
 still in an older layout is brought across before anything is read.
 
 Register in Claude Code (PYTHONPATH names the app's folder, so `-m` finds the package
-wherever the client starts the server):
+wherever the client starts the server; -P, on Python 3.11 and later, keeps the client's own
+working folder off the path):
     claude mcp add moonglade -e MOONGLADE_OUT="D:\\path\\to\\pixai_backup" \\
         -e PYTHONPATH="C:\\Users\\<you>\\source\\repos\\pixai-gallery-backup" \\
-        -- python -m moonglade.mcp_server
+        -- python -P -m moonglade.mcp_server
 Then restart Claude Code; tools appear as moonglade:search_catalog, moonglade:similar, ...
-A registration made before 3.20 runs the app folder's moonglade_mcp.py by path: a stand-in
-that runs this module and goes in 3.21, so re-register before then.
+A registration made before 3.20 names the app folder's moonglade_mcp.py, which is gone: the
+app finds such a registration and rewrites it to this one when asked (moonglade.outside).
 
 NOTE: the Similar tool loads the Pixeltable index (embedded Postgres). Don't run a
 Similar-heavy MCP session at the same time as `--rebuild-similar` -- both touch the

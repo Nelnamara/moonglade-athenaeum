@@ -73,7 +73,7 @@ def test_the_launcher_does_not_hardcode_the_folder():
     """It used to pass `--out pixai_backup` on every start. An always-present flag beats the
     stored setting by the resolution order above, so the Panel's field would have saved
     correctly and then changed nothing at all -- the worst kind of broken."""
-    launcher = (ROOT / "Serve Gallery.pyw").read_text(encoding="utf-8")
+    launcher = (ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
     body = launcher[launcher.index("SERVE_ARGS ="):]
     body = body[:body.index("serve.txt")]
     assert "--out" not in body, "the launcher pins the folder and the setting cannot win"

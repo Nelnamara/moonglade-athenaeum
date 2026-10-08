@@ -11,7 +11,7 @@ image file, thumbnail, and catalog row).
 Requirements:
     pip install flask pillow
 
-Usage (from the app's folder; normally the launcher, Serve Gallery, starts it):
+Usage (from the app's folder; normally the launcher, Moonglade Launcher, starts it):
     python -m moonglade.gallery
     python -m moonglade.gallery --out pixai_backup --port 5000
 """
@@ -6727,23 +6727,24 @@ def _ps_quote(s):
 
 
 def _mark_ico_path(mark_id):
-    """The app icon for `mark_id` as a REAL file on disk, or None when the mark has no .ico
-    cut. The Desktop launcher (make_launcher_shortcut) and the pack's Explorer file type
-    (register_pack_file_type) both point Windows at it, and Windows reads an icon only off
-    disk: a loose cut in the coded tree wins; a pack-shipped one is written into
-    local/icons/ (moonglade_paths.icons_dir()) -- not a cache, since a shortcut points at
-    the file and clearing a cache must never blank its icon."""
-    ico = _role_dir("marks") / (str(mark_id) + ".ico")
-    if ico.exists():
-        return ico
+    """The app icon for `mark_id` as a REAL file in local\\icons\\ (moonglade.paths.icons_dir()),
+    or None when the mark has no .ico cut. Every shortcut the app makes or re-points
+    (make_launcher_shortcut, moonglade.outside) takes its icon from here, because Windows
+    reads an icon only off disk -- and this folder is no cache, so no clean-up ever blanks a
+    shortcut, as deleting 3.19's _container_cache\\ would have. The bytes are the loose cut in
+    the coded tree when there is one, else the pack's; the file is rewritten only when they
+    differ."""
     raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
     if raw is None:
         return None
-    cache = _paths.icons_dir()
+    ico = _paths.icons_dir() / (str(mark_id) + ".ico")
     try:
-        cache.mkdir(parents=True, exist_ok=True)
-        ico = cache / (str(mark_id) + ".ico")
-        ico.write_bytes(raw)
+        if ico.is_file() and ico.read_bytes() == raw:
+            return ico
+        ico.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ico.with_name(ico.name + ".tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, ico)                   # whole, never half-written under a shortcut
     except OSError:
         return None
     return ico
@@ -6751,21 +6752,23 @@ def _mark_ico_path(mark_id):
 
 def make_launcher_shortcut(out_dir, mark_id):
     """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
-    chosen mark's .ico, targeting Serve Gallery.pyw via pythonw. Returns the
-    .lnk path. Machine-local action -- caller must gate to localhost."""
+    chosen mark's .ico, targeting Moonglade Launcher.pyw via pythonw. Returns the
+    .lnk path. Machine-local action -- caller must gate to localhost. The Desktop is the
+    shell's own (one moved into OneDrive included: moonglade.outside.desktop_dir())."""
     import subprocess
-    # PowerShell's CreateShortcut reads IconLocation straight off disk, so a
-    # pack-shipped .ico is materialized first (_mark_ico_path).
+    from moonglade import outside as moonglade_outside
+    # PowerShell's CreateShortcut reads IconLocation straight off disk, so the .ico is
+    # written into local\icons\ first (_mark_ico_path).
     ico = _mark_ico_path(mark_id)
     if ico is None:
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
     repo = _paths.APP_ROOT
     pyw = _paths.launcher_path()
     if not pyw.exists():
-        raise RuntimeError("Serve Gallery.pyw not found next to the server")
+        raise RuntimeError("Moonglade Launcher.pyw not found next to the server")
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     target = pythonw if pythonw.exists() else Path(sys.executable)
-    lnk = Path.home() / "Desktop" / "Moonglade Athenaeum.lnk"
+    lnk = moonglade_outside.desktop_dir() / "Moonglade Athenaeum.lnk"
     ps = ("$sh = New-Object -ComObject WScript.Shell; "
           "$s = $sh.CreateShortcut(%s); "
           "$s.TargetPath = %s; "
@@ -12112,11 +12115,11 @@ def changelog_entries(text=None):
     return entries
 
 
-def art_pack_info(container_path, out_dir=None):
+def art_pack_info(container_path):
     """{installed, version} for the About card's "art pack vN". The version comes from the
     installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so. (There is no
-    list of old copies to delete: the app removes its own, DECISIONS 2026-10-05.)"""
+    the pack on disk is the one this build expects; a missing pack says so. (About never
+    lists old copies for a person to delete: the app removes its own old files itself.)"""
     try:
         present = Path(container_path).exists()
     except OSError:
@@ -12136,7 +12139,7 @@ def art_pack_info(container_path, out_dir=None):
     return info
 
 
-def about_payload(version, container_path, entries=None, out_dir=None):
+def about_payload(version, container_path, entries=None):
     """What the About card, the post-update toast and the what's-new sheet read: this
     version's CHANGELOG entry (the running version's, not the newest in the file), the
     release's size (major/minor/patch), the art pack, and the earlier entries for "Earlier
@@ -12154,7 +12157,7 @@ def about_payload(version, container_path, entries=None, out_dir=None):
         "title": (cur or {}).get("title", ""),
         "items": (cur or {}).get("items", []),
         "earlier": earlier,
-        "pack": art_pack_info(container_path, out_dir=out_dir),
+        "pack": art_pack_info(container_path),
         "releases_url": RELEASES_WEB_URL,
         "issues_url": ISSUES_WEB_URL,
         "wiki_url": WIKI_WEB_URL,
@@ -12225,47 +12228,66 @@ def resolve_server_settings(host_arg=None, port_arg=None):
 
 
 def _supervised():
-    """True when the server was started by the managed launcher (Serve Gallery), which sets
+    """True when the server was started by the managed launcher (Moonglade Launcher), which sets
     MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
     return os.environ.get("MOONGLADE_SUPERVISED") == "1"
 
 
-# STOP AND START ONCE (3.20, the move into the moonglade/ folder). A launcher that was already
-# running when the install updated across the move built its command line before the move, as
-# `python <app folder>/moonglade_gallery.py`, and after the update's restart it runs that path
-# again. The root stand-in of that name keeps it working and sets MOONGLADE_VIA_STANDIN=1.
-# Such a server asks, once per start, for Moonglade to be stopped once and started again from
-# its shortcut (which starts the new launcher, which runs the package directly), and refuses
-# the next update until that has happened, so an install that passes through 3.20 is on the
-# new launcher before it takes another release. The same words do both jobs.
-#
-# THE STAND-IN STAYS FOR GOOD (DECISIONS 2026-10-05). An update pulls the newest release, so
-# an install on 3.17-3.19 can skip 3.20 entirely, never meet this notice or this gate, and
-# still have its old launcher relaunch the old path after that update's restart. Only the
-# other two root stand-ins (moonglade_backup.py, moonglade_mcp.py) go, in 3.21.
-STANDIN_NOTICE_TITLE = "Moonglade moved into its new folder."
-# Not "close it": closing the browser leaves the server running, the shortcut then finds the
-# port taken and only opens a tab, and Restart goes back through the old launcher. The
-# Control Panel's ■ Stop exits 0, which ends the old launcher too (it relaunches only on 42);
-# the shortcut then starts the new one.
-STANDIN_NOTICE_MSG = ("Stop it once (Control Panel → Server → ■ Stop, and confirm), then start "
-                      "it again from its shortcut.")
-# New on every server start, so each start through the old launcher asks again, once.
+# New on every server start: a notice keyed by it is said once per start in every open tab
+# (gallery/src/notify/serverNotice.js remembers the key it last showed).
 _SERVER_START = secrets.token_hex(8)
 
 
-def _via_standin():
-    """True when the root moonglade_gallery.py stand-in started this server: a launcher from
-    before 3.20 is still the one that restarts it."""
-    return os.environ.get("MOONGLADE_VIA_STANDIN") == "1"
+# THINGS OUTSIDE THE APP THAT NAME ITS OLD FILES (moonglade.outside; DECISIONS 2026-10-07,
+# pick 5): a scheduled task, a Claude tools registration or a shortcut still running
+# moonglade_backup.py, moonglade_mcp.py or Serve Gallery.pyw. A real start (main()) looks
+# once, off the request path, and the notice offers **Fix them** to a tab on this machine.
+# None until that look has run -- and in every app a test builds, since only main() looks.
+_OUTSIDE = {"items": None}
+_OUTSIDE_FIXING = threading.Lock()
+OUTSIDE_FIX_LABEL = "Fix them"
 
 
-def server_notice():
-    """The notice every open tab shows once per server start (the /api/jobs poll carries it;
-    gallery/src/notify/serverNotice.js shows the corner toast), or None. Read only."""
-    if not _via_standin():
+def _outside_scan():
+    """Look outside the app now and keep what was found. Never raises."""
+    from moonglade import outside as moonglade_outside
+    try:
+        items = moonglade_outside.find()
+    except Exception:                                   # noqa: BLE001 -- nothing found, then
+        items = []
+    _OUTSIDE["items"] = items
+    return items
+
+
+def _outside_prime():
+    """main()'s one call: the look runs on its own thread (schtasks can take seconds), after
+    the server is up."""
+    threading.Thread(target=_outside_scan, daemon=True, name="moonglade-outside-scan").start()
+
+
+def _shortcut_icon_bytes(stem):
+    """A mark's .ico bytes by its file stem (mark_4), for a shortcut whose old icon is gone:
+    the loose cut, else the pack's. Only a plain stem is ever looked up."""
+    if not re.match(r"^[A-Za-z0-9_-]+$", stem or ""):
         return None
-    return {"key": _SERVER_START, "title": STANDIN_NOTICE_TITLE, "msg": STANDIN_NOTICE_MSG}
+    return _branding_bytes(_role_rel("marks", stem + ".ico"))
+
+
+def server_notice(local=False):
+    """The notice every open tab shows once per server start (the /api/jobs poll carries it;
+    gallery/src/notify/serverNotice.js shows the corner toast), or None. Read only.
+
+    Today it is the one about things outside the app that still name its old files, and only
+    for a tab on this machine (`local`): the fix rewrites this machine's tasks, configs and
+    shortcuts, and its route is LOCALHOST. `fix` names the toast's button; the poll adds the
+    session's CSRF token to it."""
+    items = _OUTSIDE.get("items")
+    if not local or not items:
+        return None
+    from moonglade import outside as moonglade_outside
+    title, msg = moonglade_outside.notice_words(items)
+    return {"key": _SERVER_START, "title": title, "msg": msg,
+            "fix": {"label": OUTSIDE_FIX_LABEL}}
 
 
 # The running werkzeug server, so a web Stop/Restart handler can shut it down GRACEFULLY instead
@@ -16374,11 +16396,11 @@ def create_app(out_dir: Path):
     @app.route("/api/server/restart", methods=["POST"])
     @tier(LOGIN)
     def api_server_restart():
-        """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
+        """Restart the server from the browser. Needs the managed launcher (Moonglade Launcher),
         which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
         if not _supervised():
             return jsonify({"error": "Restart needs the managed launcher — start via "
-                                     "'Serve Gallery'. (Stop still works.)"}), 409
+                                     "'Moonglade Launcher'. (Stop still works.)"}), 409
         # An update restarts the server ITSELF when it is done; a restart in the middle of
         # one would land the process on half-pulled code. (The updater's own restart does
         # not come through here -- see _update_busy.)
@@ -16427,9 +16449,6 @@ def create_app(out_dir: Path):
         st = update_state()
         if st.get("error"):
             st["error"] = _redact_host_paths(st["error"])
-        # 3.20: an old launcher is still in charge, so the update is refused until Moonglade
-        # has been stopped once and started again from its shortcut (see _via_standin).
-        st["via_standin"] = _via_standin()
         return jsonify(st)
 
     @app.route("/api/update/apply", methods=["POST"])
@@ -16457,11 +16476,6 @@ def create_app(out_dir: Path):
           * supervised              -- without the managed launcher, exit 42 stops the
                                        server instead of relaunching it: an update would
                                        be indistinguishable from "the app vanished"
-          * not via the stand-in    -- a launcher from before 3.20 still restarts the
-                                       server through the root stand-in: it must be
-                                       stopped once and started again first, so the
-                                       install is on the new launcher before it takes
-                                       another release
           * no running panel job    -- same rule Restart uses; a pull under a running job
                                        swaps the code out from under it
           * on master               -- the recovered scope's own out-of-scope rule: a
@@ -16498,11 +16512,8 @@ def create_app(out_dir: Path):
                                      "this.", "kind": "failed"}), 409
         if not _supervised():
             return jsonify({"error": "Updating needs the managed launcher — start via "
-                                     "'Serve Gallery'. (Without it the server would stop "
+                                     "'Moonglade Launcher'. (Without it the server would stop "
                                      "instead of restarting into the new version.)",
-                            "kind": "failed"}), 409
-        if _via_standin():
-            return jsonify({"error": STANDIN_NOTICE_TITLE + " " + STANDIN_NOTICE_MSG,
                             "kind": "failed"}), 409
         busy = _job_busy()
         if busy:
@@ -23222,6 +23233,33 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "lnk": lnk})
 
+    @app.route("/api/outside/fix", methods=["POST"])
+    @tier(LOCALHOST)
+    def api_outside_fix():
+        """**Fix them** on the notice about things outside the app that still name its old
+        files (server_notice; moonglade.outside, DECISIONS 2026-10-07 pick 5): this machine's
+        scheduled tasks, Claude tools registrations and shortcuts are looked at again, now,
+        and each one found is rewritten to the new names -- a copy of it kept first in
+        local\\.snapshot\\ -- and reported fixed or failed, with the reason, in plain words.
+
+        LOCALHOST: it rewrites files and Task Scheduler entries on the machine the server runs
+        on, the same trust class as /api/branding/shortcut. The CSRF explicit-token class: a
+        real change to the machine off one click. One fix at a time."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        if not _OUTSIDE_FIXING.acquire(blocking=False):
+            return jsonify({"error": "Already fixing them. Give it a moment."}), 409
+        try:
+            from moonglade import outside as moonglade_outside
+            results = moonglade_outside.fix(provide_icon=_shortcut_icon_bytes)
+            _outside_scan()
+        finally:
+            _OUTSIDE_FIXING.release()
+        kind, title, msg = moonglade_outside.result_words(results)
+        return jsonify({"ok": True, "kind": kind, "title": title, "msg": msg,
+                        "results": [r.as_dict() for r in results]})
+
     @app.route("/api/suggest-prompt")
     @tier(LOGIN)
     def api_suggest_prompt():
@@ -23731,7 +23769,7 @@ def create_app(out_dir: Path):
         between the what's-new sheet and About after an update), the art pack, the earlier
         entries. Whether a newer release is out is /api/update/check's to say, not this."""
         from moonglade import backup as core
-        return jsonify(about_payload(core.__version__, _container_path(), out_dir=out_dir))
+        return jsonify(about_payload(core.__version__, _container_path()))
 
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
@@ -28247,10 +28285,14 @@ __DESIGN_TOKENS__
                     j["pixai_says"] = says
         except Exception:                                  # noqa: BLE001
             pass
-        # `notice`: the one-time "stop and start again" while an old launcher is in charge
-        # (server_notice, 3.20), or null.
+        # `notice`: a sentence the server asks every open tab to say once per start
+        # (server_notice), or null. Its Fix button carries this session's CSRF token: the
+        # fix route checks it.
+        notice = server_notice(local=_is_local_request())
+        if notice and notice.get("fix"):
+            notice["fix"]["csrf"] = session.setdefault("csrf", secrets.token_hex(16))
         return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live,
-                        "notice": server_notice()})
+                        "notice": notice})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)
@@ -29052,7 +29094,7 @@ __DESIGN_TOKENS__
     @app.after_request
     def _identify_server(resp):
         # Stamp EVERY response -- including the front door's 401 short-circuit -- with a
-        # stable marker the "Serve Gallery" launcher uses to tell "our server is already
+        # stable marker the "Moonglade Launcher" uses to tell "our server is already
         # on this port" from "some other service is" (or nothing). It MUST ride the auth
         # gate: the launcher probes /api/ping without a session and now gets a 401, not a
         # 200, so a status-based check can't identify us. A fixed value, not __version__:
@@ -29097,7 +29139,7 @@ def port_owner(host, port, timeout=0.4):
     costing a debugging session chasing a "fix that didn't work" which had in fact
     worked perfectly in a process nobody was talking to.
 
-    `Serve Gallery.pyw` already probes the X-Moonglade header to decide "one of our
+    `Moonglade Launcher.pyw` already probes the X-Moonglade header to decide "one of our
     servers is already up here" before launching. That check lived ONLY in the
     launcher, so `python -m moonglade.gallery --port N` -- how every script, test
     harness and background agent starts this thing -- walked straight past it.
@@ -29162,7 +29204,7 @@ def main():
     ap.add_argument("--open-browser", action="store_true",
                     help="open the gallery in your default browser ~1.5s after the server "
                          "starts (manual convenience for a terminal launch; the double-click "
-                         "'Serve Gallery' launcher does NOT pass this -- it polls the server "
+                         "'Moonglade Launcher' does NOT pass this -- it polls the server "
                          "until it actually answers and opens the browser itself)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="show INFO-level log lines (request activity, startup steps) on the "
@@ -29347,6 +29389,9 @@ def main():
     # and its only job is to make the FIRST Health open of the session a memory read instead
     # of a full library walk with the user watching. See _health_prime / health_cached.
     _health_prime(out_dir, db_path)
+    # Look for things outside the app that still name its old files (a scheduled task, a
+    # Claude registration, a shortcut): off-thread, for the notice (server_notice).
+    _outside_prime()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

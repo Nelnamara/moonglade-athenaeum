@@ -587,6 +587,26 @@ def _no_real_registry(monkeypatch):
     monkeypatch.setitem(sys.modules, "winreg", _NoRealRegistry("winreg"))
 
 
+class _RealMachineRefused(RuntimeError):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _no_real_outside(tmp_path, monkeypatch):
+    """No test may look at or change the real things outside the app: Task Scheduler, the
+    Claude configs (~/.claude.json, %APPDATA%\\Claude\\), the Desktop and the Start menu.
+    moonglade.outside reaches all of them through machine(), which refuses here; a test of the
+    fixer hands in its own Machine built on temp folders. The Desktop the shortcut button
+    writes to is a temp folder too."""
+    from moonglade import outside as _outside
+
+    def _refuse():
+        raise _RealMachineRefused("a test reached the real machine (moonglade.outside."
+                                  "machine()); pass a Machine built on temp folders")
+    monkeypatch.setattr(_outside, "machine", _refuse)
+    monkeypatch.setattr(_outside, "desktop_dir", lambda: tmp_path / "Desktop")
+
+
 @pytest.fixture(autouse=True)
 def _isolated_branding(tmp_path, monkeypatch):
     """Branding art moved OUT of the library folder and into the app root on 2026-07-26, so

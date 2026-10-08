@@ -66,7 +66,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   machine running it — a phone or a laptop on your own Wi-Fi. Nothing on screen announces it;
   you meet it as controls that are simply not drawn: **Import**, and the Control Panel's
   machine-only buttons. Everything else, including watching a job run, works as normal.
-- **the launcher** — **`Serve Gallery.pyw`**, the double-click way to start the gallery with no
+- **the launcher** — **`Moonglade Launcher.pyw`**, the double-click way to start the gallery with no
   console window. See [Setup](Setup).
 - **the continuity ribbon** — the strip of frame pairs under The Loom's reel, in the Timeline
   drawer's full view: each shot's closing frame beside the next one's opening frame. See [The

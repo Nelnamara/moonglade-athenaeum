@@ -34,7 +34,7 @@ LOGGER_NAME = "moonglade"
 # The web server's OWN module logger, under both names it can have. moonglade/gallery.py's
 # background workers do not use get_logger() -- they use logging.getLogger(__name__), which
 # resolves to "__main__" when the server runs as the main module (which is how it always runs
-# in production: "Serve Gallery.pyw" launches `python -m moonglade.gallery` as a child) and to
+# in production: "Moonglade Launcher.pyw" launches `python -m moonglade.gallery` as a child) and to
 # "moonglade.gallery" when it is imported. Before 3.20 the imported name was the flat
 # "moonglade_gallery", and neither name was under LOGGER_NAME, so until 2026-09-07
 # every one of those lines inherited root's WARNING ceiling and reached the file only if it
@@ -176,8 +176,8 @@ def log_path():
     return _paths.logs_dir() / "moonglade.log"
 
 
-# serve.log (local/logs/serve.log), the launcher's capture of the server's console, is appended
-# to on every start. It is trimmed at start instead of by a logging handler: the server's
+# serve.log (local/logs/serve.log), the launcher's capture of the server's console (Moonglade
+# Launcher.pyw), is appended to on every start. It is trimmed at start instead of by a logging handler: the server's
 # stdout and stderr are written straight into the file by the OS, so nothing in Python sees
 # the lines go by.
 SERVE_LOG_MAX_BYTES = 1024 * 1024

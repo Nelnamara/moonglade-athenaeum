@@ -1,6 +1,6 @@
 """The launcher runs the package (3.20, "the move").
 
-`Serve Gallery.pyw` starts the web server as `python -m moonglade.gallery` from the app's
+`Moonglade Launcher.pyw` starts the web server as `python -m moonglade.gallery` from the app's
 folder. Everything else it does is exactly as before: the serve.txt flags ride along, an exit
 code of 42 relaunches the same command, anything else ends it, a server already answering on
 the port means it only opens the browser and bows out, and the port comes from config.json
@@ -30,7 +30,7 @@ import pytest
 from moonglade import paths
 from tests.conftest import REPO_ROOT
 
-LAUNCHER = REPO_ROOT / "Serve Gallery.pyw"
+LAUNCHER = REPO_ROOT / "Moonglade Launcher.pyw"
 
 
 class _NoThread:
@@ -77,8 +77,7 @@ def launch(monkeypatch, tmp_path):
     return _launch
 
 
-def test_it_starts_the_server_as_the_package_from_the_app_folder(launch, monkeypatch):
-    monkeypatch.setenv("MOONGLADE_VIA_STANDIN", "1")     # never handed on: see below
+def test_it_starts_the_server_as_the_package_from_the_app_folder(launch):
     run = launch(codes=[0], serve_txt="--host 0.0.0.0 --port 5757\n")
     assert len(run.started) == 1
     child = run.started[0]
@@ -86,8 +85,6 @@ def test_it_starts_the_server_as_the_package_from_the_app_folder(launch, monkeyp
                          "--host", "0.0.0.0", "--port", "5757"]
     assert os.path.samefile(child.cwd, paths.APP_ROOT)
     assert child.env["MOONGLADE_SUPERVISED"] == "1"
-    # The stand-in flag says "an OLD launcher started this server". This one is new.
-    assert "MOONGLADE_VIA_STANDIN" not in child.env
     assert child.stdin is subprocess.DEVNULL
     assert getattr(child.stdout, "name", None) == str(paths.local_path("serve.log"))
     assert run.probed == ["http://localhost:5757/api/ping"]

@@ -198,19 +198,15 @@ def test_about_never_lists_old_copies_to_delete(tmp_path):
     new.write_bytes(b"x")
     (tmp_path / "pack" / ma.LEGACY_NAME).write_bytes(b"an older pack")
     assert "note" not in g.art_pack_info(new)
-    assert "note" not in g.about_payload("3.14.1", new, out_dir=tmp_path)["pack"]
+    assert "note" not in g.about_payload("3.14.1", new)["pack"]
     new.unlink()
     assert g.art_pack_info(new) == {"installed": False, "version": ""}
 
 
-def test_about_shows_the_packs_note_in_its_own_stamp_style():
-    """The note is one more line in the About card's existing stamp style, under the
-    "app x.y.z · art pack vN" line -- no new element, and the card names no file itself."""
+def test_the_about_card_has_no_line_for_old_copies():
     import pathlib
-    import re
     src = pathlib.Path("gallery/src/help/AboutLayers.jsx").read_text(encoding="utf-8")
-    assert re.search(r'\{about\.pack && about\.pack\.note \? \(?\s*<div className="mgab-stamp">'
-                     r'\{about\.pack\.note\}</div>', src), "About does not show the pack's note"
+    assert "pack.note" not in src
 
 
 def test_a_real_start_never_asks_the_owner_to_delete_an_old_pack(tmp_path, monkeypatch,

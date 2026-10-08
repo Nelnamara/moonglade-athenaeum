@@ -57,7 +57,7 @@ def real_paths(monkeypatch):
 
 def test_app_root_is_the_folder_holding_the_launcher():
     assert paths.APP_ROOT == _REPO
-    assert (paths.APP_ROOT / "Serve Gallery.pyw").is_file()
+    assert (paths.APP_ROOT / "Moonglade Launcher.pyw").is_file()
 
 
 _LOCAL = _REPO / "local"
@@ -121,12 +121,7 @@ _TABLE = [
     ("loom/vendor", lambda: paths.loom_vendor(), lambda: _REPO / "loom" / "vendor"),
     ("static/", lambda: paths.static_dir(), lambda: _REPO / "static"),
     ("requirements.txt", lambda: paths.requirements_path(), lambda: _REPO / "requirements.txt"),
-    ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Serve Gallery.pyw"),
-    # The two old entry scripts: since 3.20 the root stand-ins, kept for one release.
-    ("the server script", lambda: paths.gallery_script_path(),
-     lambda: _REPO / "moonglade_gallery.py"),
-    ("the CLI script", lambda: paths.backup_script_path(),
-     lambda: _REPO / "moonglade_backup.py"),
+    ("the launcher", lambda: paths.launcher_path(), lambda: _REPO / "Moonglade Launcher.pyw"),
     ("the default library, absolute", lambda: paths.default_library_path(),
      lambda: _REPO / "pixai_backup"),
     ("a relative library's anchor", lambda: paths.library_anchor(), lambda: _REPO),
@@ -144,8 +139,7 @@ def test_the_shipped_files_are_really_there(real_paths):
     """The table's tracked entries name files a checkout has, so a typo in a helper cannot
     hide behind a path that merely looks right."""
     for p in (ma.manifest_path(), g.wiki_dir(), g.changelog_path(), paths.loom_dir(),
-              paths.static_dir(), paths.requirements_path(), paths.launcher_path(),
-              paths.gallery_script_path(), paths.backup_script_path()):
+              paths.static_dir(), paths.requirements_path(), paths.launcher_path()):
         assert p.exists(), p
 
 
@@ -209,9 +203,10 @@ def test_the_branding_picks_live_in_settings_json(tmp_path):
     assert not (tmp_path / "branding_slots.json").exists()
 
 
-def test_a_shortcut_icon_is_written_under_local_icons(monkeypatch, tmp_path):
-    """A pack-shipped .ico is written into local/icons/ -- not a cache, and not beside the
-    art tree."""
+def test_shortcut_icons_are_written_into_local_icons(monkeypatch, tmp_path):
+    """A shortcut's .ico is written into local/icons/ (icons_dir()), which is no cache: a
+    pack-shipped one and a loose cut in the coded tree alike, so no shortcut's icon ever
+    points into the art tree or a folder a clean-up deletes."""
     from moonglade import container as mc
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     local.mkdir()
@@ -223,10 +218,15 @@ def test_a_shortcut_icon_is_written_under_local_icons(monkeypatch, tmp_path):
     g._container_cache.update(path=None, mtime=None, box=None)
     try:
         ico = g._mark_ico_path("mark_4")
+        loose = art / g._role_rel("marks", "mark_5.ico")
+        loose.parent.mkdir(parents=True)
+        loose.write_bytes(b"loose cut")
+        ico5 = g._mark_ico_path("mark_5")
     finally:
         g._container_cache.update(path=None, mtime=None, box=None)
-    assert ico == local / "icons" / "mark_4.ico"
+    assert ico == local / "icons" / "mark_4.ico" == paths.icons_dir() / "mark_4.ico"
     assert ico.read_bytes() == b"\x00\x00\x01\x00ico"
+    assert ico5 == local / "icons" / "mark_5.ico" and ico5.read_bytes() == b"loose cut"
     assert not (art.parent / "_container_cache").exists()
     assert not (local / "cache").exists()
 
@@ -237,7 +237,10 @@ def test_a_shortcut_icon_is_written_under_local_icons(monkeypatch, tmp_path):
 # moonglade_paths.
 _FILE_ALLOWED = {
     "moonglade/paths.py": "it IS the app-root definition",
-    "Serve Gallery.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
+    "moonglade/__main__.py": "run as a folder (`python <app>\\moonglade`) it has no package yet, "
+                             "so it finds the app's folder from its own file to put the package "
+                             "on sys.path (tests/test_folder_run.py)",
+    "Moonglade Launcher.pyw": "its own folder, by os.path.abspath, is APP_ROOT unresolved: it goes "
                          "on sys.path so the moonglade package imports however the launcher "
                          "was started, and it is the cwd the server runs from (`-m "
                          "moonglade.gallery` finds the package through it), byte-for-byte as "
@@ -291,8 +294,8 @@ def test_the_launcher_finds_its_own_folder_once_and_byte_for_byte():
     folder is what goes on sys.path, what it changes into and the folder the server runs from
     (since 3.20 as `-m moonglade.gallery`, which finds the package through the working
     directory). tests/test_launcher_runs_the_package.py runs the launcher for the rest."""
-    src = (_REPO / "Serve Gallery.pyw").read_text(encoding="utf-8")
-    uses = _file_uses(_REPO / "Serve Gallery.pyw")
+    src = (_REPO / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
+    uses = _file_uses(_REPO / "Moonglade Launcher.pyw")
     assert [u[1] for u in uses] == ["here = os.path.dirname(os.path.abspath(__file__))"], uses
     assert "sys.path.insert(0, here)" in src
     assert "os.chdir(here)" in src

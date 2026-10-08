@@ -77,9 +77,6 @@ export function AboutCard({ inline, lead, onClose }) {
           <div className="mgab-stamp">
             app {about.version} · {packLabel(about.pack)}{about.date ? " · " + about.date : ""}
           </div>
-          {/* The server's plain line about the pack (an old copy left beside it), in the same
-              stamp style: art_pack_info's `note`, present only when there is one. */}
-          {about.pack && about.pack.note ? <div className="mgab-stamp">{about.pack.note}</div> : null}
         </div>
       </div>
       <div className="mgab-kick">CHANGELOG · {ver}</div>

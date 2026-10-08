@@ -1,6 +1,6 @@
 # The Gallery
 
-A local web gallery over your whole catalog. Double-click **`Serve Gallery.pyw`** to start
+A local web gallery over your whole catalog. Double-click **`Moonglade Launcher.pyw`** to start
 it — a no-console launcher that opens the gallery in your browser once it is ready. The
 gallery is a viewer of `catalog.db` + your files, but can also make authenticated API calls
 for prune / reconcile (see [Deleting & Sync](Deleting)).
@@ -15,7 +15,7 @@ python -m moonglade.gallery --out pixai_backup --rebuild-thumbs         # regene
 ```
 
 Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
-disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's options:
+disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the server's options:
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -26,7 +26,7 @@ disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's
 | `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
-| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Serve Gallery`** launcher waits until the server answers and opens the browser itself |
+| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Moonglade Launcher`** waits until the server answers and opens the browser itself |
 | `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `_moonglade/logs/` in your library always has them |
 
 ## The header
