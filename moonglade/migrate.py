@@ -1178,13 +1178,13 @@ def _install_half(half, local, old, copyfirst, report):
             if stray_marker.is_file():
                 _remove(stray_marker)
             report.info("Removed an older copy of the art pack from the app folder; the one in "
-                        "local\\ is used.")
+                        "local/ is used.")
         elif old_pack.is_file():
             if (local / PACK_MARKER).is_file():
                 _remove(local / PACK_MARKER)     # a marker whose pack is not there
             moved = _bring(old_pack, new_pack, "file", half)
             if moved == "moved":
-                report.info("Moved the art pack into local\\.")
+                report.info("Moved the art pack into local/.")
                 if stray_marker.is_file():
                     _bring(stray_marker, local / PACK_MARKER, "file", half)
         elif stray_marker.is_file():
@@ -1200,8 +1200,8 @@ def _install_half(half, local, old, copyfirst, report):
             _remove(p)
     j.doc["finished"] = _now()
     j.save()
-    report.info("The app folder is tidy: settings in local\\settings.json, logs in "
-                "local\\logs\\, shortcut icons in local\\icons\\.")
+    report.info("The app folder is tidy: settings in local/settings.json, logs in "
+                "local/logs/, shortcut icons in local/icons/.")
 
 
 # ---- the library half -------------------------------------------------------------------------
@@ -1396,7 +1396,7 @@ def _banners(half, out, report):
         _bring(png, _paths.banners_dir() / name, "file", half)
         worn[slot] = {"kind": "migrated"}
         changed = True
-        report.info("Kept the banner this install wears (%s) in local\\banners\\.", name)
+        report.info("Kept the banner this install wears (%s) in local/banners/.", name)
     if changed:
         _settings.update_branding(lambda b: b.__setitem__("worn_banner", worn))
 
