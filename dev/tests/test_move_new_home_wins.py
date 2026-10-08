@@ -24,7 +24,9 @@ Now the new home is never replaced, and what the older copy adds is folded in:
     file (the cast library member by member, a board key by key). A board only the older
     install made comes across; a value that can't be merged is kept beside the new home
     under a key of its own, outside the safety snapshot.
-  * the spend guard entry by entry, whichever blocks longer; telemetry's counters added up.
+  * the spend guard entry by entry, whichever blocks longer; telemetry's counters added up,
+    less what the move itself took (a copy put back, or saved across the move, is never
+    counted twice), with the new home's copy in that run's safety zip first.
   * job lists by unseen lines, other JSON records by union.
   * anything that can't be merged (a report) is set aside and named; the new home stays.
   * an older install still holding its old log open stops every bring-in, idle or not.
@@ -613,6 +615,136 @@ def test_telemetry_counters_add_up_and_jobs_merge_by_unseen_lines(r):
     assert tel["baselines"] == {"goods:app-a": ["mark_1"], "goods:app-b": ["mark_2"]}
     assert (r.lib / "_moonglade" / "records" / "jobs.jsonl").read_text().splitlines() == \
         ['{"id": "before-the-move"}', '{"id": "older-install"}']
+
+
+# ---- telemetry: what the move already took is never counted twice --------------------------------
+
+def _tel(r):
+    return json.loads((r.lib / "_moonglade" / "records" / "telemetry.json").read_text())
+
+
+def _tel_moved(r, gens=40):
+    """A library whose first move took telemetry.json holding `gens` (by one rename, as it is
+    on one drive), and whose new home has counted on since. Returns the pre-move bytes and
+    their time."""
+    write_config(r)
+    old = write(r.lib / "telemetry.json", {"counters": {"gens": gens, "loom": 2}})
+    before, mtime_ns = old.read_bytes(), old.stat().st_mtime_ns
+    start(r)
+    assert not old.exists() and _tel(r)["counters"] == {"gens": gens, "loom": 2}
+    return before, mtime_ns
+
+
+def _new_home_counts_on(r, **counters):
+    p = r.lib / "_moonglade" / "records" / "telemetry.json"
+    doc = json.loads(p.read_text())
+    doc["counters"].update(counters)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_the_exact_pre_move_telemetry_put_back_with_its_own_time_changes_no_counter(r):
+    """A backup restored with its original time: not written since, so nothing stops, and its
+    bytes are exactly what the move took -- counted already."""
+    before, mtime_ns = _tel_moved(r)
+    _new_home_counts_on(r, gens=41)
+    put_back = r.lib / "telemetry.json"
+    put_back.write_bytes(before)
+    os.utime(put_back, ns=(mtime_ns, mtime_ns))
+    start(r)
+    assert _tel(r)["counters"] == {"gens": 41, "loom": 2}
+    assert not put_back.exists()
+
+
+def test_the_exact_pre_move_telemetry_put_back_later_changes_no_counter(r):
+    """The same bytes brought back with a new time (a sync tool): it reads as written since, so
+    the start stops once, and the bring-in drops it -- those counts are the new home's
+    already. (Before the fix: gens 41 + 40 = 81.)"""
+    before, _ns = _tel_moved(r)
+    _new_home_counts_on(r, gens=41)
+    _older_install_writes(r.lib / "telemetry.json", before)
+    done = _bring_in(r)
+    assert _tel(r)["counters"] == {"gens": 41, "loom": 2}
+    assert not (r.lib / "telemetry.json").exists()
+    assert "exactly what the move took" in _said(done)
+
+
+def test_a_pre_move_telemetry_plus_one_adds_exactly_one(r):
+    """An older install that loaded telemetry.json before the move and saved it after, one
+    generation later (or a restored backup counted on once): every counter is at least what
+    the move took, so only the difference is added. (Before the fix: 45 + 41 = 86.)"""
+    _tel_moved(r, gens=40)
+    _new_home_counts_on(r, gens=45)
+    _older_install_writes(r.lib / "telemetry.json", {"counters": {"gens": 41, "loom": 2}})
+    _bring_in(r)
+    assert _tel(r)["counters"] == {"gens": 46, "loom": 2}
+
+
+def test_an_older_install_s_counts_since_the_move_add_as_they_are(r):
+    """The move emptied the older install's home, so what it saves holds only its own counts
+    since -- less than what the move took -- and they add whole."""
+    _tel_moved(r, gens=40)
+    _new_home_counts_on(r, gens=45)
+    _older_install_writes(r.lib / "telemetry.json", {"counters": {"gens": 2, "mirror": 1}})
+    _bring_in(r)
+    assert _tel(r)["counters"] == {"gens": 47, "loom": 2, "mirror": 1}
+
+
+def test_two_identical_later_telemetry_writes_add_twice(r):
+    """An older install writes {"gens": 1} after each bring-in emptied its home again: the
+    second copy has the very bytes the first fold took, but it is a new count, not the same
+    file left behind. (Before the fix the second was removed as "already moved": 42, not 43.)"""
+    _tel_moved(r, gens=40)
+    _new_home_counts_on(r, gens=41)
+    one = json.dumps({"counters": {"gens": 1}})
+    _older_install_writes(r.lib / "telemetry.json", one)
+    _bring_in(r)
+    assert _tel(r)["counters"]["gens"] == 42
+    p = write(r.lib / "telemetry.json", one)
+    later = time.time() + 600
+    os.utime(p, (later, later))
+    _bring_in(r)
+    assert _tel(r)["counters"]["gens"] == 43
+
+
+def test_a_fold_cut_short_before_the_old_copy_went_is_not_counted_again(r, monkeypatch):
+    """The fold wrote the new home, and the start died before the older copy was removed: the
+    next start finds the very same file (bytes, time and size) and only removes it."""
+    _tel_moved(r, gens=40)
+    _new_home_counts_on(r, gens=41)
+    older = _older_install_writes(r.lib / "telemetry.json", {"counters": {"gens": 1}})
+    with pytest.raises(msetup.MoveStopped):
+        start(r)                                   # told to close it
+    real = migrate._remove
+
+    def die_removing_it(p):
+        if os.path.normcase(str(p)) == os.path.normcase(str(older)):
+            raise migrate._Failed("cut short")
+        return real(p)
+    monkeypatch.setattr(migrate, "_remove", die_removing_it)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    assert _tel(r)["counters"]["gens"] == 42 and older.exists()
+    monkeypatch.setattr(migrate, "_remove", real)
+    start(r)
+    assert _tel(r)["counters"]["gens"] == 42
+    assert not older.exists()
+
+
+def test_the_new_home_s_telemetry_is_in_the_safety_copy_before_an_additive_fold(r):
+    """Adding counts can't be undone by reading the file again, so the new home's own
+    telemetry.json goes into that run's safety copy first."""
+    import zipfile
+    _tel_moved(r, gens=40)
+    _new_home_counts_on(r, gens=45)
+    _older_install_writes(r.lib / "telemetry.json", {"counters": {"gens": 2}})
+    _bring_in(r)
+    zips = sorted((r.lib / "_moonglade" / ".snapshot").glob("*.zip"),
+                  key=lambda p: p.stat().st_mtime_ns)
+    with zipfile.ZipFile(zips[-1]) as zf:
+        kept = json.loads(zf.read("_moonglade/records/telemetry.json"))
+        older = json.loads(zf.read("telemetry.json"))
+    assert kept["counters"]["gens"] == 45 and older["counters"]["gens"] == 2
+    assert _tel(r)["counters"]["gens"] == 47
 
 
 def test_what_can_t_be_merged_is_set_aside_and_named_and_the_new_home_stays(r):
