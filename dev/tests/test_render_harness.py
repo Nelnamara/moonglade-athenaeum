@@ -7354,16 +7354,6 @@ def test_pull_to_refresh_fills_a_true_fraction_syncs_past_72_and_never_starts_of
         page.route(_LIBRARY_READ, lambda r: (libs.append(r.request.url), r.continue_())[1])
         page.evaluate("window.__qWrites.length = 0")
 
-        # not at the top: the pull does not start
-        page.evaluate("document.querySelector('.glm-body').scrollTop = 400")
-        _settle(page)
-        release = _q_touch_drag(page, 195, 300, 450)
-        _settle(page)
-        assert page.evaluate(_Q_PULL_STATE_JS)["px"] == 0
-        release()
-        page.evaluate("document.querySelector('.glm-body').scrollTop = 0")
-        _settle(page)
-
         # short of the line: the moon follows the finger as a true fraction, release does nothing
         release = _q_touch_drag(page, 195, 300, 400)                 # 100 px of finger -> 60 px of page
         _settle(page)
@@ -7413,6 +7403,18 @@ def test_pull_to_refresh_fills_a_true_fraction_syncs_past_72_and_never_starts_of
         release()
         page.wait_for_function("() => !document.querySelector('.ptr.syncing')", timeout=15_000)
         assert len(runs) == 2, "a pull still syncs with the saver on: %r" % runs
+
+        # not at the top: the pull does not start. Last, so that no drag at the top follows it: this
+        # drag really scrolls .glm-body under the finger, and on a busy machine Chromium is still
+        # settling that touch scroll when the next gesture begins -- the scroller lands 1 px off the
+        # top just as it starts, and the pull rightly refuses (it never starts off the top).
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 400")
+        _settle(page)
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        st = page.evaluate(_Q_PULL_STATE_JS)
+        assert st["px"] == 0 and not st["syncing"], st
+        release()
     finally:
         ctx.close()
 
