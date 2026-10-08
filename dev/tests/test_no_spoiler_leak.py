@@ -17,14 +17,21 @@ _REPO = Path(__file__).resolve().parents[2]
 # Public text surfaces a roast could leak into. NOT tests/ (fixtures hold fake data) and NOT
 # the private donor itself. dist/ bundles are included -- a rebuilt bundle must not embed one.
 # The app's own modules come from the shared collector (conftest.first_party_sources): the
-# repo root AND the moonglade/ code folder once the modules move there.
+# repo root AND the moonglade/ code folder once the modules move there. "dev/*.md": the public
+# developer docs (ROADMAP.md, CONTEXT.md) sat at the root, under "*.md", until 3.20 moved them
+# into dev/; without it they fell out of this scan silently. "dev/tools/**" reaches the tools'
+# subfolders too (dev/tools/art/).
 _SCAN_GLOBS = [
-    "*.md", "docs/**/*.md", "wiki/**/*.md",
-    "dev/tools/*.py",
+    "*.md", "docs/**/*.md", "wiki/**/*.md", "dev/*.md",
+    "dev/tools/**/*.py",
     "gallery/src/**/*.jsx", "gallery/src/**/*.js", "gallery/dist/*.js",
     "gallery/dist/*.css", "gallery/dist/*.html", "gallery/dist/*.json",
     "loom/src/**/*.js", "loom/dist/*.js",
 ]
+
+# The public developer docs this scan must always open, wherever they live. A later move that
+# takes one out of every glob fails test_the_developer_docs_are_scanned instead of passing quietly.
+_MUST_SCAN = ["dev/ROADMAP.md", "dev/CONTEXT.md"]
 
 
 def _files_to_scan():
@@ -38,6 +45,17 @@ def _files_to_scan():
                 continue
             seen.add(p)
             yield p
+
+
+def test_the_developer_docs_are_scanned():
+    """dev/ROADMAP.md and dev/CONTEXT.md are public and tracked, so the roast scan must open
+    them (they left its "*.md" glob when 3.20 moved them into dev/). No donor needed: this
+    checks which files the scan reads, never what is in them."""
+    scanned = {p.resolve() for p in _files_to_scan()}
+    for rel in _MUST_SCAN:
+        path = (_REPO / rel).resolve()
+        assert path.is_file(), "%s is gone -- point _MUST_SCAN at where it lives now" % rel
+        assert path in scanned, "%s is not in the spoiler scan -- add its folder to _SCAN_GLOBS" % rel
 
 
 @pytest.mark.skipif(not _SEALED_DONOR.is_file(),
