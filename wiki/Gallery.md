@@ -8,10 +8,10 @@ for prune / reconcile (see [Deleting & Sync](Deleting)).
 ## Running it from a terminal
 
 ```bash
-python -m moonglade.gallery --out pixai_backup                 # http://127.0.0.1:5000
-python -m moonglade.gallery --out pixai_backup --port 5757
-python -m moonglade.gallery --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
-python -m moonglade.gallery --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
+python -m moonglade.gallery                          # http://127.0.0.1:5000
+python -m moonglade.gallery --port 5757
+python -m moonglade.gallery --host 0.0.0.0 --https   # LAN + PWA
+python -m moonglade.gallery --rebuild-thumbs         # regenerate thumbnails
 ```
 
 Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
@@ -19,7 +19,7 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting |
+| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting, for that start only. A run that names its own library never moves one, and refuses a library still in an older layout |
 | `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `local\settings.json`). Typing it always wins |
 | `--host` | `127.0.0.1` | the address to listen on — or the saved one (also in `local\settings.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
 | `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |

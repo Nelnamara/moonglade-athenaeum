@@ -146,9 +146,9 @@ python -m moonglade --import-curation curation.json --apply           # do it
 - **Pictures this catalog does not have are listed, not invented** — import again after a sync.
 - **A smart collection whose name is already used** by another collection is skipped and named.
 - **An import can be undone.** Before `--apply` writes anything it saves the current state as
-  `curation_pre_import_<time>.json` in the library folder; import that file with `--apply
-  --curation-overwrite` to put every picture it touched back. A smart collection or a manual
-  order the import created stays.
+  `curation_pre_import_<time>.json` in the library's `_moonglade/decisions/` folder; import that
+  file with `--apply --curation-overwrite` to put every picture it touched back. A smart
+  collection or a manual order the import created stays.
 - A file that is not a curation file, is from a newer version, or holds a value the app would
   refuse (a rating of 7, an over-long note, too many tags) is turned back whole, saying why;
   nothing changes.

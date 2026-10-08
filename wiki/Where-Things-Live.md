@@ -76,9 +76,10 @@ merged, set aside or removed), and says when the program's folder and the librar
 start was interrupted, the next one finishes it.
 
 **A command or the Claude tools say my library is "still in an older Moonglade's layout".**
-Only the launcher moves a library's files, so a command line or the Claude tools never pull a
-library out from under an older install that may still be using it. Open the library once with
-its own install's launcher (updated to 3.20), then run the command again.
+Only a start of the gallery moves a library's files: the launcher, or `python -m moonglade.gallery`
+without `--out`. A command line, the Claude tools and a run that names its own library (`--out`)
+never pull a library out from under an older install that may still be using it. Open the
+library once with its own install's launcher (updated to 3.20), then run the command again.
 
 **It says an older Moonglade is still using the library.**
 Something wrote to the library's old places after the move: usually an older install pointed at
@@ -99,3 +100,6 @@ used to start. Double-click **Moonglade Launcher** in the program's folder once.
 re-points your Desktop and Start-menu shortcuts to it, icon and all. A Windows Task Scheduler job
 or a Claude tools registration that still names an old file is found too, and the notice in the
 corner offers **Fix it** (or **Fix them**). More in [Troubleshooting](Troubleshooting#after-updating-to-320-where-did-my-files-go).
+
+Going back to an earlier version after 3.20 isn't supported, because it won't find your records
+or settings.

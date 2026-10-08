@@ -99,9 +99,9 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
 
 **A start stopped with a sentence instead of opening.** It says why, and what to do:
 
-- *"The library … is still in an older Moonglade's layout."* A command line or the Claude tools
-  never move a library's files. Open the library once with its own install's launcher (updated
-  to 3.20), then run the command again.
+- *"The library … is still in an older Moonglade's layout."* A command line, the Claude tools
+  and a run that names its own library (`--out`) never move a library's files. Open the library
+  once with its own install's launcher (updated to 3.20), then run the command again.
 - *"An older Moonglade is still using the library …"* An older install wrote to the library's
   old places after the move. Close it (its window, its scheduled tasks and its Claude tools) and
   start again: the move then brings in what it wrote.

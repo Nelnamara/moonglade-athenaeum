@@ -71,11 +71,12 @@ optional overrides; leave them blank. More detail: [How It Works](How-It-Works).
 Run every command in this guide from the app's folder (the one holding `config.json`):
 `python -m moonglade` finds the app from there. From any other folder, name the code folder
 instead: `python "C:\path\to\app\moonglade" --sync`. Before 3.20 the commands named the
-files (`python moonglade_backup.py ...`); those files are gone.
+files (`python moonglade_backup.py ...`); those files are gone. Going back to an earlier version
+after 3.20 isn't supported, because it won't find your records or settings.
 
 Web gallery (browse, generate, The Loom) — at [localhost:5000](http://localhost:5000):
 ```bash
-python -m moonglade.gallery --out pixai_backup
+python -m moonglade.gallery
 ```
 
 **Create your login (v2.0.0+).** The gallery requires an account on every path, including on

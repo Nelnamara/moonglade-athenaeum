@@ -396,8 +396,10 @@ def _public_files():
     roots = [_REPO / "gallery" / "src", _REPO / "gallery" / "dist", _REPO / "loom",
              _REPO / "wiki", _REPO / "docs"]
     seen = set()
-    for top in ("README.md", "CHANGELOG.md"):
-        p = _REPO / top
+    # The public developer docs are named one by one (3.20 moved them into dev/, which holds
+    # the tests and tools too), so these scans never depend on where they live.
+    for p in (_REPO / "README.md", _REPO / "CHANGELOG.md",
+              _REPO / "dev" / "ROADMAP.md", _REPO / "dev" / "CONTEXT.md"):
         if p.is_file():
             seen.add(p)
             yield p
@@ -415,7 +417,7 @@ def _public_files():
 def test_no_public_file_carries_moment_copy(sealed_donor_present):
     """Every moment's copy is sealed: it reaches a browser only in an earned
     /api/achievements answer. It must never be written into the front-end source, the Loom,
-    the wiki, the docs, the README, the CHANGELOG or a built bundle."""
+    the wiki, the docs, the README, the CHANGELOG, the developer docs or a built bundle."""
     needles = [(m, k, v) for m, copy in _donor_copy().items() for k, v in copy.items() if v]
     assert needles, "no moment copy in the donor -- the guard would be a no-op"
     scanned, leaks = 0, []

@@ -7,7 +7,7 @@ on the same PixAI video engine.
 Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
 
 ```bash
-python -m moonglade.gallery --out pixai_backup      # then http://127.0.0.1:5000/loom
+python -m moonglade.gallery      # then http://127.0.0.1:5000/loom
 ```
 
 **A storyboard has its own address.** `/loom` opens whichever board you had open last, as it
@@ -404,7 +404,7 @@ lists it as an audio event. **✕** takes it off this storyboard; the file itsel
 are never deleted on their own: when some are no longer on any storyboard, the full view offers
 **Remove…** for exactly those, and asks first. If one of your storyboards won't read (a file torn by a crash, say),
 nothing is offered for removal: the line names that storyboard, when it was saved, and where its
-file is under the library's `loom/kv/` folder, so you can restore it from a backup or delete it.
+file is under the library's `_moonglade/loom/kv/` folder, so you can restore it from a backup or delete it.
 
 ### The continuity ribbon
 
@@ -455,8 +455,8 @@ pieces in flight.
 
 ## Saving & export
 
-The board **autosaves to the gallery server** (one file per key under `loom/kv/` in your
-backup folder), so it survives restarts and follows you between browsers and devices.
+The board **autosaves to the gallery server** (one file per key under `_moonglade/loom/kv/` in your
+library folder), so it survives restarts and follows you between browsers and devices.
 
 **Export ▾** offers three tiers, the editor handoff, plus restore:
 

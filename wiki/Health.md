@@ -157,7 +157,7 @@ A row offers only the fix that applies to it (**Re-download** or **Rebuild**, se
 re-download; it offers **Open details** and **Keep as is**, which quiets it.
 
 **Mark lost** and **Keep as is** are a note this app keeps for itself, in
-`integrity_marks.json` at the library root beside the two reports. They delete nothing and
+`integrity_marks.json` in the library's `_moonglade/decisions/` folder. They delete nothing and
 change nothing else, a lost row stops being counted for **Fix all**, and the toast that
 confirms either one has an **Undo** for ten seconds.
 
@@ -216,7 +216,7 @@ isn't). Health resolves video/local rows by filename, so they aren't reported as
 false "missing". Regenerate thumbnails any time:
 
 ```bash
-python -m moonglade.gallery --out pixai_backup --rebuild-thumbs
+python -m moonglade.gallery --rebuild-thumbs
 ```
 
 ---
