@@ -169,7 +169,10 @@ def run_pytest_halves(tmp):
     try:
         for name, job, args in halves:
             report = os.path.join(tmp, name + ".xml")
-            cmd = PYTEST + args + ["--junitxml=%s" % report]
+            # `-u`: a pipe gets Python's block buffering, which held each half's progress back
+            # in 8 KB lumps; unbuffered, its lines arrive as pytest writes them. It changes
+            # nothing else about the run (the workers already run unbuffered under xdist).
+            cmd = PYTEST[:1] + ["-u"] + PYTEST[1:] + args + ["--junitxml=%s" % report]
             with _PRINT:
                 print("\n== %s ==\n   side by side; its lines carry [%s]: %s"
                       % (job, name, subprocess.list2cmdline(cmd[1:])))
