@@ -77,7 +77,7 @@ the day it was written.
 The CI gap, and what covers it
 ------------------------------
 This module SKIPS without playwright + a browser. `.github/workflows/tests.yml` installs
-playwright and chromium for the pytest job, so on CI these guards RUN on chromium (the
+playwright and chromium for its render-harness job, so on CI these guards RUN on chromium (the
 WebKit profile is local-only: `MG_HARNESS_BROWSER=webkit`). Before 2026-09 CI installed
 neither and defect 3 above regressed on a `push` unseen. `dev/tests/csshelp.py` covers that one axis in pure
 stdlib: it resolves which declaration WINS the cascade (!important, specificity,
