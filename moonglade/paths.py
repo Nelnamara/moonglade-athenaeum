@@ -1,52 +1,59 @@
-"""moonglade_paths.py -- where Moonglade Athenaeum's own files are. The ONE place an app-root
-path is derived.
+"""moonglade.paths -- where Moonglade Athenaeum's own files are. The ONE place an app-root or
+library-records path is derived.
 
 Every module used to find "the app's folder" from its own `__file__`, in more than a dozen
 places, and none of them shared a helper (moonglade-internal/scopes/wave4/COUPLING.md section
-2). That only works while every module sits flat beside the launcher. Each location now has a
-named helper here, so moving a group of files is a change to one line in this module:
+2). Each location now has a named helper here, so moving a group of files is a change to one
+line in this module.
 
-  APP_ROOT          the folder holding the launcher and config.json.
-  config_path()     config.json: beside the app first, then the working directory.
-  local_path(name)  the machine files, in APP_ROOT/local/ since 3.20: the art pack and its
-                    .version marker, branding.json, branding_slots.json, mirror_session.json,
-                    serve.txt, serve.log and the icon cache (local/cache/). They belong to
-                    this machine, not to the code, the art tree or the library. Until an
-                    install's own files have been brought across (moonglade.migrate), a file
-                    found only in its old place (old_local_path()) is read there.
-  art_root()        the coded art tree branding_root() returns. Deliberately NOT derived
-                    from local_path(): the art tree and the machine files move separately.
-  state_path(out_dir, name)    one of the app's own records inside a library: its state
-  reports_path(out_dir, name)  files, jobs, logs and per-account folders, and its reports,
-                    in the library's _moonglade/ (reports in _moonglade/reports/) since
-                    3.20, read at the library's top until the library is brought across.
-                    catalog.db, the pictures, loom/, gallery/, _deleted/ and _duplicates/
-                    are the library itself, not records, and never go through these.
-  the rest          the shipped files the app reads: the pack manifest, wiki/, the
-                    CHANGELOG, gallery/dist, loom/, static/, requirements.txt, the launcher
-                    and the two entry scripts.
+The layout (moonglade-internal/scopes/wave4-rescope/SPEC_3.20_REBUILD.md; DECISIONS 2026-10-07,
+"The full reorganize: the owner's picks"). There is ONE home for each item, and nothing here
+ever answers an old place: only the move itself (moonglade.migrate) knows where an older
+version kept things.
+
+  <install>\\                 APP_ROOT: the launcher, config.json (hand-edited values only),
+                             the code (moonglade\\), the art tree and the shipped folders.
+    local\\                   local_dir(): this PC's machinery.
+      settings.json          settings_path(): everything the app writes (moonglade.settings).
+      mirror_session.json    local_path(MIRROR_SESSION_NAME): the Mirror's rotating sign-in.
+      moonglade.mgpack       local_path(PACK_NAME), and its .version marker.
+      icons\\                 icons_dir(): the shortcut .ico files. NOT a cache: a shortcut
+                             points here, so clearing a cache never blanks its icon.
+      banners\\               banners_dir(): banner renders that are the only copy.
+      cache\\                 cache_dir(): rebuildable things (badges, masks, banner renders).
+      logs\\                  logs_dir(): serve.log* (the launcher's) and moonglade.log*.
+      .journal.json, .lock   the install half of the move.
+  <library>\\
+    _moonglade\\              library_app_dir(out): everything of the app's in a library.
+      accounts\\<key>\\        account_dir(out, login): every per-login store.
+      loom\\                  loom_root(out): the Loom's whole folder.
+      records\\               records_path(out, name): achievements, runs, jobs, the schedule,
+                             the spend guard, telemetry, the integrity reports...
+      decisions\\             decisions_path(out, name): what the owner decided and must never
+                             lose (Mark-lost choices, the --organize undo list, curation undo).
+      .journal.json, .lock   the library half of the move.
 
 Nothing here imports another app module, so every module (and the launcher, before it has
 anything else) can import it first.
 
-The test suite pins `config_path`, `local_path`, `local_dir` and `old_local_path` to each
+The test suite pins `config_path`, `local_dir`, `local_path` and `library_anchor` to each
 test's own folder (tests/conftest.py), and tests/test_app_paths.py holds every helper against
 the exact path it resolves to.
 """
-import json
+import hashlib
 from pathlib import Path
 
-# The folder holding the launcher (Serve Gallery.pyw) and config.json: the parent of the
-# moonglade/ code folder this module sits in. The code moved down a folder in 3.20, and every
-# app-root path still follows from this one line.
+# The folder holding the launcher and config.json: the parent of the moonglade/ code folder
+# this module sits in. Every app-root path follows from this one line.
 APP_ROOT = Path(__file__).resolve().parent.parent
 
 # The coded art tree's folder name ("goods" in hex). The tree sits beside the launcher, not
 # in the library or the code (DECISIONS 2026-07-26).
 GOODS_ROOT_NAME = "0x676F6F6473"
 
-# The library used when neither --out nor config.json's LIBRARY_DIR names one. RELATIVE on
-# purpose: it resolves against run_dir(), and it is shown, stored and logged as typed.
+# The library used when neither an explicit --out nor settings.json names one. RELATIVE on
+# purpose: it is anchored to APP_ROOT (moonglade.settings.library_path), and it is shown and
+# logged as typed.
 DEFAULT_LIBRARY_DIR = "pixai_backup"
 
 
@@ -65,121 +72,141 @@ def token_paths():
     return (APP_ROOT / "token.txt", Path("token.txt"))
 
 
-# ---- 3.20: the machine files' folder, and the library's records folder -------------------
-# The machine files' folder under APP_ROOT.
+# ---- the install: local\ ------------------------------------------------------------------
 LOCAL_DIRNAME = "local"
-# The app's own records inside a library, and its reports inside that.
-RECORDS_DIRNAME = "_moonglade"
-REPORTS_DIRNAME = "reports"
-# What a migration brought across, written beside what it brought (moonglade.migrate): one
-# entry per name, with where it came from, where it went, copied or moved, when and how big.
-# A name it records is never looked for in its old place again.
-MOVED_NAME = "MOVED.json"
-# The icon cache: local/cache/ now, the app root's _container_cache/ before 3.20.
-ICON_CACHE_NAME = "cache"
-OLD_ICON_CACHE_NAME = "_container_cache"
-# The file the mirror's login lives in (a rotating token): beside config.json before 3.20.
+SETTINGS_NAME = "settings.json"
 MIRROR_SESSION_NAME = "mirror_session.json"
-# The files a migration MOVES rather than copies, because two copies would diverge: the art
-# pack and its marker, the Mirror's rotating token, the training spend guard. A rollback to
-# 3.19 moves them back, so wherever one is missing from its new place and present in its old
-# one, it is read there -- whatever MOVED.json says -- and the next start moves it again.
-MOVED_NAMES = frozenset({"moonglade.mgpack", "moonglade.mgpack.version", MIRROR_SESSION_NAME,
-                         "train_guard.json"})
+PACK_NAME = "moonglade.mgpack"
+ICONS_DIRNAME = "icons"
+BANNERS_DIRNAME = "banners"
+CACHE_DIRNAME = "cache"
+LOGS_DIRNAME = "logs"
+# The move's bookkeeping, one of each in local\ and in a library's _moonglade\.
+JOURNAL_NAME = ".journal.json"
+LOCK_NAME = ".lock"
+# The safety snapshot (the owner's pick 4), beside each journal; parked copies go in it.
+SNAPSHOT_DIRNAME = ".snapshot"
 
 
 def local_dir():
-    """The machine files' folder: APP_ROOT/local."""
+    """This PC's machinery: APP_ROOT/local."""
     return APP_ROOT / LOCAL_DIRNAME
 
 
-def old_local_path(name):
-    """Where 3.19 kept the machine file `name`: the app folder itself, except the icon cache
-    (`_container_cache/`) and mirror_session.json (beside wherever config.json was found).
-    The migration's source, and a reader's fallback until the file has been brought across."""
-    if name == ICON_CACHE_NAME:
-        return APP_ROOT / OLD_ICON_CACHE_NAME
-    if name == MIRROR_SESSION_NAME:
-        return config_path().parent / name
-    return APP_ROOT / name
-
-
-# The launcher's console log is never brought across: a fresh one starts in local/ as soon as
-# local/ exists, and the old ones stay where they are.
-FRESH_NAMES = ("serve.log",)
-
-
 def local_path(name):
-    """A machine file by name: `moonglade.mgpack` (+ `.version`), `branding.json`,
-    `branding_slots.json`, `mirror_session.json`, `serve.txt`, `serve.log`, the icon cache
-    (`cache`). It is local_dir() / name, except while the file is still only in its old
-    place and the migration has not recorded it (an install not yet started on 3.20, or a
-    move that was refused): then it is read, and written, where it is. serve.log is
-    local/serve.log whenever local/ exists (FRESH_NAMES)."""
-    if name in FRESH_NAMES:
-        return local_dir() / name if local_dir().is_dir() else old_local_path(name)
-    return _settled(local_dir(), name, old_local_path(name), local_dir() / MOVED_NAME)
+    """A flat file in local\\ by name: the pack (`moonglade.mgpack`) and its `.version`
+    marker, `mirror_session.json`. Always local_dir() / name."""
+    return local_dir() / name
 
 
-def icon_cache_dir():
-    """The regenerable cache of pack-shipped .ico files that Windows must read off disk (the
-    Desktop shortcut's icon). A machine file, so it goes through local_path()."""
-    return local_path(ICON_CACHE_NAME) / "marks"
+def settings_path():
+    """settings.json: everything the app writes for this install (moonglade.settings)."""
+    return local_dir() / SETTINGS_NAME
 
 
-# A manifest's entries by name, read once per change of the file (path -> (stamp, entries)).
-_moved_entries_cache = {}
+def icons_dir():
+    """The shortcut .ico files Windows reads off disk (the Desktop/Start-menu shortcuts and
+    the pack's Explorer type). Not a cache: a shortcut points at a file here."""
+    return local_dir() / ICONS_DIRNAME
 
 
-def moved_entries(manifest):
-    """{name: its LATEST entry} in a migration manifest: what was brought across (copied,
-    moved, started fresh, or found already in place), from where, and the source's
-    fingerprint at the time. An absent or unreadable manifest records nothing."""
-    manifest = Path(manifest)
-    try:
-        st = manifest.stat()
-    except OSError:
-        return {}
-    stamp = (st.st_mtime_ns, st.st_size)
-    hit = _moved_entries_cache.get(str(manifest))
-    if hit and hit[0] == stamp:
-        return hit[1]
-    entries = {}
-    try:
-        doc = json.loads(manifest.read_text(encoding="utf-8"))
-        for e in doc.get("entries", []):
-            if isinstance(e, dict) and isinstance(e.get("name"), str):
-                entries[e["name"]] = e
-    except (OSError, ValueError, AttributeError, TypeError):
-        entries = {}
-    _moved_entries_cache[str(manifest)] = (stamp, entries)
-    return entries
+def banners_dir():
+    """Banner renders that are the only copy of what this install wears (moved in from an
+    early version's art-tree root, or a render with no record): never regenerated, never in
+    a cache."""
+    return local_dir() / BANNERS_DIRNAME
 
 
-def moved_names(manifest):
-    """The names a migration manifest records as brought across."""
-    return frozenset(moved_entries(manifest))
+def cache_dir():
+    """Rebuildable things: badge thumbnails, feat masks, slot and earned banner renders.
+    Anything here may be deleted; it is made again when it is next needed."""
+    return local_dir() / CACHE_DIRNAME
 
 
-def _settled(new_dir, name, old, manifest):
-    """The new place for `name`, unless it is missing there, present in its old place `old`,
-    and either a MOVED kind (MOVED_NAMES: its only copy may be in the old place again after a
-    round trip to 3.19) or not recorded in `manifest`: then the old place. A recorded COPY is
-    never looked for in its old place again, so deleting the new copy can never bring back a
-    stale old one."""
-    new = Path(new_dir) / name
-    try:
-        if new.exists() or not old.exists():
-            return new
-        if name in MOVED_NAMES:
-            return old
-        if name in moved_names(manifest):
-            return new
-    except OSError:
-        return new
-    return old
+def logs_dir():
+    """Both logs: the launcher's serve.log* and the app's moonglade.log*."""
+    return local_dir() / LOGS_DIRNAME
 
 
+# ---- the library: <library>\_moonglade\ ----------------------------------------------------
+# The app's own folder inside a library. Every library walker prunes it (moonglade.gallery's
+# QUARANTINE_EXCLUDE), so nothing in it is ever catalogued, counted, organized or quarantined
+# -- the Loom's frames and cuts included, which is why the Loom lives in it.
+LIBRARY_APP_DIRNAME = "_moonglade"
+ACCOUNTS_DIRNAME = "accounts"
+LOOM_DIRNAME = "loom"
+RECORDS_DIRNAME = "records"
+DECISIONS_DIRNAME = "decisions"
+# The per-login account folder of a caller with no web session (the CLI, the MCP server):
+# moonglade.gallery's ACCOUNT_LOCAL. A login's key is 16 hex characters, so it never collides.
+LOCAL_ACCOUNT_KEY = "_local"
+
+
+def library_app_dir(out_dir):
+    """The app's folder inside the library `out_dir`: out_dir/_moonglade."""
+    return Path(out_dir) / LIBRARY_APP_DIRNAME
+
+
+def account_key(login):
+    """Filesystem-safe, case-COLLISION-safe key for the login name `login`: the first 16 hex
+    digits of sha256 of the exact (case-sensitive) name. "Nel" and "nel" are two logins, and
+    on NTFS two plain-name folders would be one; two digests never are. Not reversible on
+    purpose: the login owns its display name in config.json's AUTH_USERS."""
+    return hashlib.sha256(str(login).encode("utf-8")).hexdigest()[:16]
+
+
+def accounts_dir(out_dir):
+    """Where every per-login folder of the library `out_dir` lives."""
+    return library_app_dir(out_dir) / ACCOUNTS_DIRNAME
+
+
+def account_dir(out_dir, login):
+    """The one folder holding every per-login store of `login` (prefs, state, snippets,
+    toolbox presets, saved views) in the library `out_dir`: accounts/<account_key(login)>."""
+    return accounts_dir(out_dir) / account_key(login)
+
+
+def local_account_dir(out_dir):
+    """The per-login folder of a caller with no web session (LOCAL_ACCOUNT_KEY)."""
+    return accounts_dir(out_dir) / LOCAL_ACCOUNT_KEY
+
+
+def loom_root(out_dir):
+    """The Loom's whole folder in the library `out_dir`: boards (kv/), music beds (_beds/),
+    the render journal (_submits/), frames and exports."""
+    return library_app_dir(out_dir) / LOOM_DIRNAME
+
+
+def _in_library(folder, out_dir, make):
+    """`folder`, made first when `make` and the library itself exists -- so a first write can
+    land, and asking about a folder that is not a library never creates one."""
+    if make:
+        try:
+            if not folder.is_dir() and Path(out_dir).is_dir():
+                folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    return folder
+
+
+def records_path(out_dir, name, make=True):
+    """One of the app's records in the library `out_dir`, by name: achievements.json (with
+    the skin), telemetry.json, schedule.json, train_guard.json, reconcile_stamp.json,
+    jobs.jsonl, raw_tasks.jsonl, runs.db, the integrity reports and their lock,
+    audit_report.csv, verify_report.csv. out_dir/_moonglade/records/name. `make=False` only
+    looks: it never makes the folder."""
+    return _in_library(library_app_dir(out_dir) / RECORDS_DIRNAME, out_dir, make) / name
+
+
+def decisions_path(out_dir, name, make=True):
+    """One of the owner's decisions in the library `out_dir`, by name: integrity_marks.json
+    (Mark lost / Keep as is), organize_manifest.csv (the --organize undo list), the curation
+    import's undo snapshots (curation_pre_import_<time>.json). Kept apart from the records
+    because none of it can be made again. out_dir/_moonglade/decisions/name."""
+    return _in_library(library_app_dir(out_dir) / DECISIONS_DIRNAME, out_dir, make) / name
+
+
+# ---- shipped files ----------------------------------------------------------------------
 def art_root():
     """The coded art tree, beside the launcher. branding_root() returns this."""
     return APP_ROOT / GOODS_ROOT_NAME
@@ -207,7 +234,7 @@ def gallery_dist():
 
 
 def loom_dir():
-    """The Loom's folder."""
+    """The Loom's code folder (the front end), not its library data (loom_root)."""
     return APP_ROOT / "loom"
 
 
@@ -255,87 +282,22 @@ def backup_script_path():
     return APP_ROOT / "moonglade_backup.py"
 
 
+def library_anchor():
+    """The folder a relative library path (the default, or a relative one stored in
+    settings.json) is anchored to: the app folder, whatever the working directory of the
+    entry point. The test suite pins it to each test's own folder."""
+    return APP_ROOT
+
+
 def default_library_path():
-    """The default library as an absolute path, for a process whose working directory is not
-    the app's (the MCP server, started by an MCP client from anywhere)."""
-    return APP_ROOT / DEFAULT_LIBRARY_DIR
-
-
-# The app's own records inside a library: its state files and folders...
-STATE_NAMES = (
-    "achievements.json", "telemetry.json", "schedule.json", "train_guard.json",
-    "reconcile_stamp.json", "jobs.jsonl", "raw_tasks.jsonl", "runs.db",
-    "account_prefs", "account_state", "prompt_snippets", "toolbox_presets",
-    "view_presets", "logs",
-    # the install-wide files the per-account folders replaced, still read as a fallback for
-    # an account with no file of its own (an install can have a live one: D:'s presets)
-    "prompt_snippets.json", "toolbox_presets.json", "view_presets.json",
-)
-# ...and its reports. (Also a report, by a name with a time in it: the curation import's
-# undo files, CURATION_SNAPSHOT_PREFIX + "<time>.json".)
-REPORT_NAMES = (
-    "integrity_report.csv", "integrity_report.json", "integrity_marks.json",
-    "integrity_report.lock", "audit_report.csv", "verify_report.csv",
-    "organize_manifest.csv",
-)
-CURATION_SNAPSHOT_PREFIX = "curation_pre_import_"
-
-
-def state_path(out_dir, name, make=True):
-    """One of the app's own records inside the library `out_dir`, by name:
-    `achievements.json`, `telemetry.json`, `schedule.json`, `train_guard.json`,
-    `reconcile_stamp.json`, `jobs.jsonl`, `raw_tasks.jsonl`, `runs.db`, the per-account
-    folders (`account_prefs/`, `account_state/`, `prompt_snippets/`, `toolbox_presets/`,
-    `view_presets/`), the install-wide files they replaced and still fall back to
-    (`prompt_snippets.json`, `toolbox_presets.json`, `view_presets.json`) and `logs/`.
-
-    out_dir/_moonglade/name since 3.20 -- except while a record is still only at the
-    library's top (old_state_path) and the library's migration has not recorded it (a
-    library not yet opened by 3.20, or a move that was refused): then it is read, and
-    written, where it is. `make=False` only looks: it never makes the records folder (About's
-    list of leftovers asks this way)."""
-    out = Path(out_dir)
-    return _record(out, out / RECORDS_DIRNAME, name, make)
-
-
-def reports_path(out_dir, name, make=True):
-    """One of the app's reports inside the library `out_dir`, by name:
-    `integrity_report.csv`/`.json`/`.lock`, `integrity_marks.json`, `audit_report.csv`,
-    `verify_report.csv`, `organize_manifest.csv` and the curation import's undo files
-    (`curation_pre_import_<time>.json`). out_dir/_moonglade/reports/name since 3.20, with
-    the same fallback to the library's top, and the same `make`, as state_path()."""
-    out = Path(out_dir)
-    return _record(out, out / RECORDS_DIRNAME / REPORTS_DIRNAME, name, make)
-
-
-def old_state_path(out_dir, name):
-    """Where 3.19 kept a record or report: the library's top. The migration's source, and a
-    reader's fallback until it has been brought across."""
-    return Path(out_dir) / name
-
-
-def records_manifest(out_dir):
-    """The library's record of what its migration brought across."""
-    return Path(out_dir) / RECORDS_DIRNAME / MOVED_NAME
-
-
-def _record(out, new_dir, name, make=True):
-    """_settled() for a library record. When the answer is the new place and its folder is
-    not there yet, the folder is made -- but only inside a library that exists, so asking
-    about a folder that is not a library never creates one -- so a first write can land."""
-    p = _settled(new_dir, name, old_state_path(out, name), records_manifest(out))
-    if make and p.parent == new_dir:
-        try:
-            if not new_dir.is_dir() and out.is_dir():
-                new_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-    return p
+    """The default library as an absolute path: DEFAULT_LIBRARY_DIR anchored to the app
+    folder (library_anchor())."""
+    return library_anchor() / DEFAULT_LIBRARY_DIR
 
 
 def run_dir():
-    """The working directory, which relative paths (the default library, a relative folder
-    typed into the Control Panel) resolve against. Every entry point makes it APP_ROOT: the
-    launcher changes into it, the Control Panel starts its jobs in it, and the documented
-    command lines run from it. Named so that code which depends on it says so."""
+    """The working directory, which a relative path typed into the Control Panel resolves
+    against. Every entry point makes it APP_ROOT: the launcher changes into it, the Control
+    Panel starts its jobs in it, and the documented command lines run from it. Named so that
+    code which depends on it says so."""
     return Path.cwd()
