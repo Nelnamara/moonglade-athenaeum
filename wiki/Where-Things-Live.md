@@ -121,7 +121,8 @@ Any install from 3.10 onward updates this way.
   this install and the older one both run on Windows. If either runs on Linux or macOS (or the
   older one on a NAS), close every older install on the library yourself before the first start.
   If an older install writes to the library later, the next start keeps everything already in the
-  new homes and merges in what the older one added.
+  new homes and merges in what the older one added. The achievement counts an older install makes
+  after the move aren't added.
 
 Going back to an earlier version after 3.20 isn't supported, because it won't find your records
 or settings.

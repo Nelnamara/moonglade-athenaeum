@@ -40,17 +40,20 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     written later -- by an older install still on the library, or by a version gone back to --
     holds only that install's additions (the move had emptied its homes), so it never replaces
     the new home. What it adds is folded in where the format allows: lines it lacks; JSON
-    records by union, telemetry's counters added (the older copy counted only its own since;
-    a copy holding exactly what the move took adds nothing, and one that counted on from it
-    adds only the difference), the spend guard entry by entry, whichever blocks longer; runs.db (the Runs and their spend
-    reservations) run by run, inside the new home itself under SQLite's write lock, after both
-    files pass their integrity check -- a run both hold keeps the new home's rows whole, and
-    the older copy's is named in the log; integrity_marks.json mark by mark, a login's stores
-    key by key, and the Loom's boards and cast library inside the JSON text the Loom keeps in
-    each file -- on a clash the new home's value stays and the older one is logged. What
-    can't be merged is set aside and named in the log; a Loom value that can't is kept beside
-    its new home under a key of its own, outside the snapshot. When the NEW home is the side
-    that won't read, the start stops and names it: the healthy older copy is never set aside.
+    records by union, telemetry's counters at their max per key (never added: a restored
+    backup of any age, or a sync tool's copy, holds counts the new home already has, and a max
+    can't count them twice -- so the counts an older install makes after the move aren't
+    added), the spend guard entry by entry, whichever blocks longer; runs.db (the Runs and
+    their spend reservations) run by run, inside the new home itself under SQLite's write
+    lock, after both files pass their integrity check -- a run both hold keeps the new home's
+    rows whole, and the older copy's is named in the log; integrity_marks.json mark by mark, a
+    login's stores key by key, and the Loom's cast library and boards inside the JSON text the
+    Loom keeps in each file -- on a clash the new home's value stays and the older one is
+    logged, except a board: one both copies changed is kept whole beside its new home under a
+    key of its own, so no card or render record of either is lost. What can't be merged is set
+    aside and named in the log; a Loom value that can't is kept beside its new home under a key
+    of its own, outside the snapshot. When the NEW home is the side that won't read, the start
+    stops and names it: the healthy older copy is never set aside.
   * THE SNAPSHOT (the owner's pick 4). Before a run moves, removes or parks anything, the small
     records it is about to touch are zipped into its half's .snapshot\\ (one zip per run that has
     work, so every later sweep is covered too) -- never pictures, catalog.db, the art pack, the
@@ -150,7 +153,8 @@ REMOVE_BACKOFF_S = 0.1       # ...pausing 0.1, 0.2, 0.4 and 0.8 s between tries
 _REPLACE_RETRY_WINERRORS = (5, 32, 33)
 WRITTEN_SINCE_SLACK_S = 2.0  # a file's time this close to the move's own end is the move's
 # A file at most this big is hashed even when it moves by one rename, so the journal knows the
-# very bytes the move took (a record put back later is then recognised: _two_copies).
+# very bytes the move took, as the copy path's does (a record put back later with exactly those
+# bytes is then the move's own source, and is only removed: _two_copies).
 SMALL_RECORD_BYTES = 4 << 20
 # The reparse tags of an entry that points somewhere else: a symbolic link (to a file or a
 # folder) and a junction (a mount point). os.path.islink() misses a junction, and os.walk()
@@ -1565,44 +1569,18 @@ def _union_marks(a, b):
     return out, clashes
 
 
-def _number(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
-def _moved_base(cb, moved):
-    """The counters to take off an older copy's before it adds: those the move took
-    (`moved`, {name: number}) when the older copy holds every one of them at least as high --
-    it loaded them before the move and counted on (an older install that saved across the
-    rename, a restored backup counted on once) -- else {} (it counted only its own since)."""
-    if not isinstance(moved, dict):
-        return {}
-    base = {k: v for k, v in moved.items() if _number(v)}
-    if all(_number(cb.get(k)) and cb[k] >= v for k, v in base.items()):
-        return base
-    return {}
-
-
-def _sum_telemetry(a, b, moved=None):
-    """telemetry.json written after the move, `b`, folded into the new home's, `a`. The move
-    emptied the older install's home, and it counts by load-add-save from disk, so `b` holds
-    only what it counted since: its counters ADD to the new home's -- less the counters the
-    move itself took (`moved`, from the journal) when `b` holds every one of those at least as
-    high, because then it counted on from them (_moved_base). The maxima stay at their max, the
-    sets, days and day lists are unions, a flag is set if either set it (all as _merge_generic
-    does), and the new home's baselines stay (a snapshot only `b` holds, for an app folder the
-    new home never looked at, is added)."""
+def _merge_telemetry(a, b):
+    """telemetry.json written after the move, `b`, folded into the new home's, `a`: each
+    counter at its max, never added. A copy written at an old place after the move may be a
+    restored backup of any age, a sync tool's copy, or an older install's own counts since;
+    nothing in the file tells which, and adding the first two counted achievements twice. A
+    max can never count anything twice, and folding the same copy again changes nothing. The
+    cost: the counts an older install makes after the move aren't added (the docs say not to
+    run one on the library). The maxima stay at their max, the sets, days and day lists are
+    unions, a flag is set if either set it (all as _merge_generic does), and the new home's
+    baselines stay (a snapshot only `b` holds, for an app folder the new home never looked at,
+    is added)."""
     out = _merge_generic(a, b)
-    ca, cb = a.get("counters"), b.get("counters")
-    if isinstance(ca, dict) and isinstance(cb, dict):
-        base = _moved_base(cb, moved)
-        counters = dict(ca)
-        for k, v in cb.items():
-            add = v - base.get(k, 0) if _number(v) else v
-            if k not in counters:
-                counters[k] = add
-            elif _number(counters[k]) and _number(v):
-                counters[k] = counters[k] + add
-        out["counters"] = counters
     ba, bb = a.get("baselines"), b.get("baselines")
     if isinstance(ba, dict):
         baselines = dict(bb) if isinstance(bb, dict) else {}
@@ -1725,11 +1703,10 @@ def _loom_kept_beside(dest, sha):
     return None
 
 
-def _settled_bytes(src, dest, how, moved=None):
+def _settled_bytes(src, dest, how):
     """(the new home's content with the older copy folded in, as bytes; clashes), or
-    (None, []) when the two can't be merged. `moved`: the counters the first move took into
-    the new home (telemetry.json only, _sum_telemetry). Raises ValueError or
-    UnicodeDecodeError for a copy that won't parse, OSError for one that won't read."""
+    (None, []) when the two can't be merged. Raises ValueError or UnicodeDecodeError for a
+    copy that won't parse, OSError for one that won't read."""
     if how == "log":
         return _merged_log(src, dest), []
     if how != "lines" and not how.startswith("json:"):
@@ -1757,7 +1734,7 @@ def _settled_bytes(src, dest, how, moved=None):
     elif how == "json:guard":
         doc = _merge_guard(a, b, False)                      # more guarding, never less
     elif how == "json:telemetry":
-        doc = _sum_telemetry(a, b, moved)                    # its counts add to the new home's
+        doc = _merge_telemetry(a, b)                         # each counter at its max
     else:
         doc = _merge_generic(a, b)
     if doc is None:
@@ -1974,67 +1951,10 @@ def _park(path, half, said=True):
     return target
 
 
-def _identity(p):
-    """The file `p` as it is now beyond its bytes -- its modified time and size, journalled
-    beside its hash -- so a later start can tell that very file, not yet removed, from a new
-    one written with the same bytes. {} when it can't be read."""
-    try:
-        st = os.stat(p)
-    except OSError:
-        return {}
-    return {"src_mtime_ns": st.st_mtime_ns, "src_size": st.st_size}
-
-
-def _same_identity(entry, p):
-    """Is `p` still the very file `entry` journalled taking (time and size, beside its hash)?"""
-    ident = _identity(p)
-    return bool(ident) and all(entry.get(k) == v for k, v in ident.items())
-
-
-def _counters_of(p):
-    """The numeric counters of the telemetry.json at `p` ({name: number}; {} for none)."""
-    doc = _json_doc(p)
-    c = doc.get("counters") if isinstance(doc, dict) else None
-    return {k: v for k, v in c.items() if _number(v)} if isinstance(c, dict) else {}
-
-
-def _carry(half, key, entry):
-    """Journal `entry` for `key`, keeping what the first move took (`moved`) from the entry
-    it replaces: a later write of the same home never forgets it."""
-    old = half.journal.items.get(key)
-    if isinstance(old, dict) and isinstance(old.get("moved"), dict):
-        entry["moved"] = old["moved"]
-    half.journal.items[key] = entry
-    return entry
-
-
-def _note_moved(half, key, kind, src_hash, dest):
-    """At the first move (never a later bring-in), what it took into the new home `dest` for
-    telemetry.json: the hash of every old copy it took, and the counters the new home held
-    right after. A later copy holding exactly those bytes, or counted on from those counters,
-    is then never added again (_two_copies, _sum_telemetry). The caller saves the journal."""
-    if half.settled or kind != "json:telemetry" or not src_hash:
-        return
-    entry = half.journal.items.setdefault(key, {"src": None, "state": "kept", "time": _now()})
-    moved = entry.get("moved") if isinstance(entry.get("moved"), dict) else {}
-    hashes = [h for h in (moved.get("sha256") or []) if isinstance(h, str)]
-    if src_hash not in hashes:
-        hashes.append(src_hash)
-    entry["moved"] = {"sha256": hashes, "counters": _counters_of(dest)}
-
-
-def _moved_hashes(entry):
-    """The hashes of the old copies the first move took for this home (_note_moved)."""
-    moved = entry.get("moved") if isinstance(entry, dict) else None
-    return [h for h in ((moved or {}).get("sha256") or []) if isinstance(h, str)]
-
-
-def _swap_in(tmp, dest, half, key, src_hash, merged_sha, ident=None):
-    """Swap the verified temp `tmp` in over `dest`, journalled first (verified, then made).
-    `ident`: the source's time and size (_identity), journalled beside its hash."""
-    _carry(half, key, dict({"src": None, "src_sha256": src_hash, "sha256": merged_sha,
-                            "state": "verified", "time": _now(), "merged": True},
-                           **(ident or {})))
+def _swap_in(tmp, dest, half, key, src_hash, merged_sha):
+    """Swap the verified temp `tmp` in over `dest`, journalled first (verified, then made)."""
+    half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": merged_sha,
+                               "state": "verified", "time": _now(), "merged": True}
     half.journal.save()
     _replace(tmp, dest)
     _fsync_dir(dest.parent)
@@ -2042,7 +1962,7 @@ def _swap_in(tmp, dest, half, key, src_hash, merged_sha, ident=None):
     half.journal.save()
 
 
-def _replace_with(dest, data, half, key, src_hash, ident=None):
+def _replace_with(dest, data, half, key, src_hash):
     """Write merged bytes over `dest` safely and record the move made it."""
     tmp = dest.with_name(dest.name + MOVING_SUFFIX)
     _discard(tmp)
@@ -2053,7 +1973,7 @@ def _replace_with(dest, data, half, key, src_hash, ident=None):
     if tmp.read_bytes() != data:
         _discard(tmp)
         raise _Failed("couldn't write the merged %s" % dest)
-    _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest(), ident)
+    _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest())
 
 
 class _NewHomeBroken(Exception):
@@ -2083,26 +2003,25 @@ def _fold_db(src, dest, half, key, src_hash):
         raise _NewHomeBroken(dest)
     if _db_counts(src) is None:
         return None
-    ident = _identity(src)
     added, clashes = _fold_db_rows(dest, src)
-    _carry(half, key, dict({"src": None, "src_sha256": src_hash, "sha256": None,
-                            "state": "made", "time": _now(), "merged": True}, **ident))
+    half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": None,
+                               "state": "made", "time": _now(), "merged": True}
     half.journal.save()
     return added, clashes
 
 
-def _fold_in(src, dest, kind, half, key, src_hash, moved=None):
+def _fold_in(src, dest, kind, half, key, src_hash):
     """The library's move had finished, and `src` -- an old home -- was written since: by an
     older install still on the library, or by a version gone back to. The new home always
     wins: it is never replaced, and what the older copy adds is folded into it where the
     format allows (_settled_kind): lines it lacks, JSON keys and marks it lacks (on a clash
-    the new home's value stays, and the older value is logged), telemetry's counters added
-    (less what the move took, `moved`: _sum_telemetry) and its maxima at their max, guards
-    from both, database rows by primary key. What can't be merged is set aside
-    and named in the log -- except a file of the Loom's key->value store, which is kept beside
-    the new home under a key of its own (_loom_aside), outside the safety snapshot: a board or
-    a cast list the older install made is never lost to the clean-start sweep. Returns
-    "merged", "parked" or "kept"."""
+    the new home's value stays, and the older value is logged), telemetry's counters and
+    maxima at their max (_merge_telemetry), guards from both, database rows by primary key.
+    What can't be merged is set aside and named in the log -- except a file of the Loom's
+    key->value store (a board both copies changed among them), which is kept beside the new
+    home under a key of its own (_loom_aside), outside the safety snapshot: a board or a cast
+    list the older install made is never lost to the clean-start sweep. Returns "merged",
+    "parked" or "kept"."""
     how = _settled_kind(kind, dest, half.loom_kv)
     item, rel = half.report.item, half.rel
     why = "it is not a kind of file that can be merged"
@@ -2125,10 +2044,9 @@ def _fold_in(src, dest, kind, half, key, src_hash, moved=None):
                 return "merged"
             why = "the older copy fails its own integrity check"
         elif how != "park":
-            ident = _identity(src)
-            data, clashes = _settled_bytes(src, dest, how, moved)
+            data, clashes = _settled_bytes(src, dest, how)
             if data is not None:
-                _replace_with(dest, data, half, key, src_hash, ident)
+                _replace_with(dest, data, half, key, src_hash)
                 _remove(src)
                 if clashes:
                     item("In %s the new home's value was kept for %d key(s); the older copy "
@@ -2187,33 +2105,20 @@ def _two_copies(src, dest, kind, half, vouched):
     item = half.report.item
     src_hash = _sha256(src)
     if vouched:
-        _note_moved(half, key, kind, src_hash, dest)
         _remove(src)
         item("Removed %s: 3.20 had already copied it to %s.", half.rel(src), half.rel(dest))
         return "removed"
     dest_hash = _sha256(dest)
     made = entry.get("state") == "made" or (entry.get("state") == "verified"
                                             and entry.get("sha256") == dest_hash)
-    # telemetry.json written after the move is ADDED to the new home (_sum_telemetry), so a
-    # copy counts as one already taken only by its very file (bytes, time and size), or by
-    # bytes the first move took -- never by bytes alone: an older install that wrote the same
-    # few counts twice has counted twice.
-    additive = half.settled and kind == "json:telemetry"
-    if made and entry.get("src_sha256") == src_hash and \
-            (not additive or _same_identity(entry, src)):
+    if made and entry.get("src_sha256") == src_hash:
         if entry.get("state") != "made":     # it died between the swap and the journal
             half.journal.items[key]["state"] = "made"
             half.journal.save()
         _remove(src)                         # the move's own source, not yet deleted
         item("Removed %s: it was already moved to %s.", half.rel(src), half.rel(dest))
         return "removed"
-    if additive and src_hash in _moved_hashes(entry):
-        _remove(src)                         # put back, or brought back by a sync tool
-        item("Removed %s: it holds exactly what the move took to %s, counted there already.",
-             half.rel(src), half.rel(dest))
-        return "removed"
-    if src_hash == dest_hash and not additive:
-        _note_moved(half, key, kind, src_hash, dest)
+    if src_hash == dest_hash:
         _remove(src)                         # the same bytes: nothing to lose
         item("Removed %s: %s holds the same.", half.rel(src), half.rel(dest))
         return "removed"
@@ -2231,8 +2136,7 @@ def _two_copies(src, dest, kind, half, vouched):
         return "removed"
     if half.settled:
         # Written after the library's move finished: the new home always wins (A).
-        moved = entry.get("moved") if isinstance(entry.get("moved"), dict) else {}
-        return _fold_in(src, dest, kind, half, key, src_hash, moved.get("counters"))
+        return _fold_in(src, dest, kind, half, key, src_hash)
     # The first move.
     data = None
     try:
@@ -2243,9 +2147,7 @@ def _two_copies(src, dest, kind, half, vouched):
     except (OSError, ValueError, UnicodeDecodeError):
         data = None
     if data is not None:
-        _replace_with(dest, data, half, key, src_hash, _identity(src))
-        _note_moved(half, key, kind, src_hash, dest)
-        half.journal.save()
+        _replace_with(dest, data, half, key, src_hash)
         _remove(src)
         item("Merged %s into %s.", half.rel(src), half.rel(dest))
         return "merged"
@@ -2354,11 +2256,10 @@ def _bring(src, dest, kind, half, vouched=False):
         if kind != "db" and _same_volume(src, dest.parent):
             entry = {"src": half.rel(src), "state": "renaming", "time": _now()}
             if kind != "log" and src.stat().st_size <= SMALL_RECORD_BYTES:
-                # A small record's very bytes (and its time and size) are journalled here
-                # too, as the copy below journals them: a copy of it put back later is known.
+                # A small record's very bytes are journalled here too, as the copy below
+                # journals them: a copy of it put back later is known.
                 entry["src_sha256"] = _sha256(src)
-                entry.update(_identity(src))
-            _carry(half, key, entry)
+            half.journal.items[key] = entry
             half.journal.save()
             try:
                 _rename_into(src, dest)
@@ -2367,7 +2268,6 @@ def _bring(src, dest, kind, half, vouched=False):
             else:
                 _fsync_dir(dest.parent)
                 half.journal.items[key].update(state="made", how="renamed")
-                _note_moved(half, key, kind, entry.get("src_sha256"), dest)
                 half.journal.save()
                 half.tick()
                 half.report.item("Moved %s to %s.", half.rel(src), half.rel(dest))
@@ -2377,14 +2277,13 @@ def _bring(src, dest, kind, half, vouched=False):
         if not _verified(src, src_hash, tmp, used):
             _discard(tmp)
             raise _Failed("the copy of %s did not match it" % src)
-        _carry(half, key, dict({"src": half.rel(src), "src_sha256": src_hash,
-                                "sha256": _sha256(tmp), "state": "verified",
-                                "time": _now()}, **_identity(src)))
+        half.journal.items[key] = {"src": half.rel(src), "src_sha256": src_hash,
+                                   "sha256": _sha256(tmp), "state": "verified",
+                                   "time": _now()}
         half.journal.save()
         _replace(tmp, dest)
         _fsync_dir(dest.parent)
         half.journal.items[key]["state"] = "made"
-        _note_moved(half, key, kind, src_hash, dest)
         half.journal.save()
         _remove(src)
         half.tick()
@@ -3996,8 +3895,8 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # banner renders that may be the only copy, and 3.20's record.
     snap = list(plan.snap) + [(p, half.rel(p)) for p in shared]
     if half.settled:
-        # An additive fold (telemetry's counters) can't be undone by reading the file again:
-        # the new home's own copy goes into this run's zip first.
+        # A fold writes telemetry.json's new home in place: its own copy goes into this run's
+        # zip first, beside the older copy.
         homes = {Path(d) for s, d, k, _v in plan.moves
                  if k == "json:telemetry" and _movable(s) and Path(d).is_file()}
         snap += [(d, half.rel(d)) for d in sorted(homes)]
