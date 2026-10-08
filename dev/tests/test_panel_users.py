@@ -12,9 +12,15 @@ all survived unchanged. The session CSRF token is fetched off /api/panel/summary
 JSON (the field the React overlay itself uses) instead of scraped from the dead
 page's inline `var CSRF = "..."`.
 """
+import pytest
+
 from moonglade import backup as core
 
 from tests.conftest import login_client
+
+# The shipped password hashing, not the suite's cheap test cost (conftest): this file asserts
+# the stored hash's format.
+pytestmark = pytest.mark.usefixtures("real_password_hashing")
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in,
                          # same address dev/tests/test_route_tiers.py uses.

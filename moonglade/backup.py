@@ -343,6 +343,15 @@ def _save_config(cfg):
 # ---------------------------------------------------------------------------
 _accounts_lock = threading.Lock()
 
+# How every NEW web-login password hash is made (werkzeug's generate_password_hash method):
+# scrypt at werkzeug's own default cost. A module-level name for one reason: the test suite
+# swaps it for a token scrypt cost on its throwaway accounts (dev/tests/conftest.py), since a
+# real hash takes about a tenth of a second per account made and per sign-in checked, and most
+# of the suite signs in. check_password_hash reads the cost back out of each stored hash, so
+# this decides only how new hashes are made. Never lower it here:
+# dev/tests/test_web_auth.py holds the shipped value to full strength.
+WEB_PASSWORD_HASH_METHOD = "scrypt"
+
 def get_or_create_secret_key():
     """Return config.json's AUTH_SECRET_KEY, generating + persisting a fresh
     secrets.token_hex(32) the first time this ever runs. Persisting it is what lets
@@ -537,8 +546,10 @@ def add_or_update_web_user(username, password):
         # _next_sess_epoch()'s docstring for why a record-local counter was the bug.
         next_epoch = _next_sess_epoch(cfg)
         new_users = [u for u in users if not (isinstance(u, dict) and u.get("username") == username)]
-        new_users.append({"username": username, "password_hash": generate_password_hash(password),
-                           "sess_epoch": next_epoch})
+        new_users.append({"username": username,
+                          "password_hash": generate_password_hash(
+                              password, method=WEB_PASSWORD_HASH_METHOD),
+                          "sess_epoch": next_epoch})
         cfg["AUTH_USERS"] = new_users
         _save_config(cfg)
         return replaced
@@ -590,7 +601,8 @@ def set_web_user_password_guarded(username, new_password, current_password=None)
         new_users = [u for u in users
                      if not (isinstance(u, dict) and u.get("username") == username)]
         new_users.append({"username": username,
-                          "password_hash": generate_password_hash(new_password),
+                          "password_hash": generate_password_hash(
+                              new_password, method=WEB_PASSWORD_HASH_METHOD),
                           "sess_epoch": next_epoch})
         cfg["AUTH_USERS"] = new_users
         _save_config(cfg)
@@ -620,11 +632,13 @@ def add_web_user_if_new(username, password):
         if _find_web_user(cfg, username) is not None:
             return False
         users = cfg.get("AUTH_USERS") or []
-        users.append({"username": username, "password_hash": generate_password_hash(password),
-                       # The Panel's /api/users/add path -- the one an owner actually
-                       # uses from a browser. Hardcoding 0 here left the resurrection
-                       # defect fully live through the UI even with the CLI path fixed.
-                       "sess_epoch": _next_sess_epoch(cfg)})
+        users.append({"username": username,
+                      "password_hash": generate_password_hash(
+                          password, method=WEB_PASSWORD_HASH_METHOD),
+                      # The Panel's /api/users/add path -- the one an owner actually
+                      # uses from a browser. Hardcoding 0 here left the resurrection
+                      # defect fully live through the UI even with the CLI path fixed.
+                      "sess_epoch": _next_sess_epoch(cfg)})
         cfg["AUTH_USERS"] = users
         _save_config(cfg)
         return True
@@ -740,11 +754,15 @@ def _dummy_password_hash():
     against this for an UNKNOWN username so an unknown-username login takes about
     the same time as a known-username-wrong-password one -- no username enumeration
     via response timing. Lazy + cached so a plain CLI run that never touches web
-    auth never pays scrypt's cost, and a running server pays it at most once."""
-    if "h" not in _dummy_hash_cache:
+    auth never pays scrypt's cost, and a running server pays it at most once. Made with
+    WEB_PASSWORD_HASH_METHOD and cached per method, so it always costs what a real account's
+    check costs."""
+    method = WEB_PASSWORD_HASH_METHOD
+    if method not in _dummy_hash_cache:
         from werkzeug.security import generate_password_hash
-        _dummy_hash_cache["h"] = generate_password_hash("no-such-account-#dummy-timing-guard")
-    return _dummy_hash_cache["h"]
+        _dummy_hash_cache[method] = generate_password_hash(
+            "no-such-account-#dummy-timing-guard", method=method)
+    return _dummy_hash_cache[method]
 
 
 def verify_web_user(username, password):

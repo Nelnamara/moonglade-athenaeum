@@ -959,6 +959,44 @@ def mock_session(mocker):
 
 
 # ---------------------------------------------------------------------------
+# Password hashing for the suite's own accounts
+# ---------------------------------------------------------------------------
+# What moonglade.backup ships, read at import -- before the session fixture below swaps it.
+SHIPPED_PASSWORD_HASH_METHOD = core.WEB_PASSWORD_HASH_METHOD
+# scrypt at a token cost: the same "scrypt:" hash format and the same code path, in a fraction
+# of a millisecond. (werkzeug sizes scrypt's memory limit from n, so n much below this fails.)
+TEST_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cheap_test_password_hashes():
+    """The suite's throwaway accounts are hashed cheaply.
+
+    A real hash is scrypt at werkzeug's full cost, about a tenth of a second to make and
+    the same again to check, and most of the suite makes an account and signs in through the
+    real login route. core.WEB_PASSWORD_HASH_METHOD decides how new hashes are made, and a
+    stored hash carries its own cost, so swapping it makes both the account and every sign-in
+    against it cheap -- with nothing else about the auth path changed. Session scope, so the
+    accounts module- and session-scoped fixtures make (the render harness's) are cheap too.
+
+    The auth tests (test_web_auth, test_session_revocation, test_panel_users, which asserts
+    the stored format) take `real_password_hashing` and run with the shipped cost, and
+    test_web_auth holds that shipped cost to full strength."""
+    mp = pytest.MonkeyPatch()
+    mp.setattr(core, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
+@pytest.fixture()
+def real_password_hashing(monkeypatch):
+    """The shipped password hashing for one test, instead of the suite's cheap one."""
+    monkeypatch.setattr(core, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
+
+
+# ---------------------------------------------------------------------------
 # Real-login test helpers
 # ---------------------------------------------------------------------------
 # moonglade_gallery.py's _is_authorized_request() has NO localhost bypass -- login is

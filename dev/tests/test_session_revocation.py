@@ -43,9 +43,14 @@ cookie string.
 """
 import threading
 
+import pytest
+
 from moonglade import backup as core
 from moonglade.gallery import create_app
 from tests.conftest import _do_login, extract_login_csrf
+
+# The shipped password hashing, not the suite's cheap test cost (conftest).
+pytestmark = pytest.mark.usefixtures("real_password_hashing")
 
 LAN = "203.0.113.5"
 

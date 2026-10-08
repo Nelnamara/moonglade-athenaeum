@@ -19,6 +19,7 @@ incidental-GET csrf setdefault, blank-remote_addr fail-closed).
 
 NOT about PIXAI_API_KEY auth -- that's dev/tests/test_auth.py. This file is about
 the *web session* login that gates the gallery itself."""
+import ast
 import re
 import sys
 
@@ -26,11 +27,41 @@ import pytest
 
 from moonglade import backup as core
 from moonglade.gallery import create_app
-from tests.conftest import login_existing_client
+from tests.conftest import SHIPPED_PASSWORD_HASH_METHOD, login_existing_client
+
+# The suite hashes its throwaway accounts at a token cost (conftest's
+# _cheap_test_password_hashes); every test here runs with the shipped one.
+pytestmark = pytest.mark.usefixtures("real_password_hashing")
 
 
 def _client(tmp_path):
     return create_app(tmp_path)
+
+
+def test_the_shipped_password_hash_is_full_strength_scrypt(tmp_path):
+    """The app's own hashing method, as moonglade/backup.py ships it, is scrypt at werkzeug's
+    full cost (n=32768, r=8, p=1) or stronger -- the suite's cheap test-account cost must never
+    be the shipped one. Read from the source rather than the live module attribute, which the
+    suite swaps; then a real account is made with it, and the unknown-username dummy check
+    pays the same cost, so response timing still cannot tell a missing account from a wrong
+    password."""
+    src = open(core.__file__, encoding="utf-8").read()
+    shipped = [ast.literal_eval(node.value) for node in ast.parse(src).body
+               if isinstance(node, ast.Assign)
+               and any(getattr(t, "id", None) == "WEB_PASSWORD_HASH_METHOD" for t in node.targets)]
+    assert shipped == [SHIPPED_PASSWORD_HASH_METHOD] == [core.WEB_PASSWORD_HASH_METHOD], (
+        "moonglade/backup.py must assign WEB_PASSWORD_HASH_METHOD exactly once, and this "
+        "module must run with that value")
+
+    core.add_or_update_web_user("alice", "hunter2")
+    stored = core._load_config()["AUTH_USERS"][0]["password_hash"]
+    m = re.match(r"^scrypt:(\d+):(\d+):(\d+)\$", stored)
+    assert m, "a new account's hash is not werkzeug scrypt: {!r}".format(stored.split("$")[0])
+    n, r, p = map(int, m.groups())
+    assert n >= 2 ** 15 and r >= 8 and p >= 1, (
+        "the shipped scrypt cost is below werkzeug's default: {}".format(stored.split("$")[0]))
+    assert core._dummy_password_hash().split("$")[0] == stored.split("$")[0], (
+        "an unknown username's dummy check must cost what a real account's check costs")
 
 
 def _csrf(html):

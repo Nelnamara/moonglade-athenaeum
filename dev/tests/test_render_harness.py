@@ -37,7 +37,8 @@ Design, and why
   localhost bypass and re-validates the session against `config.json`'s `AUTH_USERS` on
   every request, so the harness drives the real React login page (GET /login serves the
   shell; its form fetches POST /api/login) with a real scrypt-hashed account made by
-  `core.add_or_update_web_user` -- the same endpoint `dev/tests/conftest.py`'s
+  `core.add_or_update_web_user` (at the suite's token scrypt cost, conftest's
+  `_cheap_test_password_hashes`) -- the same endpoint `dev/tests/conftest.py`'s
   `login_client()` helpers post to for the test client. Nothing here weakens an auth path.
 * **The conftest interaction that matters.** `dev/tests/conftest.py::_isolated_auth_config` is
   autouse and function-scoped: it re-points `core._config_path()` at each test's own
