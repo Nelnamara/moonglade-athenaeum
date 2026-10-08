@@ -6415,7 +6415,7 @@ def _ensure_banner_flat(out_dir, slot, db_path=None):
 
 def _record_slot_resolution(out_dir):
     """Write the resolution the startup pass is about to render from back into
-    branding_slots.json, so a slot that HAD no recorded pick has one from here
+    settings.json's branding slots, so a slot that HAD no recorded pick has one from here
     on and the answer stops being re-derived at every start.
 
     Resolution is already deterministic (resolve_slot_active), so this changes
@@ -13796,7 +13796,7 @@ def create_app(out_dir: Path):
     # create_app() is called by ~every test with the tree unpatched: the root-flat
     # migration (_migrate_root_banner_flats), which MOVES a real render out of the
     # real coded tree, and the slot-pick record (_record_slot_resolution), which
-    # rewrites branding_slots.json beside it. Both run from main(), the one place
+    # rewrites settings.json's branding slots. Both run from main(), the one place
     # that knows this is a real server start. The ensure pass above only READS
     # those picks; everything it writes is under out_dir.
     #
@@ -29303,8 +29303,8 @@ def main():
     # flats are looked for, not after.
     ensure_branding_discovery_tree()
     _migrate_root_banner_flats(out_dir)
-    # Same rule, same reason: this WRITES branding_slots.json, which lives beside
-    # the coded tree and is not out_dir-scoped, so it stays out of create_app().
+    # Same rule, same reason: this WRITES settings.json's branding slots, which
+    # are not out_dir-scoped, so it stays out of create_app().
     # Ordered last of the three -- after the scaffold, so a legacy install's
     # assets are already in the coded dirs to resolve against, and before
     # create_app(), so its ensure pass stamps renders with a recorded pick.

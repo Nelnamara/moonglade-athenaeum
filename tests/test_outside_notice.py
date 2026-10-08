@@ -31,7 +31,7 @@ import pytest
 from moonglade import gallery as g
 from moonglade import outside
 from moonglade import paths
-from tests.conftest import REPO_ROOT, login_client, session_csrf, with_csrf
+from tests.conftest import REPO_ROOT, login_client, session_csrf, stub_code_module, with_csrf
 
 LAN = {"REMOTE_ADDR": "192.168.1.9"}
 _ITEMS = [outside.Item("task", "\\Moonglade sync", "the scheduled task “Moonglade sync”", {}),
@@ -209,9 +209,8 @@ def _launch(monkeypatch, platform):
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(
         user32=types.SimpleNamespace(MessageBoxW=lambda *a: 1)), raising=False)
-    import moonglade
-    monkeypatch.delattr(moonglade, "setup", raising=False)
-    monkeypatch.setitem(sys.modules, "moonglade.setup", None)
+    ready = types.SimpleNamespace(summary=lambda: "")
+    stub_code_module(monkeypatch, "setup", types.SimpleNamespace(prepare=lambda kind: ready))
     monkeypatch.chdir(paths.local_dir())
     try:
         runpy.run_path(str(REPO_ROOT / "Moonglade Launcher.pyw"), run_name="__main__")
@@ -228,7 +227,7 @@ def test_the_launcher_re_points_shortcuts_on_windows_and_says_so(monkeypatch):
         outside.Result("the shortcut “Moonglade Athenaeum” on your Desktop", True)])
     t.target()
     assert ran == [1]
-    log = paths.local_path("serve.log").read_text(encoding="utf-8")
+    log = (paths.logs_dir() / "serve.log").read_text(encoding="utf-8")
     assert "[launcher] Fixed the shortcut “Moonglade Athenaeum” on your Desktop." in log
 
 
@@ -252,7 +251,7 @@ def test_the_launchers_pass_is_after_getting_ready_and_before_the_server_loop():
 
     def first(pred):
         return next(i for i, n in enumerate(body) if any(pred(x) for x in ast.walk(n)))
-    ready = first(lambda x: isinstance(x, ast.Call) and getattr(x.func, "id", "") == "_prepare")
+    ready = first(lambda x: isinstance(x, ast.Call) and getattr(x.func, "attr", "") == "prepare")
     shortcuts = first(lambda x: isinstance(x, ast.Constant) and x.value == "moonglade-shortcuts")
     loop = next(i for i, n in enumerate(body) if isinstance(n, ast.While))
     assert ready < shortcuts < loop

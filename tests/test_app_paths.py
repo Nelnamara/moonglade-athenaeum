@@ -299,7 +299,7 @@ def test_the_launcher_finds_its_own_folder_once_and_byte_for_byte():
     assert [u[1] for u in uses] == ["here = os.path.dirname(os.path.abspath(__file__))"], uses
     assert "sys.path.insert(0, here)" in src
     assert "os.chdir(here)" in src
-    assert 'cmd = [sys.executable, "-m", "moonglade.gallery"] + SERVE_ARGS' in src
+    assert 'cmd = [sys.executable, "-m", "moonglade.gallery"]\n' in src.replace("\r\n", "\n")
     assert "cwd=here" in src
 
 

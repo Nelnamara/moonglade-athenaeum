@@ -1,13 +1,14 @@
 """The launcher gets the install ready before it reads a setting (3.20 rebuild, B2).
 
 `Moonglade Launcher.pyw` calls moonglade.setup.prepare("launcher") first: the settings merge
-and the move, under their locks, before serve.txt, config.json or the port is read. Claims:
+and the move, under their locks, before settings.json or the port is read. Claims:
   * prepare runs once, with "launcher", before the first setting is read -- what it puts in
-    place is what the launcher then starts the server with;
+    place (settings.json's port) is what the launcher then probes and opens;
   * a start that cannot get ready says why, plainly, and stops: no server, no browser. On
-    Windows that is a message box (pythonw has no console) and a line in serve.log;
-  * a build with no moonglade.setup at all carries on as before -- only the module's own
-    absence is forgiven: an import failing INSIDE it stops the start like any other failure.
+    Windows that is a message box (pythonw has no console) and a line in local/logs/serve.log.
+    MoveStopped's text is the sentence shown;
+  * moonglade.setup is part of every build now: one that is missing, or fails to import, stops
+    the start like any other failure.
 
 The .pyw runs on import, so it is run with runpy and every outside effect stood in for, the
 same way tests/test_launcher_runs_the_package.py runs it.
@@ -46,7 +47,7 @@ def launch(monkeypatch, tmp_path):
 
     def _launch(codes=(0,), windows=False):
         codes = list(codes)
-        run = types.SimpleNamespace(started=[], boxes=[], exit=None)
+        run = types.SimpleNamespace(started=[], boxes=[], probed=[], exit=None)
 
         def popen(cmd, **kw):
             run.started.append(types.SimpleNamespace(cmd=list(cmd), **kw))
@@ -54,6 +55,7 @@ def launch(monkeypatch, tmp_path):
             return types.SimpleNamespace(wait=lambda: rc)
 
         def urlopen(url, timeout=None):
+            run.probed.append(url)
             raise urllib.error.URLError("refused")
 
         def box(hwnd, text, title, flags):
@@ -89,20 +91,42 @@ def test_it_gets_ready_once_before_it_reads_a_setting(launch, monkeypatch):
     def prepare(kind):
         calls.append(kind)
         # what the merge puts in place is what the launcher must then read
-        paths.local_path("serve.txt").write_text("--port 5959", encoding="utf-8")
+        paths.settings_path().write_text('{"port": 5959}', encoding="utf-8")
 
     stub_code_module(monkeypatch, "setup", _setup(prepare))
     run = launch(codes=[42, 0])
     assert calls == ["launcher"]                      # once, not again on a relaunch
     assert len(run.started) == 2
-    assert run.started[0].cmd == [sys.executable, "-m", "moonglade.gallery", "--port", "5959"]
+    assert run.started[0].cmd == [sys.executable, "-m", "moonglade.gallery"]
+    assert run.probed == ["http://localhost:5959/api/ping"]
+
+
+def test_the_real_prepare_runs_and_its_move_happens_first(launch):
+    """Not stubbed: the real moonglade.setup.prepare("launcher") runs in this test's own
+    local/ (conftest pins it), so an install's journal is there before the server starts."""
+    run = launch(codes=[0])
+    assert len(run.started) == 1
+    assert (paths.local_dir() / ".journal.json").is_file()
+
+
+def test_a_move_that_stops_shows_its_own_sentence(launch, monkeypatch):
+    from moonglade import migrate
+
+    def prepare(kind):
+        raise migrate.MoveStopped("Another start is getting Moonglade ready. Try again in a "
+                                  "minute.")
+
+    stub_code_module(monkeypatch, "setup", _setup(prepare))
+    run = launch(codes=[0], windows=True)
+    assert run.exit == 1 and run.started == []
+    assert "Another start is getting Moonglade ready." in run.boxes[0][0]
 
 
 def test_what_getting_ready_did_goes_in_serve_log(launch, monkeypatch):
     said = types.SimpleNamespace(summary=lambda: "Moved serve.txt into local.")
     stub_code_module(monkeypatch, "setup", _setup(lambda kind: said))
     launch(codes=[0])
-    log = paths.local_path("serve.log").read_text(encoding="utf-8")
+    log = (paths.logs_dir() / "serve.log").read_text(encoding="utf-8")
     assert "[launcher] Moved serve.txt into local." in log
 
 
@@ -122,7 +146,8 @@ def test_a_start_that_cannot_get_ready_says_why_and_stops(launch, monkeypatch, f
     text, title = run.boxes[0]
     assert title == "Moonglade Athenaeum"
     assert "Another start is getting this install ready. Try again in a minute." in text
-    assert "Try again in a minute." in paths.local_path("serve.log").read_text(encoding="utf-8")
+    assert "Try again in a minute." in (paths.logs_dir() / "serve.log").read_text(
+        encoding="utf-8")
 
 
 def test_off_windows_it_says_so_on_stderr(launch, monkeypatch, capsys):
@@ -137,14 +162,15 @@ def test_off_windows_it_says_so_on_stderr(launch, monkeypatch, capsys):
     assert "The library's folder is busy." in capsys.readouterr().err
 
 
-def test_a_build_without_moonglade_setup_carries_on(launch, monkeypatch):
-    """Until the data layer's setup module is part of the build, the launcher starts as it did."""
+def test_a_build_without_moonglade_setup_stops(launch, monkeypatch):
+    """The data layer is part of the build: without it nothing would bring an older install's
+    settings across, so the launcher says so and stops rather than start on empty homes."""
     import moonglade
     monkeypatch.delattr(moonglade, "setup", raising=False)
     monkeypatch.setitem(sys.modules, "moonglade.setup", None)    # "no such module"
-    run = launch(codes=[0])
-    assert run.exit is None or run.exit == 0
-    assert len(run.started) == 1
+    run = launch(codes=[0], windows=True)
+    assert run.exit == 1 and run.started == []
+    assert len(run.boxes) == 1
 
 
 class _BrokenSetupFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):

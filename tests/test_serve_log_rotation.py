@@ -140,7 +140,7 @@ def test_the_launcher_rotates_serve_log_before_it_opens_it():
     # after the single-instance check (a second launcher must not touch the running one's
     # log), before the log is opened, and once -- not on every exit-42 relaunch
     assert guard < rotate < opened < loop
-    assert 'local_path("serve.log")' in src
+    assert '_paths.logs_dir() / "serve.log"' in src          # local/logs/, beside moonglade.log
 
 
 def test_the_launcher_still_supervises_and_relaunches_on_42():

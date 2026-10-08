@@ -844,9 +844,18 @@ def _shortcut_label(p, where):
     return "the shortcut “%s” %s" % (p.stem, where)
 
 
-def find_shortcuts(install, m):
+def _icon_moved(old_icon, icons):
+    """True when the .ico an old-cache icon names is already in `icons` (local\\icons\\): the
+    move brings the old cache's .ico files there before it deletes the cache, so a shortcut
+    whose only fault is that icon can still be pointed at its copy."""
+    name = ntpath.basename(ntpath.expandvars(_clean(old_icon)))
+    return bool(name) and (Path(icons) / name).is_file()
+
+
+def find_shortcuts(install, m, icons=None):
     if not m.windows:
         return []
+    icons = Path(icons) if icons is not None else _paths.icons_dir()
     found = []
     for p, where in _lnk_files(m):
         lnk = read_lnk(p)
@@ -859,6 +868,8 @@ def find_shortcuts(install, m):
             auto = not rw.problem and _gone(rw, install)
         elif Path(ntpath.expandvars(_clean(lnk.icon))).is_file():
             auto = True             # its icon only: moved while the old cache still holds it
+        elif _icon_moved(lnk.icon, icons):
+            auto = True             # its icon only: the move already put it in local\icons\
         else:
             continue                # its icon is gone already: nothing there to move
         found.append(Item("shortcut", str(p), _shortcut_label(p, where),
@@ -1007,14 +1018,18 @@ def _reason(e):
 _FINDERS = {"task": find_tasks, "claude": find_claude, "shortcut": find_shortcuts}
 
 
-def find(install=None, m=None, kinds=("task", "claude", "shortcut")):
-    """Everything outside the app that names this install's old files. Never raises."""
+def find(install=None, m=None, kinds=("task", "claude", "shortcut"), icons=None):
+    """Everything outside the app that names this install's old files. Never raises. `icons`:
+    the shortcut-icon folder (icons_dir() by default), where an old-cache icon may already be."""
     install = Path(install or _paths.APP_ROOT)
     m = m or machine()
     found = []
     for kind in kinds:
         try:
-            found += _FINDERS[kind](install, m)
+            if kind == "shortcut":
+                found += find_shortcuts(install, m, icons)
+            else:
+                found += _FINDERS[kind](install, m)
         except Exception:                               # noqa: BLE001 -- the others still count
             continue
     return found
@@ -1027,7 +1042,7 @@ def fix(items=None, install=None, m=None, snapshot=None, icons=None, provide_ico
     m = m or machine()
     snapshot = Path(snapshot) if snapshot is not None else snapshot_dir()
     icons = Path(icons) if icons is not None else _paths.icons_dir()
-    items = find(install, m) if items is None else items
+    items = find(install, m, icons=icons) if items is None else items
     results = []
     for item in items:
         try:
@@ -1053,5 +1068,5 @@ def repoint_shortcuts(install=None, m=None, snapshot=None, icons=None, provide_i
     m = m or machine()
     if not m.windows:
         return []
-    items = [i for i in find(install, m, kinds=("shortcut",)) if i.auto]
+    items = [i for i in find(install, m, kinds=("shortcut",), icons=icons) if i.auto]
     return fix(items, install, m, snapshot, icons, provide_icon) if items else []

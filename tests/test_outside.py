@@ -576,6 +576,24 @@ def test_an_icon_only_shortcut_whose_icon_is_gone_is_not_offered(install, box):
     assert outside.find(install, machine(box), kinds=("shortcut",)) == []
 
 
+def test_an_icon_the_move_already_brought_into_local_icons_is_re_pointed(install, box):
+    """The move copies the old cache's .ico files into local\\icons\\ and then deletes the
+    cache (moonglade.migrate's install half), so by the time the launcher's pass runs, a
+    shortcut whose only fault is its icon names a file that is gone -- but its copy is in
+    local\\icons\\, and the shortcut is pointed there without asking: it never loses its icon."""
+    (box.icons / "mark_3.ico").parent.mkdir(parents=True, exist_ok=True)
+    (box.icons / "mark_3.ico").write_bytes(b"ICO3")
+    write_lnk(box.desktop / "M.lnk", target=r"C:\Python311\pythonw.exe",
+              args='"%s\\Moonglade Launcher.pyw"' % install,
+              icon=str(install / "_container_cache" / "marks" / "mark_3.ico"))
+    save = SavedLnk()
+    m = machine(box, save=save)
+    results = outside.repoint_shortcuts(install, m, box.snapshot, box.icons)
+    assert [r.fixed for r in results] == [True]
+    assert save.saved[0]["icon"] == "%s,0" % (box.icons / "mark_3.ico")
+    assert save.saved[0]["args"] == '"%s\\Moonglade Launcher.pyw"' % install
+
+
 def test_an_icon_already_gone_is_offered_from_the_app_when_it_can(install, box):
     write_lnk(box.desktop / "M.lnk", target=r"C:\Python311\pythonw.exe",
               args='"%s\\Serve Gallery.pyw"' % install,

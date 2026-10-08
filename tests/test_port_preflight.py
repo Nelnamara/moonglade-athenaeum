@@ -153,14 +153,14 @@ def test_wildcard_bind_addresses_probe_loopback(host, tmp_path):
         srv.server_close()
 
 
-def test_launcher_reads_port_from_config_when_serve_txt_is_silent():
-    """The launcher opens the browser + runs its single-instance probe at PORT, so PORT must come
-    from config.json (where the Bonjour chip writes it) when serve.txt gives no explicit --port --
-    otherwise moving the port in the chip binds the server there but still opens the browser at
-    :5000. Source-level guard: the .pyw runs on import, so it can't be imported."""
+def test_launcher_reads_the_port_from_settings_json():
+    """The launcher opens the browser + runs its single-instance probe at PORT, so PORT must be
+    the one the server binds: settings.json's (where the Bonjour chip writes it) -- otherwise
+    moving the port in the chip binds the server there but still opens the browser at :5000.
+    Source-level guard: the .pyw runs on import (tests/test_launcher_runs_the_package.py runs
+    it); serve.txt and config.json's PORT are gone, folded into settings.json by the move."""
     import pathlib
     src = pathlib.Path("Moonglade Launcher.pyw").read_text(encoding="utf-8")
-    assert '"--port" in SERVE_ARGS' in src, "an explicit --port in serve.txt must still win"
-    i = src.index('"--port" in SERVE_ARGS')
-    tail = src[i:i + 800]
-    assert "else:" in tail and "_load_config()" in tail and '.get("PORT")' in tail,         "with no explicit --port, PORT must fall back to config.json's PORT"
+    assert 'PORT = _settings.server()["port"]' in src
+    assert "serve.txt" not in src and '.get("PORT")' not in src
+    assert src.index('_setup.prepare("launcher")') < src.index("PORT = _settings.server()")

@@ -56,6 +56,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import sys
 import time
 import zipfile
@@ -382,6 +383,23 @@ def _discard(p):
             os.remove(p)
     except OSError:
         pass
+
+
+def _rmtree_whole(folder):
+    """Delete `folder` and everything in it. A file that kept a read-only attribute when it was
+    copied in (the outside-references fixer copies a shortcut or a config with shutil.copy2)
+    is made writable first: Windows refuses to delete a read-only file, and the folder would
+    otherwise outlive every attempt. Raises OSError."""
+    for dirpath, _dirs, files in os.walk(folder):
+        for fn in files:
+            p = os.path.join(dirpath, fn)
+            try:
+                mode = os.stat(p).st_mode
+                if not mode & stat.S_IWRITE:
+                    os.chmod(p, mode | stat.S_IWRITE)
+            except OSError:
+                pass
+    shutil.rmtree(folder)
 
 
 def _remove(p):
@@ -862,7 +880,10 @@ def _make_snapshot(half, members, extra=None):
 def count_clean_start(folder, report, half_name):
     """One clean server start for the half whose folder is `folder`: its move has finished
     and this start found nothing to move, merge or park. At CLEAN_STARTS the app deletes the
-    half's .snapshot\\ (the zip and anything parked or saved beside it). Never raises."""
+    half's WHOLE .snapshot\\ -- the zip, anything parked beside it, and the copies the
+    outside-references fixer saved in local\\.snapshot\\outside\\ (moonglade.outside). A fix
+    made later that makes the folder again is counted again from there, so its copies go too,
+    CLEAN_STARTS clean starts on. Never raises."""
     try:
         journal = Journal(folder)
         snap = Path(folder) / _paths.SNAPSHOT_DIRNAME
@@ -874,7 +895,7 @@ def count_clean_start(folder, report, half_name):
             return
         n = int(journal.doc.get("clean_starts") or 0) + 1
         if n >= CLEAN_STARTS:
-            shutil.rmtree(snap)
+            _rmtree_whole(snap)
             journal.doc["clean_starts"] = 0
             if isinstance(journal.doc.get("snapshot"), dict):
                 journal.doc["snapshot"]["removed"] = _now()

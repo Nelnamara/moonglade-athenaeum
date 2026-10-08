@@ -16,9 +16,11 @@ The child is told it's supervised via MOONGLADE_SUPERVISED=1 (so it enables Rest
 Background maintenance (the Control Panel scheduler + job runner) runs inside the server,
 so you don't need the desktop app to keep the archive current.
 
-The bind host + port + LAN discovery are normally set from the Control Panel's Bonjour chip
-(stored in config.json). serve.txt still overrides per machine (e.g. "--port 5757"); see below.
-Make a shortcut: right-click -> Send to -> Desktop (create shortcut); set moonglade.ico if you like.
+Before anything else it gets the install ready (moonglade.setup.prepare): an update from an
+older version brings its settings into local\\settings.json and its files into their homes.
+The library, bind host, port, LAN discovery and launch switches are all settings.json's, set
+from the Control Panel; the server reads them itself, so nothing is passed on its command
+line. The server's console output goes to local\\logs\\serve.log.
 """
 import os
 import subprocess
@@ -39,13 +41,20 @@ from moonglade import paths as _paths    # noqa: E402
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
 
+def _serve_log_path():
+    """local\\logs\\serve.log: the server's console output, and the launcher's own lines."""
+    return _paths.logs_dir() / "serve.log"
+
+
 def _stop(message):
     """Say plainly why Moonglade cannot start, where a person will see it, and stop. Under
     pythonw there is no console, so it is a Windows message box (and a line in serve.log when
     that can be written); elsewhere, stderr."""
     text = "Moonglade couldn't get ready to start.\n\n" + message
     try:
-        with open(str(_paths.local_path("serve.log")), "a", encoding="utf-8") as f:
+        log = _serve_log_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(log), "a", encoding="utf-8") as f:
             f.write("[launcher] " + text.replace("\n\n", " ") + "\n")
     except Exception:                                   # noqa: BLE001 -- the box still shows
         pass
@@ -62,26 +71,15 @@ def _stop(message):
     sys.exit(1)
 
 
-def _prepare():
-    """moonglade.setup.prepare("launcher"): before anything reads a setting, merge the settings
-    and bring this install's own files into their homes (under the install's lock), then the
-    library's half (under the library's). Every entry point runs it first. Returns what it
-    returned, or None in a build that has no moonglade.setup -- only the module itself being
-    absent is tolerated: anything failing inside it stops the start."""
-    import importlib
-    try:
-        setup = importlib.import_module("moonglade.setup")
-    except ModuleNotFoundError as e:
-        if e.name == "moonglade.setup":
-            return None
-        raise
-    return setup.prepare("launcher")
-
-
-# A start that could not get ready never carries on: it would read settings the move had not
-# brought across yet (a lock another start held past its wait, a disk that refused).
+# Get the install ready FIRST (B2), before anything reads a setting: under the install's lock,
+# merge the settings into local\settings.json and bring this install's own files into their
+# homes, then the library's half under the library's lock (moonglade.setup.prepare). A start
+# that cannot get ready never carries on -- it would read settings the move had not brought
+# across yet (a lock another start held past its wait, a file in use): MoveStopped's text is
+# the sentence to show, and anything else failing in there (an import included) stops it too.
 try:
-    _ready = _prepare()
+    from moonglade import setup as _setup
+    _ready = _setup.prepare("launcher")
 except SystemExit as e:
     if e.code in (None, 0):
         raise
@@ -89,45 +87,17 @@ except SystemExit as e:
 except Exception as e:                                  # noqa: BLE001 -- said, then stopped
     _stop(str(e) or e.__class__.__name__)
 
-# No --out here on purpose. The server resolves its own folder (an explicit --out, then
-# config.json's LIBRARY_DIR, then pixai_backup), and a hardcoded flag here would always beat
-# the stored setting -- which is precisely why the Control Panel's folder field could not
-# work while this line passed one. Put an explicit --out in serve.txt if you want THIS
-# launcher pinned to a folder regardless of the setting; it still wins.
-SERVE_ARGS = []                             # base args. Extra flags go in serve.txt (below).
+# The server is started with no arguments on purpose: it reads the library, host, port and
+# launch switches from local\settings.json itself (moonglade.settings), and a flag here would
+# beat the stored setting -- which is precisely why the Control Panel's folder field could not
+# work while this launcher passed `--out`. A Restart (exit 42) runs the same command, so a
+# setting the Control Panel just changed is read fresh by the new server.
 RESTART_CODE = 42                           # child exit code that means "relaunch me"
 
-# Machine-local overrides WITHOUT editing this tracked file (so `git pull` never conflicts):
-# put extra flags in an untracked "serve.txt" in local\ beside this launcher, e.g. one line:
-#     --host 0.0.0.0 --port 5757
-# (LAN access + a custom port). Whitespace-separated; blank/missing = defaults. (An install
-# not yet brought across still has it beside this launcher, and it is read there.)
-_serve_txt = str(_paths.local_path("serve.txt"))
-if os.path.exists(_serve_txt):
-    try:
-        SERVE_ARGS += open(_serve_txt, encoding="utf-8").read().split()
-    except OSError:
-        pass
-
-# Port for the browser-open (parsed from whatever --port ended up in the args; default 5000).
-PORT = 5000
-if "--port" in SERVE_ARGS:
-    try:
-        PORT = int(SERVE_ARGS[SERVE_ARGS.index("--port") + 1])
-    except (ValueError, IndexError):
-        pass
-else:
-    # Mirror the server's own resolve_server_settings precedence: with no explicit --port in
-    # serve.txt, take the port from config.json (where the Control Panel's Bonjour chip writes it).
-    # Without this the chip could move the server's port while the browser still opened :5000 --
-    # the same class of bug the "no --out here" note above fixed for the library folder.
-    try:
-        from moonglade import backup as _core
-        _cfg_port = (_core._load_config() or {}).get("PORT")
-        if _cfg_port:
-            PORT = int(_cfg_port)
-    except Exception:
-        pass
+# The port for the single-instance probe and the browser-open: the one the server will bind,
+# from the same settings (the Control Panel's Bonjour chip writes it).
+from moonglade import settings as _settings    # noqa: E402
+PORT = _settings.server()["port"]
 
 # Single instance: if a Moonglade server is ALREADY answering on this port, don't start a second
 # one (on Windows SO_REUSEADDR lets two servers bind the same port and fight) -- just focus the
@@ -165,7 +135,7 @@ if _moonglade_on_port(PORT):
 
 # The server runs as the package's module (3.20), from this folder: `-m` finds the moonglade
 # package through the working directory, which is why cwd=here below matters.
-cmd = [sys.executable, "-m", "moonglade.gallery"] + SERVE_ARGS
+cmd = [sys.executable, "-m", "moonglade.gallery"]
 env = dict(os.environ, MOONGLADE_SUPERVISED="1")
 
 
@@ -190,15 +160,16 @@ def _open_when_ready():
         pass
 
 
-# Capture the child's stdout/stderr to serve.log so a boot failure isn't silent under pythonw
-# (no console). stdin=DEVNULL so the headless child never blocks on input.
+# Capture the child's stdout/stderr to local\logs\serve.log so a boot failure isn't silent under
+# pythonw (no console). stdin=DEVNULL so the headless child never blocks on input.
 #
 # The log trims itself, once per launcher start (not on a Restart): over 1 MB it becomes
 # serve.log.1, the older ones shift to .2 and .3, and the oldest is dropped. After the
 # single-instance check above, so a second launcher never touches a running server's log.
 # Best effort: nothing here can stop the app starting.
-_serve_log = _paths.local_path("serve.log")
+_serve_log = _serve_log_path()
 try:
+    _serve_log.parent.mkdir(parents=True, exist_ok=True)
     from moonglade import logs as _mlog
     _mlog.rotate_by_size(_serve_log)
 except Exception:

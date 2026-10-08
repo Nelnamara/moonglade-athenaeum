@@ -313,6 +313,39 @@ def test_the_snapshot_goes_after_five_clean_server_starts(r):
     assert not any(s.exists() for s in snaps)
 
 
+def _fixer_copy(r, name):
+    """What moonglade.outside saves before it changes a file outside the app: a copy in
+    local\\.snapshot\\outside\\, here read-only, as shutil.copy2 keeps a shortcut's attribute."""
+    import stat
+    from moonglade import outside
+    copy = outside.snapshot_dir() / name
+    write(copy, b"the shortcut as it was")
+    os.chmod(copy, stat.S_IREAD)
+    assert outside.snapshot_dir() == r.local / ".snapshot" / "outside"
+    return copy
+
+
+def test_the_whole_install_snapshot_goes_with_the_fixers_copies_and_again_if_remade(r):
+    """Pick 4 covers the fixer's copies too: at the fifth clean server start the WHOLE
+    local\\.snapshot\\ goes, outside\\ and its read-only copies included. A fix made later
+    makes the folder again, and five clean starts on, it goes again."""
+    layout_317(r)
+    _prepare(r, "server")                    # the move itself
+    _fixer_copy(r, "Moonglade Athenaeum.lnk")
+    for _ in range(4):
+        _prepare(r, "server")
+    assert (r.local / ".snapshot" / "outside").is_dir()
+    _prepare(r, "server")
+    assert not (r.local / ".snapshot").exists()
+
+    _fixer_copy(r, "claude_desktop_config.json")      # a later fix, after the snapshot went
+    for _ in range(4):
+        _prepare(r, "server")
+    assert (r.local / ".snapshot").exists()
+    _prepare(r, "server")
+    assert not (r.local / ".snapshot").exists()
+
+
 def test_a_start_that_moves_or_parks_starts_the_count_again(r):
     write_config(r)
     write(r.lib / "jobs.jsonl", '{"id": 1}\n')

@@ -74,12 +74,13 @@ def test_the_launcher_does_not_hardcode_the_folder():
     stored setting by the resolution order above, so the Panel's field would have saved
     correctly and then changed nothing at all -- the worst kind of broken."""
     launcher = (ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
-    body = launcher[launcher.index("SERVE_ARGS ="):]
-    body = body[:body.index("serve.txt")]
-    assert "--out" not in body, "the launcher pins the folder and the setting cannot win"
-    # serve.txt must still be able to override -- that is the documented machine-local escape
-    # hatch, and an explicit --out there is a deliberate pin.
-    assert "SERVE_ARGS +=" in launcher
+    body = launcher[launcher.index("cmd = "):]
+    body = body[:body.index("\n")]
+    assert body.strip() == 'cmd = [sys.executable, "-m", "moonglade.gallery"]', \
+        "the launcher pins the folder and the setting cannot win"
+    # serve.txt is gone (the move folds its --out into settings.json's library_dir): nothing
+    # in the launcher reads it any more.
+    assert "serve.txt" not in launcher
 
 
 def test_setting_the_folder_writes_it_and_creates_nothing_by_accident(tmp_path):
