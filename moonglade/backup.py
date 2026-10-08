@@ -18140,9 +18140,10 @@ def main():
     webauth.add_argument("--list-web-users", action="store_true",
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
-    # B2: before anything reads a setting, the move runs (the install half, then this run's
-    # library) and the library is resolved: --out for this one run, else settings.json's, else
-    # the default. A move that cannot finish stops the command with its plain sentence.
+    # B2: before anything reads a setting, the install half of the move runs and the library
+    # is resolved: --out for this one run, else settings.json's, else the default. The command
+    # line never moves a library's files (X1): one still in an older Moonglade's layout stops
+    # the command with a plain sentence, as does a move that cannot finish.
     from moonglade import setup as moonglade_setup
     try:
         prepared = moonglade_setup.prepare("cli", explicit_out=args.out)

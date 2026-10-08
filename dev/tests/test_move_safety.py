@@ -1,18 +1,24 @@
 """The move's safety rules (SPEC_3.20_REBUILD.md "Rules every lane follows"; B4, S9, pick 4):
 
-  * THE SAFE MOVE: copy into a temp beside the destination, flush, verify (sha256; a database
-    by integrity_check and row counts), journal, swap within one folder, journal, delete the
-    source. A copy that does not verify is never swapped in, and the source stays.
+  * THE SAFE MOVE: on one volume, one rename (journalled first); across volumes (or for a
+    database) copy into a temp beside the destination, flush, verify (sha256; a database by
+    integrity_check and row counts), journal, swap within one folder, journal, delete the
+    source. A copy that does not verify is never swapped in, and the source stays. A copy
+    keeps its source's modified time, so "keep the newer" compares real times.
   * RESUME: a start that dies at any step is finished by the next one, from the journal.
-  * NEVER ACROSS VOLUMES: nothing is renamed from one folder to another -- the only os.replace
-    is a temp into its own folder -- so a library on another drive moves the same way.
+  * NEVER RENAMED ACROSS VOLUMES: where a rename between folders fails (another drive), the
+    move copies instead, so a library on another drive moves the same way.
   * CONFLICTS (B4): a new copy wins only when the journal says the move made it. A fresh file
     that appeared in the new home first never wins over the real data: JSONL is merged,
     telemetry/achievements/the spend guard merged where the format allows, anything else keeps
     the newer and parks the other. Nothing is deleted on a guess.
-  * THE SNAPSHOT (pick 4): made before the first move, deleted after 5 clean server starts.
-  * THE LOCKS: a lock held past its wait stops the start with a plain sentence; a dead
-    holder's lock is taken over.
+  * THE SNAPSHOT (pick 4): a zip before each run that moves anything, deleted after 5 clean
+    server starts -- counted by the server once it has served a while or stopped cleanly,
+    never at prepare(), and never the start that moved (S1).
+  * THE LOCKS: a lock held past its wait stops the start with a plain sentence; a lock is
+    taken over only from a holder that is gone; a lock is only ever released by its holder.
+  * A READ-ONLY OR BUSY FILE (S2): a verified source is made writable before it is deleted,
+    and a refusal is tried again; what stops a start says why and what to do.
 """
 import errno
 import json
@@ -24,8 +30,8 @@ import pytest
 
 from moonglade import migrate
 from moonglade import setup as msetup
-from tests.move_layouts import (KEY_NEL, db_rows, layout_317, make_db, rig, write,
-                                write_config)
+from tests.move_layouts import (KEY_NEL, db_rows, layout_317, make_db, rig, start,
+                                write, write_config)
 
 
 @pytest.fixture
@@ -37,8 +43,9 @@ class _Crash(BaseException):
     """A process dying mid-move: nothing catches it, the lock is left behind."""
 
 
-def _prepare(r, kind="cli"):
-    return msetup.prepare(kind, explicit_out=str(r.lib))
+def _prepare(r, kind="launcher"):
+    """A start that may move the library (X1): the launcher's, or the server's."""
+    return start(r, kind)
 
 
 def _no_moving_temps(*roots):
@@ -73,14 +80,27 @@ def _guard_dest(r):
 GUARD = {"basic": {"k1": {"state": "ambiguous", "at": 100.0}}, "retried": {}, "paid": {}}
 
 
-@pytest.mark.parametrize("step", ["copied", "verified", "swapped", "made"])
+@pytest.mark.parametrize("step", ["copied", "verified", "swapped", "made", "renamed"])
 def test_a_crash_at_each_step_is_finished_by_the_next_start(r, monkeypatch, step):
-    """The spend guard is the example: the item a lost copy would hurt most."""
+    """The spend guard is the example: the item a lost copy would hurt most. The copy's steps
+    are crashed with the library treated as another volume; "renamed" is the one-volume move
+    cut short between the rename and the journal saying so."""
     write_config(r)
     write(_guard_src(r), GUARD)
     is_guard = lambda *a, **k: "train_guard" in str(a[0])        # noqa: E731
     with monkeypatch.context() as m:
-        if step == "copied":          # the temp is written, the process dies before verifying
+        if step != "renamed":
+            m.setattr(migrate, "_same_volume", lambda *a: False)
+        if step == "renamed":
+            real_save = migrate.Journal.save
+
+            def save(self):
+                item = self.doc.get("items", {}).get("_moonglade/records/train_guard.json")
+                if item and item.get("state") == "made" and item.get("how") == "renamed":
+                    raise _Crash()
+                return real_save(self)
+            m.setattr(migrate.Journal, "save", save)
+        elif step == "copied":          # the temp is written, the process dies before verifying
             _crash_on(m, migrate, "_verified", 1, is_guard)
         elif step == "verified":      # journalled as verified, dies before the swap
             _crash_on(m, migrate.os, "replace", 1,
@@ -118,6 +138,7 @@ def test_a_crash_at_each_step_is_finished_by_the_next_start(r, monkeypatch, step
 def test_a_copy_that_does_not_verify_is_never_swapped_in(r, monkeypatch):
     write_config(r)
     write(_guard_src(r), GUARD)
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
     monkeypatch.setattr(migrate, "_verified", lambda *a: False)
     with pytest.raises(migrate.MoveStopped) as e:
         _prepare(r)
@@ -134,10 +155,10 @@ def test_a_database_comes_across_through_sqlite_and_is_checked(r):
     assert db_rows(r.lib / "_moonglade" / "records" / "runs.db") == ["r%d" % i for i in range(40)]
 
 
-def test_nothing_is_renamed_across_folders(r, monkeypatch):
+def test_where_a_rename_between_folders_fails_the_move_copies(r, monkeypatch):
     """Force the copy path everywhere: os.replace between two folders fails as it would
-    between two volumes, and the folder renames are refused outright. The move still
-    completes, because it only ever swaps a temp into its own folder."""
+    between two volumes, and the renames are refused outright. The move still completes,
+    because it then only ever swaps a temp into its own folder."""
     layout_317(r)
     real_replace = os.replace
 
@@ -147,6 +168,8 @@ def test_nothing_is_renamed_across_folders(r, monkeypatch):
         return real_replace(a, b, *x, **k)
     monkeypatch.setattr(os, "replace", replace)
     monkeypatch.setattr(os, "rename", lambda *a, **k: (_ for _ in ()).throw(
+        OSError(errno.EXDEV, "cross-device link")))
+    monkeypatch.setattr(os, "link", lambda *a, **k: (_ for _ in ()).throw(
         OSError(errno.EXDEV, "cross-device link")))
     import shutil
     monkeypatch.setattr(shutil, "move", lambda *a, **k: (_ for _ in ()).throw(
@@ -296,21 +319,44 @@ def test_the_snapshot_holds_the_small_records_and_never_the_library_itself(r):
         assert never not in names, never
 
 
+def _served(r):
+    """One server start that went on to serve for a while (or was stopped cleanly): what
+    moonglade.gallery.main counts, after the bind."""
+    done = _prepare(r, "server")
+    done.count_clean_start()
+    return done
+
+
 def test_the_snapshot_goes_after_five_clean_server_starts(r):
     layout_317(r)
-    _prepare(r, "server")                    # the move itself: not a clean start
+    _prepare(r, "launcher")                  # the move itself
     snaps = (r.local / ".snapshot", r.lib / "_moonglade" / ".snapshot")
+    _served(r)                               # the launcher's own server: the start that moved
     for _ in range(4):
-        _prepare(r, "server")
+        _served(r)
         assert all(s.exists() for s in snaps)
     for _ in range(3):
         _prepare(r, "cli")                   # the command line never counts
         _prepare(r, "mcp")
+        _prepare(r, "server")                # a server that never served counts nothing
     assert all(s.exists() for s in snaps)
-    done = _prepare(r, "server")             # the fifth clean server start
+    done = _prepare(r, "server")
+    said = done.count_clean_start()          # the fifth clean server start
     assert not any(s.exists() for s in snaps)
-    assert any("after 5 clean starts" in line for _lvl, line in done.report.lines)
-    assert not any(s.exists() for s in snaps)
+    assert any("after 5 clean starts" in line for _lvl, line in said.lines)
+    assert done.count_clean_start().lines == [], "a start is counted once, never twice"
+
+
+def test_prepare_never_counts_a_start(r):
+    """S1: a server that refuses its port or falls over as it starts has run prepare() too;
+    only serving (or a clean stop) counts."""
+    layout_317(r)
+    _prepare(r, "launcher")
+    for _ in range(8):
+        _prepare(r, "server")
+    assert (r.lib / "_moonglade" / ".snapshot").exists()
+    journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())
+    assert not journal.get("clean_starts") and journal["skip_next"] is True
 
 
 def _fixer_copy(r, name):
@@ -330,36 +376,50 @@ def test_the_whole_install_snapshot_goes_with_the_fixers_copies_and_again_if_rem
     local\\.snapshot\\ goes, outside\\ and its read-only copies included. A fix made later
     makes the folder again, and five clean starts on, it goes again."""
     layout_317(r)
-    _prepare(r, "server")                    # the move itself
+    _served(r)                               # the move itself: not counted
     _fixer_copy(r, "Moonglade Athenaeum.lnk")
     for _ in range(4):
-        _prepare(r, "server")
+        _served(r)
     assert (r.local / ".snapshot" / "outside").is_dir()
-    _prepare(r, "server")
+    _served(r)
     assert not (r.local / ".snapshot").exists()
 
-    _fixer_copy(r, "claude_desktop_config.json")      # a later fix, after the snapshot went
+    _fixer_copy(r, "task-Moonglade sync.xml")         # a later fix, after the snapshot went
     for _ in range(4):
-        _prepare(r, "server")
+        _served(r)
     assert (r.local / ".snapshot").exists()
-    _prepare(r, "server")
+    _served(r)
     assert not (r.local / ".snapshot").exists()
+
+
+def test_a_fixer_copy_starts_the_count_again(r):
+    """N8: a copy the fixer keeps is not deleted at the very next clean start."""
+    from moonglade import outside
+    layout_317(r)
+    _served(r)
+    for _ in range(4):
+        _served(r)
+    outside._snapshot_bytes(outside.snapshot_dir(), "task-x.xml", b"<Task/>")
+    _served(r)
+    assert (outside.snapshot_dir()).is_dir(), "kept five clean starts on, not one"
 
 
 def test_a_start_that_moves_or_parks_starts_the_count_again(r):
     write_config(r)
     write(r.lib / "jobs.jsonl", '{"id": 1}\n')
-    _prepare(r, "server")
+    _served(r)
     for _ in range(3):
-        _prepare(r, "server")
-    write(r.lib / "schedule.json", {"written": "back"})     # an older install wrote again
-    _prepare(r, "server")
+        _served(r)
+    write(r.lib / "schedule.json", {"written": "back"})     # restored from an old backup
+    _served(r)                                              # it moved: not counted
     journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())
     assert journal["clean_starts"] == 0
+    assert len(list((r.lib / "_moonglade" / ".snapshot").glob("*.zip"))) == 2, \
+        "a zip for every run that moves anything (X3)"
     for _ in range(4):
-        _prepare(r, "server")
+        _served(r)
     assert (r.lib / "_moonglade" / ".snapshot").exists()
-    _prepare(r, "server")
+    _served(r)
     assert not (r.lib / "_moonglade" / ".snapshot").exists()
 
 
@@ -395,14 +455,87 @@ def test_a_dead_start_s_lock_is_taken_over(r):
     assert not (r.local / ".lock").exists()
 
 
-def test_a_lock_untouched_for_too_long_is_taken_over(r):
+def test_a_live_holder_s_lock_is_never_taken_however_old(r, monkeypatch):
+    """S3: on this PC a lock is taken over only from a holder that is gone. A slow move (a
+    first move of GBs, a network drive) touches its lock, but a live holder is never broken
+    even when it has not."""
+    monkeypatch.setattr(migrate, "LOCK_WAIT_S", 0.3)
     r.local.mkdir(parents=True)
     lock = r.local / ".lock"
-    lock.write_text(str(os.getppid()), encoding="ascii")
+    import time
+    lock.write_text("%d %s %.3f" % (os.getppid(), migrate._host(), time.time()),
+                    encoding="ascii")
+    old = lock.stat().st_mtime - migrate.LOCK_STALE_S - 5
+    os.utime(lock, (old, old))
+    with pytest.raises(migrate.MoveStopped):
+        msetup.prepare("cli")
+    assert lock.exists()
+
+
+def test_a_lock_whose_number_was_reused_is_taken_over(r):
+    """The holder died and its process number now belongs to a process started later: that
+    process is not the holder."""
+    r.local.mkdir(parents=True)
+    lock = r.local / ".lock"
+    started = migrate._process_started(os.getppid())
+    if started is None:
+        pytest.skip("this system cannot say when a process started")
+    lock.write_text("%d %s %.3f" % (os.getppid(), migrate._host(), started - 3600),
+                    encoding="ascii")
+    msetup.prepare("cli")
+    assert not lock.exists()
+
+
+def test_another_pc_s_lock_counts_until_it_goes_untouched(r, monkeypatch):
+    """A library on a network drive: another PC's process number means nothing here, so its
+    lock counts as alive until it has gone LOCK_STALE_S untouched."""
+    monkeypatch.setattr(migrate, "LOCK_WAIT_S", 0.3)
+    r.local.mkdir(parents=True)
+    lock = r.local / ".lock"
+    lock.write_text("999999999 another-pc 1.000", encoding="ascii")
+    with pytest.raises(migrate.MoveStopped):
+        msetup.prepare("cli")
     old = lock.stat().st_mtime - migrate.LOCK_STALE_S - 5
     os.utime(lock, (old, old))
     msetup.prepare("cli")
     assert not lock.exists()
+
+
+def test_a_lock_is_released_only_by_its_holder(tmp_path):
+    lock = migrate.FolderLock(tmp_path, "a folder").acquire()
+    (tmp_path / ".lock").write_text("12345 another-pc 1.000", encoding="ascii")  # taken over
+    lock.release()
+    assert (tmp_path / ".lock").read_text(encoding="ascii") == "12345 another-pc 1.000"
+
+
+def test_a_long_step_keeps_every_held_lock_fresh(tmp_path, monkeypatch):
+    """S3: the install lock is touched from inside the library half's long copies too."""
+    monkeypatch.setattr(migrate, "HEARTBEAT_S", 0.0)
+    (tmp_path / "a").mkdir()
+    a = migrate.FolderLock(tmp_path / "a", "a").acquire()
+    old = a.path.stat().st_mtime - 100
+    os.utime(a.path, (old, old))
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"x" * (3 << 20))
+    migrate._sha256(big)
+    assert a.path.stat().st_mtime > old + 50
+    a.release()
+
+
+def test_a_folder_this_user_cannot_write_in_says_so(tmp_path, monkeypatch):
+    """S2: a lock that cannot be made because the folder refuses this user is not "another
+    start is still tidying": it says the folder is read-only for you, at once."""
+    real = os.open
+
+    def refuse(path, *a, **k):
+        if str(path).endswith(".lock"):
+            raise PermissionError(13, "Access is denied")
+        return real(path, *a, **k)
+    monkeypatch.setattr(os, "open", refuse)
+    monkeypatch.setattr(migrate, "_folder_writable", lambda folder: False)
+    with pytest.raises(migrate.MoveStopped) as e:
+        migrate.FolderLock(tmp_path, "the app folder").acquire(wait=30)
+    assert "writable for you" in str(e.value)
 
 
 def test_the_lock_check_never_signals_a_process():
@@ -414,3 +547,97 @@ def test_the_lock_check_never_signals_a_process():
     assert "os.kill" not in win
     assert migrate._pid_alive(os.getppid()) is True
     assert migrate._pid_alive(999999999) is False
+
+
+
+# ---- "keep the newer" means the newer (rehearsal 1) ---------------------------------------------
+
+@pytest.mark.parametrize("volumes", ["one", "two"])
+def test_a_genuinely_newer_old_copy_wins(r, monkeypatch, volumes):
+    """The copy-first 3.20 left a live schedule.json in _moonglade\\; an older install then
+    wrote the library-top one, later. The move brings the first across, then meets the second:
+    the second is newer and must win -- the move's own copy of the first is as old as the first,
+    not as new as the moment it was made -- and the older one is set aside, never lost."""
+    if volumes == "two":
+        monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    write_config(r)
+    write(r.lib / "_moonglade" / "schedule.json", {"which": "older, _moonglade"})
+    os.utime(r.lib / "_moonglade" / "schedule.json", (1_600_000_000, 1_600_000_000))
+    write(r.lib / "schedule.json", {"which": "newer, library top"})
+    os.utime(r.lib / "schedule.json", (1_700_000_000, 1_700_000_000))
+    done = _prepare(r)
+    got = json.loads((r.lib / "_moonglade" / "records" / "schedule.json").read_text())
+    assert got == {"which": "newer, library top"}
+    parked = list((r.lib / "_moonglade" / ".snapshot" / "parked").rglob("schedule.json*"))
+    assert [json.loads(x.read_text()) for x in parked] == [{"which": "older, _moonglade"}]
+    assert done.report.parked == 1
+
+
+def test_two_logs_are_merged_not_parked(r):
+    """Rehearsal 4: two copies of one log keep both, the older one's lines first."""
+    write_config(r)
+    write(r.lib / "_moonglade" / "logs" / "moonglade.log", "older line\n")
+    os.utime(r.lib / "_moonglade" / "logs" / "moonglade.log", (1_600_000_000, 1_600_000_000))
+    write(r.lib / "logs" / "moonglade.log", "newer line\n")
+    _prepare(r)
+    assert (r.local / "logs" / "moonglade.log").read_text() == "older line\nnewer line\n"
+    assert not (r.lib / "_moonglade" / ".snapshot" / "parked").exists()
+
+
+# ---- a read-only file, a moment's hold (S2) ------------------------------------------------------
+
+def test_a_read_only_source_is_removed_once_its_copy_is_verified(r, monkeypatch):
+    import stat
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    write_config(r)
+    write(_guard_src(r), GUARD)
+    os.chmod(_guard_src(r), stat.S_IREAD)
+    _prepare(r)
+    assert json.loads(_guard_dest(r).read_text()) == GUARD
+    assert not _guard_src(r).exists()
+
+
+def test_a_moment_s_hold_is_tried_again(r, monkeypatch):
+    monkeypatch.setattr(migrate, "REMOVE_BACKOFF_S", 0.0)
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    write_config(r)
+    write(_guard_src(r), GUARD)
+    real, held = os.remove, {"n": 0}
+
+    def remove(p, *a, **k):
+        if "train_guard" in str(p) and held["n"] < 3:
+            held["n"] += 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real(p, *a, **k)
+    monkeypatch.setattr(os, "remove", remove)
+    _prepare(r)
+    assert held["n"] == 3 and not _guard_src(r).exists()
+
+
+def test_a_hold_that_lasts_stops_with_what_to_do(r, monkeypatch):
+    monkeypatch.setattr(migrate, "REMOVE_BACKOFF_S", 0.0)
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    write_config(r)
+    write(_guard_src(r), GUARD)
+    real = os.remove
+
+    def remove(p, *a, **k):
+        if "train_guard" in str(p):
+            e = PermissionError(13, "The process cannot access the file")
+            e.winerror = 32
+            raise e
+        return real(p, *a, **k)
+    monkeypatch.setattr(os, "remove", remove)
+    with pytest.raises(migrate.MoveStopped) as e:
+        _prepare(r)
+    text = str(e.value)
+    assert "another program has it open" in text
+    assert "Close the program that has it open" in text
+    assert "Nothing was lost" in text
+    assert json.loads(_guard_dest(r).read_text()) == GUARD and _guard_src(r).exists()
+
+
+def test_a_full_disk_says_so():
+    e = OSError(28, "No space left on device")
+    assert migrate._reason(e) == "the disk is full"
+    assert "Free some space" in migrate._advice(e)

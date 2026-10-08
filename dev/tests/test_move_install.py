@@ -11,14 +11,15 @@ files are zipped into local\\.snapshot\\ -- never the pack, never the Mirror's t
 """
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from moonglade import migrate
 from moonglade import settings
 from moonglade import setup as msetup
-from tests.move_layouts import (layout_317, layout_c_copy_first, read_config, rig, write,
-                                write_config)
+from tests.move_layouts import (layout_317, layout_c_copy_first, read_config, rig, start,
+                                write, write_config)
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def _zip_names(folder):
 
 def test_the_3_17_install_moves_into_local(r):
     layout_317(r)
-    msetup.prepare("cli", explicit_out=str(r.lib))
+    start(r)
     # the pre-v7 pack rename, then the move; the marker follows its own pack
     assert (r.local / "moonglade.mgpack").read_bytes() == b"PACK-317" * 64
     assert json.loads((r.local / "moonglade.mgpack.version").read_text())["version"] == "6"
@@ -57,7 +58,7 @@ def test_the_3_17_install_moves_into_local(r):
 def test_the_snapshot_holds_the_small_settings_files_and_never_the_pack_or_token(r):
     layout_317(r)
     write_config(r, PORT=5000, READ_ONLY=True)
-    msetup.prepare("cli", explicit_out=str(r.lib))
+    start(r)
     names = _zip_names(r.local)
     assert {"serve.txt", "branding.json"} <= names
     assert "config.json (the keys moved to settings.json).json" in names
@@ -88,7 +89,7 @@ def test_c_s_copy_first_install_keeps_the_live_copies_and_removes_the_recorded_o
     """The local\\ copies are the ones 3.20 was using; the root copies are exactly what 3.20
     copied (MOVED.json's fingerprints match), so they are its leftovers and go."""
     layout_c_copy_first(r)
-    done = msetup.prepare("cli", explicit_out=str(r.lib))
+    done = start(r)
     b = settings.branding()
     assert b["mark"] == "mark_4" and b["animation"]["anim"] == "aurora", "the live copy"
     assert b["slots"] == {"banner_main": "live"}
@@ -98,21 +99,21 @@ def test_c_s_copy_first_install_keeps_the_live_copies_and_removes_the_recorded_o
     for gone in ("serve.txt", "branding.json", "branding_slots.json", "serve.log",
                  migrate.OLD_RECORD, "cache/marks"):
         assert not (r.local / gone).exists(), gone
-    assert (r.local / "logs" / "serve.log").read_text() == "the 3.20 launcher's log\n"
     assert (r.local / "icons" / "mark_4.ico").read_bytes() == b"ICO-4"
     assert (r.local / "moonglade.mgpack").read_bytes() == b"PACK-320" * 64
     # 3.20 started serve.log fresh in local\ and never copied the root one, so the two are
-    # different files of one name: the newer is kept and the old launcher's is parked.
-    parked = sorted((r.local / ".snapshot" / "parked").rglob("*"))
-    assert [p.name for p in parked if p.is_file()] == ["serve.log"]
-    assert parked[-1].read_text() == "the old launcher's log\n"
-    assert done.report.parked == 1
+    # different files of one name: a log is merged, the older one's lines first -- nothing
+    # either holds goes to the snapshot (to be deleted with it).
+    assert (r.local / "logs" / "serve.log").read_text() == \
+        "the old launcher's log\nthe 3.20 launcher's log\n"
+    assert not (r.local / ".snapshot" / "parked").exists()
+    assert done.report.parked == 0
 
 
 def test_an_old_copy_written_since_3_20_copied_it_is_parked_not_deleted(r):
     layout_c_copy_first(r)
     write(r.app / "branding.json", {"mark": "written-since", "anim": "glow"})
-    msetup.prepare("cli", explicit_out=str(r.lib))
+    start(r)
     assert settings.branding()["mark"] == "mark_4", "the copy 3.20 was using still wins"
     parked = list((r.local / ".snapshot" / "parked").rglob("branding.json*"))
     assert len(parked) == 1
@@ -173,3 +174,177 @@ def test_the_config_keys_leave_through_the_atomic_writer(r, monkeypatch):
     assert seen["locked"] is True
     assert "HOST" not in seen["keys"] and "PIXAI_API_KEY" in seen["keys"]
     assert "HOST" not in read_config(r)
+
+
+# ---- the settings merge, step by step (X2) ------------------------------------------------------
+
+class _Cut(BaseException):
+    """A start that dies mid-merge (a power cut, a Task Manager kill)."""
+
+
+def _c_disagreement(r):
+    """C:'s exact case: serve.txt pins pixai_backup and 5057, config.json's LIBRARY_DIR names
+    another install's library."""
+    write_config(r, LIBRARY_DIR=r"D:\Moonglade Athenaeum\pixai_backup", PORT=5000)
+    write(r.app / "serve.txt", "--out pixai_backup --port 5057\n")
+    (r.app / "pixai_backup").mkdir()
+
+
+@pytest.mark.parametrize("cut_at", ["before-keys", "before-sources"])
+def test_a_merge_cut_short_keeps_what_settings_json_holds(r, monkeypatch, cut_at):
+    """X2: the first start merged (pixai_backup, 5057) and was cut short before config.json's
+    keys were dropped, or before serve.txt was deleted. The next start must never read the
+    LIBRARY_DIR left behind as a new choice: settings.json's library and port win."""
+    _c_disagreement(r)
+    with monkeypatch.context() as m:
+        if cut_at == "before-keys":
+            def drop(report):
+                raise _Cut()
+            m.setattr(migrate, "_drop_config_keys", drop)
+        else:
+            real = migrate._remove
+
+            def remove(p):
+                if p.name == "serve.txt":
+                    raise _Cut()
+                return real(p)
+            m.setattr(migrate, "_remove", remove)
+        with pytest.raises(_Cut):
+            msetup.prepare("cli")
+    if cut_at == "before-keys":
+        assert "LIBRARY_DIR" in read_config(r), "the keys were still there when it stopped"
+        (r.app / "serve.txt").unlink()           # only the config key is left to read
+    else:
+        assert "LIBRARY_DIR" not in read_config(r), "the keys go before serve.txt does"
+        assert (r.app / "serve.txt").is_file()
+    journal = json.loads((r.local / ".journal.json").read_text())
+    assert journal["merge"]["values"]["library_dir"] == "pixai_backup"
+    (r.local / ".lock").unlink(missing_ok=True)
+    done = msetup.prepare("cli")
+    assert settings.library_dir() == "pixai_backup" and settings.server()["port"] == 5057
+    assert done.library == r.app / "pixai_backup", "never the other install's library"
+    cfg = read_config(r)
+    assert "LIBRARY_DIR" not in cfg and "PORT" not in cfg
+    assert not (r.app / "serve.txt").exists()
+    assert json.loads((r.local / ".journal.json").read_text())["merge"]["state"] == "done"
+
+
+def test_a_merge_cut_short_puts_back_a_value_settings_json_lost(r, monkeypatch):
+    _c_disagreement(r)
+    with monkeypatch.context() as m:
+        def drop(report):
+            raise _Cut()
+        m.setattr(migrate, "_drop_config_keys", drop)
+        with pytest.raises(_Cut):
+            msetup.prepare("cli")
+    (r.local / "settings.json").unlink()
+    msetup.prepare("cli")
+    assert settings.library_dir() == "pixai_backup" and settings.server()["port"] == 5057
+
+
+def test_the_config_keys_go_before_serve_txt(r, monkeypatch):
+    _c_disagreement(r)
+    order = []
+    real_drop, real_remove = migrate._drop_config_keys, migrate._remove
+
+    def drop(report):
+        order.append("keys")
+        return real_drop(report)
+
+    def remove(p):
+        order.append(p.name)
+        return real_remove(p)
+    monkeypatch.setattr(migrate, "_drop_config_keys", drop)
+    monkeypatch.setattr(migrate, "_remove", remove)
+    msetup.prepare("cli")
+    assert order.index("keys") < order.index("serve.txt")
+
+
+def test_one_moved_key_is_said_in_the_singular(r):
+    write_config(r, HOST="0.0.0.0")
+    done = msetup.prepare("cli")
+    assert "Removed HOST from config.json: it lives in settings.json now." in [
+        line for _lvl, line in done.report.lines]
+
+
+# ---- the pack's marker (N1), and the app's own dead files at the root (S9) ------------------------
+
+def test_a_marker_left_behind_by_a_cut_short_move_follows_its_pack(r, monkeypatch):
+    """The pack came across and the start was cut short before its marker did: the marker
+    still describes that pack, so it follows rather than being deleted (no re-download)."""
+    write(r.app / "moonglade.mgpack", b"PACK" * 64)
+    write(r.app / "moonglade.mgpack.version", {"version": "7"})
+    real = migrate._bring
+
+    def bring(src, dest, kind, half, vouched=False):
+        if Path(src).name == "moonglade.mgpack.version":
+            raise _Cut()
+        return real(src, dest, kind, half, vouched)
+    with monkeypatch.context() as m:
+        m.setattr(migrate, "_bring", bring)
+        with pytest.raises(_Cut):
+            msetup.prepare("cli")
+    assert (r.local / "moonglade.mgpack").is_file() and not (r.app / "moonglade.mgpack").exists()
+    (r.local / ".lock").unlink(missing_ok=True)
+    msetup.prepare("cli")
+    assert json.loads((r.local / "moonglade.mgpack.version").read_text()) == {"version": "7"}
+    assert not (r.app / "moonglade.mgpack.version").exists()
+
+
+def test_the_apps_own_dead_files_at_the_root_go(r):
+    """S9: the desktop GUI's settings file and an empty stray catalog.db are the app's own dead
+    files: the move removes them (the GUI file goes into the safety copy first)."""
+    write(r.app / "pixai_gui_settings.json", {"geometry": "x"})
+    write(r.app / "catalog.db", b"")
+    msetup.prepare("cli")
+    assert not (r.app / "pixai_gui_settings.json").exists()
+    assert not (r.app / "catalog.db").exists()
+    assert "pixai_gui_settings.json" in _zip_names(r.local)
+
+
+def test_a_catalog_db_with_anything_in_it_at_the_root_is_never_touched(r):
+    write(r.app / "catalog.db", b"SQLite format 3\x00 something")
+    msetup.prepare("cli")
+    assert (r.app / "catalog.db").read_bytes().startswith(b"SQLite format 3")
+
+
+# ---- one rename on one volume; the copy across volumes (rehearsal 6) -----------------------------
+
+def test_the_art_pack_is_renamed_on_one_volume_not_copied(r, monkeypatch):
+    write(r.app / "moonglade.mgpack", b"PACK" * 64)
+    copied = []
+    real = migrate._copy_into
+
+    def copy_into(src, tmp, kind):
+        copied.append(Path(src).name)
+        return real(src, tmp, kind)
+    monkeypatch.setattr(migrate, "_copy_into", copy_into)
+    msetup.prepare("cli")
+    assert (r.local / "moonglade.mgpack").read_bytes() == b"PACK" * 64
+    assert "moonglade.mgpack" not in copied
+    item = json.loads((r.local / ".journal.json").read_text())["items"]["local/moonglade.mgpack"]
+    assert (item["state"], item["how"], item["src"]) == ("made", "renamed", "moonglade.mgpack")
+
+
+def test_across_volumes_the_pack_is_copied_and_keeps_its_time(r, monkeypatch):
+    import os
+    write(r.app / "moonglade.mgpack", b"PACK" * 64)
+    os.utime(r.app / "moonglade.mgpack", (1_600_000_000, 1_600_000_000))
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    msetup.prepare("cli")
+    assert (r.local / "moonglade.mgpack").stat().st_mtime == 1_600_000_000
+    item = json.loads((r.local / ".journal.json").read_text())["items"]["local/moonglade.mgpack"]
+    assert item["state"] == "made" and item["sha256"]
+
+
+def test_the_move_writes_one_line_per_file_to_moonglade_log(r):
+    """Rehearsal 5: the docs say local\\logs\\moonglade.log lists what was brought across. The
+    launcher never sets logging up, so its start appends the lines itself (write_log)."""
+    layout_317(r)
+    done = start(r)
+    done.write_log()
+    log = (r.local / "logs" / "moonglade.log").read_text(encoding="utf-8")
+    assert "Moved moonglade.mgpack to local/moonglade.mgpack" in log
+    assert "Moved jobs.jsonl to _moonglade/records/jobs.jsonl" in log
+    assert "Removed serve.txt: what it held is in local/settings.json now." in log
+    assert "Moved jobs.jsonl" not in done.summary(), "serve.log gets the overview only"

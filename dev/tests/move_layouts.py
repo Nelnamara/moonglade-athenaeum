@@ -36,6 +36,18 @@ def rig(tmp_path, monkeypatch):
     return SimpleNamespace(app=app, local=local, lib=lib, cfg=app / "config.json")
 
 
+def start(r, kind="launcher"):
+    """A start the way the launcher (or the web server) makes one: the library half moves only
+    for those two, and only in the library this install serves (X1) -- so the test's library
+    is made this install's own in settings.json, when nothing is stored yet. (A layout whose
+    serve.txt pins a library still wins: the merge puts the old launcher's --out first.)"""
+    from moonglade import settings as _settings
+    from moonglade import setup as _setup
+    if not _settings.library_dir():
+        _settings.set_values(library_dir=str(r.lib))
+    return _setup.prepare(kind)
+
+
 def write_config(r, **keys):
     doc = {"PIXAI_API_KEY": "sk-test-not-real", "AUTH_SECRET_KEY": "s",
            "AUTH_USERS": [{"username": "Nel", "password_hash": "x"}]}

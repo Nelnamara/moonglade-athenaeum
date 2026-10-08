@@ -7,8 +7,10 @@ reimplemented here. Catalog writes are set_rating / add_to_collection / remove_f
 Library: the one the Control Panel's library folder names (local/settings.json), like the
 web server and the command line; else pixai_backup in the app's folder. An env MOONGLADE_OUT
 (e.g. "D:\\path\\to\\pixai_backup") names one for this server alone. The server runs
-moonglade.setup.prepare("mcp") first, like every other entry point, so a library or an install
-still in an older layout is brought across before anything is read.
+moonglade.setup.prepare("mcp") first, like every other entry point: an install still in an
+older layout has its settings brought across, but the MCP server never moves a library's
+files. A library still in an older Moonglade's layout (or one an older Moonglade is still
+writing) stops the server with a plain sentence: open it once with its own install's launcher.
 
 Register in Claude Code (PYTHONPATH names the app's folder, so `-m` finds the package
 wherever the client starts the server; -P, on Python 3.11 and later, keeps the client's own
