@@ -65,9 +65,11 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     first move, and at every later bring-in. Once a library's move has finished, an old-layout
     file written after it also means an older Moonglade is still using that library: the start
     stops and says so, rather than sweep its records out from under it. Started again with
-    nothing more written there and no old log held (the person closed it), the move brings in
-    what it wrote, and the new homes keep everything they hold. Off Windows, and for an older
-    install running on a Linux or macOS machine, nothing is held: those are closed by hand.
+    nothing more written there and no old log held (the person stopped it: Stop server in its
+    Control Panel, since closing its browser tab leaves it serving), the move brings in what it
+    wrote, and the new homes keep everything they hold. A held log is seen only when this
+    install and the older one both run on Windows; if either runs on Linux or macOS (or the
+    older one on a NAS), nothing is held, and the person closes every older install first.
   * ONLY WHAT IS MOONGLADE'S, BY ITS CONTENT. An old home's name is not enough: a folder that
     isn't a Moonglade library is left exactly as it is (_is_moonglade_library), and in one that
     is, each old home passes its own check -- the logs only moonglade.log*, the Loom only its
@@ -3385,17 +3387,25 @@ def _names(paths, half, most=3):
     return ", ".join(rels[:most]) + (" and %d more" % more if more > 0 else "")
 
 
+# How to stop an older Moonglade that is still using a library. Its server (3.10-3.19, started
+# from "Serve Gallery.pyw") runs under pythonw with no window of its own: closing its browser
+# tab leaves it serving. Control Panel -> Server -> Stop server is what stops it.
+STOP_OLDER_WORDS = (
+    "Stop that Moonglade with Stop server in its Control Panel, or end its python or pythonw "
+    "process (closing its browser tab doesn't stop it). Turn off its scheduled tasks, and any "
+    "service that starts it on Linux or macOS, and close its Claude tools.")
+
+
 def _older_live_words(out, written, half, moving):
     head = ("An older Moonglade is still using the library %s: it wrote %s after this version "
             "moved the library's files into _moonglade. " % (out, _names(written, half)))
     if moving:
-        return head + ("Moving them now, while it runs, would hide its records from it. Close "
-                       "that Moonglade (its window, its scheduled tasks and its Claude tools), "
-                       "then start this one again: it brings in what that one wrote, and "
-                       "keeps everything already here.")
-    return head + ("This command never moves a library's files. Close that Moonglade, then "
-                   "start this one with its launcher (Moonglade Launcher) to bring in what it "
-                   "wrote.")
+        return head + ("Moving them now, while it runs, would hide its records from it. " +
+                       STOP_OLDER_WORDS + " Then start this one again: it brings in what that "
+                       "one wrote, and keeps everything already here.")
+    return head + ("This command never moves a library's files. " + STOP_OLDER_WORDS +
+                   " Then start this one with its launcher (Moonglade Launcher) to bring in "
+                   "what it wrote.")
 
 
 def _refusal_words(out, named):
@@ -3411,12 +3421,13 @@ def _refusal_words(out, named):
 # The sentence when something still holds a library's old log open (#12): at the first move,
 # and before bringing in what an older Moonglade wrote after it -- before anything moves, so
 # an older install's records are never taken from under it. Filled with the log, then the
-# library. Windows can tell only an older install that also runs on Windows.
+# library. Moonglade can tell only when this install and the older one both run on Windows.
 OLDER_RUNNING_WORDS = (
     "Another program has %s open, so Moonglade can't tidy the library %s yet. It may be an "
-    "older Moonglade still running on that library (its window, or one of its scheduled "
-    "tasks, on this PC or another Windows PC), or another program that has the file open. "
-    "Close it, then start Moonglade again.")
+    "older Moonglade still running on that library, on this PC or another Windows PC: stop it "
+    "with Stop server in its Control Panel, or end its python or pythonw process (closing its "
+    "browser tab doesn't stop it), and stop its scheduled tasks and any service that starts "
+    "it. Otherwise close the program that has the file open. Then start Moonglade again.")
 
 
 def _held_open(p):

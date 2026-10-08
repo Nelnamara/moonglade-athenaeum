@@ -103,8 +103,15 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
   and a run that names its own library (`--out`) never move a library's files. Open the library
   once with its own install's launcher (updated to 3.20), then run the command again.
 - *"An older Moonglade is still using the library …"* An older install wrote to the library's
-  old places after the move. Close it (its window, its scheduled tasks and its Claude tools) and
-  start again: the move then brings in what it wrote.
+  old places after the move. Stop it with **Stop server** in its Control Panel, or end its
+  `python` or `pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled
+  tasks (and any service that starts it on Linux or macOS) and close its Claude tools, then start
+  again: the move brings in what it wrote.
+- *"Another program has …\logs\moonglade.log open …"* That is the library's old log, and
+  what holds it is usually an older Moonglade still running on the library, on this PC or another
+  Windows PC, or one of its scheduled tasks. Stop it the same way (**Stop server** in its Control
+  Panel; closing its browser tab doesn't stop it) and stop its scheduled tasks. If it isn't
+  Moonglade, close the program that has the log open. Then start again. Nothing was moved.
 - *"Moonglade's settings file … is damaged"* or *"can't read its settings file"*: Moonglade
   won't guess which library to open, or write over the file. Close whatever has
   `local\settings.json` open, or fix the file (it is plain JSON), and start again.

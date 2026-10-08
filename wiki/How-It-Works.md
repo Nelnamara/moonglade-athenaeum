@@ -140,8 +140,10 @@ records it touches is zipped; the app deletes the snapshot after five clean star
 the gallery once it has served for ten minutes or was stopped cleanly. Only the launcher and the
 gallery move a library's files, and only the library this install uses; the command line and the
 MCP server refuse a library still in an older layout, and every start stops when an older install
-is still writing a library's old places, or (on Windows) still holds its old log open. [Where Things Live](Where-Things-Live) answers the
-everyday questions.
+is still writing a library's old places, or still holds its old log open. Moonglade can tell only
+when this install and the older one both run on Windows. If either runs on Linux or macOS (or the
+older one on a NAS), close every older install on the library yourself before the first start.
+[Where Things Live](Where-Things-Live) answers the everyday questions.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

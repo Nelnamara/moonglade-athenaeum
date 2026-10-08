@@ -83,11 +83,13 @@ library once with its own install's launcher (updated to 3.20), then run the com
 
 **It says an older Moonglade is still using the library.**
 Something wrote to the library's old places after the move: usually an older install pointed at
-the same library. Close it (its window, its scheduled tasks and its Claude tools), then start this
-one again. It brings in what the older one wrote, and nothing is lost. When it says another
-program has the library's old `logs\moonglade.log` open, that is usually the older install still
-running (its window, or one of its scheduled tasks, on this PC or another Windows PC); a program
-reading that log holds it too.
+the same library. Stop it with **Stop server** in its Control Panel, or end its `python` or
+`pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled tasks (and any
+service that starts it on Linux or macOS) and close its Claude tools, then start this one again.
+It brings in what the older one wrote, and nothing is lost. When it says another program has the
+library's old `logs\moonglade.log` open, that is usually the older install still running, on this
+PC or another Windows PC, or one of its scheduled tasks: stop it the same way. If it isn't, close
+the program that has the log open.
 
 ## Updating from 3.19 or older
 
@@ -115,11 +117,11 @@ Any install from 3.10 onward updates this way.
   made again in its new place so it still points at the same folder; on Windows the start asks
   you to make it point by its full path first.
 - **A library two installs share:** update both before using it again. If an older Moonglade is
-  still open on the library, 3.20 stops and asks you to close it. Windows can tell only when that
-  older install also runs on Windows: if one runs on a Linux or macOS machine (or a NAS) that
-  shares the library, close it yourself first. If an older install writes to the library later,
-  the next start keeps everything already in the new homes and merges in what the older one
-  added.
+  still open on the library, 3.20 stops and asks you to close it. Moonglade can tell only when
+  this install and the older one both run on Windows. If either runs on Linux or macOS (or the
+  older one on a NAS), close every older install on the library yourself before the first start.
+  If an older install writes to the library later, the next start keeps everything already in the
+  new homes and merges in what the older one added.
 
 Going back to an earlier version after 3.20 isn't supported, because it won't find your records
 or settings.

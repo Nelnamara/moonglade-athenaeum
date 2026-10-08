@@ -25,6 +25,7 @@ Layouts: 3.17 (D:'s shape), and C:'s copy-first 3.20 state.
 """
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -449,6 +450,59 @@ def test_an_older_install_holding_its_log_open_stops_the_first_move(r):
         holder.wait()
     _prepare(r)                                   # closed: the move goes ahead
     assert (r.lib / "_moonglade" / "records" / "train_guard.json").is_file()
+
+
+# ---- what the stop sentences and the pages read before the move tell the person to do ---------
+
+_WIKI = Path(__file__).resolve().parents[2] / "wiki"
+_BOTH_ON_WINDOWS = (
+    "Moonglade can tell only when this install and the older one both run on Windows. If either "
+    "runs on Linux or macOS (or the older one on a NAS), close every older install on the "
+    "library yourself before the first start.")
+
+
+def _page(name):
+    return " ".join((_WIKI / name).read_text(encoding="utf-8").split())
+
+
+def test_the_stop_sentences_name_what_actually_stops_an_older_install(r):
+    """A 3.10-3.19 server started from its launcher runs under pythonw with no window, and
+    closing its browser tab leaves it serving (and holding its log): the sentences name Stop
+    server in its Control Panel, its python/pythonw process, its scheduled tasks and a service,
+    and the other program that may hold the file."""
+    held = migrate.OLDER_RUNNING_WORDS % (r.lib / "logs" / "moonglade.log", r.lib)
+    look = migrate._Half("library", r.lib / "_moonglade", migrate._library_roots(r.lib),
+                         migrate.Report())
+    said = [held] + [migrate._older_live_words(r.lib, [r.lib / "jobs.jsonl"], look, moving)
+                     for moving in (True, False)]
+    for text in said:
+        assert "Stop server in its Control Panel" in text, text
+        assert "python or pythonw process" in text, text
+        assert "closing its browser tab doesn't stop it" in text, text
+        assert "scheduled tasks" in text and "service that starts it" in text, text
+        assert "its window" not in text, text
+    assert "close the program that has the file open" in held
+
+
+def test_the_pages_say_windows_tells_only_when_both_installs_run_on_it():
+    """Read before an irreversible move: an install on Linux or macOS sees no older install
+    anywhere, and none sees one running on Linux, macOS or a NAS."""
+    for name in ("Where-Things-Live.md", "How-It-Works.md"):
+        assert _BOTH_ON_WINDOWS in _page(name), name
+
+
+def test_the_pages_name_stop_server_and_the_held_log_has_its_own_entry():
+    for name in ("Where-Things-Live.md", "Troubleshooting.md"):
+        text = _page(name)
+        assert "**Stop server** in its Control Panel" in text, name
+        assert "closing its browser tab doesn't stop it" in text, name
+        assert "its window" not in text, name
+    trouble = _page("Troubleshooting.md")
+    entry = trouble[trouble.index("*\"Another program has …\\logs\\moonglade.log open …\"*"):]
+    entry = entry[:entry.index(" - *")] if " - *" in entry else entry
+    for want in ("older Moonglade still running", "scheduled tasks", "**Stop server**",
+                 "close the program that has the log open"):
+        assert want in entry, want
 
 
 # ---- only what is Moonglade's by its content moves (#10) ----------------------------------------
