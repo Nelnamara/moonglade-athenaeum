@@ -6721,11 +6721,6 @@ def brand_context(out_dir):
                 mark_kind="alpha", has_banner=has_banner)
 
 
-def _ps_quote(s):
-    """PowerShell single-quoted literal: double any embedded single quotes."""
-    return "'" + str(s).replace("'", "''") + "'"
-
-
 def _mark_ico_path(mark_id):
     """The app icon for `mark_id` as a REAL file in local\\icons\\ (moonglade.paths.icons_dir()),
     or None when the mark has no .ico cut. Every shortcut the app makes or re-points
@@ -6754,8 +6749,11 @@ def make_launcher_shortcut(out_dir, mark_id):
     """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
     chosen mark's .ico, targeting Moonglade Launcher.pyw via pythonw. Returns the
     .lnk path. Machine-local action -- caller must gate to localhost. The Desktop is the
-    shell's own (one moved into OneDrive included: moonglade.outside.desktop_dir())."""
-    import subprocess
+    shell's own (one moved into OneDrive included: moonglade.outside.desktop_dir()). The
+    shortcut is written by the same fixed-script writer the outside-references fixer uses
+    (moonglade.outside._save_lnk_with_powershell): every path reaches PowerShell as an
+    environment variable, never quoted into the script, so a quote in one -- a typographic
+    one included, which also ends a PowerShell '...' string -- can't break or steer it."""
     from moonglade import outside as moonglade_outside
     # PowerShell's CreateShortcut reads IconLocation straight off disk, so the .ico is
     # written into local\icons\ first (_mark_ico_path).
@@ -6769,20 +6767,9 @@ def make_launcher_shortcut(out_dir, mark_id):
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     target = pythonw if pythonw.exists() else Path(sys.executable)
     lnk = moonglade_outside.desktop_dir() / "Moonglade Athenaeum.lnk"
-    ps = ("$sh = New-Object -ComObject WScript.Shell; "
-          "$s = $sh.CreateShortcut(%s); "
-          "$s.TargetPath = %s; "
-          "$s.Arguments = %s; "
-          "$s.WorkingDirectory = %s; "
-          "$s.IconLocation = %s; "
-          "$s.Description = 'Moonglade Athenaeum'; $s.Save()" % (
-              _ps_quote(lnk), _ps_quote(target), _ps_quote('"%s"' % pyw),
-              _ps_quote(repo), _ps_quote(str(ico) + ",0")))
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       capture_output=True, text=True, timeout=30,
-                       creationflags=_NO_WINDOW)
-    if r.returncode != 0:
-        raise RuntimeError((r.stderr or "PowerShell failed").strip()[:200])
+    moonglade_outside._save_lnk_with_powershell(
+        lnk, str(target), '"%s"' % pyw, str(repo), str(ico) + ",0",
+        description="Moonglade Athenaeum")
     return str(lnk)
 
 

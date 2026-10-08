@@ -116,19 +116,24 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
         stdout = ""
     def fake_run(argv, **k):
         captured["argv"] = argv
+        captured["env"] = k.get("env") or {}
         return R()
     monkeypatch.setattr(subprocess, "run", fake_run)
     cli = _client(tmp_path)
     d = cli.post("/api/branding/shortcut", json={"mark": "mark_4"}).get_json()
     assert d.get("ok") is True and d["lnk"].endswith("Moonglade Athenaeum.lnk")
-    argv = captured["argv"]
+    argv, env = captured["argv"], captured["env"]
     assert argv[0] == "powershell"
-    assert "CreateShortcut" in argv[-1] and "mark_4.ico" in argv[-1]
-    assert "Moonglade Launcher.pyw" in argv[-1]
+    # the script is fixed text; the paths reach it as environment variables
+    from moonglade import outside
+    assert "CreateShortcut" in argv[-1] and argv[-1] == outside._LNK_SCRIPT
+    assert env["MOONGLADE_LNK_Arguments"].endswith('Moonglade Launcher.pyw"')
     # the icon lives in local/icons/ (no cache), and the Desktop is the shell's own (pinned
     # to a temp folder in every test by conftest)
-    assert str(moonglade_paths.icons_dir() / "mark_4.ico") + ",0" in argv[-1]
+    assert env["MOONGLADE_LNK_IconLocation"] == \
+        str(moonglade_paths.icons_dir() / "mark_4.ico") + ",0"
     assert d["lnk"] == str(tmp_path / "Desktop" / "Moonglade Athenaeum.lnk")
+    assert env["MOONGLADE_LNK_PATH"] == d["lnk"]
     # LAN can't write shortcuts onto the owner's Desktop even for THIS already-logged-in
     # session -- it passes the global front door (real session) but is then refused by
     # the route's OWN, stricter _is_local_request() re-check (403), same property
@@ -1015,7 +1020,8 @@ def test_the_shortcut_route_accepts_an_uploaded_custom_mark(tmp_path, monkeypatc
         stdout = ""
 
     monkeypatch.setattr(subprocess, "run",
-                        lambda argv, **k: (captured.__setitem__("argv", argv), R())[1])
+                        lambda argv, **k: (captured.__setitem__("env", k.get("env") or {}),
+                                           R())[1])
     cli = _client(tmp_path)
     mark_id = cli.post("/api/branding/mark/custom",
                        data={"file": (io_bytes(_png_bytes()), "m.png")},
@@ -1023,7 +1029,7 @@ def test_the_shortcut_route_accepts_an_uploaded_custom_mark(tmp_path, monkeypatc
 
     r = cli.post("/api/branding/shortcut", json={"mark": mark_id})
     assert r.status_code == 200 and r.get_json()["ok"] is True
-    assert mark_id + ".ico" in captured["argv"][-1]
+    assert mark_id + ".ico" in captured["env"]["MOONGLADE_LNK_IconLocation"]
 
 
 # ---- mark reward gate (2026-09-08): a mark bound to an achievement is pickable only once
@@ -1127,6 +1133,36 @@ def test_shortcut_route_refuses_a_locked_mark(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: {"archivist"})
     assert cli.post("/api/branding/shortcut", json={"mark": "mark_ms"}).status_code == 200
+
+
+def test_the_desktop_shortcut_s_paths_never_go_into_the_powershell_script(tmp_path, monkeypatch):
+    """The Desktop shortcut button writes through the same fixed-script writer as the
+    outside-references fixer: its paths reach PowerShell as environment variables, never
+    quoted into the script. Quoting them used to double only the ASCII apostrophe, and
+    PowerShell also ends a '...' string at a typographic quote: a folder named with one
+    broke the button, and a crafted one could run what followed."""
+    from moonglade import outside
+    desktop = tmp_path / "Greg’s Desktop'; Write-Output INJECTED; ‘"
+    desktop.mkdir()
+    ico = tmp_path / "icons" / "mark_4.ico"
+    ico.parent.mkdir()
+    ico.write_bytes(b"\x00\x00\x01\x00ICON")
+    monkeypatch.setattr(g, "_mark_ico_path", lambda mark_id: ico)
+    monkeypatch.setattr(outside, "desktop_dir", lambda: desktop)
+    seen = []
+    monkeypatch.setattr(outside, "_run", lambda argv, timeout=60, env=None:
+                        seen.append((list(argv), dict(env or {}))) or (0, b"", ""))
+    lnk = g.make_launcher_shortcut(tmp_path, "mark_4")
+    [(argv, env)] = seen
+    assert argv[:4] == ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
+    assert argv[4] == outside._LNK_SCRIPT, "the script is the same fixed text every time"
+    assert "INJECTED" not in " ".join(argv) and "’" not in " ".join(argv)
+    assert env["MOONGLADE_LNK_PATH"] == lnk == str(desktop / "Moonglade Athenaeum.lnk")
+    assert env["MOONGLADE_LNK_Arguments"] == '"%s"' % moonglade_paths.launcher_path()
+    assert env["MOONGLADE_LNK_WorkingDirectory"] == str(moonglade_paths.APP_ROOT)
+    assert env["MOONGLADE_LNK_IconLocation"] == str(ico) + ",0"
+    assert env["MOONGLADE_LNK_Description"] == "Moonglade Athenaeum"
+    assert not hasattr(g, "_ps_quote"), "no script is built by quoting any more"
 
 
 # ---- spoiler seal (feat/mark-gating review 2026-09-08): a mark bound to a HIDDEN feat must

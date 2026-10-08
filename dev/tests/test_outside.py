@@ -34,7 +34,6 @@ import ntpath
 import os
 import shutil
 import struct
-import subprocess
 import sys
 
 import pytest
@@ -1092,25 +1091,17 @@ def test_the_launchers_pass_never_asks_about_tasks_or_claude(install, box):
 @pytest.mark.skipif(sys.platform != "win32" or not shutil.which("powershell"),
                     reason="Windows' own shortcut writer")
 def test_windows_own_shortcut_writer_round_trips(install, box):
-    """The real writer (PowerShell's WScript.Shell, as the app's shortcut button uses) on a
-    shortcut Windows itself made, in this test's temp folder only."""
+    """The real writer (PowerShell's WScript.Shell): it MAKES a shortcut the way the app's
+    shortcut button does (make_launcher_shortcut writes through it: a new .lnk, its fields
+    and description), then re-points it, in this test's temp folder only."""
     lnk = box.desktop / "Moonglade Athenaeum.lnk"
     ico = install / "_container_cache" / "marks" / "mark_4.ico"
     ico.parent.mkdir(parents=True)
     ico.write_bytes(b"\x00\x00\x01\x00ICON")
-
-    def q(s):
-        return "'" + str(s).replace("'", "''") + "'"
-    ps = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); $s.TargetPath = %s; "
-          "$s.Arguments = %s; $s.WorkingDirectory = %s; $s.IconLocation = %s; $s.Save()" % (
-              q(lnk), q(sys.executable), q('"%s\\Serve Gallery.pyw"' % install), q(install),
-              q(str(ico) + ",0")))
-    # stdin=DEVNULL: a run with no console (an agent's shell) can hand this process a
-    # standard-input handle Windows will not duplicate, and a child that inherits it fails
-    # to start with "the handle is invalid" (seen 2026-10-07: DuplicateHandle refused it
-    # under pytest's capture before any other test had run). The child needs no input.
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                   check=True, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert not lnk.exists()
+    outside._save_lnk_with_powershell(lnk, sys.executable, '"%s\\Serve Gallery.pyw"' % install,
+                                      str(install), str(ico) + ",0",
+                                      description="Moonglade Athenaeum")
     made = outside.read_lnk(lnk)
     assert made.args == '"%s\\Serve Gallery.pyw"' % install
     assert ntpath.normcase(made.target) == ntpath.normcase(sys.executable)

@@ -1321,7 +1321,7 @@ def fix_shortcut(item, install, m, snapshot, icons, provide_icon=None):
 
 
 # The shortcut fields the writer may set, and the environment variable each value travels in.
-_LNK_FIELDS = ("TargetPath", "Arguments", "WorkingDirectory", "IconLocation")
+_LNK_FIELDS = ("TargetPath", "Arguments", "WorkingDirectory", "IconLocation", "Description")
 _LNK_ENV = "MOONGLADE_LNK_"
 # The writer's whole script. It is the same text for every shortcut: the path and the values
 # reach it only as environment variables, never as part of the script, so nothing carried over
@@ -1336,13 +1336,14 @@ _LNK_SCRIPT = (
     + "$s.Save()") % {"e": _LNK_ENV}
 
 
-def _save_lnk_with_powershell(path, target, args, workdir, icon):
-    """Rewrite the .lnk at `path` through the shell's own WScript.Shell, the way the app's
-    shortcut button writes one (moonglade.gallery.make_launcher_shortcut). A field given as
-    None is left as the shortcut has it. The script is fixed (_LNK_SCRIPT): the path and the
-    values go to it as environment variables, so a crafted shortcut can't steer it."""
+def _save_lnk_with_powershell(path, target, args, workdir, icon, description=None):
+    """Write the .lnk at `path` through the shell's own WScript.Shell -- rewriting one, or
+    making a new one (the app's shortcut button, moonglade.gallery.make_launcher_shortcut,
+    writes through here too). A field given as None is left as the shortcut has it. The
+    script is fixed (_LNK_SCRIPT): the path and the values go to it as environment
+    variables, so neither a crafted shortcut nor a path with a quote in it can steer it."""
     env = {_LNK_ENV + "PATH": str(path)}
-    for field, value in zip(_LNK_FIELDS, (target, args, workdir, icon)):
+    for field, value in zip(_LNK_FIELDS, (target, args, workdir, icon, description)):
         if value is not None:
             env[_LNK_ENV + "SET_" + field] = "1"
             env[_LNK_ENV + field] = str(value)
