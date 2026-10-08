@@ -101,16 +101,17 @@ def _write_marker(container_path, manifest):
 LEGACY_NAME = "moonglade.dat"
 
 # Where the rename writes down what it did: a child of the app's own logger, which
-# moonglade_logging lets through to out_dir/logs/moonglade.log at every level. This module's
+# moonglade_logging lets through to local/logs/moonglade.log at every level. This module's
 # own name would not do -- the root ceiling there is WARNING, so the INFO line that says the
 # rename happened would never reach the file.
 _LOG = "moonglade.assets"
 
 
 def migrate_legacy_name(container_path):
-    """Move an install's pack from its pre-v7 name to `container_path`, once. A real server
-    start (moonglade_gallery.main()) runs this before anything asks whether the pack is
-    current, so the version check that follows judges the moved file:
+    """Move an install's pack from its pre-v7 name to `container_path`, once. The move
+    (moonglade.migrate's install half, before anything asks whether the pack is current) runs
+    this in the app folder, where a pack before 3.20 sat, so the version check that follows
+    judges the renamed file:
 
       - only the old name present: os.replace the pack, then its .version marker. If the
         marker matches the manifest nothing downloads; if it is older, the ordinary verified
@@ -118,8 +119,11 @@ def migrate_legacy_name(container_path):
         A marker already under the new name belongs to a pack that is not there, so it is
         dropped first: it describes other bytes and must never vouch for these. A moved pack
         whose own marker could not follow is then judged unverified (size, readability).
-      - both names present: nothing moves and the old file is NEVER deleted. One warning
-        says an old copy remains; a stray asset copy is the owner's to remove.
+      - both names present: the pack under the new name is the one in use. When it opens as
+        a pack this build understands, the old one (and its marker) is an older copy of the
+        same art and the app removes it -- deleting the app's own dead files is never left to
+        the owner (S13). When the new one does not open, nothing is touched and one warning
+        says so.
       - the rename refused (a read-only folder, a locked file): one warning, and the start
         carries on as it did before this existed (no pack under the new name: the check
         offers the download).
@@ -146,8 +150,20 @@ def migrate_legacy_name(container_path):
             pass                                   # a few bytes; tried again next start
         return "none"
     if new.exists():
-        log.warning("art pack: an old copy remains at %s beside %s. It is left untouched; "
-                    "delete it yourself once you no longer need it.", old, new.name)
+        if _container_readable(new):
+            try:
+                os.remove(old)
+                stray = _version_marker_path(old)
+                if stray.is_file():
+                    os.remove(stray)
+                log.info("art pack: removed the older copy %s; %s is the one in use.",
+                         old.name, new.name)
+            except OSError as e:
+                log.warning("art pack: could not remove the older copy %s (%s); it is tried "
+                            "again at the next start.", old.name, e)
+        else:
+            log.warning("art pack: %s does not open as a pack, so the older %s beside it is "
+                        "left as it is.", new.name, old.name)
         return "both"
     old_marker, new_marker = _version_marker_path(old), _version_marker_path(new)
     try:
