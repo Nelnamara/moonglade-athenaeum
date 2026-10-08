@@ -40,6 +40,11 @@ doing it this way.
 { "PIXAI_API_KEY": "your-api-key" }
 ```
 
+`config.json` is only for what you type yourself: the key, the logins, `READ_ONLY` and the
+overrides. What you set in the Control Panel (the library folder, the port, LAN discovery, the
+Mirror switch, branding) the app keeps in `local\settings.json` beside the program. See
+[Where Things Live](Where-Things-Live).
+
 Generate a key at [pixai.art → Profile → Settings → API](https://pixai.art) (requires
 membership; lifetime up to ~2 years). It's the Bearer credential for **every** call, and:
 

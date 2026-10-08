@@ -23,13 +23,14 @@ The gallery picks its folder in this order:
 
 1. `--out <folder>` on the command line — always wins, so a one-off launch or a second
    install can point anywhere without disturbing the setting.
-2. `LIBRARY_DIR` in `config.json` — what the Control Panel writes.
+2. The library folder in `local\settings.json` — what the Control Panel writes.
 3. `pixai_backup` — the default.
 
-**A command you type yourself does not read that setting.** `python -m moonglade …`
-uses `pixai_backup/` next to the app unless you add `--out <your library folder>`. Everything
-the Control Panel starts for you — its buttons and the jobs under **Runs itself** — already
-passes your folder along, so only terminal commands need the flag.
+**A command you type reads the same setting** (since 3.20). `python -m moonglade …` opens the
+library the Control Panel names, as the gallery and the Claude tools do; add `--out <folder>`
+for a run that should use another one. Your presets, Loom boards and achievements live inside
+the library (in its `_moonglade` folder), so they follow it. See
+[Where Things Live](Where-Things-Live).
 
 By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
 `raw_tasks.jsonl`, and — once organized — `YYYY-MM/` month folders.
@@ -261,7 +262,7 @@ Organize.)
 ## Duplicate audit & dedup
 
 ```bash
-python -m moonglade --audit                 # report -> _moonglade/reports/audit_report.csv
+python -m moonglade --audit                 # report -> _moonglade/records/audit_report.csv
 python -m moonglade --dedup                 # dry-run plan
 python -m moonglade --dedup --apply         # quarantine redundant copies
 python -m moonglade --verify-dupes          # confirm quarantine is safe to delete
@@ -295,7 +296,7 @@ python -m moonglade --verify-library --verify-deep          # + files cut short
 `--verify-library` is read-only. It checks every catalogued file for a missing or zero-byte
 file, a missing or empty thumbnail (a video's poster), images on disk with no catalog row and
 thumbnails with no row, and writes `integrity_report.csv` (one line per problem) and
-`integrity_report.json` (counts and the time it ran) in the library's `_moonglade/reports/` folder. `--verify-deep` also
+`integrity_report.json` (counts and the time it ran) in the library's `_moonglade/records/` folder. `--verify-deep` also
 reads the end of each file — PNG, JPEG, WebP and GIF end markers, an MP4's index — and lists a
 file that stops short as *suspect*, without decoding it. Health's **Missing thumbs** and **Last
 verified** tiles read the JSON report; see [Health → Library integrity](Health).
@@ -392,7 +393,7 @@ These are either regenerated on demand or superseded by something newer.
 |---|---|
 | `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
 | `pixai_backup/catalog.csv` | The **legacy** catalog format from the OG backup tool. Nothing reads or writes it any more — the silent auto-seed and the CLI `--export-csv` dump were both retired 2026-08-24; `catalog.db` is the source of truth, so deleting this loses nothing. (The **⬇ Download catalog (CSV)** button in the gallery is a separate in-browser download.) |
-| `local/serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). Rotating file logs live in `pixai_backup/_moonglade/logs/` instead. |
+| `local/logs/serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). The app's own rotating log, `moonglade.log`, sits beside it in `local/logs/`. |
 | `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
 | `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
 | A `0`-byte `catalog.db` in the *install root* | Not your catalog — that lives at `pixai_backup/catalog.db`. An empty stray file at the top level is an artefact of an old run. Check the size before deleting: if it isn't 0 bytes, stop and ask. |
@@ -433,7 +434,7 @@ python -m moonglade --organize --dry-run          # preview, changes nothing
 python -m moonglade --organize                    # normalize into YYYY-MM/
 ```
 
-`--organize` writes `organize_manifest.csv` (in `_moonglade/reports/`) and `--undo-organize`
+`--organize` writes `organize_manifest.csv` (in `_moonglade/decisions/`) and `--undo-organize`
 reverses it, so this is a safe thing to try.
 
 ### Where the space actually goes

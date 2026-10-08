@@ -67,8 +67,8 @@ once per run, above the flood of per-image lines, ending with:
 > is in the log.)
 
 It's said once rather than 17,000 times for the obvious reason; each individual failure is
-still recorded in the rotating log at `pixai_backup/_moonglade/logs/moonglade.log`, whether or not you
-ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
+still recorded in the rotating log at `local\logs\moonglade.log` beside the program, whether or
+not you ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
 
 Two details worth knowing. The API host and the media CDN are different hosts, so one can be
 trusted while the other isn't — which is why this used to look like a PixAI problem instead
@@ -77,30 +77,43 @@ server the paragraph appears on the console the first time and not again, so rea
 there rather than waiting for it to repeat.
 
 ## After updating to 3.20: where did my files go?
-Nothing was deleted. 3.20 keeps the app's own files in two tidy folders and brings yours
-across the first time it starts:
+Nothing was lost. 3.20 gives every file one home, and the first time it starts it moves yours
+there by itself. [Where Things Live](Where-Things-Live) has the whole map.
 
-- **Beside the program, in `local\`:** the art pack (`moonglade.mgpack` and its `.version`
-  note), `branding.json`, `branding_slots.json`, the Mirror's sign-in (`mirror_session.json`),
-  `serve.txt`, `serve.log` and the icon cache (`local\cache`). `config.json` stays where it was.
-  Put launch flags such as `--port` in `local\serve.txt` now.
-- **In your library, in `_moonglade\`:** the achievements, counters, schedule, job list,
-  presets, snippets and settings, the Runs store and the logs; the reports (broken files, the
-  duplicate audit, the `--organize` undo list) in `_moonglade\reports\`.
+- **This PC's things are in `local\`** beside the program: `settings.json` (everything the
+  Control Panel sets: the library folder, the port and LAN discovery, the Mirror switch, your
+  branding picks; it replaces `serve.txt`), the Mirror's sign-in, the art pack, the shortcut
+  icons, the caches and both logs (`local\logs\`). `config.json` stays where it was, with only
+  what you typed into it yourself.
+- **Your stuff is in your library's `_moonglade\`:** each login's presets and settings in
+  `accounts\`, the Loom's boards in `loom\`, the achievements, Runs, job list, schedule, spend
+  guards and reports in `records\`, and the `--organize` undo list and your Mark-lost choices in
+  `decisions\`.
 
-The pack, the Mirror's sign-in and the training spend guard were **moved**; the rest was
-**copied**, and the old copies are still in the old places. `local\MOVED.json` and
-`pixai_backup\_moonglade\MOVED.json` list what went where. The app removes its own old
-copies itself: it never asks you to delete one. A file another program held open is left where
-it is, still used there, and tried again at the next start; the log says so.
+Each file is copied, checked byte for byte, and only then deleted from its old place. A start
+that was interrupted is finished by the next one. Before it moves anything the app keeps a safety
+copy of the small files it moves, and deletes that copy by itself after five clean starts. Nothing
+is left for you to delete. `local\logs\moonglade.log` says what was brought across.
 
-**Going back to 3.19?** Move `moonglade.mgpack` and `moonglade.mgpack.version` from `local\`
-back beside the program, or 3.19 downloads the pack again. Move `local\mirror_session.json`
-back too, or sign the Mirror in again, and `pixai_backup\_moonglade\train_guard.json` back to
-`pixai_backup\`, so a training run that may already have started is still guarded. Everything
-else 3.19 reads is still where it was. When you come back to 3.20, the pack, the Mirror's
-sign-in and the spend guard you moved back are read from there and moved into place again.
-Anything else you change while on 3.19 stays in the old places.
+**The app closed right after the update.** That's expected when you update from 3.19 or older:
+the launcher that was running can't find the files it used to start. Double-click **Moonglade
+Launcher** in the program's folder once. That start re-points your Desktop and Start-menu
+shortcuts to it, icon and all.
+
+**A launch switch you kept in `serve.txt`** (`--https`, `--skip-thumbs`, `--allow-port-reuse`,
+`-v`) still applies at every start: it is in `local\settings.json`, under `launch_args`. To add
+one later, stop Moonglade and add it to that list, for example `"launch_args": ["--https"]`. A
+`--out`, `--port` or `--host` there became the library folder, port and address the Control
+Panel shows. The one-off switches (`--rebuild-thumbs`, `--open-browser`) were dropped.
+
+**A scheduled backup or the Claude tools stopped working.** They still name the old files. The
+app finds them when it starts, and the notice in the corner offers **Fix them**, which rewrites
+each to the new command line and says what it fixed. A task that runs with a saved Windows
+password is reported rather than rewritten, because only you can enter the password: open it in
+Task Scheduler and change its action to `python "C:\path\to\app\moonglade"` followed by the same
+arguments. On Linux and macOS, edit a service script by hand: the server is
+`python -m moonglade.gallery`, started in the program's folder, and the command line is
+`python /path/to/app/moonglade` followed by the same arguments.
 
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you

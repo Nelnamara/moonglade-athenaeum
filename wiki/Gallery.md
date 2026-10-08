@@ -20,14 +20,14 @@ disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the ser
 | Flag | Default | Meaning |
 |---|---|---|
 | `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting |
-| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `config.json` as `PORT`). Typing it always wins |
-| `--host` | `127.0.0.1` | the address to listen on — or the saved one (`HOST` in `config.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
+| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `local\settings.json`). Typing it always wins |
+| `--host` | `127.0.0.1` | the address to listen on — or the saved one (also in `local\settings.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
 | `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |
 | `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
 | `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Moonglade Launcher`** waits until the server answers and opens the browser itself |
-| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `_moonglade/logs/` in your library always has them |
+| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file, `local\logs\moonglade.log` beside the program, always has them |
 
 ## The header
 

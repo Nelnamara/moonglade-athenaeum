@@ -25,7 +25,13 @@ moonglade/                the app's code (since 3.20), one package:
   curation_io.py          the curation sidecar: --export-curation / --import-curation and the
                           Control Panel's Download curation (JSON)
   paths.py                where the app's own files are: every app-folder path comes from here
-  logs.py                 the always-on log file, logs/moonglade.log in the library
+  settings.py             local/settings.json: everything the app writes for this install
+  setup.py                what every way of starting Moonglade runs first: the move below,
+                          then the library to open
+  migrate.py              the move: brings an older install's files into their homes, once
+  outside.py              finds and fixes what outside the app still names the old files
+                          (scheduled tasks, Claude tools registrations, shortcuts)
+  logs.py                 the always-on log file, local/logs/moonglade.log
   manifest.json           which art pack this build wants, and where to fetch it
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
@@ -94,38 +100,39 @@ pixai_backup/
 ├─ 2024-03/           organize: month folders, descriptive names
 ├─ videos/  imported/ backed-up + imported media
 ├─ gallery/thumbs/    768px JPEG thumbnails (immutable cache)
-├─ gallery/cache/     regenerable caches — e.g. Folio badge thumbnails and the rendered
-│                     banners (`_banners/`) (machine-local)
-├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)
 ├─ catalog.db         the source of truth
-└─ _moonglade/        the app's own records (3.20; every scan of the library skips it)
-   ├─ achievements.json  earned achievements + earn dates
-   ├─ telemetry.json     achievement counters
-   ├─ jobs.jsonl         Control Panel job log
-   ├─ schedule.json      Control Panel scheduled jobs
-   ├─ train_guard.json   the training spend guard
-   ├─ view_presets/      per-account saved gallery views (<account>.json each)
-   ├─ account_prefs/     per-account settings (<account>.json each): your pinned goal, saved
-   │                     lists and presets, recipe row and drafts, and your answers to the
-   │                     first-run guide
-   ├─ prompt_snippets/  toolbox_presets/   per-account snippets and Toolbox presets
-   ├─ runs.db            the Runs store: each multi-send's template and the exact request it sent
-   ├─ raw_tasks.jsonl    raw task data
-   ├─ logs/              the rotating log, moonglade.log
-   ├─ reports/           integrity_report.csv/.json, audit_report.csv, verify_report.csv,
-   │                     organize_manifest.csv (the --undo-organize list)
-   └─ MOVED.json         what 3.20 brought across from the library's top, and when
+└─ _moonglade/        your stuff, kept by the app (3.20; every scan of the library skips it)
+   ├─ accounts/<key>/    one folder per login: its settings, presets, snippets, Toolbox
+   │                     presets and saved views (your pinned goal, saved lists, recipe row
+   │                     and drafts, and your answers to the first-run guide)
+   ├─ loom/              the Loom's storyboards, beds and exports
+   ├─ records/           achievements.json (earned achievements, earn dates, the skin),
+   │                     telemetry.json (achievement counters), jobs.jsonl (the Control Panel's
+   │                     job log), schedule.json, train_guard.json (the training spend guard),
+   │                     runs.db (each multi-send's template and the exact request it sent),
+   │                     raw_tasks.jsonl, and the reports: integrity_report.csv/.json,
+   │                     audit_report.csv, verify_report.csv
+   └─ decisions/         what you decided and must never lose: your Mark-lost choices,
+                         organize_manifest.csv (the --undo-organize list), a curation import's
+                         undo file
 ```
 
-Beside the program, the machine's own files sit in `local/`: the art pack
-(`moonglade.mgpack` + `.version`), `branding.json`, `branding_slots.json`,
-`mirror_session.json`, `serve.txt`, `serve.log` and the icon cache (`local/cache/`), with
-`local/MOVED.json`. `config.json` stays beside the program. A 3.19 install has these at the
-top of each folder; the first 3.20 start brings them across (copied, except the pack, the
-Mirror's sign-in and the training spend guard, which are moved). The app removes its own
-old copies itself; it never hands you a list of files to delete.
+Beside the program, this PC's own things sit in `local/`: `settings.json` (everything the app
+writes for this install: the library folder, host and port, LAN discovery, the Mirror switch,
+the launch switches and the branding picks), `mirror_session.json`, the art pack
+(`moonglade.mgpack` + `.version`), `icons/` (the shortcut icons), `banners/` (a worn banner that
+is the only copy), `cache/` (badge thumbnails, masks and banner renders, all rebuildable) and
+`logs/` (`serve.log` and `moonglade.log`). `config.json` stays beside the program and holds only
+what a person types: the key, the logins, `READ_ONLY` and the overrides.
+
+An older install (3.17 to 3.19) is brought into this layout the first time 3.20 starts: the
+settings are merged into `settings.json`, then each file is copied beside its new home, checked
+(sha256; a database by `PRAGMA integrity_check` and its row counts), swapped in and recorded in a
+journal, and only then deleted from its old place, so an interrupted start is finished by the
+next. A safety snapshot of the small records is taken first and deleted by the app after five
+clean starts. [Where Things Live](Where-Things-Live) answers the everyday questions.
 
 **Not shown above — the Pixeltable semantic-search index lives OUTSIDE `pixai_backup/`.**
 It's a sidecar CLIP index over `catalog.db` (keyed by `media_id`), but Pixeltable stores

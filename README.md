@@ -37,11 +37,13 @@ pip install requests pillow flask truststore websockets
    python -m moonglade --count              # …or headless: how many images you have
    python -m moonglade                      # back up everything
    ```
+   Or double-click **`Moonglade Launcher.pyw`** in the app's folder: it starts the gallery with
+   no console window and opens it in your browser.
 4. First time opening the web gallery: sign in from the machine running the server — the
    login page doubles as an account-creation form the very first time, before any account
    exists (see the [FAQ](../../wiki/FAQ)).
 
-That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))*
+That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))* What you set in the Control Panel is kept in `local\settings.json` beside the app, and everything you make and earn stays inside your library folder *([Where things live →](../../wiki/Where-Things-Live))*.
 
 ---
 

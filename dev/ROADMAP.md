@@ -26,8 +26,17 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **3.20, the move** (`wave4/integration`): the app's code moves into `moonglade/`, its own files into
-  `local/` and the library's `_moonglade/`, with stand-ins at the old names. Walk sheet:
+- **3.20, the reorganize** (`reorg/integration`): rebuilt after the 2026-10-05 walk to the approved
+  reorganize map (`../moonglade-internal/scopes/wave4-rescope/REORGANIZE_MAP_2026-10-07.html`). The
+  code is in `moonglade/`; your stuff lives with the library in `_moonglade/` (`accounts/`, `loom/`,
+  `records/`, `decisions/`); this PC's things in `local/`, where `settings.json` replaces
+  `serve.txt` and holds everything the app writes; the launcher is `Moonglade Launcher.pyw`, the one
+  Python-family file at the root; the developer files are in `dev/`. The move copies, verifies and
+  only then deletes, resumes from its journals, and keeps a safety snapshot the app deletes after
+  five clean starts; a one-click fixer re-points scheduled tasks, Claude registrations and
+  shortcuts. Still to come before the walk: the adversarial review of the move and the fixer, a
+  rehearsal from a 3.17-shaped install and from C:'s first-build state, and the one full run.
+  The first build's walk sheet:
   `../moonglade-internal/design/walk/BOOP_SHEET_2026-10-05_v3.20-the-move.html`.
 
 ## Next — scoped, not started

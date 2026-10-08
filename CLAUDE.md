@@ -118,9 +118,12 @@ effect if they're in the file that loads every session.)*
 - **Treat and launch the dev server the way a plain user would** — through `Moonglade Launcher.pyw`:
   never `python -m moonglade.gallery` bare; use the launcher. Only the launcher sets supervised
   mode, and without it `/api/server/restart` 409s, silently removing the owner's Restart
-  button. Machine-local flags live in the git-ignored `local/serve.txt` beside it (3.19 and
-  earlier: `serve.txt` itself); the `--out` pin matters (an unpinned C: launch resolves
-  `LIBRARY_DIR` and serves the D: install).
+  button. This machine's settings live in the git-ignored `local\settings.json` beside it (3.19
+  and earlier: `serve.txt` and config.json's app-written keys, which the first 3.20 start folds
+  in and deletes). Its `library_dir` is C:'s pin, and it matters: it is what `serve.txt`'s
+  `--out` became, and without it a C: launch would open some other library (before 3.20,
+  config.json's `LIBRARY_DIR`, which named the D: install's). The launcher passes no flags; a
+  lasting launch switch goes in `launch_args` there.
 - **The D: install is the owner's domain.** He tests branches live there, so the D: run-copy and
   the C: repo drift by design — that is normal operation, not corruption. Never mass-commit to
   "reconcile" them. If D: looks badly behind, **say so and let him drive**; a periodic heads-up is
@@ -259,7 +262,7 @@ single-image generation.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `moonglade/logs.py` is the persistent baseline: a rotating file at `out_dir/_moonglade/logs/moonglade.log` (3.19 and earlier: `out_dir/logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
+- `moonglade/logs.py` is the persistent baseline: a rotating file at `local/logs/moonglade.log` beside the launcher's `serve.log` (3.19 and earlier: the library's `logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -342,8 +345,8 @@ recently within hours of a "correction." All tests must pass before merging to m
   clearing the flag alone un-earns nothing.
 - **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
   that needs branding art or a sealed roster pins its own `branding_root()` AND
-  `moonglade.paths.local_path()` (the pack, `branding.json` and the other machine files go
-  through that, not through the tree's parent) and seeds its
+  `moonglade.paths.local_dir()` / `local_path()` (the pack, `settings.json` and the other
+  machine files go through those, not through the tree's parent) and seeds its
   own container from the private donor (`dev/tests/conftest.py`'s `seed_sealed_container`) —
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
   and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
@@ -391,7 +394,10 @@ merge to master with `--no-ff`, tag releases.
 
 Run from the app's folder (the one holding `config.json`). Since 3.20 the code is the
 `moonglade/` package; from any other folder, `python "<app folder>\moonglade" ...` runs the
-same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone.
+same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone. Every command
+opens the library `local\settings.json` names (the Control Panel's library folder) unless it
+passes `--out`. The MCP server runs as `python -P -m moonglade.mcp_server` with
+`PYTHONPATH=<app folder>` (and `MOONGLADE_OUT` to name another library).
 
 ```
 python -m moonglade --probe                           # connection sanity check
@@ -415,7 +421,7 @@ python -m moonglade --dedup                           # dry-run dedup plan (noth
 python -m moonglade --dedup --apply                   # quarantine redundant copies to _duplicates/
 python -m moonglade --dedup --apply --dedup-delete    # delete instead of quarantine
 python -m moonglade --verify-dupes                    # confirm _duplicates/ is safe to delete
-"Moonglade Launcher.pyw"                              # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; machine-local flags live in local/serve.txt)
+"Moonglade Launcher.pyw"                              # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; this machine's settings live in local/settings.json)
 python -m moonglade -v --update                       # verbose: per-page / per-image timing diagnostics
 python -m moonglade --watch                           # live event stream (WS push): watch tasks complete
 python -m moonglade --watch --watch-backup            # + auto-collect each finished gen as it completes

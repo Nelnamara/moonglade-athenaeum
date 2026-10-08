@@ -179,7 +179,7 @@ refused by the server, so there's nothing to cheat.
 
 Most metrics are counted live off `catalog.db` every time you open the Folio — images,
 videos, collections, models, published, tagged, local generations, keywords. The rest
-are **persisted counters** kept in `telemetry.json` in your library's `_moonglade` folder, bumped as you
+are **persisted counters** kept in `telemetry.json` in your library's `_moonglade\records` folder, bumped as you
 work: edits, uploads, culls, days visited, LoRA uses, Loom shots, claims and
 free cards.
 
