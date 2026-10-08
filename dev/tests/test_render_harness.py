@@ -6482,6 +6482,14 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
 
     page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
     page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    # The login companion's row is still folding (its .35 s exit, BrandRoles.jsx's fold()) when
+    # this one opens, and its close at the end of that exit used to close WHICHEVER row was open:
+    # this editor, the moment the fold ended -- after the checks below on a quiet machine, in
+    # the middle of them on a loaded one (the xdist run). A page-side timer queued now fires
+    # after the fold's own, so this looks once the fold is over, on any machine.
+    page.evaluate("() => new Promise((done) => setTimeout(done, 500))")
+    assert page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor').count() == 1, (
+        "the login companion's fold closed the power poses editor opened during it")
     page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "moving.png", (300, 300), "PNG"))
     page.wait_for_selector(".mgcp-rl-loud")
     assert page.locator(".mgcp-rl-loud").inner_text() == (

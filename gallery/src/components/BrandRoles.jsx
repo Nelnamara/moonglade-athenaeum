@@ -146,7 +146,11 @@ export default function RolesSection({ summary, onSaved }) {
       {roles.map((role) => (
         <RoleRow key={role.slot} role={role} csrf={summary.csrf} onSaved={onSaved}
           open={openSlot === role.slot}
-          onOpen={() => setOpenSlot(role.slot)} onClose={() => setOpenSlot("")} />
+          onOpen={() => setOpenSlot(role.slot)}
+          /* A row closes only ITSELF. Its close lands at the end of its .35 s fold, and a
+             Change pressed on another row inside that exit has opened that row by then: an
+             unconditional "" shut the new editor under the user's hand. */
+          onClose={() => setOpenSlot((cur) => (cur === role.slot ? "" : cur))} />
       ))}
     </div>
   );
