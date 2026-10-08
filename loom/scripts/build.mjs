@@ -22,7 +22,18 @@ import * as esbuild from "esbuild";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const loomDir = path.resolve(here, "..");
 const entryPath = path.join(loomDir, "master-storyboard.jsx");
-const outfile = path.join(loomDir, "dist", "master-storyboard.bundle.js");
+
+// `--outfile <path>` builds somewhere other than the committed dist/ file (its CSS lands
+// beside it). The suite's staleness check builds to a temp file this way, so nothing that
+// reads dist/ can ever see a half-written bundle. With no flag: dist/, as always.
+function outfileFromArgs() {
+  const i = process.argv.indexOf("--outfile");
+  if (i === -1) return path.join(loomDir, "dist", "master-storyboard.bundle.js");
+  const given = process.argv[i + 1];
+  if (!given) throw new Error("build.mjs: --outfile needs a path");
+  return path.resolve(given);
+}
+const outfile = outfileFromArgs();
 
 // The hook list is DERIVED from master-storyboard.jsx's own import statement, never
 // hardcoded here. It used to be a string constant, and it silently rotted: `useMemo`

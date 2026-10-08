@@ -1460,6 +1460,47 @@ def test_train_recent_tasks_searches_and_brings_the_whole_task(tmp_path):
     assert sorted(seen) == sorted(["tKeep"] + ["tD%d" % i for i in range(5)])
 
 
+def test_the_scheduler_thread_starts_in_the_app_and_stays_off_in_the_suite(
+        tmp_path, monkeypatch):
+    """Issue #77. The app as it ships starts exactly one scheduler thread per create_app(),
+    and the suite's switch (conftest's SCHEDULER_SWITCH, set for the whole session) leaves it
+    unstarted -- so no test's loop can wake inside a later test.
+
+    The shipped half clears the switch for this test only, and records the thread's start
+    instead of running it: a real one would sleep and tick for the rest of the run, which is
+    exactly what conftest's session-end check fails on."""
+    import os
+    import threading
+    from tests.conftest import SCHEDULER_SWITCH, SCHEDULER_THREAD_NAME
+
+    def _alive():
+        return [t for t in threading.enumerate() if t.name == SCHEDULER_THREAD_NAME]
+
+    assert os.environ.get(SCHEDULER_SWITCH) == "1", "conftest no longer sets the switch"
+    (tmp_path / "suite").mkdir()
+    create_app(tmp_path / "suite")
+    assert _alive() == [], "create_app() started its scheduler despite the suite's switch"
+
+    real_thread = threading.Thread
+    started = []
+
+    class _Recorded(real_thread):
+        def start(self):
+            if self.name == SCHEDULER_THREAD_NAME:
+                started.append(self)
+                return
+            super().start()
+
+    monkeypatch.delenv(SCHEDULER_SWITCH)
+    monkeypatch.setattr(threading, "Thread", _Recorded)
+    (tmp_path / "shipped").mkdir()
+    create_app(tmp_path / "shipped")
+    monkeypatch.setattr(threading, "Thread", real_thread)
+    assert len(started) == 1, "the shipped app must start exactly one scheduler thread"
+    assert started[0]._target.__name__ == "_scheduler_loop" and started[0].daemon
+    assert _alive() == []
+
+
 def test_the_release_check_rides_the_schedulers_own_tick():
     """The hourly update check does NOT get a timer thread of its own. This process already
     has one periodic tick -- the automated-tasks scheduler -- so the check joins it, which is

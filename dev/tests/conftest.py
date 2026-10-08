@@ -463,6 +463,42 @@ def _real_machine_files_untouched():
                     .format(changed))
 
 
+# The switch create_app() reads to leave its sixty-second scheduler thread unstarted, and the
+# name that thread carries when it does start (issue #77). Tied to moonglade.gallery by
+# dev/tests/test_panel.py::test_the_scheduler_thread_starts_in_the_app_and_stays_off_in_the_suite.
+SCHEDULER_SWITCH = "MOONGLADE_DISABLE_SCHEDULER"
+SCHEDULER_THREAD_NAME = "mg-scheduler"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_scheduler_threads():
+    """PREVENTION, then a check: no test leaves the app's scheduler thread running (#77).
+
+    Every create_app() used to start `_scheduler_loop`, a daemon that sleeps sixty seconds and
+    ticks forever, and nothing stopped it when its test ended -- a whole run left hundreds
+    alive. One that woke inside a later test could catch that test's patched `time.sleep`, or
+    start a job from its own (still present) tmp library through the later test's stand-in
+    Popen. The switch is set for the whole session, before any module- or session-scoped
+    fixture builds an app; a test that is about the scheduler calls its tick directly (the
+    `mg_living` / `mg_mirror_renew_tick` seams) or clears the switch for itself.
+
+    At session end it fails the run if any scheduler thread is still alive, naming how many,
+    so a fixture or test that builds an app with the switch cleared and leaves its loop
+    behind cannot pass unseen."""
+    import threading
+    mp = pytest.MonkeyPatch()
+    mp.setenv(SCHEDULER_SWITCH, "1")
+    try:
+        yield
+        alive = [t for t in threading.enumerate() if t.name == SCHEDULER_THREAD_NAME]
+        if alive:
+            pytest.fail("{} scheduler thread(s) ({!r}) still running at session end -- a test "
+                        "built an app with {} cleared and left its loop behind (issue #77)"
+                        .format(len(alive), SCHEDULER_THREAD_NAME, SCHEDULER_SWITCH))
+    finally:
+        mp.undo()
+
+
 def is_a_real_panel_job(args):
     """True for the command line the Control Panel's job runner starts (moonglade.gallery's
     _panel_run): this interpreter, `-m moonglade`, and an explicit `--out`."""
@@ -997,11 +1033,13 @@ def record_own_sleeps(monkeypatch):
     """Patch time.sleep to RECORD this thread's naps instead of taking them; every other
     thread keeps sleeping for real. Returns the list the naps land in.
 
-    time.sleep is process-wide, and the process is never quiet: every create_app() starts a
-    daemon _scheduler_loop that calls time.sleep(60) forever, and a whole run leaves hundreds
-    of them alive. One that wakes while a bare `monkeypatch.setattr(time, "sleep",
-    naps.append)` is in place calls the patch instead, records 60, and spins on it -- a pacing
-    assertion then fails on naps the code under test never took (ci_local, 2026-10-03)."""
+    time.sleep is process-wide, and the process is never quiet. Until issue #77's switch
+    (_no_scheduler_threads above) every create_app() started a daemon _scheduler_loop that
+    calls time.sleep(60) forever, and one that woke while a bare `monkeypatch.setattr(time,
+    "sleep", naps.append)` was in place called the patch instead, recorded 60, and spun on it --
+    a pacing assertion then failed on naps the code under test never took (ci_local,
+    2026-10-03). Other threads (a module's live server, a job's reader) still sleep, so a
+    pacing test still records only its own."""
     import threading
     import time as _time
     naps, me, real = [], threading.get_ident(), _time.sleep
