@@ -16,6 +16,14 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **Control Panel, Branding: pressing Change on another role while one is still folding shut keeps the new editor open.** A role's editor finished closing at the end of its short fold, and that close also shut an editor opened on another row in the meantime. Each row's close now shuts only its own. (2026-10-08)
+
+### Under the hood
+- For developers: the test suite runs in a fraction of the time. CI runs it as two jobs side by side (the browser render checks on their own runner), `dev/tools/ci_local.py` runs the same two halves at once on pytest-xdist workers, and test apps no longer start the scheduler, wait out the sign-in hold or hash the suite's own logins at full cost. pytest-xdist joins the developer packages. (2026-10-08)
+- For developers: a review of every test removed the duplicate, dead and stale ones and repaired the checks that had stopped checking what they name. The unused app code that only those tests pinned went with them. (2026-10-08)
+- For developers: the Loom's node tests can draw components (React and react-dom are Loom developer packages, at the gallery's versions, and `loom/test-support/render.mjs` renders a component from its source). A first set of tests that matched component source text now draws the component and checks what it shows. The few rules they read as text (the cost badge's verdict, the cloud delete's fallback confirm, the drawer's mode bars and its version-change mode reset) moved into small helpers the components call. (2026-10-08)
+
 ## [3.20.0] - 2026-10-08 — Moving Day
 
 ### Where your things live now
