@@ -18,7 +18,15 @@ from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade import integrity
 from moonglade import paths
-from moonglade import similar as ps     # at import, as dev/tests/test_similar.py does
+
+# moonglade.similar imports numpy and pixeltable at module level, and CI installs a curated list
+# without them (it ignores dev/tests/test_similar.py for the same reason), so only the test that
+# needs it skips. It is imported here, at collection, as dev/tests/test_similar.py does: its
+# import chain reads the registry, which the autouse guard refuses once a test is running.
+try:
+    from moonglade import similar as ps
+except ImportError:
+    ps = None
 
 REC = paths.LIBRARY_APP_DIRNAME
 
@@ -99,6 +107,8 @@ def test_the_integrity_check_never_flags_it(library):
 
 
 def test_the_similar_index_never_embeds_it(library):
+    if ps is None:
+        pytest.skip("moonglade.similar needs numpy and pixeltable")
     assert [m for m, _ in ps.scan_dir(library)] == ["100"]
 
 
