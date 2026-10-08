@@ -42,12 +42,14 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     the new home. What it adds is folded in where the format allows: lines it lacks; JSON
     records by union, telemetry's counters added (the older copy counted only its own since),
     the spend guard entry by entry, whichever blocks longer; runs.db (the Runs and their spend
-    reservations) row by row by primary key, in one transaction, after both files pass their
-    integrity check; integrity_marks.json mark by mark, a login's stores key by key, and the
-    Loom's boards and cast library inside the JSON text the Loom keeps in each file -- on a
-    clash the new home's value stays and the older one is logged. What can't be merged is set
-    aside and named in the log; a Loom value that can't is kept beside its new home under a
-    key of its own, outside the snapshot.
+    reservations) run by run, inside the new home itself under SQLite's write lock, after both
+    files pass their integrity check -- a run both hold keeps the new home's rows whole, and
+    the older copy's is named in the log; integrity_marks.json mark by mark, a login's stores
+    key by key, and the Loom's boards and cast library inside the JSON text the Loom keeps in
+    each file -- on a clash the new home's value stays and the older one is logged. What
+    can't be merged is set aside and named in the log; a Loom value that can't is kept beside
+    its new home under a key of its own, outside the snapshot. When the NEW home is the side
+    that won't read, the start stops and names it: the healthy older copy is never set aside.
   * THE SNAPSHOT (the owner's pick 4). Before a run moves, removes or parks anything, the small
     records it is about to touch are zipped into its half's .snapshot\\ (one zip per run that has
     work, so every later sweep is covered too) -- never pictures, catalog.db, the art pack, the
@@ -609,6 +611,9 @@ class FolderLock:
 def _kind_of_failure(e):
     """"open" (another program has it), "full" (no space), "readonly" (the drive or the folder
     refuses this user), "refused" (Windows refused: read-only or open elsewhere), or ""."""
+    if isinstance(e, sqlite3.OperationalError) and \
+            any(w in str(e).lower() for w in ("locked", "busy")):
+        return "open"                            # a database another program is writing
     if not isinstance(e, OSError):
         return ""
     win = getattr(e, "winerror", None)
@@ -629,7 +634,8 @@ def _reason(e):
             "full": "the disk is full",
             "readonly": "the drive is read-only",
             "refused": "access was refused: it is read-only, or another program has it open",
-            }.get(_kind_of_failure(e)) or getattr(e, "strerror", None) or e.__class__.__name__
+            }.get(_kind_of_failure(e)) or getattr(e, "strerror", None) \
+        or (str(e) if isinstance(e, sqlite3.Error) else None) or e.__class__.__name__
 
 
 def _advice(e):
@@ -933,7 +939,9 @@ def _same(a, b):
 
 
 def _db_counts(p):
-    """{table: rows} for a SQLite file that passes PRAGMA integrity_check, else None."""
+    """{table: rows} for a SQLite file that passes PRAGMA integrity_check, else None. A file
+    that is busy or can't be opened (sqlite3.OperationalError: locked by another program, no
+    access) is not a damaged one: that raises, and the start stops to try again."""
     con = None
     try:
         con = sqlite3.connect(str(p))
@@ -943,6 +951,8 @@ def _db_counts(p):
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
         return {t: con.execute('SELECT COUNT(*) FROM "%s"' % t.replace('"', '""')).fetchone()[0]
                 for t in tables}
+    except sqlite3.OperationalError:
+        raise
     except sqlite3.Error:
         return None
     finally:
@@ -1456,13 +1466,18 @@ def _settled_bytes(src, dest, how):
     that won't parse, OSError for one that won't read."""
     if how == "log":
         return _merged_log(src, dest), []
+    if how != "lines" and not how.startswith("json:"):
+        return None, []
+    try:                                                 # the new home first: is it the failing side?
+        a = dest.read_text(encoding="utf-8")
+        if how != "lines":
+            a = json.loads(a)
+    except (ValueError, UnicodeDecodeError):
+        raise _NewHomeBroken(dest)
     if how == "lines":
         return _merged_bytes(src, dest, "lines"), []
     if how == "json:loom":
         return _loom_kv_merged(src, dest)
-    if not how.startswith("json:"):
-        return None, []
-    a = json.loads(dest.read_text(encoding="utf-8"))
     b = json.loads(src.read_text(encoding="utf-8"))
     clashes = []
     if how == "json:keys":
@@ -1486,6 +1501,15 @@ def _settled_bytes(src, dest, how):
     return (json.dumps(doc, indent=1) + "\n").encode("utf-8"), clashes
 
 
+def _runs_kept_words(runs_kept, most=20):
+    """The older copy's runs the new home's won over, for the log: run id (status, task ids)."""
+    parts = ["%s (status %s; task ids: %s)" % (rid, status or "unknown",
+                                               ", ".join(tasks) or "none")
+             for rid, status, tasks in runs_kept[:most]]
+    more = len(runs_kept) - most
+    return "; ".join(parts) + (" and %d more" % more if more > 0 else "")
+
+
 def _clash_words(clashes, most=20, width=300):
     """The older copy's values the new home's won over, for the log: key=value, ..."""
     def short(v):
@@ -1506,45 +1530,116 @@ def _qi(name):
     return '"%s"' % str(name).replace('"', '""')
 
 
+RUN_KEY = "run_id"       # the column every Runs table keys its rows on (moonglade.runs)
+
+
+def _insert_missing(con, q, cols, pk, old_cols, where="", params=()):
+    """Insert into main.`q` the rows of old.`q` (those `where` picks) it doesn't hold yet: by
+    primary key (the new home's row wins), or -- with no primary key -- the very same row."""
+    names = ", ".join(_qi(c) for c in cols)
+    if pk and all(c in old_cols for c in pk):
+        same = " AND ".join("m.%s IS o.%s" % (_qi(c), _qi(c)) for c in pk)
+        con.execute("INSERT INTO main.%s (%s) SELECT %s FROM old.%s AS o WHERE %sNOT EXISTS "
+                    "(SELECT 1 FROM main.%s AS m WHERE %s)" % (
+                        q, names, ", ".join("o." + _qi(c) for c in cols), q,
+                        ("%s AND " % where) if where else "", q, same), params)
+    else:
+        con.execute("INSERT INTO main.%s (%s) SELECT %s FROM old.%s AS o%s EXCEPT SELECT %s "
+                    "FROM main.%s" % (q, names, names, q, (" WHERE " + where) if where else "",
+                                      names, q), params)
+
+
+def _fold_rows(con):
+    """The fold itself, inside _fold_db_rows' transaction. Returns (added, clashes)."""
+    added, clashes, shapes = {}, [], {}
+    mine = set(_db_tables(con, "main"))
+    for name in _db_tables(con, "old"):
+        q = _qi(name)
+        if name not in mine:
+            sql = con.execute("SELECT sql FROM old.sqlite_master WHERE type='table' AND name=?",
+                              (name,)).fetchone()[0]
+            con.execute(sql)
+        info = con.execute("PRAGMA main.table_info(%s)" % q).fetchall()
+        old_cols = {r[1] for r in con.execute("PRAGMA old.table_info(%s)" % q)}
+        cols = [r[1] for r in info if r[1] in old_cols]
+        if cols:
+            pk = [r[1] for r in sorted(info, key=lambda r: r[5]) if r[5] > 0]
+            shapes[name] = (q, cols, pk, old_cols)
+    by_run = [n for n, shape in shapes.items() if RUN_KEY in shape[1]]
+    have, theirs = set(), set()
+    for name in by_run:
+        q = shapes[name][0]
+        have |= {r[0] for r in con.execute("SELECT DISTINCT %s FROM main.%s" % (RUN_KEY, q))}
+        theirs |= {r[0] for r in con.execute("SELECT DISTINCT %s FROM old.%s" % (RUN_KEY, q))}
+    for rid in sorted(theirs & have, key=str):
+        if any(_run_rows_differ(con, shapes[n], rid) for n in by_run):
+            clashes.append(_run_said(con, shapes, rid))
+    only_theirs = sorted(theirs - have, key=str)
+    for name, (q, cols, pk, old_cols) in shapes.items():
+        before = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0]
+        if name in by_run:
+            for rid in only_theirs:                      # a run only the older copy holds
+                _insert_missing(con, q, cols, pk, old_cols, "o.%s IS ?" % RUN_KEY, (rid,))
+        else:
+            _insert_missing(con, q, cols, pk, old_cols)
+        added[name] = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0] - before
+    return added, clashes
+
+
+def _run_rows_differ(con, shape, rid):
+    """Does the older copy hold a row for run `rid` in this table that the new home doesn't?"""
+    q, cols = shape[0], shape[1]
+    names = ", ".join(_qi(c) for c in cols)
+    return con.execute(
+        "SELECT COUNT(*) FROM (SELECT %s FROM old.%s WHERE %s IS ? EXCEPT SELECT %s FROM "
+        "main.%s WHERE %s IS ?)" % (names, q, RUN_KEY, names, q, RUN_KEY),
+        (rid, rid)).fetchone()[0] > 0
+
+
+def _run_said(con, shapes, rid):
+    """(run id, its status in the older copy, its task ids there): what the log names for a
+    run both copies hold whose older rows were not brought in."""
+    status, tasks = None, []
+    runs, jobs = shapes.get("runs"), shapes.get("run_jobs")
+    if runs and "status" in runs[1]:
+        row = con.execute("SELECT status FROM old.%s WHERE %s IS ?" % (runs[0], RUN_KEY),
+                          (rid,)).fetchone()
+        status = row[0] if row else None
+    if jobs and "task_id" in jobs[1]:
+        order = " ORDER BY cell" if "cell" in jobs[1] else ""
+        tasks = [str(r[0]) for r in con.execute(
+            "SELECT task_id FROM old.%s WHERE %s IS ? AND task_id IS NOT NULL AND "
+            "task_id != ''%s" % (jobs[0], RUN_KEY, order), (rid,))]
+    return rid, status, tasks
+
+
 def _fold_db_rows(target, src):
-    """Insert into the SQLite file `target` every row of `src` it doesn't hold yet, table by
-    table, in one transaction: a row is "already there" when a row with the same primary key
-    is (the new home's row wins), or -- for a table with no primary key -- the very same row.
-    A table only `src` has is made first. Returns {table: rows added}. Raises sqlite3.Error
-    (the transaction is rolled back: `target` is unchanged)."""
-    con = sqlite3.connect(str(target), isolation_level=None)
+    """Bring into the SQLite file `target` -- the new home itself, in place -- every row of
+    `src` it doesn't hold, in one BEGIN IMMEDIATE transaction: SQLite's own write lock, so a
+    server writing `target` at the same moment waits for the fold (or the fold for it), and
+    no row either writes is lost. (SQLite refuses an ATTACH inside a transaction, so `src` is
+    attached just before it begins; every read, compare and insert is inside it.)
+
+    The Runs tables (those keyed on run_id: the runs and their jobs, the spend reservations)
+    fold run by run: a run only `src` holds comes across whole; a run both hold keeps the new
+    home's rows whole, and nothing of the older copy's is grafted onto it -- where the older
+    copy's rows for it differ, that run is a clash, named for the log. Any other table folds
+    row by row by primary key (the new home's row wins), or with none, by the very same row.
+    A table only `src` has is made first. The new home's integrity is checked again before
+    the COMMIT.
+
+    Returns ({table: rows added}, [(run id, its status there, its task ids there)]). Raises
+    sqlite3.Error (rolled back: `target` is unchanged)."""
+    con = sqlite3.connect(str(target), isolation_level=None, timeout=10.0)
     try:
         con.execute("ATTACH DATABASE ? AS old", (str(src),))
         try:
             con.execute("BEGIN IMMEDIATE")
             try:
-                added = {}
-                mine = set(_db_tables(con, "main"))
-                for name in _db_tables(con, "old"):
-                    q = _qi(name)
-                    if name not in mine:
-                        sql = con.execute("SELECT sql FROM old.sqlite_master WHERE type='table' "
-                                          "AND name=?", (name,)).fetchone()[0]
-                        con.execute(sql)
-                    info = con.execute("PRAGMA main.table_info(%s)" % q).fetchall()
-                    old_cols = {r[1] for r in con.execute("PRAGMA old.table_info(%s)" % q)}
-                    cols = [r[1] for r in info if r[1] in old_cols]
-                    if not cols:
-                        continue
-                    pk = [r[1] for r in sorted(info, key=lambda r: r[5]) if r[5] > 0]
-                    names = ", ".join(_qi(c) for c in cols)
-                    before = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0]
-                    if pk and all(c in old_cols for c in pk):
-                        same = " AND ".join("m.%s IS o.%s" % (_qi(c), _qi(c)) for c in pk)
-                        con.execute(
-                            "INSERT INTO main.%s (%s) SELECT %s FROM old.%s AS o WHERE NOT "
-                            "EXISTS (SELECT 1 FROM main.%s AS m WHERE %s)" % (
-                                q, names, ", ".join("o." + _qi(c) for c in cols), q, q, same))
-                    else:
-                        con.execute("INSERT INTO main.%s (%s) SELECT %s FROM old.%s EXCEPT "
-                                    "SELECT %s FROM main.%s" % (q, names, names, q, names, q))
-                    after = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0]
-                    added[name] = after - before
+                added, clashes = _fold_rows(con)
+                check = con.execute("PRAGMA main.integrity_check").fetchone()[0]
+                if check != "ok":
+                    raise _Failed("the merged %s did not check out (%s)" % (target, check))
                 con.execute("COMMIT")
             except BaseException:
                 con.execute("ROLLBACK")
@@ -1553,7 +1648,7 @@ def _fold_db_rows(target, src):
             con.execute("DETACH DATABASE old")
     finally:
         con.close()
-    return added
+    return added, clashes
 
 
 # ---- the safe move ------------------------------------------------------------------------------
@@ -1636,31 +1731,38 @@ def _replace_with(dest, data, half, key, src_hash):
     _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest())
 
 
+class _NewHomeBroken(Exception):
+    """The new home's own file fails its check (won't parse, fails PRAGMA integrity_check)."""
+
+    def __init__(self, path):
+        super().__init__(str(path))
+        self.path = Path(path)
+
+
+def _new_home_broken_words(dest, src):
+    return ("%s won't read as what it should be: it fails its own check. Moonglade can't bring "
+            "in %s, which an older Moonglade wrote after the move, without reading it, so "
+            "nothing was moved or set aside. Restore %s from a backup, then start Moonglade "
+            "again." % (dest, src, dest.name))
+
+
 def _fold_db(src, dest, half, key, src_hash):
     """runs.db written after the move (the Runs and their spend reservations): both files pass
-    PRAGMA integrity_check first, then a copy of the new home (through SQLite's backup API)
-    takes every row of the older copy it doesn't hold yet (_fold_db_rows, one transaction),
-    is checked again (integrity, and every table's count is the new home's plus what was
-    added), and is swapped in. Returns {table: rows added}, or None when either file fails
-    its integrity check (it can't be merged). Raises sqlite3.Error or OSError."""
-    have, theirs = _db_counts(dest), _db_counts(src)
-    if have is None or theirs is None:
+    PRAGMA integrity_check first, then the new home itself takes, in place, every run of the
+    older copy it doesn't hold (_fold_db_rows: one BEGIN IMMEDIATE transaction, so a server
+    writing the new home meanwhile loses nothing), and the journal says so. Returns (added,
+    clashes), or None when the OLDER copy fails its check (it can't be merged). Raises
+    _NewHomeBroken when the new home fails its own, sqlite3.Error (busy: the start stops and
+    tries again) or OSError."""
+    if _db_counts(dest) is None:
+        raise _NewHomeBroken(dest)
+    if _db_counts(src) is None:
         return None
-    tmp = dest.with_name(dest.name + MOVING_SUFFIX)
-    try:
-        _copy_into(dest, tmp, "db")
-        added = _fold_db_rows(tmp, src)
-        got = _db_counts(tmp)
-        want = {t: n for t, n in have.items() if not t.startswith("sqlite_")}
-        for t, n in added.items():
-            want[t] = want.get(t, 0) + n
-        if got is None or any(got.get(t) != n for t, n in want.items()):
-            raise _Failed("the merged %s did not check out" % dest)
-        _fsync_path(tmp)
-        _swap_in(tmp, dest, half, key, src_hash, _sha256(tmp))
-    finally:
-        _discard(tmp)
-    return added
+    added, clashes = _fold_db_rows(dest, src)
+    half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": None,
+                               "state": "made", "time": _now(), "merged": True}
+    half.journal.save()
+    return added, clashes
 
 
 def _fold_in(src, dest, kind, half, key, src_hash):
@@ -1679,15 +1781,22 @@ def _fold_in(src, dest, kind, half, key, src_hash):
     why = "it is not a kind of file that can be merged"
     try:
         if how == "db":
-            added = _fold_db(src, dest, half, key, src_hash)
-            if added is not None:
+            folded = _fold_db(src, dest, half, key, src_hash)
+            if folded is not None:
+                added, runs_kept = folded
                 _remove(src)
+                if runs_kept:
+                    half.report.warn(
+                        "In %s the new home's run was kept whole for %d run(s) both copies "
+                        "hold, and the older copy's rows for it were not brought in; the older "
+                        "copy at %s said: %s.", rel(dest), len(runs_kept), rel(src),
+                        _runs_kept_words(runs_kept))
                 item("Merged %s into %s: the new home kept every row it had, and the older "
                      "copy added %s.", rel(src), rel(dest),
                      ", ".join("%d to %s" % (n, t) for t, n in sorted(added.items()))
                      or "nothing")
                 return "merged"
-            why = "one of the two databases fails its own integrity check"
+            why = "the older copy fails its own integrity check"
         elif how != "park":
             data, clashes = _settled_bytes(src, dest, how)
             if data is not None:
@@ -1702,8 +1811,12 @@ def _fold_in(src, dest, kind, half, key, src_hash):
             why = "the two copies hold different kinds of things"
     except sqlite3.OperationalError:
         raise                                            # busy or unreadable: stop, try again
+    except _NewHomeBroken as e:
+        # The new home is the side that fails: the healthy older copy is never set aside for
+        # the damaged one to stay. Stop, and name the file.
+        raise MoveStopped(_new_home_broken_words(e.path, src))
     except (ValueError, UnicodeDecodeError, sqlite3.DatabaseError):
-        why = "one of the two copies can't be read as what it should be"
+        why = "the older copy can't be read as what it should be"
     if how == "json:loom":
         aside, key_aside = _loom_aside(dest)
         _bring(src, aside, "file", half)
@@ -1922,8 +2035,7 @@ def _bring(src, dest, kind, half, vouched=False):
         raise
     except (OSError, sqlite3.Error) as e:
         _discard(tmp)
-        raise _Failed("couldn't move %s (%s)" % (src, _reason(e)),
-                      e if isinstance(e, OSError) else None)
+        raise _Failed("couldn't move %s (%s)" % (src, _reason(e)), e)
 
 
 def _bring_or_say(src, dest, kind, half, vouched=False):
@@ -2072,7 +2184,7 @@ def _make_snapshot(half, members, extra=None):
     except (OSError, zipfile.BadZipFile, sqlite3.Error) as e:
         _discard(tmp)
         raise _Failed("couldn't make the safety snapshot in %s (%s)" % (snap, _reason(e)),
-                      e if isinstance(e, OSError) else None)
+                      e if isinstance(e, (OSError, sqlite3.Error)) else None)
     half.journal.doc["snapshot"] = {"made": _now(), "zip": name, "files": count}
     half.journal.worked()
     half.journal.save()
@@ -2417,7 +2529,8 @@ def _save_quietly(journal):
 
 def _stopped(where, e):
     """The sentence for a move that could not finish: what failed, then what to do."""
-    cause = e.cause if isinstance(e, _Failed) else (e if isinstance(e, OSError) else None)
+    cause = e.cause if isinstance(e, _Failed) else \
+        (e if isinstance(e, (OSError, sqlite3.Error)) else None)
     return "Moonglade couldn't finish tidying %s: %s. Nothing was lost. %s" % (
         where, e, _advice(cause))
 

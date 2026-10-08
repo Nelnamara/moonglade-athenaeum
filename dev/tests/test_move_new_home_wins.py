@@ -11,8 +11,11 @@ reservations, the integrity marks, a login's stores, the Loom's boards).
 Now the new home is never replaced, and what the older copy adds is folded in:
 
   * runs.db (the Runs, and the reservation rows the spend path relies on): both files pass
-    SQLite's integrity check, then every row of the older copy the new home lacks (by primary
-    key) goes in, table by table, in one transaction. A run both hold keeps the new home's row.
+    SQLite's integrity check, then every run only the older copy holds goes in whole, inside
+    the new home itself, in one BEGIN IMMEDIATE transaction. A run both hold keeps the new
+    home's rows whole (nothing of the older copy's is grafted onto it), and the older copy's
+    run is named in the log. A busy older copy stops the start; a new home that fails its own
+    check stops it too, and the older copy stays where it is.
   * integrity_marks.json: every media id's mark from both; where both marked one, the new
     home's mark stays and the older one is logged.
   * a login's stores: every key from both; on a clash the new home's value stays and the
@@ -280,7 +283,8 @@ def test_runs_db_keeps_every_new_home_row_and_gains_the_older_install_s(r):
     old.reserve("run-C", "Nel", status="planning")                   # its own reservation
     old.put_jobs("run-C", [{"cell": 0, "prompt": "c0"}])
     old.reserve("run-S", "Nel", status="refused", reason="the older copy's")
-    old.put_jobs("run-S", [{"cell": 0, "prompt": "s0, older"}, {"cell": 1, "prompt": "s1"}])
+    old.put_jobs("run-S", [{"cell": 0, "prompt": "s0, older", "task_id": "T-PAID-0"},
+                           {"cell": 1, "prompt": "s1", "task_id": "T-PAID-1"}])
     _later(old.path)
 
     done = _bring_in(r)
@@ -292,15 +296,96 @@ def test_runs_db_keeps_every_new_home_row_and_gains_the_older_install_s(r):
     assert new.get("run-C")["status"] == "planning", "the older install's reservation arrived"
     assert new.get("run-S")["reason"] == "the new home's", "a run both hold keeps the new row"
     jobs = _rows(db, "SELECT * FROM run_jobs ORDER BY run_id, cell")
-    for row in jobs_before:
-        assert row in jobs
+    assert sorted(jobs) == sorted(jobs_before + _rows(
+        db, "SELECT * FROM run_jobs WHERE run_id = 'run-C'")), "only run-C's job came across"
     keys = [(j[0], j[1]) for j in jobs]
-    assert ("run-C", 0) in keys and ("run-S", 1) in keys
+    assert ("run-C", 0) in keys
+    assert ("run-S", 1) not in keys, "nothing of the older run-S is grafted onto the new one"
     assert [j[3] for j in jobs if (j[0], j[1]) == ("run-S", 0)] == ["s0"]
     assert _rows(db, "PRAGMA integrity_check") == [("ok",)]
     assert not (r.lib / "runs.db").exists()
     assert "runs.db" not in " ".join(_parked(r))
-    assert "Merged runs.db into _moonglade/records/runs.db" in _said(done)
+    said = _said(done)
+    assert "Merged runs.db into _moonglade/records/runs.db" in said
+    assert "run-S (status refused; task ids: T-PAID-0, T-PAID-1)" in said, \
+        "the run the new home kept whole is named, with what the older copy said"
+
+
+def test_the_runs_fold_writes_the_new_home_in_place(r):
+    """runs.db is folded inside the new home itself, under SQLite's own write lock -- never a
+    copy swapped over it -- so a server holding it open (another install serving the library)
+    reads what was brought in and loses nothing it writes."""
+    _moved(r)
+    new = runs.RunsStore(r.lib)
+    new.reserve("run-A", "Nel", status="planning")
+    server = sqlite3.connect(str(new.path))
+    try:
+        assert server.execute("SELECT COUNT(*) FROM runs").fetchone() == (1,)
+        old = _old_store(r)
+        old.reserve("run-C", "Nel", status="planning")
+        _later(old.path)
+        _bring_in(r)
+        assert server.execute("SELECT run_id FROM runs ORDER BY run_id").fetchall() == \
+            [("run-A",), ("run-C",)], "the open connection sees the fold"
+    finally:
+        server.close()
+
+
+def test_a_busy_older_runs_db_stops_the_start_and_is_never_set_aside(r):
+    """An older runs.db another program holds locked is busy, not damaged: the start stops
+    and says so, and it is neither parked nor read half-written."""
+    _moved(r)
+    runs.RunsStore(r.lib).reserve("run-A", "Nel", status="planning")
+    old = _old_store(r)
+    old.reserve("run-C", "Nel", status="planning")
+    _later(old.path)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)                                  # told to close it
+    holder = sqlite3.connect(str(old.path), isolation_level=None)
+    try:
+        holder.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(msetup.MoveStopped) as e:
+            start(r)
+        assert "another program has it open" in str(e.value)
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+    assert (r.lib / "runs.db").is_file() and _parked(r) == []
+    start(r)
+    assert runs.RunsStore(r.lib).get("run-C")["status"] == "planning"
+
+
+def test_a_new_home_that_fails_its_check_stops_and_the_older_copy_stays(r):
+    """When the NEW home is the broken side -- its runs.db fails its integrity check, or a
+    store won't parse -- the healthy older copy is never set aside for the damaged one to
+    stay: the start stops and names the file."""
+    _moved(r)
+    rec = r.lib / "_moonglade" / "records" / "runs.db"
+    write(rec, b"not a database at all")
+    old = _old_store(r)
+    old.reserve("run-C", "Nel", status="planning")
+    _later(old.path)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)                                  # told to close it
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert str(rec) in str(e.value) and "fails its own check" in str(e.value)
+    assert (r.lib / "runs.db").is_file() and _parked(r) == []
+    assert _old_store(r).get("run-C")["status"] == "planning"
+
+
+def test_a_new_home_store_that_won_t_parse_stops_and_the_older_copy_stays(r):
+    _moved(r)
+    prefs = r.lib / "_moonglade" / "accounts" / KEY_NEL / "prefs.json"
+    write(prefs, '{"theme": "dusk", "grid')
+    older = _older_install_writes(r.lib / "account_prefs" / (KEY_NEL + ".json"),
+                                  {"theme": "classic"})
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert str(prefs) in str(e.value)
+    assert json.loads(older.read_text()) == {"theme": "classic"} and _parked(r) == []
 
 
 def test_a_runs_db_that_fails_its_check_is_set_aside_and_the_new_home_stays(r):
