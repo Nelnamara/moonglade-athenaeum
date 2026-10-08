@@ -623,6 +623,38 @@ def _dismiss_any_achievement_toast(page, rounds=4):
             rounds))
 
 
+# The desktop sign-in holds on purpose after a successful sign-in: LoginPage.jsx's BUSY_MIN_MS
+# (the mascot's "Signing in..." beat) and then WELCOME_HOLD_MS (the welcome line), about 5.6 s
+# together, before it moves on to the gallery. The phone page moves on at once. Every desktop
+# test used to pay that hold, and every test also waited for the sign-in card's entrance
+# animation to finish before Playwright would click it. Signing in is not what those tests are
+# about, so _login() shortens both, on the sign-in page only and in the test only: timers of a
+# second or more fire at once there, and motion is frozen. The app is untouched, and one test
+# (test_the_desktop_sign_in_holds_its_welcome_before_moving_on) still signs in the real way and
+# asserts the hold.
+_SHORTEN_SIGN_IN_TIMERS_JS = (
+    "() => { const st = window.setTimeout;"
+    " window.setTimeout = (fn, ms, ...a) => st(fn, ms >= 1000 ? 0 : ms, ...a); }")
+
+
+def _skip_sign_in_beats(page):
+    """Shorten the sign-in page's own holds and freeze its motion (see the note above)."""
+    page.evaluate(_SHORTEN_SIGN_IN_TIMERS_JS)
+    _freeze_motion(page)
+
+
+def _sign_in_beats_ms():
+    """LoginPage.jsx's (BUSY_MIN_MS, WELCOME_HOLD_MS), read from the source so this harness
+    never keeps a second copy of the design's timings."""
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    src = open(os.path.join(repo, "gallery", "src", "components", "LoginPage.jsx"),
+               encoding="utf-8").read()
+    busy = re.search(r"^const BUSY_MIN_MS = (\d+);", src, flags=re.M)
+    hold = re.search(r"^const WELCOME_HOLD_MS = (\d+);", src, flags=re.M)
+    assert busy and hold, "LoginPage.jsx no longer declares BUSY_MIN_MS / WELCOME_HOLD_MS"
+    return int(busy.group(1)), int(hold.group(1))
+
+
 def _login(page, username=_USERNAME):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -635,8 +667,12 @@ def _login(page, username=_USERNAME):
     POST really did complete, but page.url was still /login afterward).
     expect_navigation ties the wait to the actual navigation instead, whenever
     it actually happens -- the same fix works for a synchronous native submit
-    too, so this isn't React-specific plumbing leaking into a shared helper."""
+    too, so this isn't React-specific plumbing leaking into a shared helper.
+
+    The sign-in page's own holds are shortened first (_skip_sign_in_beats): the account,
+    the form and the POST are all real; only the page's wait before it moves on is not."""
     page.goto("/login", wait_until="domcontentloaded")
+    _skip_sign_in_beats(page)
     page.fill("input[name=username]", username)
     page.fill("input[name=password]", _PASSWORD)
     # The login's own budget, wider than the context default: on a two-core CI runner the
@@ -665,6 +701,74 @@ def _settle(page):
     """Yield two animation frames: style recalc + layout have both run before we read."""
     page.evaluate("() => new Promise(r => requestAnimationFrame("
                   "() => requestAnimationFrame(r)))")
+
+
+def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
+        render_server, render_browser, monkeypatch):
+    """The one sign-in in this file that does NOT take _login()'s shortcut, so the design beat
+    the shortcut skips stays covered (issue #25 pt 2): after a successful desktop sign-in the
+    page holds "Signing in..." for BUSY_MIN_MS, then shows the welcome line, and holds that for
+    WELCOME_HOLD_MS before it moves on to the gallery.
+
+    Timed from Python, so every reading can only come out LATER than the page's own timers
+    fire (each observation lags its event); the half-second margins absorb that lag the other
+    way, and are small next to the 2.2 s and 3.4 s being guarded. The fixed wait in phase 1 is
+    the measurement itself: the claim is that nothing happens for that long.
+
+    Phase 2 proves both halves non-vacuous: the same sign-in with the shortcut moves on before
+    the busy beat would even have ended, so this test can tell a held sign-in from one that
+    was not -- and the shortcut every other test relies on really does skip the hold."""
+    import time
+
+    busy_ms, hold_ms = _sign_in_beats_ms()
+    monkeypatch.setattr(core, "_config_path", lambda: render_server.config_path)
+
+    def _open():
+        ctx = render_browser.new_context(
+            viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+            device_scale_factor=1, base_url=render_server.base_url)
+        ctx.set_default_timeout(10_000)
+        page = ctx.new_page()
+        page.goto("/login", wait_until="domcontentloaded")
+        page.fill("input[name=username]", _USERNAME)
+        page.fill("input[name=password]", _PASSWORD)
+        return ctx, page
+
+    # Phase 1: the real sign-in, untouched -- no shortened timers, no frozen motion.
+    ctx, page = _open()
+    try:
+        page.click("button[type=submit]")
+        clicked = time.monotonic()
+        try:
+            page.wait_for_selector(".lgn-welcome")
+        except _PlaywrightTimeout:
+            pytest.fail("no welcome line within 10 s of signing in; the page is at {} -- it "
+                        "moved on without its welcome hold, or never signed in".format(page.url))
+        busy_s = time.monotonic() - clicked
+        assert "/login" in page.url, "the page moved on before its welcome line showed"
+        assert busy_s >= busy_ms / 1000 - 0.5, (
+            "the welcome line came {:.2f}s after the click; the busy beat is {} ms".format(
+                busy_s, busy_ms))
+        page.wait_for_timeout(hold_ms - 500)
+        assert "/login" in page.url and page.locator(".lgn-welcome").count() == 1, (
+            "the page moved on before its {} ms welcome hold was over".format(hold_ms))
+        page.wait_for_url(lambda url: "/login" not in url, wait_until="commit")
+    finally:
+        ctx.close()
+
+    # Phase 2: the same sign-in through the shortcut every other test takes.
+    ctx, page = _open()
+    try:
+        _skip_sign_in_beats(page)
+        started = time.monotonic()
+        with page.expect_navigation(wait_until="commit"):
+            page.click("button[type=submit]")
+        moved_s = time.monotonic() - started
+        assert moved_s < busy_ms / 1000, (
+            "with the shortcut the sign-in still took {:.2f}s to move on -- _login() no longer "
+            "skips the page's hold, and every desktop test pays it again".format(moved_s))
+    finally:
+        ctx.close()
 
 
 # ---------------------------------------------------------------------------
