@@ -1637,12 +1637,16 @@ def _union_cast(a, b):
 
 def _loom_kv_merged(src, dest):
     """A Loom key->value file both homes hold, after the move: (the new home's value with the
-    older copy's folded in, as the file's bytes; clashes), or (None, []) when the two can't be
-    merged. The JSON text inside each is merged, not the string around it: the cast library
-    member by member (_union_cast); a board, or any other object or list, key by key (the
-    new home's value on a clash); and written back the way the Loom's own write leaves it. The
-    open-board pointer keeps the new home's (the older one is logged). Raises ValueError or
-    UnicodeDecodeError for a copy that won't parse, OSError for one that won't read."""
+    older copy's folded in, as the file's bytes; clashes), or (None, clashes) when the two
+    can't be merged. The JSON text inside each is merged, not the string around it: the cast
+    library member by member (_union_cast); a board (any other key) gains the keys only the
+    older copy holds -- but a board both copies changed can't be merged: key by key, the new
+    home's "acts" would replace the older copy's whole, and every card and render record only
+    the older install made would go. That one comes back as (None, its clashes), and _fold_in
+    keeps it whole beside the new home. What is merged is written back the way the Loom's own
+    write leaves it. The open-board pointer keeps the new home's (the older one is logged).
+    Raises ValueError or UnicodeDecodeError for a copy that won't parse, OSError for one that
+    won't read."""
     from urllib.parse import unquote
     key = unquote(Path(dest).stem)
     a_outer = json.loads(dest.read_text(encoding="utf-8"))
@@ -1660,6 +1664,8 @@ def _loom_kv_merged(src, dest):
         doc, clashes = _union_cast(a, b)
     else:
         doc, clashes = _union_new_wins(a, b)
+        if clashes:
+            return None, clashes                 # a board both changed: kept whole beside
     if doc is None:
         return None, []
     if doc == a:
@@ -2056,7 +2062,11 @@ def _fold_in(src, dest, kind, half, key, src_hash):
                          _clash_words(clashes))
                 item("Merged %s into %s (the new home kept what it had).", rel(src), rel(dest))
                 return "merged"
-            why = "the two copies hold different kinds of things"
+            if how == "json:loom" and clashes:
+                why = "both copies changed the same board (%s)" % ", ".join(
+                    str(k) for k, _v in clashes[:10])
+            else:
+                why = "the two copies hold different kinds of things"
     except sqlite3.OperationalError:
         raise                                            # busy or unreadable: stop, try again
     except _NewHomeBroken as e:

@@ -21,9 +21,10 @@ Now the new home is never replaced, and what the older copy adds is folded in:
   * a login's stores: every key from both; on a clash the new home's value stays and the
     older one is logged.
   * the Loom's boards and cast library: merged inside the JSON text the Loom keeps in each
-    file (the cast library member by member, a board key by key). A board only the older
-    install made comes across; a value that can't be merged is kept beside the new home
-    under a key of its own, outside the safety snapshot.
+    file (the cast library member by member; a board gains the keys only the older copy
+    holds). A board only the older install made comes across; a board both copies changed,
+    or a value that can't be merged, is kept whole beside the new home under a key of its own,
+    outside the safety snapshot.
   * the spend guard entry by entry, whichever blocks longer; telemetry's counters at their max
     per key, never added (a restored backup of any age, or a sync tool's copy, can't count
     anything twice; the counts an older install makes after the move aren't added), with the
@@ -500,27 +501,38 @@ def _loom_get(cli, key):
     return cli.get("/api/loom/get?key=" + quote(key, safe="")).get_json()["value"]
 
 
+def _asides(kv, key):
+    """The values kept beside `key`'s new home (`<key>-older-<UTC time>`), by file."""
+    from urllib.parse import quote
+    prefix = quote(key + "-older-", safe="")
+    return sorted(p for p in kv.iterdir() if p.name.startswith(prefix))
+
+
 def test_the_loom_s_cast_library_and_boards_merge_inside_their_json_text(r):
     """No real Loom file ever merged before: each parsed to a string, so it was set aside and
     deleted with the safety copy five clean starts later -- cast members and board edits the
     older install made after the move with it. Now the JSON text inside is merged: the cast
-    library member by member (by libId, the new home's member on a clash), a board key by
-    key (the new home's value on a clash), and the open-board pointer keeps the new home's."""
+    library member by member (by libId, the new home's member on a clash), a board only the
+    older copy added keys to gains them, a board both copies changed is kept whole beside the
+    new home, and the open-board pointer keeps the new home's."""
     _moved(r)
     cli, kv_new, kv_old = _loom(r)
     new_lib = {"v": 1, "members": [_member("L1", "Aria"), _member("L2", "Bram")]}
     b1 = _board("Act one (final cut)", ["c1", "c2", "c3"])
+    b3 = _board("Act three", ["c1"])
     for key, value in ((CASTLIB, _loom_text(new_lib)), (PROJ + "b1", _loom_text(b1)),
-                       (ACTIVE, "b1")):
+                       (PROJ + "b3", _loom_text(b3)), (ACTIVE, "b1")):
         assert cli.post("/api/loom/set", json={"key": key, "value": value}).get_json()["ok"]
     assert (kv_new / _kv_name(CASTLIB)).read_text() == _loom_file(new_lib), "the real shape"
     write(r.lib / "_moonglade" / "loom" / "_submits" / (KEY_NEL + ".jsonl"), '{"s": 1}\n')
 
     _older_install_writes(kv_old / _kv_name(CASTLIB), _loom_file(
         {"v": 1, "members": [_member("L9", "Cato"), _member("L1", "Aria, renamed there")]}))
-    _older_install_writes(kv_old / _kv_name(PROJ + "b1"), _loom_file(
-        _board("Act one", ["c1"], note="written by the older install")))
+    older_b1 = _board("Act one", ["c1"], note="written by the older install")
+    _older_install_writes(kv_old / _kv_name(PROJ + "b1"), _loom_file(older_b1))
     _older_install_writes(kv_old / _kv_name(PROJ + "b2"), _loom_file(_board("Act two", [])))
+    _older_install_writes(kv_old / _kv_name(PROJ + "b3"),
+                          _loom_file(_board("Act three", ["c1"], note="only added there")))
     _older_install_writes(kv_old / _kv_name(ACTIVE), json.dumps("b2"))
     _older_install_writes(r.lib / "loom" / "_submits" / (KEY_NEL + ".jsonl"), '{"s": 2}\n')
     done = _bring_in(r)
@@ -529,13 +541,16 @@ def test_the_loom_s_cast_library_and_boards_merge_inside_their_json_text(r):
     assert [m["libId"] for m in lib["members"]] == ["L1", "L2", "L9"]
     assert lib["members"][0]["name"] == "Aria", "a member both hold keeps the new home's"
     assert lib["v"] == 1
-    got = json.loads(_loom_get(cli, PROJ + "b1"))
-    assert got["name"] == b1["name"] and got["acts"] == b1["acts"]
-    assert got["note"] == "written by the older install"
+    assert json.loads(_loom_get(cli, PROJ + "b1")) == b1, "the new home's board, whole"
+    [aside] = _asides(kv_new, PROJ + "b1")
+    assert json.loads(json.loads(aside.read_text())) == older_b1, "the older board, whole"
     assert json.loads(_loom_get(cli, PROJ + "b2")) == _board("Act two", [])
+    assert json.loads(_loom_get(cli, PROJ + "b3")) == dict(b3, note="only added there")
+    assert _asides(kv_new, PROJ + "b3") == []
     assert _loom_get(cli, ACTIVE) == "b1"
+    from urllib.parse import unquote
     assert set(cli.get("/api/loom/list?prefix=" + PROJ).get_json()["keys"]) == \
-        {PROJ + "b1", PROJ + "b2"}
+        {PROJ + "b1", PROJ + "b2", PROJ + "b3", unquote(aside.name[:-5])}
     assert (r.lib / "_moonglade" / "loom" / "_submits" / (KEY_NEL + ".jsonl")).read_text() \
         .splitlines() == ['{"s": 1}', '{"s": 2}']
     assert not (r.lib / "loom").exists()
@@ -543,6 +558,35 @@ def test_the_loom_s_cast_library_and_boards_merge_inside_their_json_text(r):
     said = _said(done)
     assert "member L1=" in said and "Aria, renamed there" in said, "the clash is logged"
     assert "the open board=" in said
+    assert "both copies changed the same board" in said
+
+
+def test_a_board_both_copies_changed_keeps_the_older_card_and_its_render_for_good(r):
+    """#5: merged key by key, a board's whole "acts" came from the new home, so a card the
+    older install added -- and the render task it made for it -- was dropped, and the older
+    file deleted. A board both copies changed is kept whole beside the new home instead, and
+    that card with its render task id is still there after the clean-start sweep."""
+    _moved(r)
+    cli, kv_new, kv_old = _loom(r)
+    mine = _board("Act five", ["c1"])
+    assert cli.post("/api/loom/set", json={"key": PROJ + "b5",
+                                           "value": _loom_text(mine)}).get_json()["ok"]
+    theirs = _board("Act five", ["c1"])
+    theirs["acts"][0]["cards"].append({"id": "c2", "taskId": "t-render-5",
+                                       "takes": [{"taskId": "t-render-5"}]})
+    _older_install_writes(kv_old / _kv_name(PROJ + "b5"), _loom_file(theirs))
+    done = _bring_in(r)
+    assert json.loads(_loom_get(cli, PROJ + "b5")) == mine
+    [aside] = _asides(kv_new, PROJ + "b5")
+    assert _parked(r) == []
+    assert "both copies changed the same board" in _said(done)
+    for _ in range(migrate.CLEAN_STARTS + 1):
+        done.counted = False
+        done.count_clean_start()
+    assert not (r.lib / "_moonglade" / ".snapshot").exists(), "the sweep ran"
+    kept = json.loads(json.loads(aside.read_text()))
+    assert kept == theirs
+    assert kept["acts"][0]["cards"][1]["taskId"] == "t-render-5"
 
 
 def test_a_loom_value_that_can_t_merge_is_kept_beside_under_its_own_key_for_good(r):
