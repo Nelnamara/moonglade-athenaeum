@@ -8,8 +8,16 @@ on:
   # go green before it is merged.
   workflow_dispatch: {}
 
+# THE SUITE RUNS AS TWO JOBS, side by side, split by the `render` marker (dev/pytest.ini):
+# `render-harness` runs the browser-driven harness (-m render) and `pytest` runs everything
+# else (-m "not render"), each spread over the runner's cores by pytest-xdist (-n auto). They
+# are separate RUNS rather than one run with a deselect, because the harness's playwright keeps
+# an asyncio loop running in its thread and dev/tests/test_watch.py's own asyncio.run() calls
+# must not share a process with it. Each job installs the SAME pip line, and
+# dev/tools/ci_local.py reads it off this file -- edit both lines together.
 jobs:
   pytest:
+    name: pytest (all but the render harness)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,7 +31,44 @@ jobs:
       # (see its own pytest.importorskip). Pulling it in just to sit unused is exactly
       # the kind of CI flakiness worth avoiding.
       - name: Install dependencies
-        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov playwright
+        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov pytest-xdist playwright
+
+      # THE GALLERY BUNDLE MUST BE THE SOURCE'S.
+      #
+      # The Flask app serves the COMMITTED gallery/dist (Vite build), and the render harness
+      # measures that bundle. dev/tests/test_js_syntax.py::test_committed_gallery_bundle_matches_a_fresh_build
+      # rebuilds gallery/src into a temp folder and compares, but it skips itself when
+      # gallery/node_modules is absent -- which it was on CI until 2026-09-08, so a source edit
+      # pushed without `npm run build` sailed through with the harness green against the OLD
+      # bundle (red team on the phone-sheet fix). Node + `npm ci` here lets that test run.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gallery/package-lock.json
+
+      - name: Install the gallery build tooling
+        run: npm ci
+        working-directory: gallery
+
+      # The suite and its config live in dev/ (3.20): dev/pytest.ini is found from the
+      # dev/tests argument, so this runs from the repo root like every other step.
+      - name: Run test suite (all but the render harness)
+        run: python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py -m "not render" -n auto
+
+  render-harness:
+    name: render harness (pytest -m render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # The same line as the pytest job's (see the note above `jobs:`).
+      - name: Install dependencies
+        run: pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov pytest-xdist playwright
 
       # THE RENDERING HARNESS NEEDS A REAL BROWSER.
       #
@@ -47,28 +92,13 @@ jobs:
       - name: Install the Playwright browser
         run: python -m playwright install --with-deps chromium
 
-      # THE GALLERY BUNDLE MUST BE THE SOURCE'S.
-      #
-      # The Flask app serves the COMMITTED gallery/dist (Vite build), and the render harness
-      # measures that bundle. dev/tests/test_js_syntax.py::test_committed_gallery_bundle_matches_a_fresh_build
-      # rebuilds gallery/src into a temp folder and compares, but it skips itself when
-      # gallery/node_modules is absent -- which it was on CI until 2026-09-08, so a source edit
-      # pushed without `npm run build` sailed through with the harness green against the OLD
-      # bundle (red team on the phone-sheet fix). Node + `npm ci` here lets that test run.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: gallery/package-lock.json
-
-      - name: Install the gallery build tooling
-        run: npm ci
-        working-directory: gallery
-
-      # The suite and its config live in dev/ (3.20): dev/pytest.ini is found from the
-      # dev/tests argument, so this runs from the repo root like every other step.
-      - name: Run test suite
-        run: python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py
+      # No node here: the harness measures the COMMITTED gallery/dist and loom/dist, which the
+      # app serves straight off disk; the pytest job's gallery-bundle test and the loom job's
+      # stale-bundle step are what prove those match their sources. Each xdist worker launches
+      # its own chromium and serves its own app on its own ephemeral port (the harness's
+      # render_browser and render_server are module-scoped, so per worker).
+      - name: Run the render harness
+        run: python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py -m render -n auto
 
   loom-node-tests:
     runs-on: ubuntu-latest
