@@ -565,10 +565,15 @@ def _page(name):
     return " ".join((_WIKI / name).read_text(encoding="utf-8").split())
 
 
-def _unreleased():
+def _move_release_notes():
+    """The CHANGELOG section that carries the move's notes: [Unreleased] while it is being
+    built, the dated 3.20.0 block once the release is cut. Found by the move's own bullet, so the
+    cut (which empties [Unreleased]) never sends this test looking in the wrong section."""
     text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    text = text[text.index("## [Unreleased]"):]
-    return " ".join(text[:text.index("\n## [", 1)].split())
+    at = text.index("**An older Moonglade still using the library stops the start")
+    start = text.rfind("\n## [", 0, at)
+    end = text.find("\n## [", at)
+    return " ".join(text[start:end if end != -1 else len(text)].split())
 
 
 def test_the_stop_sentences_name_what_actually_stops_an_older_install(r):
@@ -600,10 +605,10 @@ def test_the_pages_say_windows_tells_only_when_both_installs_run_on_it():
 
 
 def test_the_release_notes_and_the_move_s_own_rules_say_the_same():
-    """CHANGELOG [Unreleased] (the release notes are cut from it) and the move's docstring: the
-    stop at the first move and later, Stop server rather than "close it", and the same
+    """The move's CHANGELOG section (the release notes are cut from it) and the move's docstring:
+    the stop at the first move and later, Stop server rather than "close it", and the same
     Windows-and-one-folder limit, sync tools named."""
-    notes = _unreleased()
+    notes = _move_release_notes()
     entry = notes[notes.index("**An older Moonglade still using the library stops the start"):]
     entry = entry[:entry.index(" - **")]
     for want in ("at the first move", "**Stop server** in its Control Panel",
