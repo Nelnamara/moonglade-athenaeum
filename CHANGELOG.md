@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-10-08 — Moving Day
+
 ### Where your things live now
 - **Your stuff lives with your library, in its `_moonglade` folder.** Each login's presets, snippets, saved views and settings are in `_moonglade\accounts`, the Loom's boards in `_moonglade\loom`, and your achievements and skin, the Runs, the job list, the schedule, the spend guards and the reports in `_moonglade\records`. The choices the app must never lose (what you marked lost, the `--organize` undo list, a curation import's undo) are in `_moonglade\decisions`. Point another PC at the library and all of it comes along. Your pictures, `catalog.db`, the month folders and the thumbnails stay where they are, and every scan of the library skips `_moonglade`. (2026-10-07)
 - **This PC's things live in `local` beside the program:** `settings.json`, the Mirror's sign-in, the art pack, the shortcut icons (`local\icons`), any banner you wear that can't be drawn again (`local\banners`), the caches (`local\cache`) and both logs (`local\logs`). (2026-10-07)
