@@ -571,6 +571,80 @@ def test_a_loom_value_that_can_t_merge_is_kept_beside_under_its_own_key_for_good
     assert aside[0].read_text() == older, "and kept it"
 
 
+def test_a_loom_aside_cut_short_before_the_old_file_went_is_not_made_twice(r, monkeypatch):
+    """The start dies after the older value is kept beside the new home and before the old
+    file goes: the next start finds the value already kept (the same bytes, under a key of
+    its own) and only removes the old file -- the Loom never lists two identical boards."""
+    _moved(r)
+    cli, kv_new, kv_old = _loom(r)
+    b3 = _board("Act three", ["c1"])
+    assert cli.post("/api/loom/set", json={"key": PROJ + "b3",
+                                           "value": _loom_text(b3)}).get_json()["ok"]
+    older = _loom_file(["not", "a", "board"])
+    old_file = _older_install_writes(kv_old / _kv_name(PROJ + "b3"), older)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)                                   # told to close it
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)   # copied, then removed
+    real = migrate._remove
+
+    def die_removing_it(p):
+        if os.path.normcase(str(p)) == os.path.normcase(str(old_file)):
+            raise migrate._Failed("cut short")
+        return real(p)
+    monkeypatch.setattr(migrate, "_remove", die_removing_it)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+
+    def asides():
+        return [p for p in kv_new.iterdir()
+                if p.name.startswith("storyboard%3Av2%3Aproj%3Ab3-older-")]
+    assert len(asides()) == 1 and old_file.exists()
+    monkeypatch.setattr(migrate, "_remove", real)
+    done = start(r)
+    assert len(asides()) == 1 and asides()[0].read_text() == older
+    assert not old_file.exists()
+    said = _said(done)
+    assert "already keeps the same" in said and asides()[0].name in said
+
+
+def test_the_kept_beside_line_is_said_before_the_value_is_brought(r, monkeypatch):
+    """The log names the Loom value it keeps beside the new home before bringing it, so a
+    start cut short in that step still says where it went."""
+    _moved(r)
+    cli, kv_new, kv_old = _loom(r)
+    assert cli.post("/api/loom/set", json={"key": PROJ + "b4", "value": _loom_text(
+        _board("Act four", []))}).get_json()["ok"]
+    _older_install_writes(kv_old / _kv_name(PROJ + "b4"), _loom_file(["a", "list"]))
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    seen = {}
+    real = migrate._bring
+
+    def bring(src, dest, kind, half, vouched=False):
+        if "-older-" in os.path.basename(str(dest)):
+            seen["said"] = " ".join(line for _l, line in half.report.all_lines())
+        return real(src, dest, kind, half, vouched=vouched)
+    monkeypatch.setattr(migrate, "_bring", bring)
+    start(r)
+    assert "Kept loom/kv/" in seen["said"] and "beside" in seen["said"]
+
+
+def test_a_cut_off_emoji_in_a_clash_never_loses_the_move_s_log(tmp_path):
+    """A Loom value can carry a lone UTF-16 surrogate (a cast member named with a cut-off
+    emoji). The clash words are plain ASCII, and the log file is written whole whatever a line
+    holds -- write_log never raises."""
+    words = migrate._clash_words([("member L1", {"name": "Aria \ud83d"})])
+    words.encode("utf-8")
+    assert "\\ud83d" in words
+    rep = migrate.Report()
+    rep.item("In loom/kv/x the new home's value was kept; the older copy said: %s", "\ud83d")
+    rep.info("The library is tidy.")
+    log = tmp_path / "logs" / "moonglade.log"
+    rep.write_log(log)
+    text = log.read_text(encoding="utf-8")
+    assert "the older copy said" in text and "The library is tidy." in text
+
+
 # ---- the rest -----------------------------------------------------------------------------------
 
 def test_a_newer_old_copy_never_replaces_the_new_home(r):

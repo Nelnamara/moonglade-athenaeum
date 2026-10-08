@@ -308,7 +308,9 @@ class Report:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
+            # backslashreplace: a line carrying a lone UTF-16 surrogate (a Loom value with a
+            # cut-off emoji) is written as \udXXX, never raises, and never loses the lines after.
+            with open(path, "a", encoding="utf-8", errors="backslashreplace") as f:
                 for level, line in self.all_lines():
                     f.write("%s %-8s [%s] %s\n" % (stamp, logging.getLevelName(level),
                                                    LOGGER_NAME, line))
@@ -1599,6 +1601,26 @@ def _loom_aside(dest):
     return dest.with_name(quote(key, safe="") + ".json"), key
 
 
+def _loom_kept_beside(dest, sha):
+    """A value already kept beside the new home `dest` (_loom_aside: `<key>-older-*`) whose
+    bytes have the sha256 `sha`, or None."""
+    from urllib.parse import unquote
+    prefix = unquote(Path(dest).stem) + "-older-"
+    try:
+        names = sorted(os.listdir(Path(dest).parent))
+    except OSError:
+        return None
+    for n in names:
+        p = Path(dest).parent / n
+        if n.endswith(".json") and unquote(n[:-5]).startswith(prefix) and not _is_link(p):
+            try:
+                if p.is_file() and _sha256(p) == sha:
+                    return p
+            except OSError:
+                continue
+    return None
+
+
 def _settled_bytes(src, dest, how, moved=None):
     """(the new home's content with the older copy folded in, as bytes; clashes), or
     (None, []) when the two can't be merged. `moved`: the counters the first move took into
@@ -1651,9 +1673,11 @@ def _runs_kept_words(runs_kept, most=20):
 
 
 def _clash_words(clashes, most=20, width=300):
-    """The older copy's values the new home's won over, for the log: key=value, ..."""
+    """The older copy's values the new home's won over, for the log: key=value, ... In plain
+    ASCII: a lone surrogate in a Loom value is written as its JSON escape, never carried into
+    the log."""
     def short(v):
-        s = json.dumps(v, ensure_ascii=False, sort_keys=True)
+        s = json.dumps(v, ensure_ascii=True, sort_keys=True)
         return s if len(s) <= width else s[:width] + "..."
     parts = ["%s=%s" % (k, short(v)) for k, v in clashes[:most]]
     more = len(clashes) - most
@@ -2018,11 +2042,18 @@ def _fold_in(src, dest, kind, half, key, src_hash, moved=None):
     except (ValueError, UnicodeDecodeError, sqlite3.DatabaseError):
         why = "the older copy can't be read as what it should be"
     if how == "json:loom":
+        kept = _loom_kept_beside(dest, src_hash)
+        if kept is not None:
+            # A start cut short after keeping it beside, before the old file went.
+            _remove(src)
+            item("Removed %s: the Loom already keeps the same beside %s as %s.", rel(src),
+                 rel(dest), rel(kept))
+            return "kept"
         aside, key_aside = _loom_aside(dest)
-        _bring(src, aside, "file", half)
         half.report.warn("Kept %s (written there after the move) beside %s as %s, the Loom "
                          "key \"%s\": %s, so both are kept.", rel(src), rel(dest), rel(aside),
                          key_aside, why)
+        _bring(src, aside, "file", half)
         return "kept"
     target = _park(src, half, said=False)
     half.report.warn("Kept %s, the new home, and set aside %s (written there after the move) "
@@ -2264,9 +2295,12 @@ def _bring(src, dest, kind, half, vouched=False):
 
 
 def _bring_or_say(src, dest, kind, half, vouched=False):
-    """_bring(), except that an old log that cannot be moved (a process still holding it open)
-    never stops a start: nothing reads a log's old place, the new log starts in local/logs/,
-    and the next start tries again. Every other item that cannot be moved stops the start."""
+    """_bring(), except that an old log that still can't be moved (a refusal, a scanner's
+    hold that outlasts the retries) is left for the next start: nothing reads a log's old
+    place, and the new log starts in local/logs/. A library's old moonglade.log that another
+    program holds open does stop the start, before anything moves (_old_log_in_use): an older
+    Moonglade may still be serving that library. Every other item that can't be moved stops
+    the start."""
     try:
         return _bring(src, dest, kind, half, vouched=vouched)
     except _Failed as e:
