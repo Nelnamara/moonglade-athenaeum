@@ -127,7 +127,7 @@ _FASTMCP_STUB = textwrap.dedent('''
 
 
 def test_python_m_moonglade_mcp_server_is_the_mcp_server(tmp_path):
-    """Its __main__ block runs: the move first (moonglade.setup.prepare), then the tools. A
+    """Its __main__ block runs: the install half of the move first (moonglade.setup.prepare), then the tools. A
     stub fastmcp stands first on the path (the real one is an optional dep, and would sit
     waiting on stdin), so `run` just says it was called.
 
@@ -152,6 +152,8 @@ def test_python_m_moonglade_mcp_server_is_the_mcp_server(tmp_path):
                        env=_env(PYTHONPATH=str(stub), MOONGLADE_OUT=str(tmp_path / "library")))
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "stub server ran over stdio"
-    # the move ran first, in this app folder and in the library MOONGLADE_OUT names
+    # the install half of the move ran first, in this app folder; the library half never runs
+    # from the Claude tools (only the launcher and the server move a library), so the library
+    # MOONGLADE_OUT names is left exactly as it was
     assert (app / "local" / ".journal.json").is_file()
-    assert (tmp_path / "library" / "_moonglade" / ".journal.json").is_file()
+    assert not (tmp_path / "library" / "_moonglade").exists()
