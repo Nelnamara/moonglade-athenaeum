@@ -440,7 +440,7 @@ def test_an_older_install_holding_its_log_open_stops_the_first_move(r):
         assert holder.stdout.readline().strip() == "ready"
         with pytest.raises(msetup.MoveStopped) as e:
             _prepare(r)
-        assert str(e.value) == migrate.OLDER_RUNNING_WORDS % r.lib
+        assert str(e.value) == migrate.OLDER_RUNNING_WORDS % (log, r.lib)
         assert (r.lib / "train_guard.json").is_file(), "no record moved"
         assert not (r.lib / "_moonglade" / "records").exists() or \
             not list((r.lib / "_moonglade" / "records").iterdir())

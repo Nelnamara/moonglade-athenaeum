@@ -53,13 +53,15 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     starts -- a server that served for a while, or was stopped cleanly (count_clean_start,
     called by the server, never by prepare) -- and the first one after a run that moved
     anything does not count. At CLEAN_STARTS the app deletes .snapshot\\.
-  * AN OLDER INSTALL STILL LIVE. Before a library's first move, an older Moonglade still
-    serving it (on this PC or another) holds its old log open: Windows refuses to rename it, and
-    the start stops before any record moves (_old_log_in_use). Once a library's move has
-    finished, an old-layout file written after it means an older Moonglade is still using that
-    library: the start stops and says so, rather than sweep its records out from under it.
-    Started again with nothing more written there (the person closed it), the move brings in
-    what it wrote, and the new homes keep everything they hold.
+  * AN OLDER INSTALL STILL LIVE. An older Moonglade still serving a library (on this PC or
+    another Windows PC) holds its old log open: Windows refuses to rename it, even after a
+    moment's wait, and the start stops before any record moves (_old_log_in_use) -- at the
+    first move, and at every later bring-in. Once a library's move has finished, an old-layout
+    file written after it also means an older Moonglade is still using that library: the start
+    stops and says so, rather than sweep its records out from under it. Started again with
+    nothing more written there and no old log held (the person closed it), the move brings in
+    what it wrote, and the new homes keep everything they hold. Off Windows, and for an older
+    install running on a Linux or macOS machine, nothing is held: those are closed by hand.
   * ONLY WHAT IS MOONGLADE'S, BY ITS CONTENT. An old home's name is not enough: a folder that
     isn't a Moonglade library is left exactly as it is (_is_moonglade_library), and in one that
     is, each old home passes its own check -- the logs only moonglade.log*, the Loom only its
@@ -1090,9 +1092,49 @@ def _merge_achievements(a, b, b_newer):
     return out
 
 
+# How long each entry of the training spend guard blocks (moonglade.gallery.TrainGuard): a Basic
+# start that may have gone through ("ambiguous", or "armed" and never resolved) for 15 minutes,
+# one PixAI started for a minute; a retry PixAI took ("done") for good, one that may have gone
+# through for a day; an Advanced confirm that may have gone through for 15 minutes.
+_GUARD_AMBIGUOUS_S = 15 * 60.0
+_GUARD_STARTED_S = 60.0
+_GUARD_RETRY_AMBIGUOUS_S = 24 * 3600.0
+
+
+def _guard_block_end(section, entry):
+    """When `entry`, one key of the spend guard's `section`, stops blocking (seconds since the
+    epoch): inf for a retry PixAI took, -inf for an entry that never blocks, None for one that
+    can't be read. A section this build doesn't know blocks until its entry's own time."""
+    if not isinstance(entry, dict):
+        return None
+    try:
+        at = float(entry.get("at") or 0)
+    except (TypeError, ValueError):
+        return None
+    state = entry.get("state")
+    if section == "retried":
+        state = state or "armed"
+        if state == "done":
+            return float("inf")
+        if state in ("ambiguous", "armed"):
+            return at + _GUARD_RETRY_AMBIGUOUS_S
+        return float("-inf")
+    if section == "basic":
+        if state in ("ambiguous", "armed"):
+            return at + _GUARD_AMBIGUOUS_S
+        if state == "started":
+            return at + _GUARD_STARTED_S
+        return float("-inf")
+    if section == "paid":
+        return at + _GUARD_AMBIGUOUS_S       # any confirm on record blocks while it is fresh
+    return at
+
+
 def _merge_guard(a, b, b_newer):
-    """The training spend guard: each section's entries from both copies; where both hold one
-    key, the later-armed entry. More guarding, never less."""
+    """The training spend guard, `a` (the new home's) with `b` folded in: each section's
+    entries from both copies; where both hold one key, the entry whose block ends later
+    (_guard_block_end) -- a retry PixAI took always wins, and on a tie (both "done") `a`'s
+    stays. More guarding, never less: a later but shorter block never replaces a longer one."""
     out = dict(a)
     for section in set(a) | set(b):
         sa, sb = a.get(section), b.get(section)
@@ -1104,12 +1146,8 @@ def _merge_guard(a, b, b_newer):
             if k not in merged:
                 merged[k] = v
                 continue
-            try:
-                at_a = float((merged[k] or {}).get("at") or 0)
-                at_b = float((v or {}).get("at") or 0)
-            except (AttributeError, TypeError, ValueError):
-                continue
-            if at_b > at_a:
+            end_a, end_b = _guard_block_end(section, merged[k]), _guard_block_end(section, v)
+            if end_b is not None and (end_a is None or end_b > end_a):
                 merged[k] = v
         out[section] = merged
     return out
@@ -2841,28 +2879,58 @@ def _refusal_words(out, named):
             "install's launcher (Moonglade Launcher), then run this again." % out)
 
 
-# The sentence when an older Moonglade still holds a library's old log open at its first move
-# (#12): before anything moves, so its records are never taken from under it.
-OLDER_RUNNING_WORDS = ("An older Moonglade (on this PC or another) is still running on this "
-                       "library (%s); close it, then start again.")
+# The sentence when something still holds a library's old log open (#12): at the first move,
+# and before bringing in what an older Moonglade wrote after it -- before anything moves, so
+# an older install's records are never taken from under it. Filled with the log, then the
+# library. Windows can tell only an older install that also runs on Windows.
+OLDER_RUNNING_WORDS = (
+    "Another program has %s open, so Moonglade can't tidy the library %s yet. It may be an "
+    "older Moonglade still running on that library (its window, or one of its scheduled "
+    "tasks, on this PC or another Windows PC), or another program that has the file open. "
+    "Close it, then start Moonglade again.")
+
+
+def _held_open(p):
+    """Does another program hold the file `p` open? Windows refuses to rename a file another
+    program has open without sharing its delete (a sharing or lock violation), so `p` is
+    renamed onto itself, and held only when every one of REMOVE_TRIES tries is refused, with
+    the same growing pause as a swap: a moment's hold (a sync tool or a virus scan reading the
+    last lines) is waited out. Off Windows nothing is refused, and nothing is held."""
+    for attempt in range(REMOVE_TRIES):
+        try:
+            os.rename(p, p)
+            return False
+        except PermissionError as e:
+            if getattr(e, "winerror", None) not in (32, 33):
+                return False
+        except OSError:
+            return False
+        if attempt + 1 < REMOVE_TRIES:
+            time.sleep(REMOVE_BACKOFF_S * (2 ** attempt))
+    return True
+
+
+def _same_file(a, b):
+    """Are `a` and `b` one file (one path, or two names for the same file)?"""
+    if _same(a, b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except (OSError, ValueError):
+        return False
 
 
 def _old_log_in_use(plan):
-    """The first old-layout log an older Moonglade still holds open, or None. Windows refuses
-    to rename a file another program has open (a sharing violation), so each old log is
-    renamed onto itself: a refusal means a server (3.19's kept its log in the library's
-    logs\\) is running on the library, on this PC or another. Off Windows nothing is refused,
-    and the probe finds nothing."""
-    for src, _dest, kind, _v in plan.moves:
-        if kind != "log" or _is_link(src) or not Path(src).is_file():
+    """The first old-layout log another program still holds open (_held_open), or None. A
+    server before 3.20 kept its log in the library's logs\\ open while it ran, on this PC or
+    another Windows PC, so a held old log means one may still be serving the library. A log
+    that is the same file as its new home (a library inside this install's own local\\) is
+    this install's own, and is skipped."""
+    for src, dest, kind, _v in plan.moves:
+        if kind != "log" or _is_link(src) or not Path(src).is_file() or _same_file(src, dest):
             continue
-        try:
-            os.rename(src, src)
-        except PermissionError as e:
-            if getattr(e, "winerror", None) in (32, 33):
-                return Path(src)
-        except OSError:
-            continue
+        if _held_open(src):
+            return Path(src)
     return None
 
 
@@ -2987,17 +3055,31 @@ def _library_half(half, out, app, copyfirst, logins, report):
     if not _has_work(plan, shared, caches):
         if not j.doc.get("finished"):
             j.finish()
+        elif j.doc.pop("held_back", None) is not None:
+            j.save()
         return
     # An older Moonglade still on this library: stop, unless the person was told and nothing
-    # more has been written there since (they closed it and started this one again).
+    # more has been written there since (they closed it and started this one again). "Nothing
+    # more" is every file written since being one the stop named, with the same time: a
+    # bring-in cut short has already folded some of them in. held_back stays until this run
+    # finishes, so a start after one cut short carries on rather than blame an older install.
     written = _written_since(j, plan, shared)
     if written:
         files = {half.rel(p): ns for p, ns in written}
         held = j.doc.get("held_back")
-        if not isinstance(held, dict) or held.get("files") != files:
+        known = held.get("files") if isinstance(held, dict) else None
+        if not isinstance(known, dict) or any(known.get(k) != ns for k, ns in files.items()):
             j.doc["held_back"] = {"at": _now(), "files": files}
             j.save()
             raise MoveStopped(_older_live_words(out, [p for p, _ns in written], half, True))
+    # Something still holds an old log open -- an older Moonglade serving this library (on
+    # this PC or another Windows PC), idle or not: stop before any of its records move (#12),
+    # at the first move and at every bring-in alike (an idle one writes nothing between two
+    # starts, so the rule above alone would let the second through). held_back is kept.
+    held_log = _old_log_in_use(plan)
+    if held_log is not None:
+        raise MoveStopped(OLDER_RUNNING_WORDS % (held_log, out))
+    if written:
         report.info("Bringing in what an older Moonglade wrote to %s after the move: %s. The "
                     "new homes keep everything they hold; what it added is merged in.",
                     out, _names([p for p, _ns in written], half))
@@ -3007,13 +3089,6 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # The library's move had finished before this run: an old-layout copy now was written
     # since, and the new home always wins (A). Before that, the first move's rules hold.
     half.settled = bool(j.doc.get("finished"))
-    if not half.settled:
-        # The first move: an older Moonglade still serving this library (on this PC or
-        # another) holds its old log open. Stop before any of its records move (#12).
-        held = _old_log_in_use(plan)
-        if held is not None:
-            raise MoveStopped(OLDER_RUNNING_WORDS % out)
-    j.doc.pop("held_back", None)
     report.worked["library"] = True
     j.worked()
     app.mkdir(parents=True, exist_ok=True)
@@ -3075,4 +3150,5 @@ def _library_half(half, out, app, copyfirst, logins, report):
         report.item("Removed %s: nothing uses it any more.", half.rel(p))
     if moved:
         report.info("Moved %d file(s) in the library %s into %s.", moved, out, half.rel(app))
+    j.doc.pop("held_back", None)
     j.finish()

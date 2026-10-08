@@ -25,10 +25,14 @@ The first move keeps its own rules (dev/tests/test_move_safety.py).
 import json
 import os
 import sqlite3
+import subprocess
+import sys
+import time
 
 import pytest
 
 from moonglade import integrity
+from moonglade import migrate
 from moonglade import runs
 from moonglade import setup as msetup
 from tests.move_layouts import KEY_NEL, rig, start, write, write_config
@@ -74,6 +78,166 @@ def _said(done):
 def _parked(r):
     folder = r.lib / "_moonglade" / ".snapshot" / "parked"
     return sorted(p.name for p in folder.rglob("*") if p.is_file()) if folder.exists() else []
+
+
+def _hold_open(path):
+    """Another process holding `path` open the way 3.19's log handler holds its log while its
+    server runs (until it is killed): it writes one line, then sits idle."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import logging, sys, time\n"
+         "h = logging.FileHandler(sys.argv[1], encoding='utf-8')\n"
+         "h.emit(logging.makeLogRecord({'msg': 'serving'}))\n"
+         "print('ready', flush=True)\n"
+         "time.sleep(60)\n", str(path)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    assert holder.stdout.readline().strip() == "ready"
+    return holder
+
+
+# ---- an older install still serving the library, idle, when its writes are brought in -------
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows refuses to rename a file another program holds open")
+def test_an_idle_older_install_still_holding_its_log_stops_every_bring_in(r):
+    """An older install still serving the library but idle writes nothing between two starts,
+    so "nothing more was written" alone never means it was closed: while it holds its old log
+    open, every start stops, and its spend guard and runs.db stay where it reads them. Closed,
+    the next start brings them in."""
+    from moonglade.gallery import TrainGuard
+    _moved(r)
+    log = r.lib / "logs" / "moonglade.log"
+    holder = _hold_open(log)
+    try:
+        guard = {"basic": {}, "paid": {},
+                 "retried": {"T": {"at": time.time(), "state": "done", "new_id": "X"}}}
+        _older_install_writes(r.lib / "train_guard.json", guard)
+        old = _old_store(r)
+        old.reserve("run-C", "Nel", status="planning")
+        _later(old.path)
+        with pytest.raises(msetup.MoveStopped) as e:
+            start(r)
+        assert "An older Moonglade is still using the library" in str(e.value)
+        for _ in range(2):
+            with pytest.raises(msetup.MoveStopped) as e:
+                start(r)
+            assert str(e.value) == migrate.OLDER_RUNNING_WORDS % (log, r.lib)
+            assert json.loads((r.lib / "train_guard.json").read_text()) == guard
+            assert (r.lib / "runs.db").is_file()
+            assert _old_store(r).get("run-C")["status"] == "planning"
+        assert not (r.lib / "_moonglade" / "records" / "train_guard.json").exists()
+    finally:
+        holder.kill()
+        holder.wait()
+    start(r)                                    # closed: what it wrote is brought in
+    assert not (r.lib / "train_guard.json").exists() and not (r.lib / "runs.db").exists()
+    rec = r.lib / "_moonglade" / "records"
+    assert TrainGuard(rec / "train_guard.json").retry_state("T") == \
+        {"state": "done", "new_id": "X"}
+    assert runs.RunsStore(r.lib).get("run-C")["status"] == "planning"
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows refuses to rename a file another program holds open")
+def test_a_moment_s_hold_on_the_old_log_is_waited_out(r):
+    """A program that has the old log open for a moment (a sync tool, a virus scan reading the
+    last lines 3.19 wrote) is waited out like any other short hold: the move goes ahead."""
+    write_config(r)
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+    log = write(r.lib / "logs" / "moonglade.log", "3.19's last lines\n")
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys, time\n"
+         "f = open(sys.argv[1], 'a')\n"
+         "print('ready', flush=True)\n"
+         "time.sleep(0.4)\n"
+         "f.close()\n"
+         "time.sleep(60)\n", str(log)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "ready"
+        start(r)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert (r.lib / "_moonglade" / "records" / "jobs.jsonl").is_file()
+    assert not (r.lib / "jobs.jsonl").exists()
+
+
+def test_a_bring_in_cut_short_is_not_taken_for_an_older_install_on_the_next_start(
+        r, monkeypatch):
+    """A bring-in that stops part-way (here the database merge) has already folded some of
+    what the older install wrote. The next start, with nothing more written, carries on: it
+    never says an older Moonglade is still using the library when nothing is."""
+    _moved(r)
+    runs.RunsStore(r.lib).reserve("run-A", "Nel", status="planning")
+    _older_install_writes(r.lib / "jobs.jsonl", '{"id": "older-install"}\n')
+    old = _old_store(r)
+    old.reserve("run-C", "Nel", status="planning")
+    _later(old.path)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)                                  # told to close it
+    real, failed = migrate._fold_db, {"n": 0}
+
+    def fold_once(*a, **k):
+        if not failed["n"]:
+            failed["n"] = 1
+            raise sqlite3.OperationalError("database is locked")
+        return real(*a, **k)
+    monkeypatch.setattr(migrate, "_fold_db", fold_once)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "still using" not in str(e.value)
+    assert not (r.lib / "jobs.jsonl").exists(), "the job list was brought in first"
+    start(r)
+    assert not (r.lib / "runs.db").exists()
+    assert runs.RunsStore(r.lib).get("run-C")["status"] == "planning"
+    journal = json.loads((r.lib / "_moonglade" / ".journal.json").read_text())
+    assert "held_back" not in journal
+
+
+# ---- the spend guard: whichever entry blocks longer --------------------------------------------
+
+def test_the_spend_guard_keeps_whichever_entry_blocks_longer(r):
+    """A retry PixAI took blocks that failed run for good; an unclear one only for a day. The
+    older install's guard starts empty after the move, so it offers Retry on a run the new home
+    already retried, and its later, unclear attempt must never replace the new home's "done".
+    The same for a Basic start: a later "started" (a minute) never replaces an "ambiguous"
+    (15 minutes) still standing."""
+    from moonglade.gallery import TrainGuard
+    _moved(r)
+    now = time.time()
+    rec = r.lib / "_moonglade" / "records" / "train_guard.json"
+    write(rec, {"basic": {"K": {"at": now - 300, "state": "ambiguous"}},
+                "retried": {"T": {"at": now - 3 * 86400, "state": "done", "new_id": "X"}},
+                "paid": {}})
+    _older_install_writes(r.lib / "train_guard.json", {
+        "basic": {"K": {"at": now - 120, "state": "started"}},
+        "retried": {"T": {"at": now - 2 * 86400, "state": "ambiguous", "new_id": ""}},
+        "paid": {}})
+    _bring_in(r)
+    tg = TrainGuard(rec)
+    assert tg.retry_state("T") == {"state": "done", "new_id": "X"}, "the retry stays refused"
+    assert tg.basic_blocked("K") is not None, "the unclear start still blocks"
+
+
+def test_the_guard_merge_by_when_each_block_ends():
+    now = 1_000_000.0
+    a = {"basic": {"K1": {"at": now, "state": "started"}},
+         "retried": {"T1": {"at": now, "state": "ambiguous", "new_id": ""},
+                     "T2": {"at": now - 90 * 86400, "state": "done", "new_id": "new-home"}},
+         "paid": {"submit:1": {"at": now - 600, "state": "ambiguous", "status": "a"}}}
+    b = {"basic": {"K1": {"at": now - 60, "state": "ambiguous"}},
+         "retried": {"T1": {"at": now - 30 * 86400, "state": "done", "new_id": "older"},
+                     "T2": {"at": now, "state": "done", "new_id": "older"}},
+         "paid": {"submit:1": {"at": now - 60, "state": "armed", "status": "b"}}}
+    got = migrate._merge_guard(a, b, False)
+    assert got["basic"]["K1"]["state"] == "ambiguous", "15 minutes beats a minute"
+    assert got["retried"]["T1"]["state"] == "done", "a done retry always wins"
+    assert got["retried"]["T2"]["new_id"] == "new-home", "both done: the new home's"
+    assert got["paid"]["submit:1"]["status"] == "b", "the confirm whose block ends later"
+    assert migrate._merge_guard(b, a, False)["retried"]["T2"]["new_id"] == "older"
 
 
 # ---- runs.db: the Runs and their spend reservations ---------------------------------------------
