@@ -13,8 +13,9 @@ the command line, the MCP server -- calls prepare(kind) once:
      moves a library's files, and only in the library this install serves: the command line,
      the MCP server and any run naming its own library never move anything, and refuse a
      library still in an older layout with a plain sentence. Every kind stops when an older
-     Moonglade is still writing the library's old homes. A library folder that is not there
-     yet is left alone: the server makes it, and the next start finds nothing to move.
+     Moonglade is still writing the library's old homes, and every kind refuses a library that
+     is the program's own folder (or holds a Moonglade program). A library folder that is not
+     there yet is left alone: the server makes it, and the next start finds nothing to move.
 
 The install lock is held through step 3 (locks are always taken install first, so two starts
 can never wait on each other): the library half also writes into local\\ (the library's logs,

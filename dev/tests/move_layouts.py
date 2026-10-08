@@ -4,10 +4,12 @@
 rig() pins every resolver the move uses to a folder of the test's own -- the app folder (the
 old place the machine files are brought from, and the folder config.json is in), local/
 inside it, a library beside it -- so nothing here can reach the checkout or a real install.
-The layouts are the shapes the move must accept (SPEC_3.20_REBUILD.md, S14): 3.17 (D:'s
-shape: the pack under its pre-v7 name, serve.txt with host and port, the library's records
-at its top), 3.19, and C:'s copy-first 3.20 state (the live copies in local\\ and
-_moonglade\\, the old ones left behind and recorded in MOVED.json).
+The layouts are the shapes the move must accept (SPEC_3.20_REBUILD.md, S14): 3.10 to 3.16
+(the same homes as 3.17, without what came later), 3.17 (D:'s shape: the pack under its
+pre-v7 name, serve.txt with host and port, the library's records at its top, and the dead
+Python leftovers an update's git pull keeps at the root), 3.19, and C:'s copy-first 3.20
+state (the live copies in local\\ and _moonglade\\, the old ones left behind and recorded in
+MOVED.json).
 
 No real file is opened: every config.json here is written by the test.
 """
@@ -114,9 +116,29 @@ def library_records(lib, base=None):
     make_db(base / "runs.db")
 
 
+CACHEDIR_TAG = ("Signature: 8a477f597d28d172789f06886806bc55\n"
+                "# This file is a cache directory tag created by pytest.\n")
+
+
+def dead_python_leftovers(app):
+    """What git leaves at an updated install's root (it keeps an ignored file when it deletes
+    the tracked ones beside it): 3.19's root modules' bytecode, pytest's cache, and tests\\ and
+    tools\\ holding only their __pycache__\\ after the dev\\ move; empty docs\\ and screenshots\\."""
+    write(app / "__pycache__" / "moonglade_backup.cpython-311.pyc", b"\x00BYTECODE")
+    write(app / "__pycache__" / "moonglade_gallery.cpython-311.pyc", b"\x00BYTECODE")
+    write(app / ".pytest_cache" / "CACHEDIR.TAG", CACHEDIR_TAG)
+    write(app / ".pytest_cache" / "README.md", "# pytest cache directory #\n")
+    write(app / ".pytest_cache" / "v" / "cache" / "lastfailed", "{}")
+    write(app / "tests" / "__pycache__" / "test_sync.cpython-311-pytest-8.3.pyc", b"\x00BC")
+    write(app / "tools" / "__pycache__" / "ci_local.cpython-311.pyc", b"\x00BC")
+    (app / "docs").mkdir()
+    (app / "screenshots" / "old").mkdir(parents=True)
+
+
 def layout_317(r, logins=("Nel",)):
     """D:'s shape: v3.17. The pack under its pre-v7 name, serve.txt with host and port and no
-    library, the library's records and reports at its top, the live shared toolbox presets."""
+    library, the library's records and reports at its top, the live shared toolbox presets,
+    and the dead Python leftovers the update's git pull keeps at the root."""
     write_config(r, AUTH_USERS=[{"username": u, "password_hash": "x"} for u in logins])
     write(r.app / "serve.txt", "--host 0.0.0.0 --port 5757\n")
     write(r.app / "moonglade.dat", b"PACK-317" * 64)
@@ -125,6 +147,7 @@ def layout_317(r, logins=("Nel",)):
     write(r.app / "mirror_session.json", {"jwt": "token-317"})
     write(r.app / "serve.log", "the launcher's log\n")
     write(r.app / "_container_cache" / "marks" / "mark_2.ico", b"ICO-2")
+    dead_python_leftovers(r.app)
     library_records(r.lib)
     write(r.lib / "organize_manifest.csv", "old_path,new_path,ts\na.png,2025-01/a.png,t\n")
     write(r.lib / "verify_report.csv", "status,quarantined_file,surviving_keeper\n")
@@ -136,6 +159,41 @@ def layout_317(r, logins=("Nel",)):
     write(r.lib / "branding.json", {"mark": "old"})
     write(r.lib / "gallery" / "cache" / "_badges" / "a1.png", b"BADGE")
     write(r.lib / "gallery" / "thumbs" / "m1.jpg", b"THUMB")
+    write(r.lib / "images" / "a_m1.png", b"PICTURE")
+    write(r.lib / "catalog.db", b"CATALOG")
+
+
+def layout_310(r, logins=("Nel",)):
+    """v3.10 to v3.16 (C): every file of theirs sits where 3.17 keeps it -- the pack under its
+    pre-v7 name (an older marker), serve.txt and the branding picks at the root, the records,
+    job lists, per-login stores, logs and Loom at the library's top. What they lack is simply
+    absent: no account_prefs\\ or account_state\\, train_guard.json, runs.db or Loom _submits\\
+    (3.15), no integrity reports or curation undo files (3.16), no integrity marks or reconcile
+    stamp (3.17), no badge masks. Read off the v3.10.0-v3.16.0 tags."""
+    write_config(r, AUTH_USERS=[{"username": u, "password_hash": "x"} for u in logins],
+                 PORT=5151)
+    write(r.app / "serve.txt", "--port 5757 --skip-thumbs\n")
+    write(r.app / "moonglade.dat", b"PACK-310" * 64)
+    write(r.app / "moonglade.dat.version", {"version": "3", "sha256": "x"})
+    write(r.app / "branding.json", {"mark": "mark_1", "anim": "classic"})
+    write(r.app / "mirror_session.json", {"jwt": "token-310"})
+    write(r.app / "serve.log", "the 3.10 launcher's log\n")
+    write(r.app / "_container_cache" / "marks" / "mark_1.ico", b"ICO-1")
+    write(r.lib / "achievements.json", {"seen": ["a1"], "earned_at": {"a1": "2026-08-30"}})
+    write(r.lib / "telemetry.json", {"counters": {"gens": 3}})
+    write(r.lib / "schedule.json", {"enabled": False})
+    write(r.lib / "jobs.jsonl", '{"id": "j310"}\n')
+    write(r.lib / "raw_tasks.jsonl", '{"t": 310}\n')
+    write(r.lib / "organize_manifest.csv", "old_path,new_path,ts\n")
+    write(r.lib / "audit_report.csv", "media_id,kind\n")
+    write(r.lib / "prompt_snippets" / (KEY_NEL + ".json"), ["a 3.10 snippet"])
+    write(r.lib / "view_presets" / (KEY_NEL + ".json"), {"mine": "?q=x"})
+    write(r.lib / "toolbox_presets.json", {"scene-a": {"label": "A", "prompt": "p"}})
+    write(r.lib / "logs" / "moonglade.log", "the 3.10 library log\n")
+    write(r.lib / "loom" / "store.json", {"storyboard:v2:project": {"title": "old board"}})
+    write(r.lib / "loom" / "kv" / KEY_NEL / "storyboard%3Av2%3Aproj%3Ab1.json", {"b": 1})
+    write(r.lib / "loom" / "_frames" / "f1.png", b"FRAME")
+    write(r.lib / "gallery" / "cache" / "_badges" / "a1.png", b"BADGE")
     write(r.lib / "images" / "a_m1.png", b"PICTURE")
     write(r.lib / "catalog.db", b"CATALOG")
 

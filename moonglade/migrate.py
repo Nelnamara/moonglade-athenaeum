@@ -27,13 +27,24 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     os.replace (only ever within one folder), mark the entry made, then delete the source.
     Nothing is ever renamed across folders or volumes. An interrupted move is finished by the
     next start: a leftover temp is this module's own and is discarded, and a destination the
-    journal says the move made is trusted.
-  * CONFLICTS. A copy in the new place wins only when the journal says the move made it (and
-    the old copy is still the very bytes it copied). Any other two-copy case: JSONL and other
-    append-only line files are merged (lines the other lacks are appended); the counters and
-    sets of telemetry.json, achievements.json and the spend guard are merged where the format
-    allows; anything else keeps the newer copy and parks the other in .snapshot\\parked\\, with
-    a log line. Nothing is deleted on a guess. (Two copies with the same bytes are one.)
+    journal says the move made is trusted. Every swap (_replace) waits out a refusal Windows
+    gives for a moment (a scan, the indexer, OneDrive), as every delete does.
+  * CONFLICTS, AT THE FIRST MOVE. A copy in the new place wins only when the journal says the
+    move made it (and the old copy is still the very bytes it copied). Any other two-copy case:
+    JSONL and other append-only line files are merged (lines the other lacks are appended); the
+    counters and sets of telemetry.json, achievements.json and the spend guard are merged where
+    the format allows; anything else keeps the newer copy and parks the other in
+    .snapshot\\parked\\, with a log line. Nothing is deleted on a guess. (Two copies with the
+    same bytes are one.)
+  * AFTER THE MOVE HAS FINISHED, THE NEW HOME ALWAYS WINS (_fold_in). An old-layout file
+    written later -- by an older install still on the library, or by a version gone back to --
+    holds only that install's additions (the move had emptied its homes), so it never replaces
+    the new home. What it adds is folded in where the format allows: lines it lacks; JSON
+    records by union, grow-only counters at their max, the spend guard from both; runs.db
+    (the Runs and their spend reservations) row by row by primary key, in one transaction,
+    after both files pass their integrity check; integrity_marks.json mark by mark, and a
+    login's stores and the Loom's boards key by key -- on a clash the new home's value stays
+    and the older one is logged. What can't be merged is set aside and named in the log.
   * THE SNAPSHOT (the owner's pick 4). Before a run moves, removes or parks anything, the small
     records it is about to touch are zipped into its half's .snapshot\\ (one zip per run that has
     work, so every later sweep is covered too) -- never pictures, catalog.db, the art pack, the
@@ -42,10 +53,25 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     starts -- a server that served for a while, or was stopped cleanly (count_clean_start,
     called by the server, never by prepare) -- and the first one after a run that moved
     anything does not count. At CLEAN_STARTS the app deletes .snapshot\\.
-  * AN OLDER INSTALL STILL LIVE. Once a library's move has finished, an old-layout file written
-    after it means an older Moonglade is still using that library: the start stops and says
-    so, rather than sweep its records out from under it. Started again with nothing more
-    written there (the person closed it), the move brings in what it wrote.
+  * AN OLDER INSTALL STILL LIVE. Before a library's first move, an older Moonglade still
+    serving it (on this PC or another) holds its old log open: Windows refuses to rename it, and
+    the start stops before any record moves (_old_log_in_use). Once a library's move has
+    finished, an old-layout file written after it means an older Moonglade is still using that
+    library: the start stops and says so, rather than sweep its records out from under it.
+    Started again with nothing more written there (the person closed it), the move brings in
+    what it wrote, and the new homes keep everything they hold.
+  * ONLY WHAT IS MOONGLADE'S, BY ITS CONTENT. An old home's name is not enough: a folder that
+    isn't a Moonglade library is left exactly as it is (_is_moonglade_library), and in one that
+    is, each old home passes its own check -- the logs only moonglade.log*, the Loom only its
+    own entries, the old branding only Moonglade's art -- and anything else is left where it
+    is, and named in the log. A library is never the program's own folder, nor one holding a
+    program (library_refusal): every start refuses one, and the settings merge and the
+    Control Panel never store one.
+  * LINKS. A junction or a symbolic link is never walked into, copied or deleted through, and
+    no tree removal follows one. A link found in an old home is moved as a link -- the link
+    entry itself renamed on the same drive (_bring_link) -- and one that can't be is left
+    where it is while the start stops with a plain sentence, before anything moves. A cache
+    that is a link goes as the link alone; a logs\\ or branding\\ that is one is left.
   * PER-LOGIN DATA. Every login key's files move into accounts\\<key>\\, whether or not this
     install's config.json lists the login (another install may share the library). A file
     named by a login's plain name (before the hashed keys) goes to that login's folder when
@@ -54,19 +80,26 @@ The rules (each one is a test in dev/tests/test_move_*.py):
   * CACHES ARE REBUILT, not copied: the badge thumbnails, feat masks and slot/earned banner
     renders are deleted, and made again in local\\cache\\ when next needed. The shortcut icons are
     not a cache: they go to local\\icons\\ before the old icon cache folders are deleted.
-  * UPGRADES from 3.17 onward, plus the copy-first 3.20 layout: 3.20's MOVED.json records
-    (`source_print`) tell its copies from files written since, then are deleted. The pre-v7
-    pack rename (moonglade.assets.migrate_legacy_name) and the shared-presets fold run here;
-    the legacy branding-root move and the Loom store.json split stay where they were
-    (moonglade.gallery), now acting on the new homes.
-  * THE SPEND RECORDS (train_guard.json, the Loom's _submits\\) move as files, through the same
-    safe move, while nothing runs: no server has started yet. No spend logic is here.
+  * THE APP'S OWN DEAD FILES GO: the old GUI's settings, an empty stray catalog.db, and the
+    Python leftovers git keeps at the root after an update (3.19's __pycache__\\, pytest's
+    .pytest_cache\\, tests\\ and tools\\ holding only bytecode, empty docs\\ and screenshots\\) --
+    never a folder holding a real file.
+  * UPGRADES from 3.10 onward, plus the copy-first 3.20 layout. 3.10 to 3.16 keep every file
+    where 3.17 does (read off the v3.10.0-v3.16.0 tags) and only lack what came later, so one
+    move serves them all. 3.20's MOVED.json records (`source_print`) tell its copies from files
+    written since, then are deleted. The pre-v7 pack rename (moonglade.assets.
+    migrate_legacy_name) and the shared-presets fold run here; the legacy branding-root move,
+    the banner renders 3.10 and 3.11 left in the art tree, and the Loom store.json split stay
+    where they were (moonglade.gallery), now acting on the new homes.
+  * THE SPEND RECORDS (train_guard.json, the Loom's _submits\\, runs.db's reservations) move as
+    files, through the same safe move, while nothing runs: no server has started yet. No spend
+    logic is here.
   * A FAILURE STOPS THE START (MoveStopped, with a plain sentence that says why and what to
-    do): a lock held past its wait, a file that cannot be copied or removed, an unreadable
-    config.json while the settings are still to merge. Carrying on would read empty new homes.
-    A source the move has copied and verified is made writable before it is deleted, and a
-    refusal is tried again a few times, so a read-only file or a scanner's moment never stops
-    every start.
+    do): a lock held past its wait, a dead start's lock that can't be removed, a file that
+    cannot be copied or removed, a link that can't move as a link, an unreadable config.json
+    while the settings are still to merge. Carrying on would read empty new homes. A source the
+    move has copied and verified is made writable before it is deleted, and a refusal is tried
+    again a few times, so a read-only file or a scanner's moment never stops every start.
 """
 import calendar
 import errno
@@ -96,9 +129,16 @@ HEARTBEAT_S = 5.0            # a held lock is touched at least this often, even 
 CLEAN_STARTS = 5             # clean server starts after which .snapshot\ is deleted (pick 4)
 MOVING_SUFFIX = ".moving"    # the temp a copy is made into, beside its destination
 PARKED_DIRNAME = "parked"
-REMOVE_TRIES = 5             # a delete Windows refuses is tried this many times...
+REMOVE_TRIES = 5             # a delete (or a swap) Windows refuses is tried this many times...
 REMOVE_BACKOFF_S = 0.1       # ...pausing 0.1, 0.2, 0.4 and 0.8 s between tries
+# The Windows refusals a swap is tried again for: access denied (a scanner or a sync tool
+# opening the file just written), a sharing violation, a lock violation.
+_REPLACE_RETRY_WINERRORS = (5, 32, 33)
 WRITTEN_SINCE_SLACK_S = 2.0  # a file's time this close to the move's own end is the move's
+# The reparse tags of an entry that points somewhere else: a symbolic link (to a file or a
+# folder) and a junction (a mount point). os.path.islink() misses a junction, and os.walk()
+# and Path.is_dir() go into one; the move never does (_is_link).
+_LINK_TAGS = (0xA000000C, 0xA0000003)
 # The kinds of start that may move a library's files (X1): the launcher and the web server, in
 # the library this install serves. The command line and the MCP server never do.
 MOVING_KINDS = ("launcher", "server")
@@ -116,6 +156,16 @@ CONFIG_MOVED_KEYS = ("LIBRARY_DIR", "HOST", "PORT", "BONJOUR_ENABLED", "BONJOUR_
 # The app's own dead files at the install root (S9): the desktop GUI's settings (the GUI went
 # in v2.1.0). A 0-byte catalog.db there is dead too (_install_half), never a real catalog.
 DEAD_ROOT_FILES = ("pixai_gui_settings.json",)
+# The install root's dead Python leftovers. An update is a git pull, and git keeps an ignored
+# file when it deletes the tracked ones beside it: 3.19's root modules leave their bytecode in
+# __pycache__\, pytest its .pytest_cache\, and the suite and tools (in dev\ since 3.20) leave
+# tests\ and tools\ holding only __pycache__\; docs\ and screenshots\ are older shells. Each
+# goes only while it holds nothing but bytecode, pytest's cache, or nothing (_only_dead_python):
+# a folder holding a real file, or a link, is never removed.
+DEAD_ROOT_FOLDERS = ("__pycache__", ".pytest_cache", "tests", "tools", "docs", "screenshots")
+# The first bytes of the CACHEDIR.TAG pytest writes into its cache folder (the cache-directory
+# tagging standard's own signature).
+_CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 # The library's dead files: the legacy catalog export nothing has read since 2026-08-24 (the
 # gallery's "Download catalog (CSV)" makes a fresh one on demand).
 DEAD_LIBRARY_FILES = ("catalog.csv",)
@@ -431,7 +481,9 @@ class FolderLock:
     is not running (or the number now belongs to a process started after the lock was made);
     a lock another PC made (a library on a network drive) counts as alive until it has gone
     LOCK_STALE_S untouched. release() removes only a lock that still holds this one's own
-    line. A folder this user cannot write in stops the start and says so."""
+    line. A folder this user cannot write in stops the start and says so, and so does a dead
+    start's lock this user can't delete -- after the same wait, pausing between tries, never
+    spinning on it."""
 
     def __init__(self, folder, what):
         self.path = Path(folder) / _paths.LOCK_NAME
@@ -442,16 +494,27 @@ class FolderLock:
     def acquire(self, wait=None):
         wait = LOCK_WAIT_S if wait is None else wait
         deadline = time.monotonic() + wait
+        stuck = None                             # why a dead holder's lock can't be removed
         while True:
             try:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 try:
-                    if self._stale():
-                        os.remove(self.path)
-                        continue
+                    stale = self._stale()
                 except OSError:
-                    continue                     # it went while we looked: try again
+                    stale = False                # it went while we looked: try again
+                if stale:
+                    try:
+                        os.remove(self.path)
+                        stuck = None
+                        continue
+                    except FileNotFoundError:
+                        continue                 # another start took it over first
+                    except OSError as e:
+                        # A dead start's lock this user can't delete (another account's
+                        # file, a share without delete rights): wait like any other holder,
+                        # then say so -- never spin on it.
+                        stuck = e
             except PermissionError as e:
                 # Windows answers the same for a holder's lock being deleted (a moment) and a
                 # folder this user cannot write in (for good): only a real file tells them apart.
@@ -473,6 +536,12 @@ class FolderLock:
                 _HELD.append(self)
                 return self
             if time.monotonic() > deadline:
+                if stuck is not None:
+                    raise MoveStopped(
+                        "Moonglade can't remove the old lock %s (%s). A start that stopped "
+                        "part-way left it, and it only marks that start, which is no longer "
+                        "running: delete it, then start Moonglade again." % (
+                            self.path, _reason(stuck)))
                 raise MoveStopped(
                     "Another Moonglade start is still tidying %s. Wait a minute, then start "
                     "Moonglade again." % self.what)
@@ -596,8 +665,24 @@ def _fsync_dir(d):
         pass
 
 
+def _replace(src, dst):
+    """os.replace(src, dst) -- every swap the move makes goes through here (the journal, a
+    moved, merged or parked file, the snapshot's zip). A refusal Windows gives for a moment
+    (winerror 5, 32 or 33: a virus scan, the search indexer or OneDrive opening the file just
+    written) is tried again REMOVE_TRIES times with a growing pause. Raises the last OSError."""
+    for attempt in range(REMOVE_TRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            if getattr(e, "winerror", None) not in _REPLACE_RETRY_WINERRORS \
+                    or attempt + 1 >= REMOVE_TRIES:
+                raise
+            time.sleep(REMOVE_BACKOFF_S * (2 ** attempt))
+
+
 def _write_bytes(p, data):
-    """Write `data` to `p` whole: a temp beside it, flushed, then os.replace."""
+    """Write `data` to `p` whole: a temp beside it, flushed, then swapped in (_replace)."""
     p = Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + MOVING_SUFFIX)
@@ -606,16 +691,104 @@ def _write_bytes(p, data):
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, p)
+        _replace(tmp, p)
         _fsync_dir(p.parent)
     finally:
         _discard(tmp)
 
 
-def _discard(p):
+# ---- links: a junction or a symbolic link is never walked into, copied or deleted through ----
+def _is_link(p):
+    """Is `p` an entry that points somewhere else -- a symbolic link (to a file or a folder)
+    or a Windows junction? os.path.islink() misses a junction, and os.walk(), Path.is_dir()
+    and a plain copy all go through one. The move never does: a link is moved as a link
+    (renamed, _bring_link), and a delete removes only the link itself (_unlink_link)."""
     try:
-        if p.is_dir():
-            shutil.rmtree(p)
+        st = os.lstat(p)
+    except (OSError, ValueError):
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return getattr(st, "st_reparse_tag", 0) in _LINK_TAGS
+
+
+def _link_target(p):
+    """Where the link `p` points, for a sentence; "" when it can't be read."""
+    try:
+        return os.readlink(p)
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def _unlink_link(p):
+    """Remove the link entry `p` itself -- never what it points at. Raises OSError."""
+    try:
+        os.unlink(p)                             # a file link; POSIX: any link
+    except (IsADirectoryError, PermissionError):
+        os.rmdir(p)                              # Windows: a folder link or a junction
+
+
+def _scan(folder):
+    """(files, links) under `folder`, each sorted: every file, and every link found (_is_link),
+    which is never walked into. A `folder` that is itself a link gives ([], [folder])."""
+    folder = Path(folder)
+    if _is_link(folder):
+        return [], [folder]
+    if not folder.is_dir():
+        return [], []
+    files, links, stack = [], [], [folder]
+    while stack:
+        d = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            p = Path(e.path)
+            if _is_link(p):
+                links.append(p)
+                continue
+            try:
+                is_dir = e.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+            if is_dir:
+                stack.append(p)
+            else:
+                files.append(p)
+    return sorted(files), sorted(links)
+
+
+def _via_link(path, root):
+    """Is any folder from `root` (not included) down to `path` (included) a link? A path
+    that goes through one leads into what the link points at, which the move never touches."""
+    path, root = Path(path), Path(root)
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return _is_link(path)
+    p = root
+    for part in rel.parts:
+        p = p / part
+        if _is_link(p):
+            return True
+    return False
+
+
+def _empty_tree(folder):
+    """True when `folder` holds no file and no link at any depth (only empty folders)."""
+    files, links = _scan(folder)
+    return not files and not links
+
+
+def _discard(p):
+    """Remove one of the move's own temps (or a folder of them). Never raises; a link is
+    removed as a link."""
+    try:
+        if _is_link(p):
+            _unlink_link(p)
+        elif p.is_dir():
+            _rmtree_whole(p)
         elif p.exists():
             os.remove(p)
     except OSError:
@@ -633,28 +806,37 @@ def _make_writable(p):
 
 
 def _rmtree_whole(folder):
-    """Delete `folder` and everything in it. A file that kept a read-only attribute when it was
+    """Delete `folder` and everything in it, never following a link: a junction or symbolic
+    link inside (or `folder` itself, when it is one) is removed as the link entry alone, and
+    what it points at is never touched. A file that kept a read-only attribute when it was
     copied in (the outside-references fixer copies a shortcut with shutil.copy2, a library
     restored from read-only media) is made writable first: Windows refuses to delete a
     read-only file, and the folder would otherwise outlive every attempt. Raises OSError."""
-    for dirpath, _dirs, files in os.walk(folder):
-        for fn in files:
-            _make_writable(os.path.join(dirpath, fn))
+    files, links = _scan(folder)
+    for link in links:
+        _unlink_link(link)
+    if _is_link(folder) or not Path(folder).exists():
+        return
+    for p in files:
+        _make_writable(p)
     shutil.rmtree(folder)
 
 
 def _remove(p):
     """Delete a file or folder this module has accounted for: a source already copied and
-    verified, a cache, a leftover of the app's own. A read-only attribute is cleared first,
-    and a refusal is tried again REMOVE_TRIES times with a growing pause (a scanner, an
-    indexer or a sync tool can hold a file for a moment). Raises _Failed, carrying the cause."""
+    verified, a cache, a leftover of the app's own. A link is removed as the link entry alone,
+    never what it points at. A read-only attribute is cleared first, and a refusal is tried
+    again REMOVE_TRIES times with a growing pause (a scanner, an indexer or a sync tool can
+    hold a file for a moment). Raises _Failed, carrying the cause."""
     p = Path(p)
     last = None
     for attempt in range(REMOVE_TRIES):
         try:
-            if p.is_dir() and not p.is_symlink():
+            if _is_link(p):
+                _unlink_link(p)
+            elif p.is_dir():
                 _rmtree_whole(p)
-            elif p.exists() or p.is_symlink():
+            elif p.exists():
                 _make_writable(p)
                 os.remove(p)
             return
@@ -759,16 +941,15 @@ def _transient_320(name):
 
 def _fingerprint_320(p):
     p = Path(p)
-    if p.is_dir():
+    if p.is_dir() and not _is_link(p):
         files = newest = size = 0
-        for dirpath, _dirs, filenames in os.walk(p):
-            for fn in filenames:
-                if _transient_320(fn):
-                    continue
-                st = (Path(dirpath) / fn).stat()
-                files += 1
-                size += st.st_size
-                newest = max(newest, st.st_mtime_ns)
+        for f in _scan(p)[0]:                    # never through a link
+            if _transient_320(f.name):
+                continue
+            st = f.stat()
+            files += 1
+            size += st.st_size
+            newest = max(newest, st.st_mtime_ns)
         return {"files": files, "newest_mtime_ns": newest, "size": size}
     st = p.stat()
     return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
@@ -813,6 +994,10 @@ class _Half:
         self.journal = Journal(self.folder)
         self.parked = 0
         self.snapshotted = False                 # this run's zip is made (_make_snapshot)
+        # The library's move had finished before this run began: an old-layout copy now is
+        # one written since, and the new home always wins (_fold_in). The first move (and the
+        # install half) keep their own rules.
+        self.settled = False
 
     def rel(self, p):
         p = Path(p)
@@ -840,6 +1025,14 @@ class _Half:
             if not isinstance(entry, dict) or entry.get("state") != "renaming":
                 continue
             dest, src = self.path_of(key), self.path_of(entry.get("src") or "")
+            if entry.get("how") == "link":       # a link renamed as itself (_bring_link)
+                if os.path.lexists(dest) and not os.path.lexists(src):
+                    entry["state"] = "made"
+                    changed = True
+                elif os.path.lexists(src) and not os.path.lexists(dest):
+                    del self.journal.items[key]
+                    changed = True
+                continue
             if dest.is_file() and not src.exists():
                 entry.update(state="made", how="renamed")
                 changed = True
@@ -947,25 +1140,203 @@ def _merged_bytes(src, dest, kind):
     return None
 
 
+# ---- after the library's move has finished: the new home always wins ----------------------------
+def _settled_kind(kind, dest):
+    """How an old-layout copy written after the library's move finished (by an older install
+    still on the library, or a version gone back to) is folded into the new home. The kinds
+    the first move already merges keep their merge (lines, logs, the JSON records, the spend
+    guard); a database is merged row by row; integrity_marks.json mark by mark; any other
+    JSON store (a login's prefs, state, snippets, presets or views, a Loom board, the
+    schedule) key by key. A report, a curation undo file or anything else is "park": it
+    can't be merged, so it is set aside and named."""
+    if kind != "file":
+        return kind
+    name = Path(dest).name
+    if name == "integrity_marks.json":
+        return "json:marks"
+    if name in _REPORT_NAMES or name.startswith(CURATION_SNAPSHOT_PREFIX):
+        return "park"
+    if Path(dest).suffix.lower() == ".json":
+        return "json:keys"
+    return "park"
+
+
+def _union_new_wins(a, b):
+    """`a` (the new home's) kept whole, with what only `b` (the older copy) holds added: a
+    dict by key, a list as a union in order. Returns (merged, clashes) -- clashes is
+    [(key, b's value)] for each key both hold with different values, where `a`'s value is
+    kept -- or (None, []) when the two can't be merged (not the same kind of thing)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out, clashes = dict(a), []
+        for k, v in b.items():
+            if k not in a:
+                out[k] = v
+            elif a[k] != v:
+                clashes.append((k, v))
+        return out, clashes
+    if isinstance(a, list) and isinstance(b, list):
+        return list(a) + [x for x in b if x not in a], []
+    return None, []
+
+
+def _union_marks(a, b):
+    """integrity_marks.json ({"format", "marks": {media id: {mark, at}}}): every media id's
+    mark from both copies, the new home's where both hold one (a clash)."""
+    if not isinstance(a, dict) or not isinstance(b, dict) \
+            or not isinstance(a.get("marks"), dict) or not isinstance(b.get("marks"), dict):
+        return None, []
+    marks, clashes = _union_new_wins(a["marks"], b["marks"])
+    out = dict(a)
+    out["marks"] = marks
+    for k, v in b.items():
+        out.setdefault(k, v)
+    return out, clashes
+
+
+def _settled_bytes(src, dest, how):
+    """(the new home's content with the older copy folded in, as bytes; clashes), or
+    (None, []) when the two can't be merged. Raises ValueError or UnicodeDecodeError for a copy
+    that won't parse, OSError for one that won't read."""
+    if how == "log":
+        return _merged_log(src, dest), []
+    if how == "lines":
+        return _merged_bytes(src, dest, "lines"), []
+    if not how.startswith("json:"):
+        return None, []
+    a = json.loads(dest.read_text(encoding="utf-8"))
+    b = json.loads(src.read_text(encoding="utf-8"))
+    clashes = []
+    if how == "json:keys":
+        doc, clashes = _union_new_wins(a, b)
+    elif how == "json:marks":
+        doc, clashes = _union_marks(a, b)
+    elif not isinstance(a, dict) or not isinstance(b, dict):
+        doc = None
+    elif how == "json:achievements":
+        doc = _merge_achievements(a, b, b_newer=False)       # the new home's skin
+    elif how == "json:guard":
+        doc = _merge_guard(a, b, False)                      # more guarding, never less
+    else:
+        doc = _merge_generic(a, b)                           # grow-only counters at their max
+    if doc is None:
+        return None, []
+    if doc == a:
+        return dest.read_bytes(), clashes                    # nothing new: the bytes stay
+    return (json.dumps(doc, indent=1) + "\n").encode("utf-8"), clashes
+
+
+def _clash_words(clashes, most=20, width=300):
+    """The older copy's values the new home's won over, for the log: key=value, ..."""
+    def short(v):
+        s = json.dumps(v, ensure_ascii=False, sort_keys=True)
+        return s if len(s) <= width else s[:width] + "..."
+    parts = ["%s=%s" % (k, short(v)) for k, v in clashes[:most]]
+    more = len(clashes) - most
+    return ", ".join(parts) + (" and %d more" % more if more > 0 else "")
+
+
+def _db_tables(con, schema):
+    return [r[0] for r in con.execute(
+        "SELECT name FROM %s.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%%' "
+        "ORDER BY name" % schema)]
+
+
+def _qi(name):
+    return '"%s"' % str(name).replace('"', '""')
+
+
+def _fold_db_rows(target, src):
+    """Insert into the SQLite file `target` every row of `src` it doesn't hold yet, table by
+    table, in one transaction: a row is "already there" when a row with the same primary key
+    is (the new home's row wins), or -- for a table with no primary key -- the very same row.
+    A table only `src` has is made first. Returns {table: rows added}. Raises sqlite3.Error
+    (the transaction is rolled back: `target` is unchanged)."""
+    con = sqlite3.connect(str(target), isolation_level=None)
+    try:
+        con.execute("ATTACH DATABASE ? AS old", (str(src),))
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                added = {}
+                mine = set(_db_tables(con, "main"))
+                for name in _db_tables(con, "old"):
+                    q = _qi(name)
+                    if name not in mine:
+                        sql = con.execute("SELECT sql FROM old.sqlite_master WHERE type='table' "
+                                          "AND name=?", (name,)).fetchone()[0]
+                        con.execute(sql)
+                    info = con.execute("PRAGMA main.table_info(%s)" % q).fetchall()
+                    old_cols = {r[1] for r in con.execute("PRAGMA old.table_info(%s)" % q)}
+                    cols = [r[1] for r in info if r[1] in old_cols]
+                    if not cols:
+                        continue
+                    pk = [r[1] for r in sorted(info, key=lambda r: r[5]) if r[5] > 0]
+                    names = ", ".join(_qi(c) for c in cols)
+                    before = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0]
+                    if pk and all(c in old_cols for c in pk):
+                        same = " AND ".join("m.%s IS o.%s" % (_qi(c), _qi(c)) for c in pk)
+                        con.execute(
+                            "INSERT INTO main.%s (%s) SELECT %s FROM old.%s AS o WHERE NOT "
+                            "EXISTS (SELECT 1 FROM main.%s AS m WHERE %s)" % (
+                                q, names, ", ".join("o." + _qi(c) for c in cols), q, q, same))
+                    else:
+                        con.execute("INSERT INTO main.%s (%s) SELECT %s FROM old.%s EXCEPT "
+                                    "SELECT %s FROM main.%s" % (q, names, names, q, names, q))
+                    after = con.execute("SELECT COUNT(*) FROM main.%s" % q).fetchone()[0]
+                    added[name] = after - before
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+        finally:
+            con.execute("DETACH DATABASE old")
+    finally:
+        con.close()
+    return added
+
+
 # ---- the safe move ------------------------------------------------------------------------------
+def _link_stop(src, dest, why):
+    """The sentence for a link the move can't bring as a link (MoveStopped)."""
+    target = _link_target(src)
+    where = (" into its new home %s" % dest) if dest is not None else ""
+    return MoveStopped(
+        "%s is a link (a junction or a symbolic link)%s. Moonglade moves a link only as a "
+        "link, by renaming it%s on the same drive, and %s. Nothing it points at was touched. "
+        "Move the link yourself, or put the real folder or file in its place, then start "
+        "Moonglade again." % (src, (" to " + target) if target else "", where, why))
+
+
 def _park(path, half, said=True):
     """Move `path` aside into the half's .snapshot\\parked\\ (copied, verified, then removed:
-    the park may be on another volume). Kept until the snapshot goes. `said`: log the
+    the park may be on another volume). Kept until the snapshot goes. A link is parked as a
+    link: renamed there, never copied (what it points at is never touched). `said`: log the
     two-copies line (a caller with its own words passes False)."""
     path = Path(path)
     base = half.snapshot_dir / PARKED_DIRNAME / half.rel(path).replace(":", "_")
     target, n = base, 1
-    while target.exists():
+    while os.path.lexists(target):
         n += 1
         target = base.with_name("%s.%d" % (base.name, n))
     target.parent.mkdir(parents=True, exist_ok=True)
+    if _is_link(path):
+        try:
+            os.rename(path, target)
+        except OSError as e:
+            raise _link_stop(path, None, "it couldn't be set aside (%s)" % _reason(e))
+        half.parked += 1
+        half.report.parked += 1
+        half.journal.worked()
+        half.report.item("Set aside the link %s in %s (what it points at was not touched).",
+                         half.rel(path), half.rel(target))
+        return target
     tmp = target.with_name(target.name + MOVING_SUFFIX)
     src_hash = _sha256(path)
     _copy_into(path, tmp, "file")
     if _sha256(tmp) != src_hash:
         _discard(tmp)
         raise _Failed("couldn't set %s aside (the copy did not match)" % path)
-    os.replace(tmp, target)
+    _replace(tmp, target)
     _remove(path)
     half.parked += 1
     half.report.parked += 1
@@ -976,6 +1347,17 @@ def _park(path, half, said=True):
     else:
         half.report.item("Set aside %s in %s.", half.rel(path), half.rel(target))
     return target
+
+
+def _swap_in(tmp, dest, half, key, src_hash, merged_sha):
+    """Swap the verified temp `tmp` in over `dest`, journalled first (verified, then made)."""
+    half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": merged_sha,
+                               "state": "verified", "time": _now(), "merged": True}
+    half.journal.save()
+    _replace(tmp, dest)
+    _fsync_dir(dest.parent)
+    half.journal.items[key]["state"] = "made"
+    half.journal.save()
 
 
 def _replace_with(dest, data, half, key, src_hash):
@@ -989,14 +1371,78 @@ def _replace_with(dest, data, half, key, src_hash):
     if tmp.read_bytes() != data:
         _discard(tmp)
         raise _Failed("couldn't write the merged %s" % dest)
-    half.journal.items[key] = {"src": None, "src_sha256": src_hash,
-                               "sha256": hashlib.sha256(data).hexdigest(),
-                               "state": "verified", "time": _now(), "merged": True}
-    half.journal.save()
-    os.replace(tmp, dest)
-    _fsync_dir(dest.parent)
-    half.journal.items[key]["state"] = "made"
-    half.journal.save()
+    _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest())
+
+
+def _fold_db(src, dest, half, key, src_hash):
+    """runs.db written after the move (the Runs and their spend reservations): both files pass
+    PRAGMA integrity_check first, then a copy of the new home (through SQLite's backup API)
+    takes every row of the older copy it doesn't hold yet (_fold_db_rows, one transaction),
+    is checked again (integrity, and every table's count is the new home's plus what was
+    added), and is swapped in. Returns {table: rows added}, or None when either file fails
+    its integrity check (it can't be merged). Raises sqlite3.Error or OSError."""
+    have, theirs = _db_counts(dest), _db_counts(src)
+    if have is None or theirs is None:
+        return None
+    tmp = dest.with_name(dest.name + MOVING_SUFFIX)
+    try:
+        _copy_into(dest, tmp, "db")
+        added = _fold_db_rows(tmp, src)
+        got = _db_counts(tmp)
+        want = {t: n for t, n in have.items() if not t.startswith("sqlite_")}
+        for t, n in added.items():
+            want[t] = want.get(t, 0) + n
+        if got is None or any(got.get(t) != n for t, n in want.items()):
+            raise _Failed("the merged %s did not check out" % dest)
+        _fsync_path(tmp)
+        _swap_in(tmp, dest, half, key, src_hash, _sha256(tmp))
+    finally:
+        _discard(tmp)
+    return added
+
+
+def _fold_in(src, dest, kind, half, key, src_hash):
+    """The library's move had finished, and `src` -- an old home -- was written since: by an
+    older install still on the library, or by a version gone back to. The new home always
+    wins: it is never replaced, and what the older copy adds is folded into it where the
+    format allows (_settled_kind): lines it lacks, JSON keys and marks it lacks (on a clash
+    the new home's value stays, and the older value is logged), grow-only counters at their
+    max, guards from both, database rows by primary key. What can't be merged is set aside
+    and named in the log. Returns "merged" or "parked"."""
+    how = _settled_kind(kind, dest)
+    item, rel = half.report.item, half.rel
+    why = "it is not a kind of file that can be merged"
+    try:
+        if how == "db":
+            added = _fold_db(src, dest, half, key, src_hash)
+            if added is not None:
+                _remove(src)
+                item("Merged %s into %s: the new home kept every row it had, and the older "
+                     "copy added %s.", rel(src), rel(dest),
+                     ", ".join("%d to %s" % (n, t) for t, n in sorted(added.items()))
+                     or "nothing")
+                return "merged"
+            why = "one of the two databases fails its own integrity check"
+        elif how != "park":
+            data, clashes = _settled_bytes(src, dest, how)
+            if data is not None:
+                _replace_with(dest, data, half, key, src_hash)
+                _remove(src)
+                if clashes:
+                    item("In %s the new home's value was kept for %d key(s); the older copy "
+                         "at %s said: %s.", rel(dest), len(clashes), rel(src),
+                         _clash_words(clashes))
+                item("Merged %s into %s (the new home kept what it had).", rel(src), rel(dest))
+                return "merged"
+            why = "the two copies hold different kinds of things"
+    except sqlite3.OperationalError:
+        raise                                            # busy or unreadable: stop, try again
+    except (ValueError, UnicodeDecodeError, sqlite3.DatabaseError):
+        why = "one of the two copies can't be read as what it should be"
+    target = _park(src, half, said=False)
+    half.report.warn("Kept %s, the new home, and set aside %s (written there after the move) "
+                     "in %s: %s.", rel(dest), rel(src), rel(target), why)
+    return "parked"
 
 
 def _merged_log(src, dest):
@@ -1050,6 +1496,10 @@ def _two_copies(src, dest, kind, half, vouched):
         _remove(src)
         item("Removed an older Mirror sign-in at %s.", half.rel(src))
         return "removed"
+    if half.settled:
+        # Written after the library's move finished: the new home always wins (A).
+        return _fold_in(src, dest, kind, half, key, src_hash)
+    # The first move.
     data = None
     try:
         if kind == "log":
@@ -1085,13 +1535,48 @@ def _rename_into(src, dest):
         pass                                 # the same file twice: the next start removes it
 
 
+def _bring_link(src, dest, half):
+    """Bring the link `src` (a junction, or a symbolic link to a file or a folder) to `dest`
+    as a link: the link entry itself is renamed, on the same drive, journalled first. What it
+    points at is never copied, walked or deleted. A link that can't be renamed there (that
+    place is taken, or it is on another drive) is left where it is, and the start stops with
+    a plain sentence (MoveStopped). Returns "moved", or None when nothing is at `src`."""
+    src, dest = Path(src), Path(dest)
+    if not os.path.lexists(src) or _same(src, dest):
+        return None
+    half.report.worked[half.name] = True
+    if os.path.lexists(dest):
+        raise _link_stop(src, dest, "that place is already taken")
+    key = half.rel(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    half.journal.items[key] = {"src": half.rel(src), "state": "renaming", "how": "link",
+                               "time": _now()}
+    half.journal.save()
+    try:
+        os.rename(src, dest)
+    except OSError as e:
+        half.journal.items.pop(key, None)
+        half.journal.save()
+        raise _link_stop(src, dest, "it couldn't be renamed there (%s)" % _reason(e))
+    _fsync_dir(dest.parent)
+    half.journal.items[key]["state"] = "made"
+    half.journal.save()
+    half.tick()
+    half.report.item("Moved the link %s to %s (what it points at was not touched).",
+                     half.rel(src), half.rel(dest))
+    return "moved"
+
+
 def _bring(src, dest, kind, half, vouched=False):
     """Bring the file `src` to `dest` (see the module's rules). On one volume that is one
     rename (the art pack, a Loom export: nothing is copied); across volumes, or for a
     database, the safe copy: temp, verify, swap, then delete the source. Either way the
-    journal says so first. Returns "moved", "removed", "merged", "parked", or None when there
-    was nothing at `src`. Raises _Failed."""
+    journal says so first. A link is brought as a link (_bring_link). Returns "moved",
+    "removed", "merged", "parked", or None when there was nothing at `src`. Raises _Failed
+    (MoveStopped for a link that can't be moved)."""
     src, dest = Path(src), Path(dest)
+    if kind == "link" or _is_link(src):
+        return _bring_link(src, dest, half)
     tmp = dest.with_name(dest.name + MOVING_SUFFIX)
     _discard(tmp)                            # a crashed run's own temp
     try:
@@ -1126,7 +1611,7 @@ def _bring(src, dest, kind, half, vouched=False):
                                    "sha256": _sha256(tmp), "state": "verified",
                                    "time": _now()}
         half.journal.save()
-        os.replace(tmp, dest)
+        _replace(tmp, dest)
         _fsync_dir(dest.parent)
         half.journal.items[key]["state"] = "made"
         half.journal.save()
@@ -1167,7 +1652,7 @@ def _copy_new(src, dest):
         _copy_into(src, tmp, "file")
         if _sha256(tmp) != h:
             raise _Failed("the copy of %s did not match it" % src)
-        os.replace(tmp, dest)
+        _replace(tmp, dest)
     except OSError as e:
         raise _Failed("couldn't copy %s (%s)" % (src, _reason(e)), e)
     finally:
@@ -1175,27 +1660,73 @@ def _copy_new(src, dest):
 
 
 def _files_under(folder):
-    """Every file under `folder`, sorted, transients included (the caller decides)."""
-    folder = Path(folder)
-    if not folder.is_dir():
-        return []
-    out = []
-    for dirpath, _dirs, files in os.walk(folder):
-        for fn in files:
-            out.append(Path(dirpath) / fn)
-    return sorted(out)
+    """Every file under `folder`, sorted, transients included (the caller decides). A link is
+    never walked into, and is not a file here (_scan gives the links)."""
+    return _scan(folder)[0]
 
 
 def _prune_empty(folder):
-    """Remove `folder` and the folders under it that hold nothing at all."""
+    """Remove `folder` and the folders under it that hold nothing at all. A link is never
+    walked into or removed, so a folder holding one stays."""
     folder = Path(folder)
-    if not folder.is_dir():
+    if _is_link(folder) or not folder.is_dir():
         return
-    for dirpath, _dirs, _files in sorted(os.walk(folder), key=lambda t: -len(t[0])):
+    dirs, stack = [], [folder]
+    while stack:
+        d = stack.pop()
+        dirs.append(d)
         try:
-            os.rmdir(dirpath)
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            p = Path(e.path)
+            try:
+                if not _is_link(p) and e.is_dir(follow_symlinks=False):
+                    stack.append(p)
+            except OSError:
+                continue
+    for d in sorted(dirs, key=lambda p: -len(str(p))):
+        try:
+            os.rmdir(d)
         except OSError:
             pass
+
+
+def _is_pytest_cache(folder):
+    """A folder pytest made for its cache: it carries pytest's CACHEDIR.TAG."""
+    try:
+        with open(Path(folder) / "CACHEDIR.TAG", "rb") as f:
+            return f.read(len(_CACHEDIR_SIGNATURE)) == _CACHEDIR_SIGNATURE
+    except OSError:
+        return False
+
+
+def _only_dead_python(folder):
+    """True when `folder` is a real folder (not a link) holding nothing but what Python and
+    pytest made -- compiled bytecode (.pyc) in __pycache__ folders, and pytest's own cache
+    folders -- or nothing at all. False the moment it holds a link or any other file: a folder
+    holding a real file is never the app's to remove."""
+    folder = Path(folder)
+    if _is_link(folder) or not folder.is_dir():
+        return False
+    files, links = _scan(folder)
+    if links:
+        return False
+    for f in files:
+        if f.parent.name == "__pycache__" and f.suffix.lower() in (".pyc", ".pyo"):
+            continue
+        p, ok = f.parent, False
+        while True:
+            if p.name == ".pytest_cache" and _is_pytest_cache(p):
+                ok = True
+                break
+            if p == folder or p == p.parent:
+                break
+            p = p.parent
+        if not ok:
+            return False
+    return True
 
 
 # ---- the snapshot -------------------------------------------------------------------------------
@@ -1222,8 +1753,8 @@ def _make_snapshot(half, members, extra=None):
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             for path, arc in members:
                 path = Path(path)
-                if not path.is_file():
-                    continue
+                if _is_link(path) or not path.is_file():
+                    continue                     # never what a link points at
                 if path.suffix == ".db":
                     dbtmp = snap / (path.name + ".snapshot-copy")
                     try:
@@ -1239,7 +1770,7 @@ def _make_snapshot(half, members, extra=None):
                 count += 1
         with open(tmp, "rb+") as f:
             os.fsync(f.fileno())
-        os.replace(tmp, target)
+        _replace(tmp, target)
     except (OSError, zipfile.BadZipFile, sqlite3.Error) as e:
         _discard(tmp)
         raise _Failed("couldn't make the safety snapshot in %s (%s)" % (snap, _reason(e)),
@@ -1392,21 +1923,29 @@ def _plan_merge(sources, cfg, current, resume=None):
     def note(msg, *args):
         lines.append((logging.INFO, msg % args if args else msg))
 
-    def _port_ok(v):
+    def _port_bad(v):
+        """Why `v` can't be the port, or None."""
         try:
-            return 1 <= int(v) <= 65535
+            return None if 1 <= int(v) <= 65535 else "it isn't a port number"
         except (TypeError, ValueError):
-            return False
+            return "it isn't a port number"
+
+    def _library_bad(v):
+        """Why `v` can't be the library, or None: never the program's own folder (#11)."""
+        p = Path(str(v)).expanduser()
+        if not p.is_absolute():
+            p = _paths.library_anchor() / p
+        return library_refusal(p)
 
     contests = (
         (_settings.LIBRARY_DIR, "library folder",
          [("serve.txt --out", flags["out"]),
           ("config.json LIBRARY_DIR", str(cfg.get("LIBRARY_DIR") or "").strip() or None)],
-         lambda v: True),
+         _library_bad),
         (_settings.HOST, "host", [("serve.txt --host", flags["host"]),
-                                  ("config.json HOST", cfg.get("HOST"))], lambda v: True),
+                                  ("config.json HOST", cfg.get("HOST"))], lambda v: None),
         (_settings.PORT, "port", [("serve.txt --port", flags["port"]),
-                                  ("config.json PORT", cfg.get("PORT"))], _port_ok),
+                                  ("config.json PORT", cfg.get("PORT"))], _port_bad),
     )
 
     if resume is not None:
@@ -1421,8 +1960,17 @@ def _plan_merge(sources, cfg, current, resume=None):
                          label, where, v, have)
         return merged, lines
 
-    for key, label, candidates, valid in contests:
-        live = [(where, v) for where, v in candidates if v not in (None, "") and valid(v)]
+    for key, label, candidates, bad in contests:
+        live = []
+        for where, v in candidates:
+            if v in (None, ""):
+                continue
+            why = bad(v)
+            if why:
+                # Kept out of settings.json (what it held stays), and said in the log.
+                note("The %s from %s (%s) was not used: %s.", label, where, v, why)
+            else:
+                live.append((where, v))
         if not live:
             continue
         where, v = live[0]
@@ -1624,8 +2172,12 @@ def _install_half(half, local, old, copyfirst, report):
     for name in LAUNCHER_LOGS:
         for src in (local / name, old / name):
             moves.append((src, _paths.logs_dir() / name, "log"))
-    old_icon_dirs = [old / OLD_ICON_CACHE / "marks", local / "cache" / "marks"]
-    for d in old_icon_dirs:
+    # (An icon cache that is a junction or a link -- or sits in one -- is never walked: its
+    # .ico files stay where the link points, and the leftover below removes the link alone.)
+    old_icon_dirs = [(old / OLD_ICON_CACHE / "marks", old), (local / "cache" / "marks", local)]
+    for d, root in old_icon_dirs:
+        if _via_link(d, root):
+            continue
         for ico in _files_under(d):
             if ico.suffix.lower() == ".ico":
                 moves.append((ico, _paths.icons_dir() / ico.name, "cache"))
@@ -1640,9 +2192,13 @@ def _install_half(half, local, old, copyfirst, report):
             dead.append(stray_db)                # an empty stray, never a real catalog
     except OSError:
         pass
+    # The dead Python leftovers at the root (bytecode, pytest's cache, the emptied tests\ and
+    # tools\): rebuildable or dead, so never in the snapshot. One holding a real file stays.
+    dead_python = [old / n for n in DEAD_ROOT_FOLDERS
+                   if not _same(old / n, local) and _only_dead_python(old / n)]
     same_folder = _same(old, local)
     stray_marker = old / PACK_MARKER
-    has_work = (pending_merge or leftovers or dead
+    has_work = (pending_merge or leftovers or dead or dead_python
                 or (not same_folder and stray_marker.is_file())
                 or any(Path(s).is_file() and not _same(s, d) for s, d, _k in moves))
     if not has_work:
@@ -1750,6 +2306,15 @@ def _install_half(half, local, old, copyfirst, report):
         if p.exists():
             _remove(p)
             report.info("Removed %s from the app folder: nothing uses it any more.", p.name)
+    for p in dead_python:
+        if _only_dead_python(p):                 # still nothing of anyone's own in it
+            _remove(p)
+            report.info("Removed %s\\ from the app folder: it held only what Python or pytest "
+                        "made for the old layout.", p.name)
+    for n in DEAD_ROOT_FOLDERS:
+        p = old / n
+        if p.exists() and p not in dead_python and not _same(p, local):
+            report.item("Left %s\\ in the app folder: it holds files of its own.", n)
     j.finish()
     report.info("The app folder is tidy: settings in local/settings.json, logs in "
                 "local/logs/, shortcut icons in local/icons/.")
@@ -1780,12 +2345,130 @@ def migrate_library(out_dir, logins, report, lock=None):
 
 class _Plan:
     def __init__(self):
-        self.moves = []          # (src, dest, kind, vouched)
+        self.moves = []          # (src, dest, kind, vouched); kind "link" moves a link as one
         self.removals = []       # files and (pruned once empty) folders
-        self.parks = []          # stray logs, set aside beside the snapshot
         self.dead = []           # the library's dead branding\ files, set aside, then gone
         self.kept = []           # per-login files no login can be found for: left, and said
+        self.left = []           # old-home names that aren't Moonglade's by their content: left
+        self.stuck = []          # (link, dest or None, why): a link that can't move as a link
         self.snap = []           # (path, name in the zip)
+        self.ours = False        # the folder is a Moonglade library (_is_moonglade_library)
+
+
+# The Loom's own entries in its folder (3.17-3.19's <library>\loom\): the boards (kv\, and the
+# store.json they were split from), the render journal, the music beds, frames, uploads and
+# exports. A loom\ holding none of these is not the Loom's, and is left where it is.
+LOOM_ENTRIES = ("kv", "_submits", "_beds", "_frames", "_uploads", "exports", "_exports",
+                "store.json", "store.json.migrated")
+# What a library's old branding\ held (before the art moved beside the launcher, 2026-07-26):
+# a branding\ with none of it is someone else's.
+OLD_BRANDING_ENTRIES = ("marks", "mascots", "badges", "_thumbs", "rewards", "logo.png",
+                        "favicon.png", "banner.png")
+# The keys a library's old branding.json held.
+BRANDING_JSON_KEYS = ("mark", "anim", "anim_speed", "anim_scale", "glow_color", "glow_angle")
+# The app's own logs in a library's old logs\: moonglade.log and its dated rotations.
+_APP_LOG_RE = re.compile(r"^moonglade\.log(\..+)?$")
+# Every version's catalog.csv began with these columns.
+_CATALOG_CSV_HEAD = "task_id,media_id,filename"
+
+
+def _json_doc(p):
+    """The JSON document in the file `p`, or None (missing, unreadable, not JSON, a link)."""
+    try:
+        if _is_link(p):
+            return None
+        return json.loads(Path(p).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        return None
+
+
+def _first_line(p, size=4096):
+    """The first line of the file `p` ("" when it can't be read)."""
+    try:
+        with open(p, "rb") as f:
+            return f.read(size).decode("utf-8-sig", "replace").splitlines()[0]
+    except (OSError, IndexError):
+        return ""
+
+
+def _db_has_table(p, table):
+    """Does the SQLite file `p` hold `table`? Opened read-only; a busy or broken file is "no"."""
+    p = Path(p)
+    if _is_link(p) or not p.is_file():
+        return False
+    con = None
+    try:
+        con = sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
+        return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                           (table,)).fetchone() is not None
+    except (sqlite3.Error, OSError, ValueError):
+        return False
+    finally:
+        if con is not None:
+            con.close()
+
+
+def _child_names(folder):
+    """The names directly inside `folder` -- a link's too: only its own entry list is read;
+    nothing in it is opened, walked into or changed."""
+    try:
+        return set(os.listdir(folder))
+    except OSError:
+        return set()
+
+
+def _is_moonglade_library(out, logins=None):
+    """Is `out` a Moonglade library, rather than a folder of someone's own that only shares
+    one of Moonglade's old names (logs\\, loom\\, branding\\, catalog.csv)? Yes when it holds
+    something only Moonglade writes: a catalog.db with the catalog table; a record at its top
+    readable as one (the achievements, telemetry, schedule, spend guard or reconcile stamp as
+    a JSON object, runs.db with its runs table, a job list whose first line is a JSON object,
+    the owner's integrity marks); a per-login file named by a login key (or by the plain name
+    of a login config.json lists); a loom\\ holding the Loom's own entries; the gallery's
+    badge, mask or banner cache; or the app's own files already in _moonglade\\. Only then do
+    its old homes count as Moonglade's, and each still passes its own content check
+    (_plan_library)."""
+    out = Path(out)
+    app = _paths.library_app_dir(out)
+    if app.is_dir() and not _is_link(app):
+        if _child_names(app) - {_paths.JOURNAL_NAME, _paths.LOCK_NAME, _paths.SNAPSHOT_DIRNAME}:
+            return True
+    if _db_has_table(out / "catalog.db", "catalog") or _db_has_table(out / "runs.db", "runs"):
+        return True
+    for name in ("achievements.json", "telemetry.json", "schedule.json", "train_guard.json",
+                 "reconcile_stamp.json"):
+        if isinstance(_json_doc(out / name), dict):
+            return True
+    marks = _json_doc(out / "integrity_marks.json")
+    if isinstance(marks, dict) and isinstance(marks.get("marks"), dict):
+        return True
+    for name in ("jobs.jsonl", "raw_tasks.jsonl"):
+        p = out / name
+        if p.is_file() and not _is_link(p):
+            try:
+                if isinstance(json.loads(_first_line(p) or "null"), dict):
+                    return True
+            except ValueError:
+                pass
+    for old_name in PER_LOGIN:
+        for n in _child_names(out / old_name):
+            if _KEY_RE.match(n.partition(".")[0]) or _plain_name_login(n, logins):
+                return True
+    if _child_names(out / "gallery" / "cache") & set(LIBRARY_CACHES):
+        return True                              # the gallery's own badge/mask/banner caches
+    return bool(_child_names(out / "loom") & set(LOOM_ENTRIES))
+
+
+def _branding_json_ours(p):
+    """A library's old branding.json: a JSON object of Moonglade's branding keys only."""
+    doc = _json_doc(p)
+    return (isinstance(doc, dict) and bool(doc) and ("mark" in doc or "anim" in doc)
+            and all(k in BRANDING_JSON_KEYS for k in doc))
+
+
+def _catalog_csv_ours(p):
+    """The legacy catalog export: its header begins with the catalog's first columns."""
+    return not _is_link(p) and _first_line(p).replace('"', "").startswith(_CATALOG_CSV_HEAD)
 
 
 def _plain_name_login(name, logins):
@@ -1810,14 +2493,29 @@ def _plain_name_login(name, logins):
 
 
 def _plan_library(out, app, copyfirst, logins, half):
+    """What the library half would do in `out`, without doing it (a _Plan). Nothing is planned
+    on a name alone (#10): a folder that isn't a Moonglade library (_is_moonglade_library)
+    gets an empty plan, and in one that is, each old home passes its own content check -- in
+    logs\\ only the moonglade.log files, in loom\\ only the Loom's own entries, a branding\\
+    only with Moonglade's old art in it, branding.json only with Moonglade's keys, catalog.csv
+    only with the catalog's header. Anything else is left where it is (plan.left) and the log
+    says so. A junction or a symbolic link is never walked into (B): one found in an old home
+    is moved as a link, and one that can't be (its new home is taken, or it would have to
+    split) is plan.stuck: the start stops, before anything moves, with a plain sentence."""
     plan = _Plan()
     reports = app / OLD_REPORTS
+    plan.ours = _is_moonglade_library(out, logins)
+    if not plan.ours:
+        for n in ("logs", "loom", "branding", "branding.json") + DEAD_LIBRARY_FILES:
+            if os.path.lexists(out / n):
+                plan.left.append(out / n)
+        return plan
 
     def two(name, primary, secondary, dest, kind, vouch_name=None):
-        if primary.is_file():
+        if _movable(primary):
             plan.moves.append((primary, dest, kind, False))
             plan.snap.append((primary, half.rel(primary)))
-        if secondary.is_file():
+        if _movable(secondary):
             vouched = copyfirst.unchanged(vouch_name or name, secondary)
             plan.moves.append((secondary, dest, kind, vouched))
             if not vouched:
@@ -1844,13 +2542,22 @@ def _plan_library(out, app, copyfirst, logins, half):
     # logins or not: another install may share the library, and nothing per-login is deleted
     # on a guess (X3; only removing a login deletes its folder). A file named by a login's
     # plain name (before the hashed keys) goes to that login's folder when the login is known
-    # (S8); one no login can be found for stays where it is, and the log says so.
+    # (S8); one no login can be found for stays where it is, and the log says so. A store's
+    # folder that is itself a link can't move as one (its files go one by one into the logins'
+    # folders): the start stops and says so.
     for old_name, new_stem in PER_LOGIN.items():
         for base, from_320 in ((app, True), (out, False)):
             folder = base / old_name
+            if _is_link(folder):
+                plan.stuck.append((folder, None, "its files go one by one into each login's own "
+                                                 "folder in _moonglade\\accounts, so it can't "
+                                                 "move as one link"))
+                continue
             vouched_folder = not from_320 and copyfirst.unchanged(old_name, folder)
-            for p in _files_under(folder):
-                if _TRANSIENT_RE.search(p.name):
+            files, links = _scan(folder)
+            for p in files + links:
+                link = p in links
+                if not link and _TRANSIENT_RE.search(p.name):
                     plan.removals.append(p)
                     continue
                 key, _dot, rest = p.name.partition(".")
@@ -1862,60 +2569,119 @@ def _plan_library(out, app, copyfirst, logins, half):
                 else:
                     plan.kept.append(p)
                     continue
-                plan.snap.append((p, half.rel(p)))
-                plan.moves.append((p, dest, "file", vouched_folder))
+                if link:
+                    plan.moves.append((p, dest, "link", False))
+                else:
+                    plan.snap.append((p, half.rel(p)))
+                    plan.moves.append((p, dest, "file", vouched_folder))
             plan.removals.append(folder)              # pruned once empty
-    # The library's logs, into local\logs\.
+    # The library's logs, into local\logs\: only Moonglade's own (moonglade.log and its
+    # rotations). Nothing reads a log back, so a link here -- or a logs\ that is one -- is
+    # simply left where it is, like anything else in the folder that isn't the app's.
     for base, from_320 in ((app / "logs", True), (out / "logs", False)):
-        vouched_folder = not from_320 and copyfirst.unchanged("logs", base)
-        for p in _files_under(base):
-            if _TRANSIENT_RE.search(p.name):
-                plan.removals.append(p)
-            elif p.parent != base:
-                plan.parks.append(p)
-            else:
-                plan.moves.append((p, _paths.logs_dir() / p.name, "log", vouched_folder))
-        plan.removals.append(base)
-    # The Loom's whole folder, into _moonglade\loom\.
-    loom_old = out / "loom"
-    for p in _files_under(loom_old):
-        rel = p.relative_to(loom_old)
-        if _TRANSIENT_RE.search(p.name):
-            plan.removals.append(p)
+        if _is_link(base):
+            plan.left.append(base)
             continue
-        kind = "lines" if rel.parts[0] == "_submits" and p.suffix == ".jsonl" else "file"
-        plan.moves.append((p, _paths.loom_root(out) / rel, kind, False))
-        if rel.parts[0] not in _LOOM_UNSNAPPED:
-            plan.snap.append((p, half.rel(p)))
-    if loom_old.is_dir():
-        plan.removals.append(loom_old)
+        vouched_folder = not from_320 and copyfirst.unchanged("logs", base)
+        for p in _scan(base)[0]:
+            if p.parent == base and _APP_LOG_RE.match(p.name):
+                plan.moves.append((p, _paths.logs_dir() / p.name, "log", vouched_folder))
+        if base.is_dir():
+            plan.removals.append(base)                # pruned once empty; the rest is said
+    # The Loom's own entries, into _moonglade\loom\. A loom\ that is a link (the Loom kept on
+    # another drive) moves as the link, when its entries are the Loom's.
+    loom_old, loom_new = out / "loom", _paths.loom_root(out)
+    if _is_link(loom_old):
+        if _child_names(loom_old) & set(LOOM_ENTRIES):
+            plan.moves.append((loom_old, loom_new, "link", False))
+        else:
+            plan.left.append(loom_old)
+    elif loom_old.is_dir():
+        names = _child_names(loom_old)
+        if names & set(LOOM_ENTRIES):
+            for n in sorted(names):
+                e = loom_old / n
+                if n not in LOOM_ENTRIES:
+                    if not _is_link(e) and e.is_file() and _TRANSIENT_RE.search(n):
+                        plan.removals.append(e)
+                    else:
+                        plan.left.append(e)
+                    continue
+                if _is_link(e):
+                    files, links = [], [e]
+                elif e.is_file():
+                    files, links = [e], []
+                else:
+                    files, links = _scan(e)
+                for p in files:
+                    rel = p.relative_to(loom_old)
+                    if _TRANSIENT_RE.search(p.name):
+                        plan.removals.append(p)
+                        continue
+                    kind = "lines" if rel.parts[0] == "_submits" and p.suffix == ".jsonl" \
+                        else "file"
+                    plan.moves.append((p, loom_new / rel, kind, False))
+                    if rel.parts[0] not in _LOOM_UNSNAPPED:
+                        plan.snap.append((p, half.rel(p)))
+                for p in links:
+                    plan.moves.append((p, loom_new / p.relative_to(loom_old), "link", False))
+            plan.removals.append(loom_old)
+        else:
+            plan.left.append(loom_old)
     # Dead copies nothing reads: the library's old branding.json and the legacy catalog.csv
     # (in the zip, then removed), and its old branding\ folder (every file in it set aside in
-    # the snapshot, so it goes with the snapshot rather than stay forever).
-    for p in [out / "branding.json"] + [out / n for n in DEAD_LIBRARY_FILES]:
-        if p.is_file():
-            plan.snap.append((p, half.rel(p)))
-            plan.removals.append(p)
-    plan.dead = [p for p in _files_under(out / "branding")]
-    if (out / "branding").is_dir():
-        plan.removals.append(out / "branding")
+    # the snapshot, so it goes with the snapshot rather than stay forever; a link in it is set
+    # aside as a link). Each only when its content is Moonglade's.
+    for p, ours in [(out / "branding.json", _branding_json_ours)] + \
+            [(out / n, _catalog_csv_ours) for n in DEAD_LIBRARY_FILES]:
+        if os.path.lexists(p):
+            if p.is_file() and not _is_link(p) and ours(p):
+                plan.snap.append((p, half.rel(p)))
+                plan.removals.append(p)
+            else:
+                plan.left.append(p)
+    branding = out / "branding"
+    if _is_link(branding):
+        plan.left.append(branding)
+    elif branding.is_dir():
+        if _child_names(branding) & set(OLD_BRANDING_ENTRIES):
+            files, links = _scan(branding)
+            plan.dead = files + links
+            plan.removals.append(branding)
+        else:
+            plan.left.append(branding)
     # 3.20's bookkeeping.
     for p in (app / OLD_RECORD, app / OLD_LOCK, out / "telemetry.lock", app / "telemetry.lock",
               out / "integrity_report.lock", reports / "integrity_report.lock",
               out / "jobs.jsonl.tmp", app / "jobs.jsonl.tmp"):
-        if p.is_file():
+        if p.is_file() and not _is_link(p):
             if p.name == OLD_RECORD:
                 plan.snap.append((p, half.rel(p)))
             plan.removals.append(p)
     plan.removals.append(reports)
+    # A cache inside a linked folder, and a linked _banners\ (_caches), are left and said.
+    for c in LIBRARY_CACHES:
+        p = out / "gallery" / "cache" / c
+        if (_via_link(p.parent, out) and c in _child_names(p.parent)) or \
+                (c == "_banners" and _is_link(p)):
+            plan.left.append(p)
+    # A link whose new home is taken can't move as a link: stop before anything moves.
+    for src, dest, kind, _v in plan.moves:
+        if kind == "link" and os.path.lexists(dest) and not _same(src, dest):
+            plan.stuck.append((src, dest, "that place is already taken"))
     return plan
+
+
+def _movable(p):
+    """Is there something at `p` to move: a file, or a link (moved as a link)?"""
+    return _is_link(p) or Path(p).is_file()
 
 
 def _shared_presets(half, out, app, copyfirst, logins, report):
     """The three install-wide preset files: copied into each login with no file of its own,
     then deleted. Left alone, with a log line, while the logins cannot be known."""
     for name, new_name in SHARED_PRESETS.items():
-        paths = [p for p in (app / name, out / name) if p.is_file()]
+        paths = [p for p in (app / name, out / name) if p.is_file() and not _is_link(p)]
         if not paths:
             continue
         half.report.worked["library"] = True
@@ -1947,8 +2713,8 @@ def _banners(half, out, report):
     worn_banner says so. A choice settings.json already holds is never overwritten."""
     from moonglade import settings as _settings
     folder = out / "gallery" / "cache" / "_banners"
-    if not folder.is_dir():
-        return
+    if _via_link(folder, out) or not folder.is_dir():
+        return                                           # through a link: never read out of it
     half.report.worked["library"] = True
     worn = dict((_settings.branding().get("worn_banner") or {}))
     changed = False
@@ -1982,48 +2748,68 @@ def _banners(half, out, report):
 
 
 def _caches(out):
-    return [out / "gallery" / "cache" / c for c in LIBRARY_CACHES]
+    """The library's rebuildable caches that are there to delete: one that is a link goes as
+    the link alone -- except a linked _banners\\, which may hold the only copy of a banner
+    the install wears and can't be read out of the link -- and one inside a linked folder is
+    never touched (both are left, and said: _plan_library)."""
+    out = Path(out)
+    found = []
+    for c in LIBRARY_CACHES:
+        p = out / "gallery" / "cache" / c
+        if _via_link(p.parent, out) or (c == "_banners" and _is_link(p)):
+            continue
+        if os.path.lexists(p):
+            found.append(p)
+    return found
 
 
 def _shared_files(out, app):
-    return [p for n in SHARED_PRESETS for p in (app / n, out / n) if p.is_file()]
+    return [p for n in SHARED_PRESETS for p in (app / n, out / n)
+            if p.is_file() and not _is_link(p)]
 
 
 def _has_work(plan, shared, caches):
-    """Is there anything to move, merge, set aside or remove? A folder still holding only
-    what the plan leaves (a file no login can be found for, something unexpected) is not work:
-    it is said once, by the start that emptied the rest, or every start would count as one
-    that moved something."""
-    return (any(Path(s).is_file() for s, _d, _k, _v in plan.moves)
-            or any(Path(p).is_file() for p in plan.removals)
-            or any(Path(p).is_dir() and not _files_under(p) for p in plan.removals)
-            or bool(plan.parks) or bool(plan.dead) or bool(shared)
-            or any(c.exists() for c in caches))
+    """Is there anything to move, merge, set aside or remove -- or a link that stops the start?
+    A folder still holding only what the plan leaves (a file no login can be found for,
+    something that isn't Moonglade's) is not work: it is said once, by the start that emptied
+    the rest, or every start would count as one that moved something."""
+    return (any(_movable(s) for s, _d, _k, _v in plan.moves)
+            or any(Path(p).is_file() and not _is_link(p) for p in plan.removals)
+            or any(Path(p).is_dir() and not _is_link(p) and _empty_tree(p)
+                   for p in plan.removals)
+            or bool(plan.dead) or bool(plan.stuck) or bool(shared)
+            or any(os.path.lexists(c) for c in caches))
+
+
+def _mtime_ns(p):
+    """`p`'s own modified time (a link's own, never what it points at), or None."""
+    try:
+        return os.lstat(p).st_mtime_ns
+    except OSError:
+        return None
 
 
 def _written_since(journal, plan, shared):
     """[(path, mtime_ns)] of old-layout files written after this library's move last
-    finished: an older Moonglade still using the library writes its old homes (the logs and
-    the records), and nothing of this version ever does."""
+    finished: an older Moonglade still using the library writes its old homes (its
+    moonglade.log and its records), and nothing of this version ever does."""
     since = journal.finished_at()
     if since is None:
         return []
     out = []
     for p in [s for s, _d, _k, _v in plan.moves] + list(shared):
-        try:
-            st = Path(p).stat()
-        except OSError:
-            continue
-        if st.st_mtime > since + WRITTEN_SINCE_SLACK_S:
-            out.append((Path(p), st.st_mtime_ns))
+        ns = _mtime_ns(p)
+        if ns is not None and ns / 1e9 > since + WRITTEN_SINCE_SLACK_S:
+            out.append((Path(p), ns))
     return out
 
 
 def _old_layout_records(plan, shared):
     """The files at old places that this version would read in a new home: every record,
-    decision, per-login store and the Loom (not the logs, which nothing reads back)."""
-    return [Path(s) for s, _d, k, _v in plan.moves if k != "log" and Path(s).is_file()] + \
-        list(shared)
+    decision, per-login store and the Loom (not the logs, which nothing reads back), and any
+    link the move would carry."""
+    return [Path(s) for s, _d, k, _v in plan.moves if k != "log" and _movable(s)] + \
+        [Path(link) for link, _d, _w in plan.stuck] + list(shared)
 
 
 def _names(paths, half, most=3):
@@ -2038,7 +2824,8 @@ def _older_live_words(out, written, half, moving):
     if moving:
         return head + ("Moving them now, while it runs, would hide its records from it. Close "
                        "that Moonglade (its window, its scheduled tasks and its Claude tools), "
-                       "then start this one again: it brings in what that one wrote.")
+                       "then start this one again: it brings in what that one wrote, and "
+                       "keeps everything already here.")
     return head + ("This command never moves a library's files. Close that Moonglade, then "
                    "start this one with its launcher (Moonglade Launcher) to bring in what it "
                    "wrote.")
@@ -2054,25 +2841,90 @@ def _refusal_words(out, named):
             "install's launcher (Moonglade Launcher), then run this again." % out)
 
 
+# The sentence when an older Moonglade still holds a library's old log open at its first move
+# (#12): before anything moves, so its records are never taken from under it.
+OLDER_RUNNING_WORDS = ("An older Moonglade (on this PC or another) is still running on this "
+                       "library (%s); close it, then start again.")
+
+
+def _old_log_in_use(plan):
+    """The first old-layout log an older Moonglade still holds open, or None. Windows refuses
+    to rename a file another program has open (a sharing violation), so each old log is
+    renamed onto itself: a refusal means a server (3.19's kept its log in the library's
+    logs\\) is running on the library, on this PC or another. Off Windows nothing is refused,
+    and the probe finds nothing."""
+    for src, _dest, kind, _v in plan.moves:
+        if kind != "log" or _is_link(src) or not Path(src).is_file():
+            continue
+        try:
+            os.rename(src, src)
+        except PermissionError as e:
+            if getattr(e, "winerror", None) in (32, 33):
+                return Path(src)
+        except OSError:
+            continue
+    return None
+
+
+def library_refusal(path):
+    """Why `path` can never be a library, in plain words ("it is Moonglade's own program
+    folder"), or None. A library is a folder of its own: never the install folder, nor a folder
+    holding an install -- its code (moonglade\\ with the package in it), its machine folder
+    (local\\ with its settings or journal), its launcher, or an older install's server file
+    (moonglade_gallery.py, at the root through 3.19). The move would otherwise take the
+    Loom's code for the Loom's data (#11). The Control Panel, the settings merge and every
+    start ask this."""
+    p = Path(path)
+    try:
+        if _same(p, old_app_root()):
+            return "it is Moonglade's own program folder"
+        if ((p / "moonglade" / "__init__.py").is_file()
+                or (p / _paths.LAUNCHER_NAME).is_file()
+                or (p / "moonglade_gallery.py").is_file()       # an install before 3.20
+                or (p / _paths.LOCAL_DIRNAME / _paths.SETTINGS_NAME).is_file()
+                or (p / _paths.LOCAL_DIRNAME / _paths.JOURNAL_NAME).is_file()):
+            return "it holds a Moonglade program (its code, its local folder or its launcher)"
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _install_folder_words(out, why, named):
+    if named:
+        return ("The library %s that this run names can't be used: %s, and a library has to "
+                "be a folder of its own. Name your library's own folder, then run this again."
+                % (out, why))
+    return ("Moonglade's library folder is set to %s, which can't be a library: %s, and a "
+            "library has to be a folder of its own. Set library_dir in %s to your library's "
+            "own folder (or remove that line to use %s), then start Moonglade again." % (
+                out, why, _paths.settings_path(), _paths.DEFAULT_LIBRARY_DIR))
+
+
 def prepare_library(out_dir, report, moves, named=False, wait=None):
     """The library half as prepare() runs it (X1). `moves`: this start may move this
     library's files (a launcher or server start, in the library this install serves).
 
+      * A library that is the program's own folder, or holds a program (library_refusal), is
+        refused by every kind of start, with a plain sentence (#11).
       * A library whose move finished and whose old homes were written since is in use by an
         older Moonglade: every kind of start stops and says so.
       * A start that may not move (the command line, the MCP server, a run naming its own
         library) refuses a library still in an older layout -- it would read empty new
         homes -- and otherwise changes nothing in it.
       * With nothing to do, nothing is locked: a read-only library still opens. A start that
-        may move stamps the library's journal finished, when it can.
+        may move stamps the library's journal finished, when it can (and says once what it
+        left in a folder that isn't a Moonglade library).
       * Otherwise the move runs under the library's lock (migrate_library).
     Raises MoveStopped."""
     out = Path(out_dir)
+    why = library_refusal(out)
+    if why:
+        raise MoveStopped(_install_folder_words(out, why, named))
     app = _paths.library_app_dir(out)
     logins = logins_from_config()
     look = _Half("library", app, _library_roots(out), Report())
     plan = _plan_library(out, app, CopyFirst(app / OLD_RECORD), logins, look)
-    shared = _shared_files(out, app)
+    shared = _shared_files(out, app) if plan.ours else []
     if not moves:
         written = _written_since(look.journal, plan, shared)
         if written:
@@ -2080,10 +2932,12 @@ def prepare_library(out_dir, report, moves, named=False, wait=None):
         if _old_layout_records(plan, shared):
             raise MoveStopped(_refusal_words(out, named))
         return None
-    if not _has_work(plan, shared, _caches(out)):
+    if not _has_work(plan, shared, _caches(out) if plan.ours else []):
         renaming = any(isinstance(e, dict) and e.get("state") == "renaming"
                        for e in look.journal.items.values())
         if not look.journal.doc.get("finished") or renaming:
+            if plan.left and not look.journal.doc.get("finished"):
+                _say_left(plan, look, report)
             try:
                 if app.is_dir() or (app.parent.is_dir() and _folder_writable(app.parent)):
                     app.mkdir(exist_ok=True)
@@ -2112,11 +2966,20 @@ def prepare_library(out_dir, report, moves, named=False, wait=None):
         return migrate_library(out, logins, report, lock=lock)
 
 
+def _say_left(plan, half, report):
+    """One line naming what the move left because it isn't Moonglade's by its content."""
+    one = len(plan.left) == 1
+    report.info("Left %s where %s: %s Moonglade's by %s content, so the move doesn't touch %s.",
+                _names(plan.left, half, most=10), "it is" if one else "they are",
+                "it isn't" if one else "they aren't", "its" if one else "their",
+                "it" if one else "them")
+
+
 def _library_half(half, out, app, copyfirst, logins, report):
     j = half.journal
     plan = _plan_library(out, app, copyfirst, logins, half)
-    shared = _shared_files(out, app)
-    caches = _caches(out)
+    shared = _shared_files(out, app) if plan.ours else []
+    caches = _caches(out) if plan.ours else []
     if not j.doc.get("started"):
         j.doc["started"] = _now()
     if half.settle_renames():
@@ -2135,8 +2998,21 @@ def _library_half(half, out, app, copyfirst, logins, report):
             j.doc["held_back"] = {"at": _now(), "files": files}
             j.save()
             raise MoveStopped(_older_live_words(out, [p for p, _ns in written], half, True))
-        report.info("Bringing in what an older Moonglade wrote to %s after the move: %s.",
+        report.info("Bringing in what an older Moonglade wrote to %s after the move: %s. The "
+                    "new homes keep everything they hold; what it added is merged in.",
                     out, _names([p for p, _ns in written], half))
+    # A link that can't move as a link stops the start before anything moves (B).
+    if plan.stuck:
+        raise _link_stop(*plan.stuck[0])
+    # The library's move had finished before this run: an old-layout copy now was written
+    # since, and the new home always wins (A). Before that, the first move's rules hold.
+    half.settled = bool(j.doc.get("finished"))
+    if not half.settled:
+        # The first move: an older Moonglade still serving this library (on this PC or
+        # another) holds its old log open. Stop before any of its records move (#12).
+        held = _old_log_in_use(plan)
+        if held is not None:
+            raise MoveStopped(OLDER_RUNNING_WORDS % out)
     j.doc.pop("held_back", None)
     report.worked["library"] = True
     j.worked()
@@ -2154,11 +3030,8 @@ def _library_half(half, out, app, copyfirst, logins, report):
     for src, dest, kind, vouched in plan.moves:
         if _bring_or_say(src, dest, kind, half, vouched=vouched) == "moved":
             moved += 1
-    for p in plan.parks:
-        if p.is_file():
-            _park(p, half)
     if plan.dead:
-        parked = [p for p in plan.dead if p.is_file()]
+        parked = [p for p in plan.dead if _movable(p)]
         for p in parked:
             _park(p, half, said=False)
         if parked:
@@ -2166,23 +3039,32 @@ def _library_half(half, out, app, copyfirst, logins, report):
                         "nothing uses it any more, and it goes when the safety copy does.",
                         _names(parked, half, most=10))
     for p in plan.kept:
-        if p.is_file():
+        if _movable(p):
             report.warn("Left %s where it is: no login in config.json goes by that name.",
                         half.rel(p))
+    if plan.left:
+        _say_left(plan, half, report)
     _shared_presets(half, out, app, copyfirst, logins, report)
     _banners(half, out, report)
-    # Caches: deleted once the new home exists (they are rebuilt in local\cache\).
+    # Caches: deleted once the new home exists (they are rebuilt in local\cache\). A cache
+    # folder that is a link goes as the link alone: what it points at is never touched.
     _paths.cache_dir().mkdir(parents=True, exist_ok=True)
     for c in caches:
-        if c.exists():
+        if os.path.lexists(c):
+            link = _is_link(c)
             _remove(c)
-            report.item("Removed %s: a cache, made again when it is needed.", half.rel(c))
+            if link:
+                report.item("Removed the link %s: a cache, made again when it is needed (what "
+                            "it pointed at was not touched).", half.rel(c))
+            else:
+                report.item("Removed %s: a cache, made again when it is needed.", half.rel(c))
     for p in plan.removals:
-        if not p.exists():
+        if _is_link(p) or not p.exists():
             continue
         if p.is_dir():
             _prune_empty(p)
-            left = [x for x in _files_under(p) if x not in plan.kept]
+            files, links = _scan(p)
+            left = [x for x in files + links if x not in plan.kept]
             if left:
                 # Only what the plan accounted for is ever removed: a folder still holding
                 # something unexpected is left where it is, and said.

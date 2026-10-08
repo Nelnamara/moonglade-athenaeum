@@ -348,3 +348,55 @@ def test_the_move_writes_one_line_per_file_to_moonglade_log(r):
     assert "Moved jobs.jsonl to _moonglade/records/jobs.jsonl" in log
     assert "Removed serve.txt: what it held is in local/settings.json now." in log
     assert "Moved jobs.jsonl" not in done.summary(), "serve.log gets the overview only"
+
+
+# ---- the dead Python leftovers at the root (#6, #7, #15) -----------------------------------------
+
+_DEAD_PY = ("__pycache__", ".pytest_cache", "tests", "tools", "docs", "screenshots")
+
+
+def test_the_dead_python_leftovers_at_the_root_go(r):
+    """git keeps an ignored file when an update deletes the tracked ones beside it: 3.19's root
+    bytecode, pytest's cache, and tests\\ and tools\\ holding only __pycache__\\ outlive the
+    update. The move removes them (rebuildable or dead: nothing goes in the safety copy)."""
+    layout_317(r)
+    done = start(r)
+    for n in _DEAD_PY:
+        assert not (r.app / n).exists(), n
+    said = " ".join(line for _lvl, line in done.report.lines)
+    assert "Removed __pycache__\\ from the app folder" in said
+    assert "Removed tests\\ from the app folder" in said
+    assert not any(".pyc" in n or "pytest_cache" in n for n in _zip_names(r.local))
+
+
+def test_a_root_folder_holding_a_real_file_is_never_removed(r):
+    from tests.move_layouts import dead_python_leftovers
+    write_config(r)
+    dead_python_leftovers(r.app)
+    write(r.app / "tests" / "test_mine.py", "def test_x(): pass\n")
+    write(r.app / "docs" / "notes.md", "mine\n")
+    write(r.app / "__pycache__" / "notes.txt", "a real file in the cache folder\n")
+    write(r.app / ".pytest_cache" / "my-results.txt", "outside pytest's own v\\ folder\n")
+    (r.app / ".pytest_cache" / "CACHEDIR.TAG").unlink()          # no longer pytest's
+    done = start(r)
+    for kept in ("tests/test_mine.py", "tests/__pycache__", "docs/notes.md",
+                 "__pycache__/notes.txt", "__pycache__/moonglade_backup.cpython-311.pyc",
+                 ".pytest_cache/my-results.txt"):
+        assert (r.app / kept).exists(), kept
+    for gone in ("tools", "screenshots"):
+        assert not (r.app / gone).exists(), gone
+    said = " ".join(line for _lvl, line in done.report.items)
+    assert "Left tests\\ in the app folder: it holds files of its own." in said
+
+
+def test_an_install_already_moved_tidies_them_at_its_next_start(r):
+    """C:'s case: the install moved before this fix; its next start removes them."""
+    from tests.move_layouts import dead_python_leftovers
+    write_config(r)
+    start(r)
+    dead_python_leftovers(r.app)
+    done = start(r)
+    assert done.report.worked["install"] is True
+    for n in _DEAD_PY:
+        assert not (r.app / n).exists(), n
+    assert start(r).report.worked["install"] is False, "then nothing at every start"

@@ -33,8 +33,8 @@ from moonglade import migrate
 from moonglade import paths
 from moonglade import settings
 from moonglade import setup as msetup
-from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layout_317,
-                                layout_c_copy_first, rig, start, write,
+from tests.move_layouts import (KEY_GONE, KEY_NEL, KEY_NEL_LOWER, db_rows, layout_310,
+                                layout_317, layout_c_copy_first, rig, start, write,
                                 write_config)
 
 
@@ -77,6 +77,47 @@ def test_the_3_17_library_moves_into_moonglade(r):
     assert journal["finished"]
     assert journal["items"]["_moonglade/records/train_guard.json"]["state"] == "made"
     assert not (app / ".lock").exists()
+
+
+def test_an_install_on_3_10_to_3_16_moves_whole(r):
+    """C: 3.10-3.16 keep every file where 3.17 does, and lack only what came later, so their
+    Update (a git pull straight to this version) is followed by the same complete move: no
+    file is left behind in an old home, and nothing is lost."""
+    layout_310(r)
+    done = start(r)
+    assert settings.server()["port"] == 5757, "serve.txt's port, as the old launcher used it"
+    assert settings.branding()["mark"] == "mark_1"
+    assert (r.local / "moonglade.mgpack").read_bytes() == b"PACK-310" * 64
+    assert json.loads((r.local / "moonglade.mgpack.version").read_text())["version"] == "3"
+    assert json.loads((r.local / "mirror_session.json").read_text()) == {"jwt": "token-310"}
+    assert (r.local / "icons" / "mark_1.ico").read_bytes() == b"ICO-1"
+    assert (r.local / "logs" / "serve.log").read_text() == "the 3.10 launcher's log\n"
+    assert (r.local / "logs" / "moonglade.log").read_text() == "the 3.10 library log\n"
+    app = r.lib / "_moonglade"
+    for name in ("achievements.json", "telemetry.json", "schedule.json", "jobs.jsonl",
+                 "raw_tasks.jsonl", "audit_report.csv"):
+        assert (app / "records" / name).is_file(), name
+    assert (app / "decisions" / "organize_manifest.csv").is_file()
+    acc = app / "accounts" / KEY_NEL
+    assert json.loads((acc / "snippets.json").read_text()) == ["a 3.10 snippet"]
+    assert json.loads((acc / "views.json").read_text()) == {"mine": "?q=x"}
+    assert json.loads((acc / "presets.json").read_text()) == \
+        {"scene-a": {"label": "A", "prompt": "p"}}, "the shared presets folded in"
+    assert json.loads((app / "loom" / "store.json").read_text())["storyboard:v2:project"]
+    assert (app / "loom" / "kv" / KEY_NEL / "storyboard%3Av2%3Aproj%3Ab1.json").is_file()
+    assert (app / "loom" / "_frames" / "f1.png").read_bytes() == b"FRAME"
+    left_behind = [n for n in ("achievements.json", "telemetry.json", "schedule.json",
+                               "jobs.jsonl", "raw_tasks.jsonl", "organize_manifest.csv",
+                               "audit_report.csv", "prompt_snippets", "view_presets",
+                               "toolbox_presets.json", "logs", "loom", "gallery/cache/_badges")
+                   if (r.lib / n).exists()]
+    assert left_behind == []
+    for n in ("serve.txt", "moonglade.dat", "moonglade.dat.version", "branding.json",
+              "mirror_session.json", "serve.log", "_container_cache"):
+        assert not (r.app / n).exists(), n
+    assert (r.lib / "images" / "a_m1.png").read_bytes() == b"PICTURE"
+    assert (r.lib / "catalog.db").read_bytes() == b"CATALOG"
+    assert done.report.parked == 0
 
 
 def test_the_readers_find_the_moved_records(r):
@@ -312,24 +353,27 @@ def test_the_walkers_never_see_the_moved_loom(r):
 # ---- the library's dead branding folder, and the legacy catalog.csv (rehearsal 3, S9) ----------
 
 def test_the_dead_branding_folder_goes_with_the_safety_copy(r):
-    """Rehearsal 3: a library's old branding\\ folder holding files is not left forever: each
-    file is set aside with the safety copy (named in the log), the folder goes, and the
-    snapshot rule deletes them in time."""
+    """Rehearsal 3: a library's old branding\\ folder (Moonglade's art before it moved beside
+    the launcher: marks\\, logo.png...) is not left forever: each file in it is set aside with
+    the safety copy (named in the log), the folder goes, and the snapshot rule deletes them in
+    time."""
     write_config(r)
-    write(r.lib / "branding" / "old" / "orphan.png", b"PNG")
-    write(r.lib / "branding" / "mark.txt", "x")
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+    write(r.lib / "branding" / "marks" / "mark_2.png", b"PNG")
+    write(r.lib / "branding" / "logo.png", b"LOGO")
     done = _prepare(r)
     assert not (r.lib / "branding").exists()
     parked = sorted(x.name for x in (r.lib / "_moonglade" / ".snapshot" / "parked").rglob("*")
                     if x.is_file())
-    assert parked == ["mark.txt", "orphan.png"]
+    assert parked == ["logo.png", "mark_2.png"]
     said = " ".join(line for _lvl, line in done.report.lines)
-    assert "branding/old/orphan.png" in said and "branding/mark.txt" in said
+    assert "branding/marks/mark_2.png" in said and "branding/logo.png" in said
 
 
 def test_the_legacy_catalog_csv_goes_and_the_catalog_never_does(r):
     write_config(r)
-    write(r.lib / "catalog.csv", "media_id,path\nm1,a.png\n")
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+    write(r.lib / "catalog.csv", "task_id,media_id,filename,url\nt1,m1,a.png,u\n")
     write(r.lib / "catalog.db", b"CATALOG")
     _prepare(r)
     assert not (r.lib / "catalog.csv").exists()
@@ -337,6 +381,146 @@ def test_the_legacy_catalog_csv_goes_and_the_catalog_never_does(r):
     zips = list((r.lib / "_moonglade" / ".snapshot").glob("*.zip"))
     with zipfile.ZipFile(zips[0]) as zf:
         assert "catalog.csv" in zf.namelist()
+
+
+# ---- a library is never the program's own folder (#11) ------------------------------------------
+
+def test_a_library_set_to_the_program_s_own_folder_is_refused_by_every_start(r):
+    """The library half there would take the Loom's code (<install>\\loom) for the Loom's data.
+    Every kind of start refuses it with a plain sentence saying what to change, and nothing in
+    the folder moves."""
+    write_config(r)
+    write(r.app / "loom" / "src" / "main.js", "the Loom's code")
+    write(r.app / "moonglade" / "__init__.py", "")
+    settings.set_values(library_dir=str(r.app))
+    for kind in ("launcher", "server", "cli", "mcp"):
+        with pytest.raises(msetup.MoveStopped) as e:
+            msetup.prepare(kind)
+        assert "Moonglade's own program folder" in str(e.value)
+        assert "library_dir" in str(e.value)
+    assert (r.app / "loom" / "src" / "main.js").read_text() == "the Loom's code"
+    assert not (r.app / "_moonglade").exists()
+    with pytest.raises(msetup.MoveStopped) as e:
+        msetup.prepare("cli", explicit_out=str(r.app))
+    assert "that this run names" in str(e.value)
+
+
+def test_a_folder_holding_another_install_is_refused(r):
+    other = r.lib.parent / "another-install"
+    write(other / "local" / "settings.json", {})
+    write(other / "loom" / "src" / "main.js", "the Loom's code")
+    settings.set_values(library_dir=str(other))
+    with pytest.raises(msetup.MoveStopped) as e:
+        msetup.prepare("launcher")
+    assert "holds a Moonglade program" in str(e.value)
+    assert (other / "loom" / "src" / "main.js").is_file()
+
+
+# ---- an older install still serving the library at its first move (#12) ------------------------
+
+@pytest.mark.skipif(__import__("sys").platform != "win32",
+                    reason="Windows refuses to rename a file another program holds open")
+def test_an_older_install_holding_its_log_open_stops_the_first_move(r):
+    """3.19's server keeps <library>\\logs\\moonglade.log open while it runs. Its records would
+    be moved out from under it (its spend guard among them) before the log refused: the first
+    move probes the old logs first, and stops with nothing moved."""
+    import subprocess
+    import sys
+    layout_317(r)
+    log = r.lib / "logs" / "moonglade.log"
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import logging, sys, time\n"
+         "h = logging.FileHandler(sys.argv[1], encoding='utf-8')\n"
+         "h.emit(logging.makeLogRecord({'msg': 'serving'}))\n"
+         "print('ready', flush=True)\n"
+         "time.sleep(60)\n", str(log)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "ready"
+        with pytest.raises(msetup.MoveStopped) as e:
+            _prepare(r)
+        assert str(e.value) == migrate.OLDER_RUNNING_WORDS % r.lib
+        assert (r.lib / "train_guard.json").is_file(), "no record moved"
+        assert not (r.lib / "_moonglade" / "records").exists() or \
+            not list((r.lib / "_moonglade" / "records").iterdir())
+    finally:
+        holder.kill()
+        holder.wait()
+    _prepare(r)                                   # closed: the move goes ahead
+    assert (r.lib / "_moonglade" / "records" / "train_guard.json").is_file()
+
+
+# ---- only what is Moonglade's by its content moves (#10) ----------------------------------------
+
+def _someone_elses_folder(r):
+    """A folder of the person's own that shares Moonglade's old names, and nothing else."""
+    write(r.lib / "logs" / "camera.log", "not ours\n")
+    write(r.lib / "logs" / "2026" / "trip.log", "not ours either\n")
+    write(r.lib / "loom" / "weaving.txt", "a real loom\n")
+    write(r.lib / "branding" / "client-logo.svg", "<svg/>")
+    write(r.lib / "branding.json", {"brand": "Acme"})
+    write(r.lib / "catalog.csv", "sku,price\n1,2\n")
+    return {p: p.read_bytes() for p in r.lib.rglob("*") if p.is_file()}
+
+
+def test_a_folder_that_is_not_a_moonglade_library_is_left_exactly_as_it_is(r):
+    """#10: a library pointed at a folder of the person's own whose names only match
+    Moonglade's old ones (logs\\, loom\\, branding\\, catalog.csv) moves, parks and removes
+    nothing, and says once what it left."""
+    write_config(r)
+    before = _someone_elses_folder(r)
+    done = _prepare(r)
+    assert {p: p.read_bytes() for p in r.lib.rglob("*") if p.is_file()
+            and "_moonglade" not in p.parts} == before
+    assert not (r.local / "logs" / "camera.log").exists()
+    assert not (r.lib / "_moonglade" / ".snapshot").exists()
+    said = " ".join(line for _lvl, line in done.report.lines)
+    assert "Left" in said and "aren't Moonglade's" in said
+    again = _prepare(r)
+    assert again.report.worked["library"] is False
+
+
+def test_in_a_moonglade_library_only_moonglade_s_own_files_move(r):
+    """#10: in a real library, an old home still passes its own content check: the logs\\ hands
+    over only moonglade.log and its rotations, the loom\\ only the Loom's own entries; anything
+    else of the person's stays where it is, and is named."""
+    write_config(r)
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+    write(r.lib / "logs" / "moonglade.log", "ours\n")
+    write(r.lib / "logs" / "moonglade.log.2026-10-01", "ours, rotated\n")
+    write(r.lib / "logs" / "camera.log", "not ours\n")
+    write(r.lib / "logs" / "2026" / "trip.log", "not ours either\n")
+    write(r.lib / "loom" / "kv" / KEY_NEL / "storyboard%3Av2%3Aproj%3Ab1.json", {"b": 1})
+    write(r.lib / "loom" / "my-notes.txt", "mine\n")
+    write(r.lib / "branding" / "client-logo.svg", "<svg/>")
+    write(r.lib / "branding.json", {"brand": "Acme"})
+    done = _prepare(r)
+    assert (r.local / "logs" / "moonglade.log").read_text() == "ours\n"
+    assert (r.local / "logs" / "moonglade.log.2026-10-01").is_file()
+    assert (r.lib / "logs" / "camera.log").read_text() == "not ours\n"
+    assert (r.lib / "logs" / "2026" / "trip.log").is_file()
+    assert (r.lib / "_moonglade" / "loom" / "kv" / KEY_NEL /
+            "storyboard%3Av2%3Aproj%3Ab1.json").is_file()
+    assert (r.lib / "loom" / "my-notes.txt").read_text() == "mine\n"
+    assert (r.lib / "branding" / "client-logo.svg").is_file()
+    assert json.loads((r.lib / "branding.json").read_text()) == {"brand": "Acme"}
+    assert not list((r.lib / "_moonglade" / ".snapshot").rglob("camera.log*"))
+    said = " ".join(line for _lvl, line in done.report.lines)
+    assert "camera.log" in said and "my-notes.txt" in said
+    assert _prepare(r).report.worked["library"] is False, "not work at every start"
+
+
+def test_a_log_nothing_of_moonglade_s_writes_never_counts_as_an_older_install(r):
+    """#10: after the move, a file another program writes into the library's logs\\ is not an
+    older Moonglade still on the library: only moonglade.log* counts."""
+    write_config(r)
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+    _prepare(r)
+    _written_after_the_move(r.lib / "logs" / "camera.log", "another program\n")
+    for kind in ("cli", "mcp", "launcher"):
+        msetup.prepare(kind)
+    assert (r.lib / "logs" / "camera.log").is_file()
 
 
 # ---- who may move a library (X1) ----------------------------------------------------------------

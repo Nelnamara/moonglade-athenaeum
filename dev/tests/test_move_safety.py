@@ -538,6 +538,89 @@ def test_a_folder_this_user_cannot_write_in_says_so(tmp_path, monkeypatch):
     assert "writable for you" in str(e.value)
 
 
+def test_a_dead_start_s_lock_that_can_t_be_removed_waits_then_says_so(tmp_path, monkeypatch):
+    """#20: a dead start's lock this user can't delete (another account's file, a share
+    without delete rights) used to spin forever at full CPU with nothing on screen. It now
+    waits like any other holder, pausing between tries, then stops with a plain sentence."""
+    import time
+    lock = migrate.FolderLock(tmp_path, "the app folder")
+    lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
+    real, tries = os.remove, {"n": 0}
+
+    def remove(p, *a, **k):
+        if str(p) == str(lock.path):
+            tries["n"] += 1
+            e = PermissionError(13, "Access is denied")
+            e.winerror = 5
+            raise e
+        return real(p, *a, **k)
+    monkeypatch.setattr(os, "remove", remove)
+    began = time.monotonic()
+    with pytest.raises(migrate.MoveStopped) as e:
+        lock.acquire(wait=0.5)
+    assert time.monotonic() - began < 5
+    assert 2 <= tries["n"] <= 20, "it pauses between tries rather than spin"
+    text = str(e.value)
+    assert "can't remove the old lock" in text and str(lock.path) in text
+
+
+# ---- every swap waits out a moment's hold (#14) ---------------------------------------------------
+
+def _refusing_replace(monkeypatch, refuse):
+    """os.replace refusing (PermissionError, winerror 32) where refuse(dest name) says so."""
+    real = os.replace
+
+    def replace(a, b, *x, **k):
+        if refuse(os.path.basename(str(b))):
+            e = PermissionError(13, "The process cannot access the file")
+            e.winerror = 32
+            raise e
+        return real(a, b, *x, **k)
+    monkeypatch.setattr(os, "replace", replace)
+
+
+def test_a_swap_windows_refuses_for_a_moment_is_tried_again(r, monkeypatch):
+    """A scanner, the search indexer or OneDrive opening a file just written makes os.replace
+    fail for a moment. Every swap the move makes -- the journal, a moved file, the safety
+    zip -- goes through one helper that tries again, so the start carries on."""
+    monkeypatch.setattr(migrate, "REMOVE_BACKOFF_S", 0.0)
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)     # copy, then swap
+    write_config(r)
+    write(_guard_src(r), GUARD)
+    held = {}
+
+    def refuse(name):
+        key = "zip" if name.endswith(".zip") else name
+        if key in (".journal.json", "train_guard.json", "zip") and held.get(key, 0) < 2:
+            held[key] = held.get(key, 0) + 1
+            return True
+        return False
+    _refusing_replace(monkeypatch, refuse)
+    _prepare(r)
+    assert held == {".journal.json": 2, "train_guard.json": 2, "zip": 2}
+    assert json.loads(_guard_dest(r).read_text()) == GUARD
+    assert not _guard_src(r).exists()
+
+
+def test_a_swap_refused_for_good_stops_with_what_to_do(r, monkeypatch):
+    monkeypatch.setattr(migrate, "REMOVE_BACKOFF_S", 0.0)
+    monkeypatch.setattr(migrate, "_same_volume", lambda *a: False)
+    write_config(r)
+    write(_guard_src(r), GUARD)
+    _refusing_replace(monkeypatch, lambda name: name == "train_guard.json")
+    with pytest.raises(migrate.MoveStopped) as e:
+        _prepare(r)
+    assert "another program has it open" in str(e.value)
+    assert json.loads(_guard_src(r).read_text()) == GUARD, "the source stays"
+
+
+def test_every_swap_in_the_move_goes_through_the_retry_helper():
+    import inspect
+    src = inspect.getsource(migrate)
+    body = src[:src.index("def _replace(")] + src[src.index("def _write_bytes("):]
+    assert "os.replace(" not in body.replace('"""os.replace(', "")
+
+
 def test_the_lock_check_never_signals_a_process():
     """On Windows os.kill(pid, 0) would TERMINATE the process: the liveness check must only
     ever query it."""

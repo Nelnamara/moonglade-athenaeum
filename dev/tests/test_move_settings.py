@@ -57,6 +57,23 @@ def test_c_s_exact_disagreement_keeps_c_on_its_own_library(r):
     assert not (r.app / "serve.txt").exists() and not (r.local / "serve.txt").exists()
 
 
+def test_a_library_that_is_the_program_s_own_folder_is_never_brought_across(r):
+    """#11: a 3.19 serve.txt `--out .` (or a LIBRARY_DIR of ".") named the program's own folder
+    as the library. The merge never stores that -- the next start would take the Loom's code
+    for the Loom's data: settings.json keeps what it held, and the log says why."""
+    write_config(r, LIBRARY_DIR=".")
+    write(r.app / "serve.txt", "--out . --port 5757\n")
+    settings.set_values(library_dir=str(r.lib))
+    done = _prepare()
+    s = settings.read()
+    assert s["library_dir"] == str(r.lib) and s["port"] == 5757
+    said = [line for _lvl, line in done.report.lines if "was not used" in line]
+    assert any("serve.txt --out (.)" in line and "own program folder" in line
+               for line in said)
+    assert any("config.json LIBRARY_DIR (.)" in line for line in said)
+    assert "LIBRARY_DIR" not in read_config(r)
+
+
 def test_with_no_flag_the_config_key_is_what_the_old_version_used(r):
     write_config(r, LIBRARY_DIR=str(r.lib), HOST="0.0.0.0", PORT=5858)
     done = _prepare()
