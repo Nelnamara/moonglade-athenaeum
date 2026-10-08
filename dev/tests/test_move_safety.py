@@ -24,6 +24,7 @@ import errno
 import json
 import os
 import stat
+import sys
 import zipfile
 from pathlib import Path
 
@@ -562,16 +563,16 @@ def test_a_dead_start_s_lock_that_can_t_be_removed_waits_then_says_so(tmp_path, 
     import time
     lock = migrate.FolderLock(tmp_path, "the app folder")
     lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
-    real, tries = os.rename, {"n": 0}
+    real, tries = os.remove, {"n": 0}
 
-    def move_aside(p, *a, **k):          # the take-over renames it first (one taker, #14)
+    def refuse(p, *a, **k):              # the take-over removes it, under its marker
         if str(p) == str(lock.path):
             tries["n"] += 1
             e = PermissionError(13, "Access is denied")
             e.winerror = 5
             raise e
         return real(p, *a, **k)
-    monkeypatch.setattr(os, "rename", move_aside)
+    monkeypatch.setattr(os, "remove", refuse)
     began = time.monotonic()
     with pytest.raises(migrate.MoveStopped) as e:
         lock.acquire(wait=0.5)
@@ -651,8 +652,9 @@ def test_a_lock_from_before_this_pc_last_started_is_taken_over(tmp_path, monkeyp
 
 def test_two_starts_taking_over_one_dead_lock_never_both_hold_it(tmp_path, monkeypatch):
     """Both judged the same dead lock stale; the first took it over and made its own before
-    the second acted. The second moves the lock aside, sees it is no longer the one it judged,
-    puts it back untouched, and waits -- it never deletes a live start's lock."""
+    the second acted. The second re-reads the lock under its take-over marker, sees it is no
+    longer the one it judged, leaves it untouched, and waits -- it never deletes a live start's
+    lock, and nothing of the take-over is left beside it."""
     lock = migrate.FolderLock(tmp_path, "the library folder")
     lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
     live = "4242 another-pc %.3f" % __import__("time").time()
@@ -668,7 +670,172 @@ def test_two_starts_taking_over_one_dead_lock_never_both_hold_it(tmp_path, monke
         lock.acquire(wait=0.3)
     assert "still tidying" in str(e.value)
     assert lock.path.read_text(encoding="ascii") == live, "the live start's lock is kept"
-    assert not [p.name for p in tmp_path.iterdir() if p.name.startswith(lock.path.name + ".")],         "nothing of the take-over is left beside it"
+    assert not [p.name for p in tmp_path.iterdir() if p.name.startswith(lock.path.name + ".")], \
+        "nothing of the take-over is left beside it"
+
+
+# ---- round 3's lock fixes: the process first, a lock that can't be checked ages out, one taker --
+
+def test_a_live_holder_is_never_taken_over_after_the_clock_steps_forward(tmp_path, monkeypatch):
+    """#6: this PC's last start is read as its clock less its uptime, so a clock stepped
+    forward after a lock was made (a dual-boot, a dead CMOS battery corrected after sign-in)
+    reads a live start's lock as made before the PC last started. The holder's process is
+    checked first: running, and started before its lock was made, it holds the lock whatever
+    the boot time says."""
+    import subprocess
+    import time
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                             stdin=subprocess.DEVNULL)
+    try:
+        if migrate._process_started(child.pid) is None:
+            pytest.skip("this system cannot say when a process started")
+        made = time.time()
+        monkeypatch.setattr(migrate, "_boot_time", lambda: made + 3600)
+        lock = migrate.FolderLock(tmp_path, "the library folder")
+        lock.path.write_text("%d %s %.3f" % (child.pid, migrate._host(), made),
+                             encoding="ascii")
+        assert lock._stale()[0] is False
+        with pytest.raises(migrate.MoveStopped):
+            migrate.FolderLock(tmp_path, "the library folder").acquire(wait=0.3)
+        assert lock.path.exists(), "a live start's lock is never taken over"
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_a_lock_whose_process_can_t_be_opened_counts_only_until_it_goes_untouched(
+        tmp_path, monkeypatch):
+    """#8: a dead start's number reused by a process this user can't open (a service,
+    winlogon) can't say when it started, so it can't be told from the holder. A live holder
+    touches its lock every HEARTBEAT_S, so such a lock counts as alive only until it has gone
+    LOCK_STALE_S untouched -- never "wait a minute" at every start for good."""
+    import time
+    monkeypatch.setattr(migrate, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(migrate, "_process_started", lambda pid: None)
+    monkeypatch.setattr(migrate, "_boot_time", lambda: time.time() - 86400)
+    lock = migrate.FolderLock(tmp_path, "the app folder")
+    lock.path.write_text("4 %s %.3f" % (migrate._host(), time.time()), encoding="ascii")
+    with pytest.raises(migrate.MoveStopped):
+        migrate.FolderLock(tmp_path, "the app folder").acquire(wait=0.3)
+    assert lock.path.exists(), "fresh: it may be a live holder's"
+    old = lock.path.stat().st_mtime - migrate.LOCK_STALE_S - 5
+    os.utime(lock.path, (old, old))
+    with migrate.FolderLock(tmp_path, "the app folder").acquire(wait=0.3) as taken:
+        assert taken.held
+
+
+def test_a_take_over_never_moves_the_lock_aside(tmp_path, monkeypatch):
+    """#7: moving a possibly live lock aside lets a third start's O_EXCL land in the gap, and
+    off Windows the put-back could fail and delete it. The take-over only ever removes the
+    lock, and only the very lock it judged dead."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
+    moved = []
+    for name in ("rename", "replace", "link"):
+        real = getattr(os, name)
+
+        def spy(a, b, *x, _real=real, **k):
+            if os.path.normcase(str(a)) == os.path.normcase(str(lock.path)):
+                moved.append(str(b))
+            return _real(a, b, *x, **k)
+        monkeypatch.setattr(os, name, spy)
+    with lock.acquire(wait=0.5):
+        assert lock.held
+    assert moved == []
+
+
+def test_the_lock_taken_over_is_the_very_lock_judged_dead(tmp_path):
+    """#7: another PC's dead lock is replaced by a third start's live one after it was judged
+    (its bytes and its time read from one file): the take-over re-reads it under its marker,
+    finds it is not the lock it judged, and never touches it."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    dead = "4242 another-pc 1.000"
+    lock.path.write_text(dead, encoding="ascii")
+    old = lock.path.stat().st_mtime - migrate.LOCK_STALE_S - 5
+    os.utime(lock.path, (old, old))
+    stale, seen = lock._stale()
+    assert stale and seen == dead.encode("ascii")
+    live = "5151 third-pc %.3f" % __import__("time").time()
+    lock.path.write_text(live, encoding="ascii")
+    assert lock._take_over(seen) is False
+    assert lock.path.read_text(encoding="ascii") == live
+    assert lock._take_over(live.encode("ascii")) is True, "the one it judged is removed"
+    assert not lock.path.exists()
+
+
+def test_a_start_taking_over_now_is_waited_for(tmp_path):
+    """Only the start holding the take-over marker may remove the dead lock: another start
+    finding a fresh marker waits for it, and never removes either."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    dead = ("999999999 %s 1.000" % migrate._host()).encode("ascii")
+    lock.path.write_bytes(dead)
+    marker = lock._marker(dead, 1)
+    marker.write_text("another start, taking it over now", encoding="ascii")
+    assert lock._take_over(dead) is False
+    assert lock.path.read_bytes() == dead and marker.exists()
+    with pytest.raises(migrate.MoveStopped) as e:
+        lock.acquire(wait=0.3)
+    assert "still tidying" in str(e.value)
+    assert lock.path.read_bytes() == dead
+
+
+def test_a_marker_left_by_a_start_that_died_taking_over_is_passed_by(tmp_path):
+    """A start that died holding its take-over marker never blocks the folder for good: a
+    marker TAKEOVER_STALE_S old is passed by with the next number (never removed under
+    another taker), and once the folder is locked again the leftover markers are cleared --
+    each named a lock that is gone."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    dead = ("999999999 %s 1.000" % migrate._host()).encode("ascii")
+    lock.path.write_bytes(dead)
+    marker = lock._marker(dead, 1)
+    marker.write_text("a start that died", encoding="ascii")
+    old = marker.stat().st_mtime - migrate.TAKEOVER_STALE_S - 5
+    os.utime(marker, (old, old))
+    with lock.acquire(wait=0.5):
+        assert lock.held
+        assert not [p.name for p in tmp_path.iterdir() if ".takeover-" in p.name]
+
+
+def test_three_starts_racing_over_one_dead_lock_hold_it_one_at_a_time(tmp_path):
+    """#7: three real starts released at once over one dead start's lock. Each holds the
+    folder in turn, and no two ever hold it together."""
+    import subprocess
+    import time
+    root = Path(__file__).resolve().parents[2]
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / ".lock").write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
+    go = tmp_path / "go"
+    script = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from moonglade import migrate\n"
+        "go = Path(sys.argv[2])\n"
+        "while not go.exists():\n"
+        "    time.sleep(0.005)\n"
+        "lock = migrate.FolderLock(sys.argv[1], 'x').acquire(wait=30)\n"
+        "t0 = time.time()\n"
+        "time.sleep(0.4)\n"
+        "t1 = time.time()\n"
+        "lock.release()\n"
+        "print(t0, t1, flush=True)\n")
+    env = dict(os.environ, PYTHONPATH=str(root))
+    procs = [subprocess.Popen([sys.executable, "-c", script, str(folder), str(go)],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, env=env)
+             for _ in range(3)]
+    time.sleep(1.0)
+    go.write_text("go")
+    spans = []
+    for p in procs:
+        out, err = p.communicate(timeout=60)
+        assert p.returncode == 0, err
+        t0, t1 = map(float, out.split())
+        spans.append((t0, t1))
+    spans.sort()
+    for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
+        assert b0 >= a1, "two starts held the lock at once"
+    assert not (folder / ".lock").exists()
 
 
 # ---- every swap waits out a moment's hold (#14) ---------------------------------------------------

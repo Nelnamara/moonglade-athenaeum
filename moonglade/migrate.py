@@ -451,6 +451,8 @@ def _boot_time():
 
 
 BOOT_SLACK_S = 60.0          # a lock made this long before this PC last started was a dead run's
+TAKEOVER_STALE_S = 30.0      # a take-over marker this old was left by a start that died taking over
+TAKEOVER_TRIES = 20          # marker numbers tried before waiting like any other start
 
 
 def _pid_alive(pid):
@@ -527,16 +529,21 @@ class FolderLock:
     touched after every step and from inside long ones (so a long move is never mistaken for
     a dead one) -- by writing it, so the disk stamps its time. acquire() waits up to
     LOCK_WAIT_S for another holder, then raises MoveStopped. A lock is taken over only from a
-    holder that is gone: on this PC, it was made before the PC last started, or its process
-    is not running (or the number now belongs to a process started after the lock was made);
-    a lock another PC made (a library on a network drive) counts as alive until it has gone
-    LOCK_STALE_S untouched, its age read on the disk's own clock (never this PC's against
-    another's). A stale lock is taken over by renaming it to a name of this start's own and
-    reading it again: only the start whose rename got the very lock it judged dead removes it,
-    and one that got a live lock made meanwhile puts it back. release() removes only a lock
-    that still holds this one's own line. A folder this user cannot write in stops the start
-    and says so, and so does a dead start's lock this user can't move aside -- after the same
-    wait, pausing between tries, never spinning on it."""
+    holder that is gone (_stale). On this PC its process is checked first: not running, or
+    the number now belongs to a process started after the lock was made, is gone; running and
+    started before it, it is the holder, whatever the clock says. Only a process that can't be
+    opened (another user's: a service, winlogon) is judged otherwise: gone when the lock was
+    made before the PC last started, else alive only until LOCK_STALE_S untouched -- a live
+    holder touches its lock every HEARTBEAT_S. A lock another PC made (a library on a network
+    drive) counts as alive until it has gone LOCK_STALE_S untouched. Every age is read on the
+    disk's own clock (never this PC's against another's), from the same open file as the
+    bytes judged. A stale lock is taken over under a short-lived marker made with O_EXCL
+    (_take_over): only the start holding it re-reads the lock, and removes it only when it is
+    still byte for byte the lock judged dead. The lock is never moved aside, so a live one
+    made meanwhile is never touched. release() removes only a lock that still holds this
+    one's own line. A folder this user cannot write in stops the start and says so, and so
+    does a dead start's lock this user can't remove -- after the same wait, pausing between
+    tries, never spinning on it."""
 
     def __init__(self, folder, what):
         self.path = Path(folder) / _paths.LOCK_NAME
@@ -564,9 +571,9 @@ class FolderLock:
                         stuck = None
                         continue
                     if isinstance(taken, OSError):
-                        # A dead start's lock this user can't move aside (another account's
-                        # file, a share without delete rights): wait like any other holder,
-                        # then say so -- never spin on it.
+                        # A dead start's lock this user can't remove (another account's file,
+                        # a share without delete rights): wait like any other holder, then say
+                        # so -- never spin on it.
                         stuck = taken
                 else:
                     stuck = None                 # a live holder's: "still tidying", not stuck
@@ -589,6 +596,7 @@ class FolderLock:
                     os.close(fd)
                 self.held = True
                 _HELD.append(self)
+                self._clear_markers()
                 return self
             if time.monotonic() > deadline:
                 if stuck is not None:
@@ -628,9 +636,11 @@ class FolderLock:
 
     def _stale(self):
         """(True only when the holder is gone (see the class), the lock's bytes as judged).
-        Raises OSError when the lock went while we looked."""
-        mtime = self.path.stat().st_mtime
-        seen = self.path.read_bytes()
+        The bytes and their time come from one open file: a lock replaced while we look is
+        never judged by another's age. Raises OSError when the lock went while we looked."""
+        with open(self.path, "rb") as f:
+            seen = f.read()
+            mtime = os.fstat(f.fileno()).st_mtime
         age = self._disk_now() - mtime
         try:
             parts = seen.decode("utf-8").split()
@@ -646,52 +656,100 @@ class FolderLock:
             made = float(parts[2]) if len(parts) > 2 else None
         except ValueError:
             made = None
+        # The process first (#6): the boot time follows this PC's clock, so a clock stepped
+        # forward after a live start made its lock would read it as made before the last boot.
+        if not _pid_alive(pid):
+            return True, seen                    # its process is gone
+        started = _process_started(pid)
+        if started is not None and made is not None:
+            return started > made + 2.0, seen    # running: the holder, unless reused since
+        # Running, as far as can be told, but it can't be opened to say when it started (a
+        # service or winlogon holding a dead start's reused number): dead when the lock was
+        # made before this PC last started, and otherwise alive only until it has gone
+        # LOCK_STALE_S untouched (#8) -- a live holder touches it every HEARTBEAT_S.
         boot = _boot_time() if made is not None else None
         if boot is not None and made < boot - BOOT_SLACK_S:
-            return True, seen                    # made before this PC last started
-        if not _pid_alive(pid):
             return True, seen
-        started = _process_started(pid) if made is not None else None
-        return started is not None and started > made + 2.0, seen   # the number was reused
+        return age > LOCK_STALE_S, seen
+
+    def _marker(self, seen, n):
+        """The take-over marker for the lock judged as `seen` (bytes), number `n`."""
+        return self.path.with_name("%s.takeover-%s-%d" % (
+            self.path.name, hashlib.sha256(seen).hexdigest()[:16], n))
 
     def _take_over(self, seen):
-        """Take over the stale lock judged as `seen`: renamed to a name of this start's own (only
-        one start's rename can get it), then read again. True when it was the very lock judged
-        dead (removed: the folder is free to lock), False when it went first or was a live lock
-        made meanwhile (put back untouched), the OSError when it can't be moved aside."""
-        grave = self.path.with_name("%s.%d-%s" % (self.path.name, os.getpid(),
-                                                  os.urandom(4).hex()))
-        try:
-            _make_writable(self.path)            # a dead start's read-only lock
-            os.rename(self.path, grave)
-        except FileNotFoundError:
-            return False                         # another start took it over first
-        except OSError as e:
-            return e
-        try:
-            got = grave.read_bytes()
-        except OSError:
-            got = None
-        if got is not None and got == seen:
+        """Take over the stale lock judged as `seen` (#7), under a marker made with O_EXCL and
+        named for that very lock: only the start holding it re-reads the lock, and removes it
+        only when it is still byte for byte `seen`. Nothing else removes a lock that isn't its
+        own, and a lock's bytes never repeat, so once the dead one is gone no taker can touch
+        the live one made after it. The lock is never moved aside. A marker TAKEOVER_STALE_S
+        old was left by a start that died taking over: the next number is tried, and the old
+        marker is never removed under another taker. The marker goes when the take-over is
+        done (and any left over goes when the folder is next locked: _clear_markers). True when
+        the dead lock was removed (the folder is free to lock), False when it went first, was
+        replaced, or another start is taking it over, the OSError when it can't be removed."""
+        marker = None
+        for n in range(1, TAKEOVER_TRIES + 1):
+            cand = self._marker(seen, n)
             try:
-                _make_writable(grave)
-                os.remove(grave)
-            except OSError:
-                pass
+                fd = os.open(str(cand), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    age = self._disk_now() - os.stat(cand).st_mtime
+                except OSError:
+                    return False                 # it went while we looked: try again
+                if age > TAKEOVER_STALE_S:
+                    continue                     # a start that died taking over: the next one
+                return False                     # another start is taking it over now
+            except PermissionError as e:
+                if os.path.lexists(cand):
+                    return False                 # another start's marker, going: try again
+                return e
+            except OSError as e:
+                return e
+            os.close(fd)
+            marker = cand
+            break
+        if marker is None:
+            return False
+        try:
+            try:
+                got = self.path.read_bytes()
+            except FileNotFoundError:
+                return False                     # it went first
+            except OSError as e:
+                return e
+            if got != seen:
+                return False                     # a live lock made meanwhile: never touched
+            try:
+                _make_writable(self.path)        # a dead start's read-only lock
+                os.remove(self.path)
+            except FileNotFoundError:
+                return False
+            except OSError as e:
+                return e
             return True
-        # A live start's lock, made after we looked: back where it was, never over a newer one.
-        try:
-            if sys.platform == "win32":
-                os.rename(grave, self.path)      # refuses an existing name
-            else:
-                os.link(grave, self.path)        # refuses an existing name
-                os.remove(grave)
-        except OSError:
+        finally:
             try:
-                os.remove(grave)
+                os.remove(marker)
             except OSError:
                 pass
-        return False
+
+    def _clear_markers(self):
+        """Remove the take-over markers beside a lock this start now holds. Each names a lock
+        that is gone (this one was made with O_EXCL, and a lock's bytes never repeat), so none
+        guards anything any more; a slow taker holding one finds the lock isn't its own."""
+        prefix = self.path.name + ".takeover-"
+        try:
+            names = os.listdir(self.path.parent)
+        except OSError:
+            return
+        for n in names:
+            if n.startswith(prefix):
+                try:
+                    os.remove(self.path.parent / n)
+                except OSError:
+                    pass
 
     def touch(self):
         """Keep a held lock fresh by writing its own line again, so the disk stamps the time
