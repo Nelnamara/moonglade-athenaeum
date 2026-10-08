@@ -538,7 +538,9 @@ def test_the_pages_name_stop_server_and_the_held_log_has_its_own_entry():
     entry = trouble[trouble.index("*\"Another program has …\\logs\\moonglade.log open …\"*"):]
     entry = entry[:entry.index(" - *")] if " - *" in entry else entry
     for want in ("older Moonglade still running", "scheduled tasks", "**Stop server**",
-                 "close the program that has the log open"):
+                 "close the program that has the log open",
+                 # #15: how to find which program it is
+                 "**Resource Monitor**", "**Associated Handles**", "search for `moonglade.log`"):
         assert want in entry, want
 
 

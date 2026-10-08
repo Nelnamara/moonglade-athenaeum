@@ -111,7 +111,9 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
   what holds it is usually an older Moonglade still running on the library, on this PC or another
   Windows PC, or one of its scheduled tasks. Stop it the same way (**Stop server** in its Control
   Panel; closing its browser tab doesn't stop it) and stop its scheduled tasks. If it isn't
-  Moonglade, close the program that has the log open. Then start again. Nothing was moved.
+  Moonglade, close the program that has the log open. Then start again. Nothing was moved. To
+  see which program has it, open **Resource Monitor** (search for it in the Start menu), go to
+  the **CPU** tab, and under **Associated Handles** search for `moonglade.log`.
 - *"Moonglade's settings file … is damaged"* or *"can't read its settings file"*: Moonglade
   won't guess which library to open, or write over the file. Close whatever has
   `local\settings.json` open, or fix the file (it is plain JSON), and start again.
