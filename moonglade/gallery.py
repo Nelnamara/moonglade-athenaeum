@@ -36,6 +36,7 @@ from moonglade import assets as moonglade_assets
 from moonglade import container as moonglade_container
 from moonglade import contest_wins
 from moonglade import paths as _paths
+from moonglade import settings as _settings
 
 try:
     from flask import (Flask, jsonify, redirect, render_template_string, request,
@@ -1006,10 +1007,10 @@ _LOOM_IDS_CACHE = {}          # str(out_dir) -> (signature, frozenset of media i
 
 def _loom_board_files(out_dir):
     """Every saved Loom board on disk: this install's per-account folders and the legacy shared
-    layer, both under loom/kv, keyed `storyboard:v2:proj:<id>` (the Loom's own PPRE) or the
+    layer, both under the Loom's kv/ (moonglade.paths.loom_root), keyed `storyboard:v2:proj:<id>` (the Loom's own PPRE) or the
     legacy single-project key. Read-only; a missing folder is simply no boards."""
     from urllib.parse import unquote
-    kv = Path(out_dir) / "loom" / "kv"
+    kv = _paths.loom_root(out_dir) / "kv"
     out = []
     try:
         entries = list(kv.iterdir())
@@ -3752,9 +3753,9 @@ def branding_root():
     translates once at the boundary (_public_rel_to_coded below).
 
     The path itself is moonglade_paths.art_root(), the one place app-root paths are derived.
-    The machine files that used to be this folder's siblings by derivation (the pack,
-    branding.json, branding_slots.json, the icon cache) go through moonglade_paths.local_path()
-    instead, so the art tree and they can move separately."""
+    The machine files that used to be this folder's siblings by derivation (the pack, the
+    branding picks, the icons) live in local/ instead (moonglade.paths, moonglade.settings),
+    so the art tree and they can move separately."""
     return _paths.art_root()
 
 
@@ -3766,7 +3767,7 @@ def branding_root():
 # callers, the discovery scaffold and the migration all DERIVE their paths
 # from it, never retype them (a retyped prefix is how a seal silently fails
 # open). `_thumbs` is a LEGACY literal: the badge-thumb cache now lives OUTSIDE
-# the tree (badge_cache_dir(): out_dir/gallery/cache/_badges/); the _thumbs/ seal
+# the tree (badge_cache_dir(): local/cache/badges/); the _thumbs/ seal
 # deny + the builder's exclusion stay as belt-and-braces for a stale cache left
 # behind by an older build -- never coded, never packed, never served.
 # ---------------------------------------------------------------------------
@@ -3895,13 +3896,6 @@ def _public_rel_to_coded(rel):
     return rel                                                    # rule 7
 
 
-def _branding_path(out_dir):
-    # A machine file (the chosen mark and animation), so it goes through local_path() -- not
-    # through the art tree's parent, so the two can move separately. Today both sit at the
-    # app root, where .gitignore covers them.
-    return _paths.local_path("branding.json")
-
-
 # ---------------------------------------------------------------------------
 # The asset container -- loose-then-container resolution (2026-08-10,
 # docs/DECISIONS.md "The asset container, re-scoped from scratch").
@@ -3930,12 +3924,12 @@ def _branding_path(out_dir):
 # ---------------------------------------------------------------------------
 def _container_path():
     """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
-    a type of its own). A machine file, beside branding.json: moonglade_paths.local_path(),
-    not the art tree's parent. Every code path that reads, fetches, checks or builds the
-    pack asks this; its `.version` marker is derived from it
-    (moonglade_assets._version_marker_path). The pack's pre-v7 name is read only by the
-    one-time rename a real start runs (moonglade_assets.migrate_legacy_name, from main())."""
-    return _paths.local_path("moonglade.mgpack")
+    a type of its own): local/moonglade.mgpack (moonglade_paths.local_path()), not the art
+    tree's parent. Every code path that reads, fetches, checks or builds the pack asks this;
+    its `.version` marker is derived from it (moonglade_assets._version_marker_path). The
+    pack's pre-v7 name is read only by the one-time rename the move runs
+    (moonglade_assets.migrate_legacy_name, from moonglade.migrate)."""
+    return _paths.local_path(_paths.PACK_NAME)
 
 
 _container_cache = {"path": None, "mtime": None, "box": None}
@@ -4505,12 +4499,13 @@ def _feats_payload(earned_ids, n_masked, feats_revealed, unleashed, secret):
     return out
 
 
-def feat_mask_cache_dir(out_dir):
-    """Where the lazily cut masks live: `out_dir/gallery/cache/_masks/`, a sibling of
-    badge_cache_dir()'s `_badges` for the same reasons (outside the coded branding tree,
-    under `gallery/`, which every walker skips). Files are named by the opaque token, never
-    by the achievement id."""
-    return Path(out_dir) / "gallery" / "cache" / "_masks"
+def feat_mask_cache_dir(out_dir=None):
+    """Where the lazily cut masks live: local/cache/masks/, a sibling of badge_cache_dir()'s
+    badges/ (outside the coded branding tree, and outside every library: a mask's name is an
+    HMAC under this install's secret, meaningless to any other install). Files are named by
+    the opaque token, never by the achievement id. Rebuildable: anything here is cut again
+    when next asked for. (`out_dir` is accepted and unused.)"""
+    return _paths.cache_dir() / "masks"
 
 
 def _feat_mask_bytes(out_dir, aid, token):
@@ -4746,22 +4741,13 @@ def list_slot_assets(out_dir, slot):
     return out
 
 
-def _slot_active_path(out_dir):
-    # A machine file beside branding.json (local_path(), git-ignored) -- kept in its OWN
-    # file rather than folded into branding.json so that file's existing
-    # read-modify-write cycle (load_branding/save_branding, mark+anim only) can never
-    # clobber slot-active state it doesn't know about.
-    return _paths.local_path("branding_slots.json")
-
-
 def _recorded_slot_active(out_dir):
-    """The RECORDED pick per slot, exactly as branding_slots.json holds it -- no
-    self-heal, no existence check, no defaulting. Split out so the resolver below
-    can be handed ONE parse of that file instead of re-reading it per slot."""
-    try:
-        raw = json.loads(_slot_active_path(out_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    """The RECORDED pick per slot, exactly as settings.json's branding.slots holds it -- no
+    self-heal, no existence check, no defaulting. Split out so the resolver below can be
+    handed ONE read instead of re-reading it per slot. (settings.json is written through
+    moonglade.settings.update_branding, which changes only the key it is asked to, so the
+    mark's writer can never clobber a slot pick or the other way round.)"""
+    raw = _settings.branding().get("slots")
     if not isinstance(raw, dict):
         return {}
     return {k: str(v) for k, v in raw.items() if k in BANNER_SLOTS and v}
@@ -4809,8 +4795,8 @@ def load_slot_active(out_dir):
 
 
 def save_slot_active(out_dir, active):
-    _slot_active_path(out_dir).write_text(
-        json.dumps({k: v for k, v in active.items() if v}, indent=2), encoding="utf-8")
+    slots = {k: v for k, v in active.items() if v}
+    _settings.update_branding(lambda b: b.__setitem__("slots", slots))
 
 
 def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
@@ -5638,22 +5624,20 @@ def _migrate_root_banner_flats(out_dir):
 
     MOVE, never delete: the flat IS the banner an existing install is currently
     wearing, and re-rendering it needs the active asset, which may only exist
-    inside the container. A cache render that already exists is the newer truth
+    inside the container. It is the only copy, so it goes to banner_keep_dir()
+    (local/banners/), never into a cache, and settings.json's worn_banner says the
+    slot wears it ({"kind": "migrated"}) -- which is what makes the move stick: the
+    create_app ensure pass that runs moments later leaves a migrated banner alone.
+    Only an explicit upload, pick, crop or apply-earned replaces it. A slot that
+    already wears something else, or a kept copy already there, is the newer truth
     and wins -- the stale root leftover is left where it is and logged, exactly
-    the never-overwrite rule _migrate_legacy_branding_root() holds.
-
-    Each moved flat is stamped {"kind": "migrated"}, which is what makes the
-    move stick: without a record the create_app ensure pass that runs moments
-    later would treat the arrival as a missing render's replacement and re-render
-    the slot's pick straight over the banner this install is actually wearing.
-    'migrated' is never regenerated by any lazy path -- only an explicit upload,
-    pick, crop or apply-earned replaces it."""
+    the never-overwrite rule _migrate_legacy_branding_root() holds."""
     import logging as _logging
     import shutil
     root = branding_root()
-    dst_dir = banner_cache_dir(out_dir)
+    dst_dir = banner_keep_dir()
     log = _logging.getLogger(__name__)
-    for name in _BANNER_FLAT.values():
+    for slot, name in _BANNER_FLAT.items():
         src = root / name
         try:
             if not src.is_file():
@@ -5661,14 +5645,14 @@ def _migrate_root_banner_flats(out_dir):
         except OSError:
             continue
         dst = dst_dir / name
-        if dst.exists():
-            log.warning("banner flat migration: NOT moving %s (destination %s "
-                        "already exists)", src, dst)
+        if dst.exists() or _worn_banner(slot) is not None:
+            log.warning("banner flat migration: NOT moving %s (the slot already wears "
+                        "another banner)", src)
             continue
         try:
             dst_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
-            _write_banner_record(out_dir, name, {"kind": "migrated"})
+            _set_worn_banner(slot, {"kind": "migrated"})
             log.info("banner flat migration: moved %s -> %s", src, dst)
         except OSError:
             log.warning("banner flat migration: failed to move %s -> %s",
@@ -6070,21 +6054,68 @@ def _flat_default_rel(slot):
     return _role_rel(slot, _BANNER_FLAT_DEFAULT[slot])
 
 
-def banner_cache_dir(out_dir):
-    """Where the RENDERED banner flats live: `out_dir/gallery/cache/_banners/`.
-    A sibling of badge_cache_dir()'s `_badges`, for exactly its reasons: these
-    files are regenerable, derived per-install state rather than shipped art,
-    and `gallery/` is the one tree every filesystem walker already skips
-    (organize, import, audit, dedup -- Invariant 6), so a render can never be
-    catalogued as art.
+def banner_cache_dir(out_dir=None):
+    """Where the RENDERED banner flats live: local/cache/banners/. A sibling of
+    badge_cache_dir()'s badges/, for exactly its reasons: these files are rebuildable --
+    a slot render from the slot's pick, an earned render from the pack -- and derived from
+    this install's picks, not from any library, so they live with the install.
 
-    Moved OUT of the coded goods root on 2026-09-10 (owner ruling). The tree
-    now holds slot folders and nothing else: the root is empty and inert, the
-    app writes nothing there and serves nothing from there, and a file dropped
-    at the root is neither served nor overwritten by the next re-render. Derived
-    from `out_dir` directly -- NOT from branding_root() -- which is the same rule
-    badge_cache_dir() follows."""
-    return Path(out_dir) / "gallery" / "cache" / "_banners"
+    Moved OUT of the coded goods root on 2026-09-10 (owner ruling). The tree now holds slot
+    folders and nothing else: the root is empty and inert, the app writes nothing there and
+    serves nothing from there, and a file dropped at the root is neither served nor
+    overwritten by the next re-render. A render that is the ONLY copy of what the install
+    wears (one migrated from an early version's root) is not a cache and lives in
+    banner_keep_dir() instead (B6). (`out_dir` is accepted and unused.)"""
+    return _paths.cache_dir() / "banners"
+
+
+def banner_keep_dir():
+    """local/banners/: banner renders that are the only copy of what this install wears (moved
+    in from an early version's art-tree root, or a render with no record). Never regenerated,
+    never in a cache; settings.json's branding.worn_banner says a slot wears one (B6)."""
+    return _paths.banners_dir()
+
+
+# The earned banners, by id, and the achievement each one is gated on.
+_EARNED_BANNERS = {"great_library": "the-great-library"}
+
+
+def _served_flat_dir(out_dir, slot):
+    """The folder `slot`'s flat is served from: banner_keep_dir() while the slot wears an only
+    copy (a migrated banner, or a kind this build does not know), else the render cache."""
+    worn = _worn_banner(slot)
+    if worn is not None and worn.get("kind") != "earned":
+        return banner_keep_dir()
+    return banner_cache_dir(out_dir)
+
+
+def _worn_banner(slot):
+    """What `slot` wears beyond its own pick, from settings.json's branding.worn_banner:
+    {"kind": "earned", "banner_id": ...} (applied from the pack), {"kind": "migrated"} (the
+    only copy, in banner_keep_dir()), or None (the slot's own pick)."""
+    worn = _settings.branding().get("worn_banner")
+    v = worn.get(slot) if isinstance(worn, dict) else None
+    return v if isinstance(v, dict) and v.get("kind") else None
+
+
+def _set_worn_banner(slot, value):
+    """Store (or with None clear) what `slot` wears beyond its pick. Fail-soft: a choice that
+    cannot be saved costs the choice, never a request."""
+    def _apply(b):
+        worn = b.get("worn_banner") if isinstance(b.get("worn_banner"), dict) else {}
+        if value is None:
+            worn.pop(slot, None)
+        else:
+            worn[slot] = value
+        if worn:
+            b["worn_banner"] = worn
+        else:
+            b.pop("worn_banner", None)
+    try:
+        _settings.update_branding(_apply)
+        return True
+    except (OSError, _settings.SettingsBusy):
+        return False
 
 
 # The output aspect each banner flat is cropped to (width / height). banner_loom
@@ -6265,11 +6296,16 @@ def _render_banner_flat(out_dir, slot, raw, zoom=100, cropx=50, cropy=50, record
     return True
 
 
-def _write_banner_flat(out_dir, slot):
+def _write_banner_flat(out_dir, slot, wear=True):
     """Render a banner slot's ACTIVE asset into its flat, baking the stored
     zoom/cropX/cropY transform in via _render_banner_flat above, and stamp the
     pick it came from. That is what makes the banner sliders REAL -- the
     transform was stored metadata nothing rendered before.
+
+    `wear`: an explicit action (an upload, a pick, a re-crop) also makes the slot wear its
+    own pick again, clearing an earned or migrated banner it wore (settings.json's
+    worn_banner). The startup ensure pass passes False: re-rendering a pick never changes
+    what the owner chose to wear.
 
     One of the EXPLICIT writers: an upload, a pick, a re-crop, and the startup
     ensure pass -- each an authenticated action or a server start. Nothing on the
@@ -6286,71 +6322,91 @@ def _write_banner_flat(out_dir, slot):
     # read via the resolution layer (coded rel), not a raw path.
     raw = _branding_bytes(_role_rel(slot, rec["asset_id"] + ".png"))
     t = rec["transform"]
-    return _render_banner_flat(out_dir, slot, raw, t["zoom"], t["cropX"], t["cropY"],
+    done = _render_banner_flat(out_dir, slot, raw, t["zoom"], t["cropX"], t["cropY"],
                                record=rec)
+    if done and wear and _worn_banner(slot) is not None:
+        _set_worn_banner(slot, None)
+    return done
 
 
-def _ensure_banner_flat(out_dir, slot):
-    """Bring one slot's rendered flat up to date if -- and only if -- its own
-    record says it is out of date. Returns the flat's Path when one exists
-    afterwards, else None.
+def _earned_banner_ok(out_dir, banner_id, db_path=None):
+    """Is the earned banner `banner_id` earned in THIS library (S5)? The choice to wear it is
+    the install's (settings.json), the reward is the library's: in a library where it is not
+    earned the slot shows its own pick, and the stored choice is kept for when the library
+    changes back. Fail-closed: anything that cannot be computed answers False."""
+    aid = _EARNED_BANNERS.get(str(banner_id or ""))
+    if not aid:
+        return False
+    try:
+        return _mark_earned(out_dir, db_path or (Path(out_dir) / "catalog.db"), aid)
+    except Exception:                      # noqa: BLE001 -- a banner must never fail a boot
+        return False
 
-    Regenerates in exactly two cases:
-      - the render is MISSING and nothing claims it -- no record at all, or a
-        record that says kind 'slot'. Renders are per-LIBRARY (out_dir) while
-        the pick that produces them is per-APP-FOLDER (branding_slots.json,
-        beside branding_root()), so pointing the app at a second library must
-        rebuild the owner's real pick rather than falling back to the shipped
-        default -- the exact coupling branding_root() left out_dir to kill in
-        2026-07-26.
-      - the render is present, its record says kind 'slot', and that slot's
-        active pick or transform no longer matches it.
 
-    Everything else is left alone, and that is the point. An 'earned' render (a
-    banner applied from sealed bytes, no slot pick behind it), a 'migrated' one
-    (moved in from an old install's coded root, possibly with nothing left to
-    re-render from) and a record this build does not recognise are never touched
-    by this path. Only an explicit user action -- upload, pick, crop,
-    apply-earned -- replaces those, and it writes its own new record when it does.
+def _ensure_banner_flat(out_dir, slot, db_path=None):
+    """Bring one slot's flat up to date, and return the Path the slot is served from (None
+    when there is nothing of this install's to serve: the route then falls through to the
+    container copy and the shipped sealed default).
 
-    The record is read BEFORE the file is looked for, and that ordering is the
-    whole guarantee. Gate the check on the render's presence instead and a
-    render that goes missing under a surviving record -- a selective cache
-    cleanup, a quarantined png, a half-copied library -- falls through to the
-    slot renderer, which stamps its own {"kind": "slot"} over the record and
-    takes the provenance with it. An earned banner would silently revert; a
-    migrated one, with nothing left to re-render from, would be gone for good.
-    A missing 'earned' or 'migrated' render is reported as missing (None) and
-    the route falls through to the container copy and the sealed default, which
-    is recoverable; an overwritten record is not.
+    What the slot wears decides it (settings.json's branding.worn_banner, B6):
 
-    Called at STARTUP (create_app, via _ensure_banner_renders) and from nowhere
-    on the request path: the /branding/ flat route serves what is here and never
-    decodes, resizes or writes."""
+      - "migrated" (or a kind this build does not know): the only copy, in
+        banner_keep_dir(). Never rendered, never touched; None when it is gone.
+      - "earned": rendered from the pack into the cache (banner_cache_dir()) when the render
+        there is missing or is not that banner -- but only while the banner is earned in this
+        library (S5). In a library where it is not, the slot's own pick is rendered instead,
+        and the choice stays stored for when the library changes back.
+      - nothing: the slot's own pick, rendered into the cache when the render there is
+        missing, or its record no longer matches the pick or its transform.
+
+    Everything in the cache is this app's own, rebuildable render, stamped with a record
+    (_write_banner_record) saying what it was rendered from; one without a record is stale.
+
+    Called at STARTUP (create_app, via _ensure_banner_renders) and from nowhere on the
+    request path: the /branding/ flat route serves what is here and never decodes,
+    resizes or writes."""
     name = _BANNER_FLAT.get(slot)
     if not name:
         return None
+    worn = _worn_banner(slot)
+    kind = worn.get("kind") if worn else None
+    if kind not in (None, "earned"):
+        keep = banner_keep_dir() / name
+        try:
+            return keep if keep.is_file() else None
+        except OSError:
+            return None
     dst = banner_cache_dir(out_dir) / name
     try:
         have = dst.is_file()
     except OSError:
         have = False
     rec = _read_banner_record(out_dir, name)
-    kind = rec.get("kind") if isinstance(rec, dict) else None
-    if kind is not None and kind != "slot":
-        # earned / migrated / a kind this build does not know -- not ours to
-        # redo, and not ours to overwrite the record of when the png is gone.
-        return dst if have else None
-    if have:
-        if kind is None:
-            return dst                     # a render nothing claims: what the install wears
-        want = _slot_render_record(out_dir, slot)
-        if want is None:
-            return dst                     # nothing to render from; keep what displays
-        if (rec.get("asset_id") == want["asset_id"]
-                and rec.get("transform") == want["transform"]):
+    if kind == "earned" and _earned_banner_ok(out_dir, worn.get("banner_id"), db_path):
+        want = {"kind": "earned", "banner_id": str(worn.get("banner_id"))}
+        if have and isinstance(rec, dict) and rec.get("kind") == "earned" \
+                and rec.get("banner_id") == want["banner_id"]:
             return dst
-    _write_banner_flat(out_dir, slot)
+        raw = _branding_bytes(_role_rel("earned_banners", want["banner_id"] + ".png"))
+        if raw is not None and _render_banner_flat(out_dir, slot, raw, record=want):
+            return dst
+        # the pack has no bytes for it right now: fall through to the slot's own pick
+    want = _slot_render_record(out_dir, slot)
+    if want is None:
+        if have and not (isinstance(rec, dict) and rec.get("kind") == "slot"):
+            # an earned render this library has not earned, with no pick to show instead
+            for stale in (dst, _banner_record_path(out_dir, name)):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+            return None
+        return dst if have else None
+    if (have and isinstance(rec, dict) and rec.get("kind") == "slot"
+            and rec.get("asset_id") == want["asset_id"]
+            and rec.get("transform") == want["transform"]):
+        return dst
+    _write_banner_flat(out_dir, slot, wear=False)
     try:
         return dst if dst.is_file() else None
     except OSError:
@@ -6371,8 +6427,8 @@ def _record_slot_resolution(out_dir):
     about a stored pick rather than about a derivation.
 
     Called from main() only -- NOT from create_app(), and for the same reason
-    _migrate_root_banner_flats() is not: branding_slots.json is addressed off
-    branding_root(), the REAL coded tree on any test that does not patch it,
+    _migrate_root_banner_flats() is not: before settings.json held the picks, the pick file
+    was addressed off branding_root(), the REAL coded tree on any test that did not patch it,
     and ~every test in the suite builds create_app(), several from module-scoped
     fixtures that conftest's per-test branding isolation cannot reach. Run there,
     a plain pytest run on a dressed install would rewrite the owner's own pick
@@ -6398,7 +6454,7 @@ def _record_slot_resolution(out_dir):
             "banner render: the slot resolution could not be recorded", exc_info=True)
 
 
-def _ensure_banner_renders(out_dir):
+def _ensure_banner_renders(out_dir, db_path=None):
     """The startup pass: every banner slot's flat brought up to date once, at
     app construction, instead of lazily on a request. The public unauthenticated
     /branding/ route must only ever SERVE -- an anonymous GET that can trigger a
@@ -6418,7 +6474,7 @@ def _ensure_banner_renders(out_dir):
     tree's own pick file."""
     for slot in BANNER_SLOTS:
         try:
-            _ensure_banner_flat(out_dir, slot)
+            _ensure_banner_flat(out_dir, slot, db_path=db_path)
         except Exception:                  # noqa: BLE001 -- a banner must never fail a boot
             import logging as _logging
             _logging.getLogger(__name__).warning(
@@ -6563,18 +6619,19 @@ def load_branding(out_dir):
     """Current branding choice, validated against what exists on disk. Falls back
     to the legacy drop-in logo.png ('logo') when no cut marks are present."""
     cfg = dict(_BRAND_DEFAULTS)
-    try:
-        raw = json.loads(_branding_path(out_dir).read_text(encoding="utf-8"))
-        if isinstance(raw, dict):   # a corrupt file degrades to defaults, never a 500
-            cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
-            for k in ("anim_speed", "anim_scale", "glow_angle"):
-                if k in raw:
-                    cfg[k] = _brand_num(k, raw[k], _BRAND_DEFAULTS[k])
-            if "glow_color" in raw:
-                cfg["glow_color"] = _brand_color(raw["glow_color"],
-                                                 _BRAND_DEFAULTS["glow_color"])
-    except (OSError, ValueError):
-        pass
+    stored = _settings.branding()          # settings.json's branding: {mark, animation, ...}
+    raw = dict(stored.get("animation") or {}) if isinstance(stored.get("animation"), dict) \
+        else {}
+    if stored.get("mark"):
+        raw["mark"] = stored["mark"]
+    if raw:                     # a junk value degrades to the default, never a 500
+        cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
+        for k in ("anim_speed", "anim_scale", "glow_angle"):
+            if k in raw:
+                cfg[k] = _brand_num(k, raw[k], _BRAND_DEFAULTS[k])
+        if "glow_color" in raw:
+            cfg["glow_color"] = _brand_color(raw["glow_color"],
+                                             _BRAND_DEFAULTS["glow_color"])
     # A retired animation (the six the 2026-08-31 workshop killed) is a stored pick
     # this build no longer has a treatment for -- it wears classic instead. Same
     # line that has always caught a typo'd id; nothing migrates, nothing errors.
@@ -6587,12 +6644,14 @@ def load_branding(out_dir):
 
 
 def save_branding(out_dir, cfg):
-    """Persist the branding choice. Every key is written explicitly (never the
-    caller's whole dict) so a stray field can't land in branding.json, and the
-    numbers go through the same clamp load_branding applies on the way back in --
-    the file can only ever hold a value the app would accept."""
-    _branding_path(out_dir).write_text(json.dumps({
-        "mark": cfg["mark"], "anim": cfg["anim"],
+    """Persist the branding choice into settings.json's branding (mark, animation). Every key
+    is written explicitly (never the caller's whole dict) so a stray field can't land in the
+    file, and the numbers go through the same clamp load_branding applies on the way back in
+    -- the file can only ever hold a value the app would accept. The slot picks and the worn
+    banner beside them are left exactly as they are."""
+    mark = str(cfg["mark"])
+    animation = {
+        "anim": str(cfg["anim"]),
         "anim_speed": _brand_num("anim_speed", cfg.get("anim_speed"),
                                  _BRAND_DEFAULTS["anim_speed"]),
         "anim_scale": _brand_num("anim_scale", cfg.get("anim_scale"),
@@ -6600,7 +6659,12 @@ def save_branding(out_dir, cfg):
         "glow_color": _brand_color(cfg.get("glow_color"), _BRAND_DEFAULTS["glow_color"]),
         "glow_angle": _brand_num("glow_angle", cfg.get("glow_angle"),
                                  _BRAND_DEFAULTS["glow_angle"]),
-    }, indent=2), encoding="utf-8")
+    }
+
+    def _apply(b):
+        b["mark"] = mark
+        b["animation"] = animation
+    _settings.update_branding(_apply)
 
 
 def _branding_tuning(cfg):
@@ -6637,7 +6701,7 @@ def brand_context(out_dir):
     # route falls through to rule 3, which line 3 below is exactly what checks.
     flat = _BANNER_FLAT["banner_main"]
     try:
-        has_flat = (banner_cache_dir(out_dir) / flat).is_file()
+        has_flat = (_served_flat_dir(out_dir, "banner_main") / flat).is_file()
     except OSError:
         has_flat = False
     box = _get_container()
@@ -6666,17 +6730,16 @@ def _mark_ico_path(mark_id):
     """The app icon for `mark_id` as a REAL file on disk, or None when the mark has no .ico
     cut. The Desktop launcher (make_launcher_shortcut) and the pack's Explorer file type
     (register_pack_file_type) both point Windows at it, and Windows reads an icon only off
-    disk: a loose cut in the coded tree wins; a pack-shipped one is materialized into a
-    git-ignored, regenerable cache, a machine file (moonglade_paths.icon_cache_dir()). (The
-    cache subfolder keeps its plain 'marks' name -- it lives outside the goods root, so it
-    is not part of the coded tree.)"""
+    disk: a loose cut in the coded tree wins; a pack-shipped one is written into
+    local/icons/ (moonglade_paths.icons_dir()) -- not a cache, since a shortcut points at
+    the file and clearing a cache must never blank its icon."""
     ico = _role_dir("marks") / (str(mark_id) + ".ico")
     if ico.exists():
         return ico
     raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
     if raw is None:
         return None
-    cache = _paths.icon_cache_dir()
+    cache = _paths.icons_dir()
     try:
         cache.mkdir(parents=True, exist_ok=True)
         ico = cache / (str(mark_id) + ".ico")
@@ -7270,7 +7333,7 @@ def claim_job_label(claimed, credits):
 
 
 def _ach_state_path(out_dir):
-    return _paths.state_path(out_dir, "achievements.json")
+    return _paths.records_path(out_dir, "achievements.json")
 
 
 def load_ach_state(out_dir):
@@ -7313,17 +7376,16 @@ def save_ach_state(out_dir, state):
         return False
 
 
-def badge_cache_dir(out_dir):
-    """Where the regenerable badge-thumb cache lives: `out_dir/gallery/cache/_badges/`.
-    OUTSIDE the coded branding tree on purpose (SCOPE_bundle-v2-branding constraint 3:
-    the tree must keep reading as the empty slot scaffold -- a folder of PNGs named by
-    achievement id beside the coded folders published the sealed roster's own contents
-    to anyone who opened it), and
-    under `gallery/`, which every filesystem walker already skips wholesale (organize,
-    import, audit, dedup -- Invariant 6), so the cache can never be catalogued as art.
-    `gallery/cache/` is the general home for regenerable caches (owner, 2026-08-21: a
-    cache container may follow); add siblings beside `_badges`, not elsewhere."""
-    return Path(out_dir) / "gallery" / "cache" / "_badges"
+def badge_cache_dir(out_dir=None):
+    """Where the regenerable badge-thumb cache lives: local/cache/badges/. OUTSIDE the coded
+    branding tree on purpose (SCOPE_bundle-v2-branding constraint 3: the tree must keep
+    reading as the empty slot scaffold -- a folder of PNGs named by achievement id beside the
+    coded folders published the sealed roster's own contents to anyone who opened it), and
+    outside every library: the thumbs are cut from the art pack, identical for any library,
+    so they live with the install that has the pack. local/cache/ is the general home for
+    rebuildable caches; add siblings beside badges/, not elsewhere. (`out_dir` is accepted
+    and unused.)"""
+    return _paths.cache_dir() / "badges"
 
 
 def _badge_thumb(out_dir, aid, size=256):
@@ -7425,7 +7487,7 @@ _TELEM_OUT = None            # set by set_telemetry_out(); None -> bare bumps no
 
 
 def _telemetry_path(out_dir):
-    return _paths.state_path(out_dir, "telemetry.json")
+    return _paths.records_path(out_dir, "telemetry.json")
 
 
 def set_telemetry_out(out_dir):
@@ -10135,10 +10197,11 @@ DELETED_DIRNAME = "_deleted"
 # the move still has files here, and a scan that swept them in would catalogue
 # someone's banner and mascots as gallery images.
 BRANDING_DIRNAME = "branding"
-# The app's own records in a library (3.20): its state, jobs, logs, runs.db and reports --
-# never pictures. Every walker prunes it, so a record is never catalogued, counted, flagged
-# as a stray, organized or quarantined.
-RECORDS_DIRNAME = _paths.RECORDS_DIRNAME
+# The app's own folder in a library (_moonglade/): its records, the owner's decisions, every
+# login's stores and the Loom -- never pictures. Every walker prunes it, so nothing in it is
+# ever catalogued, counted, flagged as a stray, organized or quarantined (the Loom's frames
+# and cuts included).
+RECORDS_DIRNAME = _paths.LIBRARY_APP_DIRNAME
 
 # The two spellings of "skip the derived + quarantined trees, and the app's records"
 # (named disagreement 2).
@@ -12052,33 +12115,14 @@ def changelog_entries(text=None):
 def art_pack_info(container_path, out_dir=None):
     """{installed, version} for the About card's "art pack vN". The version comes from the
     installed pack's own marker when the downloader wrote one, else from the manifest when
-    the pack on disk is the one this build expects; a missing pack says so.
-
-    Plus `note`, only when there is one to give: the old copies left in the old places that
-    the app no longer reads (moonglade_migrate.leftovers(): what 3.20 copied into local/ and
-    the library's _moonglade/, the old serve logs, the library-side branding.json nothing
-    reads, a pack still under its pre-v7 name). Nothing is ever deleted for the owner, so
-    About names them in plain words as safe to delete. Read from the disk on each ask, so a
-    name leaves the moment its file does."""
-    from moonglade import migrate as moonglade_migrate
+    the pack on disk is the one this build expects; a missing pack says so. (There is no
+    list of old copies to delete: the app removes its own, DECISIONS 2026-10-05.)"""
     try:
         present = Path(container_path).exists()
     except OSError:
         present = False
-    items = moonglade_migrate.leftovers(out_dir)
-    if present:
-        try:
-            beside = Path(container_path).with_name(moonglade_assets.LEGACY_NAME)
-            if beside.is_file() and beside != _paths.old_local_path(beside.name):
-                items.append(("pack", beside.name))
-        except OSError:
-            pass
-    note = moonglade_migrate.leftovers_note(items)
     if not present:
-        info = {"installed": False, "version": ""}
-        if note:
-            info["note"] = note
-        return info
+        return {"installed": False, "version": ""}
     marker = moonglade_assets._read_marker(Path(container_path)) or {}
     if marker.get("version"):
         info = {"installed": True, "version": str(marker["version"])}
@@ -12089,8 +12133,6 @@ def art_pack_info(container_path, out_dir=None):
         except Exception:                        # noqa: BLE001 -- a label, never a failure
             current = False
         info = {"installed": True, "version": str(man["version"]) if current else ""}
-    if note:
-        info["note"] = note
     return info
 
 
@@ -12155,75 +12197,31 @@ def wiki_online_differs(slug, local_md, behind, opener=None, now=None):
     return differs
 
 
-LIBRARY_DIR_KEY = "LIBRARY_DIR"
-DEFAULT_LIBRARY_DIR = _paths.DEFAULT_LIBRARY_DIR    # relative: resolves against run_dir()
+DEFAULT_LIBRARY_DIR = _paths.DEFAULT_LIBRARY_DIR    # relative: anchored to the app folder
+DEFAULT_HOST = _settings.DEFAULT_HOST
+DEFAULT_PORT = _settings.DEFAULT_PORT
+DEFAULT_BONJOUR_NAME = _settings.DEFAULT_BONJOUR_NAME
 
 
 def resolve_library_dir(explicit=None):
-    """Where the library lives: an explicit --out, then config.json's LIBRARY_DIR, then the
-    default. Explicit beats stored on purpose -- a one-off `--out somewhere`, a scheduled
-    job, or a second install pointed elsewhere must not be overridden by a shared setting,
-    and must not quietly rewrite it either.
+    """Where the library lives: an explicit --out for this one start, then settings.json's
+    library_dir (the Control Panel's library folder), then the default beside the app --
+    moonglade.settings.library_path(), the one resolver the server, the command line and the
+    MCP server share (S8). Explicit beats stored on purpose: a one-off `--out somewhere` must
+    neither be overridden by the shared setting nor quietly rewrite it. Returns a string.
 
-    Read fresh from disk rather than through core's module-level _cfg cache: the Panel
-    writes this and then restarts, and a cache populated at the OLD process's start is
-    exactly the value the restart exists to get away from.
-    """
-    if explicit:
-        return str(explicit)
-    try:
-        from moonglade import backup as _core
-        stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "").strip()
-    except Exception:                                   # noqa: BLE001
-        stored = ""
-    return stored or DEFAULT_LIBRARY_DIR
-
-
-# Server binding + Bonjour discovery settings live in config.json (edited from the Control
-# Panel's Bonjour chip), so host/port need not be buried in the launcher's serve.txt. Same
-# precedence + fresh-read discipline as resolve_library_dir above.
-HOST_KEY = "HOST"
-PORT_KEY = "PORT"
-BONJOUR_ENABLED_KEY = "BONJOUR_ENABLED"
-BONJOUR_NAME_KEY = "BONJOUR_NAME"
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 5000
-DEFAULT_BONJOUR_NAME = "Moonglade"
+    settings.json is read once per change of the file, so the value the Panel saved before a
+    restart is the one the restarted server opens."""
+    return str(_settings.library_path(explicit))
 
 
 def resolve_server_settings(host_arg=None, port_arg=None):
-    """Bind host/port + Bonjour discovery settings. An explicit CLI --host/--port wins (a one-off
-    launch or a second install must neither be overridden by, nor rewrite, the shared config),
-    else config.json's HOST/PORT/BONJOUR_*, else the defaults. Bonjour defaults OFF -- broadcast
-    is opt-in, flipped on from the chip. Read FRESH from disk (not core's _cfg cache) for the same
-    reason resolve_library_dir is: the Panel writes config then restarts."""
-    cfg = {}
-    try:
-        from moonglade import backup as _core
-        cfg = _core._load_config() or {}
-    except Exception:                                   # noqa: BLE001
-        cfg = {}
-    if host_arg is not None:
-        host = host_arg                              # an explicit --host is trusted as typed
-    else:
-        host = str(cfg.get(HOST_KEY) or "").strip() or DEFAULT_HOST
-        if host not in ("127.0.0.1", "0.0.0.0", "localhost", "::", "::1"):
-            # A hand-edited / legacy / non-bindable config HOST must not crash make_server at
-            # startup (the bind is OUTSIDE serve_forever's try). Accept only a real IP literal;
-            # anything else (a hostname, "5000", junk) falls back to the default.
-            import ipaddress
-            try:
-                ipaddress.ip_address(host)
-            except ValueError:
-                host = DEFAULT_HOST
-    try:
-        port = int(port_arg) if port_arg is not None else int(cfg.get(PORT_KEY) or DEFAULT_PORT)
-    except (TypeError, ValueError):
-        port = DEFAULT_PORT
-    name = str(cfg.get(BONJOUR_NAME_KEY) or "").strip() or DEFAULT_BONJOUR_NAME
-    return {"host": host, "port": port,
-            "bonjour_enabled": bool(cfg.get(BONJOUR_ENABLED_KEY, False)),
-            "bonjour_name": name}
+    """Bind host/port + Bonjour discovery settings: an explicit --host/--port for this one
+    start wins, else settings.json's host/port/bonjour (the Control Panel's Bonjour chip),
+    else the defaults (moonglade.settings.server). Bonjour defaults OFF -- broadcast is
+    opt-in, flipped on from the chip. A stored host that cannot be bound falls back to the
+    default rather than crash the bind at startup."""
+    return _settings.server(host_arg, port_arg)
 
 
 def _supervised():
@@ -12735,7 +12733,9 @@ def _pip_install():
 def _account_key(username):
     """Filesystem-safe, case-COLLISION-safe key for `username` -- the ONE shared
     helper every per-account store (saved views, prompt snippets, Loom storyboards,
-    toolbox presets) keys its own file/directory with (B14 residual).
+    toolbox presets) keys its own file/directory with (B14 residual). The rule itself is
+    moonglade.paths.account_key, which names each login's folder
+    (<library>/_moonglade/accounts/<key>/).
 
     Account identity in this app is case-SENSITIVE: moonglade_backup.py's
     _find_web_user compares the raw username with `==`, and username_problem()
@@ -12755,8 +12755,7 @@ def _account_key(username):
     Deliberately not reversible from the key alone -- nothing on disk needs a
     human-readable username back; the account already owns its display name in
     config.json's AUTH_USERS."""
-    import hashlib
-    return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
+    return _paths.account_key(username)
 
 
 # ---------------------------------------------------------------------------
@@ -12768,15 +12767,16 @@ def _account_key(username):
 # document validated at the write boundary -- so each later consumer is a key name
 # (`guide.<surface>`, `seen.whatsnew`, `unleash`, ...), never another store.
 #
-# ON DISK: out_dir/account_prefs/<key>.json, where <key> is _account_key(username) --
-# the same case-safe digest every per-account store uses, never the raw name.
+# ON DISK: <library>/_moonglade/accounts/<key>/prefs.json, where <key> is
+# _account_key(username) -- the same case-safe digest every per-account store uses, never
+# the raw name -- beside the login's other stores (moonglade.paths.account_dir).
 #
 # WHICH ACCOUNT: the route passes session["user"] and nothing else; the body can never
 # name one. There is no web "no accounts" mode to key: the gallery has no localhost
 # bypass, and with zero accounts nothing past /login is reachable (DECISIONS: "The
 # gallery is default-deny, with no localhost bypass"), so every request that reaches
 # the route carries a real username. ACCOUNT_LOCAL is for a SERVER-SIDE caller that has
-# no web session at all (the CLI, the MCP server): it lands on account_prefs/_local.json.
+# no web session at all (the CLI, the MCP server): it lands on accounts/_local/prefs.json.
 # It cannot collide with an account: a digest is 16 hex characters and never "_local",
 # and the sentinel is an object, not a string, so no session cookie can carry it. An
 # empty or missing username is refused outright -- it never falls back to _local.
@@ -12793,14 +12793,13 @@ def _account_key(username):
 # cannot interleave. A lockfile that cannot be taken in time refuses the write
 # (AccountPrefsBusy) rather than risk a lost update. Writes are atomic: temp file in
 # the same directory + core._atomic_replace.
-ACCOUNT_PREFS_DIRNAME = "account_prefs"
+ACCOUNT_PREFS_NAME = "prefs.json"
 ACCOUNT_PREF_KEY_MAX = 64
 ACCOUNT_PREF_VALUE_MAX = 64 * 1024        # one value's compact JSON, UTF-8 bytes
 ACCOUNT_PREFS_DOC_MAX = 1024 * 1024       # the whole document as written, UTF-8 bytes
 # Lowercase dotted names: segments of [a-z0-9_-], the first starting with a letter, the
 # rest with a letter or digit (so `seen.feat.12` works), no empty segment.
 ACCOUNT_PREF_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
-_ACCOUNT_LOCAL_FILEKEY = "_local"
 _ACCOUNT_PREFS_LOCK = threading.Lock()
 
 
@@ -12829,12 +12828,10 @@ def account_prefs_path(out_dir, account):
     session's own) or ACCOUNT_LOCAL; anything else -- None, "", whitespace, a
     non-string -- raises ValueError rather than landing on some shared file."""
     if account is ACCOUNT_LOCAL:
-        key = _ACCOUNT_LOCAL_FILEKEY
-    elif isinstance(account, str) and account.strip():
-        key = _account_key(account)
-    else:
-        raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
-    return _paths.state_path(out_dir, ACCOUNT_PREFS_DIRNAME) / (key + ".json")
+        return _paths.local_account_dir(out_dir) / ACCOUNT_PREFS_NAME
+    if isinstance(account, str) and account.strip():
+        return _paths.account_dir(out_dir, account) / ACCOUNT_PREFS_NAME
+    raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
 
 
 def _account_prefs_read(p):
@@ -12982,10 +12979,10 @@ def account_prefs_update(out_dir, account, set_=None, unset=None):
 # lockfile) and the same atomic write, and NO route that takes a state from a client: the
 # poke route below is the only writer, and it writes what moonglade_narrator.poke() returned.
 #
-# ON DISK: out_dir/account_state/<key>.json. A missing, torn or non-object file reads as a
+# ON DISK: <library>/_moonglade/accounts/<key>/state.json. A missing, torn or non-object file reads as a
 # fresh state (fail soft: a torn file must not break a click); a write never fails a poke
 # silently -- the route answers what it could not save.
-ACCOUNT_STATE_DIRNAME = "account_state"
+ACCOUNT_STATE_NAME = "state.json"
 _ACCOUNT_STATE_LOCK = threading.Lock()
 
 
@@ -12995,7 +12992,7 @@ def account_state_path(out_dir, account):
     landing on some shared file."""
     if not (isinstance(account, str) and account.strip()):
         raise ValueError("account state needs a signed-in account")
-    return _paths.state_path(out_dir, ACCOUNT_STATE_DIRNAME) / (_account_key(account) + ".json")
+    return _paths.account_dir(out_dir, account) / ACCOUNT_STATE_NAME
 
 
 @contextmanager
@@ -13771,7 +13768,7 @@ def create_app(out_dir: Path):
     # so a just-migrated flat is already stamped 'migrated' and is left alone.
     # Regenerates only a MISSING render or one whose record says its slot's pick
     # moved -- see _ensure_banner_flat.
-    _ensure_banner_renders(out_dir)
+    _ensure_banner_renders(out_dir, db_path=db_path)
     # NOTE: two startup steps are deliberately NOT here, both because they write
     # somewhere branding_root() addresses rather than somewhere out_dir does, and
     # create_app() is called by ~every test with the tree unpatched: the root-flat
@@ -13900,7 +13897,7 @@ def create_app(out_dir: Path):
     # on a missing dependency is how someone ships a silent cut without ever learning why.
     _export_job = {"status": "idle", "progress": 0, "elapsed": 0.0,
                    "out": "", "error": "", "warning": "", "proc": None, "cancelled": False}
-    _export_dir = out_dir / "loom" / "exports"
+    _export_dir = _paths.loom_root(out_dir) / "exports"
     # Bulk cloud-delete runs OFF-THREAD (it's irreversible and can be many network calls)
     # and reports to the Activity card via the job log. Single-flight so two runs can never
     # interleave their deletes.
@@ -14258,7 +14255,7 @@ def create_app(out_dir: Path):
             pass
 
     def _sched_path():
-        return _paths.state_path(out_dir, "schedule.json")
+        return _paths.records_path(out_dir, "schedule.json")
 
     def _load_sched():
         """schedule.json, normalized. The legacy quartet (enabled/action/interval_hours/
@@ -14286,10 +14283,18 @@ def create_app(out_dir: Path):
         return s
 
     def _save_sched(s):
+        """Written whole (S4): a temp beside it, then os.replace -- the stamps rewrite this
+        file every few minutes, and a torn write must never lose the owner's schedule."""
+        p = _sched_path()
+        tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
         try:
-            _sched_path().write_text(json.dumps(s), encoding="utf-8")
+            tmp.write_text(json.dumps(s), encoding="utf-8")
+            os.replace(tmp, p)
         except OSError:
-            pass
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
     def _sched_stamp(**fields):
         """Re-read under the lock, apply `fields`, save. The read-modify-write every
@@ -15444,7 +15449,7 @@ def create_app(out_dir: Path):
         through /api/watch/status while the process lived. So when a generation failed to
         mirror there was no way to answer "was it connected at the time?" -- not from the log,
         not afterwards, not at all. Every transition below is recorded in
-        out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
+        local/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
         this stream can carry a lot of traffic and a per-event line would bury the signal."""
         import asyncio
         import logging as _logging
@@ -16191,6 +16196,9 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Can't remove the last remaining account -- "
                                      "that would lock every remote device out until "
                                      "someone signs in locally to bootstrap a new one."}), 400
+        # S10: a removed login's per-login folder (prefs, state, snippets, presets, saved
+        # views) goes with it.
+        core.remove_login_files(out_dir, username)
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/password", methods=["POST"])
@@ -16297,10 +16305,10 @@ def create_app(out_dir: Path):
     @app.route("/api/library-path", methods=["GET", "POST"])
     @tier(LOGIN, POST=LOCALHOST)
     def api_library_path():
-        """Read or set the library folder (config.json's LIBRARY_DIR).
+        """Read or set the library folder (settings.json's library_dir).
 
-        LOCALHOST-ONLY on write: it rewrites config.json, the file that also holds
-        AUTH_SECRET_KEY and AUTH_USERS, so it sits in the same trust class as
+        LOCALHOST-ONLY on write: it decides which folder every later start opens (and the
+        command line and the MCP server with it), so it sits in the same trust class as
         /api/setup/save-key and /api/branding/shortcut. GET is LOGIN -- the Panel shows the
         current folder to whoever can already see the Panel, and it is the same host path
         /panel already withholds from non-local callers, so it is withheld here too.
@@ -16318,7 +16326,7 @@ def create_app(out_dir: Path):
             # withholding that /panel and this route's own docstring promise. `configured`
             # says whether a folder is set without saying where it is, which is all the
             # Panel needs to decide what to show.
-            stored = str((_core._load_config() or {}).get(LIBRARY_DIR_KEY) or "")
+            stored = _settings.library_dir()
             return jsonify({
                 "path": str(out_dir) if local else "",
                 "stored": stored if local else "",
@@ -16352,18 +16360,11 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "Couldn't create it: {}".format(
                     _redact_host_paths(str(e)))[:160]}), 200
         # Written only AFTER the folder is known good -- never write first and hope, the
-        # same order /api/setup/save-key follows for the API key.
-        # Under _accounts_lock, which serializes every read-modify-write of config.json
-        # in this process. Without it this handler can read the file, a concurrent sign-out
-        # everywhere can bump AUTH_EPOCH_SEQ, and this write then puts the stale epoch back --
-        # which un-revokes the sessions that were just signed out. config.json holds auth state, not
-        # just settings, so any writer of it belongs inside this lock.
+        # same order /api/setup/save-key follows for the API key. settings.json is written
+        # whole under its own lock (moonglade.settings), never config.json.
         try:
-            with _core._accounts_lock:
-                cfg = _core._load_config() or {}
-                cfg[LIBRARY_DIR_KEY] = str(target)
-                _core._save_config(cfg)
-        except OSError as e:
+            _settings.set_values(**{_settings.LIBRARY_DIR: str(target)})
+        except (OSError, _settings.SettingsBusy) as e:
             return jsonify({"error": "Couldn't save the setting: {}".format(
                 _redact_host_paths(str(e)))[:160]}), 200
         has_catalog = (target / "catalog.db").exists()
@@ -16594,19 +16595,18 @@ def create_app(out_dir: Path):
         name, at which reachable URLs, and is zeroconf even installed. Login required (local or
         LAN) -- reading the broadcast state is safe for a LAN device; only WRITING the settings
         (below) is localhost-only."""
-        from moonglade import backup as _core
         from moonglade import bonjour as moonglade_bonjour
-        cfg = _core._load_config() or {}
+        cfg = _settings.server()
         serving = _SERVER_CONTROL.get("serving") or {}
         adv = _SERVER_CONTROL.get("bonjour")
-        host = str(serving.get("host") or cfg.get(HOST_KEY) or DEFAULT_HOST)
+        host = str(serving.get("host") or cfg["host"])
         try:
-            port = int(serving.get("port") or cfg.get(PORT_KEY) or DEFAULT_PORT)
+            port = int(serving.get("port") or cfg["port"])
         except (TypeError, ValueError):
             port = DEFAULT_PORT
         scheme = str(serving.get("scheme") or "http")
-        enabled = bool(cfg.get(BONJOUR_ENABLED_KEY, False))
-        name = str(cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)
+        enabled = bool(cfg["bonjour_enabled"])
+        name = str(cfg["bonjour_name"])
         broadcasting = bool(adv is not None and adv.active)
         hostname = adv.hostname if broadcasting else moonglade_bonjour.hostname_label(name) + ".local"
         lan_bind = moonglade_bonjour.is_lan_bind(host)
@@ -16626,21 +16626,19 @@ def create_app(out_dir: Path):
     @app.route("/api/bonjour/settings", methods=["POST"])
     @tier(LOGIN, POST=LOCALHOST)
     def api_bonjour_settings():
-        """Write the Bonjour/mDNS settings (config.json) and apply what can change live. Broadcast
-        on/off and the name apply immediately (re-register); the bind host/port are launch-time,
-        so those return restart_needed. LOCALHOST-only on write: a LAN device may SEE the state
-        but only the server box may change how the server is exposed. config.json holds auth
-        state, so this rides _accounts_lock like every other writer of it."""
-        from moonglade import backup as _core
+        """Write the Bonjour/mDNS settings (settings.json) and apply what can change live.
+        Broadcast on/off and the name apply immediately (re-register); the bind host/port are
+        launch-time, so those return restart_needed. LOCALHOST-only on write: a LAN device may
+        SEE the state but only the server box may change how the server is exposed."""
         from moonglade import bonjour as moonglade_bonjour
         body = request.get_json(silent=True) or {}
-        cfg = _core._load_config() or {}
-        enabled = bool(body["enabled"]) if "enabled" in body else bool(cfg.get(BONJOUR_ENABLED_KEY, False))
+        cfg = _settings.server()
+        enabled = bool(body["enabled"]) if "enabled" in body else bool(cfg["bonjour_enabled"])
         name = str(body.get("name") if body.get("name") is not None
-                   else (cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)).strip()
+                   else cfg["bonjour_name"]).strip()
         new_host = str(body.get("host") if body.get("host") is not None
-                       else (cfg.get(HOST_KEY) or DEFAULT_HOST)).strip()
-        raw_port = body.get("port", cfg.get(PORT_KEY, DEFAULT_PORT))
+                       else cfg["host"]).strip()
+        raw_port = body.get("port", cfg["port"])
         if not name:
             return jsonify({"error": "A name is required."}), 200
         if new_host not in ("127.0.0.1", "0.0.0.0"):
@@ -16652,14 +16650,9 @@ def create_app(out_dir: Path):
         except (TypeError, ValueError):
             return jsonify({"error": "Port must be a whole number between 1 and 65535."}), 200
         try:
-            with _core._accounts_lock:
-                cfg = _core._load_config() or {}
-                cfg[BONJOUR_ENABLED_KEY] = enabled
-                cfg[BONJOUR_NAME_KEY] = name
-                cfg[HOST_KEY] = new_host
-                cfg[PORT_KEY] = new_port
-                _core._save_config(cfg)
-        except OSError as e:
+            _settings.set_values(**{_settings.BONJOUR: {"enabled": enabled, "name": name},
+                                    _settings.HOST: new_host, _settings.PORT: new_port})
+        except (OSError, _settings.SettingsBusy) as e:
             return jsonify({"error": "Couldn't save the setting: {}".format(
                 _redact_host_paths(str(e)))[:160]}), 200
         # Apply live what needs no rebind: stop, then (re)start if it should be on, using the
@@ -19218,7 +19211,8 @@ def create_app(out_dir: Path):
         The three banner flats take their OWN branch, after the seal check and
         in place of the loose-root lookup (2026-09-10): they are per-install
         RENDERS, not tree assets, so the coded root is never read for them.
-        This install's render in banner_cache_dir() wins; failing that the
+        This install's flat wins -- the only copy in banner_keep_dir() when the
+        slot wears one, else its render in banner_cache_dir(); failing that the
         container's own copy, if an older pack carries one; failing that the
         slot's SHIPPED sealed default, so a fresh install is dressed before its
         first crop. And the coded ROOT's own top level is inert the same way: a
@@ -19257,7 +19251,7 @@ def create_app(out_dir: Path):
             # render. Pure lookup -- whatever the startup ensure pass and the
             # explicit write paths left here is what is served.
             slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
-            cdir = banner_cache_dir(out_dir)
+            cdir = _served_flat_dir(out_dir, slot)
             try:
                 have_render = (cdir / coded).is_file()
             except OSError:
@@ -20285,18 +20279,12 @@ def create_app(out_dir: Path):
 
     _snips_lock = threading.Lock()
 
-    def _snips_dir():
-        d = _paths.state_path(out_dir, "prompt_snippets")
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
     def _snips_path(user):
-        # _account_key (B14 residual): a case-safe key, so "Nel" and "nel" don't
-        # collapse onto one file the way a bare quote(username) did on NTFS.
-        return _snips_dir() / (_account_key(user) + ".json")
-
-    def _legacy_snips_path():
-        return _paths.state_path(out_dir, "prompt_snippets.json")
+        # The login's own folder (moonglade.paths.account_dir, a case-safe key, so "Nel" and
+        # "nel" don't collapse onto one file the way a bare quote(username) did on NTFS).
+        d = _paths.account_dir(out_dir, user)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "snippets.json"
 
     def _read_snips_file(p):
         try:
@@ -20309,23 +20297,17 @@ def create_app(out_dir: Path):
         return []
 
     def _load_snippets(user):
-        """This account's snippets, falling back to the legacy shared file -- same
-        deliberately-read-only fallback as _load_view_presets: an account with no file
-        of its own yet sees whatever the old shared file held (nothing disappears), and
-        diverges the moment it saves its own."""
-        own = _snips_path(user)
-        if own.exists():
-            return _read_snips_file(own)
-        return _read_snips_file(_legacy_snips_path())
+        """This account's snippets. (The old install-wide file was copied into every login
+        with none of its own by the move, moonglade.migrate, and is gone.)"""
+        return _read_snips_file(_snips_path(user))
 
     @app.route("/api/snippets", methods=["GET", "POST"])
     @tier(LOGIN)
     def api_snippets():
-        """Prompt snippets/favorites, stored PER-ACCOUNT (out_dir/prompt_snippets/<user>.json)
-        so one signed-in account can't see or wholesale-clobber another's -- same split saved
-        views already got. Falls back read-only to the legacy shared
-        out_dir/prompt_snippets.json for an account that hasn't saved its own copy yet.
-        Login required (any session, local or LAN)."""
+        """Prompt snippets/favorites, stored PER-ACCOUNT (accounts/<key>/snippets.json in the
+        library's _moonglade/) so one signed-in account can't see or wholesale-clobber
+        another's -- same split saved views already got. Login required (any session, local
+        or LAN)."""
         user = str(session.get("user") or "")
         if not user:
             return jsonify({"error": "not logged in"}), 401
@@ -21652,7 +21634,7 @@ def create_app(out_dir: Path):
     _PAID_MAYBE_REFUSAL = ("Your last confirm of %s may have gone through: PixAI didn't "
                            "answer clearly. Check Runs before trying again (this guard clears "
                            "by itself after 15 minutes). Nothing was sent.")
-    train_guard = TrainGuard(lambda: _paths.state_path(out_dir, "train_guard.json"))
+    train_guard = TrainGuard(lambda: _paths.records_path(out_dir, "train_guard.json"))
     _runs_cache = {"full": None, "light": None}
 
     def _runs_dirty():
@@ -22841,41 +22823,24 @@ def create_app(out_dir: Path):
     @app.route("/api/mirror/enable", methods=["POST"])
     @tier(LOCALHOST)
     def api_mirror_enable():
-        """Set the MIRROR_TO_PIXAI toggle in config.json. LOCALHOST-ONLY: it rewrites
-        config.json (the file that also holds PIXAI_API_KEY, AUTH_USERS, AUTH_SECRET_KEY),
-        so it is in the same trust class as /api/setup/save-key and /api/branding/shortcut --
-        a logged-in LAN session must not be able to flip the owner's every generation onto
-        the browser JWT. Reads the file DIRECTLY and REFUSES on a present-but-unparseable
-        config rather than clobbering the whole auth block with a one-key stub (the exact
-        wipe _save_config's docstring exists to prevent -- _load_config()'s ValueError->{}
-        cannot tell a corrupt file from an empty one). Serialized on _accounts_lock with the
-        other config writers."""
+        """Set the "Mirror to PixAI website" switch (settings.json's mirror_to_pixai).
+        LOCALHOST-ONLY: it decides which credential rides the owner's every generation, so it
+        is in the same trust class as /api/setup/save-key and /api/branding/shortcut -- a
+        logged-in LAN session must not be able to flip the owner's every generation onto the
+        browser JWT. settings.json is written whole under its own lock (moonglade.settings)."""
         from moonglade import backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
-        # The SAME file _save_config() writes below (core._config_path()): reading one path and
-        # writing another would put that file's contents over the real auth block.
-        cfg_path = core._config_path()
-        with core._accounts_lock:
-            try:
-                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
-            except ValueError:
-                return jsonify({"error": "config.json exists but could not be parsed; not "
-                                "overwriting it. Fix or restore the file, then try again."}), 200
-            except OSError as e:
-                return jsonify({"error": "Could not read config.json: {}".format(
-                    _redact_host_paths(str(e)))}), 200
-            # [MAJOR] Only ARM (true-write) when a usable browser JWT actually exists: arming the
-            # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,
-            # fail make_mirror_session(), and refuse -- an armed toggle that can run nothing. The
-            # DISARM (false-write) is always allowed, so the owner can always turn it back off.
-            if want and not core._jwt_usable(core.load_mirror_state().get("jwt") or ""):
-                return jsonify({"error": "Connect the mirror first — not armed",
-                                "enabled": False}), 200
-            cfg["MIRROR_TO_PIXAI"] = want
-            try:
-                core._save_config(cfg)
-            except OSError as e:
-                return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
+        # [MAJOR] Only ARM (true-write) when a usable browser JWT actually exists: arming the
+        # mirror with no live session lets every Bridge/enhance submit hit the mirror-ON gate,
+        # fail make_mirror_session(), and refuse -- an armed toggle that can run nothing. The
+        # DISARM (false-write) is always allowed, so the owner can always turn it back off.
+        if want and not core._jwt_usable(core.load_mirror_state().get("jwt") or ""):
+            return jsonify({"error": "Connect the mirror first — not armed",
+                            "enabled": False}), 200
+        try:
+            _settings.set_values(**{_settings.MIRROR_TO_PIXAI: want})
+        except (OSError, _settings.SettingsBusy) as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
         return jsonify({"enabled": want})
 
     @app.route("/api/mirror/connect", methods=["POST"])
@@ -23197,11 +23162,11 @@ def create_app(out_dir: Path):
         upload runs. On success the SEALED earned_banners bytes go through the
         exact _render_banner_flat pipeline every other banner write uses
         (banner_main ratio 4:1 -> 1920x480), so the applied banner can't
-        differ from an uploaded one in shape or size. The render is stamped
-        {"kind": "earned"}: there is no slot pick behind it, so without that
-        record the next ensure pass would read the flat as a slot render gone
-        stale and quietly revert the owner's applied banner. LOGIN tier,
-        mirroring /api/branding/mark/custom."""
+        differ from an uploaded one in shape or size. The choice is stored in
+        settings.json's branding.worn_banner ({"kind": "earned", "banner_id"}),
+        the render beside it in the cache is stamped the same, and the ensure
+        pass rebuilds it from the pack whenever the cache lacks it (B6). LOGIN
+        tier, mirroring /api/branding/mark/custom."""
         body = request.get_json(silent=True)
         body = body if isinstance(body, dict) else {}   # a JSON array/string/number -> 400, not 500
         if str(body.get("id") or "") != "great_library":
@@ -23209,10 +23174,11 @@ def create_app(out_dir: Path):
         if not _mark_earned(out_dir, db_path, "the-great-library"):
             return jsonify({"error": "banner locked"}), 403
         raw = _branding_bytes(_role_rel("earned_banners", "great_library.png"))
-        if raw is None or not _render_banner_flat(
-                out_dir, "banner_main", raw,
-                record={"kind": "earned", "banner_id": "great_library"}):
+        record = {"kind": "earned", "banner_id": "great_library"}
+        if raw is None or not _render_banner_flat(out_dir, "banner_main", raw, record=record):
             return jsonify({"error": "banner art unavailable"}), 400
+        if not _set_worn_banner("banner_main", record):
+            return jsonify({"error": "Couldn't save the banner choice; try again."}), 200
         return jsonify({"ok": True})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
@@ -23457,26 +23423,16 @@ def create_app(out_dir: Path):
 
     _presets_lock = threading.Lock()
 
-    # Toolbox presets are PER-ACCOUNT, one file each under out_dir/toolbox_presets/ --
-    # same shape as _view_presets_path/_snips_path/_loom_kv_path. They shipped
-    # install-wide; Moonglade is explicitly not single-user (the repo is public and has
-    # real external users), so on any install with more than one account, install-wide
-    # meant every account could see, and overwrite, every other account's imported
-    # presets. The legacy shared file stays a READ-ONLY fallback for an account with no
-    # file of its own yet -- same no-migration-flag contract as _load_view_presets.
-    def _toolbox_dir():
-        d = _paths.state_path(out_dir, "toolbox_presets")
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
+    # Toolbox presets are PER-ACCOUNT, one file in each login's folder (presets.json) --
+    # same shape as _view_presets_path/_snips_path. They shipped install-wide; Moonglade is
+    # explicitly not single-user (the repo is public and has real external users), so on any
+    # install with more than one account, install-wide meant every account could see, and
+    # overwrite, every other account's imported presets. The old shared file was copied into
+    # every login with none of its own by the move (moonglade.migrate), and is gone.
     def _presets_path(user):
-        # _account_key (B14 residual): same case-safe key as every other per-account
-        # store -- toolbox_presets copied _view_presets_path's exact quote(username)
-        # pattern (and its collision) when it was split, most recently of the four.
-        return _toolbox_dir() / (_account_key(user) + ".json")
-
-    def _legacy_presets_path():
-        return _paths.state_path(out_dir, "toolbox_presets.json")
+        d = _paths.account_dir(out_dir, user)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "presets.json"
 
     def _read_presets_data(p):
         try:
@@ -23489,15 +23445,12 @@ def create_app(out_dir: Path):
         return {}
 
     def _load_presets(user):
-        own = _presets_path(user)
-        if own.exists():
-            return _read_presets_data(own)
-        return _read_presets_data(_legacy_presets_path())
+        return _read_presets_data(_presets_path(user))
 
     @app.route("/api/presets", methods=["GET", "POST"])
     @tier(LOGIN)
     def api_presets():
-        """Toolbox presets, stored per-account under out_dir/toolbox_presets/ (preset
+        """Toolbox presets, stored per-account (presets.json in the login's folder) (preset
         prompts are PixAI-authored content, so they live as the owner's own captured
         task data, never in the repo). GET lists {name: {label, scene_id}} (no prompt
         bodies). POST {task_id, label?} imports one from a task the owner ran on the
@@ -23553,7 +23506,7 @@ def create_app(out_dir: Path):
 
     _view_presets_lock = threading.Lock()
 
-    # Saved views are PER-ACCOUNT, one file each under out_dir/view_presets/.
+    # Saved views are PER-ACCOUNT, one file in each login's folder (views.json).
     #
     # They shipped install-wide (a single out_dir/view_presets.json) by analogy with
     # /api/skin, which is the right analogy for a THEME and the wrong one here: a skin is
@@ -23565,22 +23518,15 @@ def create_app(out_dir: Path):
     #
     # For the case this feature was built for -- one owner, desktop and tablet, same
     # account against one server -- per-account behaves identically. Nothing is lost.
-    def _view_presets_dir():
-        d = _paths.state_path(out_dir, "view_presets")
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
     def _view_presets_path(user):
-        # _account_key -- a case-safe key (B14 residual): the original quote(username,
-        # safe="") here was case-PRESERVING, so "Nel" and "nel" quoted to two different
-        # strings that named the SAME file on NTFS (case-insensitive-but-preserving),
-        # even though account identity itself is case-sensitive. See _account_key's
-        # own docstring for the full story; every per-account store shares this one
-        # helper now instead of each re-deriving its own quote()-based key.
-        return _view_presets_dir() / (_account_key(user) + ".json")
-
-    def _legacy_view_presets_path():
-        return _paths.state_path(out_dir, "view_presets.json")
+        # The login's own folder, keyed by a case-safe key (B14 residual): the original
+        # quote(username, safe="") here was case-PRESERVING, so "Nel" and "nel" quoted to two
+        # different strings that named the SAME file on NTFS (case-insensitive-but-preserving),
+        # even though account identity itself is case-sensitive. See _account_key's own
+        # docstring for the full story.
+        d = _paths.account_dir(out_dir, user)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "views.json"
 
     def _read_presets_file(p):
         try:
@@ -23593,19 +23539,9 @@ def create_app(out_dir: Path):
         return {}
 
     def _load_view_presets(user):
-        """This account's saved views, falling back to the legacy shared file.
-
-        The fallback is deliberately READ-ONLY and needs no migration flag. An account
-        with no file of its own yet sees whatever the old shared file held -- exactly what
-        it saw before this change, so nothing disappears -- and the moment it saves, it
-        gets its own file and diverges. No "who owns the legacy set" question, and no
-        first-loader-claims-it race, which is the trap a migration flag would have walked
-        into. Once every account has saved once, out_dir/view_presets.json is inert and
-        can be deleted by hand."""
-        own = _view_presets_path(user)
-        if own.exists():
-            return _read_presets_file(own)
-        return _read_presets_file(_legacy_view_presets_path())
+        """This account's saved views. (The old install-wide file was copied into every login
+        with none of its own by the move, moonglade.migrate, and is gone.)"""
+        return _read_presets_file(_view_presets_path(user))
 
     def _ok_view_query(q):
         # Presets navigate via location.href = '/' + query on load. Requiring the
@@ -23618,7 +23554,7 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_view_presets():
         """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
-        string}, stored server-side under out_dir/view_presets/ so a view saved at the
+        string}, stored server-side in the login's folder so a view saved at the
         desktop exists on the tablet. Login tier (no spend, nothing destructive), and
         scoped to ONE ACCOUNT -- see _view_presets_dir() for why a saved search is not
         the same kind of thing as the install-wide skin choice. They lived in
@@ -24977,7 +24913,7 @@ def create_app(out_dir: Path):
         """The pre-D-7 flat, install-wide store -- every account used to read and write
         the same files here. Now the shared, read-only fallback layer every account's
         _loom_kv_read falls through to until it saves its own copy of a given key."""
-        d = out_dir / "loom" / "kv"
+        d = _paths.loom_root(out_dir) / "kv"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -24991,7 +24927,7 @@ def create_app(out_dir: Path):
         # of a board's filename (_loom_kv_path below) is a separate concern (per-board
         # name collisions within one account's own dir, not account identity) and still
         # uses quote() unchanged.
-        d = out_dir / "loom" / "kv" / _account_key(user)
+        d = _paths.loom_root(out_dir) / "kv" / _account_key(user)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -25059,7 +24995,7 @@ def create_app(out_dir: Path):
         shared fallback layer every account now reads through). Idempotent + crash-safe:
         re-runs from the intact store.json until the final rename lands (a partial
         migration can't lose keys), then no-ops once store.json is gone."""
-        legacy = out_dir / "loom" / "store.json"
+        legacy = _paths.loom_root(out_dir) / "store.json"
         if not legacy.exists():
             return
         try:
@@ -25143,7 +25079,7 @@ def create_app(out_dir: Path):
     _loom_sending_now = set()
 
     def _loom_journal_path(user):
-        d = out_dir / "loom" / "_submits"
+        d = _paths.loom_root(out_dir) / "_submits"
         d.mkdir(parents=True, exist_ok=True)
         return d / (_account_key(user) + ".jsonl")
 
@@ -25226,7 +25162,7 @@ def create_app(out_dir: Path):
     # has already matched LOOM_BED_FILE_RE and then checks _is_under the CALLER's own folder, so
     # neither a crafted name nor another account's bed can be reached.
     def _loom_beds_dir(user):
-        return out_dir / "loom" / "_beds" / _account_key(user)
+        return _paths.loom_root(out_dir) / "_beds" / _account_key(user)
 
     # Spend review N5: an upload or a bundle import killed mid-write leaves its temp file in the
     # account's bed folder, invisible to the unused list and the sweep (they match finished
@@ -25234,7 +25170,7 @@ def create_app(out_dir: Path):
     # of exactly the two temp shapes, directly inside _beds/<account>/, are ever touched.
     _LOOM_BED_TEMP_RE = re.compile(r"^\.(upload|import)-[^/\\]*\.part$")
     try:
-        _beds_root = out_dir / "loom" / "_beds"
+        _beds_root = _paths.loom_root(out_dir) / "_beds"
         for _acct in (_beds_root.iterdir() if _beds_root.is_dir() else []):
             if not _acct.is_dir():
                 continue
@@ -26280,7 +26216,7 @@ __DESIGN_TOKENS__
             vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- generate/collect it first"}), 200
-            fdir = out_dir / "loom" / "_frames"
+            fdir = _paths.loom_root(out_dir) / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             png = fdir / (mid + "_last.png")
             if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
@@ -26331,7 +26267,7 @@ __DESIGN_TOKENS__
             vid = _find_local_video_file(mid)
             if vid is None:
                 return jsonify({"error": "clip not downloaded yet -- collect it first"}), 200
-            fdir = out_dir / "loom" / "_frames"
+            fdir = _paths.loom_root(out_dir) / "_frames"
             fdir.mkdir(parents=True, exist_ok=True)
             out = {}
             # at_seconds=0.0 is the FIRST frame through the same primitive (it takes the
@@ -26449,7 +26385,7 @@ __DESIGN_TOKENS__
                 return jsonify({"error": "at is out of range"}), 400
             frame = int(round(at * LOOM_FRAME_FPS))
             seek = frame / float(LOOM_FRAME_FPS)
-        fdir = out_dir / "loom" / "_frames"
+        fdir = _paths.loom_root(out_dir) / "_frames"
         png = fdir / "{}_{}.png".format(mid, frame)
         if png.is_file():
             try:
@@ -26518,7 +26454,7 @@ __DESIGN_TOKENS__
         r = _req.get(url, timeout=20)
         if r.status_code != 200 or not r.content:
             return False
-        fdir = out_dir / "loom" / "_frames"
+        fdir = _paths.loom_root(out_dir) / "_frames"
         fdir.mkdir(parents=True, exist_ok=True)
         src = fdir / (".frame-thumb-{}-{}".format(mid, secrets.token_hex(4)))
         dest = thumb_dir / (mid + ".jpg")
@@ -26786,7 +26722,7 @@ __DESIGN_TOKENS__
             import base64
             import hashlib
             core, session_ = _gen_session()
-            updir = out_dir / "loom" / "_uploads"
+            updir = _paths.loom_root(out_dir) / "_uploads"
             updir.mkdir(parents=True, exist_ok=True)
 
             # I2V/FLF take a catalog media_id DIRECTLY; R2V still uploads. Measured 2026-07-26,
@@ -27212,7 +27148,7 @@ __DESIGN_TOKENS__
     # One zip: the .edl and .csv the Loom planned (loom/src/loom-edl-core.js), every selected
     # take's clip under its {code}_t{take}.mp4 name, the bed when there is one (ruling 8), and
     # MISSING.txt for any clip that is not a complete file here. Local files only; never PixAI.
-    _loom_exports_dir = out_dir / "loom" / "_exports"
+    _loom_exports_dir = _paths.loom_root(out_dir) / "_exports"
     # A leftover from an export whose download never closed (a client abort, a Windows file
     # handle) is swept on the next start once it is an hour old (review F18).
     try:
@@ -29197,18 +29133,19 @@ def main():
     ap = argparse.ArgumentParser(prog="python -m moonglade.gallery",
                                  description="Local PixAI gallery server.")
     # default=None, not "pixai_backup": argparse cannot tell "the user typed the default"
-    # from "the user typed nothing", and the managed launcher used to always pass the
-    # literal default -- which made config.json's LIBRARY_DIR permanently unreachable no
-    # matter what was stored in it. None is the only value that means "not specified".
+    # from "the user typed nothing". None is the only value that means "not specified", and
+    # then the library, host and port come from local/settings.json (the Control Panel).
     ap.add_argument("--out", default=None,
-                    help="backup folder containing the catalog. Defaults to LIBRARY_DIR in "
-                         "config.json (set it in the Control Panel), or pixai_backup if that "
-                         "is unset. An explicit --out here always wins.")
+                    help="library folder for this start. Defaults to the library folder set in "
+                         "the Control Panel, or pixai_backup beside the app. An explicit --out "
+                         "here always wins, and is never stored.")
     ap.add_argument("--port", type=int, default=None,
-                    help="bind port (default 5000, or PORT in config.json / the Bonjour chip)")
+                    help="bind port for this start (default: the Control Panel's Bonjour chip, "
+                         "or 5000)")
     ap.add_argument("--host", default=None,
-                    help="bind address (default 127.0.0.1, or HOST in config.json / the Bonjour "
-                         "chip; use 0.0.0.0 for LAN). An explicit --host always wins.")
+                    help="bind address for this start (default: the Control Panel's Bonjour "
+                         "chip, or 127.0.0.1; use 0.0.0.0 for LAN). An explicit --host always "
+                         "wins.")
     ap.add_argument("--allow-port-reuse", action="store_true",
                     help="start even if something is already listening on --port. Off by "
                          "default because Windows lets a SECOND server bind an actively "
@@ -29229,18 +29166,34 @@ def main():
                          "until it actually answers and opens the browser itself)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="show INFO-level log lines (request activity, startup steps) on the "
-                         "console too -- the log FILE under out_dir/logs/ always captures them "
+                         "console too -- the log FILE in local/logs/ always captures them "
                          "regardless of this flag")
     args = ap.parse_args()
-    # config.json is the source of truth for host/port + Bonjour (the Control Panel's chip writes
-    # it); an explicit --host/--port still overrides. Fill args in place so the rest of main() --
-    # port_owner, the companion gate, make_server, the cookie name -- is unchanged.
+    # B2: the move runs FIRST -- the settings merge and the install half, then the library's --
+    # before anything below reads a setting, a record or a log. A move that cannot finish (a
+    # lock held past its wait, a file in use) stops the start with its plain sentence: the new
+    # homes would otherwise read empty.
+    from moonglade import setup as moonglade_setup
+    try:
+        prepared = moonglade_setup.prepare("server", explicit_out=args.out)
+    except moonglade_setup.MoveStopped as e:
+        print("\n" + str(e) + "\n", file=sys.stderr)
+        return 3
+    # The launch switches settings.json keeps (launch_args, S17) apply to every start; this
+    # start's own command line adds to them.
+    stored = _settings.launch_args()
+    if stored:
+        args = ap.parse_args(stored + sys.argv[1:])
+    # settings.json is the source of truth for host/port + Bonjour (the Control Panel's chip
+    # writes it); an explicit --host/--port still overrides. Fill args in place so the rest of
+    # main() -- port_owner, the companion gate, make_server, the cookie name -- is unchanged.
     _srv = resolve_server_settings(args.host, args.port)
     args.host, args.port = _srv["host"], _srv["port"]
 
-    out_dir = Path(resolve_library_dir(args.out))
+    out_dir = Path(prepared.library)
     from moonglade import logs as moonglade_logging
-    moonglade_logging.setup_logging(out_dir, verbose=args.verbose)
+    moonglade_logging.setup_logging(verbose=args.verbose)
+    prepared.log()
     # A fresh clone has neither the (git-ignored) output folder nor a catalog -- refusing
     # to start here used to be the ONLY thing a brand-new user saw: a console exit, before
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a
@@ -29297,21 +29250,6 @@ def main():
                   "  --allow-port-reuse if you genuinely want that.\n".format(args.port, args.port + 1),
                   file=sys.stderr)
             return 2
-
-    # 3.20 keeps the machine files in local/ (the pack and its marker, branding.json,
-    # branding_slots.json, mirror_session.json, serve.txt, serve.log, the icon cache). An
-    # install still holding them at the app root has them brought across here, once and
-    # logged, before anything below reads them (a pack under its pre-v7 name is renamed
-    # first) -- so a matching pack never downloads again. After the port check on purpose: a
-    # start refused above must not move the pack out from under the server already running.
-    # Never stops the start: what could not move is read where it is (moonglade.migrate).
-    # The library's own records go the same way, into its _moonglade/ folder (copied; the
-    # spend guard moved), before the app below opens any of them; the file log follows its
-    # logs/ folder there. Also after the port check: a refused start must not move the spend
-    # guard out from under the server already running.
-    from moonglade import migrate as moonglade_migrate
-    moonglade_migrate.open_library(out_dir, move_guard=True)
-    moonglade_migrate.tidy_app_folder()
 
     # One-time, and only on a REAL start: move any rendered banner flat still
     # sitting at the coded root into this install's banner cache. Here rather
