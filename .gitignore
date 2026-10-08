@@ -173,13 +173,13 @@ static/_mockup_*.html
 /_backups/
 /_2000/
 
-# ---- The folders the next release moves runtime files into (Wave 4) ----
-# The machine files' folder: the art pack and its marker, branding.json, branding_slots.json,
-# mirror_session.json, serve.txt, serve.log and the icon cache. Machine-local, never committed.
-# Anchored: only the app root's.
+# ---- This PC's folder and a library's app folder (the 3.20 layout) ----
+# This PC's machinery: settings.json, mirror_session.json, the art pack and its marker, icons/,
+# banners/, cache/, logs/, and the move's journal, lock and safety snapshot. Machine-local,
+# never committed. Anchored: only the app root's.
 /local/
-# The app's own records INSIDE a library (its state files, jobs, logs and reports).
-# Unanchored, like the library guards above, so a library anywhere is covered.
+# The app's own folder INSIDE a library: accounts/, loom/, records/, decisions/ and the move's
+# journal. Unanchored, like the library guards above, so a library anywhere is covered.
 _moonglade/
 
 # ---- The code folder: its code is never ignored (KEEP THIS BLOCK LAST) ----
