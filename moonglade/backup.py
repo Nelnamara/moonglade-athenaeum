@@ -1069,7 +1069,7 @@ _jobs_compact_lock = threading.Lock()
 
 
 def _jobs_path(out_dir):
-    return _paths.state_path(out_dir, JOBS_LOG_NAME)
+    return _paths.records_path(out_dir, JOBS_LOG_NAME)
 
 
 def append_job_event(out_dir, job_id, status=None, **fields):
@@ -5121,7 +5121,7 @@ def cmd_audit(args, out):
         _fmt_bytes(t["reclaimable_bytes"])))
 
     # Write detailed CSV
-    report_path = _paths.reports_path(out, "audit_report.csv")
+    report_path = _paths.records_path(out, "audit_report.csv")
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["class", "group_key", "role", "bucket", "media_id", "size", "path"])
@@ -5319,7 +5319,7 @@ def cmd_verify_dupes(args, out):
     print("  ORPHAN  - no surviving keeper             : {:,}".format(len(res["orphan"])))
 
     if res["differs"] or res["orphan"]:
-        report = _paths.reports_path(out, "verify_report.csv")
+        report = _paths.records_path(out, "verify_report.csv")
         with open(report, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["status", "quarantined_file", "surviving_keeper"])
@@ -5441,7 +5441,7 @@ def cmd_organize(args, out, img_dir, db_path):
         print("Nothing to do -- everything already organized.")
         return
 
-    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
+    manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
     mf_new = not manifest_path.exists()
     mf = open(manifest_path, "a", newline="", encoding="utf-8")
     mw = csv.writer(mf)
@@ -5571,7 +5571,7 @@ def cmd_undo_organize(args, out):
     each new_path is moved back to its old_path. Safe (skips already-reverted),
     then clears the manifest. Lets a re-normalize be undone if you don't like it."""
     db_path = _ensure_db(out)
-    manifest_path = _paths.reports_path(out, ORGANIZE_MANIFEST)
+    manifest_path = _paths.decisions_path(out, ORGANIZE_MANIFEST)
     if not manifest_path.exists():
         print("No organize manifest found ({}); nothing to undo.".format(manifest_path))
         return
@@ -6226,8 +6226,8 @@ _mirror_renewal_reset()
 
 def _mirror_state_path():
     """Where the rotating mirror session (JWT + cookie jar) lives: a dedicated git-ignored
-    machine file, moonglade.paths.local_path() (local/ since 3.20; until an install has been
-    brought across, beside config.json as before). Deliberately NOT config.json -- the JWT
+    machine file, local/mirror_session.json (moonglade.paths.local_path()). Deliberately NOT
+    config.json -- the JWT
     rotates on every refresh, and a write there must never risk clobbering the API key (a
     test once overwrote the real PIXAI_API_KEY; a separate file can't)."""
     return _paths.local_path(_paths.MIRROR_SESSION_NAME)
@@ -6289,11 +6289,12 @@ def save_mirror_state(state):
 
 
 def mirror_enabled():
-    """Is the Control Panel 'Mirror to PixAI website' toggle on? Reads config fresh
-    (git-ignored MIRROR_TO_PIXAI flag). Default OFF = pure API-key mode. When ON, the create
-    POST rides the browser JWT (see _session_for_create) so the generation lands in the
-    pixai.art web library."""
-    return bool(_load_config().get("MIRROR_TO_PIXAI"))
+    """Is the Control Panel 'Mirror to PixAI website' toggle on? settings.json's
+    mirror_to_pixai (moonglade.settings), read once per change of the file. Default OFF = pure
+    API-key mode. When ON, the create POST rides the browser JWT (see _session_for_create) so
+    the generation lands in the pixai.art web library."""
+    from moonglade import settings as _settings
+    return _settings.mirror_to_pixai()
 
 
 def _jwt_usable(jwt):
@@ -16092,11 +16093,11 @@ RECONCILE_STAMP = "reconcile_stamp.json"
 
 
 def _stamp_reconcile(out, flagged, cleared):
-    """Write reconcile_stamp.json at the library root, atomically. Advisory, like the
+    """Write reconcile_stamp.json among the library's records, atomically. Advisory, like the
     reconcile itself: a disk that refuses it costs the date on a LOST line, nothing more."""
     doc = {"reconciled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "flagged": flagged, "cleared": cleared}
-    dest = _paths.state_path(out, RECONCILE_STAMP)
+    dest = _paths.records_path(out, RECONCILE_STAMP)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
         tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
@@ -16210,7 +16211,7 @@ def _count_backup_images(out):
     _norm = os.path.normcase
     _gallery, _deleted, _dupes = (_norm(GALLERY_DIRNAME), _norm(DELETED_DIRNAME),
                                   _norm(DUPLICATES_DIRNAME))
-    _records = _norm(_paths.RECORDS_DIRNAME)
+    _records = _norm(_paths.LIBRARY_APP_DIRNAME)
     n = b = thumbs = trashed = trashed_bytes = 0
     for e in scan_library(out, kinds=("image",), exclude=()):
         top = _norm(e.rel.parts[0]) if len(e.rel.parts) > 1 else ""
@@ -16222,7 +16223,7 @@ def _count_backup_images(out):
         elif top == _dupes:
             pass                       # quarantined duplicates: neither live nor trash
         elif top == _records:
-            pass                       # the app's own records (3.20), never pictures
+            pass                       # the app's own folder (_moonglade/), never pictures
         else:
             n += 1
             b += e.size or 0
@@ -17051,7 +17052,7 @@ def run_download(args, progress=None):
     """
     out = Path(args.out)
     img_dir = out / "images"
-    raw_path = _paths.state_path(out, "raw_tasks.jsonl")
+    raw_path = _paths.records_path(out, "raw_tasks.jsonl")
     db_path  = out / "catalog.db"
 
     # Ensure the catalog db exists + is schema-migrated (raises if none; no CSV auto-seed, #19)
@@ -17609,12 +17610,30 @@ def run_add_web_user(args):
 
 
 def run_remove_web_user(args):
-    """CLI: remove one gallery web-login account by username."""
+    """CLI: remove one gallery web-login account by username, and its per-login folder in the
+    library (S10: a removed login's preferences, presets and snippets go with it)."""
     username = args.remove_web_user
     if remove_web_user(username):
+        remove_login_files(getattr(args, "out", None), username)
         print("Removed web-login account '{}'.".format(username))
     else:
         print("No web-login account named '{}'.".format(username))
+
+
+def remove_login_files(out_dir, username):
+    """Delete `username`'s per-login folder (moonglade.paths.account_dir) in the library
+    `out_dir`, once the login itself is gone. Best effort: True when it was removed."""
+    if not out_dir or not str(username or "").strip():
+        return False
+    import shutil
+    folder = _paths.account_dir(out_dir, username)
+    try:
+        if folder.is_dir():
+            shutil.rmtree(folder)
+            return True
+    except OSError:
+        pass
+    return False
 
 
 def run_list_web_users(args):
@@ -17654,8 +17673,11 @@ def main():
     ap.add_argument("--token",
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
-    ap.add_argument("--out", default=_paths.DEFAULT_LIBRARY_DIR,
-                    help="output folder for images and catalog (default: pixai_backup)")
+    # default=None: the library comes from settings.json (the Control Panel's library folder)
+    # unless this run names one -- moonglade.setup.prepare() resolves it (S8).
+    ap.add_argument("--out", default=None,
+                    help="library folder for this run (default: the library folder set in "
+                         "the Control Panel, or pixai_backup beside the app)")
     ap.add_argument("--page-size", type=int, default=250,
                     help="tasks per API page (default 250; fewer round-trips. Keep <~8000)")
     ap.add_argument("--workers", type=int, default=4,
@@ -18118,9 +18140,19 @@ def main():
     webauth.add_argument("--list-web-users", action="store_true",
                     help="list gallery web-login usernames (never password hashes), then exit")
     args = ap.parse_args()
+    # B2: before anything reads a setting, the move runs (the install half, then this run's
+    # library) and the library is resolved: --out for this one run, else settings.json's, else
+    # the default. A move that cannot finish stops the command with its plain sentence.
+    from moonglade import setup as moonglade_setup
+    try:
+        prepared = moonglade_setup.prepare("cli", explicit_out=args.out)
+    except moonglade_setup.MoveStopped as e:
+        sys.exit(str(e))
+    args.out = str(prepared.library)
     set_verbose(getattr(args, "verbose", False))
     from moonglade import logs as moonglade_logging
-    moonglade_logging.setup_logging(args.out, verbose=getattr(args, "verbose", False))
+    moonglade_logging.setup_logging(verbose=getattr(args, "verbose", False))
+    prepared.log()
     # Give every command a progress callback (terminal bar, or Control Panel markers under
     # MOONGLADE_PROGRESS=1). Commands that report progress (audit/dedup/sync/...) pick it up;
     # the rest ignore it.
@@ -18144,12 +18176,6 @@ def main():
         return
 
     out = Path(args.out)
-    # 3.20: the library's own records live in its _moonglade/ folder. A library not yet
-    # opened by 3.20 has them brought across here, once and logged, before any command reads
-    # one (copied; the spend guard moved); the file log follows its logs/ folder there. Never
-    # stops the command: what could not be brought across is read where it is.
-    from moonglade import migrate as moonglade_migrate
-    moonglade_migrate.open_library(out)
     img_dir = out / "images"
     db_path  = out / "catalog.db"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger

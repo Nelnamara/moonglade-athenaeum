@@ -31,8 +31,8 @@ LOST: its report line says recoverable "no", because there is nothing left to re
 from. Every other broken row says "yes".
 
 READ-ONLY. It never deletes, moves, re-downloads or rebuilds anything. The only files it
-writes are its own two reports at the library root, beside audit_report.csv, each replaced
-atomically:
+writes are its own two reports among the library's records (_moonglade/records/, beside
+audit_report.csv), each replaced atomically:
 
   integrity_report.csv    media_id, problem, path, size, recoverable -- one line per problem
   integrity_report.json   verified_at (UTC), deep, rows checked, files walked, the counts,
@@ -211,7 +211,7 @@ def _write_atomic(path, data):
                 pass
 
 
-# The reports' lock: a file at the library root, created exclusively, held while one writer
+# The reports' lock: a file beside the reports, created exclusively, held while one writer
 # reads and rewrites the reports (the re-check of a fix run) or writes them (a full check), so
 # neither can lose the other's lines. A lock older than REPORT_LOCK_STALE_S was left by a
 # process that died and is broken; a writer waits up to REPORT_LOCK_WAIT_S for a live one.
@@ -222,7 +222,7 @@ REPORT_LOCK_WAIT_S = 60
 
 class _ReportLock:
     def __init__(self, out):
-        self.path = _paths.reports_path(out, REPORT_LOCK)
+        self.path = _paths.records_path(out, REPORT_LOCK)
         self.held = False
 
     def __enter__(self):
@@ -412,8 +412,8 @@ def _write_reports(out, lines, summary):
     w.writerow(["media_id", "problem", "path", "size", "recoverable"])
     for mid, problem, path, size, rec in lines:
         w.writerow([csv_safe(mid), problem, csv_safe(path), size, rec])
-    _write_atomic(_paths.reports_path(out, REPORT_CSV), buf.getvalue().encode("utf-8"))
-    _write_atomic(_paths.reports_path(out, REPORT_JSON),
+    _write_atomic(_paths.records_path(out, REPORT_CSV), buf.getvalue().encode("utf-8"))
+    _write_atomic(_paths.records_path(out, REPORT_JSON),
                   json.dumps(summary, indent=2, sort_keys=True).encode("utf-8"))
 
 
@@ -421,7 +421,8 @@ def read_summary(out_dir):
     """The last run's integrity_report.json, or None when there is none (or it is not one).
     A file read, never a walk: Health calls this on every recompute."""
     try:
-        doc = json.loads(_paths.reports_path(out_dir, REPORT_JSON).read_text(encoding="utf-8"))
+        doc = json.loads(_paths.records_path(out_dir, REPORT_JSON, make=False)
+                         .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(doc, dict) or doc.get("format") != REPORT_FORMAT:
@@ -522,7 +523,7 @@ def read_lines(out_dir):
     """The last check's report lines, as (media_id, problem, path, size, recoverable) with
     size an int ("" when the report has none). [] when there is no report."""
     try:
-        text = _paths.reports_path(out_dir, REPORT_CSV).read_text(encoding="utf-8")
+        text = _paths.records_path(out_dir, REPORT_CSV, make=False).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
     rows = list(csv.reader(io.StringIO(text)))
@@ -542,7 +543,8 @@ def read_lines(out_dir):
 def read_marks(out_dir):
     """{media_id: {"mark": "lost" | "kept", "at": utc}} -- the owner's local flags."""
     try:
-        doc = json.loads(_paths.reports_path(out_dir, MARKS_FILE).read_text(encoding="utf-8"))
+        doc = json.loads(_paths.decisions_path(out_dir, MARKS_FILE, make=False)
+                         .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return {}
     marks = doc.get("marks") if isinstance(doc, dict) else None
@@ -569,7 +571,7 @@ def set_mark(out_dir, media_id, mark):
         else:
             marks.pop(mid, None)
         doc = {"format": MARKS_FORMAT, "marks": marks}
-        _write_atomic(_paths.reports_path(out_dir, MARKS_FILE),
+        _write_atomic(_paths.decisions_path(out_dir, MARKS_FILE),
                       json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
     return prev
 
@@ -579,7 +581,7 @@ def reconciled_at(out_dir):
     archive-only flags, or None before the first stamped one."""
     from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
-        doc = json.loads(_paths.state_path(out_dir, core.RECONCILE_STAMP)
+        doc = json.loads(_paths.records_path(out_dir, core.RECONCILE_STAMP, make=False)
                          .read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None

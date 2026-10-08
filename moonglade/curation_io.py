@@ -41,7 +41,8 @@ IMPORT RULES
     never invented (owner question 2, option a).
   * A smart collection whose name is taken by a different collection is skipped and reported.
   * Before an apply writes anything, the current state is exported to
-    curation_pre_import_<stamp>.json at the library root -- including an empty entry for every
+    curation_pre_import_<stamp>.json among the library's decisions (_moonglade/decisions/) --
+    including an empty entry for every
     picture the import is about to touch -- so an import can itself be undone with this same
     importer (--import-curation that file --apply --curation-overwrite). That puts back every
     touched picture's rating, mark, note, tags and collections; a smart collection or a
@@ -350,14 +351,14 @@ def import_curation(db_path, doc, apply=False, overwrite=False):
         return report
 
     # --- apply: snapshot first, then the existing verbs ---------------------------
-    # The snapshot is the import's undo file, one of the library's reports (like the organize
-    # undo list), so its folder is reports_path()'s: the library root today.
+    # The snapshot is the import's undo file: an owner decision that cannot be made again
+    # (like the organize undo list), so it goes with the decisions (decisions_path()).
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     library = Path(db_path).parent
-    snap = _paths.reports_path(library, "{}{}.json".format(SNAPSHOT_PREFIX, stamp))
+    snap = _paths.decisions_path(library, "{}{}.json".format(SNAPSHOT_PREFIX, stamp))
     n = 2
     while snap.exists():
-        snap = _paths.reports_path(library, "{}{}-{}.json".format(SNAPSHOT_PREFIX, stamp, n))
+        snap = _paths.decisions_path(library, "{}{}-{}.json".format(SNAPSHOT_PREFIX, stamp, n))
         n += 1
     before = export_curation(db_path)
     touched = (set(states) | {m for v in labels.values() for m in v}

@@ -1,6 +1,6 @@
-"""Shared logging baseline for both surfaces (moonglade_backup.py's CLI and
-moonglade_gallery.py's web server): a persistent, rotating file under
-out_dir/logs/moonglade.log, always on regardless of -v/--verbose -- so a crash
+"""Shared logging baseline for every surface (the command line, the web server, the MCP
+server): a persistent, rotating file at local/logs/moonglade.log (moonglade.paths.logs_dir()),
+beside the launcher's serve.log, always on regardless of -v/--verbose -- so a crash
 or failure is on record even if nobody remembered the flag, or the terminal
 window that would have shown it is already gone.
 
@@ -59,14 +59,15 @@ _prev_excepthook = None
 _prev_threading_excepthook = None
 
 
-def setup_logging(out_dir, verbose=False):
+def setup_logging(verbose=False):
     """Idempotent -- safe to call more than once (tests, a CLI command that
     internally drives another). Only the first call attaches handlers; later
     calls just adjust the verbosity level.
 
-    out_dir: the same output folder everything else in this app already
-    lives under (catalog.db, images/, branding/, jobs.jsonl) -- git-ignored
-    already, so logs/ needs no new .gitignore entry.
+    The file is this install's (local/logs/, git-ignored with the rest of local/), never a
+    library's: the log describes this machine's server and command line, and a second library
+    must not get a second log. Every entry point calls this after moonglade.setup.prepare(),
+    so the move has already brought an older version's logs into that folder.
     """
     global _configured, _file_handler, _console_handler
     app_logger = logging.getLogger(LOGGER_NAME)
@@ -75,7 +76,7 @@ def setup_logging(out_dir, verbose=False):
         _console_handler.setLevel(logging.DEBUG if verbose else logging.WARNING)
         return app_logger
 
-    file_handler = _file_handler_for(out_dir)
+    file_handler = _file_handler_for()
     fmt = file_handler.formatter
 
     _console_handler = logging.StreamHandler(sys.stdout)
@@ -104,9 +105,9 @@ def setup_logging(out_dir, verbose=False):
     return app_logger
 
 
-def _file_handler_for(out_dir):
-    """The rotating file handler for out_dir's log (log_path()), its folder made."""
-    log_file = log_path(out_dir)
+def _file_handler_for():
+    """The rotating file handler for the log (log_path()), its folder made."""
+    log_file = log_path()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.handlers.TimedRotatingFileHandler(
         str(log_file), when="midnight", backupCount=14, encoding="utf-8", delay=True)
@@ -115,33 +116,6 @@ def _file_handler_for(out_dir):
         datefmt="%Y-%m-%d %H:%M:%S"))
     handler.setLevel(logging.DEBUG)   # the file always captures everything
     return handler
-
-
-def reopen(out_dir):
-    """Point the file log at log_path(out_dir) when that has moved since setup_logging()
-    opened it -- 3.20: logging opens before a library is brought across (in its old logs/,
-    where an unmigrated library still keeps it), and moonglade.migrate.open_library() calls
-    this once the copy into _moonglade/logs/ is made. Returns True when it re-pointed; a no-op
-    (False) when logging is not set up or is already writing there. Never raises."""
-    global _file_handler
-    if not _configured or _file_handler is None:
-        return False
-    try:
-        new = os.path.normcase(os.path.abspath(str(log_path(out_dir))))
-        if os.path.normcase(_file_handler.baseFilename) == new:
-            return False
-        handler = _file_handler_for(out_dir)
-    except Exception:
-        return False
-    root = logging.getLogger()
-    root.addHandler(handler)
-    old, _file_handler = _file_handler, handler
-    root.removeHandler(old)
-    try:
-        old.close()
-    except Exception:
-        pass
-    return True
 
 
 def _install_crash_hook(logger):
@@ -156,7 +130,7 @@ def _install_crash_hook(logger):
     in any background worker -- the web app's sync/build/thumbnail jobs, the
     live-mirror watcher thread -- goes to `threading.excepthook` instead, which was
     left at its default until 2026-07-27: it printed a traceback to a stderr nobody
-    was watching and returned, leaving zero trace in out_dir/logs/moonglade.log. That
+    was watching and returned, leaving zero trace in the moonglade.log file. That
     is exactly the "terminal window that would have shown it is already gone" case in
     this module's own docstring, and it meant a background job that died looked
     identical to a background job that quietly stopped.
@@ -197,12 +171,12 @@ def _install_crash_hook(logger):
     threading.excepthook = _thread_hook
 
 
-def log_path(out_dir):
-    """The current log file's path, for a future --show-logs/Panel affordance."""
-    return _paths.state_path(out_dir, "logs") / "moonglade.log"
+def log_path():
+    """The current log file's path: local/logs/moonglade.log."""
+    return _paths.logs_dir() / "moonglade.log"
 
 
-# serve.log, the launcher's capture of the server's console (Serve Gallery.pyw), is appended
+# serve.log (local/logs/serve.log), the launcher's capture of the server's console, is appended
 # to on every start. It is trimmed at start instead of by a logging handler: the server's
 # stdout and stderr are written straight into the file by the OS, so nothing in Python sees
 # the lines go by.

@@ -626,7 +626,7 @@ class RunsStore(object):
     yet: the file grows with every run (reported as still to do)."""
 
     def __init__(self, out_dir):
-        self.path = _paths.state_path(out_dir, RUNS_DB)
+        self.path = _paths.records_path(out_dir, RUNS_DB)
         self._lock = threading.Lock()
 
     def _connect(self, create):

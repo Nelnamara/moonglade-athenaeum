@@ -4,9 +4,11 @@ AI-assisted curation of the local PixAI backup. LOCAL stdio, owner-only.
 Reuses moonglade/gallery.py's catalog helpers + moonglade.similar.similar() -- no SQL is
 reimplemented here. Catalog writes are set_rating / add_to_collection / remove_from_collection; tag_suggest is the first tool to reach the PixAI account (free, read-only).
 
-Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
-"D:\\path\\to\\pixai_backup"). Falls back to pixai_backup in the app's folder
-(moonglade.paths.default_library_path()).
+Library: the one the Control Panel's library folder names (local/settings.json), like the
+web server and the command line; else pixai_backup in the app's folder. An env MOONGLADE_OUT
+(e.g. "D:\\path\\to\\pixai_backup") names one for this server alone. The server runs
+moonglade.setup.prepare("mcp") first, like every other entry point, so a library or an install
+still in an older layout is brought across before anything is read.
 
 Register in Claude Code (PYTHONPATH names the app's folder, so `-m` finds the package
 wherever the client starts the server):
@@ -29,10 +31,18 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
 from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
-from moonglade import paths as _paths
 
-OUT = Path(os.environ.get("MOONGLADE_OUT") or _paths.default_library_path())
-DB = str(OUT / "catalog.db")
+# The library the tools read: bound by main() once the move has run and the library is
+# resolved (bind_library). Importing this module reads nothing.
+OUT = None
+DB = None
+
+
+def bind_library(path):
+    """Point every tool at the library `path` (its catalog.db)."""
+    global OUT, DB
+    OUT = Path(path)
+    DB = str(OUT / "catalog.db")
 
 mcp = FastMCP("moonglade-athenaeum")
 
@@ -319,5 +329,23 @@ def tag_suggest(media_id: str) -> dict:
     return {"media_id": media_id, "suggestions": list(out or [])}
 
 
-if __name__ == "__main__":
+def main():
+    """B2: the move first (moonglade.setup.prepare), then the library, then the tools."""
+    import sys
+    from moonglade import logs as moonglade_logging
+    from moonglade import setup as moonglade_setup
+    try:
+        prepared = moonglade_setup.prepare("mcp",
+                                           explicit_out=os.environ.get("MOONGLADE_OUT") or None)
+    except moonglade_setup.MoveStopped as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    moonglade_logging.setup_logging()
+    prepared.log()
+    bind_library(prepared.library)
     mcp.run(transport="stdio")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
