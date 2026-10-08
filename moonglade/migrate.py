@@ -40,11 +40,14 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     written later -- by an older install still on the library, or by a version gone back to --
     holds only that install's additions (the move had emptied its homes), so it never replaces
     the new home. What it adds is folded in where the format allows: lines it lacks; JSON
-    records by union, grow-only counters at their max, the spend guard from both; runs.db
-    (the Runs and their spend reservations) row by row by primary key, in one transaction,
-    after both files pass their integrity check; integrity_marks.json mark by mark, and a
-    login's stores and the Loom's boards key by key -- on a clash the new home's value stays
-    and the older one is logged. What can't be merged is set aside and named in the log.
+    records by union, telemetry's counters added (the older copy counted only its own since),
+    the spend guard entry by entry, whichever blocks longer; runs.db (the Runs and their spend
+    reservations) row by row by primary key, in one transaction, after both files pass their
+    integrity check; integrity_marks.json mark by mark, a login's stores key by key, and the
+    Loom's boards and cast library inside the JSON text the Loom keeps in each file -- on a
+    clash the new home's value stays and the older one is logged. What can't be merged is set
+    aside and named in the log; a Loom value that can't is kept beside its new home under a
+    key of its own, outside the snapshot.
   * THE SNAPSHOT (the owner's pick 4). Before a run moves, removes or parks anything, the small
     records it is about to touch are zipped into its half's .snapshot\\ (one zip per run that has
     work, so every later sweep is covered too) -- never pictures, catalog.db, the art pack, the
@@ -1000,6 +1003,9 @@ class _Half:
         # one written since, and the new home always wins (_fold_in). The first move (and the
         # install half) keep their own rules.
         self.settled = False
+        # The Loom's key->value folder in the new home (the library half only): its files are
+        # merged by what the Loom stores in them (_loom_kv_merged).
+        self.loom_kv = None
 
     def rel(self, p):
         p = Path(p)
@@ -1179,17 +1185,28 @@ def _merged_bytes(src, dest, kind):
 
 
 # ---- after the library's move has finished: the new home always wins ----------------------------
-def _settled_kind(kind, dest):
+def _under(p, folder):
+    try:
+        Path(p).relative_to(folder)
+        return True
+    except ValueError:
+        return False
+
+
+def _settled_kind(kind, dest, loom_kv=None):
     """How an old-layout copy written after the library's move finished (by an older install
     still on the library, or a version gone back to) is folded into the new home. The kinds
     the first move already merges keep their merge (lines, logs, the JSON records, the spend
-    guard); a database is merged row by row; integrity_marks.json mark by mark; any other
-    JSON store (a login's prefs, state, snippets, presets or views, a Loom board, the
-    schedule) key by key. A report, a curation undo file or anything else is "park": it
-    can't be merged, so it is set aside and named."""
+    guard); a database is merged row by row; integrity_marks.json mark by mark; a file of the
+    Loom's key->value store (under `loom_kv`) by what the Loom keeps in it (_loom_kv_merged);
+    any other JSON store (a login's prefs, state, snippets, presets or views, the schedule) key
+    by key. A report, a curation undo file or anything else is "park": it can't be merged, so
+    it is set aside and named."""
     if kind != "file":
         return kind
     name = Path(dest).name
+    if loom_kv is not None and Path(dest).suffix.lower() == ".json" and _under(dest, loom_kv):
+        return "json:loom"
     if name == "integrity_marks.json":
         return "json:marks"
     if name in _REPORT_NAMES or name.startswith(CURATION_SNAPSHOT_PREFIX):
@@ -1231,6 +1248,129 @@ def _union_marks(a, b):
     return out, clashes
 
 
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _sum_telemetry(a, b):
+    """telemetry.json written after the move, `b`, folded into the new home's, `a`. The move
+    emptied the older install's home, and it counts by load-add-save from disk, so `b` holds
+    only what it counted since: its counters ADD to the new home's. The maxima stay at their
+    max, the sets, days and day lists are unions, a flag is set if either set it (all as
+    _merge_generic does), and the new home's baselines stay (a snapshot only `b` holds, for an
+    app folder the new home never looked at, is added)."""
+    out = _merge_generic(a, b)
+    ca, cb = a.get("counters"), b.get("counters")
+    if isinstance(ca, dict) and isinstance(cb, dict):
+        counters = dict(ca)
+        for k, v in cb.items():
+            if k not in counters:
+                counters[k] = v
+            elif _number(counters[k]) and _number(v):
+                counters[k] = counters[k] + v
+        out["counters"] = counters
+    ba, bb = a.get("baselines"), b.get("baselines")
+    if isinstance(ba, dict):
+        baselines = dict(bb) if isinstance(bb, dict) else {}
+        baselines.update(ba)
+        out["baselines"] = baselines
+    return out
+
+
+# ---- the Loom's key->value store, after the move ----------------------------------------------
+# The Loom keeps every board and its cast library as JSON text (window.storage.set(k,
+# JSON.stringify(...)), loom/master-storyboard.jsx), which /api/loom/set writes as a JSON string
+# (moonglade.gallery's _loom_kv_write: json.dumps(value)): the file is JSON text inside a JSON
+# string, one file per key, named quote(key) + ".json".
+LOOM_CASTLIB_KEY = "storyboard:v2:castlib"    # the cast library: {v, members: [{libId, ...}]}
+LOOM_ACTIVE_KEY = "storyboard:v2:active"      # which board is open: a pointer, not a record
+
+
+def _loom_inner(outer):
+    """(the document, True) for a Loom value holding JSON text, else (outer, False)."""
+    if isinstance(outer, str):
+        try:
+            return json.loads(outer), True
+        except ValueError:
+            return outer, False
+    return outer, False
+
+
+def _union_cast(a, b):
+    """The cast library, the new home's `a` with the older copy's `b` folded in: every member
+    of both by its libId -- the new home's where both hold one (a clash) -- and every other
+    key by union (the new home's on a clash). Returns (merged, clashes)."""
+    members = list(a["members"])
+    mine = {str(m.get("libId")): m for m in members if isinstance(m, dict) and m.get("libId")}
+    clashes = []
+    for m in b["members"]:
+        lid = str(m.get("libId")) if isinstance(m, dict) and m.get("libId") else None
+        if lid is None:
+            if m not in members:
+                members.append(m)
+            continue
+        if lid in mine:
+            if mine[lid] != m:
+                clashes.append(("member " + lid, m))
+            continue
+        members.append(m)
+        mine[lid] = m
+    rest, more = _union_new_wins({k: v for k, v in a.items() if k != "members"},
+                                 {k: v for k, v in b.items() if k != "members"})
+    rest["members"] = members
+    return rest, more + clashes
+
+
+def _loom_kv_merged(src, dest):
+    """A Loom key->value file both homes hold, after the move: (the new home's value with the
+    older copy's folded in, as the file's bytes; clashes), or (None, []) when the two can't be
+    merged. The JSON text inside each is merged, not the string around it: the cast library
+    member by member (_union_cast); a board, or any other object or list, key by key (the
+    new home's value on a clash); and written back the way the Loom's own write leaves it. The
+    open-board pointer keeps the new home's (the older one is logged). Raises ValueError or
+    UnicodeDecodeError for a copy that won't parse, OSError for one that won't read."""
+    from urllib.parse import unquote
+    key = unquote(Path(dest).stem)
+    a_outer = json.loads(dest.read_text(encoding="utf-8"))
+    b_outer = json.loads(src.read_text(encoding="utf-8"))
+    if a_outer == b_outer:
+        return dest.read_bytes(), []
+    if key == LOOM_ACTIVE_KEY:
+        return dest.read_bytes(), [("the open board", b_outer)]
+    a, a_text = _loom_inner(a_outer)
+    b, b_text = _loom_inner(b_outer)
+    if a_text != b_text:
+        return None, []
+    if (key == LOOM_CASTLIB_KEY and isinstance(a, dict) and isinstance(b, dict)
+            and isinstance(a.get("members"), list) and isinstance(b.get("members"), list)):
+        doc, clashes = _union_cast(a, b)
+    else:
+        doc, clashes = _union_new_wins(a, b)
+    if doc is None:
+        return None, []
+    if doc == a:
+        return dest.read_bytes(), clashes
+    if a_text:
+        value = json.dumps(json.dumps(doc, separators=(",", ":"), ensure_ascii=False))
+    else:
+        value = json.dumps(doc)
+    return value.encode("utf-8"), clashes
+
+
+def _loom_aside(dest):
+    """Where a Loom file that can't be merged is kept, beside the new home under a key of its
+    own (`<key>-older-<UTC time>`): outside the safety snapshot, so no clean-start sweep ever
+    deletes it, and still the Loom's -- a board kept this way is listed as a board."""
+    from urllib.parse import quote, unquote
+    base = "%s-older-%s" % (unquote(Path(dest).stem),
+                            time.strftime("%Y%m%d-%H%M%S", time.gmtime()))
+    key, n = base, 1
+    while os.path.lexists(dest.with_name(quote(key, safe="") + ".json")):
+        n += 1
+        key = "%s-%d" % (base, n)
+    return dest.with_name(quote(key, safe="") + ".json"), key
+
+
 def _settled_bytes(src, dest, how):
     """(the new home's content with the older copy folded in, as bytes; clashes), or
     (None, []) when the two can't be merged. Raises ValueError or UnicodeDecodeError for a copy
@@ -1239,6 +1379,8 @@ def _settled_bytes(src, dest, how):
         return _merged_log(src, dest), []
     if how == "lines":
         return _merged_bytes(src, dest, "lines"), []
+    if how == "json:loom":
+        return _loom_kv_merged(src, dest)
     if not how.startswith("json:"):
         return None, []
     a = json.loads(dest.read_text(encoding="utf-8"))
@@ -1254,8 +1396,10 @@ def _settled_bytes(src, dest, how):
         doc = _merge_achievements(a, b, b_newer=False)       # the new home's skin
     elif how == "json:guard":
         doc = _merge_guard(a, b, False)                      # more guarding, never less
+    elif how == "json:telemetry":
+        doc = _sum_telemetry(a, b)                           # its counts add to the new home's
     else:
-        doc = _merge_generic(a, b)                           # grow-only counters at their max
+        doc = _merge_generic(a, b)
     if doc is None:
         return None, []
     if doc == a:
@@ -1446,8 +1590,11 @@ def _fold_in(src, dest, kind, half, key, src_hash):
     format allows (_settled_kind): lines it lacks, JSON keys and marks it lacks (on a clash
     the new home's value stays, and the older value is logged), grow-only counters at their
     max, guards from both, database rows by primary key. What can't be merged is set aside
-    and named in the log. Returns "merged" or "parked"."""
-    how = _settled_kind(kind, dest)
+    and named in the log -- except a file of the Loom's key->value store, which is kept beside
+    the new home under a key of its own (_loom_aside), outside the safety snapshot: a board or
+    a cast list the older install made is never lost to the clean-start sweep. Returns
+    "merged", "parked" or "kept"."""
+    how = _settled_kind(kind, dest, half.loom_kv)
     item, rel = half.report.item, half.rel
     why = "it is not a kind of file that can be merged"
     try:
@@ -1477,6 +1624,13 @@ def _fold_in(src, dest, kind, half, key, src_hash):
         raise                                            # busy or unreadable: stop, try again
     except (ValueError, UnicodeDecodeError, sqlite3.DatabaseError):
         why = "one of the two copies can't be read as what it should be"
+    if how == "json:loom":
+        aside, key_aside = _loom_aside(dest)
+        _bring(src, aside, "file", half)
+        half.report.warn("Kept %s (written there after the move) beside %s as %s, the Loom "
+                         "key \"%s\": %s, so both are kept.", rel(src), rel(dest), rel(aside),
+                         key_aside, why)
+        return "kept"
     target = _park(src, half, said=False)
     half.report.warn("Kept %s, the new home, and set aside %s (written there after the move) "
                      "in %s: %s.", rel(dest), rel(src), rel(target), why)
@@ -2370,6 +2524,7 @@ def migrate_library(out_dir, logins, report, lock=None):
     out = Path(out_dir)
     app = _paths.library_app_dir(out)
     half = _Half("library", app, _library_roots(out), report, lock)
+    half.loom_kv = _paths.loom_root(out) / "kv"
     copyfirst = CopyFirst(app / OLD_RECORD)
     try:
         _library_half(half, out, app, copyfirst, logins, report)

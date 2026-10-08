@@ -15,10 +15,16 @@ Now the new home is never replaced, and what the older copy adds is folded in:
     key) goes in, table by table, in one transaction. A run both hold keeps the new home's row.
   * integrity_marks.json: every media id's mark from both; where both marked one, the new
     home's mark stays and the older one is logged.
-  * a login's stores and a Loom board: every key from both; on a clash the new home's value
-    stays and the older one is logged. A board only the older install made comes across.
-  * job lists by unseen lines, JSON records by union with grow-only counters at their max.
+  * a login's stores: every key from both; on a clash the new home's value stays and the
+    older one is logged.
+  * the Loom's boards and cast library: merged inside the JSON text the Loom keeps in each
+    file (the cast library member by member, a board key by key). A board only the older
+    install made comes across; a value that can't be merged is kept beside the new home
+    under a key of its own, outside the safety snapshot.
+  * the spend guard entry by entry, whichever blocks longer; telemetry's counters added up.
+  * job lists by unseen lines, other JSON records by union.
   * anything that can't be merged (a report) is set aside and named; the new home stays.
+  * an older install still holding its old log open stops every bring-in, idle or not.
 
 The first move keeps its own rules (dev/tests/test_move_safety.py).
 """
@@ -351,33 +357,131 @@ def test_a_login_s_stores_keep_the_new_home_s_values_and_gain_the_older_install_
     assert 'theme="classic"' in _said(done), "the older copy's clashing value is logged"
 
 
-# ---- the Loom's boards --------------------------------------------------------------------------
+# ---- the Loom's boards and cast library ---------------------------------------------------------
+# The Loom keeps every board and its cast library as JSON text -- window.storage.set(k,
+# JSON.stringify(...)) (loom/master-storyboard.jsx's writeBoard, and the cast library's
+# JSON.stringify(next)) -- and /api/loom/set stores that text as a JSON string
+# (moonglade.gallery's _loom_kv_write: json.dumps(value)). So every kv file is JSON text inside
+# a JSON string. The new home's values below go through the real route; the older install's
+# are written the way the same route writes them, which the test checks first.
 
-def test_a_loom_board_keeps_the_new_home_s_and_the_older_install_s_new_board_arrives(r):
+CASTLIB = "storyboard:v2:castlib"
+ACTIVE = "storyboard:v2:active"
+PROJ = "storyboard:v2:proj:"
+
+
+def _loom_text(doc):
+    """What the Loom hands /api/loom/set as a value: JSON.stringify(doc)."""
+    return json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
+
+
+def _loom_file(doc):
+    """A kv file as _loom_kv_write leaves it for that value."""
+    return json.dumps(_loom_text(doc))
+
+
+def _kv_name(key):
+    from urllib.parse import quote
+    return quote(key, safe="") + ".json"
+
+
+def _member(lib_id, name):
+    """A cast library member (loom/src/loom-cast-library.js memberFromAsset): the asset's
+    fields and a stable libId."""
+    return {"name": name, "kind": "image", "tag": "@image1", "mediaId": "m-" + lib_id,
+            "thumbId": "", "source": "gallery", "lock": False, "libId": lib_id}
+
+
+def _board(name, cards, **more):
+    return dict({"name": name, "acts": [{"id": "act1", "name": "Act 1",
+                                         "cards": [{"id": c} for c in cards]}],
+                 "assets": []}, **more)
+
+
+def _loom(r):
+    """A logged-in client on the library, and the login's kv folders: new home, old home."""
+    from moonglade.gallery import _account_key
+    from tests.conftest import _TEST_USERNAME, login_client
+    cli = login_client(r.lib)
+    key = _account_key(_TEST_USERNAME)
+    return cli, r.lib / "_moonglade" / "loom" / "kv" / key, r.lib / "loom" / "kv" / key
+
+
+def _loom_get(cli, key):
+    from urllib.parse import quote
+    return cli.get("/api/loom/get?key=" + quote(key, safe="")).get_json()["value"]
+
+
+def test_the_loom_s_cast_library_and_boards_merge_inside_their_json_text(r):
+    """No real Loom file ever merged before: each parsed to a string, so it was set aside and
+    deleted with the safety copy five clean starts later -- cast members and board edits the
+    older install made after the move with it. Now the JSON text inside is merged: the cast
+    library member by member (by libId, the new home's member on a clash), a board key by
+    key (the new home's value on a clash), and the open-board pointer keeps the new home's."""
     _moved(r)
-    kv_new = r.lib / "_moonglade" / "loom" / "kv" / KEY_NEL
-    kv_old = r.lib / "loom" / "kv" / KEY_NEL
-    board = "storyboard%3Av2%3Aproj%3Ab1.json"
-    mine = {"title": "Act one (final cut)", "shots": [{"id": 1}, {"id": 2}, {"id": 3}]}
-    write(kv_new / board, mine)
+    cli, kv_new, kv_old = _loom(r)
+    new_lib = {"v": 1, "members": [_member("L1", "Aria"), _member("L2", "Bram")]}
+    b1 = _board("Act one (final cut)", ["c1", "c2", "c3"])
+    for key, value in ((CASTLIB, _loom_text(new_lib)), (PROJ + "b1", _loom_text(b1)),
+                       (ACTIVE, "b1")):
+        assert cli.post("/api/loom/set", json={"key": key, "value": value}).get_json()["ok"]
+    assert (kv_new / _kv_name(CASTLIB)).read_text() == _loom_file(new_lib), "the real shape"
     write(r.lib / "_moonglade" / "loom" / "_submits" / (KEY_NEL + ".jsonl"), '{"s": 1}\n')
-    _older_install_writes(kv_old / board, {"title": "Act one", "shots": [{"id": 1}],
-                                           "note": "written by the older install"})
-    _older_install_writes(kv_old / "storyboard%3Av2%3Aproj%3Ab2.json", {"title": "Act two"})
+
+    _older_install_writes(kv_old / _kv_name(CASTLIB), _loom_file(
+        {"v": 1, "members": [_member("L9", "Cato"), _member("L1", "Aria, renamed there")]}))
+    _older_install_writes(kv_old / _kv_name(PROJ + "b1"), _loom_file(
+        _board("Act one", ["c1"], note="written by the older install")))
+    _older_install_writes(kv_old / _kv_name(PROJ + "b2"), _loom_file(_board("Act two", [])))
+    _older_install_writes(kv_old / _kv_name(ACTIVE), json.dumps("b2"))
     _older_install_writes(r.lib / "loom" / "_submits" / (KEY_NEL + ".jsonl"), '{"s": 2}\n')
     done = _bring_in(r)
-    got = json.loads((kv_new / board).read_text())
-    assert got["title"] == mine["title"] and got["shots"] == mine["shots"]
+
+    lib = json.loads(_loom_get(cli, CASTLIB))
+    assert [m["libId"] for m in lib["members"]] == ["L1", "L2", "L9"]
+    assert lib["members"][0]["name"] == "Aria", "a member both hold keeps the new home's"
+    assert lib["v"] == 1
+    got = json.loads(_loom_get(cli, PROJ + "b1"))
+    assert got["name"] == b1["name"] and got["acts"] == b1["acts"]
     assert got["note"] == "written by the older install"
-    assert json.loads((kv_new / "storyboard%3Av2%3Aproj%3Ab2.json").read_text()) == \
-        {"title": "Act two"}
+    assert json.loads(_loom_get(cli, PROJ + "b2")) == _board("Act two", [])
+    assert _loom_get(cli, ACTIVE) == "b1"
+    assert set(cli.get("/api/loom/list?prefix=" + PROJ).get_json()["keys"]) == \
+        {PROJ + "b1", PROJ + "b2"}
     assert (r.lib / "_moonglade" / "loom" / "_submits" / (KEY_NEL + ".jsonl")).read_text() \
         .splitlines() == ['{"s": 1}', '{"s": 2}']
     assert not (r.lib / "loom").exists()
-    from moonglade import gallery as g
-    assert {p.name for p in g._loom_board_files(r.lib)} == \
-        {board, "storyboard%3Av2%3Aproj%3Ab2.json"}
-    assert '"Act one"' in _said(done)
+    assert _parked(r) == [], "nothing set aside for the sweep to delete"
+    said = _said(done)
+    assert "member L1=" in said and "Aria, renamed there" in said, "the clash is logged"
+    assert "the open board=" in said
+
+
+def test_a_loom_value_that_can_t_merge_is_kept_beside_under_its_own_key_for_good(r):
+    """A Loom value whose two copies hold different kinds of things (here the older copy's
+    text is a list, not a board) is kept beside the new home under a key of its own --
+    outside the safety snapshot, so the five-start sweep never deletes it -- and the Loom
+    lists it as a board of its own."""
+    _moved(r)
+    cli, kv_new, kv_old = _loom(r)
+    b3 = _board("Act three", ["c1"])
+    assert cli.post("/api/loom/set", json={"key": PROJ + "b3",
+                                           "value": _loom_text(b3)}).get_json()["ok"]
+    older = _loom_file(["not", "a", "board"])
+    _older_install_writes(kv_old / _kv_name(PROJ + "b3"), older)
+    done = _bring_in(r)
+    assert json.loads(_loom_get(cli, PROJ + "b3")) == b3, "the new home stays"
+    aside = [p for p in kv_new.iterdir() if p.name.startswith("storyboard%3Av2%3Aproj%3Ab3-older-")]
+    assert len(aside) == 1 and aside[0].read_text() == older
+    keys = cli.get("/api/loom/list?prefix=" + PROJ).get_json()["keys"]
+    assert len(keys) == 2 and PROJ + "b3" in keys
+    assert _parked(r) == []
+    assert "both are kept" in _said(done)
+    for _ in range(migrate.CLEAN_STARTS + 1):
+        done.counted = False
+        done.count_clean_start()
+    assert not (r.lib / "_moonglade" / ".snapshot").exists(), "the sweep ran"
+    assert aside[0].read_text() == older, "and kept it"
 
 
 # ---- the rest -----------------------------------------------------------------------------------
@@ -395,17 +499,33 @@ def test_a_newer_old_copy_never_replaces_the_new_home(r):
     assert _parked(r) == []
 
 
-def test_records_merge_with_counters_at_their_max_and_jobs_by_unseen_lines(r):
+def test_telemetry_counters_add_up_and_jobs_merge_by_unseen_lines(r):
+    """The move emptied the older install's telemetry.json, and it counts by load-add-save from
+    disk, so what it wrote holds only its own counts since: they add to the new home's. The
+    maxima stay at their max, sets and days are unions, a flag is set if either set it, and
+    the new home's baselines stay."""
     _moved(r)
     write(r.lib / "_moonglade" / "records" / "telemetry.json",
-          {"counters": {"gens": 40, "loom": 3}, "sets": {"m": ["x"]}})
+          {"counters": {"gens": 40, "loom": 3}, "maxima": {"lora_stacked": 3},
+           "sets": {"m": ["x"]}, "flags": {"f1": 1}, "days": ["2026-10-07"],
+           "day_lists": {"gen_days": ["2026-10-07"]},
+           "baselines": {"goods:app-a": ["mark_1"]}})
     _older_install_writes(r.lib / "telemetry.json",
-                          {"counters": {"gens": 2, "mirror": 1}, "sets": {"m": ["y"]}})
+                          {"counters": {"gens": 2, "mirror": 1}, "maxima": {"lora_stacked": 5},
+                           "sets": {"m": ["y"]}, "flags": {"f2": 1}, "days": ["2026-10-08"],
+                           "day_lists": {"gen_days": ["2026-10-08"]},
+                           "baselines": {"goods:app-a": ["mark_1", "mark_9"],
+                                         "goods:app-b": ["mark_2"]}})
     _older_install_writes(r.lib / "jobs.jsonl", '{"id": "older-install"}\n')
     _bring_in(r)
     tel = json.loads((r.lib / "_moonglade" / "records" / "telemetry.json").read_text())
-    assert tel["counters"] == {"gens": 40, "loom": 3, "mirror": 1}
+    assert tel["counters"] == {"gens": 42, "loom": 3, "mirror": 1}
+    assert tel["maxima"] == {"lora_stacked": 5}
     assert sorted(tel["sets"]["m"]) == ["x", "y"]
+    assert tel["flags"] == {"f1": 1, "f2": 1}
+    assert tel["days"] == ["2026-10-07", "2026-10-08"]
+    assert tel["day_lists"] == {"gen_days": ["2026-10-07", "2026-10-08"]}
+    assert tel["baselines"] == {"goods:app-a": ["mark_1"], "goods:app-b": ["mark_2"]}
     assert (r.lib / "_moonglade" / "records" / "jobs.jsonl").read_text().splitlines() == \
         ['{"id": "before-the-move"}', '{"id": "older-install"}']
 
