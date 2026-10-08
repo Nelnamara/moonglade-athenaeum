@@ -3714,8 +3714,8 @@ def _names(paths, half, most=3):
 
 
 # How to stop an older Moonglade that is still using a library. Its server (3.10-3.19, started
-# from "Serve Gallery.pyw") runs under pythonw with no window of its own: closing its browser
-# tab leaves it serving. Control Panel -> Server -> Stop server is what stops it.
+# from that version's launcher) runs under pythonw with no window of its own: closing its
+# browser tab leaves it serving. Control Panel -> Server -> Stop server is what stops it.
 STOP_OLDER_WORDS = (
     "Stop that Moonglade with Stop server in its Control Panel, or end its python or pythonw "
     "process (closing its browser tab doesn't stop it). Turn off its scheduled tasks, and any "
