@@ -285,9 +285,6 @@ class Container:
     def paths(self):
         return sorted(self._toc.get("assets", {}))
 
-    def payload_names(self):
-        return sorted(self._toc.get("payloads", {}))
-
     def schema(self):
         """This container's TOC layout version. 0 for a pre-stamp v2 file (the early
         shipped packs are) -- open_container has already refused anything newer than

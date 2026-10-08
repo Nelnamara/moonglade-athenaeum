@@ -157,8 +157,7 @@ import "../styles/create-mobile.css";
    credits, refused unless the PixAI mirror is armed. dev/tests/test_enhance.py
    pins that restored surface now rather than its absence (run it for the
    count). The one thing still gone for good is ENHANCE_PLUGINS -- the dead
-   "detail-fix"/"hand-fix"/"face-fix" dict, which that file also pins as
-   absent. Desktop's Edit-tab "Enhance" sub-tab is that paid dispatch:
+   "detail-fix"/"hand-fix"/"face-fix" dict. Desktop's Edit-tab "Enhance" sub-tab is that paid dispatch:
    EnhanceTab.jsx, mounted by GenerateDrawer.jsx only while the mirror is
    armed, prices each preset off /api/enhance/presets, confirms the spend and
    posts to /api/enhance. It is no longer the free filters panel -- the free,

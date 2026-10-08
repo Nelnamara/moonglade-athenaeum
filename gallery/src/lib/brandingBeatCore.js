@@ -43,14 +43,6 @@ export function beatPlan({ unlocked, status, seen, reduced, ready }) {
   return reduced ? "rest" : "play";
 }
 
-/* Which half of the beat a moment falls in. */
-export function beatPhase(elapsedMs) {
-  if (!(elapsedMs >= 0)) return "tile";
-  if (elapsedMs < BEAT.TILE_MS) return "tile";
-  if (elapsedMs < BEAT.TOTAL_MS) return "tab";
-  return "done";
-}
-
 /* Does the panel hold on Maintenance while the beat runs? Only when the panel was opened ON
    the Branding tab (the celebration's button), and only until the beat is over. */
 export function holdsOnMaintenance(plan, phase) {

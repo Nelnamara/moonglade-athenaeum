@@ -9067,8 +9067,7 @@ ENHANCE_EMOTION_MEMBERSHIP = frozenset({
 #
 # The panelplugin half's CLI entry (--workflow-id and run_enhance): NOT restored. The Bridge is
 # web-only -- its mirror gate is a route concern, and a bare CLI --workflow-id could submit a
-# panelplugin task on the API key (the reaped-at-60-min bug). dev/tests/test_enhance.py keeps the
-# flag unparseable.
+# panelplugin task on the API key (the reaped-at-60-min bug). The parser defines no such flag.
 #
 # The art-filter half (build_filter_parameters, --filter-id): that one worked, and was still
 # the wrong thing to do. PixAI's 7 "art filters" are not inference at all -- each is two or
@@ -9081,8 +9080,7 @@ ENHANCE_EMOTION_MEMBERSHIP = frozenset({
 # offline, for nothing, so the paid path is deleted rather than left as a strictly worse
 # second option.
 #
-# Guarded by dev/tests/test_enhance.py, which drives the parser to prove the --filter-id flag is
-# unaccepted and greps for the two literals a FILTER submit could not do without -- the filter
+# Guarded by dev/tests/test_enhance.py, which greps for the two literals a FILTER submit could not do without -- the filter
 # model's id and the filter-inputs key. Neither exact string appears above on purpose: the
 # CONCEPT is named in prose so the strings themselves stay a reliable tripwire. (The panelplugin
 # model literal and its workflow-id key DO appear now, in the restored, mirror-gated builder

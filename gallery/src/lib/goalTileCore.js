@@ -12,11 +12,10 @@
 
 export const PACK_DIR = "training";
 
-// T2b's timings. The tint paints at once; a lavender sheen crosses it on a 1.6 s loop until the
-// picture decodes or 3 s have passed, whichever is first; the picture fades in over .42 s.
-export const SHEEN_LOOP_MS = 1600;
+// T2b's one timing that lives in script. The tint paints at once; a lavender sheen crosses it until
+// the picture decodes or 3 s have passed, whichever is first. The sheen's 1.6 s loop and the
+// picture's .42 s fade are CSS (styles/train.css).
 export const SHEEN_STOP_MS = 3000;
-export const FADE_MS = 420;
 
 export function goalArtName(goalValue) {
   return "goal_" + goalValue;
