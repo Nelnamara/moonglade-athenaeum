@@ -16,11 +16,17 @@ What is held:
     the snapshot first; a task with a saved password, or one Windows refuses, is reported
     with why, never half-done;
   * Claude: Claude Desktop's config and both of Claude Code's scopes rewritten to
-    `-m moonglade.mcp_server` with PYTHONPATH added and the other env kept, written whole,
-    a copy kept first; checked off Windows too;
-  * shortcuts: the target and the icon re-pointed (the icon into local\\icons\\), a copy kept,
-    the file swapped in whole; a folder Windows refuses is reported; the launcher's pass only
-    takes the ones whose old target is gone;
+    `-m moonglade.mcp_server` (-P only for a Python of 3.11 or later, asked of the
+    registration's own Python, which must have fastmcp) with PYTHONPATH added and the other
+    env kept, written whole after a re-read (a change Claude made meanwhile is never lost); a
+    copy kept beside the file, never in the install, and removed once the rewrite reads back;
+    "Fixed" only then, with "restart Claude". A registration run through another program, or
+    naming the old file by a relative path it does not anchor here, is reported with the
+    command line to use, never rewritten; checked off Windows too;
+  * shortcuts: only what changes is written (an icon-only fault gets its icon and nothing
+    else), a copy kept, the file swapped in whole, and nothing left behind when Windows
+    refuses; the launcher's pass only takes the ones that start this install's old launcher,
+    now gone, never one this user cannot change, and sweeps a temp a killed save left;
   * off Windows only the Claude configs are looked at.
 """
 import json
@@ -142,7 +148,7 @@ def task_xml(command, arguments="", workdir="", logon="InteractiveToken"):
 
 class SavedLnk:
     """A stand-in for Windows' shortcut writer: records what it was told and writes it, so
-    the file on disk really changes."""
+    the file on disk really changes. A field given as None is left as the shortcut has it."""
 
     def __init__(self, refuse=None):
         self.saved = []
@@ -155,9 +161,24 @@ class SavedLnk:
                                icon=icon))
         old = outside.read_lnk(path)
         icon_path, _, index = (icon or "").rpartition(",")
-        path.write_bytes(build_lnk(target, args=args, workdir=workdir,
+        path.write_bytes(build_lnk(old.target if target is None else target,
+                                   args=old.args if args is None else args,
+                                   workdir=old.workdir if workdir is None else workdir,
                                    icon=icon_path if icon else old.icon,
                                    icon_index=int(index) if icon else old.icon_index))
+
+
+class Probe:
+    """A stand-in for asking a registration's Python its version and whether it has fastmcp:
+    records what was asked."""
+
+    def __init__(self, version=(3, 11), fastmcp=True, starts=True):
+        self.asked = []
+        self.answer = {"version": version, "fastmcp": fastmcp} if starts else None
+
+    def __call__(self, argv):
+        self.asked.append(list(argv))
+        return self.answer
 
 
 @pytest.fixture
@@ -187,7 +208,7 @@ def box(tmp_path):
     return Box
 
 
-def machine(box, platform="win32", tasks=None, save=None):
+def machine(box, platform="win32", tasks=None, save=None, probe=None):
     return outside.Machine(
         platform=platform,
         shortcut_folders=[(box.desktop, "on your Desktop", False),
@@ -198,7 +219,8 @@ def machine(box, platform="win32", tasks=None, save=None):
         claude_configs=[(box.claude_desktop, "Claude Desktop"), (box.claude_code, "Claude Code")],
         run=tasks if tasks is not None else FakeSchtasks({}),
         save_lnk=save or SavedLnk(),
-        python=PY)
+        python=PY,
+        probe=probe or Probe())
 
 
 def _fix(items, install, m, box, **kw):
@@ -328,7 +350,8 @@ def test_a_task_is_rewritten_whole_with_its_xml_kept_first(install, box):
     m = machine(box, tasks=st)
     results = _fix(outside.find(install, m, kinds=("task",)), install, m, box)
     assert [r.as_dict() for r in results] == [
-        {"label": "the scheduled task “Moonglade sync”", "fixed": True, "reason": ""}]
+        {"label": "the scheduled task “Moonglade sync”", "fixed": True, "reason": "",
+         "note": ""}]
     created = st.created["\\Moonglade sync"]
     assert "<Arguments>&quot;%s\\moonglade&quot; --sync</Arguments>" % install in created \
         or '<Arguments>"%s\\moonglade" --sync</Arguments>' % install in created
@@ -400,19 +423,21 @@ def test_claude_desktops_registration_is_rewritten_with_its_env_kept(install, bo
     found = outside.find(install, m, kinds=("claude",))
     assert [i.label for i in found] == ["Claude Desktop's Moonglade tools"]
     [r] = _fix(found, install, m, box)
-    assert r.fixed
+    assert r.fixed and r.note == "Restart Claude to use it."
+    assert r.line() == "Fixed Claude Desktop's Moonglade tools. Restart Claude to use it."
     doc = json.loads(box.claude_desktop.read_text(encoding="utf-8"))
     new = doc["mcpServers"]["moonglade"]
     assert new["command"] == "python"
-    assert new["args"] == outside._mcp_args()
-    assert new["args"][-2:] == ["-m", "moonglade.mcp_server"]
+    assert new["args"] == ["-P", "-m", "moonglade.mcp_server"], "its Python said 3.11"
     assert new["env"] == {"MOONGLADE_OUT": "D:\\library", "PYTHONPATH": str(install)}
     assert doc["mcpServers"]["other"] == other
     assert doc["globalShortcut"] == "Ctrl+Space"
     assert box.claude_desktop.read_text(encoding="utf-8").startswith('{\n  "mcpServers"')
-    [snap] = _snapshots(box)
-    assert (box.snapshot / snap).read_bytes() == original
+    # S6: a config can hold keys and tokens -- never copied into the install's snapshot; the
+    # copy kept beside it goes once the rewrite reads back.
+    assert _snapshots(box) == []
     assert [p.name for p in box.claude_desktop.parent.iterdir()] == [box.claude_desktop.name]
+    assert original != box.claude_desktop.read_bytes()
 
 
 def test_claude_codes_user_and_project_scopes_are_both_rewritten(install, box):
@@ -423,13 +448,15 @@ def test_claude_codes_user_and_project_scopes_are_both_rewritten(install, box):
                                   "history": ["a"]},
                      "C:\\other": {"mcpServers": {"x": {"command": "node", "args": ["s.js"]}}}},
     })
-    m = machine(box)
+    m = machine(box, probe=Probe(version=(3, 10)))
     found = outside.find(install, m, kinds=("claude",))
     assert [i.label for i in found] == ["Claude Code's Moonglade tools"]
     [r] = _fix(found, install, m, box)
     assert r.fixed
     doc = json.loads(box.claude_code.read_text(encoding="utf-8"))
     assert doc["numStartups"] == 12
+    assert doc["mcpServers"]["moonglade"]["args"] == ["-m", "moonglade.mcp_server"], \
+        "S5: a 3.10 Python refuses -P, so it is not written"
     assert doc["mcpServers"]["moonglade"]["args"][-1] == "moonglade.mcp_server"
     proj = doc["projects"]["C:\\work"]
     assert proj["mcpServers"]["mg"]["env"] == {"PYTHONPATH": str(install)}
@@ -454,6 +481,112 @@ def test_another_installs_registration_is_left_alone(install, box):
     assert outside.find(install, m, kinds=("claude",)) == []
     assert outside.fix(None, install=install, m=m, snapshot=box.snapshot, icons=box.icons) == []
     assert box.claude_desktop.read_bytes() == before
+
+
+def test_the_registration_s_own_python_is_asked_with_its_own_options(install, box):
+    """S5: `py -3.12 <old file>` runs the tools on 3.12, whatever Python runs the app: the
+    py launcher is asked with its own option, and -P follows its answer."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "py", "args": ["-3.12", str(install / "moonglade_mcp.py")]}}})
+    probe = Probe(version=(3, 12))
+    m = machine(box, probe=probe)
+    [r] = _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+    assert r.fixed and probe.asked == [["py", "-3.12"]]
+    new = json.loads(box.claude_desktop.read_text(encoding="utf-8"))["mcpServers"]["moonglade"]
+    assert new["command"] == "py" and new["args"] == ["-3.12", "-P", "-m", "moonglade.mcp_server"]
+
+
+def test_a_registration_run_through_another_program_is_reported_with_the_line_to_use(
+        install, box):
+    """S5: `uv run --with fastmcp <old file>` is not rewritten on a guess (`-P -m ...` would
+    land in uv's arguments): it is reported, with the command line to use."""
+    _write_json(box.claude_code, {"mcpServers": {"moonglade": {
+        "command": "uv", "args": ["run", "--with", "fastmcp",
+                                  str(install / "moonglade_mcp.py")]}}})
+    before = box.claude_code.read_bytes()
+    m = machine(box)
+    [item] = outside.find(install, m, kinds=("claude",))
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed
+    assert "starts through uv" in r.reason and "-m moonglade.mcp_server" in r.reason
+    assert str(install) in r.reason
+    assert box.claude_code.read_bytes() == before
+
+
+@pytest.mark.parametrize("probe, words", [
+    (Probe(starts=False), "couldn't be started"),
+    (Probe(fastmcp=False), "doesn't have fastmcp"),
+], ids=["no-python", "no-fastmcp"])
+def test_a_python_that_cannot_run_the_tools_is_never_written(install, box, probe, words):
+    """S5: "Fixed" only when the registration's own Python can run the new command."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": _mcp(install)}})
+    before = box.claude_desktop.read_bytes()
+    m = machine(box, probe=probe)
+    [r] = _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+    assert not r.fixed and words in r.reason
+    assert box.claude_desktop.read_bytes() == before
+
+
+def test_a_relative_old_file_is_this_install_s_only_where_it_starts_here(install, box,
+                                                                        tmp_path):
+    """Rehearsal 9: `.\\moonglade_mcp.py` names the file in whatever folder the server starts
+    in. With no cwd saying that is this install, it would match every install's fixer: it is
+    reported and left alone. With this install as its cwd, it is this install's."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": [".\\moonglade_mcp.py"]}}})
+    before = box.claude_desktop.read_bytes()
+    m = machine(box)
+    [item] = outside.find(install, m, kinds=("claude",))
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed and "which folder it starts in" in r.reason
+    assert box.claude_desktop.read_bytes() == before
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": [".\\moonglade_mcp.py"], "cwd": str(install)}}})
+    [r] = _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+    assert r.fixed
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": [".\\moonglade_mcp.py"],
+        "cwd": str(tmp_path / "another install")}}})
+    assert outside.find(install, m, kinds=("claude",)) == []
+
+
+def test_a_change_claude_makes_meanwhile_is_never_lost(install, box, monkeypatch):
+    """S6: Claude rewrites its config often. Between the fixer's read and its replace, Claude
+    wrote: the fixer reads it again and rewrites THAT, so both changes stand."""
+    _write_json(box.claude_code, {"numStartups": 1,
+                                  "mcpServers": {"moonglade": _mcp(install)}})
+    m = machine(box)
+    [item] = outside.find(install, m, kinds=("claude",))
+    real = outside._backup_beside
+    wrote = {"n": 0}
+
+    def backup(path, data):
+        out = real(path, data)
+        if wrote["n"] == 0:                    # Claude writes, just then
+            wrote["n"] += 1
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc["numStartups"] = 2
+            _write_json(path, doc)
+        return out
+    monkeypatch.setattr(outside, "_backup_beside", backup)
+    [r] = _fix([item], install, m, box)
+    assert r.fixed
+    doc = json.loads(box.claude_code.read_text(encoding="utf-8"))
+    assert doc["numStartups"] == 2, "Claude's change kept"
+    assert doc["mcpServers"]["moonglade"]["args"][-1] == "moonglade.mcp_server", "and the fix"
+    assert [p.name for p in box.claude_code.parent.iterdir()] == [".claude.json"]
+
+
+def test_a_temp_a_killed_save_left_beside_a_config_is_swept(install, box):
+    import time
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": _mcp(install)}})
+    stale = box.claude_desktop.with_name(".claude_desktop_config.json.moonglade-0123abcd.tmp")
+    stale.write_text("half", encoding="utf-8")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+    m = machine(box)
+    _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+    assert not stale.exists()
 
 
 def test_a_registration_already_rewritten_finds_nothing(install, box):
@@ -517,7 +650,7 @@ def test_the_apps_old_desktop_shortcut_is_re_pointed_target_and_icon(install, bo
     assert r.fixed, r.reason
     [s] = save.saved
     assert s["args"] == '"%s\\Moonglade Launcher.pyw"' % install
-    assert s["target"] == r"C:\Python311\pythonw.exe" and s["workdir"] == str(install)
+    assert s["target"] is None and s["workdir"] is None, "only what changes is written"
     assert s["icon"] == "%s,0" % (box.icons / "mark_4.ico")
     assert (box.icons / "mark_4.ico").read_bytes() == b"\x00\x00\x01\x00ICON"
     now = outside.read_lnk(lnk)
@@ -561,10 +694,15 @@ def test_an_icon_only_in_an_old_cache_is_moved_to_the_icons_folder(install, box)
     save = SavedLnk()
     m = machine(box, save=save)
     [item] = outside.find(install, m, kinds=("shortcut",))
-    assert item.auto and item.label.endswith("pinned to your taskbar")
+    assert not item.auto and item.label.endswith("pinned to your taskbar"), \
+        "S7: an icon-only fault is offered in the notice, not fixed at every start"
+    assert outside.repoint_shortcuts(install, m, box.snapshot, box.icons) == []
     [r] = _fix([item], install, m, box)
     assert r.fixed and save.saved[0]["icon"] == "%s,0" % (box.icons / "mark_2.ico")
-    assert save.saved[0]["args"] == '"%s\\Moonglade Launcher.pyw"' % install
+    assert save.saved[0]["target"] is None and save.saved[0]["args"] is None \
+        and save.saved[0]["workdir"] is None, "S7: only the icon is written"
+    assert outside.read_lnk(box.taskbar / "Moonglade Athenaeum.lnk").args == \
+        '"%s\\Moonglade Launcher.pyw"' % install
 
 
 def test_an_icon_only_shortcut_whose_icon_is_gone_is_not_offered(install, box):
@@ -578,9 +716,9 @@ def test_an_icon_only_shortcut_whose_icon_is_gone_is_not_offered(install, box):
 
 def test_an_icon_the_move_already_brought_into_local_icons_is_re_pointed(install, box):
     """The move copies the old cache's .ico files into local\\icons\\ and then deletes the
-    cache (moonglade.migrate's install half), so by the time the launcher's pass runs, a
-    shortcut whose only fault is its icon names a file that is gone -- but its copy is in
-    local\\icons\\, and the shortcut is pointed there without asking: it never loses its icon."""
+    cache (moonglade.migrate's install half), so a shortcut whose only fault is its icon names
+    a file that is gone -- but its copy is in local\\icons\\, and Fix points it there (the
+    notice offers it; the launcher's pass leaves an icon-only fault alone, S7)."""
     (box.icons / "mark_3.ico").parent.mkdir(parents=True, exist_ok=True)
     (box.icons / "mark_3.ico").write_bytes(b"ICO3")
     write_lnk(box.desktop / "M.lnk", target=r"C:\Python311\pythonw.exe",
@@ -588,10 +726,12 @@ def test_an_icon_the_move_already_brought_into_local_icons_is_re_pointed(install
               icon=str(install / "_container_cache" / "marks" / "mark_3.ico"))
     save = SavedLnk()
     m = machine(box, save=save)
-    results = outside.repoint_shortcuts(install, m, box.snapshot, box.icons)
+    assert outside.repoint_shortcuts(install, m, box.snapshot, box.icons) == []
+    results = _fix(outside.find(install, m, kinds=("shortcut",), icons=box.icons),
+                   install, m, box)
     assert [r.fixed for r in results] == [True]
     assert save.saved[0]["icon"] == "%s,0" % (box.icons / "mark_3.ico")
-    assert save.saved[0]["args"] == '"%s\\Moonglade Launcher.pyw"' % install
+    assert save.saved[0]["args"] is None
 
 
 def test_an_icon_already_gone_is_offered_from_the_app_when_it_can(install, box):
@@ -605,6 +745,7 @@ def test_an_icon_already_gone_is_offered_from_the_app_when_it_can(install, box):
     [r] = _fix([item], install, m, box,
                provide_icon=lambda stem: (asked.append(stem), b"FROMPACK")[1])
     assert r.fixed and asked == ["mark_7"]
+    assert save.saved[0]["args"] == '"%s\\Moonglade Launcher.pyw"' % install
     assert (box.icons / "mark_7.ico").read_bytes() == b"FROMPACK"
 
 
@@ -629,12 +770,46 @@ def test_a_folder_windows_refuses_is_reported_and_the_shortcut_kept(install, box
     assert not r.fixed and "administrator" in r.reason
     assert lnk.read_bytes() == before
     assert sorted(p.name for p in box.common.iterdir()) == ["Moonglade Athenaeum.lnk"]
+    assert _snapshots(box) == [], "S7: a refusal leaves no copy behind either"
+
+
+def test_the_launchers_pass_never_tries_a_shortcut_this_user_cannot_change(install, box,
+                                                                          monkeypatch):
+    """S7: an all-users shortcut without administrator rights is not tried again at every
+    start (nor copied into the snapshot each time): the notice still offers it."""
+    _app_shortcut(box, install, folder=box.common)
+    save = SavedLnk()
+    m = machine(box, save=save)
+    monkeypatch.setattr(outside, "_may_change", lambda path: False)
+    assert outside.repoint_shortcuts(install, m, box.snapshot, box.icons) == []
+    assert save.saved == [] and _snapshots(box) == []
+    assert [i.label for i in outside.find(install, m, kinds=("shortcut",))] == [
+        "the shortcut “Moonglade Athenaeum” in the Start menu for all users"]
+
+
+def test_the_launchers_pass_sweeps_a_temp_a_killed_save_left(install, box):
+    import time
+    stale = box.desktop / ".Moonglade Athenaeum.moonglade-0123abcd.lnk"
+    stale.write_bytes(b"half a shortcut")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+    fresh = box.desktop / ".Moonglade Athenaeum.moonglade-89abcdef.lnk"
+    fresh.write_bytes(b"a save in progress")
+    mine = box.desktop / ".hidden.lnk"
+    mine.write_bytes(b"not ours")
+    os.utime(mine, (old, old))
+    outside.repoint_shortcuts(install, machine(box), box.snapshot, box.icons)
+    assert not stale.exists() and fresh.exists() and mine.exists()
 
 
 def test_the_launchers_pass_takes_only_shortcuts_whose_old_target_is_gone(install, box):
+    """S7: only a shortcut that starts this install's old launcher, now gone. One naming
+    another old file (here still present, and one gone) waits for the notice's Fix."""
     _app_shortcut(box, install)
     write_lnk(box.programs / "Old CLI.lnk", target=PY,
               args='"%s\\moonglade_backup.py" --sync' % install)
+    write_lnk(box.programs / "Old server.lnk", target=PY,
+              args='"%s\\moonglade_gallery.py"' % install)
     (install / "moonglade_backup.py").write_text("# still here, somehow\n")
     save = SavedLnk()
     m = machine(box, save=save)
@@ -696,8 +871,13 @@ def test_the_notice_and_the_result_are_plain_words():
              outside.Item("claude", "c", "Claude Desktop's Moonglade tools", {})]
     title, msg = outside.notice_words(items)
     assert title == "Some things outside Moonglade still use its old file names."
-    assert msg == ("The scheduled task “A” and Claude Desktop's Moonglade tools. "
-                   "Fix them points them at the new names.")
+    assert msg == ("They are the scheduled task “A” and Claude Desktop's Moonglade tools. "
+                   "Press Fix them to point them at the new names.")
+    assert outside.fix_label(items) == "Fix them"
+    title, msg = outside.notice_words(items[:1])
+    assert title == "The scheduled task “A” still uses Moonglade's old file names."
+    assert msg == "Press Fix it to point it at the new names."
+    assert outside.fix_label(items[:1]) == "Fix it"
     ok = [outside.Result("the scheduled task “A”", True)]
     assert outside.result_words(ok) == (
         "ok", "Fixed.", "The scheduled task “A” now uses the new names.")
@@ -708,6 +888,11 @@ def test_the_notice_and_the_result_are_plain_words():
     assert msg == ("Fixed the scheduled task “A”. Couldn't fix Claude Desktop's Moonglade "
                    "tools: its config couldn't be written (in use or not allowed).")
     assert outside.result_words([])[0] == "ok"
+    claude = [outside.Result("Claude Desktop's Moonglade tools", True,
+                             note="Restart Claude to use it.")]
+    assert outside.result_words(claude) == (
+        "ok", "Fixed.", "Claude Desktop's Moonglade tools now uses the new names. "
+                        "Restart Claude to use it.")
 
 
 def test_no_test_can_reach_the_real_machine():

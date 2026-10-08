@@ -18,22 +18,37 @@ find() lists them; fix() rewrites each to the new names:
   Serve Gallery.pyw      -> Moonglade Launcher.pyw, in the same folder
   moonglade_backup.py    -> the code folder: python "<install>\\moonglade" <same args>
   moonglade_gallery.py   -> python -m moonglade.gallery <same args>, started in the install
-  moonglade_mcp.py       -> python -P -m moonglade.mcp_server, with PYTHONPATH=<install>
-                            added to the registration's own env (the rest kept)
+  moonglade_mcp.py       -> <its Python> -m moonglade.mcp_server (-P added only when that
+                            Python is 3.11 or later), with PYTHONPATH=<install> added to the
+                            registration's own env (the rest kept)
   an icon in an old icon cache (_container_cache\\, local\\cache\\) -> the same .ico in
                             local\\icons\\ (moonglade.paths.icons_dir()), which is no cache
 
 The rules:
   * Only THIS install's files are matched (moonglade.paths.APP_ROOT, or `install`); a
-    reference to another install's files is left alone. A bare file name counts only where
-    the thing starts in this install's folder.
-  * Before a file is changed it is copied into local\\.snapshot\\outside\\ (a task: its XML as
-    Windows gave it), and it is rewritten whole: a temp file beside it, then one os.replace.
+    reference to another install's files is left alone. A bare or .\\ file name counts only
+    where the thing starts in this install's folder; a Claude registration that names the old
+    file that way without saying it starts here is reported, never rewritten on a guess.
+  * A Claude registration is rewritten only when it runs Python itself (or the old file by
+    its type). Its own Python is asked first (its version, and whether it has fastmcp): -P is
+    written only for 3.11 or later, and one that cannot run the tools is reported with the
+    command line to use, never written. "Fixed" means the file was re-read and holds the new
+    command; Claude then needs a restart to use it.
+  * A Claude config can hold keys and tokens, so it never goes into the install's snapshot:
+    a copy is kept beside it (as private as the file itself) and removed once the rewrite is
+    read back. The file is re-read just before it is replaced, so a change Claude made
+    meanwhile is never lost: the rewrite starts again from it.
+  * A task's XML and a shortcut are copied into local\\.snapshot\\outside\\ before they change
+    (and the safety snapshot's clean-start count starts again, so the copy is kept five clean
+    starts on). Every file is rewritten whole: a temp file beside it, then one os.replace.
   * Every item comes back as fixed or failed, with a plain reason. Nothing here raises.
   * Off Windows, only the Claude configs are looked at.
   * repoint_shortcuts() is the launcher's own pass, at every start and without asking: it
-    fixes only shortcuts whose old target is already gone (or whose icon sits in an old
-    cache), so nothing it does can make a shortcut worse.
+    fixes only shortcuts that start this install's old launcher, now gone, so nothing it does
+    can make a shortcut worse. One Windows won't let this user change is left for the notice
+    (and its Fix button's plain reason), not tried again at every start. A shortcut whose only
+    fault is its icon is offered in the notice. A temp a killed save left beside a shortcut is
+    swept.
 
 Everything that touches the machine goes through a Machine (where the folders are, how a
 command runs, how a .lnk is saved), so the tests hand in one built on temp folders and fake
@@ -103,20 +118,24 @@ class Machine:
     claude_configs    [(path, who)]: the Claude config files, and whose ("Claude Desktop")
     run(argv)         -> (returncode, stdout bytes, stderr text); runs schtasks
     save_lnk(path, target, args, workdir, icon)
-                      rewrites the .lnk at `path` in place (icon: "path,index" or None to
-                      leave it)
+                      rewrites the .lnk at `path` in place; a field given as None is left as
+                      it is (icon: "path,index")
     python            the interpreter a rewritten command names when the old one ran a .py by
                       its file type (python.exe beside the one running the app)
+    probe(argv)       -> {"version": (major, minor), "fastmcp": bool}, or None when `argv`
+                      (a Python and its own options) cannot be started: asked of a Claude
+                      registration's Python before it is rewritten
     """
 
     def __init__(self, platform=None, shortcut_folders=(), claude_configs=(), run=None,
-                 save_lnk=None, python=None):
+                 save_lnk=None, python=None, probe=None):
         self.platform = platform or sys.platform
         self.shortcut_folders = list(shortcut_folders)
         self.claude_configs = list(claude_configs)
         self.run = run or _run
         self.save_lnk = save_lnk or _save_lnk_with_powershell
         self.python = python or _console_python()
+        self.probe = probe or _probe_python
 
     @property
     def windows(self):
@@ -161,6 +180,24 @@ def _console_python():
     if exe.name.lower() == "pythonw.exe" and exe.with_name("python.exe").exists():
         return str(exe.with_name("python.exe"))
     return str(exe)
+
+
+_PROBE_CODE = ("import sys, importlib.util as u; "
+               "print('%d.%d %d' % (sys.version_info[0], sys.version_info[1], "
+               "u.find_spec('fastmcp') is not None))")
+
+
+def _probe_python(argv):
+    """Ask the Python `argv` names (with its own options, e.g. ["py", "-3.12"]) its version and
+    whether it has fastmcp, without importing anything else. None when it cannot be started
+    or says something else."""
+    rc, out, _err = _run(list(argv) + ["-c", _PROBE_CODE], timeout=30)
+    if rc != 0:
+        return None
+    m = re.match(r"^\s*(\d+)\.(\d+) ([01])\s*$", _decode(out))
+    if not m:
+        return None
+    return {"version": (int(m.group(1)), int(m.group(2))), "fastmcp": m.group(3) == "1"}
 
 
 def _run(argv, timeout=60):
@@ -235,17 +272,19 @@ class Item:
 
 
 class Result:
-    def __init__(self, label, fixed, reason=""):
+    def __init__(self, label, fixed, reason="", note=""):
         self.label = label
         self.fixed = bool(fixed)
         self.reason = reason
+        self.note = note          # what the person does next ("Restart Claude to use it.")
 
     def as_dict(self):
-        return {"label": self.label, "fixed": self.fixed, "reason": self.reason}
+        return {"label": self.label, "fixed": self.fixed, "reason": self.reason,
+                "note": self.note}
 
     def line(self):
         if self.fixed:
-            return "Fixed %s." % self.label
+            return "Fixed %s.%s" % (self.label, (" " + self.note) if self.note else "")
         return "Couldn't fix %s: %s." % (self.label, self.reason)
 
 
@@ -256,30 +295,48 @@ def _and(words):
     return ", ".join(words[:-1]) + " and " + words[-1]
 
 
+def _cap(text):
+    return text[:1].upper() + text[1:]
+
+
+def fix_label(items):
+    """The notice's button: "Fix it" for one thing, "Fix them" for several."""
+    return "Fix it" if len(list(items)) == 1 else "Fix them"
+
+
 def notice_words(items):
-    """(title, message) for the app's one notice about `items`."""
+    """(title, message) for the app's one notice about `items`, worded for one or several."""
+    items = list(items)
     labels = [i.label for i in items]
-    head = _and(labels)
+    if len(labels) == 1:
+        return (_cap(labels[0]) + " still uses Moonglade's old file names.",
+                "Press Fix it to point it at the new names.")
     return ("Some things outside Moonglade still use its old file names.",
-            head[:1].upper() + head[1:] + ". Fix them points them at the new names.")
+            "They are " + _and(labels) + ". Press Fix them to point them at the new names.")
 
 
 def result_words(results):
     """(kind, title, message) for what fix() did: kind "ok" when every item was fixed."""
     fixed = [r for r in results if r.fixed]
     failed = [r for r in results if not r.fixed]
+    notes = []
+    for r in results:
+        if r.note and r.note not in notes:
+            notes.append(r.note)
+    tail = (" " + " ".join(notes)) if notes else ""
     if not results:
         return ("ok", "Nothing to fix.",
                 "Nothing outside Moonglade names its old files any more.")
     if not failed:
-        head = _and(r.label for r in fixed)
-        return ("ok", "Fixed.", head[:1].upper() + head[1:] + " now use the new names."
-                if len(fixed) > 1 else head[:1].upper() + head[1:] + " now uses the new names.")
+        head = _cap(_and(r.label for r in fixed))
+        return ("ok", "Fixed.", (head + " now use the new names."
+                                 if len(fixed) > 1 else head + " now uses the new names.") + tail)
     parts = []
     if fixed:
         parts.append("Fixed " + _and(r.label for r in fixed) + ".")
     parts += ["Couldn't fix %s: %s." % (r.label, r.reason) for r in failed]
-    return ("err", "Some couldn't be fixed." if fixed else "Couldn't fix them.", " ".join(parts))
+    return ("err", "Some couldn't be fixed." if fixed else "Couldn't fix them.",
+            " ".join(parts) + tail)
 
 
 # ---- paths, Windows style ------------------------------------------------------------------
@@ -573,11 +630,15 @@ def fix_task(item, install, m, snapshot):
 
 # ---- Claude's MCP registrations ------------------------------------------------------------
 
-def _mcp_args():
-    # -P (Python 3.11+) keeps the client's working folder off sys.path; PYTHONPATH names the
-    # app. An interpreter older than 3.11 refuses -P, so it is only written where the app's
-    # own Python has it.
-    return (["-P"] if sys.version_info >= (3, 11) else []) + ["-m", "moonglade.mcp_server"]
+RESTART_CLAUDE = "Restart Claude to use it."
+_MODULE_ARGS = ["-m", "moonglade.mcp_server"]
+
+
+def _mcp_args(version=None):
+    """The rewritten registration's arguments. -P (Python 3.11+) keeps the client's working
+    folder off sys.path, and is written only for a Python known to be 3.11 or later: an older
+    one refuses it and the tools would not start. PYTHONPATH names the app either way."""
+    return (["-P"] if version is not None and tuple(version) >= (3, 11) else []) + _MODULE_ARGS
 
 
 def _with_install(pythonpath, install, platform):
@@ -588,40 +649,88 @@ def _with_install(pythonpath, install, platform):
     return sep.join([str(install)] + parts)
 
 
-def rewrite_mcp_server(spec, install, python, platform):
-    """One mcpServers entry with this install's moonglade_mcp.py rewritten, or None when it
-    names no such file."""
+def _how_to_run(install):
+    return ("set it to run your Python with -m moonglade.mcp_server, and PYTHONPATH set to %s"
+            % install)
+
+
+class _McpPlan:
+    """What one mcpServers entry needs. `new` is the rewritten entry (None: nothing to write);
+    `problem` says why an entry naming this install's old file is left as it is."""
+
+    def __init__(self, new=None, problem=""):
+        self.new, self.problem = new, problem
+
+
+def _old_script_arg(args, install, cwd):
+    """(index, "this" | "unsure") of the argument naming moonglade_mcp.py, or None. A full
+    path counts only inside this install; a bare or .\\ name only when the registration says it
+    starts in this install (its cwd), and is otherwise "unsure": it would match every install."""
+    target = ntpath.join(str(install), OLD_MCP)
+    for i, a in enumerate(args):
+        if not isinstance(a, str):
+            continue
+        if _same(a, target):
+            return i, "this"
+        name = _clean(a)
+        base = ntpath.basename(name.replace("/", "\\"))
+        if base.lower() != OLD_MCP.lower():
+            continue
+        if ntpath.isabs(name) or name.startswith(("\\\\", "//")):
+            continue                                     # another folder's file
+        if not cwd:
+            return i, "unsure"
+        whole = ntpath.normpath(ntpath.join(_clean(cwd), name))
+        return (i, "this") if _same(whole, target) else None
+    return None
+
+
+def rewrite_mcp_server(spec, install, python, platform, probe=None):
+    """What to do with one mcpServers entry: an _McpPlan, or None when it does not name this
+    install's moonglade_mcp.py. With `probe` (fix time) the registration's own Python is asked
+    its version and whether it has fastmcp; without it (find time) only the shape is judged.
+    Never raises."""
     if not isinstance(spec, dict):
         return None
-    command = spec.get("command")
+    command = spec.get("command") if isinstance(spec.get("command"), str) else ""
     args = spec.get("args") if isinstance(spec.get("args"), list) else []
+    cwd = spec.get("cwd") if isinstance(spec.get("cwd"), str) else ""
     target = ntpath.join(str(install), OLD_MCP)
-    changed = False
-    new = dict(spec)
-    new_args = []
-    if isinstance(command, str) and _same(command, target):
-        new["command"] = python
-        new_args = _mcp_args() + list(args)
-        changed = True
+    if command and _same(command, target):
+        interpreter, before, after = [python], [], list(args)
     else:
-        pat = _ref_pattern(install, MCP_NAMES)
-        for a in args:
-            if isinstance(a, str) and _same(a, target):
-                new_args += _mcp_args()
-                changed = True
-            elif isinstance(a, str) and pat.search(a) and pat.search(a).group("prefix"):
-                new_args.append(pat.sub(lambda m: " ".join(_mcp_args())
-                                        if m.group("prefix") else m.group(0), a))
-                changed = True
-            else:
-                new_args.append(a)
-    if not changed:
-        return None
-    new["args"] = new_args
+        found = _old_script_arg(args, install, cwd)
+        if found is None:
+            return None
+        i, whose = found
+        if whose == "unsure":
+            return _McpPlan(problem=(
+                "it names moonglade_mcp.py without saying which folder it starts in, so the "
+                "app can't tell it is this install's; " + _how_to_run(install)))
+        if not command or not _PY.match(ntpath.basename(_clean(command))):
+            return _McpPlan(problem=(
+                "it starts through %s, which the app won't rewrite on a guess; %s" % (
+                    ntpath.basename(_clean(command)) or "another program", _how_to_run(install))))
+        interpreter, before, after = [command], list(args[:i]), list(args[i + 1:])
+    version = None
+    if probe is not None:
+        info = probe(interpreter + before)
+        who = " ".join(interpreter + before)
+        if info is None:
+            return _McpPlan(problem="its Python (%s) couldn't be started; %s" % (
+                who, _how_to_run(install)))
+        if not info.get("fastmcp"):
+            return _McpPlan(problem=(
+                "its Python (%s) doesn't have fastmcp, which the tools need; install it there "
+                "(pip install fastmcp), then press Fix again" % who))
+        version = info.get("version")
+    new = dict(spec)
+    new["command"] = interpreter[0]
+    new["args"] = before + _mcp_args(version) + after
     env = dict(spec.get("env") or {}) if isinstance(spec.get("env") or {}, dict) else {}
     env["PYTHONPATH"] = _with_install(env.get("PYTHONPATH"), install, platform)
     new["env"] = env
-    return new
+    return _McpPlan(new=new)
 
 
 def _mcp_tables(doc):
@@ -639,15 +748,21 @@ def _mcp_tables(doc):
     return tables
 
 
-def _rewrite_claude_doc(doc, install, python, platform):
-    n = 0
+def _rewrite_claude_doc(doc, install, python, platform, probe=None):
+    """Rewrite `doc`'s registrations of this install's old file in place. Returns
+    (rewritten, problems): how many entries were rewritten, and why the others were not."""
+    n, problems = 0, []
     for table in _mcp_tables(doc):
         for name, spec in list(table.items()):
-            new = rewrite_mcp_server(spec, install, python, platform)
-            if new is not None:
-                table[name] = new
+            plan = rewrite_mcp_server(spec, install, python, platform, probe)
+            if plan is None:
+                continue
+            if plan.new is not None:
+                table[name] = plan.new
                 n += 1
-    return n
+            elif plan.problem not in problems:
+                problems.append(plan.problem)
+    return n, problems
 
 
 def _read_json(path):
@@ -664,7 +779,8 @@ def find_claude(install, m):
             _text, doc = _read_json(path)
         except (OSError, ValueError):
             continue
-        if _rewrite_claude_doc(doc, install, m.python, m.platform):
+        n, problems = _rewrite_claude_doc(doc, install, m.python, m.platform)
+        if n or problems:
             found.append(Item("claude", str(path), "%s's Moonglade tools" % who,
                               {"path": str(path)}))
     return found
@@ -677,23 +793,78 @@ def _indent_of(text):
     return m.group(1) if "\t" in m.group(1) else len(m.group(1))
 
 
-def fix_claude(item, install, m, snapshot):
+def _backup_beside(path, data):
+    """A copy of a Claude config as it was, beside it (never in the install: it can hold keys
+    and tokens), made private to this user where the system allows (on Windows it takes the
+    folder's own access list, the user's profile). Returns its path."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name("%s.moonglade-backup-%s-%s" % (path.name, stamp,
+                                                           uuid.uuid4().hex[:6]))
+    fd = os.open(str(backup), os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+                 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        _drop(backup)
+        raise
+    return backup
+
+
+_CLAIM_TRIES = 3
+
+
+def fix_claude(item, install, m, snapshot=None):
+    """Rewrite one Claude config's registrations of this install's old file. The file is
+    re-read just before it is replaced: if Claude changed it meanwhile, the rewrite starts
+    again from the new content, so neither write is lost. "Fixed" only once the file is read
+    back holding the new command."""
     path = Path(item.data["path"])
-    try:
-        text, doc = _read_json(path)
-    except (OSError, ValueError) as e:
-        return Result(item.label, False, "its config couldn't be read (%s)" % _reason(e))
-    if not _rewrite_claude_doc(doc, install, m.python, m.platform):
-        return Result(item.label, True)                  # already right
-    try:
-        _snapshot_file(snapshot, path)
+    _sweep_own_temps(path.parent, path.name)
+    for _attempt in range(_CLAIM_TRIES):
+        try:
+            raw = path.read_bytes()
+            text = raw.decode("utf-8-sig")
+            doc = json.loads(text)
+        except (OSError, ValueError) as e:
+            return Result(item.label, False, "its config couldn't be read (%s)" % _reason(e))
+        n, problems = _rewrite_claude_doc(doc, install, m.python, m.platform, m.probe)
+        if not n:
+            if problems:
+                return Result(item.label, False, "; ".join(problems))
+            return Result(item.label, True)              # already right
         out = json.dumps(doc, indent=_indent_of(text), ensure_ascii=False)
         if text.endswith("\n"):
             out += "\n"
-        _write_atomically(path, out.encode("utf-8"))
-    except OSError as e:
-        return Result(item.label, False, "its config couldn't be written (%s)" % _reason(e))
-    return Result(item.label, True)
+        try:
+            backup = _backup_beside(path, raw)
+        except OSError as e:
+            return Result(item.label, False, "a copy couldn't be kept first (%s)" % _reason(e))
+        try:
+            if path.read_bytes() != raw:
+                _drop(backup)                            # Claude wrote it meanwhile: again
+                continue
+            _write_atomically(path, out.encode("utf-8"))
+        except OSError as e:
+            _drop(backup)
+            return Result(item.label, False, "its config couldn't be written (%s)" % _reason(e))
+        try:
+            _t, check = _read_json(path)
+            left, _p = _rewrite_claude_doc(check, install, m.python, m.platform)
+        except (OSError, ValueError):
+            left = None
+        if left == 0:
+            _drop(backup)
+            if problems:
+                return Result(item.label, False, "; ".join(problems), note=RESTART_CLAUDE)
+            return Result(item.label, True, note=RESTART_CLAUDE)
+        return Result(item.label, False,
+                      "Claude changed the file at the same moment; close Claude, then press "
+                      "Fix again (the file as it was is kept beside it, as %s)" % backup.name)
+    return Result(item.label, False,
+                  "Claude kept changing the file; close Claude, then press Fix again")
 
 
 # ---- shortcuts (.lnk) ------------------------------------------------------------------------
@@ -865,11 +1036,11 @@ def find_shortcuts(install, m, icons=None):
         if not rw.refs and not icon_moves:
             continue
         if rw.refs:
-            auto = not rw.problem and _gone(rw, install)
-        elif Path(ntpath.expandvars(_clean(lnk.icon))).is_file():
-            auto = True             # its icon only: moved while the old cache still holds it
-        elif _icon_moved(lnk.icon, icons):
-            auto = True             # its icon only: the move already put it in local\icons\
+            # The launcher's own pass takes only a shortcut that starts this install's old
+            # launcher, which is gone: nothing it does can make that one worse.
+            auto = not rw.problem and OLD_LAUNCHER in rw.refs and _gone(rw, install)
+        elif Path(ntpath.expandvars(_clean(lnk.icon))).is_file() or _icon_moved(lnk.icon, icons):
+            auto = False            # its icon only: offered in the notice
         else:
             continue                # its icon is gone already: nothing there to move
         found.append(Item("shortcut", str(p), _shortcut_label(p, where),
@@ -910,6 +1081,11 @@ def _place_icon(old_icon, icons, provide_icon):
 
 
 def fix_shortcut(item, install, m, snapshot, icons, provide_icon=None):
+    """Re-point one shortcut. Only what changes is written: a shortcut whose only fault is its
+    icon gets its icon and nothing else (its target, as this module reads it, may be less
+    than Windows knows: a network share, a relative link). The new .lnk is made as a temp
+    beside it first; a copy goes into the snapshot only once that worked, and is taken back
+    if the save fails, so a refusal leaves nothing behind."""
     p = Path(item.data["path"])
     lnk = read_lnk(p)
     if lnk is None:
@@ -926,46 +1102,92 @@ def fix_shortcut(item, install, m, snapshot, icons, provide_icon=None):
         if not rw.refs and not icon_moves:
             return Result(item.label, True)              # already right
         return Result(item.label, False, "its old icon is gone, so there is none to move")
-    try:
-        _snapshot_file(snapshot, p)
-    except OSError as e:
-        return Result(item.label, False, "a copy couldn't be kept first (%s)" % _reason(e))
-    tmp = p.with_name(".%s.moonglade-%s.lnk" % (p.stem, uuid.uuid4().hex[:8]))
+    target = rw.command if rw.changed and rw.command != lnk.target else None
+    args = rw.arguments if rw.changed and rw.arguments != lnk.args else None
+    workdir = rw.workdir if rw.changed and rw.workdir != lnk.workdir else None
+    tmp = p.with_name(".%s%s%s.lnk" % (p.stem, _TEMP_TAG, uuid.uuid4().hex[:8]))
+    kept = None
     try:
         shutil.copy2(p, tmp)
-        m.save_lnk(tmp, rw.command, rw.arguments, rw.workdir, icon)
+        kept = _snapshot_file(snapshot, p)
+        m.save_lnk(tmp, target, args, workdir, icon)
         os.replace(tmp, p)
     except PermissionError:
         _drop(tmp)
+        _drop(kept)
         return Result(item.label, False, "Windows refused: changing it needs administrator rights")
     except Exception as e:                              # noqa: BLE001 -- reported, never raised
         _drop(tmp)
+        _drop(kept)
         return Result(item.label, False, _reason(e))
     return Result(item.label, True)
 
 
 def _save_lnk_with_powershell(path, target, args, workdir, icon):
     """Rewrite the .lnk at `path` through the shell's own WScript.Shell, the way the app's
-    shortcut button writes one (moonglade.gallery.make_launcher_shortcut)."""
+    shortcut button writes one (moonglade.gallery.make_launcher_shortcut). A field given as
+    None is left as the shortcut has it."""
     def q(s):
         return "'" + str(s).replace("'", "''") + "'"
-    ps = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); "
-          "$s.TargetPath = %s; $s.Arguments = %s; $s.WorkingDirectory = %s; " % (
-              q(path), q(target), q(args), q(workdir)))
-    if icon:
-        ps += "$s.IconLocation = %s; " % q(icon)
+    ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(%s); " % q(path)
+    for field, value in (("TargetPath", target), ("Arguments", args),
+                         ("WorkingDirectory", workdir), ("IconLocation", icon)):
+        if value is not None:
+            ps += "$s.%s = %s; " % (field, q(value))
     ps += "$s.Save()"
     rc, _out, err = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps])
     if rc != 0:
         raise RuntimeError("Windows couldn't save it (%s)" % ((err or "PowerShell failed")[:160]))
 
 
+# The tag this module's own temp files carry: .<name>.moonglade-<hex>.lnk beside a shortcut,
+# .<name>.moonglade-<hex>.tmp beside a config. One a killed save left is swept.
+_TEMP_TAG = ".moonglade-"
+TEMP_SWEEP_AGE_S = 60.0
+
+
+def _sweep_own_temps(folder, name=None):
+    """Remove this module's own temp files a killed save left in `folder` (older than a
+    minute, so a save in progress is never touched). Never raises."""
+    try:
+        now = time.time()
+        for f in Path(folder).iterdir():
+            n = f.name
+            if not n.startswith(".") or _TEMP_TAG not in n:
+                continue
+            if name is not None and not n.startswith("." + name + _TEMP_TAG):
+                continue
+            if not re.search(re.escape(_TEMP_TAG) + r"[0-9a-f]{8}\.(lnk|tmp)$", n):
+                continue
+            try:
+                if now - f.stat().st_mtime > TEMP_SWEEP_AGE_S:
+                    os.remove(f)
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
 # ---- files: the snapshot and whole rewrites --------------------------------------------------
 
 def snapshot_dir():
-    """local\\.snapshot\\outside\\: where a file is copied before the app changes it. It goes
+    """local\\.snapshot\\outside\\: where a task's XML or a shortcut is copied before the app
+    changes it (never a Claude config: fix_claude keeps that copy beside the file). It goes
     with the move's own snapshot."""
     return _paths.local_dir() / SNAPSHOT_DIRNAME / SNAPSHOT_SUBDIR
+
+
+def _kept_for_a_while(snapshot):
+    """A copy just went into `snapshot`: the folder holding .snapshot\\ counts its clean
+    starts again from here (moonglade.migrate.reset_clean_starts), so the copy is not deleted
+    at the very next one. Only where the move keeps a journal. Never raises."""
+    try:
+        holder = Path(snapshot).parent.parent
+        if (holder / _paths.JOURNAL_NAME).is_file():
+            from moonglade import migrate as _migrate
+            _migrate.reset_clean_starts(holder)
+    except Exception:                                   # noqa: BLE001 -- bookkeeping only
+        pass
 
 
 def _safe_name(name):
@@ -979,16 +1201,20 @@ def _snapshot_target(snapshot, name):
 
 
 def _snapshot_file(snapshot, path):
-    shutil.copy2(path, _snapshot_target(snapshot, Path(path).name))
+    target = _snapshot_target(snapshot, Path(path).name)
+    shutil.copy2(path, target)
+    _kept_for_a_while(snapshot)
+    return target
 
 
 def _snapshot_bytes(snapshot, name, data):
     _snapshot_target(snapshot, name).write_bytes(data)
+    _kept_for_a_while(snapshot)
 
 
 def _write_atomically(path, data):
     path = Path(path)
-    tmp = path.with_name(".%s.moonglade-%s.tmp" % (path.name, uuid.uuid4().hex[:8]))
+    tmp = path.with_name(".%s%s%s.tmp" % (path.name, _TEMP_TAG, uuid.uuid4().hex[:8]))
     try:
         with open(tmp, "wb") as f:
             f.write(data)
@@ -1001,6 +1227,8 @@ def _write_atomically(path, data):
 
 
 def _drop(p):
+    if p is None:
+        return
     try:
         os.remove(p)
     except OSError:
@@ -1068,5 +1296,29 @@ def repoint_shortcuts(install=None, m=None, snapshot=None, icons=None, provide_i
     m = m or machine()
     if not m.windows:
         return []
-    items = [i for i in find(install, m, kinds=("shortcut",), icons=icons) if i.auto]
+    for folder, _where, _recursive in m.shortcut_folders:
+        _sweep_own_temps(folder)
+    items = [i for i in find(install, m, kinds=("shortcut",), icons=icons)
+             if i.auto and _may_change(i.data["path"])]
     return fix(items, install, m, snapshot, icons, provide_icon) if items else []
+
+
+def _may_change(path):
+    """Can this user change the shortcut at `path` (and make its temp beside it)? Asked
+    before the launcher's pass tries, so one Windows refuses (a Desktop shared by all users,
+    without administrator rights) is never tried again at every start, nor copied into the
+    snapshot each time: the notice still offers it, with the reason."""
+    p = Path(path)
+    try:
+        with open(p, "r+b"):
+            pass
+    except OSError:
+        return False
+    try:
+        fd, probe = tempfile.mkstemp(prefix="." + p.stem + _TEMP_TAG, suffix=".probe",
+                                     dir=str(p.parent))
+    except OSError:
+        return False
+    os.close(fd)
+    _drop(probe)
+    return True
