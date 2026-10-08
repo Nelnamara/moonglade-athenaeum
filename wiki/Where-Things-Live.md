@@ -101,5 +101,19 @@ re-points your Desktop and Start-menu shortcuts to it, icon and all. A Windows T
 or a Claude tools registration that still names an old file is found too, and the notice in the
 corner offers **Fix it** (or **Fix them**). More in [Troubleshooting](Troubleshooting#after-updating-to-320-where-did-my-files-go).
 
+Any install from 3.10 onward updates this way.
+
+- **Only Moonglade's own files move.** A folder that just shares an old name, such as `logs` or
+  `branding`, is moved only when its contents are Moonglade's. Anything else stays where it is, and
+  the log says so.
+- **Linked folders move as links.** A Windows junction or folder link you made (for example, Loom
+  exports kept on another drive) is moved as the link itself. Its target is never copied, moved or
+  deleted.
+- **A library two installs share:** update both before using it again. If an older Moonglade is
+  still open on the library, the first start of 3.20 stops and asks you to close it. Windows can
+  tell; on Linux and macOS, close every older install yourself first. If an older install writes
+  to the library later, the next start keeps everything already in the new homes and merges in what
+  the older one added.
+
 Going back to an earlier version after 3.20 isn't supported, because it won't find your records
 or settings.
