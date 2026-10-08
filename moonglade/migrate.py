@@ -105,7 +105,10 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     install's config.json lists the login (another install may share the library). A file
     named by a login's plain name (before the hashed keys) goes to that login's folder when
     the login is known; otherwise it stays where it is, said in the log. Nothing per-login is
-    deleted here: only removing a login (the Users tab, --remove-web-user) does that.
+    deleted here: only removing a login (the Users tab, --remove-web-user) does that. The
+    three install-wide preset files go the same way: into every login with no file of its own,
+    this install's and every one the library already holds, then deleted; with no login to give
+    them to, they stay where they are, and are no work for any start.
   * CACHES ARE REBUILT, not copied: the badge thumbnails, feat masks and slot/earned banner
     renders are deleted, and made again in local\\cache\\ when next needed. The shortcut icons are
     not a cache: they go to local\\icons\\ before the old icon cache folders are deleted.
@@ -3607,21 +3610,50 @@ def _movable(p):
     return _is_link(p) or Path(p).is_file()
 
 
-def _shared_presets(half, out, app, copyfirst, logins, report):
-    """The three install-wide preset files: copied into each login with no file of its own,
-    then deleted. Left alone, with a log line, while the logins cannot be known."""
+# A login's key in the library: the first 16 hex digits of its name's sha256 (never the
+# command line's own _local folder, which is not a login).
+_LOGIN_KEY_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _preset_keys(out, logins, plan):
+    """The login keys the shared preset files go to: this install's logins (config.json), and
+    every login key the library already holds -- a folder in accounts\\, a folder of Loom
+    boards, a render journal in the Loom's _submits\\, or one the plan is moving there. In
+    3.10-3.19 every login with no file of its own saw the shared files, another install's on
+    the same library too. An empty set when there is no login to give them to; None while this
+    install's logins can't be known (no readable config.json): nothing is given out on a
+    guess."""
+    if logins is None:
+        return None
+    keys = {_paths.account_key(u) for u in logins}
+    loom = _paths.loom_root(out)
+    homes = [Path(d) for _s, d, _k, _v in plan.moves]
+    for folder in (_paths.accounts_dir(out), loom / "kv", loom / "_submits"):
+        names = set(_child_names(folder))
+        names.update(d.relative_to(folder).parts[0] for d in homes if _under(d, folder))
+        for n in names:
+            key = n[:-len(".jsonl")] if folder.name == "_submits" and n.endswith(".jsonl") else n
+            if _LOGIN_KEY_RE.match(key):
+                keys.add(key)
+    return keys
+
+
+def _shared_presets(half, out, app, copyfirst, keys, report):
+    """The three install-wide preset files: copied into each login with no file of its own --
+    this install's, and every one the library already holds (_preset_keys) -- then deleted.
+    Left alone, with a log line, while there is no login to give them to."""
     for name, new_name in SHARED_PRESETS.items():
         paths = [p for p in (app / name, out / name) if p.is_file() and not _is_link(p)]
         if not paths:
             continue
-        half.report.worked["library"] = True
-        if not logins:
-            report.warn("%s was left where it is: there are no logins in config.json to give "
-                        "it to yet.", half.rel(paths[0]))
+        if not keys:
+            report.warn("%s was left where it is: there is no login to give it to yet.",
+                        half.rel(paths[0]))
             continue
+        half.report.worked["library"] = True
         primary = paths[0]
-        for user in logins:
-            dest = _paths.account_dir(out, user) / new_name
+        for key in sorted(keys):
+            dest = _paths.accounts_dir(out) / key / new_name
             if not dest.exists():
                 _copy_new(primary, dest)
                 report.item("Copied %s to %s.", half.rel(primary), half.rel(dest))
@@ -3704,7 +3736,11 @@ def _banners_linked(folder):
     return _is_link(folder) or any(_is_link(folder / n) for n in BANNER_FLATS.values())
 
 
-def _shared_files(out, app):
+def _shared_files(out, app, keys):
+    """The shared preset files there are to give out: none while no login can take them
+    (_preset_keys), so that they are not work for every start."""
+    if not keys:
+        return []
     return [p for n in SHARED_PRESETS for p in (app / n, out / n)
             if p.is_file() and not _is_link(p)]
 
@@ -3774,12 +3810,13 @@ def _written_since(half, plan, shared):
     return out
 
 
-def _old_layout_records(plan, shared):
+def _old_layout_records(plan):
     """The files at old places that this version would read in a new home: every record,
     decision, per-login store and the Loom (not the logs, which nothing reads back), and any
-    link the move would carry."""
+    link the move would carry. Not the shared preset files: only the gallery reads presets,
+    snippets and views, never the command line or the MCP server."""
     return [Path(s) for s, _d, k, _v in plan.moves if k != "log" and _movable(s)] + \
-        [Path(stuck[0]) for stuck in plan.stuck] + list(shared)
+        [Path(stuck[0]) for stuck in plan.stuck]
 
 
 def _names(paths, half, most=3):
@@ -3965,12 +4002,12 @@ def prepare_library(out_dir, report, moves, named=False, wait=None):
     logins = logins_from_config()
     look = _Half("library", app, _library_roots(out), Report())
     plan = _plan_library(out, app, CopyFirst(app / OLD_RECORD), logins, look)
-    shared = _shared_files(out, app) if plan.ours else []
+    shared = _shared_files(out, app, _preset_keys(out, logins, plan)) if plan.ours else []
     if not moves:
         written = _written_since(look, plan, shared)
         if written:
             raise MoveStopped(_older_live_words(out, [p for p, _ns in written], look, False))
-        if _old_layout_records(plan, shared):
+        if _old_layout_records(plan):
             raise MoveStopped(_refusal_words(out, named))
         return None
     if not _has_work(plan, shared, _caches(out) if plan.ours else []):
@@ -4025,7 +4062,8 @@ def _library_half(half, out, app, copyfirst, logins, report):
     if half.settle_renames():
         j.save()
     plan = _plan_library(out, app, copyfirst, logins, half)
-    shared = _shared_files(out, app) if plan.ours else []
+    keys = _preset_keys(out, logins, plan)
+    shared = _shared_files(out, app, keys) if plan.ours else []
     caches = _caches(out) if plan.ours else []
     if not _has_work(plan, shared, caches):
         if not j.doc.get("finished"):
@@ -4114,7 +4152,7 @@ def _library_half(half, out, app, copyfirst, logins, report):
                         half.rel(p))
     if plan.left:
         _say_left(plan, half, report)
-    _shared_presets(half, out, app, copyfirst, logins, report)
+    _shared_presets(half, out, app, copyfirst, keys, report)
     _banners(half, out, report)
     # Caches: deleted once the new home exists (they are rebuilt in local\cache\). A cache
     # folder that is a link goes as the link alone: what it points at is never touched.

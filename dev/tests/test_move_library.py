@@ -147,10 +147,102 @@ def test_the_shared_presets_go_to_each_login_with_none_of_its_own(r):
     assert not (r.lib / "toolbox_presets.json").exists()
 
 
-def test_with_no_logins_the_shared_presets_wait(r):
+def test_with_no_logins_in_config_the_shared_presets_go_to_the_library_s_own_logins(r):
+    """A command-line-only PC's config.json lists no login, but the library holds Nel's files
+    (another install's login): the shared presets go to Nel, as they would from that install."""
     layout_317(r, logins=())
     _prepare(r)
+    acc = r.lib / "_moonglade" / "accounts"
+    assert json.loads((acc / KEY_NEL / "presets.json").read_text()) == \
+        {"scene-a": {"label": "A", "prompt": "p"}}
+    assert not (r.lib / "toolbox_presets.json").exists()
+
+
+def test_with_config_json_unreadable_the_shared_presets_wait(r):
+    """This install's logins can't be known: nothing is given out or deleted on a guess, and
+    the shared files are not work for every start."""
+    layout_317(r)
+    r.cfg.write_text("{ not json", encoding="utf-8")
+    with pytest.raises(msetup.MoveStopped):
+        _prepare(r)                     # the settings merge needs config.json first
+    r.cfg.unlink()                      # a missing config.json: the logins still can't be known
+    _prepare(r)
     assert (r.lib / "toolbox_presets.json").is_file(), "nothing is deleted on a guess"
+    snap = r.lib / "_moonglade" / ".snapshot"
+    zips = sorted(p.name for p in snap.glob("*.zip"))
+    _prepare(r)
+    assert sorted(p.name for p in snap.glob("*.zip")) == zips
+
+
+SHARED = {"toolbox_presets.json": ("presets.json", {"scene-a": {"label": "A", "prompt": "p"}}),
+          "prompt_snippets.json": ("snippets.json", ["golden hour"]),
+          "view_presets.json": ("views.json", {"mine": "?q=moon"})}
+
+
+def _shared_files_at_the_top(r):
+    for name, (_new, doc) in SHARED.items():
+        write(r.lib / name, doc)
+
+
+def test_the_shared_presets_go_to_every_login_the_library_already_holds(r):
+    """Two PCs on one library, each with its own config.json: this one lists Nel, the other
+    Tania. In 3.10-3.19 every login with no file of its own saw the library's shared files, so
+    every login the library already holds gets them -- one with prefs in account_prefs\\, one
+    with only Loom boards, one with only a render journal -- not just this config's. The CLI's
+    own folder (_local) is not a login."""
+    layout_317(r, logins=("Nel",))
+    _shared_files_at_the_top(r)
+    tania, bo, cy = (paths.account_key(n) for n in ("Tania", "Bo", "Cy"))
+    write(r.lib / "account_prefs" / (tania + ".json"), {"theme": "dusk"})
+    write(r.lib / "account_prefs" / "_local.json", {"who": "the command line"})
+    write(r.lib / "loom" / "kv" / bo / "storyboard%3Av2%3Aproj%3Ab9.json", {"b": 9})
+    write(r.lib / "loom" / "_submits" / (cy + ".jsonl"), '{"submit": "c1"}\n')
+    _prepare(r)
+    acc = r.lib / "_moonglade" / "accounts"
+    for key in (KEY_NEL, tania, bo, cy):
+        for name, (new, doc) in SHARED.items():
+            assert json.loads((acc / key / new).read_text()) == doc, (key, new)
+    assert not (acc / "_local" / "presets.json").exists()
+    for name in SHARED:
+        assert not (r.lib / name).exists(), name
+
+
+def test_with_no_login_anywhere_the_shared_presets_wait_without_counting_as_work(r):
+    """No login in config.json and none in the library: there is no one to give the shared
+    files to, so they stay where they are -- and they are not old-layout records (the command
+    line and the MCP server never read them), not work for every start, and never reset the
+    clean-start count, so the safety copy ages out. A login added later gets them at the next
+    launcher start."""
+    import shutil
+    layout_317(r, logins=())
+    (r.lib / "account_prefs" / (KEY_NEL + ".json")).unlink()
+    shutil.rmtree(r.lib / "loom")                     # no login's boards or render journal
+    _shared_files_at_the_top(r)
+    _prepare(r)                                       # the first move: everything else
+    snap = r.lib / "_moonglade" / ".snapshot"
+    zips = sorted(p.name for p in snap.glob("*.zip"))
+    assert len(zips) == 1
+    for _ in range(3):
+        _prepare(r)
+        _prepare(r, "cli")                            # never refused
+        _prepare(r, "mcp")
+    assert sorted(p.name for p in snap.glob("*.zip")) == zips, "no start re-zips them"
+    for _ in range(migrate.CLEAN_STARTS + 1):
+        _prepare(r, "server").count_clean_start()
+    assert not snap.exists(), "the clean-start count was never reset"
+    for name in SHARED:
+        assert (r.lib / name).is_file(), name
+
+    # A login appears (the web sign-up): the command line still runs, and the next launcher
+    # start gives the shared files out.
+    write_config(r)
+    _prepare(r, "cli")
+    _prepare(r, "mcp")
+    _prepare(r)
+    acc = r.lib / "_moonglade" / "accounts" / KEY_NEL
+    for name, (new, doc) in SHARED.items():
+        assert json.loads((acc / new).read_text()) == doc
+        assert not (r.lib / name).exists(), name
 
 
 def test_two_logins_get_two_folders_and_another_install_s_login_moves_too(r):
