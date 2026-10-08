@@ -16,7 +16,13 @@ itself sets lives here instead, one key each (DECISIONS 2026-10-07; SPEC_3.20_RE
 One file, one lock, written whole and atomically (a temp beside it, flushed to disk, then
 os.replace). A reader parses it once per change of the file: the document is cached against
 the file's (inode, mtime, size), so the per-request readers (the mark on every page, the
-Mirror switch on every generation) cost one stat.
+Mirror switch on every generation) cost one stat. It is read as UTF-8 with or without a byte
+order mark (Notepad and PowerShell write one).
+
+A file that is there but cannot be read (another program holds it) or will not parse is never
+written over: update() refuses (SettingsUnreadable), and every start stops with a sentence
+(moonglade.setup.prepare checks state() first) rather than open the default library. A
+moment's failure to read is never cached as an empty document.
 
 Nothing here reads an old place. The values that used to live in config.json, serve.txt,
 branding.json and branding_slots.json are brought here once by the move (moonglade.migrate),
@@ -64,6 +70,11 @@ class SettingsBusy(RuntimeError):
     """Another process held settings.json's lock past the wait: the change was not saved."""
 
 
+class SettingsUnreadable(OSError):
+    """settings.json is there but cannot be read, or is not a settings document. Nothing is
+    written over it: a fresh file would throw away the library pin, the port and every pick."""
+
+
 def _stamp(p):
     try:
         st = p.stat()
@@ -73,31 +84,43 @@ def _stamp(p):
 
 
 def _parse(p):
-    """(document, state): state "ok", "missing" or "corrupt" (unreadable, not JSON, or not an
-    object). The document is {} unless "ok"."""
+    """(document, state, why): state "ok", "missing", "unreadable" (the file is there but
+    could not be read: another program holds it, access was refused) or "corrupt" (not JSON,
+    or not an object); `why` says it in plain words. The document is {} unless "ok"."""
     try:
         raw = p.read_bytes()
     except FileNotFoundError:
-        return {}, "missing"
-    except OSError:
-        return {}, "corrupt"
+        return {}, "missing", ""
+    except OSError as e:
+        why = ("access was refused, or another program has it open"
+               if isinstance(e, PermissionError) else (e.strerror or e.__class__.__name__))
+        return {}, "unreadable", why
     try:
-        doc = json.loads(raw.decode("utf-8"))
+        doc = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, ValueError):
-        return {}, "corrupt"
+        return {}, "corrupt", "it isn't valid JSON"
     if not isinstance(doc, dict):
-        return {}, "corrupt"
-    return doc, "ok"
+        return {}, "corrupt", "it doesn't hold a settings object"
+    return doc, "ok", ""
+
+
+def state():
+    """(state, why) of settings.json, read now: see _parse."""
+    _doc, st, why = _parse(_paths.settings_path())
+    return st, why
 
 
 def read():
-    """The whole document, a copy the caller may change freely. A missing or unreadable file
-    reads as {} (fail soft: a torn settings file must never stop a page)."""
+    """The whole document, a copy the caller may change freely. A missing, unreadable or
+    damaged file reads as {} (fail soft: a torn settings file must never stop a page); a file
+    that could not be read at all is not cached, so the next read tries again."""
     p = _paths.settings_path()
     key = (str(p), _stamp(p))
     with _LOCK:
         if _cache["key"] != key or _cache["doc"] is None:
-            doc, _state = _parse(p)
+            doc, st, _why = _parse(p)
+            if st == "unreadable":
+                return {}
             _cache["key"], _cache["doc"] = key, doc
         return copy.deepcopy(_cache["doc"])
 
@@ -160,23 +183,18 @@ def update(fn):
     """Change the settings: `fn(doc)` edits a fresh read of the document in place, and the
     result is written whole. Holds the one lock (this process's, and the lockfile every
     process honours) across the read and the write, so two writers never lose each other's
-    change. A file that exists but will not parse is set aside (settings.json.corrupt-<time>,
-    kept) rather than silently replaced. Returns a copy of the new document. Raises
-    SettingsBusy or OSError."""
+    change. A file that exists but cannot be read, or will not parse, is never written over:
+    the change is refused (SettingsUnreadable), and the file kept as it is. Returns a copy of
+    the new document. Raises SettingsBusy or OSError (SettingsUnreadable included)."""
     p = _paths.settings_path()
     with _LOCK:
         p.parent.mkdir(parents=True, exist_ok=True)
         lock = _file_lock(p)
         try:
-            doc, state = _parse(p)
-            if state == "corrupt":
-                aside = p.with_name("%s.corrupt-%s" % (
-                    p.name, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())))
-                os.replace(p, aside)
-                import logging
-                logging.getLogger("moonglade.settings").warning(
-                    "settings.json could not be read; set aside as %s and started fresh.",
-                    aside.name)
+            doc, st, why = _parse(p)
+            if st in ("unreadable", "corrupt"):
+                raise SettingsUnreadable("settings.json can't be read (%s), so the change was "
+                                         "not saved." % why)
             fn(doc)
             _write(p, doc)
             _cache["key"], _cache["doc"] = (str(p), _stamp(p)), copy.deepcopy(doc)
@@ -243,10 +261,12 @@ def _port(value):
     return port
 
 
-def server(host_arg=None, port_arg=None):
+def server(host_arg=None, port_arg=None, doc=None):
     """{host, port, bonjour_enabled, bonjour_name}. An explicit --host/--port for this one
-    start wins; else the stored values; else the defaults. Bonjour is off unless switched on."""
-    doc = read()
+    start wins; else the stored values (from `doc` when given: the settings as the move will
+    leave them, moonglade.migrate.planned_settings); else the defaults. Bonjour is off unless
+    switched on."""
+    doc = read() if doc is None else doc
     bonjour = doc.get(BONJOUR) if isinstance(doc.get(BONJOUR), dict) else {}
     host = host_arg if host_arg is not None else _host(doc.get(HOST))
     try:
@@ -258,9 +278,9 @@ def server(host_arg=None, port_arg=None):
             "bonjour_name": name}
 
 
-def launch_args():
+def launch_args(doc=None):
     """The stored launch switches, in order, each one of LAUNCH_FLAGS."""
-    v = read().get(LAUNCH_ARGS)
+    v = (read() if doc is None else doc).get(LAUNCH_ARGS)
     if not isinstance(v, list):
         return []
     return [str(a) for a in v if str(a) in LAUNCH_FLAGS]

@@ -2,8 +2,10 @@
 
   * written whole and atomically, under one lock every process honours, and read once per
     change of the file (a reader costs one stat until the file changes);
-  * a file that will not parse reads as {} and is set aside, never silently replaced, when a
-    change is written;
+  * a file that will not parse, or cannot be read, reads as {} for a page -- but is never
+    written over: a change is refused (SettingsUnreadable), and every start stops with a
+    sentence (moonglade.setup); a moment's failure to read is never cached (S4);
+  * read with or without a byte order mark (Notepad and PowerShell write one);
   * one key each for the library, host and port (S17), with the resolvers the server, the
     command line and the MCP server share (S8);
   * the Control Panel's writers (library field, Bonjour chip, Mirror switch, branding picks)
@@ -66,14 +68,46 @@ def test_a_change_by_another_process_is_seen(tmp_path):
     assert settings.server()["port"] == 5202
 
 
-def test_a_corrupt_file_reads_as_nothing_and_is_set_aside_before_a_write(tmp_path):
+def test_a_corrupt_file_reads_as_nothing_and_is_never_written_over(tmp_path):
+    """S4: a write over a damaged file would throw away the library pin, the port and every
+    pick; the change is refused and the file kept as it is."""
     paths.settings_path().parent.mkdir(parents=True, exist_ok=True)
-    paths.settings_path().write_text("{ not json", encoding="utf-8")
+    paths.settings_path().write_text('{"library_dir": "D:\\lib", ', encoding="utf-8")
     assert settings.read() == {}
-    settings.set_values(port=5101)
-    aside = list(paths.settings_path().parent.glob("settings.json.corrupt-*"))
-    assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == "{ not json"
-    assert settings.read() == {"port": 5101}
+    assert settings.state() == ("corrupt", "it isn't valid JSON")
+    with pytest.raises(settings.SettingsUnreadable):
+        settings.set_values(port=5101)
+    assert paths.settings_path().read_text(encoding="utf-8") == '{"library_dir": "D:\\lib", '
+    assert not list(paths.settings_path().parent.glob("settings.json.corrupt-*"))
+
+
+def test_a_file_that_cannot_be_read_is_not_cached_or_written_over(tmp_path, monkeypatch):
+    """S4: another program holding the file for a moment must not make the whole process read
+    the default library until the file changes."""
+    settings.set_values(library_dir="D:\\lib", port=5101)
+    settings._cache.update(key=None, doc=None)
+    real = settings._parse
+    held = {"on": True}
+
+    def parse(p):
+        if held["on"]:
+            return {}, "unreadable", "another program has it open"
+        return real(p)
+    monkeypatch.setattr(settings, "_parse", parse)
+    assert settings.read() == {}
+    with pytest.raises(settings.SettingsUnreadable):
+        settings.set_values(port=6000)
+    held["on"] = False
+    assert settings.library_dir() == "D:\\lib" and settings.server()["port"] == 5101
+
+
+def test_a_byte_order_mark_is_read(tmp_path):
+    paths.settings_path().parent.mkdir(parents=True, exist_ok=True)
+    paths.settings_path().write_bytes(b"\xef\xbb\xbf" + b'{"port": 5151}')
+    assert settings.server()["port"] == 5151
+    assert settings.state() == ("ok", "")
+    settings.set_values(host="0.0.0.0")
+    assert settings.read() == {"port": 5151, "host": "0.0.0.0"}
 
 
 def test_two_writers_never_lose_each_others_change(tmp_path):
