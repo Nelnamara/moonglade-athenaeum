@@ -385,14 +385,14 @@ def test_the_recheck_waits_for_the_report_lock(tmp_path, monkeypatch):
     interleave with another writer of the reports; it waits while the lock is held."""
     import threading
     out = _broken_library(tmp_path)
-    lock = out / integ.REPORT_LOCK
+    lock = paths.records_path(out, integ.REPORT_LOCK)
     lock.write_text("held")
-    before = (paths.reports_path(out, "integrity_report.csv")).read_bytes()
+    before = (paths.records_path(out, "integrity_report.csv")).read_bytes()
     (out / "images" / "p_t1_102.png").write_bytes(_png(4, 4))            # fixed meanwhile
     t = threading.Thread(target=integ.reverify, args=(out, out / "catalog.db", ["102"]))
     t.start()
     t.join(0.6)
-    assert t.is_alive() and (paths.reports_path(out, "integrity_report.csv")).read_bytes() == before
+    assert t.is_alive() and (paths.records_path(out, "integrity_report.csv")).read_bytes() == before
     lock.unlink()
     t.join(10)
     assert not t.is_alive()
@@ -404,7 +404,7 @@ def test_a_stale_report_lock_is_broken(tmp_path):
     import os
     import time as _t
     out = _broken_library(tmp_path)
-    lock = out / integ.REPORT_LOCK
+    lock = paths.records_path(out, integ.REPORT_LOCK)
     lock.write_text("left by a process that died")
     old = _t.time() - integ.REPORT_LOCK_STALE_S - 5
     os.utime(lock, (old, old))
@@ -458,7 +458,7 @@ def test_odd_report_and_marks_files_never_break_the_list(tmp_path):
     """Nit 9: a size cell like '²' (isdigit() but not int()) and a marks file nested deep
     enough to raise RecursionError still give a list, and the route answers."""
     out = _broken_library(tmp_path)
-    csv_path = paths.reports_path(out, "integrity_report.csv")
+    csv_path = paths.records_path(out, "integrity_report.csv")
     csv_path.write_text(csv_path.read_text(encoding="utf-8").replace(
         "images/p_t1_102.png,0,", "images/p_t1_102.png,\u00b2,"), encoding="utf-8")
     (out / integ.MARKS_FILE).write_text("[" * 200000, encoding="utf-8")
@@ -774,5 +774,5 @@ def test_the_report_lock_retries_when_windows_answers_permission_denied(tmp_path
 
     monkeypatch.setattr(integ.os, "open", flaky_open)
     with integ._ReportLock(tmp_path) as lk:
-        assert lk.held and paths.reports_path(tmp_path, integ.REPORT_LOCK).exists()
-    assert calls["n"] == 2 and not paths.reports_path(tmp_path, integ.REPORT_LOCK).exists()
+        assert lk.held and paths.records_path(tmp_path, integ.REPORT_LOCK).exists()
+    assert calls["n"] == 2 and not paths.records_path(tmp_path, integ.REPORT_LOCK).exists()

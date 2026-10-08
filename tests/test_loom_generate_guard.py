@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade.gallery import _account_key, create_app
 from tests.conftest import _TEST_PASSWORD, _TEST_USERNAME, _do_login, login_test_client
@@ -103,8 +104,8 @@ def test_the_loom_keys_never_reach_build_request(rig):
 def test_a_body_without_the_keys_is_todays_request(rig):
     r = rig["cli"].post("/api/loom/generate", json=_body(submit_id=None, card=None))
     assert r.get_json()["task_id"] == "task-1"
-    assert not (rig["tmp"] / "loom" / "_submits").exists() or not any(
-        (rig["tmp"] / "loom" / "_submits").iterdir()), "nothing is journalled"
+    assert not (_paths.loom_root(rig["tmp"]) / "_submits").exists() or not any(
+        (_paths.loom_root(rig["tmp"]) / "_submits").iterdir()), "nothing is journalled"
 
 
 def test_an_imported_picture_is_refused_before_anything_is_sent(rig):
@@ -247,7 +248,7 @@ def test_the_invalid_media_id_fallback_is_journalled(rig):
     assert len(rig["submits"]) == 2, "exactly two submits: the refused passthrough and the fallback"
     st = rig["cli"].get("/api/loom/submit-status?submit_id=sF").get_json()
     assert st == {"state": "submitted", "task_id": "task-after-fallback"}
-    jf = rig["tmp"] / "loom" / "_submits" / (_account_key(_TEST_USERNAME) + ".jsonl")
+    jf = _paths.loom_root(rig["tmp"]) / "_submits" / (_account_key(_TEST_USERNAME) + ".jsonl")
     entry = {}
     for ln in jf.read_text(encoding="utf-8").splitlines():
         rec = json.loads(ln)
@@ -403,7 +404,7 @@ def test_a_send_still_in_flight_cannot_be_released_or_rendered_twice(rig):
 def test_a_send_that_died_with_an_earlier_process_can_still_be_released(tmp_path):
     """B1's other half (F8 kept): the in-flight set is per process, so a journal line that
     says "sending" for a request no running process owns (a crash mid-send) can be released."""
-    d = tmp_path / "loom" / "_submits"
+    d = _paths.loom_root(tmp_path) / "_submits"
     d.mkdir(parents=True, exist_ok=True)
     now = time.time()
     (d / (_account_key(_TEST_USERNAME) + ".jsonl")).write_text(json.dumps(
@@ -431,7 +432,7 @@ def test_an_unknown_submit_id_after_a_prune_can_be_released(rig):
 def test_old_journal_lines_are_pruned_on_first_read(tmp_path, monkeypatch):
     app = create_app(tmp_path)
     cli = login_test_client(app)
-    d = tmp_path / "loom" / "_submits"
+    d = _paths.loom_root(tmp_path) / "_submits"
     d.mkdir(parents=True, exist_ok=True)
     f = d / (_account_key("tester") + ".jsonl")
     old = time.time() - 15 * 24 * 3600
@@ -522,7 +523,7 @@ def test_the_handoff_source_names_no_spend_call():
 # ---- the board store: revisions, compare-and-swap, unreadable (F15, N5) ----------------------
 
 def _kv(tmp_path, user="tester"):
-    return tmp_path / "loom" / "kv" / _account_key(user)
+    return _paths.loom_root(tmp_path) / "kv" / _account_key(user)
 
 
 def test_get_hands_back_a_rev_and_a_stale_base_rev_is_refused(rig):
@@ -556,7 +557,7 @@ def test_a_corrupt_own_board_is_unreadable_never_missing(rig):
 def test_a_corrupt_legacy_board_is_unreadable_too(rig):
     """F15b: the legacy fallback returned None for a corrupt file, so the client seeded a
     blank board into the account's own key and shadowed the legacy board forever."""
-    leg = rig["tmp"] / "loom" / "kv"
+    leg = _paths.loom_root(rig["tmp"]) / "kv"
     leg.mkdir(parents=True, exist_ok=True)
     (leg / "legacykey.json").write_text("{nope", encoding="utf-8")
     r = rig["cli"].get("/api/loom/get?key=legacykey")
@@ -565,7 +566,7 @@ def test_a_corrupt_legacy_board_is_unreadable_too(rig):
 
 def test_the_first_save_of_a_board_inherited_from_the_legacy_layer(rig):
     """N5: the rev follows the read's own resolution, so a legacy board saves on its rev."""
-    leg = rig["tmp"] / "loom" / "kv"
+    leg = _paths.loom_root(rig["tmp"]) / "kv"
     leg.mkdir(parents=True, exist_ok=True)
     (leg / "inherited.json").write_text(json.dumps("{\"old\":1}"), encoding="utf-8")
     got = rig["cli"].get("/api/loom/get?key=inherited").get_json()

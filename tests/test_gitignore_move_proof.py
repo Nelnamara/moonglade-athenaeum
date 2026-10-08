@@ -53,6 +53,13 @@ ALWAYS_IGNORED = (
     "D_library/_moonglade/jobs.jsonl", "D_library/_moonglade/reports/audit_report.csv",
     "D_library/_moonglade/achievements.json", "D_library/_moonglade/runs.db",
     "D_library/_moonglade/account_prefs/a.json",
+    # the 3.20 layout's homes (SPEC_3.20_REBUILD.md)
+    "local/settings.json", "local/logs/serve.log", "local/logs/moonglade.log",
+    "local/icons/mark_4.ico", "local/banners/banner.png", "local/cache/badges/a.png",
+    "local/.journal.json", "local/.snapshot/before-the-move.zip",
+    "D_library/_moonglade/records/runs.db", "D_library/_moonglade/decisions/a.csv",
+    "D_library/_moonglade/accounts/0123456789abcdef/prefs.json",
+    "D_library/_moonglade/loom/kv/b.json", "D_library/_moonglade/.journal.json",
     "some/where/lib/gallery/thumbs/a.jpg", "some/where/lib/images/a.png",
     "other_out/catalog.db", "other_out/jobs.jsonl",
     # the runtime files at the root, as before, and the old logs the launcher rotates to

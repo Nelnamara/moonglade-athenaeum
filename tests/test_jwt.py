@@ -241,10 +241,12 @@ def test_run_mirror_check_no_session(tmp_path, monkeypatch):
     assert res["ok"] is False and res["source"] == "none"
 
 
-def test_mirror_enabled_reads_flag(monkeypatch):
-    monkeypatch.setattr(mj, "_load_config", lambda: {"MIRROR_TO_PIXAI": True})
+def test_mirror_enabled_reads_flag(tmp_path):
+    """settings.json's mirror_to_pixai (an app-written setting, never config.json)."""
+    from moonglade import settings
+    settings.set_values(mirror_to_pixai=True)
     assert mj.mirror_enabled() is True
-    monkeypatch.setattr(mj, "_load_config", lambda: {})
+    settings.set_values(mirror_to_pixai=None)
     assert mj.mirror_enabled() is False
 
 
@@ -308,16 +310,23 @@ def test_api_mirror_status_reports_days_left_never_the_token(tmp_path, monkeypat
 
 
 def test_api_mirror_enable_arms_only_with_a_usable_jwt(tmp_path, monkeypatch):
-    """/api/mirror/enable writes ONLY the MIRROR_TO_PIXAI flag (never clobbering the auth
-    block). [MAJOR, Bridge change #6] It now ARMS (true-write) only when a usable browser JWT
+    """/api/mirror/enable writes ONLY settings.json's mirror_to_pixai (config.json, with the
+    auth block, is never rewritten). [MAJOR, Bridge change #6] It ARMS (true-write) only when a
+    usable browser JWT
     exists: arming with no live session would leave every Bridge/enhance submit hitting the
     mirror gate and refusing -- an armed toggle that can run nothing. DISARM is always allowed."""
     from tests.conftest import login_client
     cli = login_client(tmp_path)                                # real login (real config read = auth intact)
+    from moonglade import settings
     captured = {}
-    # capture ONLY the flag off the write (never persist, never retain the real config/key)
-    monkeypatch.setattr(mj, "_save_config",
-                        lambda cfg: captured.__setitem__("flag", cfg.get("MIRROR_TO_PIXAI")))
+    real_set = settings.set_values
+
+    def _spy(**kw):
+        captured["flag"] = kw.get("mirror_to_pixai")
+        return real_set(**kw)
+    monkeypatch.setattr(settings, "set_values", _spy)
+    monkeypatch.setattr(mj, "_save_config", lambda cfg: (_ for _ in ()).throw(
+        AssertionError("the Mirror switch rewrote config.json")))
 
     # ARM with a usable JWT -> the flag is written True. (_jwt_usable is mocked so the gate is
     # deterministic and never depends on a real mirror_session.json on the test machine.)

@@ -224,7 +224,7 @@ def test_apply_saves_the_current_state_first_and_that_undoes_the_import(tmp_path
     g.add_to_collection(b, ["m2"], "Mine")
     before = cio.export_curation(b, now=NOW)["items"]
     rep = cio.import_curation(b, doc, apply=True)
-    snap = paths.reports_path(tmp_path / "b", rep["snapshot"])
+    snap = paths.decisions_path(tmp_path / "b", rep["snapshot"])
     assert snap.name.startswith("curation_pre_import_") and snap.exists()
     assert cio.export_curation(b, now=NOW)["items"] != before
     # the snapshot, imported with overwrite, puts every touched picture back

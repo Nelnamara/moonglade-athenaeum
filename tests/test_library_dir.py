@@ -3,9 +3,10 @@
 Three pieces have to agree for this to work, and each one has its own way of silently
 breaking the other two, so each is pinned here:
 
-  * resolve_library_dir()'s ORDER: explicit --out, then config.json's LIBRARY_DIR, then the
-    default. Explicit has to win so a one-off run, a scheduled job or a second install can
-    point somewhere without touching (or being overridden by) the shared setting.
+  * resolve_library_dir()'s ORDER: explicit --out, then settings.json's library_dir (the
+    Control Panel's library folder), then the default beside the app. Explicit has to win so
+    a one-off run, a scheduled job or a second install can point somewhere without touching
+    (or being overridden by) the shared setting.
   * the launcher must NOT pass --out itself. It used to pass the literal default, which made
     the stored setting permanently unreachable no matter what was in it -- the setting would
     have looked saved and done nothing.
@@ -19,9 +20,10 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from moonglade import backup as core  # noqa: E402
-from moonglade.gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR, LIBRARY_DIR_KEY,  # noqa: E402
-                           resolve_library_dir, save_catalog)
+from moonglade import paths  # noqa: E402
+from moonglade import settings  # noqa: E402
+from moonglade.gallery import (CATALOG_FIELDS, DEFAULT_LIBRARY_DIR,  # noqa: E402
+                               resolve_library_dir, save_catalog)
 
 from tests.conftest import login_client  # noqa: E402
 
@@ -37,15 +39,13 @@ def _authed_client(tmp_path, rows):
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def test_resolution_order_explicit_beats_stored_beats_default(tmp_path, monkeypatch):
-    cfg = tmp_path / "config.json"
-    monkeypatch.setattr(core, "_config_path", lambda: cfg)
-
-    cfg.write_text("{}", encoding="utf-8")
-    assert resolve_library_dir(None) == DEFAULT_LIBRARY_DIR
+def test_resolution_order_explicit_beats_stored_beats_default(tmp_path):
+    """conftest anchors a relative library to this test's folder (paths.library_anchor)."""
+    default = str(paths.library_anchor() / DEFAULT_LIBRARY_DIR)
+    assert resolve_library_dir(None) == default
     assert resolve_library_dir(r"D:\one-off") == r"D:\one-off"
 
-    cfg.write_text(json.dumps({LIBRARY_DIR_KEY: r"D:\Moonglade Library"}), encoding="utf-8")
+    settings.set_values(library_dir=r"D:\Moonglade Library")
     assert resolve_library_dir(None) == r"D:\Moonglade Library"
     # An explicit flag must still win, or a scheduled job pointed elsewhere would be
     # silently redirected into the shared setting's folder.
@@ -53,17 +53,20 @@ def test_resolution_order_explicit_beats_stored_beats_default(tmp_path, monkeypa
 
     # A blank or whitespace value is not a setting -- it must fall through, not resolve to
     # the filesystem root or the current directory.
-    cfg.write_text(json.dumps({LIBRARY_DIR_KEY: "   "}), encoding="utf-8")
-    assert resolve_library_dir(None) == DEFAULT_LIBRARY_DIR
+    settings.set_values(library_dir="   ")
+    assert resolve_library_dir(None) == default
+
+    # A relative stored one is anchored to the app folder, whatever the working directory:
+    # the server, the command line and the MCP server all open the same library (S8).
+    settings.set_values(library_dir="my_library")
+    assert resolve_library_dir(None) == str(paths.library_anchor() / "my_library")
 
 
-def test_a_broken_config_does_not_stop_the_server_starting(tmp_path, monkeypatch):
-    """resolve_library_dir runs before anything else on startup. A corrupt config.json must
+def test_a_broken_settings_file_does_not_stop_the_server_starting(tmp_path):
+    """resolve_library_dir runs before anything else on startup. A corrupt settings.json must
     fall back to the default rather than take the whole server down with it."""
-    cfg = tmp_path / "config.json"
-    cfg.write_text("{ not json", encoding="utf-8")
-    monkeypatch.setattr(core, "_config_path", lambda: cfg)
-    assert resolve_library_dir(None) == DEFAULT_LIBRARY_DIR
+    paths.settings_path().write_text("{ not json", encoding="utf-8")
+    assert resolve_library_dir(None) == str(paths.library_anchor() / DEFAULT_LIBRARY_DIR)
 
 
 def test_the_launcher_does_not_hardcode_the_folder():
@@ -95,8 +98,9 @@ def test_setting_the_folder_writes_it_and_creates_nothing_by_accident(tmp_path):
     assert d.get("ok") is True and target.is_dir()
     assert d["has_catalog"] is False, "a fresh folder has no catalog and must say so"
 
-    stored = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
-    assert stored[LIBRARY_DIR_KEY] == str(target.resolve())
+    assert settings.library_dir() == str(target.resolve())
+    cfg = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert "LIBRARY_DIR" not in cfg, "an app-written setting never goes into config.json"
 
 
 def test_a_file_is_refused_and_nothing_is_written(tmp_path):
@@ -106,8 +110,7 @@ def test_a_file_is_refused_and_nothing_is_written(tmp_path):
     afile.write_text("x", encoding="utf-8")
     d = cli.post("/api/library-path", json={"path": str(afile)}).get_json()
     assert "folder" in (d.get("error") or "").lower()
-    cfg = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
-    assert LIBRARY_DIR_KEY not in cfg, "a rejected path must not be written"
+    assert settings.library_dir() == "", "a rejected path must not be written"
 
     d = cli.post("/api/library-path", json={"path": "   "}).get_json()
     assert d.get("error")
@@ -158,28 +161,15 @@ def test_the_host_path_is_withheld_from_a_lan_caller_in_every_field(tmp_path):
     assert loc["stored"] == str(target.resolve())
 
 
-def test_the_config_write_holds_the_accounts_lock(tmp_path, monkeypatch):
-    """config.json holds AUTH_SECRET_KEY, AUTH_USERS and AUTH_EPOCH_SEQ, not just settings,
-    and core._accounts_lock exists to serialize every read-modify-write of it in-process.
-
-    Writing outside the lock is a real auth regression, not an abstract race: this handler
-    can read the file, a concurrent /logout can bump AUTH_EPOCH_SEQ to revoke that session,
-    and this write then puts the stale epoch back -- un-revoking the session that just
-    logged out.
-    """
-    held = {}
-    real_save = core._save_config
-
-    def _spy(cfg):
-        held["locked"] = core._accounts_lock.locked()
-        return real_save(cfg)
-
-    monkeypatch.setattr(core, "_save_config", _spy)
+def test_setting_the_folder_never_rewrites_config_json(tmp_path):
+    """config.json holds AUTH_SECRET_KEY, AUTH_USERS and AUTH_EPOCH_SEQ: a settings write
+    that read-modify-wrote it could put back a stale revocation counter and un-revoke a
+    session. The library folder is settings.json's, so the auth file is never rewritten."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a.png",
                                          created_at="2025-01-01T00:00:00")])
+    before = (tmp_path / "config.json").read_bytes()
     target = tmp_path / "locked"
     d = cli.post("/api/library-path", json={"path": str(target), "create": True}).get_json()
     assert d.get("ok") is True
-    assert held.get("locked") is True, (
-        "config.json was written without _accounts_lock -- a concurrent /logout's "
-        "AUTH_EPOCH_SEQ bump can be clobbered, restoring a revoked session")
+    assert (tmp_path / "config.json").read_bytes() == before
+    assert settings.library_dir() == str(target.resolve())

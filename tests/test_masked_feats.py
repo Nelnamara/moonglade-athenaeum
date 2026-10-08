@@ -253,14 +253,14 @@ def test_the_route_needs_a_login(tmp_path):
     assert r.status_code in (302, 401, 403)
 
 
-def test_the_cut_is_cached_under_the_library_by_token_never_by_id(tmp_path):
+def test_the_cut_is_cached_by_token_never_by_id(tmp_path):
     cli = _client(tmp_path)
     sf.earn(tmp_path, sf.FEAT_IDS[1])
     m = _feats(cli)["feats"]["masked"]
     token = _mask_token({"feats": {"masked": m}})
     assert cli.get(m["mask_url"]).status_code == 200
     d = g.feat_mask_cache_dir(tmp_path)
-    assert d == tmp_path / "gallery" / "cache" / "_masks"
+    assert d == tmp_path / "cache" / "masks"      # local/cache/masks (conftest's local_dir)
     names = [p.name for p in d.iterdir()]
     assert names == [token + ".png"]
     assert not any(sf.FEAT_IDS[0] in n for n in names)

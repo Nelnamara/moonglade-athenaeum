@@ -24,12 +24,13 @@ def _presets_file(tmp_path, user="tester"):
     Keyed through the same _account_key() the app itself uses (B14 residual: a bare
     username here would silently pass on a case-insensitive filesystem even after a
     regression, since "tester" happens to need no encoding either way)."""
-    return paths.state_path(tmp_path, "view_presets") / (_account_key(user) + ".json")
+    return paths.account_dir(tmp_path, user) / "views.json"
 
 
 def _legacy_presets_file(tmp_path):
-    """The pre-split shared store. Still READ as a fallback for an account that has no
-    file of its own yet, so nothing vanishes on upgrade; never written back to."""
+    """The pre-split shared store, at an older layout's library top. The move gives it to
+    each login with no file of its own, then deletes it (moonglade.migrate); the app itself
+    never reads it."""
     return tmp_path / "view_presets.json"
 
 
@@ -179,28 +180,24 @@ def test_saved_views_are_independent_for_accounts_differing_only_by_case(tmp_pat
         "nel's save overwrote Nel's identically-named view -- case-collision on disk")
 
 
-def test_an_account_without_its_own_file_still_sees_the_legacy_shared_set(tmp_path):
-    """Upgrade path: nothing disappears the moment the store goes per-account.
-
-    An account with no file of its own falls back to reading the old shared
-    out_dir/view_presets.json -- exactly what it saw before the split. The fallback is
-    read-only and needs no migration flag: the first save writes the account's own file
-    and it diverges from then on. That avoids the first-loader-claims-everything race a
-    migration flag would have introduced.
-    """
+def test_the_legacy_shared_set_is_given_to_each_login_by_the_move(tmp_path):
+    """Upgrade path: nothing disappears when the store goes per-account. The move copies the
+    old shared view_presets.json into every login with no file of its own -- exactly what
+    each one saw before -- then deletes it (the app cleans up after itself). From then on
+    the app reads only the login's own file: no fallback read is left."""
+    from moonglade import migrate
     cli = login_client(tmp_path)
     _legacy_presets_file(tmp_path).write_text(
         json.dumps({"from-before": "?q=legacy"}), encoding="utf-8")
+    assert cli.get("/api/view-presets").get_json()["presets"] == {}, "no fallback read"
 
+    migrate.migrate_library(tmp_path, migrate.logins_from_config(), migrate.Report())
+    assert not _legacy_presets_file(tmp_path).exists()
     assert cli.get("/api/view-presets").get_json()["presets"] == {"from-before": "?q=legacy"}
 
-    # First save takes ownership: the account's own file appears, carrying the inherited
-    # entry plus the new one, and the legacy file is left untouched for other accounts.
     cli.post("/api/view-presets", json=with_csrf(cli, {"name": "new-one", "query": "?q=new"}))
     own = json.loads(_presets_file(tmp_path).read_text(encoding="utf-8"))
     assert own == {"from-before": "?q=legacy", "new-one": "?q=new"}
-    assert json.loads(_legacy_presets_file(tmp_path).read_text(encoding="utf-8")) == {
-        "from-before": "?q=legacy"}
 
 
 def test_anonymous_request_is_refused(tmp_path):

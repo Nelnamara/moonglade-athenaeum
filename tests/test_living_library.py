@@ -797,7 +797,7 @@ def _due_schedule(tmp_path, actions, standing=None):
     job per tick before any Panel action could be observed."""
     jobs = [{"action": j["action"], "enabled": j["action"] in actions,
              "interval_s": j["interval_s"], "last_run": 1.0} for j in g.LIVING_ALL]
-    (tmp_path / "schedule.json").write_text(json.dumps({
+    g._paths.records_path(tmp_path, "schedule.json").write_text(json.dumps({
         "enabled": bool(standing), "action": standing or "sync",
         "interval_hours": 6, "workers": 4, "jobs": jobs}), encoding="utf-8")
 
@@ -1481,7 +1481,7 @@ def test_a_hand_edited_schedule_cannot_lower_the_floor_either(tmp_path):
     """The other way in. living_merge normalizes whatever is in the file on EVERY read, so
     the floor has to live there too -- a file that says sixty seconds must not become a
     sixty-second full re-walk just because nobody went through the route."""
-    (tmp_path / "schedule.json").write_text(json.dumps({
+    g._paths.records_path(tmp_path, "schedule.json").write_text(json.dumps({
         "enabled": False, "action": "sync", "interval_hours": 6, "workers": 4,
         "jobs": [{"action": "resync-full", "enabled": True, "interval_s": 60,
                   "last_run": 1000.0}]}), encoding="utf-8")
@@ -1532,7 +1532,7 @@ def test_the_defer_check_confirms_the_standing_order_can_actually_run_the_job(tm
     the save-time check above never ran. _living_tick only steps aside for a standing
     order that CAN execute the named action -- an advanced one falls through to the
     living library's own path instead of vanishing from both."""
-    (tmp_path / "schedule.json").write_text(json.dumps({
+    g._paths.records_path(tmp_path, "schedule.json").write_text(json.dumps({
         "enabled": True, "action": "resync-full", "interval_hours": 6, "workers": 4,
     }), encoding="utf-8")
     cli = _client(tmp_path)

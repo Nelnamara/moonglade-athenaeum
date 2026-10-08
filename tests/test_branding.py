@@ -81,7 +81,8 @@ def test_branding_save_and_render(tmp_path):
     # tests/test_marks_build.py.
     saved = r.get_json()
     assert (saved["mark"], saved["anim"]) == ("mark_7", "eclipse")
-    assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
+    assert json.loads((tmp_path / "settings.json").read_text())["branding"]["animation"][
+        "anim"] == "eclipse"
     # the saved choice reads back through the same API the React header consumes
     # (the classic BASE_HTML mark-span render died in the 2026-08-08 classic cut)
     d = cli.get("/api/branding").get_json()
@@ -217,21 +218,21 @@ def test_branding_root_is_the_app_folder_not_the_library(tmp_path):
     assert _REAL_BRANDING_ROOT.__code__.co_argcount == 0
 
 
-def test_branding_json_is_a_machine_file_not_inside_the_art_directory():
-    """branding.json is one of the machine files (moonglade_paths.local_path()): today it sits
-    at the app root beside the art tree, where .gitignore covers it, and it never nests inside
-    the tree -- if it did, an existing install's selections would go missing silently and the
-    app would just render defaults. It no longer DERIVES from the tree's parent (Wave 4), so the
-    machine files and the art tree can move separately; tests/test_app_paths.py pins the split
-    and the absolute location.
+def test_the_branding_picks_are_a_machine_setting_not_inside_the_art_directory(tmp_path):
+    """The mark and animation picks are settings.json's branding (local/, beside the other
+    app-written settings): never inside the art tree -- if they were, an existing install's
+    selections would go missing silently and the app would just render defaults -- and never
+    derived from the tree's parent or from a library, so the machine files, the art tree and
+    the library can move separately. tests/test_app_paths.py pins the absolute location.
 
-    Resolved through the module, so it holds wherever local_path() points -- the app root in
+    Resolved through the module, so it holds wherever local_dir() points -- local/ in
     production, tmp_path under conftest's fixture."""
-    cfg = g._branding_path(pathlib.Path("/some/unrelated/library"))
-
-    assert cfg == moonglade_paths.local_path("branding.json")
+    g.save_branding(pathlib.Path("/some/unrelated/library"), dict(g._BRAND_DEFAULTS))
+    cfg = moonglade_paths.settings_path()
+    assert cfg.is_file() and cfg.parent == moonglade_paths.local_dir()
     assert g.branding_root() not in cfg.parents          # never inside the art tree
     assert "library" not in str(cfg)                     # the argument is genuinely ignored
+    assert not (moonglade_paths.local_dir() / "branding.json").exists()
 
 
 def _png_bytes(color=(200, 30, 30)):

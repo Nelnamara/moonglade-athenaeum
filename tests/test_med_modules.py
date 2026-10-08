@@ -119,7 +119,7 @@ def _flush():
 
 
 def _log_text(tmp_path):
-    p = moonglade_logging.log_path(tmp_path)
+    p = moonglade_logging.log_path()
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
@@ -133,7 +133,7 @@ def test_uncaught_exception_in_a_background_thread_reaches_the_file(tmp_path):
     # PytestUnhandledThreadExceptionWarning every run. Chaining itself is asserted by
     # the next test. Installed BEFORE setup_logging, which captures what it chains to.
     threading.excepthook = lambda args: None
-    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    moonglade_logging.setup_logging(verbose=False)
 
     def boom():
         raise ValueError("worker exploded")
@@ -153,7 +153,7 @@ def test_thread_crash_hook_still_chains_to_whatever_was_installed(tmp_path):
     otherwise have printed, exactly like the main-thread hook."""
     seen = []
     threading.excepthook = lambda args: seen.append(args.exc_type)
-    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    moonglade_logging.setup_logging(verbose=False)
 
     t = threading.Thread(target=lambda: 1 / 0, name="mg-chain-test")
     t.start()
@@ -168,7 +168,7 @@ def test_keyboard_interrupt_in_a_thread_is_not_logged_as_a_crash(tmp_path):
     """Ctrl+C stopping a long job is not a crash on the main thread and is not one in
     a worker either -- same exclusion, or every interrupted run files a false crash."""
     threading.excepthook = lambda args: None      # chained into; keeps pytest's warning out
-    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    moonglade_logging.setup_logging(verbose=False)
 
     def interrupted():
         raise KeyboardInterrupt()
@@ -186,7 +186,7 @@ def test_system_exit_in_a_thread_is_not_logged_as_a_crash(tmp_path):
     default threading hook ignores it, so recording it at CRITICAL would file an orderly
     shutdown as a crash."""
     threading.excepthook = lambda args: None      # chained into; keeps pytest's warning out
-    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    moonglade_logging.setup_logging(verbose=False)
 
     t = threading.Thread(target=sys.exit, name="mg-orderly-exit")
     t.start()
@@ -198,7 +198,7 @@ def test_system_exit_in_a_thread_is_not_logged_as_a_crash(tmp_path):
 
 def test_main_thread_crash_hook_is_unchanged(tmp_path):
     """Installing the second hook must not disturb the first one."""
-    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    moonglade_logging.setup_logging(verbose=False)
     try:
         raise RuntimeError("main-thread boom")
     except RuntimeError:

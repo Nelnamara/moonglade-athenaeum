@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 import pytest
 
+from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import (
@@ -167,7 +168,7 @@ def _board(cards, imported=()):
 
 
 def _write_board(out_dir, project, key="storyboard:v2:proj:p1", account=None, as_string=True):
-    d = out_dir / "loom" / "kv"
+    d = _paths.loom_root(out_dir) / "kv"
     if account:
         d = d / account
     d.mkdir(parents=True, exist_ok=True)
@@ -186,8 +187,8 @@ def test_the_loom_render_ids_are_results_and_kept_attempts_not_imported_footage(
 
 def test_no_loom_folder_is_simply_no_renders(tmp_path):
     assert loom_render_ids(tmp_path) == frozenset()
-    (tmp_path / "loom" / "kv").mkdir(parents=True)
-    (tmp_path / "loom" / "kv" / "storyboard%3Av2%3Aproj%3Abad.json").write_text("{not json")
+    (_paths.loom_root(tmp_path) / "kv").mkdir(parents=True)
+    (_paths.loom_root(tmp_path) / "kv" / "storyboard%3Av2%3Aproj%3Abad.json").write_text("{not json")
     assert loom_render_ids(tmp_path) == frozenset()
 
 

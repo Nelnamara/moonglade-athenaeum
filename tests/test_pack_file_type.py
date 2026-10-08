@@ -247,14 +247,14 @@ def _main_calls():
 
 
 def test_a_real_start_registers_the_file_type_after_the_pack_is_settled():
-    """Its only production call site is main(): after the tidy that renames an old pack and
+    """Its only production call site is main(): after the move that renames an old pack and
     brings it into local/ (so the pack it looks for is the one in its new place) and after the
     coded tree is folded in (so a custom mark's .ico is where the icon lookup reads), before
     the app is built."""
     names = _main_calls()
     assert "register_pack_file_type" in names, "main() no longer registers the pack's type"
     i = names.index("register_pack_file_type")
-    assert names.index("tidy_app_folder") < i
+    assert names.index("prepare") < i
     assert names.index("ensure_branding_discovery_tree") < i < names.index("create_app")
 
 

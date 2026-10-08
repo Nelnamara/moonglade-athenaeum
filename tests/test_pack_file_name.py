@@ -101,18 +101,20 @@ def _main_calls():
 
 
 def test_a_real_start_renames_an_old_pack_before_anything_reads_it():
-    """The rename's only production road is main()'s tidy (moonglade_migrate.tidy_app_folder,
-    which renames a pack still under its pre-v7 name at the old place, then moves it into
-    local/). It runs once the start is sure it will serve (after the port check: a second
-    server refused on a busy port must not move the running one's pack) and before
-    create_app(), so every check after it -- the page's "is my pack current", About, the fetch
-    job bound at app build -- sees the pack where it now is."""
+    """The rename's only production road is the move every entry point runs first
+    (moonglade.setup.prepare -> moonglade.migrate's install half, which renames a pack still
+    under its pre-v7 name at the old place, then moves it into local/). In main() it runs
+    before anything reads a setting -- the port check included (B2) -- and so before
+    create_app(): every check after it (the page's "is my pack current", About, the fetch job
+    bound at app build) sees the pack where it now is. A second server refused on a busy port
+    moves nothing: the running one's start already finished the move, and the journal says
+    so."""
     import inspect
 
     from moonglade import migrate as mig
     calls = _main_calls()
     names = [c[0] for c in calls]
-    assert "tidy_app_folder" in names, "main() no longer brings the pack across"
-    i = names.index("tidy_app_folder")
-    assert names.index("port_owner") < i < names.index("create_app")
-    assert "migrate_legacy_name" in inspect.getsource(mig._legacy_pack_rename)
+    assert "prepare" in names, "main() no longer runs the move"
+    i = names.index("prepare")
+    assert i < names.index("port_owner") < names.index("create_app")
+    assert "migrate_legacy_name" in inspect.getsource(mig._install_half)

@@ -4,6 +4,7 @@ legacy single store.json. The React app's window.storage API is unchanged; this
 tests the server backend underneath it."""
 import json
 
+from moonglade import paths as _paths
 from moonglade.gallery import _account_key
 from tests.conftest import login_client
 
@@ -15,7 +16,7 @@ def _client(tmp_path):
 def _kv_dir(tmp_path, user="tester"):
     """The account's own per-account Loom kv subdirectory -- keyed through the same
     _account_key() the app uses (B14 residual), not the raw username."""
-    return tmp_path / "loom" / "kv" / _account_key(user)
+    return _paths.loom_root(tmp_path) / "kv" / _account_key(user)
 
 
 def test_set_get_roundtrip_and_isolation(tmp_path):
@@ -54,7 +55,7 @@ def test_atomic_write_leaves_no_temp_in_kv_dir(tmp_path):
 
 
 def test_migrates_legacy_store_json_once(tmp_path):
-    loom = tmp_path / "loom"
+    loom = _paths.loom_root(tmp_path)
     loom.mkdir(parents=True)
     (loom / "store.json").write_text(json.dumps({
         "storyboard:v2:proj:old": {"name": "Legacy"},
@@ -124,7 +125,7 @@ def test_account_without_its_own_dir_still_sees_legacy_shared_boards(tmp_path):
     account with no dir of its own falls back to the old shared out_dir/loom/kv/
     (read-only) -- exactly what it saw before the split -- but writing a DIFFERENT key
     doesn't leak into another account's dir."""
-    kv = tmp_path / "loom" / "kv"
+    kv = _paths.loom_root(tmp_path) / "kv"
     kv.mkdir(parents=True)
     (kv / "storyboard%3Av2%3Aproj%3Aold.json").write_text(
         json.dumps({"name": "Legacy board"}), encoding="utf-8")
@@ -143,7 +144,7 @@ def _legacy_write(tmp_path, key, value):
     """Plant a board in the pre-per-account shared layer -- what every storyboard that
     predates the D-7 split still lives in until its account saves its own copy."""
     from urllib.parse import quote
-    d = tmp_path / "loom" / "kv"
+    d = _paths.loom_root(tmp_path) / "kv"
     d.mkdir(parents=True, exist_ok=True)
     (d / (quote(key, safe="") + ".json")).write_text(json.dumps(value), encoding="utf-8")
 
@@ -180,7 +181,7 @@ def test_the_legacy_file_itself_is_never_removed(tmp_path):
     _legacy_write(tmp_path, key, {"name": "Shared board"})
     cli = _client(tmp_path)
     cli.post("/api/loom/delete", json={"key": key})
-    legacy = tmp_path / "loom" / "kv" / (quote(key, safe="") + ".json")
+    legacy = _paths.loom_root(tmp_path) / "kv" / (quote(key, safe="") + ".json")
     assert legacy.exists(), "the shared legacy file must survive one account's delete"
 
 

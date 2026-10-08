@@ -1243,7 +1243,7 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     page.wait_for_selector('[aria-label="Accounts"]', state="detached")
 
     # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
-    # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
+    # real MARK_ANIMS list this harness's own settings.json (branding) now persists.
     # The tab is achievement-gated (brandingUnlocked = the feat carrying unlocks: "branding_tab"; the
     # harness seeds branding_custom_file to earn it). Since bundle-v2 the roster is
     # SEALED in the art pack, so that gate can only resolve when the private donor is
@@ -6833,7 +6833,7 @@ class _MatrixFixture:
         self.db = root / "catalog.db"
         self.run_id = "b" * 32
         self.tid = "9100000000000001"
-        self.jobs_path = moonglade_paths.state_path(root, "jobs.jsonl")
+        self.jobs_path = moonglade_paths.records_path(root, "jobs.jsonl")
         self.jobs_before = self.jobs_path.read_bytes() if self.jobs_path.exists() else None
         con = sqlite3.connect(str(self.db))
         try:
@@ -6875,7 +6875,7 @@ class _MatrixFixture:
             con.commit()
         finally:
             con.close()
-        c2 = sqlite3.connect(str(moonglade_paths.state_path(self.root, "runs.db")))
+        c2 = sqlite3.connect(str(moonglade_paths.records_path(self.root, "runs.db")))
         try:
             c2.execute("DELETE FROM run_jobs WHERE run_id=?", (self.run_id,))
             c2.execute("DELETE FROM runs WHERE run_id=?", (self.run_id,))

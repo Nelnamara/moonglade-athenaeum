@@ -327,11 +327,12 @@ def unpinned_module_view():
     from types import SimpleNamespace
 
     from moonglade import gallery as _g
+    from moonglade import migrate as _m
     from moonglade import paths as _p
     return SimpleNamespace(root=_g.branding_root(), container=_g._container_path(),
-                           branding_json=_g._branding_path(None),
+                           settings_json=_p.settings_path(),
                            local_dir=_p.local_dir(),
-                           old_pack=_p.old_local_path("moonglade.mgpack"))
+                           old_pack=_m.old_app_root() / "moonglade.mgpack")
 
 
 def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_module_view):
@@ -360,12 +361,12 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
         "a module-scoped fixture resolved _container_path() to the pack beside the checkout "
         "at {} -- its achievement state would be whatever that file happens to hold on this "
         "machine".format(real_pack))
-    # The other machine files resolve through the same helper: none may be the checkout's.
-    assert unpinned_module_view.branding_json.parent != real_local, (
-        "a module-scoped fixture resolved branding.json to the checkout's own {}"
-        .format(unpinned_module_view.branding_json))
-    # 3.20: the folder a start brings the machine files INTO, and the old places it brings
-    # them FROM -- a module-scoped fixture that ran a real start's tidy with either one
+    # The other machine files resolve through the same folder: none may be the checkout's.
+    assert unpinned_module_view.settings_json.parent != real_local, (
+        "a module-scoped fixture resolved settings.json to the checkout's own {}"
+        .format(unpinned_module_view.settings_json))
+    # The folder the move brings the machine files INTO, and the old app folder it brings
+    # them FROM -- a module-scoped fixture that ran a real start's move with either one
     # unpinned would move the checkout's own pack.
     from tests.conftest import _REAL_APP_ROOT, _REAL_LOCAL_DIR
     assert unpinned_module_view.local_dir != _REAL_LOCAL_DIR, (
@@ -376,23 +377,29 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
         .format(unpinned_module_view.old_pack))
 
 
-def test_the_machine_files_guard_sees_a_real_tidy(tmp_path, monkeypatch):
-    """conftest's `_real_machine_files_untouched` is the backstop for the tidy a real start
-    runs (moonglade_migrate): pointed at an app folder of this test's own, its census must
-    change when that tidy moves the pack into local/ -- or it would watch nothing."""
+def test_the_machine_files_guard_sees_a_real_move(tmp_path, monkeypatch):
+    """conftest's `_real_machine_files_untouched` is the backstop for the move a real start
+    runs (moonglade.setup.prepare): pointed at an app folder of this test's own, its census
+    must change when that move brings the pack and serve.txt into local/ -- or it would watch
+    nothing."""
     from moonglade import migrate as mig
     from moonglade import paths
+    from moonglade import setup as msetup
     import tests.conftest as c
     app = tmp_path / "app"
     app.mkdir()
     (app / "moonglade.mgpack").write_bytes(b"a pack")
+    (app / "serve.txt").write_text("--port 5101\n", encoding="utf-8")
     monkeypatch.setattr(c, "_REAL_APP_ROOT", app)
     monkeypatch.setattr(c, "_REAL_LOCAL_DIR", app / "local")
     monkeypatch.setattr(c, "_REAL_DEFAULT_LIBRARY", app / "pixai_backup")
     before = c._snapshot_machine_files()
     monkeypatch.setattr(paths, "local_dir", lambda: app / "local")
-    monkeypatch.setattr(paths, "old_local_path", lambda name: app / name)
-    mig.migrate_local()
+    monkeypatch.setattr(paths, "local_path", lambda name: app / "local" / name)
+    monkeypatch.setattr(mig, "old_app_root", lambda: app)
+    msetup.prepare("cli", explicit_out=str(app / "pixai_backup"))
     after = c._snapshot_machine_files()
     assert not before["local/"] and after["local/"]
     assert before["moonglade.mgpack"] and not after["moonglade.mgpack"]
+    assert before["serve.txt"] and not after["serve.txt"]
+    assert before["local/.journal.json"] is None and after["local/.journal.json"]

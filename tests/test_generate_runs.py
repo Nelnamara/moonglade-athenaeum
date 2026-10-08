@@ -345,7 +345,7 @@ def test_plan_writes_nothing(cli, rig, tmp_path):
     jobs_before = jobs.read_text(encoding="utf-8") if jobs.exists() else ""
     d = plan(cli, prompt="{silver|cobalt} hair, __poses__", count=4).get_json()
     assert d["count"] == 4 and d["jobs"] == 4
-    assert not (tmp_path / runs.RUNS_DB).exists(), "/plan must not create the Runs store"
+    assert not runs.RunsStore(tmp_path).path.exists(), "/plan must not create the Runs store"
     assert (jobs.read_text(encoding="utf-8") if jobs.exists() else "") == jobs_before
     assert cli.get("/api/account/prefs").get_json()["prefs"] == prefs_before
     assert rig.mutations == []
@@ -866,7 +866,9 @@ def test_a_failed_task_id_write_still_answers_with_the_task_and_never_reads_not_
 
 
 def _unreadable_store(tmp_path):
-    (tmp_path / runs.RUNS_DB).write_bytes(b"this is not a SQLite database\n" * 64)
+    from moonglade import paths
+    paths.records_path(tmp_path, runs.RUNS_DB).write_bytes(
+        b"this is not a SQLite database\n" * 64)
 
 
 def test_an_unreadable_store_is_not_no_such_run(cli, rig, tmp_path):
@@ -888,7 +890,7 @@ def test_an_unreadable_store_is_not_no_such_run(cli, rig, tmp_path):
     d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
     assert "Couldn't read the run store" in d["error"]
     assert rig.mutations == []
-    os.remove(tmp_path / runs.RUNS_DB)          # no connection left open on it
+    os.remove(runs.RunsStore(tmp_path).path)    # no connection left open on it
 
 
 def test_no_row_is_still_none_and_404(cli, rig, tmp_path):

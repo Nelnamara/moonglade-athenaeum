@@ -1,17 +1,17 @@
-"""moonglade_paths: the one place an app-root path is derived (Wave 4 groundwork, 3.19.0).
+"""moonglade_paths: the one place an app-root or library-records path is derived.
 
 Three claims, each with its own test:
   * every helper, and every app function that asks one, resolves to the exact path the table
-    below names: where it was before the helpers existed, except the pack manifest, which
-    3.20 moved into moonglade/ with the code, and the machine files, which live in local/
-    since 3.20 (with the old places a start brings them across from);
-  * the machine files and the art tree are separate concepts: the pack, branding.json,
-    branding_slots.json and the icon cache follow local_path(), never the art tree's parent;
+    below names: the layout of SPEC_3.20_REBUILD.md -- this PC's machinery in local/
+    (settings.json, the pack, the Mirror's sign-in, icons/, banners/, cache/, logs/), and a
+    library's app folder _moonglade/ (accounts/, loom/, records/, decisions/);
+  * the machine files and the art tree are separate concepts: the pack, the settings and the
+    icons follow local_dir(), never the art tree's parent;
   * no first-party module but moonglade_paths derives an app-root path from `__file__`.
 
-conftest pins `config_path`, `local_path` and `branding_root()` to each test's own folder,
-so the real resolvers are captured here at import, before any fixture runs. Calling them
-only builds paths; nothing here reads or writes the checkout's own files.
+conftest pins `config_path`, `local_path`, `local_dir` and `branding_root()` to each test's own
+folder, so the real resolvers are captured here at import, before any fixture runs. Calling
+them only builds paths; nothing here reads or writes the checkout's own files.
 """
 import ast
 from pathlib import Path
@@ -21,7 +21,10 @@ import pytest
 from moonglade import assets as ma
 from moonglade import backup as core
 from moonglade import gallery as g
+from moonglade import logs as mlog
+from moonglade import migrate as mmig
 from moonglade import paths
+from moonglade import settings as msettings
 from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -30,7 +33,8 @@ _REPO = Path(__file__).resolve().parents[1]
 _REAL_CONFIG_PATH = paths.config_path
 _REAL_LOCAL_PATH = paths.local_path
 _REAL_LOCAL_DIR = paths.local_dir
-_REAL_OLD_LOCAL_PATH = paths.old_local_path
+_REAL_OLD_APP_ROOT = mmig.old_app_root
+_REAL_LIBRARY_ANCHOR = paths.library_anchor
 _REAL_CORE_CONFIG_PATH = core._config_path
 _REAL_BRANDING_ROOT = g.branding_root
 _REAL_MANIFEST_PATH = ma.manifest_path
@@ -39,14 +43,12 @@ _REAL_MANIFEST_PATH = ma.manifest_path
 @pytest.fixture
 def real_paths(monkeypatch):
     """Undo conftest's pins for one test, so the app's own resolvers answer. Path
-    arithmetic only: no test that uses this may touch a file. The old places a machine file
-    is read from until a start brings it across point at a folder that does not exist, so
-    the answer is the same on every machine (the owner's checkout still HAS its old files)."""
+    arithmetic only: no test that uses this may touch a file."""
     monkeypatch.setattr(paths, "config_path", _REAL_CONFIG_PATH)
     monkeypatch.setattr(paths, "local_path", _REAL_LOCAL_PATH)
     monkeypatch.setattr(paths, "local_dir", _REAL_LOCAL_DIR)
-    monkeypatch.setattr(paths, "old_local_path",
-                        lambda name: _REPO / "no-such-folder-before-3.20" / name)
+    monkeypatch.setattr(mmig, "old_app_root", _REAL_OLD_APP_ROOT)
+    monkeypatch.setattr(paths, "library_anchor", _REAL_LIBRARY_ANCHOR)
     monkeypatch.setattr(core, "_config_path", _REAL_CORE_CONFIG_PATH)
     monkeypatch.setattr(g, "branding_root", _REAL_BRANDING_ROOT)
     monkeypatch.setattr(ma, "manifest_path", _REAL_MANIFEST_PATH)
@@ -59,6 +61,8 @@ def test_app_root_is_the_folder_holding_the_launcher():
 
 
 _LOCAL = _REPO / "local"
+_LIB = Path("/any/library")
+_KEY = paths.account_key("Nel")
 
 # (what, how to ask it, the path it resolves to)
 _TABLE = [
@@ -66,35 +70,42 @@ _TABLE = [
     ("config.json via the backup", lambda: core._config_path(), lambda: _REPO / "config.json"),
     ("token.txt", lambda: paths.token_paths(),
      lambda: (_REPO / "token.txt", Path("token.txt"))),
-    ("the machine files' folder", lambda: paths.local_dir(), lambda: _LOCAL),
+    ("this PC's folder", lambda: paths.local_dir(), lambda: _LOCAL),
+    ("settings.json", lambda: paths.settings_path(), lambda: _LOCAL / "settings.json"),
     ("the pack", lambda: g._container_path(), lambda: _LOCAL / "moonglade.mgpack"),
     ("the pack's marker", lambda: ma._version_marker_path(g._container_path()),
      lambda: _LOCAL / "moonglade.mgpack.version"),
-    ("branding.json", lambda: g._branding_path(Path("/any/library")),
-     lambda: _LOCAL / "branding.json"),
-    ("branding_slots.json", lambda: g._slot_active_path(Path("/any/library")),
-     lambda: _LOCAL / "branding_slots.json"),
     ("mirror_session.json", lambda: core._mirror_state_path(),
      lambda: _LOCAL / "mirror_session.json"),
-    ("serve.txt", lambda: paths.local_path("serve.txt"), lambda: _LOCAL / "serve.txt"),
-    # a fresh one in local/ whenever local/ exists; beside the launcher when it could not be
-    # made (that old place is pointed at an empty folder by real_paths)
-    ("serve.log", lambda: paths.local_path("serve.log"),
-     lambda: (_LOCAL if _LOCAL.is_dir() else _REPO / "no-such-folder-before-3.20") / "serve.log"),
-    ("the icon cache", lambda: paths.icon_cache_dir(), lambda: _LOCAL / "cache" / "marks"),
-    ("what moved, recorded", lambda: paths.local_dir() / paths.MOVED_NAME,
-     lambda: _LOCAL / "MOVED.json"),
-    # where 3.19 kept them: what a start brings across from
-    ("the pack before 3.20", lambda: _REAL_OLD_LOCAL_PATH("moonglade.mgpack"),
-     lambda: _REPO / "moonglade.mgpack"),
-    ("branding.json before 3.20", lambda: _REAL_OLD_LOCAL_PATH("branding.json"),
-     lambda: _REPO / "branding.json"),
-    ("serve.txt before 3.20", lambda: _REAL_OLD_LOCAL_PATH("serve.txt"),
-     lambda: _REPO / "serve.txt"),
-    ("the icon cache before 3.20", lambda: _REAL_OLD_LOCAL_PATH("cache"),
-     lambda: _REPO / "_container_cache"),
-    ("mirror_session.json before 3.20", lambda: _REAL_OLD_LOCAL_PATH("mirror_session.json"),
-     lambda: _REPO / "mirror_session.json"),
+    ("the shortcut icons", lambda: paths.icons_dir(), lambda: _LOCAL / "icons"),
+    ("the only-copy banners", lambda: paths.banners_dir(), lambda: _LOCAL / "banners"),
+    ("the only-copy banners, gallery", lambda: g.banner_keep_dir(), lambda: _LOCAL / "banners"),
+    ("the caches", lambda: paths.cache_dir(), lambda: _LOCAL / "cache"),
+    ("the badge thumbs", lambda: g.badge_cache_dir(_LIB), lambda: _LOCAL / "cache" / "badges"),
+    ("the feat masks", lambda: g.feat_mask_cache_dir(_LIB), lambda: _LOCAL / "cache" / "masks"),
+    ("the banner renders", lambda: g.banner_cache_dir(_LIB),
+     lambda: _LOCAL / "cache" / "banners"),
+    ("the logs", lambda: paths.logs_dir(), lambda: _LOCAL / "logs"),
+    ("the app's log", lambda: mlog.log_path(), lambda: _LOCAL / "logs" / "moonglade.log"),
+    ("the install's journal", lambda: paths.local_dir() / paths.JOURNAL_NAME,
+     lambda: _LOCAL / ".journal.json"),
+    ("the install's snapshot", lambda: paths.local_dir() / paths.SNAPSHOT_DIRNAME,
+     lambda: _LOCAL / ".snapshot"),
+    # a library's app folder
+    ("a library's app folder", lambda: paths.library_app_dir(_LIB), lambda: _LIB / "_moonglade"),
+    ("a login's folder", lambda: paths.account_dir(_LIB, "Nel"),
+     lambda: _LIB / "_moonglade" / "accounts" / _KEY),
+    ("the no-session folder", lambda: paths.local_account_dir(_LIB),
+     lambda: _LIB / "_moonglade" / "accounts" / "_local"),
+    ("the Loom's data", lambda: paths.loom_root(_LIB), lambda: _LIB / "_moonglade" / "loom"),
+    ("a record", lambda: paths.records_path(_LIB, "runs.db", make=False),
+     lambda: _LIB / "_moonglade" / "records" / "runs.db"),
+    ("a decision", lambda: paths.decisions_path(_LIB, "integrity_marks.json", make=False),
+     lambda: _LIB / "_moonglade" / "decisions" / "integrity_marks.json"),
+    ("a library's journal", lambda: paths.library_app_dir(_LIB) / paths.JOURNAL_NAME,
+     lambda: _LIB / "_moonglade" / ".journal.json"),
+    # where an install before this layout kept its machine files: what the move brings across
+    ("the app folder before the move", lambda: mmig.old_app_root(), lambda: _REPO),
     ("the art tree", lambda: g.branding_root(), lambda: _REPO / "0x676F6F6473"),
     ("the art tree, helper", lambda: paths.art_root(), lambda: _REPO / g._GOODS_ROOT_NAME),
     ("the legacy art folder", lambda: g.branding_root().parent / "branding",
@@ -116,8 +127,9 @@ _TABLE = [
      lambda: _REPO / "moonglade_gallery.py"),
     ("the CLI script", lambda: paths.backup_script_path(),
      lambda: _REPO / "moonglade_backup.py"),
-    ("the MCP server's default library", lambda: paths.default_library_path(),
+    ("the default library, absolute", lambda: paths.default_library_path(),
      lambda: _REPO / "pixai_backup"),
+    ("a relative library's anchor", lambda: paths.library_anchor(), lambda: _REPO),
     ("the default library (relative)", lambda: g.DEFAULT_LIBRARY_DIR, lambda: "pixai_backup"),
     ("the working directory", lambda: paths.run_dir(), lambda: _REPO),
 ]
@@ -170,26 +182,41 @@ def test_config_path_keeps_its_rule(monkeypatch, tmp_path):
 
 # ---- the machine files are not the art tree's siblings any more ---------------------------
 
-def test_machine_files_follow_local_path_not_the_art_tree(monkeypatch, tmp_path):
+def test_machine_files_follow_local_dir_not_the_art_tree(monkeypatch, tmp_path):
     """The art tree and the machine files are separate concepts: the art tree sits at the app
     root and the machine files in local/, and either can move without the other."""
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     monkeypatch.setattr(g, "branding_root", lambda: art)
+    monkeypatch.setattr(paths, "local_dir", lambda: local)
     monkeypatch.setattr(paths, "local_path", lambda name: local / name)
     assert g._container_path() == local / "moonglade.mgpack"
-    assert g._branding_path(tmp_path) == local / "branding.json"
-    assert g._slot_active_path(tmp_path) == local / "branding_slots.json"
-    assert paths.icon_cache_dir() == local / "cache" / "marks"
+    assert paths.settings_path() == local / "settings.json"
+    assert paths.icons_dir() == local / "icons"
+    assert g.badge_cache_dir() == local / "cache" / "badges"
     # ...and the art tree itself still follows branding_root().
     assert g._role_dir("marks").is_relative_to(art)
 
 
-def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
-    """A pack-shipped .ico is materialized under local_path(), not beside the art tree."""
+def test_the_branding_picks_live_in_settings_json(tmp_path):
+    """The mark, its animation and the slot picks are settings.json's branding (conftest
+    pins local_dir() to tmp_path), never a file beside the art tree."""
+    g.save_branding(tmp_path, dict(g._BRAND_DEFAULTS, anim="glow"))
+    g.save_slot_active(tmp_path, {"banner_main": "abc", "banner_login": None})
+    b = msettings.branding()
+    assert b["mark"] == g._BRAND_DEFAULTS["mark"] and b["animation"]["anim"] == "glow"
+    assert b["slots"] == {"banner_main": "abc"}
+    assert not (tmp_path / "branding.json").exists()
+    assert not (tmp_path / "branding_slots.json").exists()
+
+
+def test_a_shortcut_icon_is_written_under_local_icons(monkeypatch, tmp_path):
+    """A pack-shipped .ico is written into local/icons/ -- not a cache, and not beside the
+    art tree."""
     from moonglade import container as mc
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     local.mkdir()
     monkeypatch.setattr(g, "branding_root", lambda: art)
+    monkeypatch.setattr(paths, "local_dir", lambda: local)
     monkeypatch.setattr(paths, "local_path", lambda name: local / name)
     mc.write_container(g._container_path(), {
         g._role_rel("marks", "mark_4.ico"): b"\x00\x00\x01\x00ico"}, {})
@@ -198,9 +225,10 @@ def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
         ico = g._mark_ico_path("mark_4")
     finally:
         g._container_cache.update(path=None, mtime=None, box=None)
-    assert ico == local / "cache" / "marks" / "mark_4.ico"
+    assert ico == local / "icons" / "mark_4.ico"
     assert ico.read_bytes() == b"\x00\x00\x01\x00ico"
     assert not (art.parent / "_container_cache").exists()
+    assert not (local / "cache").exists()
 
 
 # ---- the lint: no module but moonglade_paths derives an app-root path from __file__ ------

@@ -128,8 +128,14 @@ _FASTMCP_STUB = textwrap.dedent('''
 
 
 def test_python_m_moonglade_mcp_server_is_the_mcp_server(tmp_path):
-    """Its __main__ block runs. A stub fastmcp stands first on the path (the real one is an
-    optional dep, and would sit waiting on stdin), so `run` just says it was called."""
+    """Its __main__ block runs: the move first (moonglade.setup.prepare), then the tools. A
+    stub fastmcp stands first on the path (the real one is an optional dep, and would sit
+    waiting on stdin), so `run` just says it was called.
+
+    It runs from a COPY of the code folder in an app folder of this test's own: a real run
+    does the install half of the move in its app folder's local/, and that must never be the
+    checkout's (tests/conftest.py's _real_machine_files_untouched watches for it)."""
+    import shutil
     stub = tmp_path / "stub"
     (stub / "fastmcp" / "utilities").mkdir(parents=True)
     (stub / "fastmcp" / "__init__.py").write_text(_FASTMCP_STUB, encoding="utf-8")
@@ -137,7 +143,16 @@ def test_python_m_moonglade_mcp_server_is_the_mcp_server(tmp_path):
     (stub / "fastmcp" / "utilities" / "types.py").write_text(
         "class Image:\n    def __init__(self, data=None, format=None):\n        pass\n",
         encoding="utf-8")
-    r = _run(["-m", "moonglade.mcp_server"], PYTHONPATH=str(stub),
-             MOONGLADE_OUT=str(tmp_path / "library"))
+    app = tmp_path / "app"
+    shutil.copytree(PACKAGE, app / CODE_PACKAGE,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (tmp_path / "library").mkdir()
+    r = subprocess.run([sys.executable, "-m", "moonglade.mcp_server"], cwd=str(app),
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
+                       encoding="utf-8", errors="replace",
+                       env=_env(PYTHONPATH=str(stub), MOONGLADE_OUT=str(tmp_path / "library")))
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "stub server ran over stdio"
+    # the move ran first, in this app folder and in the library MOONGLADE_OUT names
+    assert (app / "local" / ".journal.json").is_file()
+    assert (tmp_path / "library" / "_moonglade" / ".journal.json").is_file()

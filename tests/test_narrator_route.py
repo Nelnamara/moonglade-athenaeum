@@ -75,8 +75,10 @@ def _poke(cli, csrf=None):
     return cli.post(URL, json={"csrf": _token(cli) if csrf is None else csrf})
 
 
-def _state_dir(tmp_path):
-    return tmp_path / g.ACCOUNT_STATE_DIRNAME
+def _state_dir(tmp_path, user="tester"):
+    """The login's server-only state file (accounts/<key>/state.json): "nothing was
+    written" means it does not exist."""
+    return g.account_state_path(tmp_path, user)
 
 
 def _ladder(tmp_path, user="tester"):
@@ -256,10 +258,11 @@ def test_nothing_else_is_written(tmp_path, clock):
     after = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
     new = sorted(after - before)
     key = g._account_key("tester")
-    # the library's own records folder (3.20): _moonglade/
-    assert set(new) <= {"_moonglade/account_state/%s.json" % key, "_moonglade/telemetry.json",
-                        "_moonglade/achievements.json"}, new
-    assert "_moonglade/account_state/%s.json" % key in new
+    # the library's app folder: the login's own folder, and the records
+    assert set(new) <= {"_moonglade/accounts/%s/state.json" % key,
+                        "_moonglade/records/telemetry.json",
+                        "_moonglade/records/achievements.json"}, new
+    assert "_moonglade/accounts/%s/state.json" % key in new
     assert not [n for n in after if n.endswith((".lock", ".tmp")) or ".tmp-" in n], "leftover"
 
 

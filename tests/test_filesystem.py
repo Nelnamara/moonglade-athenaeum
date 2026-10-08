@@ -379,7 +379,7 @@ def test_organize_normalizes_to_month_descriptive_no_batches(tmp_path):
     assert (tmp_path / "2024-06" / "gamma_T3_m3.png").exists()            # batch -> month
     assert not (tmp_path / "batches").exists()                           # batches flattened away
     assert (tmp_path / "imported" / "keep.png").exists()                 # import left alone
-    assert paths.reports_path(tmp_path, "organize_manifest.csv").exists()                 # reversible
+    assert paths.decisions_path(tmp_path, "organize_manifest.csv").exists()                 # reversible
     by = {r["media_id"]: r for r in load_catalog(db)}
     assert by["m2"]["filename"] == "beta_T2_m2.png" and by["m2"]["batch"] == ""
 
@@ -441,7 +441,7 @@ def test_undo_organize_reverts_moves(tmp_path):
     core.cmd_undo_organize(SimpleNamespace(out=str(tmp_path), dry_run=False), tmp_path)
     assert (tmp_path / "images" / "alpha_T1_m1.png").exists()             # back to original
     assert not (tmp_path / "2024-03" / "alpha_T1_m1.png").exists()
-    assert not paths.reports_path(tmp_path, "organize_manifest.csv").exists()              # manifest cleared
+    assert not paths.decisions_path(tmp_path, "organize_manifest.csv").exists()              # manifest cleared
 
 
 def _organize_args(out):

@@ -5,7 +5,8 @@ routes used to rebuild the path by hand from the backup module's own folder -- t
 Wizard's key save and the mirror toggle -- so a test that redirected only the helper could
 still have them write the real file (it happened, 2026-08-02), and after the code moves into
 a package folder they would have written a config.json nobody reads. mirror_session.json is a
-machine file now: local_path(), no longer config.json's sibling by derivation.
+machine file now: local_path(), no longer config.json's sibling by derivation. The Mirror
+switch is an app-written setting: settings.json, never config.json.
 
 Each test points the helper at one folder and the backup module's own folder at a DECOY, so
 a writer that still derives the path by hand lands in the decoy and fails here.
@@ -18,12 +19,12 @@ import pytest
 
 from moonglade import backup as core
 from moonglade import paths
+from moonglade import settings as msettings
 from tests.conftest import first_party_sources, login_client
 
 _REPO = Path(__file__).resolve().parents[1]
 _REAL_LOCAL_PATH = paths.local_path
 _REAL_LOCAL_DIR = paths.local_dir
-_REAL_OLD_LOCAL_PATH = paths.old_local_path
 _REAL_CORE_CONFIG_PATH = core._config_path
 _REAL_PATHS_CONFIG_PATH = paths.config_path
 
@@ -62,17 +63,18 @@ def test_the_setup_wizard_key_save_writes_through_the_helper(routed, tmp_path, m
     _decoy_untouched(routed)
 
 
-def test_the_mirror_toggle_reads_and_writes_through_the_helper(routed, tmp_path, monkeypatch):
-    """It reads the file it then writes: reading the decoy and writing the helper's file
-    would put the decoy's contents over the real auth block."""
+def test_the_mirror_toggle_writes_settings_json_never_config_json(routed, tmp_path,
+                                                                   monkeypatch):
+    """The switch is app-written, so it is settings.json's mirror_to_pixai; config.json (the
+    hand-edited file with the auth block) is never rewritten by it."""
     monkeypatch.setattr(core, "_jwt_usable", lambda jwt: True)
     cli = login_client(tmp_path)
+    before = routed.read_text(encoding="utf-8")
     d = cli.post("/api/mirror/enable", json={"enabled": True}).get_json()
     assert d == {"enabled": True}
-    cfg = json.loads(routed.read_text(encoding="utf-8"))
-    assert cfg["MIRROR_TO_PIXAI"] is True
-    assert cfg["USER_ID"] == "kept" and cfg.get("AUTH_USERS"), "the rest of the file survives"
-    assert "DECOY" not in cfg
+    assert msettings.read()["mirror_to_pixai"] is True and core.mirror_enabled() is True
+    assert routed.read_text(encoding="utf-8") == before
+    assert "MIRROR_TO_PIXAI" not in json.loads(routed.read_text(encoding="utf-8"))
     _decoy_untouched(routed)
 
 
@@ -100,24 +102,27 @@ def test_mirror_session_is_a_machine_file(routed, tmp_path, monkeypatch):
     assert core._mirror_state_path() == tmp_path / "local" / "mirror_session.json"
 
 
-def test_mirror_session_is_in_local_on_a_real_install(monkeypatch, tmp_path):
-    """On a real install it is local/mirror_session.json -- path arithmetic only: the old
-    place a not-yet-moved install would still be read from is pointed at an empty folder, so
-    the answer cannot depend on what this machine's checkout holds."""
+def test_mirror_session_is_in_local_on_a_real_install(monkeypatch):
+    """On a real install it is local/mirror_session.json, and only there -- path arithmetic
+    only: nothing reads an old place any more."""
     monkeypatch.setattr(paths, "local_path", _REAL_LOCAL_PATH)
     monkeypatch.setattr(paths, "local_dir", _REAL_LOCAL_DIR)
-    monkeypatch.setattr(paths, "old_local_path", lambda name: tmp_path / "nothing" / name)
     assert core._mirror_state_path() == _REPO / "local" / "mirror_session.json"
 
 
-def test_mirror_session_was_beside_config_json(monkeypatch):
-    """Where 3.19 kept it -- beside wherever config_path() found config.json -- is where a
-    start moves it from."""
-    monkeypatch.setattr(paths, "old_local_path", _REAL_OLD_LOCAL_PATH)
-    monkeypatch.setattr(core, "_config_path", _REAL_CORE_CONFIG_PATH)
-    monkeypatch.setattr(paths, "config_path", _REAL_PATHS_CONFIG_PATH)
-    monkeypatch.chdir(_REPO)
-    assert paths.old_local_path("mirror_session.json") ==         core._config_path().parent / "mirror_session.json"
+def test_the_move_brings_the_mirror_session_from_beside_config_json(tmp_path, monkeypatch):
+    """Where 3.19 kept it -- beside wherever config_path() found config.json -- is where the
+    move brings it from (here config.json's folder is made a separate one from local/)."""
+    from moonglade import setup as msetup
+    old, local = tmp_path / "old-app", tmp_path / "local"
+    old.mkdir()
+    (old / "mirror_session.json").write_text('{"jwt": "t"}', encoding="utf-8")
+    monkeypatch.setattr(paths, "config_path", lambda: old / "config.json")
+    monkeypatch.setattr(paths, "local_dir", lambda: local)
+    monkeypatch.setattr(paths, "local_path", lambda name: local / name)
+    msetup.prepare("cli", explicit_out=str(tmp_path / "no-library"))
+    assert json.loads((local / "mirror_session.json").read_text(encoding="utf-8")) ==         {"jwt": "t"}
+    assert not (old / "mirror_session.json").exists()
 
 
 # ---- the lint: nobody spells config.json's path but the helper ----------------------------

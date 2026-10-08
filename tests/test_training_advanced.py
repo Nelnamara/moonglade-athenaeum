@@ -433,12 +433,12 @@ def test_an_unclear_retry_failure_keeps_the_guard_and_a_refusal_clears_it(tmp_pa
     assert post(url, {"confirm": True, "accept_credit_cost": 100000}).status_code == 409
     assert len(pixai.calls_for("/training-task/800/retry")) == 1
     # a definite refusal leaves it free to try again
-    TrainGuard(paths.state_path(tmp_path, "train_guard.json")).retry_resolve("800", "refused")
+    TrainGuard(paths.records_path(tmp_path, "train_guard.json")).retry_resolve("800", "refused")
     pixai.fail("/training-task/800/retry", core.PixAIRestError(
         "x", 403, {"code": "INSUFFICIENT_BALANCE"}))
     r = post(url, {"confirm": True, "accept_credit_cost": 100000})
     assert r.status_code == 403 and "credits" in r.get_json()["error"]
-    assert TrainGuard(paths.state_path(tmp_path, "train_guard.json")).retry_state("800") is None
+    assert TrainGuard(paths.records_path(tmp_path, "train_guard.json")).retry_state("800") is None
 
 
 def test_only_a_failed_advanced_run_can_be_retried(tmp_path, pixai):
@@ -576,7 +576,7 @@ def test_finished_runs_are_what_the_academy_counts(tmp_path, pixai):
 
 
 def test_a_retried_run_carries_its_guard(tmp_path, pixai):
-    TrainGuard(paths.state_path(tmp_path, "train_guard.json")).retry_resolve("703", "done", "704")
+    TrainGuard(paths.records_path(tmp_path, "train_guard.json")).retry_resolve("703", "done", "704")
     cli, _ = _app(tmp_path)
     pixai.on("/training-task/in-progress", {"tasks": [
         {"id": "703", "status": "failed", "title": "x", "baseModelId": T3, "mediaCount": 10,
@@ -748,8 +748,8 @@ def test_an_unclear_paid_advanced_failure_arms_a_guard_so_a_second_confirm_sends
     pixai.on("trainingTask", _task(status="waiting" if what == "submit" else "captioning"))
     r = post2(url, body)
     assert r.status_code == 409 and not r.get_json().get("maybe_started")
-    assert "paid" in paths.state_path(tmp_path, "train_guard.json").read_text()
-    assert "%s:700" % what not in paths.state_path(tmp_path, "train_guard.json").read_text()
+    assert "paid" in paths.records_path(tmp_path, "train_guard.json").read_text()
+    assert "%s:700" % what not in paths.records_path(tmp_path, "train_guard.json").read_text()
     assert len(pixai.calls_for(path)) == 1
 
 
@@ -771,7 +771,7 @@ def test_a_definite_paid_advanced_refusal_does_not_arm_the_guard(tmp_path, pixai
 
 
 def test_the_paid_guard_lapses_after_its_window_and_only_on_the_same_status(tmp_path):
-    g = TrainGuard(paths.state_path(tmp_path, "train_guard.json"))
+    g = TrainGuard(paths.records_path(tmp_path, "train_guard.json"))
     g.paid_arm("submit", "700", "captionReady", now=1000.0)
     g.paid_resolve("submit", "700", "ambiguous", now=1000.0)
     assert g.paid_blocked("submit", "700", "captionReady", now=1000.0 + 60)

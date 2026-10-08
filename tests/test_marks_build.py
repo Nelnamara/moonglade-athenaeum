@@ -7,6 +7,7 @@ Hermetic: conftest's _isolated_branding points branding_root() at tmp_path, so e
 mark written here lands in the test's own tree and never near a real install's art."""
 import json
 
+from moonglade import settings
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -39,6 +40,13 @@ def _webp_bytes(color=(30, 90, 200)):
     return buf.getvalue()
 
 
+
+def _write_branding(doc):
+    """A stored branding pick as the move (or a hand edit) leaves it in settings.json."""
+    mark = doc.get("mark")
+    anim = {k: v for k, v in doc.items() if k != "mark"}
+    settings.update_branding(lambda b: b.update({"mark": mark, "animation": anim}))
+
 # ---- the roster ------------------------------------------------------------
 
 def test_retired_animation_falls_back_to_classic(tmp_path):
@@ -48,8 +56,7 @@ def test_retired_animation_falls_back_to_classic(tmp_path):
     assert g.MARK_ANIMS_RETIRED                        # the roster really retired some
     assert not (set(g.MARK_ANIMS_RETIRED) & set(g.MARK_ANIMS))
     for dead in g.MARK_ANIMS_RETIRED:
-        g._branding_path(tmp_path).write_text(
-            json.dumps({"mark": "logo", "anim": dead}), encoding="utf-8")
+        _write_branding({"mark": "logo", "anim": dead})
         assert g.load_branding(tmp_path)["anim"] == "classic", dead
         assert g.brand_context(tmp_path)["mark_anim"] == "classic", dead
 
@@ -111,10 +118,11 @@ def test_tuning_reaches_the_page_boot_payload(tmp_path):
 
 
 def test_corrupt_tuning_values_degrade_to_defaults(tmp_path):
-    """A hand-edited branding.json must never be the reason a page fails to render."""
-    g._branding_path(tmp_path).write_text(json.dumps(
+    """A hand-edited branding pick (settings.json) must never be the reason a page fails to
+    render."""
+    _write_branding(
         {"mark": "logo", "anim": "glow", "anim_speed": "fast", "anim_scale": None,
-         "glow_color": "not-a-colour", "glow_angle": []}), encoding="utf-8")
+         "glow_color": "not-a-colour", "glow_angle": []})
     cfg = g.load_branding(tmp_path)
     assert (cfg["anim_speed"], cfg["anim_scale"], cfg["glow_angle"]) == (1.0, 1.0, 0.0)
     assert cfg["glow_color"] == "#94e2d5"
@@ -126,7 +134,7 @@ def test_saved_branding_file_only_ever_holds_acceptable_values(tmp_path):
     g.save_branding(tmp_path, dict(g._BRAND_DEFAULTS, mark="logo", anim="glow",
                                    anim_speed=50, anim_scale=-3, glow_color="nope",
                                    glow_angle=999))
-    raw = json.loads(g._branding_path(tmp_path).read_text(encoding="utf-8"))
+    raw = settings.branding()["animation"]
     assert raw["anim_speed"] == g._BRAND_NUM_RANGES["anim_speed"][1]
     assert raw["anim_scale"] == g._BRAND_NUM_RANGES["anim_scale"][0]
     assert raw["glow_angle"] == g._BRAND_NUM_RANGES["glow_angle"][1]

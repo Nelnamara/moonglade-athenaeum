@@ -145,7 +145,7 @@ def test_main_wires_bonjour_gated_on_lan_bind_with_a_goodbye():
 
 def test_bonjour_status_and_settings_routes(tmp_path, monkeypatch):
     """Functional: the chip's two routes. GET status returns the live state; POST settings
-    validates + writes config.json. (Tier enforcement -- status LOGIN, settings LOCALHOST -- is
+    validates + writes settings.json. (Tier enforcement -- status LOGIN, settings LOCALHOST -- is
     pinned by test_route_tiers' generated snapshot, not re-tested here.)"""
     from tests.conftest import login_client
     from moonglade import backup as core
@@ -165,9 +165,12 @@ def test_bonjour_status_and_settings_routes(tmp_path, monkeypatch):
                  json={"enabled": True, "name": "The Library", "host": "0.0.0.0", "port": 5757}).get_json()
     assert r["ok"] is True and r["enabled"] is True and r["name"] == "The Library"
     assert r["host"] == "0.0.0.0" and r["port"] == 5757
+    from moonglade import settings
+    s = settings.read()
+    assert s["bonjour"] == {"enabled": True, "name": "The Library"}
+    assert s["host"] == "0.0.0.0" and s["port"] == 5757
     cfg = core._load_config() or {}
-    assert cfg["BONJOUR_ENABLED"] is True and cfg["BONJOUR_NAME"] == "The Library"
-    assert cfg["HOST"] == "0.0.0.0" and cfg["PORT"] == 5757
+    assert not {"BONJOUR_ENABLED", "BONJOUR_NAME", "HOST", "PORT"} & set(cfg)
 
     for bad in ({"host": "8.8.8.8"}, {"port": 0}, {"port": 70000}, {"port": "nope"}, {"name": "   "}):
         assert "error" in cli.post("/api/bonjour/settings", json=bad).get_json(), bad

@@ -177,8 +177,19 @@ def test_the_mcp_stand_in_runs_the_mcp_server_and_prints_nothing_of_its_own(tmp_
     (stub / "fastmcp" / "utilities" / "types.py").write_text(
         "class Image:\n    def __init__(self, data=None, format=None):\n        pass\n",
         encoding="utf-8")
-    r = _run("moonglade_mcp.py", cwd=tmp_path, PYTHONPATH=str(stub),
-             MOONGLADE_OUT=str(tmp_path / "library"))
+    # From a COPY of the app folder: the MCP server runs the move first (moonglade.setup), whose
+    # install half works in its app folder's local/ -- never the checkout's.
+    import shutil
+    app = tmp_path / "app"
+    shutil.copytree(REPO_ROOT / "moonglade", app / "moonglade",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(REPO_ROOT / "moonglade_mcp.py", app / "moonglade_mcp.py")
+    (tmp_path / "library").mkdir()
+    r = subprocess.run([sys.executable, str(app / "moonglade_mcp.py")], cwd=str(tmp_path),
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
+                       encoding="utf-8", errors="replace",
+                       env=_env(PYTHONPATH=str(stub), MOONGLADE_OUT=str(tmp_path / "library")))
+    assert (app / "local" / ".journal.json").is_file(), r.stderr
     assert r.returncode == 0, r.stderr
     assert r.stdout == "stub server ran over stdio\n"
     assert r.stderr == ""

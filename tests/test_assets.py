@@ -466,8 +466,8 @@ def test_rename_then_a_newer_manifest_downloads_over_it_leaving_one_pack(tmp_pat
 
 
 def test_both_names_present_leaves_the_old_copy_untouched_and_says_so(tmp_path, caplog):
-    """A pack already under the new name AND one under the old: nothing moves, nothing is
-    deleted (a stray asset copy is the owner's to remove), and one warning says it is there."""
+    """A pack already under the new name that does NOT open as a pack, AND one under the old:
+    nothing moves, nothing is deleted on a guess, and one warning says why."""
     manifest = _manifest_for(REAL_BYTES)
     _old_pack(tmp_path, data=b"an older pack", manifest=manifest)
     new = tmp_path / _NEW
@@ -479,6 +479,23 @@ def test_both_names_present_leaves_the_old_copy_untouched_and_says_so(tmp_path, 
     assert after == before
     warned = _warnings(caplog)
     assert len(warned) == 1 and ma.LEGACY_NAME in warned[0].getMessage()
+
+
+def test_both_names_present_the_app_removes_the_older_copy_itself(tmp_path, caplog):
+    """S13: when the pack under the new name opens as a pack, the one under the pre-v7 name
+    is an older copy of the same art, and the app removes it (and its marker) itself --
+    deleting the app's own dead files is never left to the owner."""
+    from moonglade import container as mc
+    _old_pack(tmp_path, data=b"an older pack", manifest=_manifest_for(REAL_BYTES))
+    new = tmp_path / _NEW
+    mc.write_container(new, {"system/x.txt": b"x"}, {})
+    with caplog.at_level(logging.INFO):
+        assert ma.migrate_legacy_name(new) == "both"
+    assert not (tmp_path / ma.LEGACY_NAME).exists()
+    assert not (tmp_path / (ma.LEGACY_NAME + ".version")).exists()
+    assert new.is_file()
+    assert not _warnings(caplog)
+    assert not any("yourself" in r.getMessage() for r in caplog.records)
 
 
 def test_neither_name_present_is_a_normal_fresh_download(tmp_path):
@@ -556,7 +573,7 @@ def test_a_marker_that_cannot_follow_its_pack_never_leaves_a_stale_one_vouching(
 
 @pytest.mark.parametrize("case", ["renamed", "both", "failed"])
 def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
-    """The start's only record is out_dir/logs/moonglade.log, written through the real
+    """The start's only record is local/logs/moonglade.log, written through the real
     setup_logging. Its root ceiling is WARNING and only the app's own loggers are let through
     below it, so a line logged anywhere else at INFO never reaches the file: each outcome --
     the rename itself included -- must be findable there afterwards."""
@@ -572,14 +589,14 @@ def test_what_the_rename_did_reaches_the_log_file(tmp_path, monkeypatch, case):
         monkeypatch.setattr(ma.os, "replace", _refuse)
     ml._reset_for_tests()
     try:
-        ml.setup_logging(library)
+        ml.setup_logging()
         assert ma.migrate_legacy_name(app / _NEW) == case
-        log = ml.log_path(library)
+        log = ml.log_path()
         text = log.read_text(encoding="utf-8") if log.exists() else ""
     finally:
         ml._reset_for_tests()
     want = {"renamed": "renamed %s to %s" % (ma.LEGACY_NAME, _NEW),
-            "both": "an old copy remains",
+            "both": "does not open as a pack",
             "failed": "could not rename"}[case]
     assert want in text, "%r is not in the log file:\n%s" % (want, text)
 

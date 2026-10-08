@@ -187,26 +187,19 @@ def test_the_pack_version_reads_the_installed_marker(tmp_path):
     assert g.art_pack_info(dat) == {"installed": True, "version": "7"}
 
 
-def test_an_old_pack_left_beside_the_new_one_says_so_on_about(tmp_path):
-    """A start that finds the pack under both names never deletes the old one; About's
-    art-pack line says so in plain words instead (since 3.20 as one entry of the list of old
-    copies that are safe to delete: tests/test_about_leftovers.py). Read from the disk each
-    time, so the note leaves the moment the old copy does, without a restart. No old copy,
-    no note."""
+def test_about_never_lists_old_copies_to_delete(tmp_path):
+    """The app removes its own old copies (DECISIONS 2026-10-05: "The ownership of deleting
+    dead files should NEVER be on the user"), so About's art-pack line never carries a list
+    of files to delete -- not even with an old pack under its pre-v7 name beside the new one
+    (the move removes that itself: tests/test_assets.py)."""
     from moonglade import assets as ma
     (tmp_path / "pack").mkdir()
     new = tmp_path / "pack" / "moonglade.mgpack"
     new.write_bytes(b"x")
+    (tmp_path / "pack" / ma.LEGACY_NAME).write_bytes(b"an older pack")
     assert "note" not in g.art_pack_info(new)
-    old = tmp_path / "pack" / ma.LEGACY_NAME
-    old.write_bytes(b"an older pack")
-    assert g.art_pack_info(new)["note"] == (
-        "Safe to delete once you've checked this version works: moonglade.dat beside the pack.")
-    assert g.about_payload("3.14.1", new)["pack"]["note"] == g.art_pack_info(new)["note"]
-    old.unlink()
-    assert "note" not in g.art_pack_info(new)
+    assert "note" not in g.about_payload("3.14.1", new, out_dir=tmp_path)["pack"]
     new.unlink()
-    old.write_bytes(b"an older pack")            # no pack in use: nothing to say "beside"
     assert g.art_pack_info(new) == {"installed": False, "version": ""}
 
 
@@ -220,22 +213,26 @@ def test_about_shows_the_packs_note_in_its_own_stamp_style():
                      r'\{about\.pack\.note\}</div>', src), "About does not show the pack's note"
 
 
-def test_a_real_start_keeps_what_the_rename_found(tmp_path, monkeypatch, capsys):
-    """main()'s tidy keeps the rename's result rather than dropping it: a start that finds
-    the pack under both names says so on the console it was started from, beside the About
-    card's note."""
+def test_a_real_start_never_asks_the_owner_to_delete_an_old_pack(tmp_path, monkeypatch,
+                                                                   capsys):
+    """A start that finds the pack under both names in the app folder handles it itself (the
+    rename's "both" answer, then the move): nothing on the console or in the log tells the
+    owner to delete something (S13)."""
     from moonglade import assets as ma
     from moonglade import migrate as mig
     from moonglade import paths
+    from moonglade import setup as msetup
     app = tmp_path / "app"
     app.mkdir()
     (app / ma.LEGACY_NAME).write_bytes(b"an older pack")
     (app / "moonglade.mgpack").write_bytes(b"the pack")
     monkeypatch.setattr(paths, "local_dir", lambda: app / "local")
-    monkeypatch.setattr(paths, "old_local_path", lambda name: app / name)
-    mig.tidy_app_folder()
-    said = capsys.readouterr().out
-    assert ma.LEGACY_NAME in said and "safe to delete" in said
+    monkeypatch.setattr(paths, "local_path", lambda name: app / "local" / name)
+    monkeypatch.setattr(mig, "old_app_root", lambda: app)
+    done = msetup.prepare("cli", explicit_out=str(tmp_path / "no-library"))
+    said = capsys.readouterr().out + done.summary()
+    assert "yourself" not in said and "safe to delete" not in said.lower()
+    assert (app / "local" / "moonglade.mgpack").read_bytes() == b"the pack"
 
 
 def test_the_running_version_has_a_changelog_entry():

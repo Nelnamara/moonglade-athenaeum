@@ -12,6 +12,7 @@ from moonglade import assets as moonglade_assets
 from moonglade import backup as core
 from moonglade import container as _mc
 from moonglade import gallery
+from moonglade import migrate as moonglade_migrate
 from moonglade import paths as moonglade_paths
 
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
@@ -249,18 +250,20 @@ def pin_daytime_clock(mp):
 # test that leaves the resolver patched cannot point the guard at a decoy.
 _REAL_CODED_ROOT = gallery.branding_root()
 # The real machine files' folder and the real pack, resolved the same way and for the same
-# reason: the pack and branding.json are moonglade_paths.local_path() files, NOT the coded
-# tree's siblings, so pinning branding_root() alone no longer keeps a test away from them.
+# reason: the pack and settings.json are local/ files (moonglade.paths), NOT the coded tree's
+# siblings, so pinning branding_root() alone no longer keeps a test away from them.
 _REAL_LOCAL_PACK = moonglade_paths.local_path("moonglade.mgpack")
-# 3.20: the machine files' real folder (local/), the real old places a start brings them
-# across from, and the checkout's own default library -- whose records a start brings into
-# its _moonglade/. Resolved at import, before any pin, for _real_machine_files_untouched.
+# The machine files' real folder (local/), the real old places the move brings them across
+# from (the app folder itself), and the checkout's own default library -- whose records the
+# move brings into its _moonglade/. Resolved at import, before any pin, for
+# _real_machine_files_untouched.
 _REAL_LOCAL_DIR = moonglade_paths.local_dir()
 _REAL_APP_ROOT = moonglade_paths.APP_ROOT
 _REAL_DEFAULT_LIBRARY = moonglade_paths.default_library_path()
-# The empty folder, under each test's own tmp_path, that stands in for the app root a start
-# brings the machine files across FROM.
-_OLD_APP_ROOT_NAME = "app-before-3.20"
+# The empty folder, under each test's own tmp_path, that stands in for the app folder of an
+# install before this layout (moonglade.migrate.old_app_root), which the move brings the
+# machine files across FROM.
+_OLD_APP_ROOT_NAME = "app-before-the-move"
 
 
 def _snapshot_coded_tree():
@@ -324,11 +327,15 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     root = tmp_path_factory.mktemp("session-branding")
     mp.setattr(gallery, "branding_root", lambda: root / "branding")
     # ...and the machine files (the pack among them), which no longer derive from the tree --
-    # their folder, and the old places a start brings them across from (moonglade.migrate),
-    # so a fixture that runs a real start's tidy moves nothing of the checkout's own.
+    # their folder, and the old app folder the move brings them across from
+    # (moonglade.migrate.old_app_root), so a fixture that runs a real start moves nothing of
+    # the checkout's own.
     mp.setattr(moonglade_paths, "local_path", lambda name: root / name)
     mp.setattr(moonglade_paths, "local_dir", lambda: root)
-    mp.setattr(moonglade_paths, "old_local_path", lambda name: root / _OLD_APP_ROOT_NAME / name)
+    mp.setattr(moonglade_migrate, "old_app_root", lambda: root / _OLD_APP_ROOT_NAME)
+    # ...and the folder a relative library (the default one among them) is anchored to, so a
+    # start with no --out opens a library of the session's own, never the checkout's.
+    mp.setattr(moonglade_paths, "library_anchor", lambda: root)
     seed_sealed_container(gallery._container_path())
     try:
         yield root
@@ -389,25 +396,27 @@ def _stamp(p):
 
 
 def _snapshot_machine_files():
-    """A read-only census of what a 3.20 start's tidy would touch in the REAL checkout: the
-    machine files' folder and its record of what moved, the old places the pack, its marker,
-    the mirror token and the icon cache move FROM (a move makes them vanish), and the default
-    library's records folder and its record. Never creates, never writes.
+    """A read-only census of what a start's move would touch in the REAL checkout: the
+    machine files' folder, its journal and its settings.json, the old places the pack, its
+    marker, the mirror token, the settings files and the icon cache move FROM (a move makes
+    them vanish), and the default library's app folder and its journal. Never creates, never
+    writes.
 
-    Sizes and times of the old files are deliberately NOT compared: on the owner's machine a
-    running server may rewrite the mirror token or branding_slots.json mid-run. A tidy's
-    footprint is presence -- a folder appearing, a file vanishing -- and the two MOVED.json
-    records, which only a migration writes."""
+    Sizes and times are deliberately NOT compared: on the owner's machine a running server
+    may rewrite the mirror token or settings.json mid-run. A move's footprint is presence --
+    a folder appearing, a file vanishing -- and the two journals, which only the move writes."""
     from moonglade import assets as _ma
-    records = _REAL_DEFAULT_LIBRARY / moonglade_paths.RECORDS_DIRNAME
+    app = _REAL_DEFAULT_LIBRARY / moonglade_paths.LIBRARY_APP_DIRNAME
     out = {
         "local/": _stamp(_REAL_LOCAL_DIR) == "dir",
-        "local/MOVED.json": _stamp(_REAL_LOCAL_DIR / moonglade_paths.MOVED_NAME),
-        "library/_moonglade/": _stamp(records) == "dir",
-        "library/_moonglade/MOVED.json": _stamp(records / moonglade_paths.MOVED_NAME),
+        "local/.journal.json": _stamp(_REAL_LOCAL_DIR / moonglade_paths.JOURNAL_NAME),
+        "local/.lock": _stamp(_REAL_LOCAL_DIR / moonglade_paths.LOCK_NAME) is not None,
+        "library/_moonglade/": _stamp(app) == "dir",
+        "library/_moonglade/.journal.json": _stamp(app / moonglade_paths.JOURNAL_NAME),
     }
     for name in ("moonglade.mgpack", "moonglade.mgpack.version", _ma.LEGACY_NAME,
-                 moonglade_paths.MIRROR_SESSION_NAME, moonglade_paths.OLD_ICON_CACHE_NAME):
+                 moonglade_paths.MIRROR_SESSION_NAME, moonglade_migrate.OLD_ICON_CACHE,
+                 "serve.txt", "branding.json", "branding_slots.json"):
         out[name] = _stamp(_REAL_APP_ROOT / name) is not None
     return out
 
@@ -416,8 +425,8 @@ def _snapshot_machine_files():
 def _real_machine_files_untouched():
     """No test runs a real start's tidy against the checkout itself -- and this watches.
 
-    The pins above (local_dir, old_local_path, local_path) are the prevention: a test that
-    runs main() or the launcher's tidy brings nothing across but its own tmp folders. This is
+    The pins above (local_dir, local_path, moonglade.migrate.old_app_root) are the prevention:
+    a test that runs main() or prepare() brings nothing across but its own tmp folders. This is
     the backstop, for the machine where it would matter most -- the owner's, where the real
     pack (several hundred MB) and his mirror login sit beside the checkout: a tidy that ran
     for real would move them into a local/ folder this checkout never had."""
@@ -427,7 +436,7 @@ def _real_machine_files_untouched():
     if before != after:
         changed = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
         pytest.fail("a test brought the checkout's own machine files or library records "
-                    "across (moonglade.migrate) -- pin local_dir / old_local_path, or run "
+                    "across (moonglade.migrate) -- pin local_dir / migrate.old_app_root, or run "
                     "the migration on a tmp folder. Changed (before, after): {}"
                     .format(changed))
 
@@ -548,9 +557,8 @@ def _isolated_branding(tmp_path, monkeypatch):
 
     Redirecting the resolver to tmp_path restores exactly the semantics the whole suite was
     already written against (branding under the per-test directory), so every existing branding
-    test keeps working unchanged and this is a no-op for them. Note _branding_path() derives
-    branding.json as a SIBLING of this, which lands it at tmp_path/branding.json -- the path
-    tests/test_branding.py already expects."""
+    test keeps working unchanged and this is a no-op for them. (The branding picks live in
+    settings.json, under local_dir() -- pinned to this same tmp_path by _isolated_local_files.)"""
     monkeypatch.setattr(gallery, "branding_root", lambda: tmp_path / "branding")
 
 
@@ -565,15 +573,19 @@ def _isolated_local_files(tmp_path, monkeypatch):
     the art tree and the machine files are separate concepts now (Wave 4): a test that
     re-points one does not move the other.
 
-    3.20 keeps them in local/ and a real start brings an old install's across
-    (moonglade.migrate). The folder it brings them into (local_dir) is this same tmp_path,
-    and the old places it brings them FROM (old_local_path) are an empty folder of this
-    test's own: a test that runs main(), or the launcher's tidy, can never move the
-    checkout's real pack, token or icons. mirror_session.json is a machine file now too."""
+    They live in local/ (settings.json among them) and a real start's move brings an older
+    install's across (moonglade.migrate). The folder it brings them into (local_dir) is this
+    same tmp_path, and the old app folder it brings them FROM (migrate.old_app_root) is an
+    empty folder of this test's own: a test that runs main() or prepare() can never move the
+    checkout's real pack, token or icons, or read its settings."""
     monkeypatch.setattr(moonglade_paths, "local_path", lambda name: tmp_path / name)
     monkeypatch.setattr(moonglade_paths, "local_dir", lambda: tmp_path)
-    monkeypatch.setattr(moonglade_paths, "old_local_path",
-                        lambda name: tmp_path / _OLD_APP_ROOT_NAME / name)
+    monkeypatch.setattr(moonglade_migrate, "old_app_root",
+                        lambda: tmp_path / _OLD_APP_ROOT_NAME)
+    # A relative library -- the default `pixai_backup` among them -- is anchored here, so a
+    # start with no --out (main(), prepare()) opens this test's own library, never the
+    # checkout's.
+    monkeypatch.setattr(moonglade_paths, "library_anchor", lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)

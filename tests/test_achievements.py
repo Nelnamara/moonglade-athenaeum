@@ -185,7 +185,7 @@ def test_state_roundtrip_and_soft_fail(tmp_path):
     g.save_ach_state(tmp_path, {"seen": [], "skin": ""})
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
     # corrupt file -> default, never raises
-    (tmp_path / "achievements.json").write_text("{not json", encoding="utf-8")
+    g._ach_state_path(tmp_path).write_text("{not json", encoding="utf-8")
     assert g.load_ach_state(tmp_path)["skin"] == "moonglade"
 
 

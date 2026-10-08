@@ -37,6 +37,7 @@ import time
 
 import pytest
 
+from moonglade import settings as _settings
 from moonglade import container as mc
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
@@ -637,10 +638,12 @@ def test_building_the_app_never_moves_a_render_out_of_the_tree(tmp_path):
     assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
 
 
-def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_path):
+def test_startup_migration_moves_a_pre_existing_root_flat_into_the_kept_banners(tmp_path):
     """MOVE, never delete: that flat is the banner the install is currently
     WEARING, and re-rendering it needs an active asset that may only exist in
-    the container."""
+    the container. It is the only copy, so it goes to local/banners/ (never a
+    cache, never the art tree -- B6), and settings.json's worn_banner says the
+    slot wears it."""
     _seed_catalog(tmp_path)
     root = _mkdir(g.branding_root())
     raw = _png_bytes((7, 8, 9))
@@ -648,15 +651,16 @@ def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_pat
 
     g._migrate_root_banner_flats(tmp_path)     # what a real start (main()) runs
 
-    dst = g.banner_cache_dir(tmp_path) / "banner.png"
+    dst = g.banner_keep_dir() / "banner.png"
     assert not (root / "banner.png").exists()
     assert dst.read_bytes() == raw, "moved, not re-rendered and not dropped"
-    assert g._read_banner_record(tmp_path, "banner.png") == {"kind": "migrated"}
+    assert g._worn_banner("banner_main") == {"kind": "migrated"}
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists(), "never into a cache"
 
     g._migrate_root_banner_flats(tmp_path)     # idempotent: a no-op second time
     assert dst.read_bytes() == raw
 
-    # A cache render already in place is the newer truth. A stale root leftover
+    # A kept banner already in place is the newer truth. A stale root leftover
     # never overwrites it, and is left where it is rather than deleted.
     (root / "banner.png").write_bytes(_png_bytes((1, 2, 3)))
     g._migrate_root_banner_flats(tmp_path)
@@ -666,16 +670,13 @@ def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_pat
 
 def test_a_migrated_flat_survives_the_startup_ensure_pass(tmp_path):
     """The move is only half the fix. main() migrates and then builds the app,
-    whose ensure pass looks at every slot -- so without provenance the arriving
-    flat reads as "a render exists, is it current?", the slot's pick wins, and
-    the banner the install is actually WEARING is re-rendered away on the very
-    first start after the upgrade. 'migrated' is never regenerated."""
+    whose ensure pass looks at every slot -- the banner the install is actually
+    WEARING must not be re-rendered away on the very first start after the
+    upgrade. A slot wearing a migrated banner is served from local/banners/ and
+    the ensure pass never touches it."""
     _seed_catalog(tmp_path)
     # A real recorded pick, so there IS something the ensure pass could render.
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    dst = g.banner_cache_dir(tmp_path) / "banner.png"
-    dst.unlink()
-    g._banner_record_path(tmp_path, "banner.png").unlink()
 
     root = _mkdir(g.branding_root())
     worn = _png_bytes((7, 8, 9))
@@ -683,8 +684,12 @@ def test_a_migrated_flat_survives_the_startup_ensure_pass(tmp_path):
     g._migrate_root_banner_flats(tmp_path)     # what main() runs, before create_app
 
     create_app(tmp_path)
-    assert dst.read_bytes() == worn, \
+    kept = g.banner_keep_dir() / "banner.png"
+    assert kept.read_bytes() == worn, \
         "app startup re-rendered the slot's pick over the migrated banner"
+    assert g._served_flat_dir(tmp_path, "banner_main") == g.banner_keep_dir()
+    cli = _public_client(tmp_path)
+    assert cli.get("/branding/banner.png").data == worn
 
 
 def test_a_real_start_runs_the_root_flat_migration(tmp_path):
@@ -719,11 +724,9 @@ def test_a_real_start_runs_the_root_flat_migration(tmp_path):
 
 
 def test_an_absent_cache_render_is_rebuilt_at_startup_not_defaulted(tmp_path):
-    """banner_cache_dir() hangs off out_dir (the LIBRARY) while the pick that
-    produces a render hangs off the app folder (branding_slots.json), so an
-    absent render has to be rebuilt from the pick or pointing the app at a
-    second library would wear the shipped default while the owner's real pick
-    sat recorded -- the coupling branding_root() left out_dir to kill.
+    """The cache (local/cache/banners/) is rebuildable: an absent render has to be
+    rebuilt from the recorded pick (settings.json), or a cleared cache would wear
+    the shipped default while the owner's real pick sat recorded.
 
     The rebuild happens at STARTUP, not on the request path: /branding/<flat> is
     PUBLIC tier, and an anonymous GET must not be able to schedule a Pillow
@@ -737,7 +740,7 @@ def test_an_absent_cache_render_is_rebuilt_at_startup_not_defaulted(tmp_path):
     mine = flat.read_bytes()
 
     _build_box(tmp_path, {g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
-    flat.unlink()                                   # a library this install never rendered into
+    flat.unlink()                                   # a cleared cache
     g._banner_record_path(tmp_path, "banner.png").unlink()
 
     create_app(tmp_path)                            # the next start
@@ -787,16 +790,17 @@ def test_serving_prefers_the_cache_render_then_the_sealed_default(tmp_path):
 # ---------------------------------------------------------------------------
 # 2b. A render carries its provenance
 #
-# The cache used to decide staleness by MTIME against the SHARED
-# branding_slots.json, which is not a provenance at all: any slot's change made
-# every slot's flat look stale, and an applied earned banner was silently
-# re-rendered back to banner_main's slot pick on the next request. The record
-# beside each render is what replaced that.
+# The cache used to decide staleness by MTIME against the SHARED pick file,
+# which is not a provenance at all: any slot's change made every slot's flat
+# look stale, and an applied earned banner was silently re-rendered back to
+# banner_main's slot pick on the next request. The record beside each render,
+# and settings.json's worn_banner for what a slot wears beyond its pick (B6),
+# are what replaced that.
 # ---------------------------------------------------------------------------
 
 def test_one_slots_change_does_not_regenerate_another_slots_render(tmp_path):
-    """branding_slots.json holds all three picks, so its mtime says nothing
-    about WHICH slot moved. The record does: only the slot whose own pick or
+    """settings.json holds all three picks, so its mtime says nothing about
+    WHICH slot moved. The record does: only the slot whose own pick or
     transform changed is re-rendered."""
     _seed_catalog(tmp_path)
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
@@ -814,60 +818,96 @@ def test_one_slots_change_does_not_regenerate_another_slots_render(tmp_path):
         "banner_login's render was rewritten because ANOTHER slot's pick moved"
 
 
-def test_an_applied_earned_banner_is_never_reverted_by_the_ensure_pass(tmp_path):
+_EARNED = {"kind": "earned", "banner_id": "great_library"}
+
+
+def test_an_applied_earned_banner_is_never_reverted_by_the_ensure_pass(tmp_path, monkeypatch):
     """The earned banner is rendered from sealed bytes with no slot pick behind
-    it. Startup must leave it alone however many slot picks are recorded, or
-    applying one is undone by the next restart."""
+    it, and the choice to wear it is settings.json's worn_banner. Startup must
+    leave it alone however many slot picks are recorded, or applying one is
+    undone by the next restart."""
     _seed_catalog(tmp_path)
+    monkeypatch.setattr(g, "_earned_banner_ok", lambda *a, **k: True)
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     flat = g.banner_cache_dir(tmp_path) / "banner.png"
 
     assert g._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
-                                 record={"kind": "earned",
-                                         "banner_id": "great_library"}) is True
+                                 record=dict(_EARNED)) is True
+    g._set_worn_banner("banner_main", dict(_EARNED))
     applied = flat.read_bytes()
 
     create_app(tmp_path)
     g._ensure_banner_renders(tmp_path)              # and again, directly
     assert flat.read_bytes() == applied, "the ensure pass reverted an applied earned banner"
     assert g._read_banner_record(tmp_path, "banner.png")["kind"] == "earned"
+    assert g._worn_banner("banner_main") == _EARNED
 
 
-@pytest.mark.parametrize("record", [
-    {"kind": "earned", "banner_id": "great_library"},
-    {"kind": "migrated"},
-])
-def test_a_render_that_goes_missing_never_costs_its_provenance(tmp_path, record):
-    """A render and its record can part company -- a selective cache cleanup, a
-    png quarantined by a virus scanner, a library copied while it was being
-    written. Reading the record only when the png is PRESENT makes that a silent
-    revert: the ensure pass sees "no render", calls the slot renderer, and the
-    renderer stamps its own {"kind": "slot"} over the record on the way past. An
-    applied earned banner would come back as the slot pick on the next restart,
-    and a migrated flat -- which may have nothing left to re-render from -- would
-    lose the only thing saying so.
-
-    So the record is read first, and 'earned'/'migrated' is left alone whether
-    its bytes are there or not. A missing render is reported missing and the
-    route falls through to the container copy and the sealed default, which the
-    owner can undo; an overwritten record he cannot."""
+def test_an_earned_banner_not_earned_in_this_library_shows_the_pick_and_is_kept(tmp_path):
+    """S5: wearing the earned banner is the install's choice (settings.json), but
+    the reward is the library's. In a library where it is not earned the slot
+    shows its own pick -- and the choice stays stored for when the library
+    changes back."""
     _seed_catalog(tmp_path)
     pick = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
-    flat = g.banner_cache_dir(tmp_path) / "banner.png"
     assert g._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
-                                 record=dict(record)) is True
+                                 record=dict(_EARNED)) is True
+    g._set_worn_banner("banner_main", dict(_EARNED))
+    assert g._earned_banner_ok(tmp_path, "great_library") is False   # nothing earned here
 
-    flat.unlink()                                   # the png alone goes missing
-    assert g._banner_record_path(tmp_path, "banner.png").is_file()
+    create_app(tmp_path)
+    rec = g._read_banner_record(tmp_path, "banner.png")
+    assert rec["kind"] == "slot" and rec["asset_id"] == pick["id"]
+    assert g._worn_banner("banner_main") == _EARNED, "the choice is kept"
+
+
+def test_an_earned_render_that_goes_missing_is_rebuilt_from_the_pack(tmp_path, monkeypatch):
+    """The render is a cache; the choice is not. A missing earned render is made
+    again from the pack's own bytes, and the choice in settings.json is never
+    overwritten by the slot renderer on the way past."""
+    _seed_catalog(tmp_path)
+    monkeypatch.setattr(g, "_earned_banner_ok", lambda *a, **k: True)
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    _build_box(tmp_path, {g._role_rel("earned_banners", "great_library.png"):
+                          _png_bytes((1, 1, 250))})
+    g._set_worn_banner("banner_main", dict(_EARNED))
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    if flat.exists():
+        flat.unlink()
+
+    assert g._ensure_banner_flat(tmp_path, "banner_main") == flat
+    assert g._read_banner_record(tmp_path, "banner.png") == _EARNED
+    from PIL import Image
+    with Image.open(flat) as im:
+        assert im.convert("RGB").getpixel((0, 0)) == (1, 1, 250)
+    assert g._worn_banner("banner_main") == _EARNED
+
+
+def test_a_kept_banner_that_goes_missing_is_never_replaced_by_the_pick(tmp_path):
+    """A migrated banner is the only copy. When it goes missing the slot is
+    reported missing -- the route falls through to the container copy and the
+    sealed default, which the owner can undo -- and nothing is rendered in its
+    place, nor its choice overwritten."""
+    _seed_catalog(tmp_path)
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    g._set_worn_banner("banner_main", {"kind": "migrated"})
+    assert not (g.banner_keep_dir() / "banner.png").exists()
 
     assert g._ensure_banner_flat(tmp_path, "banner_main") is None
-    create_app(tmp_path)                            # and a whole start over it
+    create_app(tmp_path)
+    assert g._worn_banner("banner_main") == {"kind": "migrated"}
+    assert not (g.banner_keep_dir() / "banner.png").exists()
 
-    assert g._read_banner_record(tmp_path, "banner.png") == record, \
-        "the slot renderer overwrote a record it does not own"
-    assert not flat.exists(), \
-        "the ensure pass rendered the slot pick into a flat that was not its own"
-    assert pick["id"]                               # there WAS a pick to render, and it did not
+
+def test_an_explicit_pick_wears_the_slot_again(tmp_path, monkeypatch):
+    """Only an explicit action -- an upload, a pick, a crop -- replaces what a slot
+    wears; it clears worn_banner for that slot."""
+    _seed_catalog(tmp_path)
+    g._set_worn_banner("banner_main", {"kind": "migrated"})
+    g._set_worn_banner("banner_login", {"kind": "migrated"})
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    assert g._worn_banner("banner_main") is None
+    assert g._worn_banner("banner_login") == {"kind": "migrated"}, "only that slot"
 
 
 def test_a_slot_render_regenerates_when_its_own_pick_moves(tmp_path):
@@ -894,10 +934,12 @@ def test_a_slot_render_regenerates_when_its_own_pick_moves(tmp_path):
         assert im.convert("RGB").getpixel((0, 0)) == (200, 10, 10)
 
 
-def test_a_render_with_no_record_is_left_alone(tmp_path):
-    """A render this build cannot account for -- an older build's cache, a
-    record that failed to write -- is opaque, and opaque means untouched. The
-    file is what the install is wearing; nothing here knows better."""
+def test_a_cache_render_with_no_record_is_the_caches_own_and_is_rebuilt(tmp_path):
+    """Everything in local/cache/banners/ is this app's own render, stamped with what it
+    was rendered from. A file there with no record is stale cache, and is rebuilt from the
+    pick. (A render that is the ONLY copy of what the install wears -- one with no record
+    in an older layout's cache -- is moved to local/banners/ by the move, B6, and never
+    lives in the cache.)"""
     _seed_catalog(tmp_path)
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     flat = g.banner_cache_dir(tmp_path) / "banner.png"
@@ -905,7 +947,8 @@ def test_a_render_with_no_record_is_left_alone(tmp_path):
     flat.write_bytes(b"SOMETHING OLDER")
 
     create_app(tmp_path)
-    assert flat.read_bytes() == b"SOMETHING OLDER"
+    assert flat.read_bytes() != b"SOMETHING OLDER"
+    assert g._read_banner_record(tmp_path, "banner.png")["kind"] == "slot"
 
 
 # ---------------------------------------------------------------------------
@@ -921,6 +964,10 @@ def test_a_render_with_no_record_is_left_alone(tmp_path):
 # what it resolved.
 # ---------------------------------------------------------------------------
 
+def _drop_recorded_picks():
+    _settings.update_branding(lambda b: b.pop("slots", None))
+
+
 @pytest.mark.parametrize("order", [("aaaa1111", "zzzz9999"), ("zzzz9999", "aaaa1111")])
 def test_an_unrecorded_pick_resolves_to_the_last_manifest_item(tmp_path, order):
     """The rule is the manifest's LAST item -- the most recent upload, which is
@@ -933,7 +980,7 @@ def test_an_unrecorded_pick_resolves_to_the_last_manifest_item(tmp_path, order):
         (sdir / (iid + ".png")).write_bytes(_png_bytes())
     (sdir / "manifest.json").write_text(
         json.dumps({"items": [{"id": i} for i in order]}), encoding="utf-8")
-    assert not g._slot_active_path(tmp_path).exists(), "no recorded pick is the state under test"
+    assert "slots" not in _settings.branding(), "no recorded pick is the state under test"
 
     assert g.resolve_slot_active(tmp_path, "banner_main") == order[-1]
     assert g.load_slot_active(tmp_path)["banner_main"] == order[-1]
@@ -945,14 +992,14 @@ def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
     """End to end: two assets, no recorded pick, two server starts, one render.
     A real start also RECORDS the resolution, so the answer stops being
     re-derived from the manifest at every boot -- run here in main()'s order
-    (record, then build the app), because branding_slots.json hangs off the
-    coded tree and create_app() must not write it."""
+    (record, then build the app), because create_app() must not write the
+    recorded picks."""
     _seed_catalog(tmp_path)
     first = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
     flat = g.banner_cache_dir(tmp_path) / "banner.png"
-    # the pick file goes missing -- a library copied mid-write, a cleaned app folder
-    g._slot_active_path(tmp_path).unlink()
+    # the recorded pick goes missing -- a settings.json restored from elsewhere
+    _drop_recorded_picks()
     flat.unlink()
     g._banner_record_path(tmp_path, "banner.png").unlink()
 
@@ -980,37 +1027,35 @@ def test_the_render_is_the_same_asset_even_with_nobody_recording_it(tmp_path):
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
     flat = g.banner_cache_dir(tmp_path) / "banner.png"
-    pick = g._slot_active_path(tmp_path)
-    pick.unlink()                                   # never recorded, ever
+    _drop_recorded_picks()                          # never recorded, ever
 
     for _ in range(2):
         flat.unlink()
         g._banner_record_path(tmp_path, "banner.png").unlink()
         create_app(tmp_path)
-        assert not pick.exists(), \
-            "app construction wrote the pick file that lives beside the coded tree"
+        assert "slots" not in _settings.branding(), \
+            "app construction wrote the recorded picks"
         assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"]
 
 
 def test_building_the_app_never_writes_the_slot_pick_file(tmp_path):
-    """Same rule as the flat migration above, same reason: branding_slots.json
-    is addressed off branding_root(), NOT out_dir, so on the module-scoped
-    fixtures that conftest's per-test isolation cannot reach it resolves to this
-    checkout's real app folder. A plain pytest run must not rewrite the owner's
-    own picks. Recording belongs to main().
+    """Same rule as the flat migration above: building the app never records a
+    pick. The picks are this install's settings (settings.json, local/), and on
+    the module-scoped fixtures that conftest's per-test isolation cannot reach a
+    write there would land outside the test's own folder. Recording belongs to
+    main().
 
     The state under test is the one that makes the record step want to write:
     assets present, no pick recorded."""
     _seed_catalog(tmp_path)
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
-    pick = g._slot_active_path(tmp_path)
-    pick.unlink()
+    _drop_recorded_picks()
 
     create_app(tmp_path)
 
-    assert not pick.exists(), \
-        "app construction wrote branding_slots.json beside the coded tree"
+    assert "slots" not in _settings.branding(), \
+        "app construction wrote the recorded picks"
 
 
 def test_a_real_start_records_the_slot_resolution(tmp_path):

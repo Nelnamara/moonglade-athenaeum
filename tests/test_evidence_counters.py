@@ -210,7 +210,7 @@ def test_old_counters_in_telemetry_no_longer_shadow_the_catalog(tmp_path):
     """The merge is catalog then telemetry, and a counter of the same name used to win.
     The retired counters are dropped from the flatten, so a stale or hand-edited
     telemetry.json cannot speak for them any more."""
-    (tmp_path / "telemetry.json").write_text(json.dumps({
+    g._telemetry_path(tmp_path).write_text(json.dumps({
         "counters": {"edits": 999, "lora_used": 999, "lora_distinct": 999, "gen_streak": 999},
         "maxima": {"lora_stacked": 999}, "sets": {"loras": ["a", "b"]}, "flags": {},
         "days": [], "day_lists": {"gen_days": ["2026-01-01", "2026-01-02"]}}),

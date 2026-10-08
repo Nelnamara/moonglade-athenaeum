@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from moonglade import paths as _paths
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import CATALOG_FIELDS, _account_key, create_app, save_catalog
@@ -103,7 +104,7 @@ def _upload(cli, data, filename="bed.mp3", csrf=None, board="b1"):
 
 
 def _beds_dir(tmp, user=_TEST_USERNAME):
-    return tmp / "loom" / "_beds" / _account_key(user)
+    return _paths.loom_root(tmp) / "_beds" / _account_key(user)
 
 
 def _save_board(cli, board_id, project):
@@ -480,12 +481,12 @@ def test_the_zip_is_deleted_once_the_download_closes(clips):
     r = cli.post("/api/loom/export-edl", json=_edl_body(cli), buffered=True)
     assert r.status_code == 200
     r.close()
-    d = clips["tmp"] / "loom" / "_exports"
+    d = _paths.loom_root(clips["tmp"]) / "_exports"
     assert d.is_dir() and not list(d.glob("*.zip"))
 
 
 def test_a_stale_export_is_swept_at_start_and_a_fresh_one_kept(tmp_path):
-    d = tmp_path / "loom" / "_exports"
+    d = _paths.loom_root(tmp_path) / "_exports"
     d.mkdir(parents=True)
     old, new = d / "old.zip", d / "new.zip"
     old.write_bytes(b"x")
@@ -743,7 +744,7 @@ def frames(clips, monkeypatch):
         return out
     monkeypatch.setattr(core, "frame_at", fake_frame_at)
     clips["calls"] = calls
-    clips["fdir"] = clips["tmp"] / "loom" / "_frames"
+    clips["fdir"] = _paths.loom_root(clips["tmp"]) / "_frames"
     return clips
 
 
@@ -829,7 +830,7 @@ def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
     n = _upload(cli, FLAC).get_json()["file"]
     _age(_beds_dir(rig["tmp"]) / n)
     _save_board(cli, "b9", {"name": "b", "acts": [], "bed": {"file": n}})
-    boards = [p for p in (rig["tmp"] / "loom").rglob("*.json") if "b9" in p.name]
+    boards = [p for p in _paths.loom_root(rig["tmp"]).rglob("*.json") if "b9" in p.name]
     assert len(boards) == 1, boards
     boards[0].write_text('{"name": "b", "acts": [', encoding="utf-8")     # torn mid-write
     r = cli.get("/api/loom/beds/unused")
@@ -842,7 +843,7 @@ def test_a_board_that_will_not_read_blocks_the_unused_list_and_the_sweep(rig):
 def _legacy_board_file(tmp, board_id, text):
     """A board only the legacy shared layer (out_dir/loom/kv/) holds, written as-is."""
     from urllib.parse import quote
-    d = tmp / "loom" / "kv"
+    d = _paths.loom_root(tmp) / "kv"
     d.mkdir(parents=True, exist_ok=True)
     p = d / (quote("storyboard:v2:proj:" + board_id, safe="") + ".json")
     p.write_text(text, encoding="utf-8")
@@ -858,14 +859,15 @@ def test_the_refusal_names_every_board_that_will_not_read_and_where_its_file_is(
     n = _upload(cli, FLAC).get_json()["file"]
     _age(_beds_dir(tmp) / n)
     _save_board(cli, "b9", {"name": "Moonwell ep 1", "acts": [], "bed": {"file": n}})
-    own = [p for p in (tmp / "loom").rglob("*.json") if "b9" in p.name]
+    own = [p for p in _paths.loom_root(tmp).rglob("*.json") if "b9" in p.name]
     assert len(own) == 1, own
     # The account's own copy, torn mid-write (the stored value is the board as a JSON string).
     own[0].write_text('"{\\"name\\": \\"Moonwell ep 1\\", \\"acts\\": [{\\"id\\": \\"x', encoding="utf-8")
     # A board only the legacy layer holds: its file reads, the board inside it does not.
     _legacy_board_file(tmp, "b8", json.dumps('{"name": "Old reel", "acts": [{"id": "act-private-words'))
-    own_where = "loom/kv/" + _account_key(_TEST_USERNAME) + "/storyboard%3Av2%3Aproj%3Ab9.json"
-    legacy_where = "loom/kv/storyboard%3Av2%3Aproj%3Ab8.json"
+    own_where = ("_moonglade/loom/kv/" + _account_key(_TEST_USERNAME)
+                 + "/storyboard%3Av2%3Aproj%3Ab9.json")
+    legacy_where = "_moonglade/loom/kv/storyboard%3Av2%3Aproj%3Ab8.json"
     for r in (cli.get("/api/loom/beds/unused"),
               cli.post("/api/loom/beds/sweep", json={"csrf": cli.csrf, "files": [n]})):
         assert r.status_code == 409, r.get_json()

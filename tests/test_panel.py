@@ -305,7 +305,7 @@ def test_schedule_roundtrip_and_safe_only(tmp_path):
     s = cli.post("/api/panel/schedule",
                  json={"enabled": True, "action": "sync-videos", "interval_hours": 12}).get_json()
     assert s["enabled"] is True and s["action"] == "sync-videos" and s["interval_hours"] == 12
-    assert paths.state_path(tmp_path, "schedule.json").exists()
+    assert paths.records_path(tmp_path, "schedule.json").exists()
     assert cli.get("/api/panel/schedule").get_json()["interval_hours"] == 12
     # destructive actions cannot be scheduled
     r = cli.post("/api/panel/schedule", json={"enabled": True, "action": "dedup-apply"})

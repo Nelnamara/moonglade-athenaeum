@@ -1,14 +1,16 @@
-"""The library's own records go through one resolver (Wave 4 groundwork 3.19.0; moved 3.20.0).
+"""The library's own records go through named resolvers (SPEC_3.20_REBUILD.md, Lane D).
 
-moonglade_paths.state_path(out_dir, name) names the app's state files and folders inside a
-library; moonglade_paths.reports_path(out_dir, name) names its reports. Since 3.20 they are
-`out_dir/_moonglade/name` and `out_dir/_moonglade/reports/name` (a library not yet brought
-across is read where it is: tests/test_library_records_folder.py). That only works if no
-code builds one of these names off out_dir by hand, which the lint at the foot of this file
-holds.
+In a library everything of the app's is in its _moonglade/ folder, one home each:
+  * moonglade_paths.records_path(out_dir, name)    _moonglade/records/name
+  * moonglade_paths.decisions_path(out_dir, name)  _moonglade/decisions/name
+  * moonglade_paths.account_dir(out_dir, login)    _moonglade/accounts/<login key>/
+  * moonglade_paths.loom_root(out_dir)             _moonglade/loom/
+and the app's log is this install's (local/logs/), never a library's. Nothing reads an old
+place: only the move (moonglade.migrate) names one, which is why the lint at the foot of this
+file exempts it beside moonglade/paths.py.
 
-NOT records, and never routed through here: catalog.db, the picture folders, loom/,
-gallery/, _deleted/ and _duplicates/ -- they stay where they are.
+NOT records, and never routed through here: catalog.db, the picture folders, gallery/,
+_deleted/ and _duplicates/ -- they stay where they are.
 """
 import ast
 from pathlib import Path
@@ -25,118 +27,139 @@ from tests.conftest import first_party_sources
 
 _REPO = Path(__file__).resolve().parents[1]
 
-STATE_NAMES = (
+RECORD_NAMES = (
     "achievements.json", "telemetry.json", "schedule.json", "train_guard.json",
     "reconcile_stamp.json", "jobs.jsonl", "raw_tasks.jsonl", "runs.db",
-    "account_prefs", "account_state", "prompt_snippets", "toolbox_presets",
-    "view_presets", "logs",
-    # the install-wide files those per-account folders replaced, still read as a fallback for
-    # an account with no file of its own (an install can have a live one: D:'s toolbox presets)
-    "prompt_snippets.json", "toolbox_presets.json", "view_presets.json",
+    "integrity_report.csv", "integrity_report.json", "integrity_report.lock",
+    "audit_report.csv", "verify_report.csv",
 )
-REPORT_NAMES = (
-    "integrity_report.csv", "integrity_report.json", "integrity_marks.json",
-    "integrity_report.lock", "audit_report.csv", "verify_report.csv",
-    "organize_manifest.csv",
-)
-# Also a report, by a name with a time in it so the lint below cannot list it: the curation
-# import's undo file, curation_pre_import_<time>.json (test_the_curation_snapshot_...). The
-# CLI's --export-curation default file is NOT a record: it is the export the owner asked for.
-# Library contents that are NOT the app's records: they stay put.
-NOT_RECORDS = ("catalog.db", "images", "videos", "imported", "loom", "gallery",
-               "_deleted", "_duplicates")
+DECISION_NAMES = ("integrity_marks.json", "organize_manifest.csv")
+# The per-login folders and the legacy shared files of older layouts, which only the move
+# may name now (the lint below holds every other module away from them).
+OLD_LAYOUT_NAMES = ("account_prefs", "account_state", "prompt_snippets", "toolbox_presets",
+                    "view_presets", "logs", "prompt_snippets.json", "toolbox_presets.json",
+                    "view_presets.json")
+NOT_RECORDS = ("catalog.db", "images", "videos", "imported", "gallery", "_deleted",
+               "_duplicates")
 
 
-@pytest.mark.parametrize("name", STATE_NAMES)
-def test_a_state_record_is_in_the_records_folder(tmp_path, name):
-    rec = tmp_path / "_moonglade"
-    assert paths.state_path(tmp_path, name) == rec / name
-    assert paths.state_path(str(tmp_path), name) == rec / name     # str out_dir too
+@pytest.mark.parametrize("name", RECORD_NAMES)
+def test_a_record_is_in_the_records_folder(tmp_path, name):
+    rec = tmp_path / "_moonglade" / "records"
+    assert paths.records_path(tmp_path, name) == rec / name
+    assert paths.records_path(str(tmp_path), name) == rec / name     # str out_dir too
 
 
-@pytest.mark.parametrize("name", REPORT_NAMES)
-def test_a_report_is_in_the_reports_folder(tmp_path, name):
-    rep = tmp_path / "_moonglade" / "reports"
-    assert paths.reports_path(tmp_path, name) == rep / name
-    assert paths.reports_path(str(tmp_path), name) == rep / name
+@pytest.mark.parametrize("name", DECISION_NAMES)
+def test_a_decision_is_in_the_decisions_folder(tmp_path, name):
+    dec = tmp_path / "_moonglade" / "decisions"
+    assert paths.decisions_path(tmp_path, name) == dec / name
+    assert paths.decisions_path(str(tmp_path), name) == dec / name
 
 
-def test_the_app_resolvers_are_in_the_records_folder(tmp_path):
+def test_asking_never_makes_a_folder_outside_a_library(tmp_path):
+    """A first write must land, so asking makes the folder -- but only inside a library that
+    exists, and never with make=False."""
+    nowhere = tmp_path / "not-a-library"
+    paths.records_path(nowhere, "runs.db")
+    assert not nowhere.exists()
+    paths.records_path(tmp_path, "runs.db", make=False)
+    assert not (tmp_path / "_moonglade").exists()
+    paths.records_path(tmp_path, "runs.db")
+    assert (tmp_path / "_moonglade" / "records").is_dir()
+
+
+def test_the_app_resolvers_are_in_the_new_homes(tmp_path):
     key = g._account_key("alice")
-    rec = tmp_path / "_moonglade"
-    assert g._ach_state_path(tmp_path) == rec / "achievements.json"
-    assert g._telemetry_path(tmp_path) == rec / "telemetry.json"
-    assert core._jobs_path(tmp_path) == rec / "jobs.jsonl"
-    assert g.account_prefs_path(tmp_path, "alice") == rec / "account_prefs" / (key + ".json")
-    assert g.account_state_path(tmp_path, "alice") == rec / "account_state" / (key + ".json")
-    assert mlog.log_path(tmp_path) == rec / "logs" / "moonglade.log"
-    assert runs.RunsStore(tmp_path).path == rec / "runs.db"
+    app = tmp_path / "_moonglade"
+    assert g._ach_state_path(tmp_path) == app / "records" / "achievements.json"
+    assert g._telemetry_path(tmp_path) == app / "records" / "telemetry.json"
+    assert core._jobs_path(tmp_path) == app / "records" / "jobs.jsonl"
+    assert g.account_prefs_path(tmp_path, "alice") == app / "accounts" / key / "prefs.json"
+    assert g.account_prefs_path(tmp_path, g.ACCOUNT_LOCAL) == \
+        app / "accounts" / "_local" / "prefs.json"
+    assert g.account_state_path(tmp_path, "alice") == app / "accounts" / key / "state.json"
+    assert runs.RunsStore(tmp_path).path == app / "records" / "runs.db"
+    assert mlog.log_path() == paths.logs_dir() / "moonglade.log"     # the install's, not a library's
+
+
+def test_the_account_key_is_the_paths_rule():
+    assert g._account_key("Nel") == paths.account_key("Nel") != paths.account_key("nel")
+    assert len(paths.account_key("Nel")) == 16
 
 
 @pytest.fixture
 def moved(monkeypatch):
-    """Point both resolvers somewhere else, as the next release will, to prove the app asks
-    them rather than building the path itself."""
-    monkeypatch.setattr(paths, "state_path", lambda out, name: Path(out) / "_s" / name)
-    monkeypatch.setattr(paths, "reports_path", lambda out, name: Path(out) / "_r" / name)
+    """Point the resolvers somewhere else, to prove the app asks them rather than building
+    the path itself."""
+    monkeypatch.setattr(paths, "records_path",
+                        lambda out, name, make=True: Path(out) / "_r" / name)
+    monkeypatch.setattr(paths, "decisions_path",
+                        lambda out, name, make=True: Path(out) / "_d" / name)
 
 
-def test_the_app_resolvers_follow_state_path(tmp_path, moved):
-    key = g._account_key("alice")
-    s = tmp_path / "_s"
-    assert g._ach_state_path(tmp_path) == s / "achievements.json"
-    assert g._telemetry_path(tmp_path) == s / "telemetry.json"
-    assert core._jobs_path(tmp_path) == s / "jobs.jsonl"
-    assert g.account_prefs_path(tmp_path, "alice") == s / "account_prefs" / (key + ".json")
-    assert g.account_state_path(tmp_path, "alice") == s / "account_state" / (key + ".json")
-    assert mlog.log_path(tmp_path) == s / "logs" / "moonglade.log"
-    assert runs.RunsStore(tmp_path).path == s / "runs.db"
+def test_the_app_resolvers_follow_records_path(tmp_path, moved):
+    r = tmp_path / "_r"
+    assert g._ach_state_path(tmp_path) == r / "achievements.json"
+    assert g._telemetry_path(tmp_path) == r / "telemetry.json"
+    assert core._jobs_path(tmp_path) == r / "jobs.jsonl"
+    assert runs.RunsStore(tmp_path).path == r / "runs.db"
 
 
-def test_the_integrity_reports_follow_reports_path(tmp_path, moved):
-    """The summary is read, and a mark written and read back, where reports_path() says."""
+def test_the_integrity_reports_and_marks_follow_their_resolvers(tmp_path, moved):
+    """The summary is read where records_path() says; a mark is written and read back where
+    decisions_path() says."""
     import json
     r = tmp_path / "_r"
     r.mkdir()
+    (tmp_path / "_d").mkdir()
     doc = {"format": integrity.REPORT_FORMAT, "counts": {},
            "verified_at": "2026-10-04T00:00:00Z"}
     (r / "integrity_report.json").write_text(json.dumps(doc), encoding="utf-8")
     assert integrity.read_summary(tmp_path) == doc
     integrity.set_mark(tmp_path, "m1", integrity.MARKS[0])
-    assert (r / "integrity_marks.json").is_file()
+    assert (tmp_path / "_d" / "integrity_marks.json").is_file()
     assert set(integrity.read_marks(tmp_path)) == {"m1"}
     assert not (tmp_path / "integrity_marks.json").exists()
 
 
-def test_the_curation_import_snapshot_follows_reports_path(tmp_path, moved):
-    """The undo file a curation import writes before it changes anything is a report, like
-    the organize undo list: it goes where reports_path() says, beside nothing else."""
+def test_the_curation_import_snapshot_is_a_decision(tmp_path, moved):
+    """The undo file a curation import writes before it changes anything is an owner decision
+    that cannot be made again, like the organize undo list: it goes where decisions_path()
+    says, beside nothing else."""
     from moonglade import curation_io as cio
     from moonglade.gallery import CATALOG_FIELDS, save_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {
         "media_id": "m1", "filename": "a_m1.png", "created_at": "2025-01-01T00:00:00"}])
-    (tmp_path / "_r").mkdir()
+    (tmp_path / "_d").mkdir()
     doc = cio.export_curation(db)
     doc["items"] = [{"media_id": "m1", "rating": 3, "collections": [], "tags": [],
                      "mark": "", "note": ""}]
     rep = cio.import_curation(db, doc, apply=True)
     assert rep["snapshot"].startswith(cio.SNAPSHOT_PREFIX)
-    assert (tmp_path / "_r" / rep["snapshot"]).is_file()
+    assert (tmp_path / "_d" / rep["snapshot"]).is_file()
     assert not list(tmp_path.glob(cio.SNAPSHOT_PREFIX + "*"))
 
 
-def test_the_reconcile_stamp_follows_state_path(tmp_path, moved):
-    (tmp_path / "_s").mkdir()
+def test_the_reconcile_stamp_follows_records_path(tmp_path, moved):
+    (tmp_path / "_r").mkdir()
     core._stamp_reconcile(tmp_path, 1, 0)
-    assert (tmp_path / "_s" / "reconcile_stamp.json").is_file()
+    assert (tmp_path / "_r" / "reconcile_stamp.json").is_file()
     assert not (tmp_path / "reconcile_stamp.json").exists()
     assert integrity.reconciled_at(tmp_path)          # and the reader finds it there
 
 
+def test_the_loom_lives_in_the_app_folder(tmp_path):
+    """The Loom's whole folder is under _moonglade/, which every walker prunes -- so its
+    frames and cuts are never counted as pictures."""
+    assert paths.loom_root(tmp_path) == tmp_path / "_moonglade" / "loom"
+    assert paths.LIBRARY_APP_DIRNAME in g.QUARANTINE_EXCLUDE
+
+
 # ---- the lint: no code builds a record's name off out_dir by hand ----------------------
 
-_RECORD_NAMES = set(STATE_NAMES) | set(REPORT_NAMES)
+_RECORD_NAMES = set(RECORD_NAMES) | set(DECISION_NAMES) | set(OLD_LAYOUT_NAMES)
 
 
 def _modules():
@@ -190,10 +213,12 @@ def test_no_code_builds_a_record_path_by_hand():
     consts = _record_constants(trees.values())
     assert {"JOBS_LOG_NAME", "RUNS_DB", "REPORT_CSV", "RECONCILE_STAMP"} <= consts, \
         "the lint lost track of the record constants -- it would check nothing"
-    stray = [h for p, t in trees.items() if p.relative_to(_REPO).as_posix() != "moonglade/paths.py"
+    # The move itself is the one module that names an older layout's places.
+    exempt = {"moonglade/paths.py", "moonglade/migrate.py"}
+    stray = [h for p, t in trees.items() if p.relative_to(_REPO).as_posix() not in exempt
              for h in _hand_built(p, t, consts)]
-    assert not stray, ("build a library record's path with moonglade_paths.state_path() / "
-                       "reports_path():\n  " + "\n  ".join(stray))
+    assert not stray, ("build a library record's path with moonglade_paths.records_path() / "
+                       "decisions_path() / account_dir():\n  " + "\n  ".join(stray))
 
 
 def test_the_lint_sees_a_hand_built_record():

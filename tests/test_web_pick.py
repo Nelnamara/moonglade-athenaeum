@@ -634,7 +634,7 @@ def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch, pixai):
     # Per-account storage (D-7): the file lives under prompt_snippets/<key>.json now,
     # not the old flat prompt_snippets.json every account used to share. Keyed via
     # _account_key (B14 residual), not the raw username.
-    assert (paths.state_path(tmp_path, "prompt_snippets") / (_account_key("tester") + ".json")).exists()
+    assert (paths.account_dir(tmp_path, "tester") / "snippets.json").exists()
     assert cli.get("/api/snippets").get_json() == {"snippets": ["masterpiece, 4k", "night"]}
 
 
@@ -712,22 +712,25 @@ def test_gallery_model_preview_hover_is_debounced_not_instant():
     assert "const hidePreview = () => { clearTimeout(previewTimerRef.current); setPreview(null); };" in picker_jsx
 
 
-def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path):
-    """Upgrade path: nothing disappears the moment the store goes per-account. An
-    account with no file of its own falls back to the old shared prompt_snippets.json
-    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+def test_the_legacy_shared_snippets_are_given_to_each_login_by_the_move(tmp_path):
+    """Upgrade path: nothing disappears when the store goes per-account. The move copies the
+    old shared prompt_snippets.json into every login with no file of its own, then deletes
+    it; the app reads only the login's own file."""
+    from moonglade import migrate
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     (tmp_path / "prompt_snippets.json").write_text(
         json.dumps(["from-before"]), encoding="utf-8")
+    assert cli.get("/api/snippets").get_json() == {"snippets": []}, "no fallback read"
 
+    migrate.migrate_library(tmp_path, migrate.logins_from_config(), migrate.Report())
     assert cli.get("/api/snippets").get_json() == {"snippets": ["from-before"]}
+    assert not (tmp_path / "prompt_snippets.json").exists()
 
     cli.post("/api/snippets", json=with_csrf(cli, {"snippets": ["from-before", "new-one"]}))
-    own = json.loads((paths.state_path(tmp_path, "prompt_snippets") / (_account_key("tester") + ".json"))
+    own = json.loads((paths.account_dir(tmp_path, "tester") / "snippets.json")
                      .read_text(encoding="utf-8"))
     assert own == ["from-before", "new-one"]
-    assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
 
 def test_suggest_prompt_route(tmp_path, monkeypatch, pixai):
@@ -1129,10 +1132,12 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
         "nel's save wiped Nel's presets -- case-collision on disk")
 
 
-def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch, pixai):
-    """Upgrade path: nothing disappears the moment the store goes per-account. An
-    account with no file of its own falls back to the old shared toolbox_presets.json
-    (read-only) -- exactly what it saw before the split -- and diverges on first save."""
+def test_the_legacy_shared_presets_are_given_to_each_login_by_the_move(tmp_path, monkeypatch,
+                                                                       pixai):
+    """Upgrade path: nothing disappears when the store goes per-account. The move copies the
+    old shared toolbox_presets.json (D:'s is live) into every login with no file of its own,
+    then deletes it; the app reads only the login's own file."""
+    from moonglade import migrate
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "new-scene",
                        "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
@@ -1143,14 +1148,15 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
                                     "prompt": "x", "model_id": "9"}}),
         encoding="utf-8")
 
+    assert cli.get("/api/presets").get_json()["presets"] == {}, "no fallback read"
+    migrate.migrate_library(tmp_path, migrate.logins_from_config(), migrate.Report())
     assert set(cli.get("/api/presets").get_json()["presets"]) == {"from-before"}
+    assert not (tmp_path / "toolbox_presets.json").exists()
 
     cli.post("/api/presets", json=with_csrf(cli, {"task_id": "333"}))
-    own = json.loads((paths.state_path(tmp_path, "toolbox_presets") / (_account_key("tester") + ".json"))
+    own = json.loads((paths.account_dir(tmp_path, "tester") / "presets.json")
                      .read_text(encoding="utf-8"))
     assert set(own) == {"from-before", "new-scene"}
-    legacy = json.loads((tmp_path / "toolbox_presets.json").read_text(encoding="utf-8"))
-    assert set(legacy) == {"from-before"}
 
 
 def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path, monkeypatch, pixai):

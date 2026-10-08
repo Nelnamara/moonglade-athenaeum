@@ -50,12 +50,12 @@ def test_store_roundtrip(tmp_path):
 
 
 def test_store_corrupt_and_unset_fail_soft(tmp_path):
-    (tmp_path / "telemetry.json").write_text("{not json", encoding="utf-8")
+    g._telemetry_path(tmp_path).write_text("{not json", encoding="utf-8")
     assert g.telemetry_metrics(tmp_path)["days_used"] == 0   # never raises
     g.telem_bump("uploads", out_dir=tmp_path)                # overwrites the wreck
     assert g.telemetry_metrics(tmp_path)["uploads"] == 1
     # valid JSON with hostile inner types must not len()-crash a page
-    (tmp_path / "telemetry.json").write_text(
+    g._telemetry_path(tmp_path).write_text(
         json.dumps({"counters": {"uploads": "x", "culled": "x"}, "sets": {"tools": 1},
                     "flags": {}, "maxima": {}, "days": []}), encoding="utf-8")
     m = g.telemetry_metrics(tmp_path)
@@ -222,10 +222,11 @@ def test_badge_thumb_cache(tmp_path):
     assert g._badge_thumb(tmp_path, "loremaster") == p     # cached copy reused
     assert g._badge_thumb(tmp_path, "does-not-exist") is None
     # The cache lives OUTSIDE the coded branding tree (SCOPE_bundle-v2-branding
-    # constraint 3: the tree must keep reading as the empty scaffold), under
-    # out_dir/gallery/cache/_badges/ -- gallery/ being what every walker skips.
+    # constraint 3: the tree must keep reading as the empty scaffold), and outside every
+    # library: local/cache/badges/ (conftest pins local_dir() to tmp_path).
     assert Path(p) == g.badge_cache_dir(tmp_path) / "loremaster.png"
-    assert Path(p).parent == tmp_path / "gallery" / "cache" / "_badges"
+    assert Path(p).parent == tmp_path / "cache" / "badges"
+    assert not (tmp_path / "gallery" / "cache").exists()
     assert g.branding_root() not in Path(p).parents
     assert not (g.branding_root() / "_thumbs").exists()
 

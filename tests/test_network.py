@@ -638,8 +638,8 @@ def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
 
     assert core.walk_end_reached(a) is True
     assert core.walk_end_reached(b) is False
-    assert paths.state_path(a, "telemetry.json").exists()
-    assert not paths.state_path(b, "telemetry.json").exists()
+    assert paths.records_path(a, "telemetry.json").exists()
+    assert not paths.records_path(b, "telemetry.json").exists()
 
     # ...and library B, two known pages deep and never walked to its end, keeps going.
     (b / "images").mkdir(parents=True)
@@ -1622,18 +1622,20 @@ def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
         g._SERVER_CONTROL.update(saved)
 
 
-def test_resolve_server_settings_precedence_and_bonjour_defaults(monkeypatch):
-    """config.json fills host/port/Bonjour when the CLI did not; an explicit --host/--port wins;
-    Bonjour defaults OFF (broadcast is opt-in, flipped on from the chip)."""
+def test_resolve_server_settings_precedence_and_bonjour_defaults(tmp_path):
+    """settings.json fills host/port/Bonjour when the CLI did not; an explicit --host/--port
+    wins; Bonjour defaults OFF (broadcast is opt-in, flipped on from the chip)."""
     from moonglade import gallery as g
-    from moonglade import backup as core
+    from moonglade import settings
 
-    monkeypatch.setattr(core, "_load_config", lambda: {})
+    def _store(**kw):
+        settings.update(lambda d: (d.clear(), d.update(kw)))
+
+    _store()
     assert g.resolve_server_settings(None, None) == {
         "host": "127.0.0.1", "port": 5000, "bonjour_enabled": False, "bonjour_name": "Moonglade"}
 
-    monkeypatch.setattr(core, "_load_config", lambda: {
-        "HOST": "0.0.0.0", "PORT": 5757, "BONJOUR_ENABLED": True, "BONJOUR_NAME": "The Library"})
+    _store(host="0.0.0.0", port=5757, bonjour={"enabled": True, "name": "The Library"})
     s = g.resolve_server_settings(None, None)
     assert (s["host"], s["port"], s["bonjour_enabled"], s["bonjour_name"]) == (
         "0.0.0.0", 5757, True, "The Library")
@@ -1642,15 +1644,15 @@ def test_resolve_server_settings_precedence_and_bonjour_defaults(monkeypatch):
     s = g.resolve_server_settings("127.0.0.1", 9000)
     assert s["host"] == "127.0.0.1" and s["port"] == 9000
 
-    # a junk PORT in config falls back to the default, never crashes
-    monkeypatch.setattr(core, "_load_config", lambda: {"PORT": "nope"})
+    # a junk stored port falls back to the default, never crashes
+    _store(port="nope")
     assert g.resolve_server_settings(None, None)["port"] == 5000
 
-    # a non-bindable HOST in config falls back to the default (must not crash make_server)
-    monkeypatch.setattr(core, "_load_config", lambda: {"HOST": "not-a-host"})
+    # a non-bindable stored host falls back to the default (must not crash make_server)
+    _store(host="not-a-host")
     assert g.resolve_server_settings(None, None)["host"] == "127.0.0.1"
-    # but a real IP literal in config is honored (a deliberate hand-edit to a specific NIC)
-    monkeypatch.setattr(core, "_load_config", lambda: {"HOST": "192.168.1.9"})
+    # but a real IP literal is honored (a deliberate edit to a specific NIC)
+    _store(host="192.168.1.9")
     assert g.resolve_server_settings(None, None)["host"] == "192.168.1.9"
     # an explicit --host is trusted as typed, even a hostname
     assert g.resolve_server_settings("myhost.lan", None)["host"] == "myhost.lan"

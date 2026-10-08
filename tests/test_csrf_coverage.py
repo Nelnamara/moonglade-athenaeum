@@ -248,7 +248,9 @@ def _two_sessions(tmp_path):
 
 
 def _store_file(tmp_path, folder, user):
-    return paths.state_path(tmp_path, folder) / (_account_key(user) + ".json")
+    name = {"view_presets": "views.json", "prompt_snippets": "snippets.json",
+            "toolbox_presets": "presets.json"}[folder]
+    return paths.account_dir(tmp_path, user) / name
 
 
 _STORES = [

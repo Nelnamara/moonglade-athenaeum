@@ -20,7 +20,7 @@ from moonglade import integrity
 from moonglade import paths
 from moonglade import similar as ps     # at import, as tests/test_similar.py does
 
-REC = paths.RECORDS_DIRNAME
+REC = paths.LIBRARY_APP_DIRNAME
 
 
 @pytest.fixture
