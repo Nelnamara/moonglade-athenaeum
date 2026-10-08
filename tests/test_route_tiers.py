@@ -260,6 +260,7 @@ TIER_SNAPSHOT = [
     "/api/myart/items [GET] LOGIN",
     "/api/myart/publish [POST] LOGIN",
     "/api/narrator/poke [POST] LOGIN",         # the poke ladder; per-account, server-only state
+    "/api/outside/fix [POST] LOCALHOST",       # rewrites this machine's tasks, configs, shortcuts
     "/api/palettes/presets [GET] LOGIN",
     "/api/panel/cancel [POST] LOCALHOST",
     "/api/panel/run [POST] LOGIN",

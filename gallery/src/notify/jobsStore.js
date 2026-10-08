@@ -168,8 +168,8 @@ export function refresh() {
       // `update` field -- passing that on would read as "nothing is out" and blank a standing
       // notice over one blip, exactly the way the release check refuses to cache a failure.
       if (d && !d.error) noteUpdate(d.update);
-      // A sentence the server asks every open tab to say once per server start (3.20: a
-      // launcher from before the move is still in charge -- stop and start once). Same poll,
+      // A sentence the server asks every open tab to say once per server start (3.20: things
+      // outside the app that still name its old files, with a Fix them button). Same poll,
       // same rule: only on a real answer.
       if (d && !d.error) noteServerNotice(d.notice);
       // The inbox's live count rides this same poll for the same reason (Sessions R + Y,

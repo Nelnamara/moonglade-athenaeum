@@ -124,6 +124,10 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
     assert argv[0] == "powershell"
     assert "CreateShortcut" in argv[-1] and "mark_4.ico" in argv[-1]
     assert "Moonglade Launcher.pyw" in argv[-1]
+    # the icon lives in local/icons/ (no cache), and the Desktop is the shell's own (pinned
+    # to a temp folder in every test by conftest)
+    assert str(moonglade_paths.icons_dir() / "mark_4.ico") + ",0" in argv[-1]
+    assert d["lnk"] == str(tmp_path / "Desktop" / "Moonglade Athenaeum.lnk")
     # LAN can't write shortcuts onto the owner's Desktop even for THIS already-logged-in
     # session -- it passes the global front door (real session) but is then refused by
     # the route's OWN, stricter _is_local_request() re-check (403), same property

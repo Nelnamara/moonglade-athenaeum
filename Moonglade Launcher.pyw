@@ -215,6 +215,26 @@ try:
 except Exception:                                       # noqa: BLE001 -- a log line only
     pass
 
+
+def _repoint_shortcuts():
+    """Shortcuts that still point at this install's old launcher (Serve Gallery.pyw, gone
+    since 3.20) or take their icon from an old icon cache are re-pointed, without asking:
+    the first start after an update from 3.19 or older finds them broken already, so nothing
+    could be worse (moonglade.outside.repoint_shortcuts). What it did goes in serve.log."""
+    try:
+        from moonglade import outside as _outside
+        for r in _outside.repoint_shortcuts():
+            if _log is not subprocess.DEVNULL:
+                _log.write("[launcher] " + r.line() + "\n")
+    except Exception:                                   # noqa: BLE001 -- never stops a start
+        pass
+
+
+# Off the start's path: the server starts while the shortcuts are looked at.
+if sys.platform == "win32":
+    threading.Thread(target=_repoint_shortcuts, daemon=True,
+                     name="moonglade-shortcuts").start()
+
 first = True
 while True:
     proc = subprocess.Popen(cmd, env=env, cwd=here,

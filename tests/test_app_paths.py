@@ -82,6 +82,7 @@ _TABLE = [
     ("serve.log", lambda: paths.local_path("serve.log"),
      lambda: (_LOCAL if _LOCAL.is_dir() else _REPO / "no-such-folder-before-3.20") / "serve.log"),
     ("the icon cache", lambda: paths.icon_cache_dir(), lambda: _LOCAL / "cache" / "marks"),
+    ("the shortcut icons", lambda: paths.icons_dir(), lambda: _LOCAL / "icons"),
     ("what moved, recorded", lambda: paths.local_dir() / paths.MOVED_NAME,
      lambda: _LOCAL / "MOVED.json"),
     # where 3.19 kept them: what a start brings across from
@@ -178,23 +179,32 @@ def test_machine_files_follow_local_path_not_the_art_tree(monkeypatch, tmp_path)
     assert g._role_dir("marks").is_relative_to(art)
 
 
-def test_the_icon_cache_is_written_under_local_path(monkeypatch, tmp_path):
-    """A pack-shipped .ico is materialized under local_path(), not beside the art tree."""
+def test_shortcut_icons_are_written_into_local_icons(monkeypatch, tmp_path):
+    """A shortcut's .ico is written into local/icons/ (icons_dir()), which is no cache: a
+    pack-shipped one and a loose cut in the coded tree alike, so no shortcut's icon ever
+    points into the art tree or a folder a clean-up deletes."""
     from moonglade import container as mc
     art, local = tmp_path / "elsewhere" / "art", tmp_path / "local"
     local.mkdir()
     monkeypatch.setattr(g, "branding_root", lambda: art)
     monkeypatch.setattr(paths, "local_path", lambda name: local / name)
+    monkeypatch.setattr(paths, "local_dir", lambda: local)
     mc.write_container(g._container_path(), {
         g._role_rel("marks", "mark_4.ico"): b"\x00\x00\x01\x00ico"}, {})
     g._container_cache.update(path=None, mtime=None, box=None)
     try:
         ico = g._mark_ico_path("mark_4")
+        loose = art / g._role_rel("marks", "mark_5.ico")
+        loose.parent.mkdir(parents=True)
+        loose.write_bytes(b"loose cut")
+        ico5 = g._mark_ico_path("mark_5")
     finally:
         g._container_cache.update(path=None, mtime=None, box=None)
-    assert ico == local / "cache" / "marks" / "mark_4.ico"
+    assert ico == local / "icons" / "mark_4.ico" == paths.icons_dir() / "mark_4.ico"
     assert ico.read_bytes() == b"\x00\x00\x01\x00ico"
+    assert ico5 == local / "icons" / "mark_5.ico" and ico5.read_bytes() == b"loose cut"
     assert not (art.parent / "_container_cache").exists()
+    assert not (local / "cache").exists()
 
 
 # ---- the lint: no module but moonglade_paths derives an app-root path from __file__ ------

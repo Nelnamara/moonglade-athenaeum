@@ -6663,24 +6663,24 @@ def _ps_quote(s):
 
 
 def _mark_ico_path(mark_id):
-    """The app icon for `mark_id` as a REAL file on disk, or None when the mark has no .ico
-    cut. The Desktop launcher (make_launcher_shortcut) and the pack's Explorer file type
-    (register_pack_file_type) both point Windows at it, and Windows reads an icon only off
-    disk: a loose cut in the coded tree wins; a pack-shipped one is materialized into a
-    git-ignored, regenerable cache, a machine file (moonglade_paths.icon_cache_dir()). (The
-    cache subfolder keeps its plain 'marks' name -- it lives outside the goods root, so it
-    is not part of the coded tree.)"""
-    ico = _role_dir("marks") / (str(mark_id) + ".ico")
-    if ico.exists():
-        return ico
+    """The app icon for `mark_id` as a REAL file in local\\icons\\ (moonglade.paths.icons_dir()),
+    or None when the mark has no .ico cut. Every shortcut the app makes or re-points
+    (make_launcher_shortcut, moonglade.outside) takes its icon from here, because Windows
+    reads an icon only off disk -- and this folder is no cache, so no clean-up ever blanks a
+    shortcut, as deleting 3.19's _container_cache\\ would have. The bytes are the loose cut in
+    the coded tree when there is one, else the pack's; the file is rewritten only when they
+    differ."""
     raw = _branding_bytes(_role_rel("marks", str(mark_id) + ".ico"))
     if raw is None:
         return None
-    cache = _paths.icon_cache_dir()
+    ico = _paths.icons_dir() / (str(mark_id) + ".ico")
     try:
-        cache.mkdir(parents=True, exist_ok=True)
-        ico = cache / (str(mark_id) + ".ico")
-        ico.write_bytes(raw)
+        if ico.is_file() and ico.read_bytes() == raw:
+            return ico
+        ico.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ico.with_name(ico.name + ".tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, ico)                   # whole, never half-written under a shortcut
     except OSError:
         return None
     return ico
@@ -6689,10 +6689,12 @@ def _mark_ico_path(mark_id):
 def make_launcher_shortcut(out_dir, mark_id):
     """Create/refresh the Desktop 'Moonglade Athenaeum.lnk' whose icon is the
     chosen mark's .ico, targeting Moonglade Launcher.pyw via pythonw. Returns the
-    .lnk path. Machine-local action -- caller must gate to localhost."""
+    .lnk path. Machine-local action -- caller must gate to localhost. The Desktop is the
+    shell's own (one moved into OneDrive included: moonglade.outside.desktop_dir())."""
     import subprocess
-    # PowerShell's CreateShortcut reads IconLocation straight off disk, so a
-    # pack-shipped .ico is materialized first (_mark_ico_path).
+    from moonglade import outside as moonglade_outside
+    # PowerShell's CreateShortcut reads IconLocation straight off disk, so the .ico is
+    # written into local\icons\ first (_mark_ico_path).
     ico = _mark_ico_path(mark_id)
     if ico is None:
         raise RuntimeError("no .ico cut for %s yet (branding/marks/)" % mark_id)
@@ -6702,7 +6704,7 @@ def make_launcher_shortcut(out_dir, mark_id):
         raise RuntimeError("Moonglade Launcher.pyw not found next to the server")
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     target = pythonw if pythonw.exists() else Path(sys.executable)
-    lnk = Path.home() / "Desktop" / "Moonglade Athenaeum.lnk"
+    lnk = moonglade_outside.desktop_dir() / "Moonglade Athenaeum.lnk"
     ps = ("$sh = New-Object -ComObject WScript.Shell; "
           "$s = $sh.CreateShortcut(%s); "
           "$s.TargetPath = %s; "
@@ -12216,10 +12218,56 @@ def _supervised():
 _SERVER_START = secrets.token_hex(8)
 
 
-def server_notice():
+# THINGS OUTSIDE THE APP THAT NAME ITS OLD FILES (moonglade.outside; DECISIONS 2026-10-07,
+# pick 5): a scheduled task, a Claude tools registration or a shortcut still running
+# moonglade_backup.py, moonglade_mcp.py or Serve Gallery.pyw. A real start (main()) looks
+# once, off the request path, and the notice offers **Fix them** to a tab on this machine.
+# None until that look has run -- and in every app a test builds, since only main() looks.
+_OUTSIDE = {"items": None}
+_OUTSIDE_FIXING = threading.Lock()
+OUTSIDE_FIX_LABEL = "Fix them"
+
+
+def _outside_scan():
+    """Look outside the app now and keep what was found. Never raises."""
+    from moonglade import outside as moonglade_outside
+    try:
+        items = moonglade_outside.find()
+    except Exception:                                   # noqa: BLE001 -- nothing found, then
+        items = []
+    _OUTSIDE["items"] = items
+    return items
+
+
+def _outside_prime():
+    """main()'s one call: the look runs on its own thread (schtasks can take seconds), after
+    the server is up."""
+    threading.Thread(target=_outside_scan, daemon=True, name="moonglade-outside-scan").start()
+
+
+def _shortcut_icon_bytes(stem):
+    """A mark's .ico bytes by its file stem (mark_4), for a shortcut whose old icon is gone:
+    the loose cut, else the pack's. Only a plain stem is ever looked up."""
+    if not re.match(r"^[A-Za-z0-9_-]+$", stem or ""):
+        return None
+    return _branding_bytes(_role_rel("marks", stem + ".ico"))
+
+
+def server_notice(local=False):
     """The notice every open tab shows once per server start (the /api/jobs poll carries it;
-    gallery/src/notify/serverNotice.js shows the corner toast), or None. Read only."""
-    return None
+    gallery/src/notify/serverNotice.js shows the corner toast), or None. Read only.
+
+    Today it is the one about things outside the app that still name its old files, and only
+    for a tab on this machine (`local`): the fix rewrites this machine's tasks, configs and
+    shortcuts, and its route is LOCALHOST. `fix` names the toast's button; the poll adds the
+    session's CSRF token to it."""
+    items = _OUTSIDE.get("items")
+    if not local or not items:
+        return None
+    from moonglade import outside as moonglade_outside
+    title, msg = moonglade_outside.notice_words(items)
+    return {"key": _SERVER_START, "title": title, "msg": msg,
+            "fix": {"label": OUTSIDE_FIX_LABEL}}
 
 
 # The running werkzeug server, so a web Stop/Restart handler can shut it down GRACEFULLY instead
@@ -23197,6 +23245,33 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "lnk": lnk})
 
+    @app.route("/api/outside/fix", methods=["POST"])
+    @tier(LOCALHOST)
+    def api_outside_fix():
+        """**Fix them** on the notice about things outside the app that still name its old
+        files (server_notice; moonglade.outside, DECISIONS 2026-10-07 pick 5): this machine's
+        scheduled tasks, Claude tools registrations and shortcuts are looked at again, now,
+        and each one found is rewritten to the new names -- a copy of it kept first in
+        local\\.snapshot\\ -- and reported fixed or failed, with the reason, in plain words.
+
+        LOCALHOST: it rewrites files and Task Scheduler entries on the machine the server runs
+        on, the same trust class as /api/branding/shortcut. The CSRF explicit-token class: a
+        real change to the machine off one click. One fix at a time."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        if not _OUTSIDE_FIXING.acquire(blocking=False):
+            return jsonify({"error": "Already fixing them. Give it a moment."}), 409
+        try:
+            from moonglade import outside as moonglade_outside
+            results = moonglade_outside.fix(provide_icon=_shortcut_icon_bytes)
+            _outside_scan()
+        finally:
+            _OUTSIDE_FIXING.release()
+        kind, title, msg = moonglade_outside.result_words(results)
+        return jsonify({"ok": True, "kind": kind, "title": title, "msg": msg,
+                        "results": [r.as_dict() for r in results]})
+
     @app.route("/api/suggest-prompt")
     @tier(LOGIN)
     def api_suggest_prompt():
@@ -28253,9 +28328,13 @@ __DESIGN_TOKENS__
         except Exception:                                  # noqa: BLE001
             pass
         # `notice`: a sentence the server asks every open tab to say once per start
-        # (server_notice), or null.
+        # (server_notice), or null. Its Fix button carries this session's CSRF token: the
+        # fix route checks it.
+        notice = server_notice(local=_is_local_request())
+        if notice and notice.get("fix"):
+            notice["fix"]["csrf"] = session.setdefault("csrf", secrets.token_hex(16))
         return jsonify({"jobs": jobs, "update": update_notice(), "inbox": inbox_live,
-                        "notice": server_notice()})
+                        "notice": notice})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)
@@ -29350,6 +29429,9 @@ def main():
     # and its only job is to make the FIRST Health open of the session a memory read instead
     # of a full library walk with the user watching. See _health_prime / health_cached.
     _health_prime(out_dir, db_path)
+    # Look for things outside the app that still name its old files (a scheduled task, a
+    # Claude registration, a shortcut): off-thread, for the notice (server_notice).
+    _outside_prime()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
