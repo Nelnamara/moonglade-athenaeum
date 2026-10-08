@@ -23,6 +23,7 @@
 import errno
 import json
 import os
+import stat
 import zipfile
 from pathlib import Path
 
@@ -453,6 +454,22 @@ def test_a_dead_start_s_lock_is_taken_over(r):
     (r.local / ".lock").write_text("999999999", encoding="ascii")          # no such process
     msetup.prepare("cli")
     assert not (r.local / ".lock").exists()
+
+
+def test_a_dead_start_s_read_only_lock_is_taken_over_too(tmp_path):
+    """A dead start's lock that kept a read-only attribute (a folder restored from read-only
+    media) is made writable and removed like any other file the app owns: never a minute's
+    wait and a request to delete it by hand."""
+    lock = migrate.FolderLock(tmp_path, "the app folder")
+    lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
+    os.chmod(lock.path, stat.S_IREAD)
+    try:
+        with lock.acquire(wait=0.5):
+            assert lock.held
+    finally:
+        if lock.path.exists():
+            os.chmod(lock.path, stat.S_IREAD | stat.S_IWRITE)
+    assert not lock.path.exists()
 
 
 def test_a_live_holder_s_lock_is_never_taken_however_old(r, monkeypatch):

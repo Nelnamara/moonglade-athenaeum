@@ -516,6 +516,7 @@ class FolderLock:
                     stale = False                # it went while we looked: try again
                 if stale:
                     try:
+                        _make_writable(self.path)        # a dead start's read-only lock
                         os.remove(self.path)
                         stuck = None
                         continue
