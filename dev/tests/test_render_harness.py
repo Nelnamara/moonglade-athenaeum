@@ -9249,7 +9249,9 @@ def test_an_empty_gift_box_says_so_in_one_quiet_line(logged_in_page):
                               gifts={"gifts": [], "bonuses": [], "has_thread": False, "my_name": "", "read_only": False},
                               count={"total": 0, "unread": 0, "gifts": 0})
     page.click(".ib-door.gift")
-    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-dim")
+    # The loaded state, not the first .ib-dim: "Reading your gifts…" is an .ib-dim too, and on a
+    # slow runner it is the one there before the gifts arrive (CI run 37763153579).
+    page.wait_for_selector(".ib-panel[aria-label='Gift box'] .ib-dim:has-text('Nothing waiting')")
     _settle(page)
     p = page.evaluate(_RF_PANEL_JS)
     assert p["dim"] == ["Nothing waiting. Gifts from PixAI and cards about to expire show here."], p
