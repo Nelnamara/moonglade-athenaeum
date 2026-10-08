@@ -17,7 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Fixed
-- **Control Panel, Branding: pressing Change on another role while one is still folding shut keeps the new editor open.** A role's editor finished closing at the end of its short fold, and that close also shut an editor opened on another row in the meantime. Each row's close now shuts only its own. (2026-10-08)
+- **Control Panel, Branding: what you open while a role is still folding shut stays open.** A role's editor finishes closing at the end of its short fold, and that close used to shut an editor opened on another row in the meantime, and the "Go back to the default?" question if you clicked the default picture right after **Use this**. Each row's close now shuts only its own editor, and leaves a question asked during the fold. (2026-10-08)
 
 ### Under the hood
 - For developers: the test suite runs in a fraction of the time. CI runs it as two jobs side by side (the browser render checks on their own runner), `dev/tools/ci_local.py` runs the same two halves at once on pytest-xdist workers, and test apps no longer start the scheduler, wait out the sign-in hold or hash the suite's own logins at full cost. pytest-xdist joins the developer packages. (2026-10-08)

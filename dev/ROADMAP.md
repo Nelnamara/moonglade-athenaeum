@@ -27,8 +27,8 @@ flight is never invisible. On 2026-09-06 six built branches existed that nothing
 why this section exists.
 
 - **The test cleanup** (branch `tests/render`, which carries `tests/cleanup` and `tests/speed`): the
-  2026-10-05 test review's repairs, merges and deletes, the two-half parallel run, and the Loom's
-  component-drawing setup with its first converted files. Merges on the owner's boop.
+  repairs, merges and deletes from the test review of 2026-10-05, the two-half parallel run, and the
+  Loom's component-drawing setup with its first converted files. Merges on the owner's boop.
 
 ## Next — scoped, not started
 
