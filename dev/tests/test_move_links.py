@@ -23,7 +23,7 @@ import pytest
 
 from moonglade import migrate
 from moonglade import setup as msetup
-from tests.move_layouts import KEY_NEL, rig, start, write, write_config
+from tests.move_layouts import KEY_NEL, library_records, rig, start, write, write_config
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="a real Windows junction")
 
@@ -113,6 +113,7 @@ def test_a_link_whose_new_home_is_taken_stops_before_anything_moves(r):
     text = str(e.value)
     assert "is a link (a junction or a symbolic link)" in text
     assert "already taken" in text and "Nothing it points at was touched" in text
+    assert "to %s." % target in text and "\\\\?\\" not in text, "a plain path, no \\\\?\\"
     assert migrate._is_link(r.lib / "loom"), "the link is left where it is"
     assert _tree(target) == before
     assert (r.lib / "jobs.jsonl").is_file(), "nothing moved before the stop"
@@ -199,3 +200,100 @@ def test_a_junctioned_icon_cache_in_the_app_folder_goes_as_the_link_alone(r):
     msetup.prepare("cli")
     assert not os.path.lexists(r.app / "_container_cache")
     assert (target / "marks" / "mark_2.ico").read_bytes() == b"ICO"
+
+
+# ---- every link is checked before anything moves -------------------------------------------------
+
+def _all_records_still_at_the_top(r):
+    return all((r.lib / n).exists() for n in ("achievements.json", "jobs.jsonl", "runs.db"))
+
+
+def test_a_record_that_is_a_link_with_its_home_taken_stops_before_anything_moves(r):
+    """A record (or a decision, or a curation undo file) is planned with its own kind, not as
+    a link; one that IS a link still moves only as a link, so a taken home stops the start
+    before any other record has moved."""
+    write_config(r)
+    library_records(r.lib)
+    (r.lib / "raw_tasks.jsonl").unlink()
+    _junction(r.lib / "raw_tasks.jsonl", _elsewhere(r, "raw-tasks"))
+    write(r.lib / "_moonglade" / "records" / "raw_tasks.jsonl", '{"t": "already here"}\n')
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "raw_tasks.jsonl is a link" in str(e.value) and "already taken" in str(e.value)
+    assert _all_records_still_at_the_top(r), "nothing moved before the stop"
+    assert not (r.lib / "_moonglade" / "records" / "achievements.json").exists()
+
+
+def test_a_link_whose_new_home_is_on_another_drive_stops_before_anything_moves(r, monkeypatch):
+    """A link can only be renamed on its own drive: one whose new home is on another (a
+    _moonglade that is itself a junction to another drive, say) stops the start before
+    anything moves, not after the records went."""
+    write_config(r)
+    library_records(r.lib)
+    target = _elsewhere(r, "loom-data")
+    write(target / "kv" / KEY_NEL / BOARD, {"b": 1})
+    _junction(r.lib / "loom", target)
+    monkeypatch.setattr(migrate, "_same_device", lambda src, dest: not migrate._is_link(src))
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "another drive" in str(e.value)
+    assert _all_records_still_at_the_top(r)
+    assert migrate._is_link(r.lib / "loom")
+
+
+def test_a_relative_symbolic_link_stops_on_windows_before_anything_moves(r, monkeypatch):
+    """On Windows a symbolic link whose target is written relative to its own folder would
+    point somewhere else from its deeper new home, and making it again needs a privilege: the
+    start stops, before anything moves, and says how to fix it. (A real symbolic link needs
+    that privilege to make, so the junction here reports a relative target;
+    test_move_symlinks.py makes real ones where it can.)"""
+    write_config(r)
+    library_records(r.lib)
+    target = _elsewhere(r, "loom-data")
+    write(target / "kv" / KEY_NEL / BOARD, {"b": 1})
+    _junction(r.lib / "loom", target)
+    rel = os.path.join("..", "another-drive", "loom-data")
+    monkeypatch.setattr(migrate, "_symlink_text",
+                        lambda p: rel if os.path.normcase(str(p)) ==
+                        os.path.normcase(str(r.lib / "loom")) else None)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    text = str(e.value)
+    assert "written from where it sits (%s)" % rel in text
+    assert "point by its full path" in text
+    assert _all_records_still_at_the_top(r)
+    assert migrate._is_link(r.lib / "loom")
+
+
+# ---- the copy-first layout's own folders: never through a link -----------------------------------
+
+def test_a_junctioned_local_cache_keeps_its_icons(r):
+    """3.20's first build kept the shortcut icons in local\\cache\\marks\\. With local\\cache a
+    junction, its icons are never walked (they stay where it points), and the leftover is
+    never deleted inside the junction's target either."""
+    write_config(r)
+    target = _elsewhere(r, "cache")
+    write(target / "marks" / "mark_4.ico", b"ICO-4")
+    _junction(r.local / "cache", target)
+    msetup.prepare("cli")
+    assert (target / "marks" / "mark_4.ico").read_bytes() == b"ICO-4"
+    assert migrate._is_link(r.local / "cache")
+
+
+def test_a_junctioned_reports_folder_stops_and_nothing_moves_through_it(r):
+    """3.20's _moonglade\\reports\\ that is a junction: its files would split between
+    records\\ and decisions\\, so it can't move as one link. The start stops before anything
+    moves, and nothing in what it points at is moved or deleted."""
+    write_config(r)
+    library_records(r.lib)
+    target = _elsewhere(r, "reports")
+    write(target / "integrity_report.json", {"format": 1})
+    write(target / "integrity_report.lock", "1")
+    write(target / "curation_pre_import_1.json", {"undo": 1})
+    before = _tree(target)
+    _junction(r.lib / "_moonglade" / "reports", target)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "reports is a link" in str(e.value) and "can't move as one link" in str(e.value)
+    assert _tree(target) == before
+    assert _all_records_still_at_the_top(r)

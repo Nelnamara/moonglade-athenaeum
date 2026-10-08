@@ -74,9 +74,13 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     Control Panel never store one.
   * LINKS. A junction or a symbolic link is never walked into, copied or deleted through, and
     no tree removal follows one. A link found in an old home is moved as a link -- the link
-    entry itself renamed on the same drive (_bring_link) -- and one that can't be is left
-    where it is while the start stops with a plain sentence, before anything moves. A cache
-    that is a link goes as the link alone; a logs\\ or branding\\ that is one is left.
+    entry itself renamed on the same drive (_bring_link); a symbolic link whose target is
+    written relative to its own folder is made again at its deeper new home with its target
+    rewritten, so it still points at the same place (off Windows) -- and one that can't be
+    (its new home taken or on another drive, a relative one on Windows) is left where it is
+    while the start stops with a plain sentence, before anything moves. A cache that is a
+    link goes as the link alone; a logs\\ or branding\\ that is one is left, and so is a
+    banner cache holding a linked render, and anything inside a link.
   * PER-LOGIN DATA. Every login key's files move into accounts\\<key>\\, whether or not this
     install's config.json lists the login (another install may share the library). A file
     named by a login's plain name (before the hashed keys) goes to that login's folder when
@@ -718,11 +722,76 @@ def _is_link(p):
 
 
 def _link_target(p):
-    """Where the link `p` points, for a sentence; "" when it can't be read."""
+    """Where the link `p` points, for a sentence ("" when it can't be read): a junction's
+    target without Windows' \\\\?\\ prefix, and a \\\\?\\UNC\\ one as the \\\\server path it is."""
     try:
-        return os.readlink(p)
+        t = os.readlink(p)
     except (OSError, ValueError, AttributeError):
         return ""
+    if t.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + t[len("\\\\?\\UNC\\"):]
+    if t.startswith("\\\\?\\"):
+        return t[len("\\\\?\\"):]
+    return t
+
+
+def _symlink_text(p):
+    """The target the symbolic link `p` holds, as it is written (relative or a full path);
+    None for a junction (always a full path) or anything that isn't a symbolic link."""
+    try:
+        if not stat.S_ISLNK(os.lstat(p).st_mode):
+            return None
+        return os.readlink(p)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _relinked(link_dir, target, new_dir):
+    """A symbolic link in the real folder `link_dir` holds `target`: the target to write
+    instead when the link moves to the real folder `new_dir`, so it still points at the same
+    place -- relative, as it was -- or None when it needs no change (a full path, or one that
+    points at the same place from either folder). Path arithmetic only."""
+    if not target or os.path.isabs(target):
+        return None
+    old = os.path.normpath(os.path.join(link_dir, target))
+    new = os.path.normpath(os.path.join(new_dir, target))
+    if os.path.normcase(old) == os.path.normcase(new):
+        return None
+    return os.path.relpath(old, new_dir)
+
+
+def _retarget(src, dest):
+    """The target a symbolic link at `src` must hold at `dest` to point where it does now
+    (_relinked, on the real folders), or None when a plain rename keeps it right."""
+    text = _symlink_text(src)
+    if text is None:
+        return None
+    return _relinked(os.path.realpath(Path(src).parent), text,
+                     os.path.realpath(Path(dest).parent))
+
+
+def _nearest_existing(p):
+    p = Path(p)
+    while not os.path.lexists(p) and p != p.parent:
+        p = p.parent
+    return p
+
+
+def _same_device(src, dest):
+    """Is the entry `src` on the drive `dest` would be made on (its nearest existing folder,
+    links in the way followed)? Unknown counts as yes: the rename itself then says."""
+    try:
+        a = os.lstat(src).st_dev
+        b = os.stat(_nearest_existing(Path(dest).parent)).st_dev
+    except OSError:
+        return True
+    return a == b or not a or not b
+
+
+_RELATIVE_LINK_WHY = ("it points by a path written from where it sits (%s), so from its new "
+                      "home it would point somewhere else")
+_RELATIVE_LINK_ADVICE = ("Make the link point by its full path, or put the real folder or file "
+                         "in its place, then start Moonglade again.")
 
 
 def _unlink_link(p):
@@ -1039,6 +1108,16 @@ class _Half:
                     changed = True
                 elif os.path.lexists(src) and not os.path.lexists(dest):
                     del self.journal.items[key]
+                    changed = True
+                elif (entry.get("target") and os.path.lexists(src)
+                      and _symlink_text(dest) == entry["target"]):
+                    # Made again at its new home with its target rewritten, and cut short
+                    # before the old entry went: it goes now.
+                    try:
+                        _unlink_link(src)
+                    except OSError:
+                        continue
+                    entry["state"] = "made"
                     changed = True
                 continue
             if dest.is_file() and not src.exists():
@@ -1478,15 +1557,16 @@ def _fold_db_rows(target, src):
 
 
 # ---- the safe move ------------------------------------------------------------------------------
-def _link_stop(src, dest, why):
+def _link_stop(src, dest, why, advice=None):
     """The sentence for a link the move can't bring as a link (MoveStopped)."""
     target = _link_target(src)
     where = (" into its new home %s" % dest) if dest is not None else ""
     return MoveStopped(
         "%s is a link (a junction or a symbolic link)%s. Moonglade moves a link only as a "
         "link, by renaming it%s on the same drive, and %s. Nothing it points at was touched. "
-        "Move the link yourself, or put the real folder or file in its place, then start "
-        "Moonglade again." % (src, (" to " + target) if target else "", where, why))
+        "%s" % (src, (" to " + target) if target else "", where, why,
+                advice or "Move the link yourself, or put the real folder or file in its place, "
+                          "then start Moonglade again."))
 
 
 def _park(path, half, said=True):
@@ -1730,9 +1810,14 @@ def _rename_into(src, dest):
 def _bring_link(src, dest, half):
     """Bring the link `src` (a junction, or a symbolic link to a file or a folder) to `dest`
     as a link: the link entry itself is renamed, on the same drive, journalled first. What it
-    points at is never copied, walked or deleted. A link that can't be renamed there (that
-    place is taken, or it is on another drive) is left where it is, and the start stops with
-    a plain sentence (MoveStopped). Returns "moved", or None when nothing is at `src`."""
+    points at is never copied, walked or deleted. A symbolic link whose target is written
+    relative to its own folder would point somewhere else from its deeper new home
+    (_retarget): off Windows it is made again at `dest` with its target rewritten (still
+    relative) and the old entry removed; on Windows, where making one needs a privilege, the
+    start stops. A link that can't be brought there (that place is taken, it is on another
+    drive, it points by a relative path on Windows) is left where it is, and the start stops
+    with a plain sentence (MoveStopped; _plan_library stops for these before anything
+    moves). Returns "moved", or None when nothing is at `src`."""
     src, dest = Path(src), Path(dest)
     if not os.path.lexists(src) or _same(src, dest):
         return None
@@ -1741,21 +1826,42 @@ def _bring_link(src, dest, half):
         raise _link_stop(src, dest, "that place is already taken")
     key = half.rel(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    half.journal.items[key] = {"src": half.rel(src), "state": "renaming", "how": "link",
-                               "time": _now()}
+    target = _retarget(src, dest)
+    if target is not None and sys.platform == "win32":
+        raise _link_stop(src, dest, _RELATIVE_LINK_WHY % _symlink_text(src),
+                         _RELATIVE_LINK_ADVICE)
+    entry = {"src": half.rel(src), "state": "renaming", "how": "link", "time": _now()}
+    if target is not None:
+        entry["target"] = target
+    half.journal.items[key] = entry
     half.journal.save()
     try:
-        os.rename(src, dest)
+        if target is None:
+            os.rename(src, dest)
+        else:
+            os.symlink(target, dest, target_is_directory=os.path.isdir(src))
     except OSError as e:
         half.journal.items.pop(key, None)
         half.journal.save()
         raise _link_stop(src, dest, "it couldn't be renamed there (%s)" % _reason(e))
+    if target is not None:
+        try:
+            _unlink_link(src)
+        except OSError as e:
+            # Made at its new home; the old entry stays journalled "renaming", and the next
+            # start removes it (settle_renames).
+            raise _Failed("couldn't remove the old link %s (%s)" % (src, _reason(e)), e)
     _fsync_dir(dest.parent)
     half.journal.items[key]["state"] = "made"
     half.journal.save()
     half.tick()
-    half.report.item("Moved the link %s to %s (what it points at was not touched).",
-                     half.rel(src), half.rel(dest))
+    if target is None:
+        half.report.item("Moved the link %s to %s (what it points at was not touched).",
+                         half.rel(src), half.rel(dest))
+    else:
+        half.report.item("Moved the link %s to %s, its target written as %s from there so it "
+                         "still points at the same place (what it points at was not "
+                         "touched).", half.rel(src), half.rel(dest), target)
     return "moved"
 
 
@@ -2373,9 +2479,17 @@ def _install_half(half, local, old, copyfirst, report):
         for ico in _files_under(d):
             if ico.suffix.lower() == ".ico":
                 moves.append((ico, _paths.icons_dir() / ico.name, "cache"))
-    leftovers = [p for p in (local / OLD_RECORD, local / OLD_LOCK, old / OLD_ICON_CACHE,
-                             local / "cache" / "marks")
-                 if p.exists() and not _same(p, local)]
+    # A leftover inside a link (local\cache a junction, say) is never removed: that would
+    # delete inside what the link points at. One that is itself a link goes as the link alone.
+    leftovers, in_links = [], []
+    for p, root in ((local / OLD_RECORD, local), (local / OLD_LOCK, local),
+                    (old / OLD_ICON_CACHE, old), (local / "cache" / "marks", local)):
+        if not (p.exists() or _is_link(p)) or _same(p, local):
+            continue
+        if not _is_link(p) and _via_link(p.parent, root):
+            in_links.append(p)
+            continue
+        leftovers.append(p)
     # The app's own dead files at the install root (S9): never left for the person to delete.
     dead = [old / n for n in DEAD_ROOT_FILES if (old / n).is_file()]
     stray_db = old / "catalog.db"
@@ -2491,9 +2605,12 @@ def _install_half(half, local, old, copyfirst, report):
             continue
         _bring_or_say(src, dest, kind, half)
     for p in leftovers:
-        if p.exists():
+        if p.exists() or _is_link(p):
             _remove(p)
             report.item("Removed %s: an older version's bookkeeping or icon cache.", half.rel(p))
+    for p in in_links:
+        report.item("Left %s where it is: it is inside a link, and what a link points at is "
+                    "never touched.", half.rel(p))
     for p in dead:
         if p.exists():
             _remove(p)
@@ -2543,7 +2660,8 @@ class _Plan:
         self.dead = []           # the library's dead branding\ files, set aside, then gone
         self.kept = []           # per-login files no login can be found for: left, and said
         self.left = []           # old-home names that aren't Moonglade's by their content: left
-        self.stuck = []          # (link, dest or None, why): a link that can't move as a link
+        self.stuck = []          # (link, dest or None, why[, advice]): a link that can't
+        #                          move as a link (_link_stop's arguments)
         self.snap = []           # (path, name in the zip)
         self.ours = False        # the folder is a Moonglade library (_is_moonglade_library)
 
@@ -2703,9 +2821,16 @@ def _plan_library(out, app, copyfirst, logins, half):
             if os.path.lexists(out / n):
                 plan.left.append(out / n)
         return plan
+    # 3.20's reports\ that is itself a link: its files split between records\ and decisions\,
+    # so it can't move as one link, and nothing is ever moved out through one.
+    if _is_link(reports):
+        plan.stuck.append((reports, None, "its files go one by one into _moonglade\\records "
+                                          "and _moonglade\\decisions, so it can't move as one "
+                                          "link"))
+        reports = None
 
     def two(name, primary, secondary, dest, kind, vouch_name=None):
-        if _movable(primary):
+        if primary is not None and _movable(primary):
             plan.moves.append((primary, dest, kind, False))
             plan.snap.append((primary, half.rel(primary)))
         if _movable(secondary):
@@ -2716,12 +2841,16 @@ def _plan_library(out, app, copyfirst, logins, half):
 
     # Records and the reports that are records (S6).
     for name, kind in RECORDS.items():
-        primary = (reports if name in _REPORT_NAMES else app) / name
+        if name in _REPORT_NAMES:
+            primary = reports / name if reports is not None else None
+        else:
+            primary = app / name
         two(name, primary, out / name, _paths.records_path(out, name, make=False), kind)
     # The owner's decisions.
     for name, kind in DECISIONS.items():
-        two(name, reports / name, out / name, _paths.decisions_path(out, name, make=False), kind)
-    for folder in (reports, out):
+        two(name, reports / name if reports is not None else None, out / name,
+            _paths.decisions_path(out, name, make=False), kind)
+    for folder in [f for f in (reports, out) if f is not None]:
         try:
             snaps = sorted(folder.glob(CURATION_SNAPSHOT_PREFIX + "*.json"))
         except OSError:
@@ -2844,24 +2973,39 @@ def _plan_library(out, app, copyfirst, logins, half):
         else:
             plan.left.append(branding)
     # 3.20's bookkeeping.
-    for p in (app / OLD_RECORD, app / OLD_LOCK, out / "telemetry.lock", app / "telemetry.lock",
-              out / "integrity_report.lock", reports / "integrity_report.lock",
-              out / "jobs.jsonl.tmp", app / "jobs.jsonl.tmp"):
+    bookkeeping = [app / OLD_RECORD, app / OLD_LOCK, out / "telemetry.lock",
+                   app / "telemetry.lock", out / "integrity_report.lock",
+                   out / "jobs.jsonl.tmp", app / "jobs.jsonl.tmp"]
+    if reports is not None:
+        bookkeeping.append(reports / "integrity_report.lock")
+    for p in bookkeeping:
         if p.is_file() and not _is_link(p):
             if p.name == OLD_RECORD:
                 plan.snap.append((p, half.rel(p)))
             plan.removals.append(p)
-    plan.removals.append(reports)
-    # A cache inside a linked folder, and a linked _banners\ (_caches), are left and said.
+    if reports is not None:
+        plan.removals.append(reports)
+    # A cache inside a linked folder, and a _banners\ that is a link or holds a linked render
+    # (_banners_linked), are left and said (_caches).
     for c in LIBRARY_CACHES:
         p = out / "gallery" / "cache" / c
         if (_via_link(p.parent, out) and c in _child_names(p.parent)) or \
-                (c == "_banners" and _is_link(p)):
+                (c == "_banners" and _banners_linked(p)):
             plan.left.append(p)
-    # A link whose new home is taken can't move as a link: stop before anything moves.
+    # A link that can't move as a link stops the start before anything moves: its new home is
+    # taken, or on another drive, or (on Windows) it points by a path relative to where it
+    # sits. Any source that is a link counts, whatever kind the plan gave it (a record, a
+    # decision or a curation file can be one).
     for src, dest, kind, _v in plan.moves:
-        if kind == "link" and os.path.lexists(dest) and not _same(src, dest):
+        if not (kind == "link" or _is_link(src)) or _same(src, dest):
+            continue
+        if os.path.lexists(dest):
             plan.stuck.append((src, dest, "that place is already taken"))
+        elif not _same_device(src, dest):
+            plan.stuck.append((src, dest, "its new home is on another drive"))
+        elif sys.platform == "win32" and _retarget(src, dest) is not None:
+            plan.stuck.append((src, dest, _RELATIVE_LINK_WHY % _symlink_text(src),
+                               _RELATIVE_LINK_ADVICE))
     return plan
 
 
@@ -2906,8 +3050,8 @@ def _banners(half, out, report):
     worn_banner says so. A choice settings.json already holds is never overwritten."""
     from moonglade import settings as _settings
     folder = out / "gallery" / "cache" / "_banners"
-    if _via_link(folder, out) or not folder.is_dir():
-        return                                           # through a link: never read out of it
+    if _via_link(folder, out) or _banners_linked(folder) or not folder.is_dir():
+        return             # through a link, or holding a linked render: left, never read from
     half.report.worked["library"] = True
     worn = dict((_settings.branding().get("worn_banner") or {}))
     changed = False
@@ -2942,18 +3086,29 @@ def _banners(half, out, report):
 
 def _caches(out):
     """The library's rebuildable caches that are there to delete: one that is a link goes as
-    the link alone -- except a linked _banners\\, which may hold the only copy of a banner
-    the install wears and can't be read out of the link -- and one inside a linked folder is
-    never touched (both are left, and said: _plan_library)."""
+    the link alone -- except a _banners\\ that is a link or holds a linked render
+    (_banners_linked), which may hold the only copy of a banner the install wears and can't be
+    read out of the link -- and one inside a linked folder is never touched (both are left,
+    and said: _plan_library)."""
     out = Path(out)
     found = []
     for c in LIBRARY_CACHES:
         p = out / "gallery" / "cache" / c
-        if _via_link(p.parent, out) or (c == "_banners" and _is_link(p)):
+        if _via_link(p.parent, out) or (c == "_banners" and _banners_linked(p)):
             continue
         if os.path.lexists(p):
             found.append(p)
     return found
+
+
+def _banners_linked(folder):
+    """Is the library's banner render cache a link, or does it hold a render a library may
+    wear (BANNER_FLATS) that is a link? Such a render may be the only copy of the banner the
+    install wears, and could only move into local\\banners\\ -- on another drive, for a
+    library away from the program -- by being read through the link: the folder is left where
+    it is, and said, like a _banners\\ that is itself a link."""
+    folder = Path(folder)
+    return _is_link(folder) or any(_is_link(folder / n) for n in BANNER_FLATS.values())
 
 
 def _shared_files(out, app):
@@ -3002,7 +3157,7 @@ def _old_layout_records(plan, shared):
     decision, per-login store and the Loom (not the logs, which nothing reads back), and any
     link the move would carry."""
     return [Path(s) for s, _d, k, _v in plan.moves if k != "log" and _movable(s)] + \
-        [Path(link) for link, _d, _w in plan.stuck] + list(shared)
+        [Path(stuck[0]) for stuck in plan.stuck] + list(shared)
 
 
 def _names(paths, half, most=3):
@@ -3200,13 +3355,15 @@ def _say_left(plan, half, report):
 
 def _library_half(half, out, app, copyfirst, logins, report):
     j = half.journal
+    if not j.doc.get("started"):
+        j.doc["started"] = _now()
+    # A rename cut short is settled first: it can finish one (a link made again at its new
+    # home whose old entry is still there), which the plan must not take for a taken home.
+    if half.settle_renames():
+        j.save()
     plan = _plan_library(out, app, copyfirst, logins, half)
     shared = _shared_files(out, app) if plan.ours else []
     caches = _caches(out) if plan.ours else []
-    if not j.doc.get("started"):
-        j.doc["started"] = _now()
-    if half.settle_renames():
-        j.save()
     if not _has_work(plan, shared, caches):
         if not j.doc.get("finished"):
             j.finish()
