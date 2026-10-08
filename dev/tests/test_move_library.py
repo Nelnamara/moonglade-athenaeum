@@ -218,7 +218,12 @@ def test_a_plain_name_file_and_the_login_s_own_keep_the_newer(r):
     _prepare(r)
     acc = r.lib / "_moonglade" / "accounts"
     assert json.loads((acc / KEY_NEL / "views.json").read_text()) == {"v": "hashed, newer"}
-    parked = list((r.lib / "_moonglade" / ".snapshot" / "parked").rglob("Nel.json*"))
+    # Which of the two the plan meets first follows the folder's sorted listing, and that is
+    # case-blind on Windows and case-sensitive elsewhere: "Nel.json" can come first, arrive in
+    # the new home, and be parked under that home's name once the newer one comes. Either
+    # way the older copy is the one parked, whole.
+    parked = [p for p in (r.lib / "_moonglade" / ".snapshot" / "parked").rglob("*")
+              if p.is_file()]
     assert [json.loads(x.read_text()) for x in parked] == [{"v": "plain, older"}]
 
 

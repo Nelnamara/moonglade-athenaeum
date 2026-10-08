@@ -45,8 +45,11 @@ def test_resolution_order_explicit_beats_stored_beats_default(tmp_path):
     assert resolve_library_dir(None) == default
     assert resolve_library_dir(r"D:\one-off") == r"D:\one-off"
 
-    settings.set_values(library_dir=r"D:\Moonglade Library")
-    assert resolve_library_dir(None) == r"D:\Moonglade Library"
+    # A full path on this platform: r"D:\..." is relative on Linux and macOS, so there it is
+    # anchored to the app folder like any relative stored one (below).
+    stored = str(tmp_path / "Moonglade Library")
+    settings.set_values(library_dir=stored)
+    assert resolve_library_dir(None) == stored
     # An explicit flag must still win, or a scheduled job pointed elsewhere would be
     # silently redirected into the shared setting's folder.
     assert resolve_library_dir(r"E:\scratch") == r"E:\scratch"

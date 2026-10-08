@@ -929,7 +929,10 @@ def test_a_send_to_shortcut_in_a_start_menu_folder_is_found(install, box):
     [item] = outside.find(install, m, kinds=("shortcut",))
     assert item.label == "the shortcut “Moonglade” in your Start menu"
     [r] = _fix([item], install, m, box)
-    assert r.fixed and save.saved[0]["target"] == str(install / "Moonglade Launcher.pyw")
+    # A shortcut's target is a Windows path, joined the Windows way on every platform the
+    # tests run on (ntpath), as rewrite_command does.
+    assert r.fixed
+    assert save.saved[0]["target"] == ntpath.join(str(install), "Moonglade Launcher.pyw")
 
 
 def test_shortcuts_to_other_things_are_left_alone(install, box):
