@@ -857,8 +857,10 @@ def find_shortcuts(install, m):
             continue
         if rw.refs:
             auto = not rw.problem and _gone(rw, install)
-        else:                       # its icon only: moved while the old cache still holds it
-            auto = Path(ntpath.expandvars(_clean(lnk.icon))).is_file()
+        elif Path(ntpath.expandvars(_clean(lnk.icon))).is_file():
+            auto = True             # its icon only: moved while the old cache still holds it
+        else:
+            continue                # its icon is gone already: nothing there to move
         found.append(Item("shortcut", str(p), _shortcut_label(p, where),
                           {"path": str(p), "where": where}, auto=auto))
     return found

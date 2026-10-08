@@ -567,6 +567,15 @@ def test_an_icon_only_in_an_old_cache_is_moved_to_the_icons_folder(install, box)
     assert save.saved[0]["args"] == '"%s\\Moonglade Launcher.pyw"' % install
 
 
+def test_an_icon_only_shortcut_whose_icon_is_gone_is_not_offered(install, box):
+    """Its target is right and its icon is already blank: nothing is there to move, so it is
+    not put to the owner as something to fix (it could only ever fail again)."""
+    write_lnk(box.desktop / "M.lnk", target=r"C:\Python311\pythonw.exe",
+              args='"%s\\Moonglade Launcher.pyw"' % install,
+              icon=str(install / "_container_cache" / "marks" / "gone.ico"))
+    assert outside.find(install, machine(box), kinds=("shortcut",)) == []
+
+
 def test_an_icon_already_gone_is_offered_from_the_app_when_it_can(install, box):
     write_lnk(box.desktop / "M.lnk", target=r"C:\Python311\pythonw.exe",
               args='"%s\\Serve Gallery.pyw"' % install,
