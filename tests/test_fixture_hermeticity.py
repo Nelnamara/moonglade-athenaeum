@@ -403,3 +403,22 @@ def test_the_machine_files_guard_sees_a_real_move(tmp_path, monkeypatch):
     assert before["moonglade.mgpack"] and not after["moonglade.mgpack"]
     assert before["serve.txt"] and not after["serve.txt"]
     assert before["local/.journal.json"] is None and after["local/.journal.json"]
+
+
+def test_no_test_can_start_a_real_control_panel_job(tmp_path):
+    """conftest's _no_real_panel_jobs: the job runner's command line (`python -m moonglade
+    --out <library> ...`, from the app folder) is refused for the whole session, so a job's
+    follow-on started after a test's own Popen stand-in is gone can never run the command
+    line -- and the move -- against the checkout. Every other subprocess still starts."""
+    import subprocess
+    import sys
+    from tests.conftest import is_a_real_panel_job
+    argv = [sys.executable, "-m", "moonglade", "--out", str(tmp_path), "-v", "--sync"]
+    assert is_a_real_panel_job(argv)
+    with pytest.raises(OSError):
+        subprocess.Popen(argv, cwd=str(tmp_path))
+    assert not is_a_real_panel_job([sys.executable, "-m", "moonglade", "--version"])
+    assert not is_a_real_panel_job([sys.executable, "-m", "moonglade.mcp_server"])
+    r = subprocess.run([sys.executable, "-c", "print('still starts')"], capture_output=True,
+                       stdin=subprocess.DEVNULL, text=True, timeout=60)
+    assert r.stdout.strip() == "still starts"

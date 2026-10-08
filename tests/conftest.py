@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -439,6 +440,48 @@ def _real_machine_files_untouched():
                     "across (moonglade.migrate) -- pin local_dir / migrate.old_app_root, or run "
                     "the migration on a tmp folder. Changed (before, after): {}"
                     .format(changed))
+
+
+def is_a_real_panel_job(args):
+    """True for the command line the Control Panel's job runner starts (moonglade.gallery's
+    _panel_run): this interpreter, `-m moonglade`, and an explicit `--out`."""
+    try:
+        argv = [str(a) for a in args] if not isinstance(args, (str, bytes)) else [str(args)]
+    except TypeError:
+        return False
+    return (len(argv) >= 3 and argv[1:3] == ["-m", "moonglade"] and "--out" in argv)
+
+
+class _NoRealPanelJob(subprocess.Popen):
+    """subprocess.Popen, except that it refuses to start a real Control Panel job."""
+
+    def __init__(self, args, *a, **k):
+        if is_a_real_panel_job(args):
+            raise OSError("the test suite never starts a real Control Panel job")
+        super().__init__(args, *a, **k)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_real_panel_jobs():
+    """PREVENTION: no test starts a real Control Panel job.
+
+    The job runner (moonglade.gallery's _panel_run) starts `python -m moonglade --out <library>`
+    from the app folder, as its own process -- which none of this suite's pins reach. Tests that
+    drive it stand in their own Popen, but a job's follow-on (`then`) is started by its reader
+    thread once the job ends, which can be after the test's stand-in is gone. A real child then
+    ran the command line against the test's library with the checkout's real config.json, and
+    since the rebuilt move it would also run moonglade.setup.prepare("cli") in the checkout's
+    own local/ -- on the owner's machine a real install. So the process's Popen refuses that
+    one command line for the whole session (a refused start is the job runner's ordinary
+    "could not start the job"); a test's own stand-in still replaces it while it runs, and every
+    other subprocess -- `-m moonglade --version`, the MCP server run from a copied app folder,
+    git, ffmpeg -- starts as normal. _real_machine_files_untouched stays as the backstop."""
+    mp = pytest.MonkeyPatch()
+    mp.setattr(subprocess, "Popen", _NoRealPanelJob)
+    try:
+        yield
+    finally:
+        mp.undo()
 
 
 def pytest_sessionstart(session):
