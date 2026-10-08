@@ -45,13 +45,15 @@ class _NoThread:
 
 @pytest.fixture
 def launch(monkeypatch, tmp_path):
+    import ctypes
+
     def _launch(codes=(0,), settings=None, config=None, ours_on_port=False):
         if settings is not None:
             paths.settings_path().write_text(json.dumps(settings), encoding="utf-8")
         if config is not None:
             paths.config_path().write_text(json.dumps(config), encoding="utf-8")
         codes = list(codes)
-        run = types.SimpleNamespace(started=[], probed=[], opened=[], exit=None)
+        run = types.SimpleNamespace(started=[], probed=[], opened=[], boxes=[], exit=None)
 
         def popen(cmd, **kw):
             run.started.append(types.SimpleNamespace(cmd=list(cmd), **kw))
@@ -70,6 +72,10 @@ def launch(monkeypatch, tmp_path):
         monkeypatch.setattr(time, "sleep", lambda s: None)
         monkeypatch.setattr(threading, "Thread", _NoThread)
         monkeypatch.setattr(sys, "path", list(sys.path))
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(
+            user32=types.SimpleNamespace(
+                MessageBoxW=lambda hwnd, text, title, flags: run.boxes.append(text) or 1)),
+            raising=False)
         monkeypatch.chdir(tmp_path)              # it changes directory; this puts it back
         try:
             runpy.run_path(str(LAUNCHER), run_name="__main__")
@@ -101,8 +107,12 @@ def test_exit_42_relaunches_the_same_command_and_0_ends_it(launch):
 
 
 def test_a_crash_ends_the_launcher_without_a_relaunch(launch):
+    """A server that falls over as it starts is said (S10), and never relaunched."""
     run = launch(codes=[1])
     assert len(run.started) == 1
+    assert run.exit == 1
+    if sys.platform == "win32":
+        assert "stopped as it started (code 1)" in run.boxes[0]
 
 
 def test_a_running_server_on_the_port_means_open_the_browser_and_bow_out(launch):

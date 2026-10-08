@@ -130,8 +130,9 @@ def _calls(name):
 
 def test_the_launcher_rotates_serve_log_before_it_opens_it():
     src, tree = _launcher()
-    guard = _top_index(tree, lambda n: isinstance(n, ast.If) and any(
-        _calls("_moonglade_on_port")(c) for c in ast.walk(n.test)))
+    # the single-instance check: the launcher bows out when one of its servers answers (S1:
+    # it runs before the move, as _bow_out_if_running)
+    guard = _top_index(tree, _calls("_bow_out_if_running"))
     rotate = _top_index(tree, _calls("rotate_by_size"))
     opened = _top_index(tree, lambda n: _calls("open")(n) and (
         "serve.log" in ast.unparse(n) or "_serve_log" in ast.unparse(n)))

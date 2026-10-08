@@ -107,8 +107,8 @@ def test_a_real_start_renames_an_old_pack_before_anything_reads_it():
     before anything reads a setting -- the port check included (B2) -- and so before
     create_app(): every check after it (the page's "is my pack current", About, the fetch job
     bound at app build) sees the pack where it now is. A second server refused on a busy port
-    moves nothing: the running one's start already finished the move, and the journal says
-    so."""
+    moves nothing: it is refused BEFORE the move (S1, its port read the way the move will
+    leave it), and the full check runs again once the settings are in place."""
     import inspect
 
     from moonglade import migrate as mig
@@ -116,5 +116,6 @@ def test_a_real_start_renames_an_old_pack_before_anything_reads_it():
     names = [c[0] for c in calls]
     assert "prepare" in names, "main() no longer runs the move"
     i = names.index("prepare")
+    assert names.index("_port_taken_early") < i
     assert i < names.index("port_owner") < names.index("create_app")
     assert "migrate_legacy_name" in inspect.getsource(mig._install_half)

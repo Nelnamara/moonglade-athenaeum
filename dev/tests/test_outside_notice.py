@@ -56,9 +56,18 @@ def test_only_this_machine_hears_about_it(found):
     n = g.server_notice(local=True)
     assert n["key"] == g._SERVER_START
     assert n["title"] == "Some things outside Moonglade still use its old file names."
-    assert n["msg"] == ("The scheduled task “Moonglade sync” and the shortcut “Moonglade” on "
-                        "your Desktop. Fix them points them at the new names.")
+    assert n["msg"] == ("They are the scheduled task “Moonglade sync” and the shortcut "
+                        "“Moonglade” on your Desktop. Press Fix them to point them at the new "
+                        "names.")
     assert n["fix"] == {"label": "Fix them"}
+
+
+def test_one_thing_is_said_in_the_singular(monkeypatch):
+    monkeypatch.setitem(g._OUTSIDE, "items", _ITEMS[:1])
+    n = g.server_notice(local=True)
+    assert n["title"] == "The scheduled task “Moonglade sync” still uses Moonglade's old file names."
+    assert n["msg"] == "Press Fix it to point it at the new names."
+    assert n["fix"] == {"label": "Fix it"}
 
 
 def test_the_jobs_poll_carries_it_with_the_sessions_token(tmp_path, found):
@@ -210,7 +219,8 @@ def _launch(monkeypatch, platform):
     monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(
         user32=types.SimpleNamespace(MessageBoxW=lambda *a: 1)), raising=False)
     ready = types.SimpleNamespace(summary=lambda: "")
-    stub_code_module(monkeypatch, "setup", types.SimpleNamespace(prepare=lambda kind: ready))
+    stub_code_module(monkeypatch, "setup", types.SimpleNamespace(
+        prepare=lambda kind: ready, peek_server=lambda: {"port": 5000}))
     monkeypatch.chdir(paths.local_dir())
     try:
         runpy.run_path(str(REPO_ROOT / "Moonglade Launcher.pyw"), run_name="__main__")

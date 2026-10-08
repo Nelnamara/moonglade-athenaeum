@@ -12245,7 +12245,6 @@ _SERVER_START = secrets.token_hex(8)
 # None until that look has run -- and in every app a test builds, since only main() looks.
 _OUTSIDE = {"items": None}
 _OUTSIDE_FIXING = threading.Lock()
-OUTSIDE_FIX_LABEL = "Fix them"
 
 
 def _outside_scan():
@@ -12287,7 +12286,7 @@ def server_notice(local=False):
     from moonglade import outside as moonglade_outside
     title, msg = moonglade_outside.notice_words(items)
     return {"key": _SERVER_START, "title": title, "msg": msg,
-            "fix": {"label": OUTSIDE_FIX_LABEL}}
+            "fix": {"label": moonglade_outside.fix_label(items)}}
 
 
 # The running werkzeug server, so a web Stop/Restart handler can shut it down GRACEFULLY instead
@@ -29123,6 +29122,53 @@ __DESIGN_TOKENS__
 # Entry point
 # ---------------------------------------------------------------------------
 
+# The line the server prints (to serve.log, under the launcher) before a move's stop sentence:
+# the launcher shows the last such line when its server stops as it starts (S10).
+PREPARE_MARK = "[prepare] "
+# How long a server must serve before its start counts as clean (S1).
+CLEAN_SERVE_S = 600.0
+
+
+def _count_clean_start(prepared):
+    """Count this server's start as clean (moonglade.setup.Prepared.count_clean_start) and log
+    what that did. Never raises."""
+    try:
+        rep = prepared.count_clean_start()
+        rep.log()
+    except Exception:                                   # noqa: BLE001 -- bookkeeping only
+        pass
+
+
+def _say_port_refused(owner, port):
+    who = ("another Moonglade server is ALREADY serving"
+           if owner == "moonglade" else "something else is listening")
+    print("\nRefusing to start: {} on port {}.\n".format(who, port), file=sys.stderr)
+    if owner == "moonglade":
+        print("  Open the one that's already running:  http://localhost:{}/\n"
+              .format(port), file=sys.stderr)
+    print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
+          "  Or just use a different port:  --port {}\n"
+          "\n"
+          "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
+          "  allows that -- and requests would land on either one at random. Pass\n"
+          "  --allow-port-reuse if you genuinely want that.\n".format(port, port + 1),
+          file=sys.stderr)
+
+
+def _port_taken_early(args, planned):
+    """S1: is this start's port already taken, judged before the move runs? `planned` is
+    moonglade.setup.peek_server(): the host, port and launch switches this start will use
+    once the settings are in place. Says why on stderr, as the later check does."""
+    if getattr(args, "allow_port_reuse", False) or \
+            "--allow-port-reuse" in (planned.get("launch_args") or []):
+        return False
+    owner = port_owner(planned["host"], planned["port"])
+    if owner:
+        _say_port_refused(owner, planned["port"])
+        return True
+    return False
+
+
 def port_owner(host, port, timeout=0.4):
     """Who, if anyone, is already listening on (host, port)?
 
@@ -29211,15 +29257,22 @@ def main():
                          "console too -- the log FILE in local/logs/ always captures them "
                          "regardless of this flag")
     args = ap.parse_args()
+    from moonglade import setup as moonglade_setup
+    # S1: a second server bows out BEFORE the move, so it never moves anything under a running
+    # one. The port is read without changing anything (moonglade.setup.peek_server: the
+    # stored settings, or the ones an older version left, read the way the merge will read
+    # them); the full check below runs again once the settings are in place.
+    if _port_taken_early(args, moonglade_setup.peek_server(args.host, args.port)):
+        return 2
     # B2: the move runs FIRST -- the settings merge and the install half, then the library's --
     # before anything below reads a setting, a record or a log. A move that cannot finish (a
     # lock held past its wait, a file in use) stops the start with its plain sentence: the new
-    # homes would otherwise read empty.
-    from moonglade import setup as moonglade_setup
+    # homes would otherwise read empty. The sentence goes to stderr (serve.log under the
+    # launcher) behind PREPARE_MARK, which the launcher looks for to show it (S10).
     try:
         prepared = moonglade_setup.prepare("server", explicit_out=args.out)
     except moonglade_setup.MoveStopped as e:
-        print("\n" + str(e) + "\n", file=sys.stderr)
+        print("\n" + PREPARE_MARK + str(e) + "\n", file=sys.stderr)
         return 3
     # The launch switches settings.json keeps (launch_args, S17) apply to every start; this
     # start's own command line adds to them.
@@ -29278,19 +29331,7 @@ def main():
     if not getattr(args, "allow_port_reuse", False):
         owner = port_owner(args.host, args.port)
         if owner:
-            who = ("another Moonglade server is ALREADY serving"
-                   if owner == "moonglade" else "something else is listening")
-            print("\nRefusing to start: {} on port {}.\n".format(who, args.port), file=sys.stderr)
-            if owner == "moonglade":
-                print("  Open the one that's already running:  http://localhost:{}/\n"
-                      .format(args.port), file=sys.stderr)
-            print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
-                  "  Or just use a different port:  --port {}\n"
-                  "\n"
-                  "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
-                  "  allows that -- and requests would land on either one at random. Pass\n"
-                  "  --allow-port-reuse if you genuinely want that.\n".format(args.port, args.port + 1),
-                  file=sys.stderr)
+            _say_port_refused(owner, args.port)
             return 2
 
     # One-time, and only on a REAL start: move any rendered banner flat still
@@ -29368,6 +29409,13 @@ def main():
     srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
     _SERVER_CONTROL["srv"] = srv
     _SERVER_CONTROL["exit_code"] = 0
+    # S1: this start counts toward deleting the move's safety snapshots only once it has
+    # served for a while (CLEAN_SERVE_S), or when it is stopped cleanly (below) -- never for
+    # a server that refused its port or fell over as it started.
+    import threading as _count_threading
+    _count_timer = _count_threading.Timer(CLEAN_SERVE_S, _count_clean_start, (prepared,))
+    _count_timer.daemon = True
+    _count_timer.start()
     # mDNS / Bonjour LAN advertising (opt-in, fail-soft). Register after make_server has bound
     # the socket, so the advertised service is immediately reachable; the goodbye fires in the
     # finally below -- which now actually runs, thanks to step 1's graceful shutdown. The
@@ -29392,11 +29440,18 @@ def main():
     # Look for things outside the app that still name its old files (a scheduled task, a
     # Claude registration, a shortcut): off-thread, for the notice (server_notice).
     _outside_prime()
+    clean_stop = False
     try:
         srv.serve_forever()
+        clean_stop = True
     except KeyboardInterrupt:
-        pass                         # Ctrl+C on a terminal launch -> clean stop (exit 0)
+        clean_stop = True            # Ctrl+C on a terminal launch -> clean stop (exit 0)
     finally:
+        _count_timer.cancel()
+        # A Stop (exit 0) is a clean start's end; a Restart (42) counts only through the
+        # timer, so a run of quick Restarts never deletes the snapshots.
+        if clean_stop and _SERVER_CONTROL.get("exit_code", 0) == 0:
+            _count_clean_start(prepared)
         b = _SERVER_CONTROL.get("bonjour")
         if b is not None:
             b.stop()                 # mDNS goodbye -- devices drop moonglade.local promptly
