@@ -93,6 +93,9 @@ def local_dir():
     return APP_ROOT / LOCAL_DIRNAME
 
 
+def icons_dir(): return local_dir() / "icons"
+
+
 def old_local_path(name):
     """Where 3.19 kept the machine file `name`: the app folder itself, except the icon cache
     (`_container_cache/`) and mirror_session.json (beside wherever config.json was found).
