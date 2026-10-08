@@ -43,8 +43,14 @@ The rules:
     variables (_LNK_SCRIPT).
   * A Claude config can hold keys and tokens, so it never goes into the install's snapshot:
     a copy is kept beside it (as private as the file itself) and removed once the rewrite is
-    read back. The file is re-read just before it is replaced, so a change Claude made
-    meanwhile is never lost: the rewrite starts again from it.
+    read back, or when the rewrite can't be written. The file is read again just before it
+    is replaced, once the new one is flushed, so a change Claude made meanwhile is kept: the
+    rewrite starts again from it. (Without a lock that leaves only a moment in which a write
+    could be missed; it can't close it.) A lone surrogate in it is written back as its
+    \\uXXXX escape.
+  * A scheduled task that runs as another account (SYSTEM, a service, a group, another user)
+    or that names an old file for another program (cmd /c del ..., an editor) is reported and
+    left as it is: Python goes in front of an old file only where it is started by its type.
   * A task's XML and a shortcut are copied into local\\.snapshot\\outside\\ before they change
     (and the safety snapshot's clean-start count starts again, so the copy is kept five clean
     starts on). Every file is rewritten whole: a temp file beside it, then one os.replace.
@@ -66,6 +72,7 @@ import json
 import logging
 import ntpath
 import os
+import posixpath
 import re
 import shutil
 import struct
@@ -132,10 +139,13 @@ class Machine:
     probe(argv)       -> {"version": (major, minor), "fastmcp": bool}, or None when `argv`
                       (a Python and its own options) cannot be started: asked of a Claude
                       registration's Python before it is rewritten
+    user              (SID, "DOMAIN\\name") of the Windows account running the app, or None
+                      when it is not known: a scheduled task that runs as anyone else is
+                      reported, never rewritten
     """
 
     def __init__(self, platform=None, shortcut_folders=(), claude_configs=(), run=None,
-                 save_lnk=None, python=None, probe=None):
+                 save_lnk=None, python=None, probe=None, user=None):
         self.platform = platform or sys.platform
         self.shortcut_folders = list(shortcut_folders)
         self.claude_configs = list(claude_configs)
@@ -143,6 +153,7 @@ class Machine:
         self.save_lnk = save_lnk or _save_lnk_with_powershell
         self.python = python or _console_python()
         self.probe = probe or _probe_python
+        self.user = tuple(user) if user else None
 
     @property
     def windows(self):
@@ -177,7 +188,20 @@ def machine():
                         "Claude Desktop"))
     configs.append((home / ".claude.json", "Claude Code"))
     return Machine(platform=platform, shortcut_folders=[f for f in folders if f[0]],
-                   claude_configs=configs)
+                   claude_configs=configs,
+                   user=_current_user() if platform == "win32" else None)
+
+
+def _current_user():
+    """(SID, "DOMAIN\\name") of the Windows account running the app, from whoami; None when
+    it can't be had."""
+    rc, out, _err = _run(["whoami", "/user", "/fo", "csv", "/nh"], timeout=30)
+    if rc != 0:
+        return None
+    m = re.match(r'^\s*"([^"]*)","([^"]*)"', _decode(out))
+    if not m or not m.group(2):
+        return None
+    return m.group(2), m.group(1)
 
 
 def _console_python():
@@ -412,6 +436,36 @@ def _interpreter_before(line, pos, command):
     return bool(_PY.match(ntpath.basename(_clean(command))))
 
 
+_CMD = re.compile(r"^cmd(?:\.exe)?$", re.I)
+_CMD_RUN = ("/c", "/k")
+
+
+def _started_by_type(line, pos, command):
+    """True when the old file at `pos` is started by its file type: it is what `cmd /c` or
+    `cmd /k` runs, or what `start` opens (after start's own switches and its window title).
+    Anywhere else the line names it for another program -- `del`, `copy`, an editor -- and
+    putting Python in front would make a different command, so it is never done."""
+    toks = re.findall(r'"[^"]*"|\S+', line[:pos])
+    j = len(toks) - 1
+
+    def skip_switches(j):
+        while j >= 0 and toks[j].startswith("/") and toks[j].lower() not in _CMD_RUN:
+            j -= 1
+        return j
+    j = skip_switches(j)
+    if j >= 0 and toks[j].startswith('"'):
+        j = skip_switches(j - 1)                         # start's window title
+    if j >= 0 and toks[j].lower() == "start":
+        return True
+    if toks and toks[-1].lower() in _CMD_RUN:
+        k = len(toks) - 2
+        while k >= 0 and toks[k].startswith("/"):        # cmd's own switches (/q, /d, /s)
+            k -= 1
+        runner = toks[k] if k >= 0 else command
+        return bool(_CMD.match(ntpath.basename(_clean(runner))))
+    return False
+
+
 class _Rewrite:
     """A command (an executable, its arguments, the folder it starts in) with this install's
     old names rewritten. `refs` names the old files it named; `problem` is set when it names
@@ -467,6 +521,12 @@ def rewrite_command(command, arguments, workdir, install, python):
             if name == OLD_LAUNCHER:
                 return q + prefix + NEW_LAUNCHER + q2
             by_python = _interpreter_before(arguments, m.start(), command)
+            # Named for another program (cmd /c del ...\moonglade_backup.py, an editor): no
+            # Python goes in front of that, and the task or shortcut is reported instead.
+            if not by_python and not _started_by_type(arguments, m.start(), command):
+                out.problem = ("it names an old file in a way the app won't rewrite on a "
+                               "guess")
+                return m.group(0)
             # Started by its file type here (cmd /c ...\moonglade_backup.py): the folder has
             # none, so Python is named in front of it -- but never inside an outer string's
             # lone quote, where the nesting would be a guess.
@@ -599,6 +659,43 @@ def _why_windows_refused(text):
     return "Windows said: " + (text.strip().splitlines() or ["no reason given"])[0][:160]
 
 
+def _is_this_user(account, user):
+    """Does the task's UserId `account` (a SID, DOMAIN\\name or a bare name) name `user`, the
+    (SID, DOMAIN\\name) running the app? Unknown (`user` None) is no."""
+    if not user:
+        return False
+    sid, full = (str(x or "") for x in user)
+    a = account.strip().lower()
+    if a in (sid.lower(), full.lower()):
+        return True
+    return "\\" not in a and "\\" in full and a == full.rpartition("\\")[2].lower()
+
+
+def _runs_as_another(root, user):
+    """Why a task runs as an account other than the one running the app (`user`), or "". The
+    app re-registers a task only as itself: a task that runs as SYSTEM or a service, for a
+    group, or as another user would get this user's Python, which that account may not be
+    able to read, or this user able to change. A task with no account of its own runs as
+    the one who registers it."""
+    principal = root.find(".//t:Principals/t:Principal", _NS)
+    if principal is None:
+        return ""
+    group = principal.find("t:GroupId", _NS)
+    if group is not None and (group.text or "").strip():
+        return ("it runs for a group of Windows accounts (%s); change it in Task Scheduler"
+                % group.text.strip())
+    logon = principal.find("t:LogonType", _NS)
+    uid = principal.find("t:UserId", _NS)
+    account = (uid.text or "").strip() if uid is not None else ""
+    if logon is not None and (logon.text or "").strip() == "ServiceAccount":
+        return ("it runs as a Windows service account (%s); change it in Task Scheduler"
+                % (account or "a service"))
+    if account and not _is_this_user(account, user):
+        return ("it runs as another Windows account (%s); change it in Task Scheduler"
+                % account)
+    return ""
+
+
 def fix_task(item, install, m, snapshot):
     name = item.data["name"]
     # The name goes to schtasks as one argument of a list, never through a shell; a name that
@@ -618,6 +715,9 @@ def fix_task(item, install, m, snapshot):
         return Result(item.label, False,
                       "it runs with a saved Windows password, which only you can give "
                       "Task Scheduler again")
+    other = _runs_as_another(root, m.user)
+    if other:
+        return Result(item.label, False, other)
     refs, problem = _rewrite_task(root, install, m.python)
     if problem:
         return Result(item.label, False, problem)
@@ -657,10 +757,32 @@ def _mcp_args(version=None):
     return (["-P"] if version is not None and tuple(version) >= (3, 11) else []) + _MODULE_ARGS
 
 
+def _posix(platform):
+    return (platform or sys.platform) != "win32"
+
+
+def _px(p):
+    """A path off Windows, for comparing: either separator read as "/", case kept."""
+    p = _clean(p).replace("\\", "/")
+    return posixpath.normpath(p) if p else ""
+
+
+def _same_on(a, b, platform):
+    """`a` and `b` are one path by `platform`'s rules: Windows folds case and separators
+    (_same); elsewhere a path is case-sensitive, and /opt/moonglade is not /opt/Moonglade."""
+    if not _posix(platform):
+        return _same(a, b)
+    return bool(_px(a)) and _px(a) == _px(b)
+
+
+def _join_on(folder, name, platform):
+    return (posixpath if _posix(platform) else ntpath).join(str(folder), name)
+
+
 def _with_install(pythonpath, install, platform):
     sep = ";" if platform == "win32" else ":"
     parts = [p for p in (pythonpath or "").split(sep) if p]
-    if any(_same(p, install) for p in parts):
+    if any(_same_on(p, install, platform) for p in parts):
         return pythonpath
     return sep.join([str(install)] + parts)
 
@@ -672,8 +794,10 @@ def _how_to_run(install):
 
 # The interpreter options a registration may carry before the old file, which the fixer then
 # passes to that Python when it asks its version: the py launcher's version pick (-3, -3.12,
-# -3.12-64) and the plain switches that run nothing of their own.
-_PY_OPTION = re.compile(r"^-(?:\d+(?:\.\d+)?(?:-(?:32|64))?|[bBdEiIOPqsSuvx]|OO|bb|vv)$")
+# -3.12-64) and the plain switches that run nothing of their own. Not -E or -I: both make
+# Python ignore PYTHONPATH, which the rewritten registration needs to find the app, so one
+# carrying either is reported with the command line to use.
+_PY_OPTION = re.compile(r"^-(?:\d+(?:\.\d+)?(?:-(?:32|64))?|[bBdiOPqsSuvx]|OO|bb|vv)$")
 
 
 def _odd_python_options(options):
@@ -691,24 +815,44 @@ class _McpPlan:
 
 
 def _old_script_arg(args, install, cwd, platform=None):
-    """(index, "this" | "unsure") of the argument naming moonglade_mcp.py, or None. A full
-    path counts only inside this install; a bare or .\\ name only when the registration says it
-    starts in this install (its cwd), and is otherwise "unsure": it would match every install.
-    Off Windows a name starting with "/" is a full path too (since Python 3.13 ntpath no
-    longer calls one absolute, which made another install's registration "unsure")."""
-    target = ntpath.join(str(install), OLD_MCP)
-    posix = (platform or sys.platform) != "win32"
+    """(index, "this" | "unsure" | "nodrive") of the argument naming moonglade_mcp.py, or
+    None. A full path counts only inside this install; a bare or .\\ name only when the
+    registration says it starts in this install (its cwd), and is otherwise "unsure": it
+    would match every install. Off Windows a name starting with "/" is a full path (since
+    Python 3.13 ntpath no longer calls one absolute), compared case-sensitively. On Windows a
+    name rooted without a drive (\\Apps\\Moonglade\\moonglade_mcp.py) is on whatever drive
+    Claude starts on: in another folder it is another install's, and in this install's own
+    folder it is "nodrive" -- this install's only if Claude starts on its drive, a guess."""
+    posix = _posix(platform)
+    target = _join_on(install, OLD_MCP, platform)
     for i, a in enumerate(args):
         if not isinstance(a, str):
             continue
-        if _same(a, target):
+        if _same_on(a, target, platform):
             return i, "this"
         name = _clean(a)
+        if posix:
+            name = _px(name)
+            if posixpath.basename(name) != OLD_MCP:
+                continue
+            if name.startswith("/"):
+                continue                                 # another folder's file
+            if not cwd:
+                return i, "unsure"
+            whole = posixpath.join(_px(cwd), name)
+            return (i, "this") if _same_on(whole, target, platform) else None
         base = ntpath.basename(name.replace("/", "\\"))
         if base.lower() != OLD_MCP.lower():
             continue
-        if ntpath.isabs(name) or name.startswith(("\\\\", "//")) or \
-                (posix and name.startswith("/")):
+        if name.startswith(("\\\\", "//")):
+            continue                                     # another machine's file
+        drive, rest = ntpath.splitdrive(name)
+        if not drive and rest.startswith(("\\", "/")):
+            here = ntpath.splitdrive(str(install))[1]
+            if _same(ntpath.dirname(rest.replace("/", "\\")), here):
+                return i, "nodrive"
+            continue                                     # another folder's file
+        if ntpath.isabs(name):
             continue                                     # another folder's file
         if not cwd:
             return i, "unsure"
@@ -727,8 +871,8 @@ def rewrite_mcp_server(spec, install, python, platform, probe=None):
     command = spec.get("command") if isinstance(spec.get("command"), str) else ""
     args = spec.get("args") if isinstance(spec.get("args"), list) else []
     cwd = spec.get("cwd") if isinstance(spec.get("cwd"), str) else ""
-    target = ntpath.join(str(install), OLD_MCP)
-    if command and _same(command, target):
+    target = _join_on(install, OLD_MCP, platform)
+    if command and _same_on(command, target, platform):
         interpreter, before, after = [python], [], list(args)
     else:
         found = _old_script_arg(args, install, cwd, platform)
@@ -739,6 +883,10 @@ def rewrite_mcp_server(spec, install, python, platform, probe=None):
             return _McpPlan(problem=(
                 "it names moonglade_mcp.py without saying which folder it starts in, so the "
                 "app can't tell it is this install's; " + _how_to_run(install)))
+        if whose == "nodrive":
+            return _McpPlan(problem=(
+                "it names moonglade_mcp.py without saying which drive it is on, so the app "
+                "can't tell it is this install's; " + _how_to_run(install)))
         if not command or not _PY.match(ntpath.basename(_clean(command))):
             return _McpPlan(problem=(
                 "it starts through %s, which the app won't rewrite on a guess; %s" % (
@@ -878,16 +1026,25 @@ def fix_claude(item, install, m, snapshot=None):
         out = json.dumps(doc, indent=_indent_of(text), ensure_ascii=False)
         if text.endswith("\n"):
             out += "\n"
+        # Encoded before any copy is made: a string Claude cut in the middle of an emoji holds
+        # a lone surrogate, which UTF-8 can't carry raw -- it is written back as the \uXXXX
+        # escape it was read from, so nothing in the file changes but the registration.
+        try:
+            data = _escape_lone_surrogates(out).encode("utf-8")
+        except ValueError as e:
+            return Result(item.label, False, "its config couldn't be written (%s)" % _reason(e))
         try:
             backup = _backup_beside(path, raw)
         except OSError as e:
             return Result(item.label, False, "a copy couldn't be kept first (%s)" % _reason(e))
         try:
-            if path.read_bytes() != raw:
-                _drop(backup)                            # Claude wrote it meanwhile: again
-                continue
-            _write_atomically(path, out.encode("utf-8"))
-        except OSError as e:
+            # Compared again just before the replace, after the new file is flushed: a change
+            # Claude made meanwhile means starting again from it.
+            _write_atomically(path, data, expect=raw)
+        except _ChangedMeanwhile:
+            _drop(backup)                                # Claude wrote it meanwhile: again
+            continue
+        except (OSError, ValueError) as e:
             _drop(backup)
             return Result(item.label, False, "its config couldn't be written (%s)" % _reason(e))
         try:
@@ -1267,7 +1424,26 @@ def _snapshot_bytes(snapshot, name, data):
     _kept_for_a_while(snapshot)
 
 
-def _write_atomically(path, data):
+class _ChangedMeanwhile(Exception):
+    """The file changed between its read and the replace (_write_atomically's `expect`)."""
+
+
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _escape_lone_surrogates(text):
+    """`text` (JSON) with each lone UTF-16 surrogate written as its \\uXXXX escape. JSON
+    joins a valid pair into one character when it is read, so any left is lone, and only
+    ever inside a string, where the escape is what it was read from."""
+    return _LONE_SURROGATE.sub(lambda m: "\\u%04x" % ord(m.group()), text)
+
+
+def _write_atomically(path, data, expect=None):
+    """Write `data` to `path` whole: a temp beside it, flushed, then one os.replace. With
+    `expect` (the bytes it was read as), the file is compared again just before the replace,
+    and _ChangedMeanwhile is raised -- the temp dropped, the file untouched -- if it changed.
+    That narrows the window in which another program's write could be lost; without a lock
+    it can't close it."""
     path = Path(path)
     tmp = path.with_name(".%s%s%s.tmp" % (path.name, _TEMP_TAG, uuid.uuid4().hex[:8]))
     try:
@@ -1275,6 +1451,8 @@ def _write_atomically(path, data):
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        if expect is not None and path.read_bytes() != expect:
+            raise _ChangedMeanwhile()
         os.replace(tmp, path)
     except BaseException:
         _drop(tmp)

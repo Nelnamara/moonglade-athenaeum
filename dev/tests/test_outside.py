@@ -130,9 +130,13 @@ class FakeSchtasks:
         raise AssertionError("unexpected schtasks call %r" % argv)
 
 
-def task_xml(command, arguments="", workdir="", logon="InteractiveToken"):
+def task_xml(command, arguments="", workdir="", logon="InteractiveToken", user=None,
+             group=None):
     wd = "<WorkingDirectory>%s</WorkingDirectory>" % workdir if workdir else ""
     args = "<Arguments>%s</Arguments>" % arguments if arguments else ""
+    # The account the task runs as comes before its logon type, as Windows writes a principal.
+    who = ("<UserId>%s</UserId>" % user if user else "") + \
+        ("<GroupId>%s</GroupId>" % group if group else "")
     return (
         '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
         "<RegistrationInfo><Author>DESKTOP\\owner</Author>"
@@ -140,10 +144,11 @@ def task_xml(command, arguments="", workdir="", logon="InteractiveToken"):
         "<Triggers><CalendarTrigger><StartBoundary>2026-01-01T03:00:00</StartBoundary>"
         "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>"
         "</Triggers>"
-        '<Principals><Principal id="Author"><LogonType>%s</LogonType></Principal></Principals>'
+        '<Principals><Principal id="Author">%s<LogonType>%s</LogonType></Principal>'
+        "</Principals>"
         "<Settings><Enabled>true</Enabled></Settings>"
         '<Actions Context="Author"><Exec><Command>%s</Command>%s%s</Exec></Actions>'
-        "</Task>" % (logon, command, args, wd))
+        "</Task>" % (who, logon, command, args, wd))
 
 
 class SavedLnk:
@@ -208,7 +213,10 @@ def box(tmp_path):
     return Box
 
 
-def machine(box, platform="win32", tasks=None, save=None, probe=None):
+ME = ("S-1-5-21-111-222-333-1001", "DESKTOP\\owner")      # the account running the app
+
+
+def machine(box, platform="win32", tasks=None, save=None, probe=None, user=ME):
     return outside.Machine(
         platform=platform,
         shortcut_folders=[(box.desktop, "on your Desktop", False),
@@ -220,7 +228,8 @@ def machine(box, platform="win32", tasks=None, save=None, probe=None):
         run=tasks if tasks is not None else FakeSchtasks({}),
         save_lnk=save or SavedLnk(),
         python=PY,
-        probe=probe or Probe())
+        probe=probe or Probe(),
+        user=user)
 
 
 def _fix(items, install, m, box, **kw):
@@ -322,6 +331,40 @@ def test_another_install_is_left_alone(install, tmp_path):
         assert not rw.refs and rw.arguments == line, line
 
 
+@pytest.mark.parametrize("command, line", [
+    (r"C:\Windows\System32\cmd.exe", '/c del "{i}\\moonglade_backup.py"'),
+    (r"C:\Windows\System32\cmd.exe", '/c copy /y "{i}\\moonglade_backup.py" D:\\bak'),
+    (r"C:\Windows\notepad.exe", '"{i}\\moonglade_backup.py"'),
+    (r"C:\Windows\System32\cmd.exe", '/c type "{i}\\moonglade_gallery.py"'),
+])
+def test_an_old_file_named_for_another_program_is_reported_not_rewritten(install, command,
+                                                                         line):
+    """Python goes in front of an old file only where it is started by its type. Named for
+    another program (del, copy, an editor), Python in front would make a different command --
+    `del <python.exe> ...` deletes the interpreter -- so the line is left and reported."""
+    line = line.format(i=install)
+    rw = _rw(install, command, line)
+    assert rw.refs and not rw.changed and "won't rewrite on a guess" in rw.problem
+    assert rw.arguments == line
+
+
+@pytest.mark.parametrize("command, line, want", [
+    (r"C:\Windows\System32\cmd.exe", '/k "{i}\\moonglade_backup.py" --sync',
+     '/k {py} "{i}\\moonglade" --sync'),
+    (r"C:\Windows\System32\cmd.exe", '/q /c "{i}\\moonglade_backup.py"',
+     '/q /c {py} "{i}\\moonglade"'),
+    (r"C:\Windows\System32\cmd.exe", '/c start "" /min "{i}\\moonglade_backup.py" --sync',
+     '/c start "" /min {py} "{i}\\moonglade" --sync'),
+    (r"C:\Windows\System32\conhost.exe", 'cmd.exe /c "{i}\\moonglade_backup.py"',
+     'cmd.exe /c {py} "{i}\\moonglade"'),
+])
+def test_an_old_file_started_by_its_type_still_gets_python_named(install, command, line,
+                                                                  want):
+    rw = _rw(install, command, line.format(i=install))
+    assert rw.changed, rw.problem
+    assert rw.arguments == want.format(i=install, py=PY)
+
+
 def test_case_and_separators_are_windows_rules(install):
     line = '"%s/MOONGLADE_BACKUP.PY" --sync' % str(install).upper().replace("\\", "/")
     rw = _rw(install, PY, line)
@@ -375,6 +418,45 @@ def test_a_task_with_a_saved_password_is_reported_not_touched(install, box):
     [r] = _fix(outside.find(install, m, kinds=("task",)), install, m, box)
     assert not r.fixed and "saved Windows password" in r.reason
     assert st.created == {} and _snapshots(box) == []
+
+
+@pytest.mark.parametrize("who, words", [
+    ({"user": "S-1-5-18", "logon": "ServiceAccount"}, "service account (S-1-5-18)"),
+    ({"user": "S-1-5-21-111-222-333-1002"}, "another Windows account (S-1-5-21-111-222-333-1002)"),
+    ({"user": "DESKTOP\\someone"}, "another Windows account (DESKTOP\\someone)"),
+    ({"group": "S-1-5-32-545"}, "a group of Windows accounts"),
+])
+def test_a_task_that_runs_as_another_account_is_reported_not_touched(install, box, who,
+                                                                    words):
+    """The app re-registers a task only as the account running it. One that runs as SYSTEM,
+    a service, a group or another user would get this user's python.exe -- one that account
+    may not be able to read, or this user may be able to change under it -- so it is
+    reported like a saved-password task, and left as it is."""
+    st = FakeSchtasks({"\\Moonglade sync": task_xml(
+        PY, '"%s\\moonglade_backup.py" --sync' % install, **who)})
+    m = machine(box, tasks=st)
+    [r] = _fix(outside.find(install, m, kinds=("task",)), install, m, box)
+    assert not r.fixed and words in r.reason and "Task Scheduler" in r.reason
+    assert st.created == {} and _snapshots(box) == []
+
+
+@pytest.mark.parametrize("account", ["S-1-5-21-111-222-333-1001", "DESKTOP\\owner", "owner",
+                                     "desktop\\OWNER"])
+def test_a_task_that_runs_as_the_app_s_own_account_is_fixed(install, box, account):
+    st = FakeSchtasks({"\\Moonglade sync": task_xml(
+        PY, '"%s\\moonglade_backup.py" --sync' % install, user=account)})
+    m = machine(box, tasks=st)
+    [r] = _fix(outside.find(install, m, kinds=("task",)), install, m, box)
+    assert r.fixed, r.reason
+    assert "<UserId>%s</UserId>" % account in st.created["\\Moonglade sync"]
+
+
+def test_a_task_whose_account_can_t_be_told_is_left_as_it_is(install, box):
+    st = FakeSchtasks({"\\Moonglade sync": task_xml(
+        PY, '"%s\\moonglade_backup.py" --sync' % install, user="DESKTOP\\owner")})
+    m = machine(box, tasks=st, user=None)
+    [r] = _fix(outside.find(install, m, kinds=("task",)), install, m, box)
+    assert not r.fixed and st.created == {}
 
 
 def test_a_task_windows_refuses_is_reported_with_why(install, box):
@@ -666,6 +748,118 @@ def test_a_broken_config_is_skipped_not_fatal(install, box):
     box.claude_desktop.parent.mkdir(parents=True)
     box.claude_desktop.write_text("{ not json", encoding="utf-8")
     assert outside.find(install, machine(box)) == []
+
+
+def _beside(path):
+    return sorted(p.name for p in path.parent.iterdir())
+
+
+def test_a_lone_surrogate_in_the_config_is_kept_and_no_copy_is_left(install, box):
+    """A string Claude cut in the middle of an emoji is saved with a lone surrogate escape.
+    UTF-8 can't carry one raw, so the fix used to fail after its copy of the config (keys and
+    tokens included) was made, leaving one more beside it at every press. It is written back
+    as the escape it was read from, and the copy goes once the rewrite reads back."""
+    box.claude_code.parent.mkdir(parents=True, exist_ok=True)
+    box.claude_code.write_text(
+        '{\n  "tipsHistory": {"x": "abc\\ud83d"},\n  "mcpServers": {"moonglade": %s}\n}\n'
+        % json.dumps(_mcp(install)), encoding="utf-8")
+    m = machine(box)
+    [r] = _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+    assert r.fixed, r.reason
+    doc = json.loads(box.claude_code.read_text(encoding="utf-8"))
+    assert doc["tipsHistory"]["x"] == "abc\ud83d", "the unrelated field is as it was"
+    assert doc["mcpServers"]["moonglade"]["args"][-1] == "moonglade.mcp_server"
+    assert _beside(box.claude_code) == [".claude.json"], "no copy left beside it"
+
+
+def test_a_write_that_fails_leaves_no_copy_beside_the_config(install, box, monkeypatch):
+    _write_json(box.claude_code, {"mcpServers": {"moonglade": _mcp(install)}})
+    m = machine(box)
+    [item] = outside.find(install, m, kinds=("claude",))
+
+    def refuse(path, data, expect=None):
+        raise ValueError("can't be written")
+    monkeypatch.setattr(outside, "_write_atomically", refuse)
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed and "couldn't be written" in r.reason
+    assert _beside(box.claude_code) == [".claude.json"]
+
+
+@pytest.mark.parametrize("option", ["-E", "-I"])
+def test_a_registration_that_ignores_pythonpath_is_reported_never_written(install, box,
+                                                                          option):
+    """-E and -I make Python ignore PYTHONPATH, which the rewritten registration needs to find
+    the app: it would be written, read back as Fixed, and never start. It is reported with
+    the command line to use, and the file is left as it is."""
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": [option, str(install / "moonglade_mcp.py")]}}})
+    before = box.claude_desktop.read_bytes()
+    probe = Probe(version=(3, 12))
+    m = machine(box, probe=probe)
+    [item] = outside.find(install, m, kinds=("claude",))
+    [r] = _fix([item], install, m, box)
+    assert not r.fixed and option in r.reason and "PYTHONPATH" in r.reason
+    assert probe.asked == []
+    assert box.claude_desktop.read_bytes() == before
+
+
+def test_a_change_claude_makes_while_the_new_file_is_flushed_is_kept(install, box,
+                                                                     monkeypatch):
+    """Claude writes after the fixer's own file is written and flushed, just before the
+    replace: the file is compared again then, so the rewrite starts again from Claude's
+    version, and both changes stand."""
+    _write_json(box.claude_code, {"numStartups": 1,
+                                  "mcpServers": {"moonglade": _mcp(install)}})
+    m = machine(box)
+    [item] = outside.find(install, m, kinds=("claude",))
+    real, wrote = os.fsync, {"n": 0}
+
+    def fsync(fd):
+        real(fd)
+        temps = [p for p in box.claude_code.parent.iterdir() if p.name.endswith(".tmp")]
+        if temps and not wrote["n"]:                     # the fixer's own file, flushed
+            wrote["n"] = 1
+            doc = json.loads(box.claude_code.read_text(encoding="utf-8"))
+            doc["numStartups"] = 2
+            _write_json(box.claude_code, doc)
+    monkeypatch.setattr(os, "fsync", fsync)
+    [r] = _fix([item], install, m, box)
+    assert wrote["n"] == 1 and r.fixed
+    doc = json.loads(box.claude_code.read_text(encoding="utf-8"))
+    assert doc["numStartups"] == 2, "Claude's change kept"
+    assert doc["mcpServers"]["moonglade"]["args"][-1] == "moonglade.mcp_server", "and the fix"
+    assert _beside(box.claude_code) == [".claude.json"]
+
+
+def test_a_drive_less_name_is_another_folder_s_or_said_never_guessed(install, box):
+    """On Windows a name rooted without a drive is on whatever drive Claude starts on. In
+    another folder it is another install's, left alone; in this install's own folder it is
+    reported, never rewritten on a guess about the drive."""
+    here = ntpath.splitdrive(str(install))[1]
+    _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+        "command": "python", "args": [here + "2\\moonglade_mcp.py"]}}})
+    m = machine(box)
+    assert outside.find(install, m, kinds=("claude",)) == []
+    if ntpath.splitdrive(str(install))[0]:               # an install on a drive (Windows)
+        _write_json(box.claude_desktop, {"mcpServers": {"moonglade": {
+            "command": "python", "args": [here + "\\moonglade_mcp.py"]}}})
+        before = box.claude_desktop.read_bytes()
+        [r] = _fix(outside.find(install, m, kinds=("claude",)), install, m, box)
+        assert not r.fixed and "which drive" in r.reason
+        assert box.claude_desktop.read_bytes() == before
+
+
+def test_off_windows_a_folder_differing_only_in_case_is_another_install(box):
+    """On Linux /opt/moonglade and /opt/Moonglade are two folders: the fixer for one never
+    rewrites the other's registration."""
+    other = {"command": "python3", "args": ["/opt/moonglade/moonglade_mcp.py"]}
+    assert outside.rewrite_mcp_server(other, "/opt/Moonglade", PY, "linux") is None
+    mine = outside.rewrite_mcp_server(
+        {"command": "python3", "args": ["/opt/Moonglade/moonglade_mcp.py"]},
+        "/opt/Moonglade", PY, "linux")
+    assert mine.new["env"]["PYTHONPATH"] == "/opt/Moonglade"
+    assert outside.rewrite_mcp_server(other, "/opt/Moonglade", PY, "win32") is not None, \
+        "on Windows the two are one folder"
 
 
 def test_off_windows_only_the_claude_configs_are_looked_at(install, box):
