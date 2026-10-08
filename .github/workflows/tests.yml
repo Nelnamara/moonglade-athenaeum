@@ -4,6 +4,9 @@ on:
   push:
     branches: [master, loom-v2]
   pull_request:
+  # Run by hand on any branch (Actions > Tests > Run workflow), so a release branch's CI can
+  # go green before it is merged.
+  workflow_dispatch: {}
 
 jobs:
   pytest:
