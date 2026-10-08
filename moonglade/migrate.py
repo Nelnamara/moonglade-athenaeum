@@ -423,6 +423,30 @@ def _process_started(pid):
         return None
 
 
+def _boot_time():
+    """When this PC last started, in seconds since the epoch on its own clock, or None when
+    that can't be known."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            k32 = ctypes.WinDLL("kernel32")
+            k32.GetTickCount64.restype = ctypes.c_ulonglong
+            return time.time() - k32.GetTickCount64() / 1000.0
+        except (OSError, AttributeError, ValueError):
+            return None
+    try:
+        with open("/proc/stat", "rb") as f:
+            for line in f:
+                if line.startswith(b"btime"):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+BOOT_SLACK_S = 60.0          # a lock made this long before this PC last started was a dead run's
+
+
 def _pid_alive(pid):
     """Is process `pid` running? Unknown answers True (never break a live holder's lock).
     Never signals anything: on Windows os.kill would TERMINATE the process, so the process is
@@ -495,46 +519,51 @@ def _folder_writable(folder):
 class FolderLock:
     """A folder's move lock: `.lock` made with O_EXCL, holding "<pid> <PC name> <made at>",
     touched after every step and from inside long ones (so a long move is never mistaken for
-    a dead one). acquire() waits up to LOCK_WAIT_S for another holder, then raises
-    MoveStopped. A lock is taken over only from a holder that is gone: on this PC, its process
+    a dead one) -- by writing it, so the disk stamps its time. acquire() waits up to
+    LOCK_WAIT_S for another holder, then raises MoveStopped. A lock is taken over only from a
+    holder that is gone: on this PC, it was made before the PC last started, or its process
     is not running (or the number now belongs to a process started after the lock was made);
     a lock another PC made (a library on a network drive) counts as alive until it has gone
-    LOCK_STALE_S untouched. release() removes only a lock that still holds this one's own
-    line. A folder this user cannot write in stops the start and says so, and so does a dead
-    start's lock this user can't delete -- after the same wait, pausing between tries, never
-    spinning on it."""
+    LOCK_STALE_S untouched, its age read on the disk's own clock (never this PC's against
+    another's). A stale lock is taken over by renaming it to a name of this start's own and
+    reading it again: only the start whose rename got the very lock it judged dead removes it,
+    and one that got a live lock made meanwhile puts it back. release() removes only a lock
+    that still holds this one's own line. A folder this user cannot write in stops the start
+    and says so, and so does a dead start's lock this user can't move aside -- after the same
+    wait, pausing between tries, never spinning on it."""
 
     def __init__(self, folder, what):
         self.path = Path(folder) / _paths.LOCK_NAME
         self.what = what
         self.held = False
         self.token = ""
+        self._disk_offset = None                 # the disk's clock less this PC's (_disk_now)
 
     def acquire(self, wait=None):
         wait = LOCK_WAIT_S if wait is None else wait
         deadline = time.monotonic() + wait
         stuck = None                             # why a dead holder's lock can't be removed
+        self._disk_offset = None
         while True:
             try:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 try:
-                    stale = self._stale()
+                    stale, seen = self._stale()
                 except OSError:
-                    stale = False                # it went while we looked: try again
+                    stale, seen = False, None    # it went while we looked: try again
                 if stale:
-                    try:
-                        _make_writable(self.path)        # a dead start's read-only lock
-                        os.remove(self.path)
+                    taken = self._take_over(seen)
+                    if taken is True:
                         stuck = None
                         continue
-                    except FileNotFoundError:
-                        continue                 # another start took it over first
-                    except OSError as e:
-                        # A dead start's lock this user can't delete (another account's
+                    if isinstance(taken, OSError):
+                        # A dead start's lock this user can't move aside (another account's
                         # file, a share without delete rights): wait like any other holder,
                         # then say so -- never spin on it.
-                        stuck = e
+                        stuck = taken
+                else:
+                    stuck = None                 # a live holder's: "still tidying", not stuck
             except PermissionError as e:
                 # Windows answers the same for a holder's lock being deleted (a moment) and a
                 # folder this user cannot write in (for good): only a real file tells them apart.
@@ -567,33 +596,108 @@ class FolderLock:
                     "Moonglade again." % self.what)
             time.sleep(0.1)
 
+    def _disk_now(self):
+        """Now, on the clock of the disk the lock is on: a file made in the lock's folder takes
+        its time from the disk (a share's server, a NAS), as the lock's own time does. The
+        difference from this PC's clock is read once per acquire()."""
+        if self._disk_offset is None:
+            self._disk_offset = 0.0
+            try:
+                fd, probe = tempfile.mkstemp(prefix=".moonglade-clock-",
+                                             dir=str(self.path.parent))
+            except OSError:
+                return time.time()
+            try:
+                os.write(fd, b"0")
+                self._disk_offset = os.fstat(fd).st_mtime - time.time()
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
+                try:
+                    os.remove(probe)
+                except OSError:
+                    pass
+        return time.time() + self._disk_offset
+
     def _stale(self):
-        """True only when the holder is gone (see the class). Raises OSError when the lock
-        went while we looked."""
-        age = time.time() - self.path.stat().st_mtime
+        """(True only when the holder is gone (see the class), the lock's bytes as judged).
+        Raises OSError when the lock went while we looked."""
+        mtime = self.path.stat().st_mtime
+        seen = self.path.read_bytes()
+        age = self._disk_now() - mtime
         try:
-            parts = self.path.read_text(encoding="utf-8").split()
+            parts = seen.decode("utf-8").split()
             pid = int(parts[0]) if parts else None
         except (ValueError, UnicodeDecodeError):
             pid = None
         if pid is None:
-            return age > 2.0                     # being written: give it a moment
+            return age > 2.0, seen               # being written: give it a moment
         host = parts[1] if len(parts) > 1 else _host()
         if host.lower() != _host().lower():
-            return age > LOCK_STALE_S            # another PC's start: alive until untouched
-        if not _pid_alive(pid):
-            return True
+            return age > LOCK_STALE_S, seen      # another PC's start: alive until untouched
         try:
             made = float(parts[2]) if len(parts) > 2 else None
         except ValueError:
             made = None
+        boot = _boot_time() if made is not None else None
+        if boot is not None and made < boot - BOOT_SLACK_S:
+            return True, seen                    # made before this PC last started
+        if not _pid_alive(pid):
+            return True, seen
         started = _process_started(pid) if made is not None else None
-        return started is not None and started > made + 2.0     # the number was reused
+        return started is not None and started > made + 2.0, seen   # the number was reused
+
+    def _take_over(self, seen):
+        """Take over the stale lock judged as `seen`: renamed to a name of this start's own (only
+        one start's rename can get it), then read again. True when it was the very lock judged
+        dead (removed: the folder is free to lock), False when it went first or was a live lock
+        made meanwhile (put back untouched), the OSError when it can't be moved aside."""
+        grave = self.path.with_name("%s.%d-%s" % (self.path.name, os.getpid(),
+                                                  os.urandom(4).hex()))
+        try:
+            _make_writable(self.path)            # a dead start's read-only lock
+            os.rename(self.path, grave)
+        except FileNotFoundError:
+            return False                         # another start took it over first
+        except OSError as e:
+            return e
+        try:
+            got = grave.read_bytes()
+        except OSError:
+            got = None
+        if got is not None and got == seen:
+            try:
+                _make_writable(grave)
+                os.remove(grave)
+            except OSError:
+                pass
+            return True
+        # A live start's lock, made after we looked: back where it was, never over a newer one.
+        try:
+            if sys.platform == "win32":
+                os.rename(grave, self.path)      # refuses an existing name
+            else:
+                os.link(grave, self.path)        # refuses an existing name
+                os.remove(grave)
+        except OSError:
+            try:
+                os.remove(grave)
+            except OSError:
+                pass
+        return False
 
     def touch(self):
+        """Keep a held lock fresh by writing its own line again, so the disk stamps the time
+        (another PC ages it on the disk's clock). Never writes over a lock that isn't this
+        one's own."""
         if self.held:
+            mine = self.token.encode("utf-8")
             try:
-                os.utime(self.path, None)
+                with open(self.path, "r+b") as f:
+                    if f.read() == mine:
+                        f.seek(0)
+                        f.write(mine)
             except OSError:
                 pass
 

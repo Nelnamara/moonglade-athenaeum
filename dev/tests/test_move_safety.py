@@ -562,16 +562,16 @@ def test_a_dead_start_s_lock_that_can_t_be_removed_waits_then_says_so(tmp_path, 
     import time
     lock = migrate.FolderLock(tmp_path, "the app folder")
     lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
-    real, tries = os.remove, {"n": 0}
+    real, tries = os.rename, {"n": 0}
 
-    def remove(p, *a, **k):
+    def move_aside(p, *a, **k):          # the take-over renames it first (one taker, #14)
         if str(p) == str(lock.path):
             tries["n"] += 1
             e = PermissionError(13, "Access is denied")
             e.winerror = 5
             raise e
         return real(p, *a, **k)
-    monkeypatch.setattr(os, "remove", remove)
+    monkeypatch.setattr(os, "rename", move_aside)
     began = time.monotonic()
     with pytest.raises(migrate.MoveStopped) as e:
         lock.acquire(wait=0.5)
@@ -579,6 +579,96 @@ def test_a_dead_start_s_lock_that_can_t_be_removed_waits_then_says_so(tmp_path, 
     assert 2 <= tries["n"] <= 20, "it pauses between tries rather than spin"
     text = str(e.value)
     assert "can't remove the old lock" in text and str(lock.path) in text
+
+
+# ---- the lock's judgment: the disk's clock, the last boot, one taker (round 2, #14) -------------
+
+def _skewed(monkeypatch, by):
+    """This PC's clock `by` seconds off the disk's (a library on another PC's share)."""
+    import time
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + by)
+
+
+def test_another_pc_s_fresh_lock_is_alive_whatever_this_pc_s_clock_says(tmp_path, monkeypatch):
+    """Aged across two clocks, a live lock on a share looked LOCK_STALE_S old to a PC whose
+    clock ran ten minutes ahead, and was taken over. Its age is read on the disk's clock."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    lock.path.write_text("4242 another-pc 1.000", encoding="ascii")
+    _skewed(monkeypatch, 600)
+    with pytest.raises(migrate.MoveStopped):
+        lock.acquire(wait=0.3)
+    assert lock.path.read_text(encoding="ascii") == "4242 another-pc 1.000"
+
+
+def test_another_pc_s_dead_lock_is_taken_over_whatever_this_pc_s_clock_says(tmp_path,
+                                                                            monkeypatch):
+    """...and a dead one, untouched on the disk for longer than LOCK_STALE_S, was kept by a PC
+    whose clock ran behind: it is taken over."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    lock.path.write_text("4242 another-pc 1.000", encoding="ascii")
+    old = lock.path.stat().st_mtime - migrate.LOCK_STALE_S - 5
+    os.utime(lock.path, (old, old))
+    _skewed(monkeypatch, -600)
+    with lock.acquire(wait=0.3):
+        assert lock.held
+    assert not lock.path.exists()
+
+
+def test_a_held_lock_is_touched_on_the_disk_s_clock(tmp_path):
+    """The holder keeps its lock fresh by writing it, so the disk stamps the time -- never by
+    setting a time from this PC's clock -- and the content stays its own."""
+    lock = migrate.FolderLock(tmp_path, "a folder").acquire()
+    old = lock.path.stat().st_mtime - 100
+    os.utime(lock.path, (old, old))
+    lock.touch()
+    assert lock.path.stat().st_mtime > old + 50
+    assert lock.path.read_text(encoding="utf-8") == lock.token
+    lock.path.write_text("12345 another-pc 1.000", encoding="ascii")    # taken over
+    lock.touch()
+    assert lock.path.read_text(encoding="ascii") == "12345 another-pc 1.000"
+    lock.release()
+
+
+def test_a_lock_from_before_this_pc_last_started_is_taken_over(tmp_path, monkeypatch):
+    """Its process number may now belong to a process this user can't open (a service,
+    winlogon), which can't say when it started: a lock this PC made before it last started
+    is dead whatever that number is now."""
+    boot = migrate._boot_time()
+    if boot is None:
+        pytest.skip("this system can't say when it last started")
+    monkeypatch.setattr(migrate, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(migrate, "_process_started", lambda pid: None)
+    lock = migrate.FolderLock(tmp_path, "the app folder")
+    lock.path.write_text("4 %s %.3f" % (migrate._host(), boot - 3600), encoding="ascii")
+    with lock.acquire(wait=0.3):
+        assert lock.held
+    lock.path.write_text("4 %s %.3f" % (migrate._host(), boot + 60), encoding="ascii")
+    with pytest.raises(migrate.MoveStopped):
+        migrate.FolderLock(tmp_path, "the app folder").acquire(wait=0.3)
+    assert lock.path.exists(), "a lock made since it started is never broken on a guess"
+
+
+def test_two_starts_taking_over_one_dead_lock_never_both_hold_it(tmp_path, monkeypatch):
+    """Both judged the same dead lock stale; the first took it over and made its own before
+    the second acted. The second moves the lock aside, sees it is no longer the one it judged,
+    puts it back untouched, and waits -- it never deletes a live start's lock."""
+    lock = migrate.FolderLock(tmp_path, "the library folder")
+    lock.path.write_text("999999999 %s 1.000" % migrate._host(), encoding="ascii")
+    live = "4242 another-pc %.3f" % __import__("time").time()
+    real = migrate.FolderLock._stale
+
+    def judged_then_beaten(self):
+        got = real(self)
+        if self.path.read_text(encoding="ascii") != live:
+            self.path.write_text(live, encoding="ascii")       # the first start, meanwhile
+        return got
+    monkeypatch.setattr(migrate.FolderLock, "_stale", judged_then_beaten)
+    with pytest.raises(migrate.MoveStopped) as e:
+        lock.acquire(wait=0.3)
+    assert "still tidying" in str(e.value)
+    assert lock.path.read_text(encoding="ascii") == live, "the live start's lock is kept"
+    assert not [p.name for p in tmp_path.iterdir() if p.name.startswith(lock.path.name + ".")],         "nothing of the take-over is left beside it"
 
 
 # ---- every swap waits out a moment's hold (#14) ---------------------------------------------------
