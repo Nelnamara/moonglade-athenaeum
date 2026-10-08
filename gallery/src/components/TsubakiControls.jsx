@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   CONFIRM_BODY, CREATIVITY, RATIOS, autoActive, confirmTitle, contextMax, contextModel, creativityName,
-  effectiveCreativity, effectiveTier, heldItems, onContextSide, profileExtra, profileLocked,
+  effectiveCreativity, effectiveTier, heldItems, needsSwitchConfirm, onContextSide, profileExtra, profileLocked,
   profilePicked, profileRows, ratioAspect, ratioIndexOf, ratioLabel, sizeTiers, tierDims,
   tierLocked, tierMembersOnly,
 } from "../gen/tsubakiCore.js";
@@ -76,7 +76,7 @@ export function InputsSwitch({ s, set, onAskConfirm, phone }) {
     : "Context images" + (ctxOn && nc ? " · " + nc : "");
   const toContext = () => {
     if (ctxOn) return;
-    if (!s.ctxWarned && heldItems(s).length) { onAskConfirm(); return; }
+    if (needsSwitchConfirm(s)) { onAskConfirm(); return; }
     set({ inputs: "context" });
   };
   return (

@@ -149,7 +149,6 @@ export const sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pe
 const unsendableIn = (list, dataOk) => (Array.isArray(list) ? list : [])
   .map((x) => str(x).trim())
   .filter((s) => s && !/^\d+$/.test(s) && !(dataOk && s.startsWith("data:")));
-export const unsendableImages = (payload) => unsendableIn(payload && payload.images, true);
 
 /** Spend review S6: the same rule for the shot's reference VIDEOS and AUDIO. The server sends
  *  only catalog ids (digits) for those -- a `local_` video was silently dropped, so the render

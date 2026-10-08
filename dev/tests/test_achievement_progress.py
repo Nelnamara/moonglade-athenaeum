@@ -7,7 +7,7 @@
     payload in any form; `relics.marks` lists earned, awarded marks only.
 
 Every roster here is SYNTHETIC (invented ids, names and metrics), so nothing asserts on a real
-honor and these run in public CI. The one test that reads the sealed roster's shape carries the
+honor and these run in public CI. The two tests that read the sealed roster's shape carry the
 sealed_donor_present gate.
 """
 import json
@@ -152,11 +152,22 @@ def test_a_threshold_that_is_not_a_positive_number_has_no_progress(bad):
     assert g.achievement_progress(_entry(threshold=bad), {"images": 4}) is None
 
 
-def test_the_measured_set_names_no_feat_metric():
+def test_the_measured_set_names_no_feat_metric(sealed_donor_present):
     # Feats are refused before this set is ever read; it must not name one either, so the
-    # public source never lists a hidden feat's metric.
+    # public source never lists a hidden feat's metric. Donor-gated: the feats' metrics live
+    # only in the sealed roster. "Feat-only", because a feat may share its metric with a
+    # visible ladder, and that metric is public already. The failure gives a count, never a
+    # name.
     for k in g._MEASURED_METRICS:
         assert isinstance(k, str) and k
+
+    def is_feat(a):
+        return a.get("tier") == "feat" or a.get("bucket") in ("feat", "meta")
+    feat_metrics = {a.get("metric") for a in g._roster() if is_feat(a)}
+    nonfeat_metrics = {a.get("metric") for a in g._roster() if not is_feat(a)}
+    feat_only = feat_metrics - nonfeat_metrics
+    leaked = len(feat_only & set(g._MEASURED_METRICS))
+    assert leaked == 0, "%d feat-only metric(s) named in _MEASURED_METRICS" % leaked
 
 
 # ---- the route --------------------------------------------------------------------------

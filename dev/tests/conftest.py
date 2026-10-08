@@ -80,8 +80,9 @@ def stub_code_module(monkeypatch, name, module):
 def pack_art():
     """{(slot, key): bytes} of the pack's nine role images (login companion, tracker mascots, reward
     icons, power poses), read from the folder the MOONGLADE_PACK_ART environment variable names. The
-    folder holds the pack's art in its public layout (login_nel.webp, nel_spinner.png or
-    system/nel_spinner.png, mascots/trk_done.png, rewards/claim.png ...). Skipped when the variable is
+    folder holds the pack's art in its public layout (system/login_nel.webp or login_nel.webp,
+    system/nel_spinner.png, mascots/trk_done.png, rewards/claim.png ...), as the private repo's design
+    mirror (`../moonglade-internal/design/handoff-*/assets/branding`) does. Skipped when the variable is
     unset or the folder lacks any of them, so a checkout without the art runs everything else. A
     test never reads the checkout's own pack (see the hermeticity rule at the top of this file)."""
     folder = os.environ.get("MOONGLADE_PACK_ART", "").strip()
@@ -91,7 +92,10 @@ def pack_art():
     for slot, role in gallery.ROLE_SLOTS.items():
         for key, img in role["images"].items():
             public = img["public"]
-            hit = next((p for p in (root / public, root / "system" / public) if p.is_file()), None)
+            # The private design mirror (tools/mirror_pack_to_design.py) writes each role under its
+            # readable role path, system/ for these; its top level also keeps older copies the
+            # design pages use. So the role path wins, and a bare top-level file is the fallback.
+            hit = next((p for p in (root / "system" / public, root / public) if p.is_file()), None)
             if hit is None:
                 missing.append(public)
             else:

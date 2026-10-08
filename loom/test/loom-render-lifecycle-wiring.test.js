@@ -118,7 +118,6 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
     const refuseLocal = fn.indexOf("unsendableRefs(p).length");
     assert.ok(refuseLocal > build && refuseLocal < fn.indexOf("await askShotSpend(p)"),
       "an imported (local_) picture, video or audio is refused BEFORE pricing (open call 4, spend review S6)");
-    assert.doesNotMatch(CODE, /unsendableImages\(/, "every render path checks every reference kind, not pictures alone (S6)");
     const fpCheck = fn.indexOf("priceFingerprint(p) !== opts.confirmedFp");
     assert.ok(fpCheck > build && fpCheck < fn.indexOf('fetch("/api/loom/generate"'),
       "a batch shot whose payload changed since the confirm is not sent (F12)");

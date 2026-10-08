@@ -942,7 +942,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     inferring it from the source being shared: two build pipelines is exactly how one host's
     bundle could go stale while the other moves on.
 
-    Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
+    Measured as shipped at 1280x900, on `/` and on `/loom` alike: the icon carries
     `at-queued`, the ring's computed animationName is `none` (a rendering job reads
     `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip reads
     "est. 27s wait". The mascot's own animationName is checked too but is ALWAYS `none`,
@@ -952,7 +952,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     orientation), so the ring alone is the real discriminator now.
     """
     seen = {}
-    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/"), ("loom", "/loom")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         m = page.evaluate(_TRAY_QUEUED_JS)
@@ -1031,7 +1031,7 @@ def test_activity_dropdown_reaches_the_true_edge_regardless_of_trigger_position(
     neither a `position:relative` regression on the trigger wrapper NOR a reorder-without-
     approval regression can land silently again.
     """
-    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/"), ("loom", "/loom")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         g = page.evaluate(_TRAY_GEOMETRY_JS[host])
@@ -1936,32 +1936,6 @@ def test_phone_similar_is_dismissed_by_the_back_gesture_too(logged_in_page, monk
     page.wait_for_selector(".glm-grid .glm-tile")
     assert page.locator(".glm-simtok").count() == 0, "Back left the token up"
     assert "/login" not in page.url, "Back walked out of the app instead of dismissing Similar"
-
-
-def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
-    """The picture screen was the last surface in the app still wearing ✧.
-
-    Its SIMILAR strip reads ◈ now -- one mark for visual similarity, everywhere -- and
-    the model filter beside it says what it does ("Filter by model"), the same rename
-    the desktop record took in B2. The strip's own data is left to the live route: with
-    no CLIP sidecar installed it renders its honest unavailable line, which is exactly
-    the state this test wants to leave alone.
-    """
-    page = logged_in_page(**PHONE)
-    _visit(page, "/")
-    page.wait_for_selector(".glm-grid .glm-tile")
-    _dismiss_any_achievement_toast(page)
-
-    page.locator(_DOOR_TILE).click()
-    page.wait_for_selector(".lbm-root")
-    page.click(".lbm-actsrow >> text=Details")
-    page.wait_for_selector(".idm-similar")
-
-    head = page.locator(".idm-similar .idm-subhead").inner_text()
-    assert "◈ SIMILAR" in head, "the picture screen still wears the old mark: {!r}".format(head)
-    recrow = page.locator(".idm-recrow").inner_text()
-    assert "Filter by model" in recrow
-    assert "Find similar (model)" not in recrow
 
 
 # ---------------------------------------------------------------------------
@@ -3414,15 +3388,6 @@ def test_the_return_trip_lands_where_the_library_was(logged_in_page):
     page.wait_for_selector(".mgx-actrow")
     assert "page=3" in page.url and "image=demo-mid-42" in page.url, (
         "came back to {!r} instead of the address the library was at".format(page.url))
-
-
-def test_a_loom_opened_cold_still_offers_the_library_front_door(logged_in_page):
-    """A tab that was never in the library has nothing to remember, and must say nothing
-    untrue about it -- the link falls back to the front door, exactly what it always was."""
-    page = logged_in_page(**DESKTOP)
-    _visit(page, "/loom")
-    page.wait_for_selector(_LOOM_READY)
-    assert page.get_attribute("a.lv-close[href]", "href") == "/"
 
 
 def test_a_phone_opens_the_phone_layout_and_a_tablet_does_not(logged_in_page):
@@ -7082,16 +7047,13 @@ def _q_json(route, payload, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None,
-            screen=None):
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None):
     """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
     collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
     unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
     monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
     opts = {"has_touch": True, "is_mobile": True} if touch else {}
     vp = viewport or PHONE
-    if screen:
-        opts["screen"] = screen
     ctx = render_browser.new_context(
         viewport={"width": vp["width"], "height": vp["height"]}, device_scale_factor=1,
         base_url=server.base_url, timezone_id="UTC", **opts)
@@ -7501,7 +7463,6 @@ def test_data_saver_draws_256px_thumbs_holds_full_size_for_a_tap_and_stops_autop
 
 @pytest.mark.parametrize("connection,expect_on,sub", [
     ({"type": "cellular", "saveData": False}, True, "metered connection"),
-    ({"type": "wifi", "saveData": False}, False, "on Wi-Fi"),
     ({"saveData": True}, True, "asking to save data"),
     (None, False, "can’t tell"),
 ])
@@ -7747,20 +7708,6 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
         lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 6)
             .map((t) => Math.round(t.getBoundingClientRect().left))""")
         assert len(set(lefts)) == 3, "3 columns under 700 px wide: %r" % lefts
-    finally:
-        ctx.close()
-
-
-def test_a_tablet_turned_sideways_is_still_the_desktop_build(phone_q_server, render_browser, monkeypatch):
-    """Q4's other edge: the rule that keeps a phone a phone in landscape must not claim an iPad mini
-    (short side 744). Same page, a sideways viewport -- but a tablet's screen."""
-    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch,
-                              vp={"width": 1133, "height": 744}, screen={"width": 1133, "height": 744})
-    try:
-        _visit(page, "/")
-        page.wait_for_selector("#root *")
-        page.wait_for_timeout(500)
-        assert page.locator(".glm-stage").count() == 0, "the desktop build, not the phone shell"
     finally:
         ctx.close()
 

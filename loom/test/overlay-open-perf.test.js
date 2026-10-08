@@ -474,8 +474,9 @@ describe("the invalidation seams", () => {
     assert.doesNotMatch(panel, /put\("\/api\/panel\/status"/);
     assert.doesNotMatch(panel, /put\("\/api\/ping"/);
     // Publish's per-image record: a stale artwork_id re-enables the Publish button.
-    assert.doesNotMatch(publish, /peek\("\/api\/next\/detail\//);
-    assert.doesNotMatch(publish, /put\("\/api\/next\/detail\//);
+    assert.doesNotMatch(publish, /(peek|put)\(\s*(detail\(|DETAIL_PREFIX|["`]\/api\/detail\/)/,
+      "Publish's per-image record is never seeded from or written to the read cache (a stale artwork_id re-enables Publish)");
+    assert.match(publish, /apiGet\(detail\(mid\)\)/, "the record is read live on every open");
   });
 
   test("the store itself refuses to keep a csrf, so no call site has to remember", () => {

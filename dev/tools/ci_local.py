@@ -23,15 +23,18 @@ THE JOBS. `.github/workflows/tests.yml` has two, and this runs both:
      local run misses: a front-end MOVE/rename goes red here while pytest stays green
      (learned twice, 2026-09-08/09).
 
-PREFLIGHT, and why it refuses rather than warns. Three checks in the pytest job are written
-to SKIP themselves when their toolchain is absent -- the committed-gallery-bundle and
-committed-loom-bundle freshness tests (they need node_modules) and the whole render harness
-(it needs a browser that launches). A run missing any of them prints the same "green" while
-saying nothing about the bundle it would have rebuilt or the layout it would have measured.
-So the run refuses to start until three things hold: gallery/node_modules and
-loom/node_modules are present, the harness engine actually launches, and every package on
-CI's `pip install` line imports on this interpreter. It names the command that fixes each
-gap and installs nothing -- an install is the kind of thing you should watch.
+PREFLIGHT, and why it refuses rather than warns. Some checks in the pytest job are written
+to SKIP themselves when what they need is absent -- the committed-gallery-bundle and
+committed-loom-bundle freshness tests (they need node_modules), the whole render harness
+(it needs a browser that launches) and the pack-art tests in test_branding_roles.py (they
+read the pack's role art from the folder MOONGLADE_PACK_ART names; the art is not in the
+repo). A run missing any of them prints the same "green" while saying nothing about the
+bundle it would have rebuilt, the layout it would have measured or the art it would have
+checked. So the run refuses to start until these hold: gallery/node_modules and
+loom/node_modules are present, the harness engine actually launches, MOONGLADE_PACK_ART
+names a folder, and every package on CI's `pip install` line imports on this interpreter.
+It names the command that fixes each gap and installs nothing -- an install is the kind of
+thing you should watch.
 
 CI's pip line is READ OFF the workflow (`ci_pip_packages`), never copied into this file, so
 it follows CI when the line changes; a token on it that is not a plain distribution name
@@ -42,10 +45,10 @@ preflight answers "could this check run", and those are not the same sentence: a
 binary can be on disk and still refuse to launch, and the harness skips on the LAUNCH, not
 on the path; `gallery/dist/app.css` can be missing, or `MOONGLADE_SKIP_GALLERY_BUILD` set,
 and the bundle test skips itself with every preflight box ticked. So the pytest job is run
-with a junit report and the report is read afterwards: both bundle-freshness tests must
-have actually executed, and the render harness must have contributed at least one
-non-skipped test. A gate that skipped fails this run. A green that skipped the gate you
-needed is worse than a red.
+with a junit report and the report is read afterwards: both bundle-freshness tests and the
+pack-art tests must have actually executed, and the render harness must have contributed at
+least one non-skipped test. A gate that skipped fails this run. A green that skipped the
+gate you needed is worse than a red.
 
 Exit 0 only if every job passes. It is a long run -- start it when you are done editing,
 not between edits.
@@ -193,6 +196,25 @@ def _engine_unusable(engine):
     return ""
 
 
+def default_pack_art():
+    """The pack's role art in its public layout, when MOONGLADE_PACK_ART is unset: the private
+    repo's design mirror beside this checkout (`../moonglade-internal/design/handoff-*/assets/
+    branding`, the newest handoff), which tools/mirror_pack_to_design.py refreshes from every
+    new pack. A worktree under `_wt/<name>/` reaches it the same way, through the
+    `moonglade-internal` junction beside the checkout. "" when there is none."""
+    for base in (os.path.join(ROOT, "..", "moonglade-internal"),):
+        design = os.path.join(base, "design")
+        try:
+            handoffs = sorted(d for d in os.listdir(design) if d.startswith("handoff-"))
+        except OSError:
+            continue
+        for h in reversed(handoffs):
+            art = os.path.join(design, h, "assets", "branding")
+            if os.path.isdir(art):
+                return os.path.normpath(art)
+    return ""
+
+
 def preflight(launch_engine=True):
     """The three things a meaningful run needs. Returns a list of (gap, fix) pairs.
 
@@ -235,22 +257,51 @@ def preflight(launch_engine=True):
                          "python -m playwright install --with-deps %s   (CI's own step for "
                          "chromium; --with-deps is what supplies the browser's system "
                          "libraries on Linux)" % engine))
+    # The pytest child inherits this environment, so the variable reaches conftest's pack_art
+    # fixture as it is. There is no default folder: the art is not in the repo, and a test may
+    # not read the checkout's own pack (conftest's hermeticity rule).
+    art = os.environ.get("MOONGLADE_PACK_ART", "").strip() or default_pack_art()
+    if art:
+        os.environ["MOONGLADE_PACK_ART"] = art
+    if not art:
+        gaps.append(("MOONGLADE_PACK_ART is unset and no private design mirror sits beside this "
+                     "checkout, so the pack-art tests in "
+                     "dev/tests/test_branding_roles.py SKIP (conftest's pack_art fixture) and "
+                     "nothing in this run checks the pack's own role art against its roles",
+                     "set MOONGLADE_PACK_ART to the folder holding the pack's role art in its "
+                     "public layout (login_nel.webp, nel_spinner.png, mascots/trk_done.png, "
+                     "rewards/claim.png ...)"))
+    elif not os.path.isdir(art):
+        gaps.append(("MOONGLADE_PACK_ART names %r, which is not a folder, so the pack-art "
+                     "tests in dev/tests/test_branding_roles.py SKIP" % art,
+                     "point MOONGLADE_PACK_ART at the folder holding the pack's role art"))
     return gaps
 
 
 # The checks inside the pytest job that are written to skip themselves. Preflight argues
-# they CAN run; this is how the run proves they DID. (module, test) for a named test;
-# (module, None) for "this whole module must have contributed something".
+# they CAN run; this is how the run proves they DID. (module, test, gate) for a named test;
+# (module, None, None) for "this whole module must have contributed something".
 #
-# Two of the three are also gates in CI's own pytest job. The loom bundle test is not --
-# CI's pytest job never installs loom/node_modules, so it skips there and CI catches a
-# stale loom/dist in the loom-node-tests job instead ([2b] below). It is required here
-# anyway: it is the one check that compares the committed bundle to a rebuild inside the
-# pytest run, and a local gate going quiet is still a local gate going quiet.
+# The gallery bundle test and the harness are also gates in CI's own pytest job. The loom
+# bundle test is not -- CI's pytest job never installs loom/node_modules, so it skips there
+# and CI catches a stale loom/dist in the loom-node-tests job instead ([2b] below). It is
+# required here anyway: it is the one check that compares the committed bundle to a rebuild
+# inside the pytest run, and a local gate going quiet is still a local gate going quiet.
+# The pack-art tests are the same kind: the art is not in the repo, so they skip in CI every
+# time, and this run is the only place they can bite. Preflight refuses a run without
+# MOONGLADE_PACK_ART; a skip here means the folder it names lacks one of the role images.
 REQUIRED_TO_RUN = [
-    ("tests.test_js_syntax", "test_committed_gallery_bundle_matches_a_fresh_build"),
-    ("tests.test_js_syntax", "test_committed_loom_bundle_matches_a_fresh_build"),
-    ("tests.test_render_harness", None),
+    ("tests.test_js_syntax", "test_committed_gallery_bundle_matches_a_fresh_build",
+     "the stale-bundle gate"),
+    ("tests.test_js_syntax", "test_committed_loom_bundle_matches_a_fresh_build",
+     "the stale-bundle gate"),
+    ("tests.test_render_harness", None, None),
+    ("tests.test_branding_roles", "test_every_pack_default_passes_its_own_roles_check",
+     "the pack-art gate"),
+    ("tests.test_branding_roles", "test_every_pack_default_can_be_uploaded_as_the_override_of_itself",
+     "the pack-art gate"),
+    ("tests.test_branding_roles", "test_the_shape_rule_is_not_vacuous_on_the_packs_own_art",
+     "the pack-art gate"),
 ]
 
 
@@ -259,8 +310,9 @@ def gates_that_did_not_run(xml_path):
 
     Empty list == every skip-prone check in the pytest job actually executed here. This is
     the difference between "the environment looks right" and "the gate ran": the harness
-    skips on a failed browser LAUNCH, and the bundle test skips on an env var or a missing
-    dist file, neither of which a preflight can see from outside the run."""
+    skips on a failed browser LAUNCH, the bundle test skips on an env var or a missing
+    dist file, and the pack-art tests skip on a folder that lacks one of the role images,
+    none of which a preflight can see from outside the run."""
     try:
         root = ET.parse(xml_path).getroot()
     except Exception as exc:                     # noqa: BLE001 -- no report is its own answer
@@ -270,7 +322,7 @@ def gates_that_did_not_run(xml_path):
               c.find("skipped") is not None)
              for c in root.iter("testcase")]
     gaps = []
-    for module, name in REQUIRED_TO_RUN:
+    for module, name, gate in REQUIRED_TO_RUN:
         if name is None:
             ran = [c for c in cases if c[0] == module and not c[2]]
             if not ran:
@@ -282,7 +334,7 @@ def gates_that_did_not_run(xml_path):
         if not matches:
             gaps.append("%s::%s was never collected" % (module, name))
         elif all(c[2] for c in matches):
-            gaps.append("%s::%s SKIPPED -- the stale-bundle gate did not run" % (module, name))
+            gaps.append("%s::%s SKIPPED -- %s did not run" % (module, name, gate))
     return gaps
 
 
@@ -307,12 +359,13 @@ def main(argv=None):
             print("     fix:  %s" % fix)
     elif dry:
         print("\n== preflight (--dry-run): CI's pip list imports here, gallery/node_modules "
-              "and\n   loom/node_modules are present. %s was NOT launched -- a dry run "
-              "starts no\n   browser, so it cannot say whether the harness would run =="
-              % harness_engine())
+              "and\n   loom/node_modules are present, MOONGLADE_PACK_ART names a folder. %s was "
+              "NOT\n   launched -- a dry run starts no browser, so it cannot say whether the "
+              "harness would run ==" % harness_engine())
     else:
         print("\n== preflight: CI's pip list imports here, gallery/node_modules and "
-              "loom/node_modules\n   are present, and %s launches ==" % harness_engine())
+              "loom/node_modules\n   are present, MOONGLADE_PACK_ART names a folder, and %s "
+              "launches ==" % harness_engine())
 
     if dry:
         print("\n-- dry run: nothing below is executed --")
@@ -349,11 +402,14 @@ def main(argv=None):
               "  test and the RENDER HARNESS really run there. It never installs\n"
               "  loom/node_modules, so the LOOM bundle test skips in CI every time -- CI\n"
               "  catches a stale loom/dist in its other job instead, the check mirrored\n"
-              "  below as [2b]. So a loom-bundle skip here is a local-only gate going\n"
-              "  quiet, and the other two are gates CI will run whether you did or not.")
+              "  below as [2b]. The PACK-ART tests skip in CI every time too: the art is\n"
+              "  not in the repo. So a loom-bundle or pack-art skip here is a local-only\n"
+              "  gate going quiet, and the gallery bundle and the harness are gates CI will\n"
+              "  run whether you did or not.")
         fails.append("a CI check skipped locally")
     else:
-        print("  both bundle-freshness tests ran, and the render harness really rendered.")
+        print("  both bundle-freshness tests and the pack-art tests ran, and the render "
+              "harness\n  really rendered.")
 
     build_ok = _run(JOBS[2], "npm run build", cwd=LOOM, shell=True)
     if not build_ok:

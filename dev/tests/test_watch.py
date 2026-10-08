@@ -618,7 +618,6 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(core, "media_ids_for", lambda node: ["M5"])
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
     monkeypatch.setattr(core, "collect_generation",
@@ -647,18 +646,25 @@ def test_the_event_path_and_the_catchup_converge_on_one_row(tmp_path, monkeypatc
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    # The node names its media, as a live TaskSummary does: the sweep asks
+    # cataloged_media_ids(node), and a node naming none is skipped before it reaches the
+    # second writer -- which would leave this test proving the frame path alone.
     monkeypatch.setattr(core, "find_connection", lambda *a, **k:
-                        {"edges": [{"node": {"id": "W6", "status": "completed"}}]})
-    monkeypatch.setattr(core, "media_ids_for", lambda node: ["M6"])
+                        {"edges": [{"node": {"id": "W6", "status": "completed",
+                                             "mediaId": "M6", "batchMediaIds": None}}]})
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
-    monkeypatch.setattr(core, "collect_generation",
-                        lambda s, tid, out, **k: {"media_ids": ["M6"], "saved": 1,
-                                                  "is_video": False})
+    collected = []
+
+    def fake_collect(s, tid, out, **k):
+        collected.append(tid)
+        return {"media_ids": ["M6"], "saved": 1, "is_video": False}
+    monkeypatch.setattr(core, "collect_generation", fake_collect)
 
     app.extensions["mg_watch_on_event"](_frame("W6", "waiting"))
     app.extensions["mg_watch_catchup"]("startup")
 
+    assert collected == ["W6"], "the catch-up never reached the task, so only one writer ran"
     rows = core.read_jobs(tmp_path)
     assert [r["job_id"] for r in rows] == ["W6"], "one generation produced two Activity rows"
     assert rows[0]["source"] == "pixai"

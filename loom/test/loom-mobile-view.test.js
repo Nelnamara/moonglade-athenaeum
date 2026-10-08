@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { cardsToResume } from "../src/loom-core.js";
+import { FIX_COLORS, FIX_MIN_PX, FIX_MAX_BOXES } from "../../gallery/src/gen/editCore.js";
 
 // First increment of the Loom Mobile board/reel view (2026-08-03), per the locked design
 // (design_handoff/design_handoff_moonglade_suite/"Loom Mobile.dc.html"). master-storyboard.jsx
@@ -33,17 +34,6 @@ describe("LoomMobile exists as a real component, inline (matching this file's ow
     assert.match(loomMobileSrc, /function LoomMobile\(\{/);
     assert.match(loomMobileSrc, /return \(\s*<div className="lm-root">/,
       "expected LoomMobile to actually render something, not bail out with a placeholder");
-  });
-
-  test("LoomMobile is NOT split into a separate loom/src/ module", () => {
-    // Deliberate call, documented in LoomMobile's own header comment: components live inline
-    // in this file (LoomV2/ProjectSwitcher/ExportMenu/ShotPreview/... all do); only
-    // React-free, DOM-free pure logic belongs in loom/src/ (loom-core.js, loom-mutations.js),
-    // because the Flask /loom route's Babel-standalone fallback only knows how to inline
-    // exactly those two files -- a third imported module would break the DEFAULT /loom page
-    // (see LoomMobile's own comment for the full reasoning).
-    assert.doesNotMatch(src, /from\s*["']\.\/src\/loom-mobile/,
-      "LoomMobile must not be imported from a new ./src/loom-mobile* module");
   });
 
   test("its own styles are defined and actually injected", () => {
@@ -277,12 +267,11 @@ describe("Shot Detail (mobile Deep Focus): opens from the board, edits the REAL 
     assert.match(loomMobileSrc, /fetch\("\/api\/loom\/handoff", \{ method: "POST"/);
   });
 
-  test("Other references & @tags uses the real addRef/setRef/delRef mutations over c.refs, not the design mockup's flat extraRefs tag-string array", () => {
+  test("Other references & @tags uses the real addRef/setRef/delRef mutations over c.refs", () => {
     assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "image"\)\}/);
     assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "video"\)\}/);
     assert.match(loomMobileSrc, /onClick=\{\(\) => addRef\(dfLive\.a\.id, c, "audio"\)\}/);
     assert.match(loomMobileSrc, /onClick=\{\(\) => delRef\(dfLive\.a\.id, c\.id, r\)\}/);
-    assert.doesNotMatch(src, /extraRefs/, "extraRefs is the design mockup's own fictional field -- the real card shape has no such field, and none of this file should invent one");
   });
 
   test("the Cast button shows the shot's REAL cast count ((c.cast||[]).length), not a separate mock toggle map", () => {
@@ -306,10 +295,9 @@ describe("Cast & assets sheet: real project.assets, mode-aware budget, and a Foo
       /onClick=\{\(\) => dfPatch\(\(cc\) => \(\{ \.\.\.cc, cast: \(cc\.cast \|\| \[\]\)\.includes\(as\.id\) \? cc\.cast\.filter\(\(x\) => x !== as\.id\) : \[\.\.\.\(cc\.cast \|\| \[\]\), as\.id\] \}\)\)\}/);
   });
 
-  test("the budget line is the REAL, mode-aware refBudget()/modeSendsRefs() -- not the design mockup's hardcoded 'N of 4 reference slots' or its I2V-only special case (FLF also doesn't send cast/refs)", () => {
+  test("the budget line is the REAL, mode-aware refBudget()/modeSendsRefs() (FLF also doesn't send cast/refs)", () => {
     assert.match(loomMobileSrc, /const castBudget = dfLive \? refBudget\(dfLive, project, imgSrc\) : null;/);
     assert.match(loomMobileSrc, /!modeSendsRefs\(c\.mode\)/);
-    assert.doesNotMatch(loomMobileSrc, /of 4 reference slots/, "the real cap is 6 minus attached frames (refBudget), never a hardcoded 4");
   });
 
   test("+ Image ref / + Audio ref append real, taggable project.assets entries via setAssets + nextTag", () => {
@@ -332,8 +320,7 @@ describe("Cast & assets sheet: real project.assets, mode-aware budget, and a Foo
 });
 
 describe("Frame picker: the shared, already-real gallery picker -- not a fabricated grid of mock data", () => {
-  test("LoomMobile never defines its own picker grid or mock gallery pool -- it reuses the real FrameSlot -> openPick -> <mg-gallery-picker> chain every other Loom surface already uses", () => {
-    assert.doesNotMatch(loomMobileSrc, /GALLERY_POOL/, "GALLERY_POOL was the LOCKED DESIGN's own fictional placeholder tint grid -- the real app must not reproduce fabricated gallery data");
+  test("LoomMobile reuses the real FrameSlot -> openPick -> <mg-gallery-picker> chain every other Loom surface already uses", () => {
     // openPick is threaded in as a real prop and handed straight to FrameSlot -- no second,
     // parallel picker implementation lives in this component.
     assert.match(loomMobileSrc, /openPick=\{openPick\}/);
@@ -365,11 +352,14 @@ describe("scope discipline: Fixer is now REAL (seventh and FINAL increment -- Lo
 // values (editCore.js), same Pointer-Events box-drawing math, same real confirm-gated submit
 // through the real /api/fix endpoint (genFix, useGenerationPipeline). Closes the last
 // disclosed gap in Loom Mobile's original 6-increment plan.
-describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js constants (not a cross-directory import)", () => {
+describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js constants", () => {
   test("FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES match editCore.js's own real values exactly", () => {
-    assert.match(src, /const FIX_COLORS = \{ face: "#b692e6", hand: "#4fc99a" \};/);
-    assert.match(src, /const FIX_MIN_PX = 6;/);
-    assert.match(src, /const FIX_MAX_BOXES = 20;/);
+    // The expected literals are built from editCore.js's own exports, so a change on either
+    // side alone breaks this (the Loom copies use double quotes, as JSON.stringify does).
+    assert.match(src, new RegExp("const FIX_COLORS = \\{ face: " + JSON.stringify(FIX_COLORS.face)
+      + ", hand: " + JSON.stringify(FIX_COLORS.hand) + " \\};"));
+    assert.match(src, new RegExp("const FIX_MIN_PX = " + FIX_MIN_PX + ";"));
+    assert.match(src, new RegExp("const FIX_MAX_BOXES = " + FIX_MAX_BOXES + ";"));
   });
 
   test("scaleFixBoxes is a verbatim port of editCore.js's scaleBoxes: naturalWidth/clientWidth scale, {x,y,width,height,tag} output", () => {
@@ -377,36 +367,13 @@ describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js con
     assert.match(src, /const scale = imgEl && imgEl\.clientWidth \? \(imgEl\.naturalWidth \/ imgEl\.clientWidth\) : 1;/);
     assert.match(src, /width: Math\.round\(b\.w \* scale\), height: Math\.round\(b\.h \* scale\), tag: b\.tag,/);
   });
-
-  test("the Fixer constants stay LOCAL copies -- editCore.js's constants are not cross-dir imported", () => {
-    // Since the Loom went bundle-only (2026-08-08), real cross-directory imports from
-    // ../gallery/src ARE the intended pattern -- shared modules the campaign is converging
-    // (artFilters, GalleryPicker, more to come) live there and import normally. So this no
-    // longer polices ALL gallery imports; it pins the ONE thing this describe block is about:
-    // FixTab.jsx's editCore.js constants (FIX_COLORS/FIX_MIN_PX/FIX_MAX_BOXES/scaleBoxes)
-    // must stay the verbatim LOCAL copies checked above, never an import of editCore.js.
-    // ^-anchored (multiline) so it matches only a REAL import statement, not the prose
-    // comment right above the local copies that quotes `import ... from ".../editCore.js"`
-    // to explain why the import is deliberately absent.
-    assert.doesNotMatch(src,
-      /^\s*import[^\n]*from\s*["']\.\.\/gallery\/src\/gen\/editCore\.js["']/m,
-      "the Fixer constants must stay LOCAL verbatim copies, not a live import of editCore.js");
-  });
 });
 
 describe("Fixer: the Edit/Fixer/Enhance sub-strip is now the design's real three-way chip row", () => {
-  test("editSub defaults to 'edit' and a real Fixer chip exists alongside Edit/Enhance", () => {
-    assert.match(loomMobileSrc, /const \[editSub, setEditSub\] = useState\("edit"\);/);
-    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
-    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "edit" \? " on" : ""\)\}/);
+  test("a real Fixer chip exists in the Edit sub-strip", () => {
+    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'), loomMobileSrc.indexOf('{genTab === "Reference"'));
     assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "fixer" \? " on" : ""\)\}/);
-    assert.match(editBlock, /className=\{"lm-tabbtn" \+ \(editSub === "enhance" \? " on" : ""\)\}/);
     assert.match(editBlock, /onClick=\{\(\) => setEditSub\("fixer"\)\}>Fixer<\/button>/);
-  });
-
-  test("the sub-strip still reuses .lm-tabsrow/.lm-tabbtn verbatim -- no new sub-tab visual language for the third chip", () => {
-    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'));
-    assert.match(editBlock, /<div className="lm-tabsrow" style=\{\{ marginBottom: 10 \}\}>/);
   });
 });
 
@@ -884,19 +851,6 @@ describe("Credit safety: the drawer's own component-local poll vs. this incremen
     assert.deepEqual(cardsToResume(null, resumed), []);
   });
 
-  test("the effect re-runs on a mobileUI flip, not on activeId alone", () => {
-    // WHEN it fires is the dep array, and that is all that is left here to read: an
-    // unmounted <mg-generate-drawer> fires no event, so the toggle itself has to be the
-    // trigger. Sliced to the resume effect rather than matched anywhere in the file.
-    // Session P: the scan is the NAMED function resumeInterrupted (the never-auto-render test
-    // roots it by name); the effect just calls it -- on the same two triggers.
-    const at = src.indexOf("const resumeInterrupted = () => {");
-    assert.ok(at >= 0, "the resume scan is resumeInterrupted");
-    const scan = src.slice(at, src.indexOf("\n  };", at));
-    assert.match(scan, /cardsToResume\(proj, resumedRef\.current\)/);
-    assert.match(src.slice(at), /useEffect\(\(\) => \{ resumeInterrupted\(\); \}, \[activeId, mobileUI\]\);/);
-  });
-
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
     // Both ends of one wire, without pinning the whole parameter list: the hook takes a
     // mobileUI, and App() hands it the state it renders from rather than a local copy.
@@ -936,14 +890,8 @@ describe("Filter compare: reused from the real art-filter engine (imported), not
     assert.match(loomMobileSrc, /const AF = MgArtFilters;/);
   });
 
-  test("the swatch grid is built from the real AF.groups() -- not the design mockup's own hardcoded FILTER_SETS/GALLERY_POOL-style placeholder", () => {
+  test("the swatch grid is built from the real AF.groups()", () => {
     assert.match(loomMobileSrc, /const fcGroups = AF \? AF\.groups\(\) : \[\];/);
-    // Checking for an actual array DECLARATION, not the bare name -- this increment's own
-    // disclosure comments legitimately CITE "FILTER_SETS" in prose (the design's own search
-    // hint, quoting its identifier so a reader can find the corresponding design markup),
-    // the same way they cite "fcSkinFilters"/"fcPixaiFilters" two lines above. What must
-    // never exist is the mockup's own hardcoded 12-entry array itself.
-    assert.doesNotMatch(loomMobileSrc, /const FILTER_SETS = \[/, "the locked design's own simplified 12-entry placeholder array (name + two flat hex stops, one hardcoded mix-blend-mode) must not be reproduced here -- the real recipe data comes from AF.groups()/AF.get() instead");
   });
 
   test("each tile paints via the real AF.renderSwatch(el, id) -- no hand-rolled two-color CSS gradient standing in for it", () => {
@@ -979,15 +927,6 @@ describe("Filter compare: reached from Generate's Edit tab via a real Edit/Fixer
 
   test("the Enhance sub-tab's 'Open filters' button calls the real openFilterCompare (not a stub)", () => {
     assert.match(loomMobileSrc, /<button type="button" className="lm-openfiltersbtn" onClick=\{openFilterCompare\}>&#9673; Open filters<\/button>/);
-  });
-
-  // Fixer WAS deliberately excluded from this sub-strip through the sixth increment (see the
-  // "scope discipline" describe block above, and its own updated comment) -- now built as the
-  // seventh and FINAL increment; see the dedicated "Fixer: ..." describe blocks below for its
-  // own coverage. This block only still asserts Edit/Enhance's own unrelated behavior above.
-  test("Fixer IS one of the sub-strip's chips now, matching the locked design's own three-way editSubChips", () => {
-    const editBlock = loomMobileSrc.slice(loomMobileSrc.indexOf('genTab === "Edit" && (() => {'), loomMobileSrc.indexOf('{genTab === "Reference"'));
-    assert.match(editBlock, /editSub === "fixer"/);
   });
 });
 

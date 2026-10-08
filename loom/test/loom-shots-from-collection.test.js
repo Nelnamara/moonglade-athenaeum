@@ -9,7 +9,7 @@ import {
 } from "../src/loom-shots-core.js";
 import { newCardShape, isCatalogMediaId, shotPayload } from "../src/loom-core.js";
 import { parseCastIdsFromSearch } from "../src/loom-mutations.js";
-import { takesOf, selectedTakeOf, inFlight, needsRender, anchorInfo, unsendableImages } from "../src/loom-takes-core.js";
+import { takesOf, selectedTakeOf, inFlight, needsRender, anchorInfo, unsendableRefs } from "../src/loom-takes-core.js";
 import { SHOTS_HANDOFF_CAP, readShotsMeta } from "../src/loom-url.js";
 
 /* A COLLECTION AS ORDERED SHOTS (Session P, P5; BUILD-w5-p §5.3; rulings 4, 9, 10; review N4).
@@ -98,9 +98,9 @@ describe("shotsFromPictures", () => {
     const c = act.cards[2];
     const project = { assets: [], draft: false, acts: [act] };
     const payload = shotPayload({ c, code: "D·03", ai: 3, ci: 2 }, project, () => null);
-    assert.deepEqual(unsendableImages(payload), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableRefs(payload), ["local_0123456789ab"]);
     const ok = shotPayload({ c: act.cards[0], code: "D·01", ai: 3, ci: 0 }, project, () => null);
-    assert.deepEqual(unsendableImages(ok), []);
+    assert.deepEqual(unsendableRefs(ok), []);
     // the card mark the board draws for it is the ruling's words
     assert.match(SRC, /imported picture — can't be sent to PixAI yet/);
   });
