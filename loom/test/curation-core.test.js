@@ -12,7 +12,7 @@ import {
 
 /* Session N (Curation), the pure half: the personal layer's rules, the honest toast words,
    the rating hotkeys' targeting and the collections manager's plans. The server owns the
-   truth (tests/test_curation.py); these pin what the screen decides before it asks. */
+   truth (dev/tests/test_curation.py); these pin what the screen decides before it asks. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "gallery", "src");

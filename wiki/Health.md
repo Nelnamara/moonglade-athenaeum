@@ -51,7 +51,7 @@ numbers?* below).
 no row in `catalog.db` at all — the mirror image of "missing files" (a catalog row with
 no file). This happens when files land on disk outside the normal backup flow. When the
 count is nonzero, Health shows a note pointing at the fix: the gallery's **↑ Import**
-button, or `python moonglade_backup.py --import-local` from the CLI — both catalog
+button, or `python -m moonglade --import-local` from the CLI — both catalog
 any not-yet-known file it finds (see [Backing Up → Importing your own media](Backing-Up)).
 
 **Opening a row whose file is gone tells you that.** A catalog row can outlive its file —
@@ -111,7 +111,7 @@ out of **Missing files**. Three tiles cover that:
   says it plainly instead.
 - **Missing thumbs** and **Last verified** — read from the last integrity check: **Control
   Panel → Check — read-only → Verify library integrity → run ▸** (or
-  `python moonglade_backup.py --verify-library`). They show "—" and "never" until it has run once.
+  `python -m moonglade --verify-library`). They show "—" and "never" until it has run once.
 
 The check looks at every catalogued file: missing, empty, no thumbnail (or, for a video, no
 poster), an empty thumbnail, files with no catalog row, and thumbnails with no row. The Panel's
@@ -121,7 +121,7 @@ that stops before its end marker, or a video with no index, is listed as **suspe
 unusual but valid file can look cut short.
 
 It changes nothing: no file is deleted, moved, downloaded or rebuilt. It writes two reports
-at the library root, `integrity_report.csv` (one line per problem: media id, problem, path,
+in the library's `_moonglade/records/` folder, `integrity_report.csv` (one line per problem: media id, problem, path,
 size, recoverable) and `integrity_report.json` (the counts and when it ran), and the Panel's log
 shows the summary and the first lines. A broken picture that PixAI no longer has says
 **recoverable: no** — there is nothing left to download it from again. The check itself
@@ -157,7 +157,7 @@ A row offers only the fix that applies to it (**Re-download** or **Rebuild**, se
 re-download; it offers **Open details** and **Keep as is**, which quiets it.
 
 **Mark lost** and **Keep as is** are a note this app keeps for itself, in
-`integrity_marks.json` at the library root beside the two reports. They delete nothing and
+`integrity_marks.json` in the library's `_moonglade/decisions/` folder. They delete nothing and
 change nothing else, a lost row stops being counted for **Fix all**, and the toast that
 confirms either one has an **Undo** for ten seconds.
 
@@ -216,7 +216,7 @@ isn't). Health resolves video/local rows by filename, so they aren't reported as
 false "missing". Regenerate thumbnails any time:
 
 ```bash
-python moonglade_gallery.py --out pixai_backup --rebuild-thumbs
+python -m moonglade.gallery --rebuild-thumbs
 ```
 
 ---

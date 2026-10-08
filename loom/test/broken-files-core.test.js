@@ -12,7 +12,7 @@ import {
 /* Health's Broken files list (Session W; Archive Integrity Handoff, picks W1a-W6a): the words and
    rules the desktop section and the phone screen draw. The server half -- which rows, which pill,
    which action, and the runner that refuses an archive-only row by itself -- is
-   tests/test_integrity_broken.py and tests/test_integrity_fix.py. */
+   dev/tests/test_integrity_broken.py and dev/tests/test_integrity_fix.py. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "gallery", "src");

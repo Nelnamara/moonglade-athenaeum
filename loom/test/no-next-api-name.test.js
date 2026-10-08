@@ -9,7 +9,7 @@ import path from "node:path";
    /next was the React app's codename through its pilot. #51 retired the page route; the three
    data routes followed: /api/library, /api/detail/<media_id>, /api/history. Their old
    /api/next/... paths answered for one release (3.17.0), as aliases on the server, and are gone
-   now (tests/test_api_route_aliases.py). Nothing in the source may read them, or it breaks
+   now (dev/tests/test_api_route_aliases.py). Nothing in the source may read them, or it breaks
    against the server: every read goes through gallery/src/apiRoutes.js, the one file allowed to
    name the old paths (to say they are gone).
 

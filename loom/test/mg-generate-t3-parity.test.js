@@ -14,7 +14,7 @@ import {
 /* SCOPE_2026-09-26 lane G, the client half: the Generate drawer shows -- and sends -- what the
    server's per-model gate will send (moonglade_backup._gate_image_params), and the Loom snaps
    to the model's grid. The Python side, and the JS/Python parity over all 32 presets, is
-   tests/test_tsubaki3_image_gate.py; this file pins the JS logic directly. */
+   dev/tests/test_tsubaki3_image_gate.py; this file pins the JS logic directly. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.resolve(__dirname, rel), "utf8").replace(/\r\n/g, "\n");

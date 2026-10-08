@@ -11,7 +11,7 @@
    minimum, with the shape (square to the pack default's, give or take 8 %) and, where the pack's own
    art is smaller, the minimum size taken from the pack default that image replaces -- so the two
    cannot drift. The refusal sentences are pinned
-   against the server's in tests/test_branding_roles.py and loom/test/brand-roles-core.test.js alike. */
+   against the server's in dev/tests/test_branding_roles.py and loom/test/brand-roles-core.test.js alike. */
 
 export const ROLE_REFUSAL_END = "Your current art is unchanged.";
 const NEED_VERB = { format: "be", transparent: "have", animation: "be", aspect: "be", size: "be" };

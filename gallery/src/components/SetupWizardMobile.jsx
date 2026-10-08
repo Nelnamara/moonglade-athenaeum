@@ -26,7 +26,7 @@ import "../styles/setup-wizard-mobile.css";
    DC's own disclosed prototype stand-in for a build that had no server to call (see
    that file's own build-spec research). SetupWizard.jsx already replaced both with
    the real endpoints (/api/setup/save-key, /api/panel/run + /api/panel/status polling)
-   well before this mobile pass, tested by tests/test_setup_wizard.py -- useSetupWizard
+   well before this mobile pass, tested by dev/tests/test_setup_wizard.py -- useSetupWizard
    just carries that same real logic over, so neither stand-in was ported here.
 
    Excluded, matching Setup Wizard Mobile.dc.html's own build-spec research (section 8):

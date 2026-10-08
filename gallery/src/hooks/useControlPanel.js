@@ -214,7 +214,7 @@ export default function useControlPanel() {
      finishes announces itself through the Activity ledger the notify tray already polls,
      and that is the whole of what the owner sees move. (DECISIONS.md 2026-09-05, which
      names living-library jobs as an inheritor of that rule by name; guarded by
-     tests/test_living_library.py, which walks this file.) */
+     dev/tests/test_living_library.py, which walks this file.) */
   const saveLivingJob = async (action, patch) =>
     saveSchedule({ jobs: [{ action, ...patch }] });
   /* Run now. The sweep is in-process and has no PANEL_ACTIONS key, so it has its own

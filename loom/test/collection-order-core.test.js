@@ -8,7 +8,7 @@ import { SHOTS_HANDOFF_CAP as LOOM_CAP, readShotsMeta } from "../src/loom-url.js
 import { parseCastIdsFromSearch } from "../src/loom-mutations.js";
 
 /* Session P, P6 (manual order) and P5 (as shots, in order), the gallery's pure half. The
-   server owns the stored order (tests/test_collection_order.py); these pin what the order
+   server owns the stored order (dev/tests/test_collection_order.py); these pin what the order
    editor and the Actions menu decide before they ask. */
 
 describe("the order editor's moves", () => {

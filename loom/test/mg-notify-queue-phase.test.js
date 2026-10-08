@@ -230,7 +230,7 @@ describe("the queued state is styled, and styled the same on both hosts", () => 
     // The gallery and the Loom load this same stylesheet. If the Loom's own <style>
     // (_LOOM_SHELL) ever starts restyling .at-* the two hosts can drift apart again, which is
     // a defect that has already happened once before (the tray's font-family, 2026-07-21).
-    const shellSrc = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
+    const shellSrc = readFileSync(path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
     const m = shellSrc.match(
       /_LOOM_SHELL = r"""[\s\S]*?"""(?:\s*\+\s*[A-Za-z_]\w*\s*\+\s*r"""[\s\S]*?""")*/);
     assert.ok(m, "could not extract _LOOM_SHELL from moonglade_gallery.py");

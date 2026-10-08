@@ -67,8 +67,8 @@ once per run, above the flood of per-image lines, ending with:
 > is in the log.)
 
 It's said once rather than 17,000 times for the obvious reason; each individual failure is
-still recorded in the rotating log at `pixai_backup/logs/moonglade.log`, whether or not you
-ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
+still recorded in the rotating log at `local\logs\moonglade.log` beside the program, whether or
+not you ran with `-v`. The cure is the one above: `pip install truststore`, then re-run.
 
 Two details worth knowing. The API host and the media CDN are different hosts, so one can be
 trusted while the other isn't — which is why this used to look like a PixAI problem instead
@@ -76,10 +76,81 @@ of a local one. And "once per run" is literally once per *process*: on the long-
 server the paragraph appears on the console the first time and not again, so read the log
 there rather than waiting for it to repeat.
 
+## After updating to 3.20: where did my files go?
+Nothing was lost. 3.20 gives every file one home, and the first time it starts it moves yours
+there by itself. [Where Things Live](Where-Things-Live) has the whole map.
+
+- **This PC's things are in `local\`** beside the program: `settings.json` (everything the
+  Control Panel sets: the library folder, the port and LAN discovery, the Mirror switch, your
+  branding picks; it replaces `serve.txt`), the Mirror's sign-in, the art pack, the shortcut
+  icons, the caches and both logs (`local\logs\`). `config.json` stays where it was, with only
+  what you typed into it yourself.
+- **Your stuff is in your library's `_moonglade\`:** each login's presets and settings in
+  `accounts\`, the Loom's boards in `loom\`, the achievements, Runs, job list, schedule, spend
+  guards and reports in `records\`, and the `--organize` undo list and your Mark-lost choices in
+  `decisions\`.
+
+On the same drive each file is moved in one step; across drives it is copied, checked byte for
+byte, and only then deleted from its old place. A start that was interrupted is finished by the
+next one. Before it moves anything the app keeps a safety copy of the small files it moves, and
+deletes that copy by itself after five clean starts (a start counts once the gallery has run for
+ten minutes or was stopped from the Control Panel). Nothing is left for you to delete.
+`local\logs\moonglade.log` has a line for each file it brought across.
+
+**A start stopped with a sentence instead of opening.** It says why, and what to do:
+
+- *"The library … is still in an older Moonglade's layout."* A command line, the Claude tools
+  and a run that names its own library (`--out`) never move a library's files. Open the library
+  once with its own install's launcher (updated to 3.20), then run the command again.
+- *"An older Moonglade is still using the library …"* An older install wrote to the library's
+  old places after the move. Stop it with **Stop server** in its Control Panel, or end its
+  `python` or `pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled
+  tasks (and any service that starts it on Linux or macOS) and close its Claude tools, then start
+  again: the move brings in what it wrote.
+- *"Another program has …\logs\moonglade.log open …"* That is the library's old log, and
+  what holds it is usually an older Moonglade still running on the library, on this PC or another
+  Windows PC, or one of its scheduled tasks. Stop it the same way (**Stop server** in its Control
+  Panel; closing its browser tab doesn't stop it) and stop its scheduled tasks. If it isn't
+  Moonglade, close the program that has the log open. Then start again. Nothing was moved. To
+  see which program has it, open **Resource Monitor** (search for it in the Start menu), go to
+  the **CPU** tab, and under **Associated Handles** search for `moonglade.log`.
+- *"Moonglade's settings file … is damaged"* or *"can't read its settings file"*: Moonglade
+  won't guess which library to open, or write over the file. Close whatever has
+  `local\settings.json` open, or fix the file (it is plain JSON), and start again.
+- *"… another program has it open"*, *"… read-only"* or *"the disk is full"*: close that
+  program (OneDrive, a virus scan, an editor), make the folder writable, or free some space, and
+  start again. Nothing was lost.
+
+When the gallery can't start, the launcher shows that sentence in a message box.
+
+**The app closed right after the update.** That's expected when you update from 3.19 or older:
+the launcher that was running can't find the files it used to start. Double-click **Moonglade
+Launcher** in the program's folder once. That start re-points your Desktop and Start-menu
+shortcuts to it, icon and all.
+
+**A launch switch you kept in `serve.txt`** (`--https`, `--skip-thumbs`, `--allow-port-reuse`,
+`-v`) still applies at every start: it is in `local\settings.json`, under `launch_args`. To add
+one later, stop Moonglade and add it to that list, for example `"launch_args": ["--https"]`. A
+`--out`, `--port` or `--host` there became the library folder, port and address the Control
+Panel shows. The one-off switches (`--rebuild-thumbs`, `--open-browser`) were dropped.
+
+**A scheduled backup or the Claude tools stopped working.** They still name the old files. The
+app finds them when it starts, and the notice in the corner offers **Fix it** (or **Fix them**),
+which rewrites each to the new command line and says what it fixed. A task that runs with a saved
+Windows password is reported rather than rewritten, because only you can enter the password: open
+it in Task Scheduler and change its action to `python "C:\path\to\app\moonglade"` followed by the
+same arguments. After the Claude tools are fixed, restart Claude to use them. A registration that
+runs them through another program (such as `uv run`), whose Python can't run them, or that names
+the old file without saying which folder it starts in is left as it is, and the notice gives the
+command line to use: your Python with `-m moonglade.mcp_server` (and `-P` before `-m` on Python
+3.11 or later), with `PYTHONPATH` set to the program's folder. On Linux and macOS, edit a service script by hand: the server is
+`python -m moonglade.gallery`, started in the program's folder, and the command line is
+`python /path/to/app/moonglade` followed by the same arguments.
+
 ## The gallery shows old behavior after I updated
 The Control Panel's one-click update restarts the server and reloads the tab for you. If you
 updated **by hand** with `git pull`, **restart the gallery server** so it loads the new code
-— Stop/Restart from the browser, or relaunch **`Serve Gallery.pyw`**. Either way, if a page
+— Stop/Restart from the browser, or relaunch **`Moonglade Launcher.pyw`**. Either way, if a page
 still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
 the service worker).
 
@@ -102,7 +173,7 @@ offline — nothing was attempted), **gold** means come back in a moment (someth
 running), and **red** means this install will keep refusing until something is changed. The
 window names the reason either way. The usual ones:
 
-- **The server wasn't started through `Serve Gallery.pyw`.** Only the launcher relaunches the
+- **The server wasn't started through `Moonglade Launcher.pyw`.** Only the launcher relaunches the
   app after an update — without it the server would simply stop.
 - **A Control Panel job is still running.** Let it finish or cancel it; changing the code
   under a running job is how you get half-old, half-new behavior.
@@ -139,9 +210,9 @@ just won't have a thumbnail.
 
 ## A generation isn't in the gallery yet
 Generated tasks don't always flow into `--update` instantly. Recover by id without
-spending credits: `python moonglade_backup.py --generate --task-id <id>`.
+spending credits: `python -m moonglade --generate --task-id <id>`.
 
 To stop it stranding in the first place, use the live push path: the web gallery
 runs a live-mirror thread automatically, and the CLI exposes the same machinery as
-`python moonglade_backup.py --watch --watch-backup`, which collects each
+`python -m moonglade --watch --watch-backup`, which collects each
 generation the moment it completes. Both need `websockets` — see [Setup](Setup).

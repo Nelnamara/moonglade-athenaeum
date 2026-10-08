@@ -27,8 +27,8 @@ import path from "node:path";
    from an inline script inside moonglade_gallery.py's _LOOM_SHELL, carrying the same three
    rules by hand. Since Session I (2026-09-28) that modal is retired and the guide's own open
    sends it (help/helpStore.js) through this same module, on both shells -- the Loom's shell
-   only writes the nonce it seeds from. tests/test_loom_notify.py pins that the shell posts
-   nothing, and tests/test_telemetry.py proves the route's half of the contract. */
+   only writes the nonce it seeds from. dev/tests/test_loom_notify.py pins that the shell posts
+   nothing, and dev/tests/test_telemetry.py proves the route's half of the contract. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(__dirname, "../../gallery/src");

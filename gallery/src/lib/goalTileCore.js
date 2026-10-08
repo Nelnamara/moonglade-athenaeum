@@ -4,7 +4,7 @@
    WHERE THE PICTURE COMES FROM, in this order (T3c: pack, then module, then tint):
      1. the art pack's own copy, training/goal_<goal>.png, read through the /branding/ route like
         every other pack asset (pack v7 will carry it; until then this simply is not there);
-     2. the app's own copy, art/goalTiles.js (tools/art/build_goal_tiles.py), shipped in the bundle;
+     2. the app's own copy, art/goalTiles.js (dev/tools/art/build_goal_tiles.py), shipped in the bundle;
      3. neither loads: the flat goal tint, with no glyph and no note (the label beside the tile
         carries the meaning).
    The names are GOALS' values behind goal_ (gen/trainCore.js): goal_character, goal_style,

@@ -27,7 +27,7 @@ import { mediaRefIndex, bundleMissingReport } from "../src/loom-core.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const jsx = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8").replace(/\r\n/g, "\n");
-const gallery = readFileSync(path.join(__dirname, "../../moonglade_gallery.py"), "utf8").replace(/\r\n/g, "\n");
+const gallery = readFileSync(path.join(__dirname, "../../moonglade/gallery.py"), "utf8").replace(/\r\n/g, "\n");
 
 const project = {
   name: "Test", target: 60, look: "",

@@ -118,7 +118,7 @@ function BrokenRow({ row, bf, menuOpen, setMenu, onOpenDetails, maxPath }) {
 /* "Fix all recoverable" confirms ONCE (W3c): the total, the re-downloads with their estimated
    size, the local rebuilds, the lost files left alone, "Nothing is deleted." -- and on a metered
    connection Data saver's line. No "don't ask again". Its own rung above Health's slab
-   (broken-files.css, 428/429; tests/test_z_ladder.py). Exported for the phone's bottom sheet,
+   (broken-files.css, 428/429; dev/tests/test_z_ladder.py). Exported for the phone's bottom sheet,
    which shows the same lines. */
 export function FixConfirm({ plan, metered, onCancel, onGo }) {
   const c = confirmLines(plan, metered);

@@ -6,7 +6,7 @@ import path from "node:path";
 
 /* The Folio's ladder headers say what each track counts in plain words (owner walk 2026-09-29:
    one read "THE MOONFORGE — MEASURED IN LOCAL_GENS"). The words are the server's (metric_words on
-   each track, held to a full table by tests/test_achievements.py); what is pinned here is that
+   each track, held to a full table by dev/tests/test_achievements.py); what is pinned here is that
    the desktop header draws those words and never the raw metric key, and that its fallback for
    an older server spaces the underscores out. The component is React and this suite has no
    renderer, so the header is checked at the source, and the fallback is run for real. */

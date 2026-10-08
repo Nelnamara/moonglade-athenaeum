@@ -4,8 +4,8 @@
    ONE SYNTAX for Random and Matrix: `{a|b|c}` is an inline variable, `__name__` reads a
    saved list; a brace group with no `|` is literal text, and a backslash is dropped only
    where it changes the parse (the S1 ruling, see parse). This file is the dock's copy of the rule; the
-   server's is moonglade_runs.py, and tests/fixtures/template_vectors.json pins both to one
-   set of answers (loom/test/template-core.test.js + tests/test_generate_runs.py), so the
+   server's is moonglade_runs.py, and dev/tests/fixtures/template_vectors.json pins both to one
+   set of answers (loom/test/template-core.test.js + dev/tests/test_generate_runs.py), so the
    preview the dock draws is the set of jobs the server sends.
 
    THE DOCK ONLY DRAWS WITH IT. The server re-parses, re-expands, re-counts, re-caps,

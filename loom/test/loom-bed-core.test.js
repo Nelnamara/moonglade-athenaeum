@@ -11,7 +11,7 @@ import {
 import { flat, bundleMissingReport } from "../src/loom-core.js";
 
 /* THE MUSIC BED (Session P, P3): the one definition of "own audio", the level and fade rules,
-   and the timing math Play (WebAudio) and ⇧ Render (ffmpeg, tests/test_loom_p_routes.py) share.
+   and the timing math Play (WebAudio) and ⇧ Render (ffmpeg, dev/tests/test_loom_p_routes.py) share.
    The page: −24…0 dB (default −8), 2 s in / 3 s out, −12 dB more under a shot with its own
    audio, a long bed cut to the cut with its out-fade, a short one ending where it ends. */
 

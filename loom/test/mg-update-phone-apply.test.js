@@ -13,7 +13,7 @@ import path from "node:path";
 
    A SOURCE GUARD, deliberately, and here is the honest limit of it: these two components
    need a DOM and a mounted React tree, which this repo's node test runner has no renderer
-   for (tests/test_render_harness.py owns the real-browser half and does not drive the update
+   for (dev/tests/test_render_harness.py owns the real-browser half and does not drive the update
    modal). What a source guard CAN pin is the wiring that would silently rot -- that the
    phone reaches the shared card and the shared hook rather than growing a second apply path
    of its own, which is the one mistake with real consequences here. The three properties:

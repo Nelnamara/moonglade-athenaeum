@@ -11,8 +11,9 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   and as the last page of the guide. See [Control Panel](Control-Panel#updates-and-about).
 - **AI Tools** — the **✦ AI Tools** catalog in the gallery header: PixAI's one-click workflow tools,
   one card each. The entry only appears once **Mirror to PixAI** is armed.
-- **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, sitting beside the
-  program. Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
+- **the art pack** — the file the app's own art ships in, `moonglade.mgpack`, in the `local`
+  folder beside the program (3.19 and earlier kept it beside the program itself; the app moves
+  it by itself). Before pack v7 it was `moonglade.dat`; the app renames an old one by itself the
   next time it starts. On Windows, Explorer lists its type as *Moonglade art pack*, with the
   app's icon (set for your own Windows account only). Also called the container, or just the
   pack.
@@ -65,7 +66,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   machine running it — a phone or a laptop on your own Wi-Fi. Nothing on screen announces it;
   you meet it as controls that are simply not drawn: **Import**, and the Control Panel's
   machine-only buttons. Everything else, including watching a job run, works as normal.
-- **the launcher** — **`Serve Gallery.pyw`**, the double-click way to start the gallery with no
+- **the launcher** — **`Moonglade Launcher.pyw`**, the double-click way to start the gallery with no
   console window. See [Setup](Setup).
 - **the continuity ribbon** — the strip of frame pairs under The Loom's reel, in the Timeline
   drawer's full view: each shot's closing frame beside the next one's opening frame. See [The

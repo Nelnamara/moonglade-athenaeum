@@ -20,7 +20,7 @@
      Z          palette scrim/panel 460/461, cheat-sheet 470/471, G-chip 462. Above the
                 claim modal's 440/441 and below the picker's 490 and the hover previews'
                 500; the ORDER is
-                what matters and tests/test_z_ladder.py is the referee. The canonical
+                what matters and dev/tests/test_z_ladder.py is the referee. The canonical
                 ladder comment lives in overlays.css. */
 
 @keyframes mgpalSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }

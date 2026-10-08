@@ -14,7 +14,7 @@ import { chipOf } from "../../gallery/src/recipes/recipesCore.js";
 /* Where lanes w2-gen (the Tsubaki.3 dock) and w2-recipes (the recipe row) meet, on the client:
    what the dock sends for its recipe row, what its price identity reads, when Generate refuses
    a recipe, and that both surfaces mount the real row with the props it needs. The server half
-   of the same seam is tests/test_recipes.py's "integration with the Tsubaki.3 dock" section. */
+   of the same seam is dev/tests/test_recipes.py's "integration with the Tsubaki.3 dock" section. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "gallery", "src");

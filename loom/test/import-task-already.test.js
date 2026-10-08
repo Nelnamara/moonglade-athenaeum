@@ -7,7 +7,7 @@ import path from "node:path";
 // FIX 2026-08-23: "Recover a task by ID" used to render the generic "imported -- N added"
 // message even when the server reported the task was ALREADY catalogued ({already:true,
 // saved:0}) -- so an already-in-library task read as "imported -- 0 added", which looks like
-// a failure. The server flag was always correct (tests/test_web_pick.py pins {already:true,
+// a failure. The server flag was always correct (dev/tests/test_web_pick.py pins {already:true,
 // saved:0, media_ids}); the client just dropped it. This pins the two client halves of the
 // fix: the hook keeps `already` in taskState, and BOTH surfaces (the desktop overlay and
 // the mobile twin ControlMobile.jsx) branch their done-copy on it.

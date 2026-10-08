@@ -3,7 +3,7 @@
 
    The art itself is in gallery/src/icons/ (nine .svg files from the Glyphs set, MIT --
    see the NOTICE beside them), transcribed into gallery/src/icons/Icons.jsx by
-   tools/build_icons.py. Every icon draws in `currentColor`, so the only thing that
+   dev/tools/build_icons.py. Every icon draws in `currentColor`, so the only thing that
    colours one is the `color` of whatever it sits in -- a skin change, a hover, a
    disabled state and a metal button face all just work, with nothing here to say so.
 

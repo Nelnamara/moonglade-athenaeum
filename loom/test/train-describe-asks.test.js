@@ -9,7 +9,7 @@ import path from "node:path";
    describe at once (1,500 credits on a draft of 10). The press now opens the Training
    Handoff's ask (3c's gold-priced confirm card: the question, PixAI's quote, the line, a way
    back, "Describe · price"), and only that card's button sends. The phone already asked, in its
-   DESCRIBE AUTOMATICALLY sheet; that is held here too. tests/test_render_harness.py walks the
+   DESCRIBE AUTOMATICALLY sheet; that is held here too. dev/tests/test_render_harness.py walks the
    desktop flow in a real browser against a faked PixAI. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));

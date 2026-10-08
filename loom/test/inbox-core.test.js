@@ -11,7 +11,7 @@ import {
 /* SESSIONS R + Y, THE PURE HALF (lane R, 2026-10-03): the gift box's badge, the inbox read by
    work, the thread's chains, the reply's counter, the cards about to expire, the gift rows.
    Design: Inbox and Event Handoff.dc.html, notes/inbox-event/NOTES.md, drift 123-133. The
-   server half (moonglade_inbox.py) is pinned by tests/test_inbox*.py. */
+   server half (moonglade_inbox.py) is pinned by dev/tests/test_inbox*.py. */
 
 const ART = { id: "17886", title: "Moonwell Vigil", thumb: "", media_id: "m1" };
 const ART2 = { id: "17887", title: "Lantern Choir", thumb: "", media_id: "" };

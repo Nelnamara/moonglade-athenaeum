@@ -15,7 +15,7 @@ import path from "node:path";
    generate / upscale) and by mg-result (the video drawer). Reading page 7, a job you queued
    ten minutes ago lands, and page 1 replaces the grid you were reading.
 
-   tests/test_render_harness.py::test_a_finished_generation_never_moves_the_page_the_owner_
+   dev/tests/test_render_harness.py::test_a_finished_generation_never_moves_the_page_the_owner_
    is_reading measures the DESKTOP behaviour in a real browser: page 2 stays, page 1
    refreshes. The completion-vs-navigation RACE is measured in that same real browser on
    both shells -- ..._never_out_races_the_owners_own_page_change on the desktop and
@@ -259,7 +259,7 @@ describe("the phone learns completions exist -- announce-only", () => {
 
    Structure is what can be pinned here, for the same reason as everything above: no React test
    renderer in this suite. The behaviour itself is a real-browser question and belongs in
-   tests/test_render_harness.py if it is ever measured live. */
+   dev/tests/test_render_harness.py if it is ever measured live. */
 describe("the Activity row's thumbnail opens the picture on the phone too", () => {
   const row = src("notify/ActivityRow.jsx");
 

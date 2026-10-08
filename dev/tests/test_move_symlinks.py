@@ -1,0 +1,290 @@
+"""Symbolic links in an old home, as `ln -s` makes them on Linux and macOS (and `mklink` on
+Windows): their target is often written RELATIVE to the folder the link sits in. Every new
+home is deeper than the old place (loom\\ -> _moonglade\\loom\\, a login's file ->
+_moonglade\\accounts\\<key>\\), so a link renamed as it is would point somewhere else, or at
+nothing, while the log said it was moved.
+
+  * Off Windows the link is made again at its new home with its target rewritten -- still
+    relative -- so it points at the same place, and the old entry is removed. A full-path
+    target is renamed as it is, unless it points into what the same move takes or
+    empties: that stops the start before anything moves. Links move before any file. What
+    a link points at is never copied, moved or deleted.
+  * On Windows, where making a link needs a privilege, a relative one stops the start before
+    anything moves, with a plain sentence (dev/tests/test_move_links.py covers that path on
+    any Windows machine; the real-link test here runs where links can be made).
+  * A banner render that is a link is left where it is, with its folder: it may be the only
+    copy of the banner the install wears, and would have to be read through the link.
+
+These are NOT Windows-only: the POSIX ones run on Linux CI. A test that needs to make a
+symbolic link skips where this user can't (Windows without the privilege).
+"""
+import json
+import os
+import sys
+
+import pytest
+
+from moonglade import migrate
+from moonglade import setup as msetup
+from tests.move_layouts import KEY_NEL, rig, start, write, write_config
+
+BOARD = "storyboard%3Av2%3Aproj%3Ab1.json"
+
+posix = pytest.mark.skipif(sys.platform == "win32",
+                           reason="off Windows a relative link is made again, rewritten")
+windows = pytest.mark.skipif(sys.platform != "win32",
+                             reason="on Windows a relative link stops the start")
+
+
+def _can_symlink(folder):
+    probe = os.path.join(str(folder), ".probe-link")
+    try:
+        os.symlink("nowhere", probe)
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    os.unlink(probe)
+    return True
+
+
+@pytest.fixture
+def r(tmp_path, monkeypatch):
+    if not _can_symlink(tmp_path):
+        pytest.skip("this user can't make a symbolic link here (Windows without the privilege)")
+    return rig(tmp_path, monkeypatch)
+
+
+def _a_library(r):
+    write_config(r)
+    write(r.lib / "jobs.jsonl", '{"id": 1}\n')
+
+
+def _same_place(a, b):
+    return os.path.realpath(str(a)) == os.path.realpath(str(b))
+
+
+# ---- the arithmetic, on every platform -----------------------------------------------------------
+
+def test_a_relative_target_is_rewritten_for_the_deeper_folder(tmp_path):
+    lib = tmp_path / "Lib"
+    up = os.path.join("..", "LoomData")
+    got = migrate._relinked(str(lib), up, str(lib / "_moonglade"))
+    assert got == os.path.join("..", "..", "LoomData")
+    assert os.path.normpath(os.path.join(str(lib / "_moonglade"), got)) == \
+        os.path.normpath(str(tmp_path / "LoomData"))
+    beside = migrate._relinked(str(lib), "LoomData", str(lib / "_moonglade"))
+    assert os.path.normpath(os.path.join(str(lib / "_moonglade"), beside)) == \
+        os.path.normpath(str(lib / "LoomData"))
+
+
+def test_a_full_path_or_an_unchanged_target_is_left_as_it_is(tmp_path):
+    lib = tmp_path / "Lib"
+    assert migrate._relinked(str(lib), str(tmp_path / "LoomData"),
+                             str(lib / "_moonglade")) is None
+    assert migrate._relinked(str(lib), os.path.join("..", "x"), str(tmp_path / "Other")) is None
+    assert migrate._relinked(str(lib), "", str(lib / "_moonglade")) is None
+
+
+def test_a_junction_s_target_is_named_without_the_windows_prefix(monkeypatch, tmp_path):
+    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\C:\\Users\\me\\LoomData")
+    assert migrate._link_target(tmp_path) == "C:\\Users\\me\\LoomData"
+    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\UNC\\nas\\share\\LoomData")
+    assert migrate._link_target(tmp_path) == "\\\\nas\\share\\LoomData"
+    monkeypatch.setattr(os, "readlink", lambda p: "../LoomData")
+    assert migrate._link_target(tmp_path) == "../LoomData"
+
+
+# ---- real links ----------------------------------------------------------------------------------
+
+@posix
+def test_relative_and_full_path_links_still_point_where_they_did_after_the_move(r):
+    _a_library(r)
+    loom_data = r.lib.parent / "LoomData"
+    write(loom_data / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "beside"})))
+    os.symlink(os.path.join("..", "LoomData"), str(r.lib / "loom"))          # a folder, relative
+    snips = write(r.lib.parent / "elsewhere" / "snips.json", ["golden hour"])
+    (r.lib / "prompt_snippets").mkdir()
+    os.symlink(os.path.join("..", "..", "elsewhere", "snips.json"),
+               str(r.lib / "prompt_snippets" / (KEY_NEL + ".json")))          # a file, relative
+    prefs = write(r.lib.parent / "elsewhere" / "prefs.json", {"guide": "done"})
+    (r.lib / "account_prefs").mkdir()
+    os.symlink(str(prefs), str(r.lib / "account_prefs" / (KEY_NEL + ".json")))  # a full path
+    done = start(r)
+
+    loom = r.lib / "_moonglade" / "loom"
+    assert os.path.islink(str(loom)) and not os.path.isabs(os.readlink(str(loom))), \
+        "made again, still relative"
+    assert _same_place(loom, loom_data)
+    acc = r.lib / "_moonglade" / "accounts" / KEY_NEL
+    assert os.path.islink(str(acc / "snippets.json"))
+    assert not os.path.isabs(os.readlink(str(acc / "snippets.json")))
+    assert _same_place(acc / "snippets.json", snips)
+    assert json.loads((acc / "snippets.json").read_text()) == ["golden hour"]
+    assert os.readlink(str(acc / "prefs.json")) == str(prefs), "a full path is renamed as is"
+    for old in (r.lib / "loom", r.lib / "prompt_snippets", r.lib / "account_prefs"):
+        assert not os.path.lexists(str(old))
+    assert json.loads(snips.read_text()) == ["golden hour"], "what it points at is untouched"
+    from moonglade import gallery as g
+    assert [p.name for p in g._loom_board_files(r.lib)] == [BOARD], "the Loom reads through it"
+    said = " ".join(line for _lvl, line in done.report.all_lines())
+    assert "its target written as" in said
+
+
+@posix
+def test_a_link_made_again_but_cut_short_before_the_old_one_went_is_finished(r, monkeypatch):
+    """The start dies between making the link at its new home and removing the old entry:
+    the next start finds both, sees the new one holds the target it journalled, removes the
+    old one, and goes on."""
+    _a_library(r)
+    loom_data = r.lib.parent / "LoomData"
+    write(loom_data / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "beside"})))
+    old = r.lib / "loom"
+    os.symlink(os.path.join("..", "LoomData"), str(old))
+    real = migrate._unlink_link
+
+    def refuse_the_old_link(p):
+        if os.path.normpath(str(p)) == os.path.normpath(str(old)):
+            raise PermissionError(13, "refused")
+        return real(p)
+    monkeypatch.setattr(migrate, "_unlink_link", refuse_the_old_link)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    assert os.path.islink(str(old)) and os.path.islink(str(r.lib / "_moonglade" / "loom"))
+    monkeypatch.setattr(migrate, "_unlink_link", real)
+    start(r)
+    assert not os.path.lexists(str(old))
+    assert _same_place(r.lib / "_moonglade" / "loom", loom_data)
+
+
+@windows
+def test_a_real_relative_symbolic_link_stops_the_start_on_windows(r):
+    _a_library(r)
+    loom_data = r.lib.parent / "LoomData"
+    write(loom_data / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "beside"})))
+    os.symlink("..\\LoomData", str(r.lib / "loom"), target_is_directory=True)
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "written from where it sits (..\\LoomData)" in str(e.value)
+    assert (r.lib / "jobs.jsonl").is_file(), "nothing moved before the stop"
+    assert os.path.islink(str(r.lib / "loom"))
+
+
+def test_a_banner_render_that_is_a_link_is_left_where_it_is(r):
+    """An unrecorded banner render is the only copy of what the install wears, and moves into
+    local\\banners\\ -- on another drive for a library away from the program, where a link
+    can't be renamed. One that is a link is left where it is, with its folder, and said."""
+    _a_library(r)
+    art = write(r.lib.parent / "art" / "my-banner.png", b"PNG-ONLY-COPY")
+    banners = r.lib / "gallery" / "cache" / "_banners"
+    banners.mkdir(parents=True)
+    os.symlink(str(art), str(banners / "banner.png"))
+    done = start(r)
+    assert os.path.islink(str(banners / "banner.png"))
+    assert art.read_bytes() == b"PNG-ONLY-COPY"
+    assert not (r.local / "banners" / "banner.png").exists()
+    assert (r.lib / "_moonglade" / "records" / "jobs.jsonl").is_file(), "the rest moved"
+    said = " ".join(line for _lvl, line in done.report.all_lines())
+    assert "_banners" in said and "Left" in said
+
+
+# ---- a remade link cut short: only ever the link it journalled is removed (round 2, #8) ---------
+
+def _remade_and_cut_short(tmp_path, monkeypatch, src_text):
+    """A _Half whose journal holds a link made again at its new home, its old entry not yet
+    removed; the old entry now reads as `src_text` (None: not a symbolic link at all)."""
+    lib = tmp_path / "lib"
+    src = write(lib / "loom", "a real file an older install wrote here since")
+    dest = write(lib / "_moonglade" / "loom", "stands in for the new link")
+    half = migrate._Half("library", lib / "_moonglade", migrate._library_roots(lib),
+                         migrate.Report())
+    key = half.rel(dest)
+    half.journal.items[key] = {"src": half.rel(src), "state": "renaming", "how": "link",
+                               "target": os.path.join("..", "..", "LoomData"),
+                               "was": os.path.join("..", "LoomData")}
+    texts = {os.path.normcase(str(dest)): half.journal.items[key]["target"],
+             os.path.normcase(str(src)): src_text}
+    monkeypatch.setattr(migrate, "_symlink_text", lambda p: texts.get(os.path.normcase(str(p))))
+    removed = []
+    monkeypatch.setattr(migrate, "_unlink_link", lambda p: removed.append(os.path.normcase(str(p))))
+    return half, key, src, removed
+
+
+def test_a_real_file_at_the_old_place_of_a_remade_link_is_never_removed(tmp_path, monkeypatch):
+    half, key, src, removed = _remade_and_cut_short(tmp_path, monkeypatch, None)
+    assert half.settle_renames() is False
+    assert removed == [] and src.is_file()
+    assert half.journal.items[key]["state"] == "renaming", "left under way"
+
+
+def test_a_link_at_the_old_place_with_other_text_is_never_removed(tmp_path, monkeypatch):
+    half, key, _src, removed = _remade_and_cut_short(tmp_path, monkeypatch, "somewhere-else")
+    assert half.settle_renames() is False
+    assert removed == [] and half.journal.items[key]["state"] == "renaming"
+
+
+def test_the_old_link_it_journalled_is_removed_and_the_entry_made(tmp_path, monkeypatch):
+    half, key, src, removed = _remade_and_cut_short(tmp_path, monkeypatch,
+                                                    os.path.join("..", "LoomData"))
+    assert half.settle_renames() is True
+    assert removed == [os.path.normcase(str(src))] and half.journal.items[key]["state"] == "made"
+
+
+# ---- a relative link whose target the plan moves too (round 2, #9) -------------------------------
+
+@posix
+def test_a_relative_link_to_a_folder_the_loom_also_moves_keeps_its_text(r):
+    """loom/exports/latest -> 2026-10: both move with the Loom's inner layout unchanged, so the
+    text already points at the right place from the new home. Rewriting it for where the
+    target sits now pointed it at the old place, which the move empties."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink("2026-10", str(r.lib / "loom" / "exports" / "latest"))
+    start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert os.readlink(str(new / "latest")) == "2026-10"
+    assert _same_place(new / "latest", new / "2026-10")
+    assert (new / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert not os.path.lexists(str(r.lib / "loom"))
+
+
+@posix
+def test_a_start_cut_short_after_the_link_moved_still_points_it_at_its_file(r, monkeypatch):
+    """#10: links move before any file, so a start cut short between the two leaves a link
+    already at its new home, its text pointing where its target's files are going; the next
+    start moves the files, and the link reaches them."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink("2026-10", str(r.lib / "loom" / "exports" / "latest"))
+    real = migrate._bring
+
+    def die_at_the_first_file(src, dest, kind, half, vouched=False):
+        if kind != "link" and not migrate._is_link(src):
+            raise migrate._Failed("cut short")
+        return real(src, dest, kind, half, vouched=vouched)
+    monkeypatch.setattr(migrate, "_bring", die_at_the_first_file)
+    with pytest.raises(msetup.MoveStopped):
+        start(r)
+    new = r.lib / "_moonglade" / "loom" / "exports"
+    assert os.path.islink(str(new / "latest")) and os.readlink(str(new / "latest")) == "2026-10"
+    monkeypatch.setattr(migrate, "_bring", real)
+    start(r)
+    assert (new / "latest" / "cut.mp4").read_bytes() == b"VIDEO"
+    assert not os.path.lexists(str(r.lib / "loom"))
+
+
+@posix
+def test_a_full_path_link_into_a_folder_the_move_takes_stops_before_anything_moves(r):
+    """#9: a full-path link is renamed as it is, so one pointing into a folder the same move
+    takes would point at the emptied old place: the start stops before anything moves, and
+    the link still reaches its file."""
+    _a_library(r)
+    write(r.lib / "loom" / "kv" / KEY_NEL / BOARD, json.dumps(json.dumps({"name": "b"})))
+    write(r.lib / "loom" / "exports" / "2026-10" / "cut.mp4", b"VIDEO")
+    os.symlink(str(r.lib / "loom" / "exports" / "2026-10"),
+               str(r.lib / "loom" / "exports" / "latest"))
+    with pytest.raises(msetup.MoveStopped) as e:
+        start(r)
+    assert "latest is a link" in str(e.value) and "points by its full path" in str(e.value)
+    assert (r.lib / "jobs.jsonl").is_file()
+    assert (r.lib / "loom" / "exports" / "latest" / "cut.mp4").read_bytes() == b"VIDEO"

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 /* The Branding tab's named roles (Session X, Branding Roles Handoff), client side: the rules the
-   editor ticks live before anything is uploaded. The server decides (tests/test_branding_roles.py
+   editor ticks live before anything is uploaded. The server decides (dev/tests/test_branding_roles.py
    holds its half); these hold that this side says the same words about the same facts. */
 
 import {
@@ -133,7 +133,7 @@ describe("the live ticks", () => {
 });
 
 describe("the refusal says what the server's says", () => {
-  // the same sentences tests/test_branding_roles.py pins
+  // the same sentences dev/tests/test_branding_roles.py pins
   test("one broken rule", () => {
     assert.equal(refusalText("Login companion", [{ rule: "aspect", need: "about square", got: "3:4" }]),
       "Refused: the Login companion must be about square. This one is 3:4. Your current art is unchanged.");

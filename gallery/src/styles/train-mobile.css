@@ -9,7 +9,7 @@
    the Runs rows, the publish sheet's tick rows, the locked parameters.
 
    Z: this screen's sheets are portalled to .glm-stage (never a fixed layer inside the
-   scrolling .glm-body -- iPhone Safari confines one there; see tests/test_render_harness.py's
+   scrolling .glm-body -- iPhone Safari confines one there; see dev/tests/test_render_harness.py's
    LoRA sheet test), so they need a rung above the pushed screen they open from. The phone's
    ladder around it, in the order a person walks it:
      .glm-scrim/.glm-sheet 306/307 (the app's own sheets) < .glm-screen 308 (this screen)

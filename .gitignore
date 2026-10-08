@@ -78,7 +78,7 @@ loom/node_modules/
 Thumbs.db
 
 # ---- Stray artifact: a root file literally named HEAD, content just "OUTPUT".
-# Real cause (found 2026-07-22): tests/test_panel.py's ffmpeg-mocking FakeProc
+# Real cause (found 2026-07-22): dev/tests/test_panel.py's ffmpeg-mocking FakeProc
 # patches subprocess.Popen globally with no command guard, and create_app()
 # shells `git rev-parse --short HEAD` through that same patched Popen -- for
 # THAT call argv[-1] is the literal string "HEAD". Fixed at the source (the
@@ -128,7 +128,7 @@ static/_mockup_*.html
 # is the very secret the coding exercise hides, so it must never reach this PUBLIC repo. Regenerable.
 /0x676F6F6473/
 
-# The asset container, the art pack (tools/build_container.py -> moonglade.mgpack), and the
+# The asset container, the art pack (dev/tools/build_container.py -> moonglade.mgpack), and the
 # .version marker the downloader writes beside it. NOT committed BY DECISION
 # (docs/DECISIONS.md "The asset container, re-scoped from scratch", 2026-08-10): delivery is a
 # GitHub Release asset fetched on first run -- Releases have no bandwidth caps, git/LFS does.
@@ -173,17 +173,17 @@ static/_mockup_*.html
 /_backups/
 /_2000/
 
-# ---- The folders the next release moves runtime files into (Wave 4) ----
-# The machine files' folder: the art pack and its marker, branding.json, branding_slots.json,
-# mirror_session.json, serve.txt, serve.log and the icon cache. Machine-local, never committed.
-# Anchored: only the app root's.
+# ---- This PC's folder and a library's app folder (the 3.20 layout) ----
+# This PC's machinery: settings.json, mirror_session.json, the art pack and its marker, icons/,
+# banners/, cache/, logs/, and the move's journal, lock and safety snapshot. Machine-local,
+# never committed. Anchored: only the app root's.
 /local/
-# The app's own records INSIDE a library (its state files, jobs, logs and reports).
-# Unanchored, like the library guards above, so a library anywhere is covered.
+# The app's own folder INSIDE a library: accounts/, loom/, records/, decisions/ and the move's
+# journal. Unanchored, like the library guards above, so a library anywhere is covered.
 _moonglade/
 
 # ---- The code folder: its code is never ignored (KEEP THIS BLOCK LAST) ----
-# The modules move into moonglade/ next release. Several lines above are unanchored on purpose
+# The app's modules live in moonglade/ (since 3.20). Several lines above are unanchored on purpose
 # -- `gallery/`, `images/`, `videos/`, `imported/`, `_duplicates/`, `private/`, `catalog.db`,
 # `config.json`, `serve.txt`, `serve.log` -- so they keep a library or a stray runtime file out
 # of git wherever it sits; they would hide package files of the same names just as well (a
@@ -193,7 +193,7 @@ _moonglade/
 # byte-code caches, and every secret or runtime file (config.json, the mirror token, a token,
 # .env, the launcher's files, a catalog, the art pack, a library, the machine files' folder).
 # The launcher's files are spelled out rather than `serve.*`, which would hide a `serve.py`.
-# tests/test_gitignore_move_proof.py asks git itself.
+# dev/tests/test_gitignore_move_proof.py asks git itself.
 !/moonglade/**
 /moonglade/**/__pycache__/
 /moonglade/**/*.py[cod]

@@ -17,7 +17,7 @@ import { PRICE_KEY_SKIP } from "./priceProbeCore.js";
 export const EDIT_PRICE_KEY_SKIP = PRICE_KEY_SKIP.concat(["instruction"]);
 
 /* Re-read 2026-09-26 (SCOPE_2026-09-26 E1/E2), in step with core.EDIT_MODELS -- a parity test
-   (tests/test_edit_upload.py) reads both tables and fails if their aspects or defaults differ:
+   (dev/tests/test_edit_upload.py) reads both tables and fails if their aspects or defaults differ:
      - Edit Pro's published default is 3:5, and it offers 3:5 and 5:3.
      - Reference Pro publishes no default aspect, so PixAI shows an "Auto" choice and sends no
        aspect ratio at all. "auto" is that choice as a VALUE: the server omits aspectRatio for

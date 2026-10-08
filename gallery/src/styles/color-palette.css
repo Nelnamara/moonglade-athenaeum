@@ -7,7 +7,7 @@
    its run tooltip (330), the model flyout (335), the Darkroom (336) and the phone's model sheet
    (345), so it opens over either the desktop dock or the phone's Advanced screen (308), and
    under the gallery picker (490) that "Extract from image" opens on top of it. The pair moves
-   together (tests/test_z_ladder.py). Everything inside the panel is local: 1-6.
+   together (dev/tests/test_z_ladder.py). Everything inside the panel is local: 1-6.
 
    Motion: enter .42 s, exit .35 s (the phone sheet .28 s), reduced motion shows the rest state.
    Peach for held and refusal notes, ruby only on the second press of Delete. */

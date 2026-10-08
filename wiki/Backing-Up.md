@@ -3,10 +3,10 @@
 ## First run
 
 ```bash
-python moonglade_backup.py --probe        # confirm connection
-python moonglade_backup.py --count        # how many images you have
-python moonglade_backup.py --max 40       # small test download
-python moonglade_backup.py                # download everything (parallel; full metadata is captured by default)
+python -m moonglade --probe               # confirm connection
+python -m moonglade --count               # how many images you have
+python -m moonglade --max 40              # small test download
+python -m moonglade                       # download everything (parallel; full metadata is captured by default)
 ```
 
 ### Where the library lives
@@ -15,34 +15,42 @@ By default everything goes in `pixai_backup/` next to the app. To keep it somewh
 big drive, an external disk — set the folder in **Control Panel ▸ Library at a glance**. It
 takes effect when the server next starts, and it offers to restart for you.
 
-**Changing it never moves anything.** It points Moonglade at a different folder; whatever is
-in the old one stays exactly where it is. If you want to bring an existing library along, move
-the folder yourself first, then point the setting at its new home.
+**Changing it never moves files from one folder to another.** It points Moonglade at a different
+folder; whatever is in the old one stays exactly where it is. If you want to bring an existing
+library along, move the folder yourself first, then point the setting at its new home. If the
+folder you point it at is a library from an older Moonglade, the next start brings it into the
+3.20 layout (its records go into its `_moonglade` folder). So don't point it at a library an
+older install is still using: update that install first, or stop it with **Stop server** in its
+Control Panel (closing its browser tab doesn't stop it).
 
 The gallery picks its folder in this order:
 
 1. `--out <folder>` on the command line — always wins, so a one-off launch or a second
-   install can point anywhere without disturbing the setting.
-2. `LIBRARY_DIR` in `config.json` — what the Control Panel writes.
+   install can point anywhere without disturbing the setting. A run that names its own
+   library never moves one, and refuses a library still in an older layout.
+2. The library folder in `local\settings.json` — what the Control Panel writes.
 3. `pixai_backup` — the default.
 
-**A command you type yourself does not read that setting.** `python moonglade_backup.py …`
-uses `pixai_backup/` next to the app unless you add `--out <your library folder>`. Everything
-the Control Panel starts for you — its buttons and the jobs under **Runs itself** — already
-passes your folder along, so only terminal commands need the flag.
+**A command you type reads the same setting** (since 3.20). `python -m moonglade …` opens the
+library the Control Panel names, as the gallery and the Claude tools do; add `--out <folder>`
+for a run that should use another one. A command never moves a library's files: one still in an
+older Moonglade's layout is refused until its own launcher has opened it once. Your presets, Loom boards and achievements live inside
+the library (in its `_moonglade` folder), so they follow it. See
+[Where Things Live](Where-Things-Live).
 
-By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db`,
-`raw_tasks.jsonl`, and — once organized — `YYYY-MM/` month folders.
+By default everything lands in `pixai_backup/` (git-ignored): `images/`, `catalog.db` and — once
+organized — `YYYY-MM/` month folders, with the app's records (`raw_tasks.jsonl` included) in
+`_moonglade/records/`.
 
 ## Fast downloads & incremental updates
 
 The download path is parallel and incremental. For routine "grab what's new":
 
 ```bash
-python moonglade_backup.py --sync                      # one-shot: the whole refresh chain
-python moonglade_backup.py --update                    # stops when it reaches what you have
-python moonglade_backup.py --update --workers 8        # more concurrency
-python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
+python -m moonglade --sync                             # one-shot: the whole refresh chain
+python -m moonglade --update                           # stops when it reaches what you have
+python -m moonglade --update --workers 8               # more concurrency
+python -m moonglade --workers 8 --page-size 500 # fast full backfill
 ```
 
 - `--sync` is the one-shot refresh: incremental pull **with** full metadata (same as
@@ -77,9 +85,9 @@ python moonglade_backup.py --workers 8 --page-size 500 # fast full backfill
 ## Full metadata
 
 ```bash
-python moonglade_backup.py                        # captured by default on every pull
-python moonglade_backup.py --backfill-full-meta   # fill existing catalog rows
-python moonglade_backup.py --catalog-stats        # how much is already filled in
+python -m moonglade                               # captured by default on every pull
+python -m moonglade --backfill-full-meta          # fill existing catalog rows
+python -m moonglade --catalog-stats               # how much is already filled in
 ```
 
 Captures the complete prompt, seed, steps, sampler, CFG, human-readable model name,
@@ -112,7 +120,7 @@ Rows captured before this existed already have their prompt and model, so the no
 backfill leaves them alone. To bring your history up to the same standard:
 
 ```bash
-python moonglade_backup.py --backfill-full-meta --with-surface --workers 8
+python -m moonglade --backfill-full-meta --with-surface --workers 8
 ```
 
 - It re-fetches each older run once and fills in everything above. On a big library that's
@@ -142,11 +150,11 @@ The two older opt-ins work the same way for their own columns:
 ## Videos & published artwork
 
 ```bash
-python moonglade_backup.py --sync-videos          # back up image-to-video mp4s
-python moonglade_backup.py --sync-artworks        # published titles/tags/likes/comments/views
-python moonglade_backup.py --sync-artworks --with-videos
-python moonglade_backup.py --sync-artworks --no-views    # everything except the view counts
-python moonglade_backup.py --sync-artworks --views-only  # ONLY the view counts, no re-walk
+python -m moonglade --sync-videos                 # back up image-to-video mp4s
+python -m moonglade --sync-artworks               # published titles/tags/likes/comments/views
+python -m moonglade --sync-artworks --with-videos
+python -m moonglade --sync-artworks --no-views           # everything except the view counts
+python -m moonglade --sync-artworks --views-only         # ONLY the view counts, no re-walk
 ```
 
 `--sync-artworks --with-videos` also downloads your animated artworks' video files into `videos/`.
@@ -190,9 +198,9 @@ last sync, and My Art says so when only part of the library has been swept.
 PixAI serves `.webp`; if you'd rather keep `.png` or `.jpeg` on disk (needs Pillow):
 
 ```bash
-python moonglade_backup.py --convert png            # convert as files download
-python moonglade_backup.py --convert-existing       # convert what's already on disk (no token needed)
-python moonglade_backup.py --convert-existing --dry-run   # preview first
+python -m moonglade --convert png                   # convert as files download
+python -m moonglade --convert-existing              # convert what's already on disk (no token needed)
+python -m moonglade --convert-existing --dry-run          # preview first
 ```
 
 | Flag | Default | Meaning |
@@ -209,9 +217,9 @@ A live WebSocket feed of your account: watch generations complete in real time, 
 optionally auto-collect each one the moment it finishes.
 
 ```bash
-python moonglade_backup.py --watch                     # stream events until Ctrl-C
-python moonglade_backup.py --watch --watch-backup      # + download each finished gen immediately
-python moonglade_backup.py --watch --watch-seconds 600 # auto-stop after 10 minutes
+python -m moonglade --watch                            # stream events until Ctrl-C
+python -m moonglade --watch --watch-backup             # + download each finished gen immediately
+python -m moonglade --watch --watch-seconds 600 # auto-stop after 10 minutes
 ```
 
 ## Importing your own media
@@ -219,8 +227,8 @@ python moonglade_backup.py --watch --watch-seconds 600 # auto-stop after 10 minu
 From the **CLI**:
 
 ```bash
-python moonglade_backup.py --import-local         # catalog files dropped into the backup
-python moonglade_backup.py --import-local <DIR>   # copy an external folder in
+python -m moonglade --import-local                # catalog files dropped into the backup
+python -m moonglade --import-local <DIR>          # copy an external folder in
 ```
 
 Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
@@ -246,10 +254,10 @@ One mode: normalize the whole backup into `YYYY-MM/` month folders with readable
 **reversible**.
 
 ```bash
-python moonglade_backup.py --organize --dry-run        # preview
-python moonglade_backup.py --organize                  # do it
-python moonglade_backup.py --organize --embed-metadata # also embed meta into PNG/JPEG
-python moonglade_backup.py --undo-organize             # roll back via the manifest
+python -m moonglade --organize --dry-run               # preview
+python -m moonglade --organize                         # do it
+python -m moonglade --organize --embed-metadata # also embed meta into PNG/JPEG
+python -m moonglade --undo-organize                    # roll back via the manifest
 ```
 
 Organizing never breaks the gallery — file lookup is by `media_id`, so images can
@@ -261,10 +269,10 @@ Organize.)
 ## Duplicate audit & dedup
 
 ```bash
-python moonglade_backup.py --audit          # report -> audit_report.csv
-python moonglade_backup.py --dedup          # dry-run plan
-python moonglade_backup.py --dedup --apply  # quarantine redundant copies
-python moonglade_backup.py --verify-dupes   # confirm quarantine is safe to delete
+python -m moonglade --audit                 # report -> _moonglade/records/audit_report.csv
+python -m moonglade --dedup                 # dry-run plan
+python -m moonglade --dedup --apply         # quarantine redundant copies
+python -m moonglade --verify-dupes          # confirm quarantine is safe to delete
 ```
 
 `--verify-dupes` is read-only — unless you add `--restore-orphans`, which moves any
@@ -275,10 +283,10 @@ Two modifiers: `--dedup-delete` (with `--dedup --apply`) deletes the redundant c
 ## Curation backup
 
 ```bash
-python moonglade_backup.py --export-curation [FILE]                 # ratings, collections, tags, marks, notes
-python moonglade_backup.py --import-curation FILE                   # dry run
-python moonglade_backup.py --import-curation FILE --apply           # fill-only
-python moonglade_backup.py --import-curation FILE --apply --curation-overwrite
+python -m moonglade --export-curation [FILE]                        # ratings, collections, tags, marks, notes
+python -m moonglade --import-curation FILE                          # dry run
+python -m moonglade --import-curation FILE --apply                  # fill-only
+python -m moonglade --import-curation FILE --apply --curation-overwrite
 ```
 
 Everything you made of the library, keyed by media id, so a catalog rebuilt from a fresh pull
@@ -288,14 +296,14 @@ gets it back. Local only. The rules (fill-only, unknown pictures, the undo file)
 ## Integrity check
 
 ```bash
-python moonglade_backup.py --verify-library                 # missing, empty, thumbnails
-python moonglade_backup.py --verify-library --verify-deep   # + files cut short
+python -m moonglade --verify-library                        # missing, empty, thumbnails
+python -m moonglade --verify-library --verify-deep          # + files cut short
 ```
 
 `--verify-library` is read-only. It checks every catalogued file for a missing or zero-byte
 file, a missing or empty thumbnail (a video's poster), images on disk with no catalog row and
 thumbnails with no row, and writes `integrity_report.csv` (one line per problem) and
-`integrity_report.json` (counts and the time it ran) at the library root. `--verify-deep` also
+`integrity_report.json` (counts and the time it ran) in the library's `_moonglade/records/` folder. `--verify-deep` also
 reads the end of each file — PNG, JPEG, WebP and GIF end markers, an MP4's index — and lists a
 file that stops short as *suspect*, without decoding it. Health's **Missing thumbs** and **Last
 verified** tiles read the JSON report; see [Health → Library integrity](Health).
@@ -343,9 +351,9 @@ Quick CLI views of your PixAI account state. Each one prints and exits; none of 
 or change anything.
 
 ```bash
-python moonglade_backup.py --credit-log      # full credit ledger: purchases, claims, gifts, spend, refunds
-python moonglade_backup.py --coupons         # Credit Boost coupons you currently hold
-python moonglade_backup.py --card-history    # recent benefit-card history (uses, refunds, expiries)
+python -m moonglade --credit-log             # full credit ledger: purchases, claims, gifts, spend, refunds
+python -m moonglade --coupons                # Credit Boost coupons you currently hold
+python -m moonglade --card-history           # recent benefit-card history (uses, refunds, expiries)
 ```
 
 | Modifier | Applies to | Effect |
@@ -363,11 +371,11 @@ The same information is in the Control Panel's **PixAI account** view — see
 ### More account commands
 
 ```bash
-python moonglade_backup.py --account                   # credit balance, membership, subscription (read-only)
-python moonglade_backup.py --cards                     # your free-generation cards and how many tickets each holds (read-only)
-python moonglade_backup.py --claims                    # rewards ready to claim: daily credits, agent stamina (read-only)
-python moonglade_backup.py --claim all --confirm       # claim them (or --claim <id> for one)
-python moonglade_backup.py --mirror-check              # is the Mirror to PixAI session alive, and for how many more days?
+python -m moonglade --account                          # credit balance, membership, subscription (read-only)
+python -m moonglade --cards                            # your free-generation cards and how many tickets each holds (read-only)
+python -m moonglade --claims                           # rewards ready to claim: daily credits, agent stamina (read-only)
+python -m moonglade --claim all --confirm              # claim them (or --claim <id> for one)
+python -m moonglade --mirror-check                     # is the Mirror to PixAI session alive, and for how many more days?
 ```
 
 `--claim` is the only one of these that grants anything: free credits or stamina, to your own
@@ -380,27 +388,19 @@ saved session; it spends nothing and never prints the credential, only the days 
 
 ## Reclaiming disk space
 
-A mature backup accumulates things that are safe to remove. Nothing below touches your
+A mature backup accumulates things you may want to remove. Nothing below touches your
 images — but read the notes, because two of these are *regenerable* rather than *disposable*,
 which is a different promise.
 
-### Safe to delete outright
+The app's own leftovers are never yours to clear: since 3.20 it removes them itself (the old
+desktop app's `pixai_gui_settings.json`, an empty stray `catalog.db` beside the program, the
+legacy `catalog.csv`), and its logs keep themselves small.
 
-These are either regenerated on demand or superseded by something newer.
+### Yours to choose
 
 | Path | What it is |
 |---|---|
-| `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
-| `pixai_backup/catalog.csv` | The **legacy** catalog format from the OG backup tool. Nothing reads or writes it any more — the silent auto-seed and the CLI `--export-csv` dump were both retired 2026-08-24; `catalog.db` is the source of truth, so deleting this loses nothing. (The **⬇ Download catalog (CSV)** button in the gallery is a separate in-browser download.) |
-| `serve.log`, `serve.log.1` to `.3` | The gallery server's console log. It keeps itself small: when the launcher starts and the log is over 1 MB, it becomes `serve.log.1` and the older ones move up to `.2` and `.3` (the oldest is deleted). Rotating file logs live in `pixai_backup/logs/` instead. |
-| `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
-| `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
-| A `0`-byte `catalog.db` in the *install root* | Not your catalog — that lives at `pixai_backup/catalog.db`. An empty stray file at the top level is an artefact of an old run. Check the size before deleting: if it isn't 0 bytes, stop and ask. |
-
-```bash
-# check before you delete -- the real catalog should be tens of MB, the stray one 0
-ls -l catalog.db pixai_backup/catalog.db
-```
+| `pixai_backup/catalog.db.bak*` | Copies of the catalog someone saved before a risky change. The live catalog is `catalog.db`; Moonglade never makes or reads these, so it leaves them to you. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
 
 ### Safe once verified
 
@@ -409,7 +409,7 @@ rather than deleted, precisely so you could change your mind. There is a command
 job is to confirm emptying it is safe:
 
 ```bash
-python moonglade_backup.py --verify-dupes
+python -m moonglade --verify-dupes
 ```
 
 It re-checks that every quarantined file still has a surviving copy elsewhere in the backup.
@@ -429,12 +429,12 @@ folders, they simply predate (or postdate) the last organize run. That's cosmeti
 problem, and it's reversible:
 
 ```bash
-python moonglade_backup.py --organize --dry-run   # preview, changes nothing
-python moonglade_backup.py --organize             # normalize into YYYY-MM/
+python -m moonglade --organize --dry-run          # preview, changes nothing
+python -m moonglade --organize                    # normalize into YYYY-MM/
 ```
 
-`--organize` writes `organize_manifest.csv` and `--undo-organize` reverses it, so this is a
-safe thing to try.
+`--organize` writes `organize_manifest.csv` (in `_moonglade/decisions/`) and `--undo-organize`
+reverses it, so this is a safe thing to try.
 
 ### Where the space actually goes
 
@@ -443,7 +443,7 @@ library the answer is almost always "the images themselves", and the reclaimable
 rounding error by comparison:
 
 ```bash
-python moonglade_backup.py --catalog-stats
+python -m moonglade --catalog-stats
 ```
 
 **Images you've already deleted are counted separately, not as part of the library.** A
@@ -462,6 +462,6 @@ under its **On disk** heading.
 
 > **A note on where your library lives.** By default `pixai_backup/` sits *inside* the
 > install folder, which is why the app directory looks enormous. Nothing requires that —
-> `--out` points anywhere you like, and keeping the library on a separate path (or drive)
-> makes the app folder itself small, easy to back up, and easy to replace wholesale when you
-> update.
+> the Control Panel's library folder points anywhere you like (`--out` does it for one run),
+> and keeping the library on a separate path (or drive) makes the app folder itself small, easy
+> to back up, and easy to replace wholesale when you update.

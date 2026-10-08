@@ -13,7 +13,7 @@ import { prefsFromState, stateFromPrefs, prefsMode } from "../../gallery/src/gen
 
 /* Session H -- Tsubaki.3 in the Generate drawer, the client's pure half (gen/tsubakiCore.js,
    gen/genPrefs.js and what genCore builds on them). The server half is
-   tests/test_tsubaki3_generate.py; the spend design is moonglade-internal/design/notes/
+   dev/tests/test_tsubaki3_generate.py; the spend design is moonglade-internal/design/notes/
    tsubaki3-generate/BUILD-w2-gen.md. */
 
 // /api/model-version's size_tiers for Tsubaki.3 (auth/T3v_size-config.json's M row in full,
@@ -268,7 +268,7 @@ describe("T3a -- the bar sends the request PixAI's own site sends (2026-10-03 ca
   /* The site's Smart Reference submit for the same edit, captured live: width and height are the
      source picture's own (1280 x 768), one picture, Pro, creativity medium, the picture as the one
      context image. The server half (controlNets [], no batchSize at one) is
-     tests/test_tsubaki3_generate.py::test_the_edit_bar_request_is_the_sites_smart_reference_shape. */
+     dev/tests/test_tsubaki3_generate.py::test_the_edit_bar_request_is_the_sites_smart_reference_shape. */
   const bar = (img) => buildPayload(tsubakiEditState({ model: T3, image: img, prompt: "make it night",
     mode: "pro", tier: "XL", member: true }));
   test("a 1280 x 768 source: these keys, these values", () => {
@@ -318,7 +318,7 @@ describe("T3a -- the bar runs at High Priority (owner's call, 2026-10-03)", () =
   /* PixAI's free Turbo lane was not starting context-image edits; his site edits that worked ran at
      High Priority (a card covered one whole, extra included). The bar sends high_priority, and the
      quote is built from the same payload, so the shown cost is the spend. The server half is
-     tests/test_tsubaki3_generate.py (priority 1000 sent and quoted, card and no card). */
+     dev/tests/test_tsubaki3_generate.py (priority 1000 sent and quoted, card and no card). */
   const st = () => tsubakiEditState({ model: T3, image: { media_id: "701", w: 1280, h: 768 },
     prompt: "make it night", mode: "pro", tier: "XL", member: true });
   test("the bar's payload asks for High Priority", () => {

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
    Edit Pro publishes 3:5 as its default and offers 3:5 and 5:3. PixAI's own control takes a
    model's published default when you leave Auto for it -- switchEditModel's keep-or-correct
    rule gives exactly that, and says so through the label map, never the raw value.
-   (tests/test_edit_upload.py holds the Python side and the EDIT_MODELS / EDIT_CAPS parity.) */
+   (dev/tests/test_edit_upload.py holds the Python side and the EDIT_MODELS / EDIT_CAPS parity.) */
 
 import {
   EDIT_ASPECT_AUTO, EDIT_CAPS, EDIT_DEFAULTS, buildEditPayload, editAspectLabel, switchEditModel,

@@ -1,6 +1,6 @@
 # The Gallery
 
-A local web gallery over your whole catalog. Double-click **`Serve Gallery.pyw`** to start
+A local web gallery over your whole catalog. Double-click **`Moonglade Launcher.pyw`** to start
 it — a no-console launcher that opens the gallery in your browser once it is ready. The
 gallery is a viewer of `catalog.db` + your files, but can also make authenticated API calls
 for prune / reconcile (see [Deleting & Sync](Deleting)).
@@ -8,26 +8,26 @@ for prune / reconcile (see [Deleting & Sync](Deleting)).
 ## Running it from a terminal
 
 ```bash
-python moonglade_gallery.py --out pixai_backup                 # http://127.0.0.1:5000
-python moonglade_gallery.py --out pixai_backup --port 5757
-python moonglade_gallery.py --out pixai_backup --host 0.0.0.0 --https   # LAN + PWA
-python moonglade_gallery.py --out pixai_backup --rebuild-thumbs         # regenerate thumbnails
+python -m moonglade.gallery                          # http://127.0.0.1:5000
+python -m moonglade.gallery --port 5757
+python -m moonglade.gallery --host 0.0.0.0 --https   # LAN + PWA
+python -m moonglade.gallery --rebuild-thumbs         # regenerate thumbnails
 ```
 
 Started this way the server is not managed, so the Control Panel's **↻ Restart server** is
-disabled — **`Serve Gallery.pyw`** is the everyday launch. All of the server's options:
+disabled — **`Moonglade Launcher.pyw`** is the everyday launch. All of the server's options:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting |
-| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `config.json` as `PORT`). Typing it always wins |
-| `--host` | `127.0.0.1` | the address to listen on — or the saved one (`HOST` in `config.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
+| `--out` | the library folder set in the Control Panel, else `pixai_backup` | the backup folder that holds `catalog.db`. Typing it always wins over the saved setting, for that start only. A run that names its own library never moves one, and refuses a library still in an older layout |
+| `--port` | `5000` | the port to listen on — or the port saved on the Control Panel's **LAN discovery** card (it lives in `local\settings.json`). Typing it always wins |
+| `--host` | `127.0.0.1` | the address to listen on — or the saved one (also in `local\settings.json`). `0.0.0.0` lets other devices on your network in. Typing it always wins |
 | `--https` | off | serve over a self-signed certificate, which installing the phone app (PWA) over your LAN needs. Requires the `cryptography` package, and browsers show a one-time certificate warning |
 | `--allow-port-reuse` | off | start even if something is already listening on the port. Off on purpose: Windows lets a **second** server share a port that is already serving, and requests then land on either one at random |
 | `--rebuild-thumbs` | off | regenerate every thumbnail, including the ones that already exist |
 | `--skip-thumbs` | off | don't build catalog thumbnails at start-up — a fast boot; missing ones show *no preview* until they are built. Thumbnails for new generations are still made |
-| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Serve Gallery`** launcher waits until the server answers and opens the browser itself |
-| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file under `logs/` in your library always has them |
+| `--open-browser` | off | open the gallery in your browser about a second and a half after the server starts. For a terminal launch — the **`Moonglade Launcher`** waits until the server answers and opens the browser itself |
+| `-v` / `--verbose` | off | also print info-level lines (request activity, start-up steps) on the console. The log file, `local\logs\moonglade.log` beside the program, always has them |
 
 ## The header
 
@@ -379,7 +379,7 @@ so you can bookmark one, and the browser's Back button closes it.
   *Filter by model* is called that on the phone too.
 
   Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
-  with `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
+  with `python -m moonglade --rebuild-similar` (run that while the gallery isn't
   serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
   view just tells you so; nothing else breaks.
 

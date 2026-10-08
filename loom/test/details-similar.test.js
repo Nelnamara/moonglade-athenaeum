@@ -199,7 +199,7 @@ test("E: vt-reveal is unique per view -- Details drops the name while the Lightb
 // 2026-09-05 (owner). B2 shipped the desktop and wrote a carve-out saying the phone had
 // nowhere to put the token. The phone has a search field -- GalleryMobile.jsx's
 // .glm-search -- so the carve-out was wrong and is gone. These pin the phone half's
-// wiring; tests/test_render_harness.py drives the whole round trip at a real 390px
+// wiring; dev/tests/test_render_harness.py drives the whole round trip at a real 390px
 // viewport (door -> results -> token -> the library back).
 const appMobile = src("components/AppMobile.jsx");
 const lbMobile = src("components/LightboxMobile.jsx");

@@ -64,9 +64,9 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 1. **Checkpoint** after every shipped increment (and before starting any new build). **One fact,
    one home — do not write the same status into two files:**
    - **What shipped** → `CHANGELOG.md [Unreleased]`, a dated tagline. Nowhere else.
-   - **Planned/outstanding work** → `ROADMAP.md` (Now / Next / Later, with real context).
+   - **Planned/outstanding work** → `dev/ROADMAP.md` (Now / Next / Later, with real context).
      When an item ships, **delete it from ROADMAP** and add the CHANGELOG line — moving it, not
-     annotating "done" in place. **The split rule:** the public `ROADMAP.md` is the DEFAULT home
+     annotating "done" in place. **The split rule:** the public `dev/ROADMAP.md` is the DEFAULT home
      for every item; `../moonglade-internal/ROADMAP-internal.md` may hold ONLY items matching a
      short list — hidden achievements/easter eggs, reward assignments, security or API probing.
      An item lives in exactly one file, never both.
@@ -115,11 +115,15 @@ effect if they're in the file that loads every session.)*
   on how much — a full pixel source (Figma frame / Claude Design / locked mockup) for a real
   surface, a quick workshop for something small — but never build a visual change straight from
   prose. Verify against whatever that source was.
-- **Treat and launch the dev server the way a plain user would** — through `Serve Gallery.pyw`,
-  never `python moonglade_gallery.py` bare. Only the launcher sets supervised mode, and without
-  it `/api/server/restart` 409s, silently removing the owner's Restart button. Machine-local
-  flags live in the git-ignored `serve.txt` beside it; the `--out` pin matters (an unpinned C:
-  launch resolves `LIBRARY_DIR` and serves the D: install).
+- **Treat and launch the dev server the way a plain user would** — through `Moonglade Launcher.pyw`:
+  never `python -m moonglade.gallery` bare; use the launcher. Only the launcher sets supervised
+  mode, and without it `/api/server/restart` 409s, silently removing the owner's Restart
+  button. This machine's settings live in the git-ignored `local\settings.json` beside it (3.19
+  and earlier: `serve.txt` and config.json's app-written keys, which the first 3.20 start folds
+  in and deletes). Its `library_dir` is C:'s pin, and it matters: it is what `serve.txt`'s
+  `--out` became, and without it a C: launch would open some other library (before 3.20,
+  config.json's `LIBRARY_DIR`, which named the D: install's). The launcher passes no flags; a
+  lasting launch switch goes in `launch_args` there.
 - **The D: install is the owner's domain.** He tests branches live there, so the D: run-copy and
   the C: repo drift by design — that is normal operation, not corruption. Never mass-commit to
   "reconcile" them. If D: looks badly behind, **say so and let him drive**; a periodic heads-up is
@@ -131,7 +135,7 @@ effect if they're in the file that loads every session.)*
   — stale closures, a guard wired so it could never fire, a check structurally incapable of
   triggering.
 - **Don't archive or consolidate a doc without first moving its live items** into the current
-  trackers (`ROADMAP.md`, GitHub Issues). Archive-then-forget silently deletes real asks; it has
+  trackers (`dev/ROADMAP.md`, GitHub Issues). Archive-then-forget silently deletes real asks; it has
   happened more than once here.
 - **Historical records keep the old module names.** A v1.9 CHANGELOG entry naming `pixai_backup.py`
   is TRUE about v1.9 — don't rewrite history to current names. Live instructions (this file, the
@@ -144,10 +148,10 @@ effect if they're in the file that loads every session.)*
   docs drifted in the first place.
 - **Never write a count in prose that a command can answer** — test counts, LOCALHOST route
   counts, commit leads. Name the command or the test instead. Both of those have already drifted
-  twice, and `tests/test_docs_dont_hardcode_counts.py` fails the suite over it.
+  twice, and `dev/tests/test_docs_dont_hardcode_counts.py` fails the suite over it.
 - **Broken or unearnable achievements are not app-breaking and are not bugs.** Don't file them,
   don't put them at the top of a defect list. They're design work; the known-dead ones are
-  already tracked in `ROADMAP.md`.
+  already tracked in `dev/ROADMAP.md`.
 
 ## Architecture / request flow
 
@@ -176,7 +180,7 @@ present — fixes corporate/antivirus HTTPS interception.
 Four modules, one shared SQLite catalog, on-disk layout, and the full function/helper
 reference all live in **`../moonglade-internal/architecture.md`** — do not restate them here; that's how
 this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
-`tests/test_docs_dont_hardcode_counts.py` had to exist.
+`dev/tests/test_docs_dont_hardcode_counts.py` had to exist.
 
 ---
 
@@ -205,7 +209,7 @@ shipped bug.
   re-POST after a lost response (read timeout, dropped connection, proxy 502 *after* the
   backend succeeded) submits and pays for a SECOND generation. `gql_adhoc`'s default is
   document-aware as a backstop (0 for a mutation, 3 for a query), but new spend paths call
-  `gql_mutate` so the intent is reviewable. Guarded by `tests/test_spend_no_retry.py`.
+  `gql_mutate` so the intent is reviewable. Guarded by `dev/tests/test_spend_no_retry.py`.
 - **`READ_ONLY` in config.json overrides `--confirm`/`--apply`.** Any new code path that
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
@@ -258,7 +262,7 @@ single-image generation.
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
-- `moonglade_logging.py` is the persistent baseline: a rotating file at `out_dir/logs/moonglade.log`, always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
+- `moonglade/logs.py` is the persistent baseline: a rotating file at `local/logs/moonglade.log` beside the launcher's `serve.log` (3.19 and earlier: the library's `logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
@@ -276,24 +280,27 @@ per-command shapes and the **Quick command reference** below for usage. The Flas
 is a full web creation suite (Generate drawer, Picker, The Loom, live-events push, Control
 Panel jobs, branding) — its structure lives in `../moonglade-internal/architecture.md`'s "The web suite"
 section; dated history in `CHANGELOG.md`. Don't restate feature detail here —
-that's how this file drifted badly enough to need `tests/test_docs_dont_hardcode_counts.py`.
+that's how this file drifted badly enough to need `dev/tests/test_docs_dont_hardcode_counts.py`.
 
 `--sync`'s reconcile step (`run_reconcile_deleted`) is caught with a deliberately **BROAD
 `except Exception`** — do NOT narrow it to `except PixAIError`, or a transient network blip
 during the advisory reconcile scan can crash a sync that already succeeded. Guarded by
-`tests/test_sync.py`; full rationale in `../moonglade-internal/architecture.md`.
+`dev/tests/test_sync.py`; full rationale in `../moonglade-internal/architecture.md`.
 
 Achievement/Folio-of-Honors art direction (badge style anchor, tier palette, prompt bank)
 lives in `../moonglade-internal/ART.md` — don't restate hexes or sizes here.
 
 ## Test suite
 
-Full run instructions live in `../moonglade-internal/architecture.md`'s Testing section. **Never write the
-test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.py` fails the
+The suite, its `pytest.ini` and the developer tools live in `dev/` (since 3.20). From the repo
+root, CI's command is `python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py`; from
+inside `dev/`, a plain `python -m pytest` runs the same suite. Full run instructions live in
+`../moonglade-internal/architecture.md`'s Testing section. **Never write the
+test count in this or any live doc** — `dev/tests/test_docs_dont_hardcode_counts.py` fails the
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
 
-- **`python tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
+- **`python dev/tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
   exactly as CI invokes it, then the loom build, the stale-`loom/dist` check (via
   `git status --porcelain`, the same comparison CI makes, so a new untracked or
   already-staged file in `dist/` fails here too) and the Loom's `node --test` suite — on
@@ -338,20 +345,20 @@ recently within hours of a "correction." All tests must pass before merging to m
   clearing the flag alone un-earns nothing.
 - **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
   that needs branding art or a sealed roster pins its own `branding_root()` AND
-  `moonglade_paths.local_path()` (the pack, `branding.json` and the other machine files go
-  through that, not through the tree's parent) and seeds its
-  own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
+  `moonglade.paths.local_dir()` / `local_path()` (the pack, `settings.json` and the other
+  machine files go through those, not through the tree's parent) and seeds its
+  own container from the private donor (`dev/tests/conftest.py`'s `seed_sealed_container`) —
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
   and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
   roster on a dev box, an empty one on CI, different fixture state per machine (2026-09-10).
-  Two things hold that: `tests/conftest.py` pins `branding_root()` for the whole SESSION, so
+  Two things hold that: `dev/tests/conftest.py` pins `branding_root()` for the whole SESSION, so
   a fixture that forgets lands in a tmp dir rather than the owner's tree and the real pack;
   and its session-scoped guard snapshots that tree (files *and* folders) at session start and
   fails the run if anything in it was added, removed or modified — a run that creates it
   counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
   on a checkout where that tree already exists, an un-pinned `create_app()` writes
   nothing new and still reads the real pack. That the pin holds is itself asserted, in
-  `tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
+  `dev/tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
   self-skips without playwright and is excludable with `-m "not render"`: a suite-wide
   invariant whose only assertion can be gated away is not an invariant.
 
@@ -385,45 +392,54 @@ merge to master with `--no-ff`, tag releases.
 
 ## Quick command reference
 
+Run from the app's folder (the one holding `config.json`). Since 3.20 the code is the
+`moonglade/` package; from any other folder, `python "<app folder>\moonglade" ...` runs the
+same tool. The old root scripts (`moonglade_backup.py` and the rest) are gone. Every command
+opens the library `local\settings.json` names (the Control Panel's library folder) unless it
+passes `--out`. A run that names its own library (`--out`, `MOONGLADE_OUT`) never moves one,
+and refuses a library still in an older layout. The MCP server runs as
+`python -P -m moonglade.mcp_server` with `PYTHONPATH=<app folder>` (and `MOONGLADE_OUT` to
+name another library).
+
 ```
-python moonglade_backup.py --probe                    # connection sanity check
-python moonglade_backup.py --count                    # tally tasks + images
-python moonglade_backup.py --max 40                   # small test download
-python moonglade_backup.py                            # full download (4 workers, 250/page)
-python moonglade_backup.py --update                   # fast incremental: stop at already-downloaded history
-python moonglade_backup.py --update --workers 8       # incremental + higher concurrency
-python moonglade_backup.py --workers 8 --page-size 500  # fast full backfill
-python moonglade_backup.py --no-full-meta             # faster pull, but rows land with no prompt/seed/model
-python moonglade_backup.py --backfill-full-meta       # fill existing rows
-python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
-python moonglade_backup.py --backfill-full-meta --with-surface --workers 8   # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
-python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
-python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible)
-python moonglade_backup.py --catalog-stats            # summarize catalog.db
-python moonglade_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
-python moonglade_backup.py --audit                    # read-only duplicate report → audit_report.csv
-python moonglade_backup.py --audit --no-content       # fast: same-media_id location dupes only
-python moonglade_backup.py --dedup                    # dry-run dedup plan (nothing changes)
-python moonglade_backup.py --dedup --apply            # quarantine redundant copies to _duplicates/
-python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
-python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
-"Serve Gallery.pyw"                                   # launch the gallery (double-click; never bare `python moonglade_gallery.py` -- see the standing rule above; machine-local flags live in serve.txt)
-python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
-python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
-python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes
-python moonglade_backup.py --contests                 # list live PixAI contests (read-only)
+python -m moonglade --probe                           # connection sanity check
+python -m moonglade --count                           # tally tasks + images
+python -m moonglade --max 40                          # small test download
+python -m moonglade                                   # full download (4 workers, 250/page)
+python -m moonglade --update                          # fast incremental: stop at already-downloaded history
+python -m moonglade --update --workers 8              # incremental + higher concurrency
+python -m moonglade --workers 8 --page-size 500       # fast full backfill
+python -m moonglade --no-full-meta                    # faster pull, but rows land with no prompt/seed/model
+python -m moonglade --backfill-full-meta              # fill existing rows
+python -m moonglade --sync                            # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
+python -m moonglade --backfill-full-meta --with-surface --workers 8  # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
+python -m moonglade --organize --dry-run              # preview month-folder normalize
+python -m moonglade --organize                        # normalize into YYYY-MM/ (reversible)
+python -m moonglade --catalog-stats                   # summarize catalog.db
+python -m moonglade --sync-artworks                   # merge published-artwork metadata (title/likes/tags) by media_id
+python -m moonglade --audit                           # read-only duplicate report → audit_report.csv
+python -m moonglade --audit --no-content              # fast: same-media_id location dupes only
+python -m moonglade --dedup                           # dry-run dedup plan (nothing changes)
+python -m moonglade --dedup --apply                   # quarantine redundant copies to _duplicates/
+python -m moonglade --dedup --apply --dedup-delete    # delete instead of quarantine
+python -m moonglade --verify-dupes                    # confirm _duplicates/ is safe to delete
+"Moonglade Launcher.pyw"                              # launch the gallery (double-click; never `python -m moonglade.gallery` bare, use the launcher -- see the standing rule above; this machine's settings live in local/settings.json)
+python -m moonglade -v --update                       # verbose: per-page / per-image timing diagnostics
+python -m moonglade --watch                           # live event stream (WS push): watch tasks complete
+python -m moonglade --watch --watch-backup            # + auto-collect each finished gen as it completes
+python -m moonglade --contests                        # list live PixAI contests (read-only)
 # --- creating (all preview-only until --confirm; --task-id recovers a task for free) ---
-python moonglade_backup.py --account                  # read-only credits/membership dashboard
-python moonglade_backup.py --cards                    # read-only free-card (kaisuuken) balances + ids
-python moonglade_backup.py --claims                   # read-only claimable rewards (daily credits, stamina)
-python moonglade_backup.py --claim all --confirm      # claim ready rewards (gated; grants to your account)
-python moonglade_backup.py --suggest-prompt <id|file> # image-to-prompt: tags + description (free)
-python moonglade_backup.py --upload path/to/image.png # local file -> media_id (free; S3 upload)
-python moonglade_backup.py --generate --prompt "..."               # preview an image gen (add --confirm to spend)
-python moonglade_backup.py --generate-video --image <media_id> --prompt "..."   # preview i2v (EXPENSIVE; --confirm)
-python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
-python moonglade_backup.py --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
-python moonglade_backup.py --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
+python -m moonglade --account                         # read-only credits/membership dashboard
+python -m moonglade --cards                           # read-only free-card (kaisuuken) balances + ids
+python -m moonglade --claims                          # read-only claimable rewards (daily credits, stamina)
+python -m moonglade --claim all --confirm             # claim ready rewards (gated; grants to your account)
+python -m moonglade --suggest-prompt <id|file>        # image-to-prompt: tags + description (free)
+python -m moonglade --upload path/to/image.png        # local file -> media_id (free; S3 upload)
+python -m moonglade --generate --prompt "..."         # preview an image gen (add --confirm to spend)
+python -m moonglade --generate-video --image <media_id> --prompt "..."  # preview i2v (EXPENSIVE; --confirm)
+python -m moonglade --reference-video --ref-image <id1> --ref-image <id2> --prompt "@image1 ... @image2 ..."  # preview multi-ref video
+python -m moonglade --edit-image --edit-src <media_id|file> --prompt "make it night"  # preview an edit
+python -m moonglade --generate-video --task-id <id> --dump-params  # recover a task (free) + print its full submit shape
 ```
 
 **Free cards auto-apply** (shipped 2026-07-03): on `--confirm`, `_apply_kaisuuken` calls PixAI's

@@ -2,7 +2,7 @@
    Session Q, Q4 -- THE PHONE TURNED SIDEWAYS (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 × 360").
    ADDITIVE to Moonglade Mobile and Lightbox Mobile: every rule below sits inside one media query, so
    upright (portrait) the phone is exactly what it was. The condition is lib/phoneCore.js's
-   LANDSCAPE_QUERY, character for character (tests/test_render_harness.py holds the two together), and
+   LANDSCAPE_QUERY, character for character (dev/tests/test_render_harness.py holds the two together), and
    hooks/usePhoneLandscape.js watches the same query for the one thing CSS cannot do -- deal the
    gallery's pictures across 4 columns (3 under 700 px wide).
 

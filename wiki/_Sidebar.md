@@ -16,6 +16,7 @@
 
 **Reference**
 - [How It Works](How-It-Works)
+- [Where Things Live](Where-Things-Live)
 - [Trust & Safety](Trust-and-Safety)
 - [Troubleshooting](Troubleshooting)
 - [FAQ](FAQ)

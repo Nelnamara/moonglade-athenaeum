@@ -17,6 +17,7 @@
 import { apiGet, apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
 import { note as noteUpdate } from "./updateStore.js";
+import { noteServerNotice } from "./serverNotice.js";
 
 const LSK = "mg_jobs_open";
 
@@ -167,6 +168,10 @@ export function refresh() {
       // `update` field -- passing that on would read as "nothing is out" and blank a standing
       // notice over one blip, exactly the way the release check refuses to cache a failure.
       if (d && !d.error) noteUpdate(d.update);
+      // A sentence the server asks every open tab to say once per server start (3.20: things
+      // outside the app that still name its old files, with a Fix them button). Same poll,
+      // same rule: only on a real answer.
+      if (d && !d.error) noteServerNotice(d.notice);
       // The inbox's live count rides this same poll for the same reason (Sessions R + Y,
       // R4b): the live mirror counts PixAI's newNotification and this payload carries it.
       // Handed to whoever listens (inbox/inboxStore.js, in the gallery's shells only).

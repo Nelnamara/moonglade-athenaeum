@@ -43,7 +43,7 @@ smart collections, tags, keeper/reject marks and notes — as one file that goes
 
 ## Running a maintenance job
 
-Click a button and the job starts as a background run of `moonglade_backup.py`:
+Click a button and the job starts as a background run of the command-line tool (`python -m moonglade`):
 
 - **One job runs at a time.** While one is running the other buttons are disabled, and a
   second request comes back with *"a job is already running"*.
@@ -65,7 +65,7 @@ The buttons are grouped exactly as the risk splits.
   the button you'll use most. See [Backing Up](Backing-Up).
 - **Catalog stats** — counts summarized straight from `catalog.db`.
 - **Duplicate audit (fast, read-only)** — the location-only duplicate report, written to
-  `audit_report.csv`. The **full (byte-compare — slower)** checkbox on the button runs the
+  `audit_report.csv` in the library's `_moonglade/records/` folder. The **full (byte-compare — slower)** checkbox on the button runs the
   content-hashing pass instead, which also catches byte-identical files saved under
   different ids.
 - **Verify `_duplicates/` is safe to delete** — confirms every quarantined file is
@@ -215,11 +215,24 @@ they stay buttons, with their confirm and their server's-own-machine gate exactl
 ### The rest of the rules
 
 - It's an **in-process timer, not an OS cron**: jobs fire only while the gallery is running.
-  For always-on backups, point Windows Task Scheduler at the CLI instead:
+  For always-on backups, point Windows Task Scheduler at the CLI instead. The action runs
+  `python` with the arguments below, and its **Start in** is the app's folder (the one
+  holding `config.json`), which is where `python -m moonglade` finds the app:
 
 ```bash
-python moonglade_backup.py --out pixai_backup --update
+python -m moonglade --update
 ```
+
+  The task uses the library folder set in the Control Panel. Add `--out <folder>` only for a
+  task that should use another library: a run that names its own library never moves one, and
+  refuses a library still in an older layout.
+
+  The code folder also runs on its own, which suits a task with no **Start in**:
+  `python "C:\path\to\app\moonglade" --update` works from any folder.
+
+  A task made before 3.20 names `moonglade_backup.py`, which is gone. Moonglade finds such a
+  task when it starts and says so in the corner: **Fix it** rewrites it to the code-folder
+  line, with the same arguments.
 
 - **One job at a time**, as always. A job whose turn arrives while another is running simply
   waits for the next minute.
@@ -354,12 +367,12 @@ Things worth knowing:
   single create per submit, and if the session isn't usable it **refuses and spends
   nothing** rather than quietly falling back to your API key. See
   [Trust & Safety](Trust-and-Safety).
-- `python moonglade_backup.py --mirror-check` verifies the renewal loop from the command
+- `python -m moonglade --mirror-check` verifies the renewal loop from the command
   line without spending anything.
 
 ## Server
 
-- **↻ Restart server** — needs the managed **`Serve Gallery`** launcher (it relaunches the
+- **↻ Restart server** — needs the managed launcher, **`Moonglade Launcher`** (it relaunches the
   process); the button is disabled when the server was started headlessly.
 - **■ Stop server** — shuts it down cleanly from the browser. No Task Manager.
 
@@ -383,8 +396,7 @@ About opens leading with a card that reads *"v3.7.3 is out"* (with the release's
 running the stamp reads *updating…* and opens the window that is reporting it.
 
 **About** is the app's own "what am I running" card. It shows Nel, the name, and a line such
-as *app 3.15.0 · art pack v6 · 2026-10-01* (with a line under it when an old `moonglade.dat`
-is still beside the art pack: it is safe to delete), then **this version's changelog** — the headline
+as *app 3.15.0 · art pack v6 · 2026-10-01*, then **this version's changelog** — the headline
 changes of the release you are running, and a short *Under the hood* line for the rest.
 **Earlier versions ›** lists the older entries in this install's changelog; click one to read
 it and **‹ This version** to come back. Along the bottom, **Guide** opens the
@@ -461,7 +473,7 @@ when it's signed in from a tablet.
 
 The two operations that *do* turn on a username — changing your own password, removing your own
 account — aren't a privilege either: what varies is whose account is being changed, not what your
-login is allowed to do. `tests/test_route_tiers.py` is what keeps this page honest; it enumerates
+login is allowed to do. `dev/tests/test_route_tiers.py` is what keeps this page honest; it enumerates
 every route the app actually registers and fails the build if one doesn't declare and enforce its
 tier against a live LAN request.
 

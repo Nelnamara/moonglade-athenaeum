@@ -39,7 +39,7 @@ export const EDL_FPS = 24;
 /** Record time starts at one hour, the usual CMX3600 convention (ruling 6). */
 export const EDL_RECORD_START = 3600;
 /** A clip's name inside the zip. The server validates every name against the same pattern
- *  (moonglade_gallery.LOOM_EDL_CLIP_RE; tests/test_loom_p_routes.py compares the two). */
+ *  (moonglade_gallery.LOOM_EDL_CLIP_RE; dev/tests/test_loom_p_routes.py compares the two). */
 export const EDL_CLIP_FILE_RE = /^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$/;
 /** The bed's name inside the zip (moonglade_gallery.LOOM_EDL_BED_NAME_RE, the same pattern). */
 export const EDL_BED_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$/;

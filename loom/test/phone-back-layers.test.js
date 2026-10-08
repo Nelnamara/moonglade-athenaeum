@@ -7,7 +7,7 @@ import path from "node:path";
 /* THE PHONE'S FOUNDATIONS (2026-09-06) -- source guards for the four things the render
    harness measures in a real browser at 390x844, plus the two the harness cannot see.
 
-   The behaviour lives in tests/test_render_harness.py:
+   The behaviour lives in dev/tests/test_render_harness.py:
      ..._the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app
      ..._the_pager_lands_each_page_at_its_top
      ..._an_open_sheet_holds_the_library_still_behind_it
@@ -36,7 +36,7 @@ const glmCss = src("styles/gallery-mobile.css");
 const idmCss = src("styles/image-details-mobile.css");
 const fmCss = src("styles/folio-mobile.css");
 const iconCss = src("styles/icons.css");
-const server = repo("moonglade_gallery.py");
+const server = repo("moonglade/gallery.py");
 const devShell = repo("gallery/index.html");
 
 // ------------------------------------------------------------------ 1. the Back gesture

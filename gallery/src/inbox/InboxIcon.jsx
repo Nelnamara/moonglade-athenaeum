@@ -7,7 +7,7 @@ import { resolveInboxIcon } from "./inboxCore.js";
    A computed background, never an <img> hole.
 
    Which picture (the goal tiles' precedence, lib/goalTileCore.js): the pack's rewards/inbox.png
-   (pack v7 carries it) › the app's own module copy (art/inboxIcon.js, tools/art/build_inbox_icon.py)
+   (pack v7 carries it) › the app's own module copy (art/inboxIcon.js, dev/tools/art/build_inbox_icon.py)
    › today's ✉ glyph when neither loads. Resolved ONCE a page and kept: the second icon -- the Menu
    reopened, the header redrawn -- paints at once and asks nothing. While the one ask is out the slot
    stays empty rather than flashing the glyph. */

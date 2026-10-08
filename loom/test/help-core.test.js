@@ -232,13 +232,14 @@ describe("The Gallery page opens in plain words", () => {
     assert.ok(firstSection > 1, "an introduction under the title");
     assert.ok(blocks.slice(1, firstSection).every((b) => b.type === "p"),
       "the introduction is paragraphs only, no command block");
-    assert.match(blocks.slice(1, firstSection).map((b) => spansText(b.spans)).join(" "), /Serve Gallery\.pyw/);
+    assert.match(blocks.slice(1, firstSection).map((b) => spansText(b.spans)).join(" "), /Moonglade Launcher\.pyw/);
     const term = blocks.findIndex((b) => b.type === "h" && b.anchor === "running-it-from-a-terminal");
     assert.equal(term, firstSection, "the terminal section follows the introduction");
     const next = blocks.findIndex((b, i) => i > term && b.type === "h");
     const code = blocks.slice(term + 1, next).filter((b) => b.type === "code");
     assert.equal(code.length, 1);
-    assert.match(code[0].text, /python moonglade_gallery\.py --out pixai_backup/);
+    assert.match(code[0].text, /^python -m moonglade\.gallery\s/m);
+    assert.doesNotMatch(code[0].text, /--out/, "the library comes from settings, never --out");
     assert.ok(!blocks.slice(0, term).some((b) => b.type === "code"));
   });
 });

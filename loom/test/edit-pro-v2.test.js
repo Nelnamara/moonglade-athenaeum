@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 /* PixAI Edit Pro V2.0 in the Edit card (#67, PROBE_2026-10-02_site "Edit Pro V2.0 -- the facts").
    A new VERSION of Edit Pro, offered beside v1.0 (which stays: the Edit Pro AI Tools scenes run
-   on it). The Python half is tests/test_edit_upload.py (the EDIT_MODELS / EDIT_CAPS parity, the
+   on it). The Python half is dev/tests/test_edit_upload.py (the EDIT_MODELS / EDIT_CAPS parity, the
    max_refs slice and the chat block). */
 
 import {

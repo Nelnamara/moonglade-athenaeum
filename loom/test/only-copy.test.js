@@ -7,7 +7,7 @@ import { ONLY_COPY_TIERS, onlyCopyMembers, onlyCopyNote, onlyCopyShort } from ".
 
 /* #66, the owner's ruling on the 2026-10-03 walk: archive-only pictures (PixAI no longer has them)
    are WARNED about, not kept back. The bulk "Delete locally" and Duplicate Review take them with the
-   rest; the confirm names them first. The server half is tests/test_archive_only_guard.py, which also
+   rest; the confirm names them first. The server half is dev/tests/test_archive_only_guard.py, which also
    proves what the wording promises: the Trash's Restore brings back the picture and its catalog row,
    and Duplicate Review's Undo does the same. */
 

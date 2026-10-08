@@ -107,7 +107,7 @@ describe("source: neither label counts the loaded page any more", () => {
   });
 
   test("the detail route returns both numbers", () => {
-    const py = src("moonglade_gallery.py");
+    const py = src("moonglade/gallery.py");
     assert.match(py, /"position": position, "nav_total": len\(nav_ids\)/);
   });
 });

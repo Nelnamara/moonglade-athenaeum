@@ -11,7 +11,7 @@ import path from "node:path";
    anything, takes the spin's place. The answer is PULSE + EMBER on one beat, plus a set of
    dials. Record: moonglade-internal/scopes/WORKSHOP_2026-09-07_restart-card-verdict.md.
 
-   tests/test_render_harness.py::test_the_restart_mascot_holds_still_and_the_halo_keeps_
+   dev/tests/test_render_harness.py::test_the_restart_mascot_holds_still_and_the_halo_keeps_
    pulsing reads the pair off a real browser's computed style. This is the cheap guard for
    the NUMBERS, which no browser test asserts: a stylesheet edit that quietly walks the
    period, the reach or the colour back would otherwise be silent. Same readFileSync-over-

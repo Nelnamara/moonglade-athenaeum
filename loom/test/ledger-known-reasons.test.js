@@ -14,7 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
 
 test("the ledger's known reasons are the server's own type keys", () => {
-  const py = src("moonglade_backup.py");
+  const py = src("moonglade/backup.py");
   const table = py.match(/CREDIT_LOG_REASONS = \{([^}]*)\}/);
   assert.ok(table, "moonglade_backup.CREDIT_LOG_REASONS is where it was");
   const serverKeys = [...table[1].matchAll(/"([a-z_]+)"\s*:/g)].map((m) => m[1]).sort();

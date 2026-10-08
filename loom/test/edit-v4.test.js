@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 /* PixAI Edit v4.0 in the Edit card (Session L decision 6, lane w2-small 2026-09-28). It adds a
    model to a paid submit; the design and its spend review are moonglade-internal/design/notes/
-   small-calls/BUILD-w2-small.md. The Python half is tests/test_edit_upload.py (the EDIT_MODELS /
+   small-calls/BUILD-w2-small.md. The Python half is dev/tests/test_edit_upload.py (the EDIT_MODELS /
    EDIT_CAPS parity and the chat block). */
 
 import {

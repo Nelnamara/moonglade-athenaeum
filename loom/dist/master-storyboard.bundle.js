@@ -7325,6 +7325,62 @@ ${"=".repeat(48)}
     return true;
   }
 
+  // ../gallery/src/notify/serverNotice.js
+  var SEEN_KEY = "mg_server_notice";
+  var seenHere = "";
+  function lastShown() {
+    try {
+      return localStorage.getItem(SEEN_KEY) || seenHere;
+    } catch {
+      return seenHere;
+    }
+  }
+  function markShown(key) {
+    seenHere = key;
+    try {
+      localStorage.setItem(SEEN_KEY, key);
+    } catch {
+    }
+  }
+  function runFix(fix) {
+    return apiPost("/api/outside/fix", { csrf: String(fix && fix.csrf || "") }).then((d) => {
+      if (!d || d.error) {
+        show({
+          kind: "err",
+          sticky: true,
+          title: "Couldn't fix them.",
+          msg: String(d && d.error || "The app didn't answer.")
+        });
+        return d;
+      }
+      const ok = d.kind === "ok";
+      show({
+        kind: ok ? "ok" : "err",
+        sticky: !ok,
+        title: String(d.title || ""),
+        msg: String(d.msg || "")
+      });
+      return d;
+    });
+  }
+  function noteServerNotice(notice) {
+    if (!notice || !notice.key || !notice.title && !notice.msg) return false;
+    const key = String(notice.key);
+    if (lastShown() === key) return false;
+    markShown(key);
+    const fix = notice.fix && notice.fix.label ? notice.fix : null;
+    show({
+      kind: "",
+      sticky: true,
+      title: String(notice.title || ""),
+      msg: String(notice.msg || ""),
+      action: fix ? { label: String(fix.label), run: () => {
+        runFix(fix);
+      } } : void 0
+    });
+    return true;
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -7435,6 +7491,7 @@ ${"=".repeat(48)}
       const rows = d && d.jobs || [];
       toastTransitions(rows);
       if (d && !d.error) note(d.update);
+      if (d && !d.error) noteServerNotice(d.notice);
       if (d && !d.error && d.inbox) pollListeners.forEach((fn) => {
         try {
           fn(d.inbox);
@@ -8348,12 +8405,12 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/notify/spikeStore.js
-  var SEEN_KEY = "mg_spike_announced";
+  var SEEN_KEY2 = "mg_spike_announced";
   var memSeen = "";
   var asked = false;
   function readStored() {
     try {
-      return localStorage.getItem(SEEN_KEY) || "";
+      return localStorage.getItem(SEEN_KEY2) || "";
     } catch {
       return "";
     }
@@ -8361,13 +8418,13 @@ ${"=".repeat(48)}
   function markSeen(at) {
     memSeen = at;
     try {
-      localStorage.setItem(SEEN_KEY, at);
+      localStorage.setItem(SEEN_KEY2, at);
     } catch {
     }
   }
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("storage", (e) => {
-      if (!e || e.key !== SEEN_KEY) return;
+      if (!e || e.key !== SEEN_KEY2) return;
       const v = String(e.newValue || "");
       if (v && v > memSeen) memSeen = v;
     });
@@ -10874,7 +10931,7 @@ ${"=".repeat(48)}
         }
       },
       "View the update \u203A"
-    )) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-id" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-nel", style: nelStyle, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-idtxt" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-name" }, "Moonglade Athenaeum"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-stamp" }, "app ", about2.version, " \xB7 ", packLabel(about2.pack), about2.date ? " \xB7 " + about2.date : ""), about2.pack && about2.pack.note ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-stamp" }, about2.pack.note) : null)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-kick" }, "CHANGELOG \xB7 ", ver), earlierOpen && !showing ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-earlier" }, (about2.earlier || []).map((e) => /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", key: e.version, onClick: () => setShowing(e) }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-mono" }, e.version), " ", e.title, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "d" }, e.date))), !(about2.earlier || []).length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-none" }, "No earlier versions in this install's changelog.") : null) : /* @__PURE__ */ react_global_shim_default.createElement("ul", { className: "mgab-items" }, items.map((i, k) => /* @__PURE__ */ react_global_shim_default.createElement("li", { key: k }, i.lead)), under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "Under the hood: ", under.map((i) => clip(i.lead, 64)).join(" \xB7 ")) : null, !items.length && !under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "This version has no changelog entry in this install.") : null), showing ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setShowing(null) }, "\u2039 This version") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setEarlierOpen((v) => !v) }, earlierOpen ? "\u2039 This version" : "Earlier versions \u203A"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-btns" }, inline ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
+    )) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-id" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-nel", style: nelStyle, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-idtxt" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-name" }, "Moonglade Athenaeum"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-stamp" }, "app ", about2.version, " \xB7 ", packLabel(about2.pack), about2.date ? " \xB7 " + about2.date : ""))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-kick" }, "CHANGELOG \xB7 ", ver), earlierOpen && !showing ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-earlier" }, (about2.earlier || []).map((e) => /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", key: e.version, onClick: () => setShowing(e) }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-mono" }, e.version), " ", e.title, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "d" }, e.date))), !(about2.earlier || []).length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-none" }, "No earlier versions in this install's changelog.") : null) : /* @__PURE__ */ react_global_shim_default.createElement("ul", { className: "mgab-items" }, items.map((i, k) => /* @__PURE__ */ react_global_shim_default.createElement("li", { key: k }, i.lead)), under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "Under the hood: ", under.map((i) => clip(i.lead, 64)).join(" \xB7 ")) : null, !items.length && !under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "This version has no changelog entry in this install.") : null), showing ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setShowing(null) }, "\u2039 This version") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setEarlierOpen((v) => !v) }, earlierOpen ? "\u2039 This version" : "Earlier versions \u203A"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-btns" }, inline ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
       done();
       openHelp({ slug: "Home" });
     } }, "Guide"), /* @__PURE__ */ react_global_shim_default.createElement("a", { href: about2.issues_url, target: "_blank", rel: "noopener noreferrer" }, "Report an issue \u2197"), /* @__PURE__ */ react_global_shim_default.createElement("a", { href: about2.releases_url, target: "_blank", rel: "noopener noreferrer" }, "Releases \u2197")));
@@ -11298,7 +11355,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/help/whatsNew.js
-  var SEEN_KEY2 = "seen.whatsnew";
+  var SEEN_KEY3 = "seen.whatsnew";
   var POLL_MS2 = 500;
   var QUIET_POLLS = 3;
   var GIVE_UP_MS = 5 * 60 * 1e3;
@@ -11332,18 +11389,18 @@ ${"=".repeat(48)}
       if (!ok || !about2 || about2.error || !about2.display_version) return;
       const stats = boot && boot.stats || {};
       const plan = whatsNewPlan({
-        seen: store.get(SEEN_KEY2, void 0),
+        seen: store.get(SEEN_KEY3, void 0),
         display: about2.display_version,
         kind: about2.kind,
         hasLibrary: (Number(stats.images) || 0) + (Number(stats.videos) || 0) > 0
       });
       if (!plan.show) {
-        if (plan.mark) store.set(SEEN_KEY2, about2.display_version);
+        if (plan.mark) store.set(SEEN_KEY3, about2.display_version);
         return;
       }
       whenCelebrationsSettle(() => {
-        if (store.get(SEEN_KEY2, void 0) === about2.display_version) return;
-        store.set(SEEN_KEY2, about2.display_version);
+        if (store.get(SEEN_KEY3, void 0) === about2.display_version) return;
+        store.set(SEEN_KEY3, about2.display_version);
         retireReceiptToast();
         show({
           kind: "whatsnew",

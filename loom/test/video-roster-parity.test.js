@@ -22,7 +22,7 @@ import { NUMERIC_TO_NAME, resolveEngine, videoRemixFromRow } from "../../gallery
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
-const py = src("moonglade_backup.py");
+const py = src("moonglade/backup.py");
 
 // VIDEO_MODELS = { "name": {"model_id": "123", "label": "..."}, ... }
 function pyVideoModels() {

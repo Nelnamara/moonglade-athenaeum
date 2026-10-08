@@ -2,7 +2,7 @@
 
 This folder holds the Loom's **source and its Node toolchain**. The Loom itself is not a
 standalone page any more: it is a surface of the web app, served at **`/loom`** by
-`moonglade_gallery.py`, and its React source is **`master-storyboard.jsx`**.
+`moonglade/gallery.py`, and its React source is **`master-storyboard.jsx`**.
 
 **The user-facing manual is [`docs/LOOM.md`](../docs/LOOM.md)** — features, shortcuts, the
 storyboard model. This file only covers what lives in `loom/`.
@@ -69,11 +69,11 @@ to `loom/` via `loom/package.json`.
 
 **One delivery path.** `/loom` serves the pre-built `loom/dist/` bundle; the old in-browser
 Babel-standalone transpile was retired on 2026-08-08 (see the comment above `loom()` in
-`moonglade_gallery.py`). The page refuses to open if the bundle was never built.
+`moonglade/gallery.py`). The page refuses to open if the bundle was never built.
 
 **The bundle is committed.** If you change `master-storyboard.jsx` or anything under `loom/src/`,
 run `npm run build` and commit `dist/`. CI rebuilds it and fails on any difference, and
-`python tools/ci_local.py` runs the same check locally.
+`python dev/tools/ci_local.py` runs the same check locally.
 
 ---
 

@@ -33,7 +33,7 @@ import { importedFootagePatch } from "../src/loom-mutations.js";
 // Same technique as the suite's other guards over plain <script> components and the JSX
 // (mg-model-picker-multi-select.test.js, loom-v2-dead-generate-shot-prop.test.js):
 // source-presence assertions, no jsdom. The server side of the chain (type='' vs
-// type=all vs type=video) is exercised for real in tests/test_web_pick.py.
+// type=all vs type=video) is exercised for real in dev/tests/test_web_pick.py.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // GalleryPicker.jsx since 2026-08-08 (ported out of static/mg-gallery-picker.js).
 const pickerSrc = readFileSync(path.join(__dirname, "../../gallery/src/components/GalleryPicker.jsx"), "utf8");

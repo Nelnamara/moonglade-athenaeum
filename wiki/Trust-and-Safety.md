@@ -71,7 +71,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   left, never the credential itself. And it's a hard switch, not a preference: when
   mirroring is on and the session isn't usable, the submit **refuses and spends nothing** —
   it never quietly falls back to your API key and files the piece somewhere you didn't
-  ask. `python moonglade_backup.py --mirror-check` verifies the session without spending.
+  ask. `python -m moonglade --mirror-check` verifies the session without spending.
 - **Charge you twice for one generation.** A submit is sent **once**, never re-sent. That
   sounds obvious, but it isn't free: the tool retries ordinary *reads* when the network
   hiccups, and until **2026-07-26** a submit was treated the same way. The danger is that a
@@ -162,7 +162,7 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   loopback included, and the CLI escape hatch above is the only way past it. Removing **someone
   else's** needs the server machine.
 
-  None of this is kept honest by hand. `tests/test_route_tiers.py` walks the app's own routing
+  None of this is kept honest by hand. `dev/tests/test_route_tiers.py` walks the app's own routing
   table — every route it has, not a list someone remembered to update — and fails the build if
   any of them lacks a declared tier or fails to enforce it against a live LAN request. If this
   page and the app ever disagree, that test is the tie-breaker, not this paragraph.

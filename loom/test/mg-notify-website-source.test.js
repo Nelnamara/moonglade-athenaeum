@@ -9,7 +9,7 @@ import path from "path";
    spinner."
 
    The server side of that is a real Activity row for a pixai.art run, written off the live
-   taskUpdated stream (moonglade_gallery.py's _website_job_seen; tests/test_watch.py). This
+   taskUpdated stream (moonglade_gallery.py's _website_job_seen; dev/tests/test_watch.py). This
    file is the window's half, and the whole rule it has to encode is a NEGATIVE one: a website
    run must be INDISTINGUISHABLE from an app run in the Activity window except for one small
    source mark. Same row component, same queued/running/done branches, same Nel spinner, same
@@ -26,7 +26,7 @@ const row = readFileSync(
 const css = readFileSync(
   path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
 const server = readFileSync(
-  path.join(__dirname, "../../moonglade_gallery.py"), "utf8");
+  path.join(__dirname, "../../moonglade/gallery.py"), "utf8");
 
 describe("a website run is marked as one, and marked nowhere else", () => {
   test("the row shows a 'website' mark when the job's source is pixai", () => {

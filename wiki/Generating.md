@@ -216,7 +216,7 @@ on a picture's record page) shows the
 exact request a picture was — or will be — sent with, after the variables were filled in, with
 the template and the drawn values beside it. The API key, cookies and session tokens are
 removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
-copies the matching `python moonglade_backup.py --generate …` command, quoted for the shell the
+copies the matching `python -m moonglade --generate …` command, quoted for the shell the
 server runs in — PowerShell on Windows, bash elsewhere, named beside the button (not the old
 Command Prompt, cmd.exe, where its quoting doesn't hold). It never includes `--confirm`, so pasting it previews
 first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
@@ -516,19 +516,19 @@ reason on hover) — and one thing you can do with it:
 
 ```bash
 # preview only (no credits):
-python moonglade_backup.py --generate --prompt "a night elf druid, moonlit grove"
+python -m moonglade --generate --prompt "a night elf druid, moonlit grove"
 
 # really generate (spends credits):
-python moonglade_backup.py --generate --confirm \
+python -m moonglade --generate --confirm \
     --prompt "..." --negative "lowres, text" \
     --model 1983308862240288769 --batch-size 1 \
     --mode standard --lora 1686550608832816741:0.7
 
 # find model / LoRA version ids:
-python moonglade_backup.py --list-models "anime"
+python -m moonglade --list-models "anime"
 
 # recover an already-created task by id (no new credits):
-python moonglade_backup.py --generate --task-id <id>
+python -m moonglade --generate --task-id <id>
 ```
 
 | Flag | Default | Meaning |
@@ -596,12 +596,12 @@ free-card check show first — for a video that check counts **tickets**, see
 
 ```bash
 # preview (free): prints the exact request + the ~credit cost
-python moonglade_backup.py --generate-video --image <media_id> --prompt "she turns slowly toward camera"
+python -m moonglade --generate-video --image <media_id> --prompt "she turns slowly toward camera"
 # really animate (EXPENSIVE — spends credits):
-python moonglade_backup.py --generate-video --image <media_id> --prompt "..." \
+python -m moonglade --generate-video --image <media_id> --prompt "..." \
     --video-model v4.0.1 --duration 5 --video-mode professional --confirm
 # recover a finished clip for free:
-python moonglade_backup.py --generate-video --task-id <id>
+python -m moonglade --generate-video --task-id <id>
 ```
 
 ### Video models and shot-mode gating
@@ -681,9 +681,9 @@ images, 1K/2K, low/medium/high, the same price as Edit Pro, without Edit Pro's 1
 
 ```bash
 # preview (free; local files show as placeholders, nothing uploads):
-python moonglade_backup.py --edit-image --edit-src <media_id> --prompt "make it nighttime, add snow"
+python -m moonglade --edit-image --edit-src <media_id> --prompt "make it nighttime, add snow"
 # edit a LOCAL image (uploads it, then edits) — spends credits:
-python moonglade_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
+python -m moonglade --edit-image --edit-src "C:\pics\her.png" --prompt "..." --confirm
 ```
 
 | Flag | Default | Meaning |
@@ -813,12 +813,12 @@ instead of a single start frame. You cite each reference in the prompt with `@im
 
 ```bash
 # preview (free): shows the exact referenceVideo request
-python moonglade_backup.py --reference-video \
+python -m moonglade --reference-video \
     --ref-image <id1> --ref-image "C:\pics\pose.png" \
     --prompt "@image1 in the outfit from @image2, slow orbit"
 # really generate — a matching V4.0 card is auto-applied (0 credits) when you hold enough
 # tickets for the duration; --no-card to pay instead:
-python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2> \
+python -m moonglade --reference-video --ref-image <id1> --ref-image <id2> \
     --prompt "@image1 ... @image2 ..." --confirm
 ```
 
@@ -845,7 +845,7 @@ Get a reusable `media_id` for any local file — **free**. Useful to pre-upload 
 reuse the id across edit/video runs.
 
 ```bash
-python moonglade_backup.py --upload "C:\pics\her.png"     # prints: Uploaded media_id: <id>
+python -m moonglade --upload "C:\pics\her.png"            # prints: Uploaded media_id: <id>
 ```
 
 ## Image → prompt (`--suggest-prompt`)
@@ -856,8 +856,8 @@ Danbooru-style **tag list** plus one or two **natural-language descriptions**. *
 read-only — no `--confirm`.
 
 ```bash
-python moonglade_backup.py --suggest-prompt 739411069833281443    # a catalog media_id
-python moonglade_backup.py --suggest-prompt "C:\pics\ref.png"     # a local file (uploads first)
+python -m moonglade --suggest-prompt 739411069833281443           # a catalog media_id
+python -m moonglade --suggest-prompt "C:\pics\ref.png"            # a local file (uploads first)
 ```
 
 > **Images only.** This calls PixAI's own image-to-prompt endpoint, which reads back tags
@@ -898,7 +898,7 @@ and events. Each is **locked to one model**.
 > many … tickets you hold … so no card will be attached").
 
 ```bash
-python moonglade_backup.py --cards        # read-only: your cards, held counts, model, expiry
+python -m moonglade --cards               # read-only: your cards, held counts, model, expiry
 ```
 
 Just generate on a model you have a card for — the match is automatic:
@@ -933,8 +933,8 @@ for the wider guarantee this sits under.
 ## Contests (`--contests`)
 
 ```bash
-python moonglade_backup.py --contests                 # live contests (read-only)
-python moonglade_backup.py --contests --all-contests  # include ended ones too
+python -m moonglade --contests                        # live contests (read-only)
+python -m moonglade --contests --all-contests         # include ended ones too
 ```
 
 Lists PixAI's contests — name, dates, entry tag — so you can aim a generation at one.

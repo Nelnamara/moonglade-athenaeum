@@ -33,15 +33,17 @@ pip install requests pillow flask truststore websockets
    ```
 3. Go:
    ```bash
-   python moonglade_gallery.py --out pixai_backup   # launch the web gallery (browse · generate · curate)
-   python moonglade_backup.py --count       # …or headless: how many images you have
-   python moonglade_backup.py               # back up everything
+   python -m moonglade.gallery              # launch the web gallery (browse · generate · curate)
+   python -m moonglade --count              # …or headless: how many images you have
+   python -m moonglade                      # back up everything
    ```
+   Or double-click **`Moonglade Launcher.pyw`** in the app's folder: it starts the gallery with
+   no console window and opens it in your browser.
 4. First time opening the web gallery: sign in from the machine running the server — the
    login page doubles as an account-creation form the very first time, before any account
    exists (see the [FAQ](../../wiki/FAQ)).
 
-That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))*
+That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everything else has working defaults. No DevTools, no token to recapture. *([Why so simple? →](../../wiki/How-It-Works))* What you set in the Control Panel is kept in `local\settings.json` beside the app, and everything you make and earn stays inside your library folder *([Where things live →](../../wiki/Where-Things-Live))*.
 
 ---
 
@@ -70,7 +72,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 | **Generate** | Full creation suite in the **web gallery** (dockable drawer: image · edit/enhance/fix · video with gallery-picked references), plus a matching CLI — model + LoRA pickers, live cost preview, and **free generation cards auto-apply** so covered gens cost 0 credits (video cards are tickets, one per 5 s of clip — the preview shows "uses N of H", and if you're short it says the clip is charged in full); results drop straight into your catalog, and the dock's **History** is a seven-day timeline of everything you've made — from the catalog, not just this session — with what each run actually cost, one click from reusing its recipe. **The Loom** is a full video storyboard tool built on top of it, for multi-shot sequences with continuity · **the Darkroom** gives the art filters a room of their own — source and filtered side by side at a size you can judge, free and entirely browser-side, no network request at all |
 | **Curate** | **Collections** (group images/videos without moving files) · **Select mode** with drag-paint multi-select · star ratings · inline prompt edit · bulk find/replace · the **Folio of Honors** tracks achievements as your archive grows |
 | **Stay in sync** | Instant incremental updates · live **event watch** (`--watch --watch-backup` auto-collects finishing gens) · optional **Mirror to PixAI website** files what you make in Moonglade into your pixai.art library too (rides your own browser session; off by default) · bulk delete locally or cloud-side · `--reconcile-deleted` for cloud-deleted orphans · Collection Health dashboard |
-| **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Serve Gallery` launcher · **one-click updates**: it notices a new release on its own and says so wherever you are, and never installs one by itself — the pull, the restart and the *"Updated to vX.Y.Z"* note afterwards all follow your press · **make it yours**: the **Identity** strip pairs the header mark with the skin from your first day — a small set ships with the app and it takes your own art too; pick a mark + its animation, choose the **Type** the app is set in from curated pairs off your own machine, then set the Desktop launcher icon to match. The app's small marks are a drawn icon set that takes your skin's colour rather than a borrowed keyboard character |
+| **Run & control** | Web **Control Panel**: one-click maintenance jobs with a real progress bar and a Stop button, scheduled auto-backups, and **server Stop/Restart from the browser** · double-click `Moonglade Launcher` · **one-click updates**: it notices a new release on its own and says so wherever you are, and never installs one by itself — the pull, the restart and the *"Updated to vX.Y.Z"* note afterwards all follow your press · **make it yours**: the **Identity** strip pairs the header mark with the skin from your first day — a small set ships with the app and it takes your own art too; pick a mark + its animation, choose the **Type** the app is set in from curated pairs off your own machine, then set the Desktop launcher icon to match. The app's small marks are a drawn icon set that takes your skin's colour rather than a borrowed keyboard character |
 
 ---
 

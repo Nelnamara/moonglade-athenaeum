@@ -10,7 +10,7 @@
 # install step, including the one omission, so a reviewer's environment matches
 # the one CI actually gates on:
 #   - pixeltable is NOT installed. It is a heavy, optional, GPU-oriented dep;
-#     tests/test_similar.py skips itself cleanly without it via importorskip.
+#     dev/tests/test_similar.py skips itself cleanly without it via importorskip.
 # If you change one list, change the other.
 
 set -euo pipefail
@@ -20,10 +20,10 @@ python -m pip install --upgrade pip
 python -m pip install requests pillow flask truststore websockets pytest pytest-mock pytest-cov
 
 echo "--- Verifying the suite runs ---"
-# Mirrors CI exactly. --ignore=tests/test_similar.py because pixeltable is absent
+# Mirrors CI exactly. --ignore=dev/tests/test_similar.py because pixeltable is absent
 # by design (see above); the file would skip itself anyway, this just keeps the
 # output clean.
-python -m pytest -q --ignore=tests/test_similar.py
+python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py
 
 # The Loom ships a pure-logic Node suite. Best-effort: a missing Node toolchain
 # must not fail the whole setup, since the Python side is what most reviews need.

@@ -8,7 +8,7 @@ import path from "node:path";
    127-128). Source guards: where the thread mounts, that it reads only when scrolled to, and
    that one question's press is at most one POST -- the first write that posts words to another
    person. The thread's pure rules are inbox-core.test.js; the server's write rules,
-   tests/test_inbox_comments.py. */
+   dev/tests/test_inbox_comments.py. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8").replace(/\r\n/g, "\n");
