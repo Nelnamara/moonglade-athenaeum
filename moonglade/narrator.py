@@ -1,4 +1,4 @@
-"""moonglade_narrator.py -- the narrator's poke ladder, as a PURE core.
+"""moonglade/narrator.py -- the narrator's poke ladder, as a PURE core.
 
 The gallery's narrator can be poked. What that does is a slow ladder rather than a switch:
 the server keeps a count and a set of clocks per signed-in account, decides whether a poke
@@ -8,7 +8,7 @@ THIS MODULE HAS NO I/O AND READS NO CLOCK. `poke()` takes the instant as a param
 float of epoch seconds for the gaps, and the local calendar day as a string), so a test can
 walk a whole simulated fortnight without sleeping a second. The store that keeps a state
 between calls, the route that carries it, and the earn through the achievement path all live
-in moonglade_gallery.py.
+in moonglade/gallery.py.
 
 WHAT THIS MODULE KNOWS is only the MECHANICS: how many pokes make a stage, how long apart two
 counted pokes must be, what a day allows. It knows NO line of copy. Every line the narrator

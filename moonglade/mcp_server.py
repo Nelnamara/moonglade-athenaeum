@@ -54,7 +54,7 @@ mcp = FastMCP("moonglade-athenaeum")
 # ---------------------------------------------------------------------------
 # PixAI session. The ACCOUNT-acting tools (tag_suggest today; generate / delete /
 # claim on the roadmap) need a live PixAI session, unlike the catalog-only tools.
-# Built exactly as the CLI/web do -- moonglade_backup._make_session(None) resolves
+# Built exactly as the CLI/web do -- moonglade.backup._make_session(None) resolves
 # PIXAI_API_KEY from config.json -- lazily and once, so a session that only ever
 # touches the local catalog never imports the backup module or holds a credential.
 # READ_ONLY in config.json still overrides every mutating path (via _check_read_only

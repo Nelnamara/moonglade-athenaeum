@@ -1,4 +1,4 @@
-"""moonglade_bonjour.py -- optional mDNS / DNS-SD (Bonjour) LAN advertising for the gallery
+"""moonglade/bonjour.py -- optional mDNS / DNS-SD (Bonjour) LAN advertising for the gallery
 server.
 
 Registers an `_http._tcp` service plus a `<name>.local` host record via python-zeroconf, so a
@@ -7,7 +7,7 @@ instead of the owner typing `http://<pc-name>.local:<port>`. The app also owns i
 name (`moonglade.local`) rather than borrowing the PC's.
 
 REACHABILITY ONLY, NEVER TRUST. This changes nothing about authorization: the gallery's login
-gate (`moonglade_gallery._is_authorized_request`) has no loopback bypass, so a device that
+gate (`moonglade.gallery._is_authorized_request`) has no loopback bypass, so a device that
 discovers `moonglade.local` still has to sign in. mDNS only makes the server easier to find.
 
 EVERYTHING HERE IS FAIL-SOFT. `zeroconf` may be absent (it is an optional dependency), the
@@ -115,7 +115,7 @@ class BonjourAdvertiser:
                     addresses=[socket.inet_aton(ip)],
                     port=int(port),
                     # Minimal TXT, mirroring the fixed `X-Moonglade: 1` header's disclosure
-                    # philosophy (moonglade_gallery.py): identity + the entry path only, never the
+                    # philosophy (moonglade/gallery.py): identity + the entry path only, never the
                     # version or the library path -- this is a public-repo app on a shared LAN.
                     properties={"app": "moonglade", "path": "/"},
                     server=server,

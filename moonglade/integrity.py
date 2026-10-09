@@ -1,4 +1,4 @@
-"""moonglade_integrity -- the library integrity pass (Phase A).
+"""moonglade.integrity -- the library integrity pass (Phase A).
 
 Health's tiles are aggregates: a library whose files are EMPTY or TORN still reads green,
 because Health counts a file that exists, whatever is in it. This pass looks at every
@@ -26,7 +26,7 @@ last ran.
                "corrupt": odd-but-valid files exist, and this pass does not decode to prove
                anything. A format it does not recognise is never called suspect.
 
-A broken row that PixAI no longer has (archive-only, moonglade_gallery.is_archive_only) is
+A broken row that PixAI no longer has (archive-only, moonglade.gallery.is_archive_only) is
 LOST: its report line says recoverable "no", because there is nothing left to re-fetch it
 from. Every other broken row says "yes".
 
@@ -45,7 +45,7 @@ a file name cannot forge a Control Panel progress line or a terminal escape.
 PHASE B (Session W, the Archive Integrity Handoff) is the Broken files list in Health, built on
 the report above and kept in its own section at the foot of this file: broken_list() reads the
 report back for the list, and the owner's local marks (Mark lost, Keep as is) live in
-integrity_marks.json beside the reports. The list itself is read-only. The fixes it offers (a
+integrity_marks.json among the library's decisions (_moonglade/decisions/). The list itself is read-only. The fixes it offers (a
 targeted re-download, a thumbnail rebuild) are the two writes at the very foot, one function
 each, with the rules they keep: an archive-only row is refused by the re-download itself, and
 nothing is ever deleted or quarantined.
@@ -577,7 +577,7 @@ def set_mark(out_dir, media_id, mark):
 
 
 def reconciled_at(out_dir):
-    """When the last reconcile (moonglade_backup.run_reconcile_deleted) rewrote the
+    """When the last reconcile (moonglade.backup.run_reconcile_deleted) rewrote the
     archive-only flags, or None before the first stamped one."""
     from moonglade import backup as core                  # lazy, like _write_atomic's
     try:
@@ -699,7 +699,7 @@ def broken_list(out_dir, db_path, avg_bytes=None):
 #                   PixAI no longer has (archive-only) is refused here, from the catalog,
 #                   whatever the caller asked -- it is the only copy anywhere, and this
 #                   function never touches it. READ_ONLY comes next, before any network.
-#                   Then the app's own single-media path (moonglade_backup.resolve_media +
+#                   Then the app's own single-media path (moonglade.backup.resolve_media +
 #                   download; for a video, media_file_gql's fileUrl + download, the way the
 #                   backup's own sync fetches clips), ONE attempt, of the FULL-SIZE file only (never resolve_media's
 #                   thumbnail fallback), into a staging file under gallery/. Only when the new
@@ -846,7 +846,7 @@ def _full_size_url(core, session, row, mid):
 
     A VIDEO is read the way the backup's own sync reads one (review finding 5): /v1/media lists
     no URL for a video, so resolve_media can never find it; the GraphQL media object carries the
-    mp4 itself in `fileUrl` (moonglade_backup.media_file_gql). That file has no thumbnail
+    mp4 itself in `fileUrl` (moonglade.backup.media_file_gql). That file has no thumbnail
     variants -- it is the clip."""
     if str(row.get("is_video") or "") == "1":
         url = (core.media_file_gql(session, mid) or {}).get("fileUrl")

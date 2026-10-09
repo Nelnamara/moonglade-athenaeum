@@ -1,15 +1,15 @@
-"""moonglade_recipes.py -- PixAI recipes: the market, a recipe's page, Mine, Sets, the
+"""moonglade/recipes.py -- PixAI recipes: the market, a recipe's page, Mine, Sets, the
 creator's writes, and the one step that adds `recipeIds` to a generation.
 
 A recipe is PixAI's saved bundle of generation inputs (prompt fragments, LoRAs, images, a
 legacy style code) bound to one model type, published to a market or kept private, and
 applied to a generation by id -- up to ten `recipeIds` per task. Styles became recipes on
 2026-09-26 (DECISIONS 2026-09-28, H3). Everything here rides PixAI's oRPC /v2 REST surface
-through moonglade_backup's transport (`_rest_get` / `_rest_post`), so the suite's offline
+through moonglade.backup's transport (`_rest_get` / `_rest_post`), so the suite's offline
 guards cover it; the schemas are the site's own (see the design note named below).
 
 THE SPEND PATH. `attach_to_built` and `apply_to_params` are what a generation sees from this
-module: the image road in `moonglade_backup.build_request` attaches the ids right after
+module: the image road in `moonglade.backup.build_request` attaches the ids right after
 building the params (before the creativity step-down reads them and before the gate), and
 checks them again after the per-model gate and before the Unlimited Mode check.
 `refusal_from` turns PixAI's 422 RECIPE_UNAVAILABLE /
@@ -107,7 +107,7 @@ def _combination_problem(params):
 
 
 def attach_to_built(params, payload, gated=True):
-    """The FIRST of the image road's two recipe steps (moonglade_backup.build_request): the
+    """The FIRST of the image road's two recipe steps (moonglade.backup.build_request): the
     payload's ids, validated by recipe_ids_from, onto the freshly BUILT params -- right after
     _gen_parameters and BEFORE _shape_creativity, whose recipe step-down (medium -> low,
     low -> off, PixAI's own rule) reads the built params' `recipeIds` and must see them (lane
@@ -130,7 +130,7 @@ def attach_to_built(params, payload, gated=True):
 
 
 def apply_to_params(params, payload, gated=True):
-    """The SECOND recipe step (moonglade_backup.build_request), on the dict the gate
+    """The SECOND recipe step (moonglade.backup.build_request), on the dict the gate
     returned. Returns `params` ITSELF when the payload names no recipe -- so every payload
     without recipes builds the byte-identical dict it always did -- and ITSELF when the ids
     attach_to_built put there are still there, as sent; else a copy carrying `recipeIds`.
@@ -155,7 +155,7 @@ def apply_to_params(params, payload, gated=True):
 
 
 def check_params(params):
-    """The send's backstop (moonglade_backup.submit_generation, after its own gate pass):
+    """The send's backstop (moonglade.backup.submit_generation, after its own gate pass):
     a dict carrying `recipeIds` must carry a well-formed list and none of the combinations
     above. The build already refused all of these; this catches what the backstop gate
     changes late -- a reference it converts into `contextImages` once a /features read that
@@ -175,7 +175,7 @@ CARD_NOTE = ("a free card matched this request; whether it also covers a recipe'
 
 
 def price_verdict(session, params, cost):
-    """The price answer's recipe rule (moonglade_backup._price_answer), for a quote whose
+    """The price answer's recipe rule (moonglade.backup._price_answer), for a quote whose
     parameters carry `recipeIds`: None when the price was read (the card check runs as
     usual), else the whole answer -- PixAI's own refusal when /v2/task-price says RECIPE_*,
     or "couldn't verify". Either way the card check is SKIPPED: a recipe quote nobody could

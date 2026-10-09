@@ -1,4 +1,4 @@
-"""moonglade_curation_io -- the curation sidecar: export the owner's own layer, import it back.
+"""moonglade.curation_io -- the curation sidecar: export the owner's own layer, import it back.
 
 Everything the owner authored lives only in catalog.db: ratings and hand-picked collections on
 the catalog rows, and three tables beside them -- personal_meta (tags, keeper/reject, a note),
