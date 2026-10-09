@@ -15,7 +15,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.0 — Moving Day,
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.1 — Clean Sweep,
   2026-10-08), per the rule at the top of this file.
 
 ---
@@ -26,9 +26,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **The test cleanup** (branch `tests/render`, which carries `tests/cleanup` and `tests/speed`): the
-  repairs, merges and deletes from the test review of 2026-10-05, the two-half parallel run, and the
-  Loom's component-drawing setup with its first converted files. Merges on the owner's boop.
+- Nothing in review.
 
 ## Next — scoped, not started
 

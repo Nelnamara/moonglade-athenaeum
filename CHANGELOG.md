@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.1] - 2026-10-08 — Clean Sweep
+
 ### Fixed
 - **Control Panel, Branding: what you open while a role is still folding shut stays open.** A role's editor finishes closing at the end of its short fold, and that close used to shut an editor opened on another row in the meantime, and the "Go back to the default?" question if you clicked the default picture right after **Use this**. Each row's close now shuts only its own editor, and leaves a question asked during the fold. (2026-10-08)
 
