@@ -169,5 +169,5 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
 Run `python -m pytest -q dev/tests` from the repo root (the suite and its tools live in
 `dev/`) — pure functions, filesystem, catalog, gallery routes, mocked network, embedded-JS
 syntax. `dev/tests/test_similar.py` needs the
-optional `pixeltable` dep and skips itself cleanly without it. The Loom's pure-logic
-modules have their own suite: `node --test` from `loom/`. All must pass before merging.
+optional `pixeltable` dep and skips itself cleanly without it. The Loom has its own
+node suite (its pure logic, plus components drawn with React): `npm ci`, then `npm test`, from `loom/`. All must pass before merging.

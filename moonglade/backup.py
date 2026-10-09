@@ -18099,7 +18099,7 @@ def main():
     ap.add_argument("--verify-library", dest="verify_library", action="store_true",
                     help="read-only integrity pass over every catalogued file: missing, zero-byte, "
                          "missing or empty thumbnails, uncataloged files. Writes "
-                         "integrity_report.csv/.json at the library root and prints a summary, "
+                         "integrity_report.csv/.json to the library's _moonglade/records folder and prints a summary, "
                          "then exit. Changes nothing else.")
     ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
                     help="with --verify-library, also check each file's end structurally "
