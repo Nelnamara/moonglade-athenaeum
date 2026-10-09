@@ -64,7 +64,7 @@ Long sessions get compacted; summaries lose design intent. Standing rule:
 1. **Checkpoint** after every shipped increment (and before starting any new build). **One fact,
    one home — do not write the same status into two files:**
    - **What shipped** → `CHANGELOG.md [Unreleased]`, a dated tagline. Nowhere else.
-   - **Planned/outstanding work** → `dev/ROADMAP.md` (Now / Next / Later, with real context).
+   - **Planned/outstanding work** → `dev/ROADMAP.md` (sorted by what each item waits on, with real context).
      When an item ships, **delete it from ROADMAP** and add the CHANGELOG line — moving it, not
      annotating "done" in place. **The split rule:** the public `dev/ROADMAP.md` is the DEFAULT home
      for every item; `../moonglade-internal/ROADMAP-internal.md` may hold ONLY items matching a
@@ -177,7 +177,8 @@ present — fixes corporate/antivirus HTTPS interception.
 
 ## Module map, functions, catalog schema
 
-Four modules, one shared SQLite catalog, on-disk layout, and the full function/helper
+The `moonglade/` package (the command-line engine, the gallery server and their companion
+modules), the shared SQLite catalog, the on-disk layout, and the full function/helper
 reference all live in **`../moonglade-internal/architecture.md`** — do not restate them here; that's how
 this file drifted (a stale "three-file" table, a wrong function shape) badly enough that
 `dev/tests/test_docs_dont_hardcode_counts.py` had to exist.
