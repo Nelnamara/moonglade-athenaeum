@@ -56,6 +56,9 @@ git tags. Full prose notes for tagged versions live on
 - **The Claude tools fix asks the registration's own Python first.** It writes `-P` only for Python 3.11 or later, says **Fixed** only once the config reads back with the new command, and then asks you to restart Claude. A registration that runs the tools through another program (such as `uv run`), whose Python can't run them, or that names the old file without saying which folder it starts in, is left as it is, and the notice gives the command line to use. (2026-10-07)
 - **The launcher re-points only shortcuts that start the old launcher.** A shortcut whose only fault is its icon is offered in the notice instead, and then only its icon changes. A shortcut Windows won't let you change isn't tried again at every start. (2026-10-07)
 - **On Linux and macOS, edit your service scripts by hand.** A systemd unit, launchd job or cron line that starts `moonglade_gallery.py` or `moonglade_backup.py` needs the new command line; the fixer only looks at Windows and the Claude configs. (2026-10-07)
+- **The library folder can't be the program's own folder.** The Control Panel's library field refuses the install folder, or any folder holding a Moonglade program (its code, its `local` folder or its launcher), with a plain reason, and writes nothing. (2026-10-07)
+- **The Claude tools keep their log lines out of Claude's stream.** A warning (the move's, the catalog's, a crashed thread's) goes to the log file and to stderr only, so it can no longer arrive as a line that isn't JSON. (2026-10-07)
+- **The Desktop shortcut button works in a folder whose name has a curly quote,** and a folder name can no longer run anything: the shortcut is written by the same fixed script the one-click fix uses. (2026-10-07)
 
 ### Under the hood
 - The art pack's manifest moved with the code, to `moonglade/manifest.json`. A pack still called `moonglade.dat` is renamed by itself, and an old `moonglade.dat` beside a pack that works is removed by the app. (2026-10-07)
@@ -81,6 +84,7 @@ git tags. Full prose notes for tagged versions live on
 - **Animated badges without a gray square.** Some animated badges' source art had a flat gray background, which showed as a square behind the medallion once the smaller animations played on a phone. In the new pack they carry real transparency, keeping their glow and any motion past the ring. (2026-10-04)
 - **Broken files: the repair no longer trips over Windows.** When one repair finished its report at the same moment another started, Windows could briefly refuse the report's lock file and the second repair stopped without updating the list. It now waits and tries again. (2026-10-04)
 - **The login companion's role in Branding takes art from 360 px tall**, the size of the pack's own sign-in animation now. (2026-10-04)
+- **The Activity tracker's spinner loses its red fringe.** The old spinner had a red ring outside its gold rim; pack v7 carries a cleaned copy. (2026-10-04)
 
 ### Under the hood
 - The old `/api/next/...` paths are gone. The app reads `/api/library`, `/api/detail/<id>` and `/api/history`, which have answered since 3.17.0, so nothing you see changes; a page left open since before 3.17.0 needs a reload. (2026-10-04)
@@ -114,6 +118,9 @@ git tags. Full prose notes for tagged versions live on
 - **PixAI's current event, one press away.** The gift box shows the events PixAI is running as banner cards that open PixAI's page, one per row across the panel at the banner's own shape, with the event's name in a readable strip underneath rather than on the picture (the phone's Gift box the same); the app never checks in or claims. (#69) (2026-10-04)
 - **The credit ledger's reason chips show as known again.** The Control Panel's PixAI account → Credit ledger drew every reason chip in its "unknown" style, because the app's list of known reasons was spelled differently from what PixAI sends. (2026-10-04)
 - **Free cards about to expire say so.** When a free card you hold expires within three days, the credits chip's CARDS half gets a thin peach underline and its hover lists them first, one line per kind ("5 Tsubaki.3 expire Oct 6 · in 3 days"). (#69) (2026-10-03)
+- **Mark all read in the Inbox.** The ⋯ in the panel's title row marks everything unread on the tab you are on as read, with one write to PixAI, then reads the count back. Read-only mode marks nothing. (2026-10-03)
+- **A generation PixAI's inbox names shows up in Activity.** A finished generation the inbox reports that Activity never saw is added as a done row marked as PixAI's, and a job Activity holds as failed or stalled that PixAI says finished carries a "PixAI says: done" line. Nothing is sent to PixAI. (2026-10-03)
+- **Details opened from an inbox row lands at the comments,** and at the quoted comment when the row quotes one. (2026-10-03)
 
 ### Goal-tile art
 - **Basic training's four goal tiles have pictures.** Step 1 now shows Character, Art style, Outfit and Something else as four square picture tiles in a row, each with its name in a strip underneath (hover for its description), where a glyph stood in since 3.15.0; on the phone each goal's row has a 44 px picture beside its name and description. A tile paints its colour at once with a soft sheen while the picture loads, and stays a flat colour, with no symbol, if it can't. The pictures ship inside the app; an art pack that carries its own wins when installed. (#61) (2026-10-03)

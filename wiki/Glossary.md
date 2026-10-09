@@ -78,7 +78,7 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **The Loom** — the **▰** storyboard for multi-clip video: acts, shots, cast and the reel bar. See
   [The Loom](The-Loom).
 - **the music bed** — one audio file under a whole Loom storyboard, mixed under **▶▶ Play** and
-  **⇩ Render**; kept on your machine, never uploaded. See [The Loom](The-Loom#the-music-bed).
+  **⇧ Render**; kept on your machine, never uploaded. See [The Loom](The-Loom#the-music-bed).
 - **Matrix** — a prompt with several `{a|b}` variables sent as every combination, one picture each
   (at most 24), with one confirm first. The dock's **Random | Matrix** choice. See
   [Generating](Generating#several-at-once-variables-random-and-matrix--and-the-one-confirm).

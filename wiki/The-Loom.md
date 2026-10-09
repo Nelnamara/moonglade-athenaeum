@@ -73,7 +73,7 @@ which act a shot is in and where it falls.
 
 The **top bar** is one row: the open storyboard's **name** with its **▾** (see
 [Storyboards](#storyboards)), the **find in storyboard** field and its chips, **⚡ Draft**, then
-**▶ Generate all** with its cost estimate, **▶▶ Play**, **⇩ Render** and **Export ▾**, and at the far
+**▶ Generate all** with its cost estimate, **▶▶ Play**, **⇧ Render** and **Export ▾**, and at the far
 end the **spent** figure, a goal you have pinned in the Folio, **Activity** and **← Gallery**. On a
 narrow window the bar wraps, but **← Gallery** never sits alone on a row. A banner sits above it;
 **⌄ Hide banner** folds it away and **🖼 Banner** brings it back.
@@ -324,7 +324,7 @@ Other controls in the top bar:
 ### Takes
 
 Every render of a shot is kept as a **take**; nothing is overwritten. The newest take becomes
-the **★ selected** one, and ★ is what **▶▶ Play**, **⇩ Render**, **Export** and the
+the **★ selected** one, and ★ is what **▶▶ Play**, **⇧ Render**, **Export** and the
 [continuity ribbon](#the-continuity-ribbon) use. Under each card the takes strip shows the
 newest six (a **+N** before them counts the older ones) with the ★ one outlined; click another
 to make it ★ — that only chooses, it never renders or prices anything. The line under it reads
@@ -399,7 +399,7 @@ and never uploaded** — nothing about it reaches PixAI. Its waveform sits under
 - A bed longer than the cut ends with the cut, faded out; a shorter one simply ends — it never
   loops.
 
-**▶▶ Play** and **⇩ Render** mix it in, the full bundle carries it, and the edit decision list
+**▶▶ Play** and **⇧ Render** mix it in, the full bundle carries it, and the edit decision list
 lists it as an audio event. **✕** takes it off this storyboard; the file itself stays. Bed files
 are never deleted on their own: when some are no longer on any storyboard, the full view offers
 **Remove…** for exactly those, and asks first. If one of your storyboards won't read (a file torn by a crash, say),
@@ -498,7 +498,7 @@ Shots with no render are left out, and a comment line in the `.edl` lists them. 
 complete on this machine is not put in the zip; a `MISSING.txt` inside it names what's missing.
 Nothing here renders or reaches PixAI. It is a desktop export — the phone layout doesn't offer it.
 
-That menu is for project *files*. The top bar's **⇩ Render** is the video: it trims and
+That menu is for project *files*. The top bar's **⇧ Render** is the video: it trims and
 stitches every finished shot into one 720p mp4 via ffmpeg (with progress, and a Stop
 button).
 

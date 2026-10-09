@@ -40,8 +40,9 @@ Everything is local. `config.json`, `token.txt`, and `pixai_backup/` are git-ign
 Nothing phones home.
 
 **Can I run it on my phone/tablet?**
-Yes — launch the gallery with `--host 0.0.0.0 --https` and open it on your device
-(installable as a PWA). [Select mode](Collections) is touch-friendly.
+Yes — in the Control Panel's **LAN discovery** card set **Reach** to **LAN** and save (the server
+restarts), then open the address the card shows on your device, or scan its QR. For HTTPS, add
+`--https` to `launch_args` in `local\settings.json` beside the launcher. [Select mode](Collections) is touch-friendly.
 
 Right after you sign in on a phone browser that can add the app to its Home Screen, a thin line under
 the gallery's buttons says **Add to Home Screen for full screen ›**. On an iPhone, in Safari, tapping it

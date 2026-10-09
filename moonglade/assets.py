@@ -2,12 +2,12 @@
 version marker, and the fetch job (start, stream+verify+swap, poll).
 
 Placement of the resulting UI moment (Setup Wizard phase vs. standalone) was
-ruled by the owner 2026-08-10 -- see docs/DECISIONS.md. This module is the
+ruled by the owner 2026-08-10 -- see moonglade-internal/DECISIONS.md. This module is the
 engine only, deliberately UI-agnostic: it exposes a start/poll pair any caller
 can drive (the wizard, a standalone boot check, a future settings page).
 
-MANIFEST. moonglade_manifest.json, committed at the app root -- a FEW LINES
-telling every install what container it should have and where to get it:
+MANIFEST. moonglade/manifest.json (moonglade.paths.manifest_path()), committed with the
+code -- a FEW LINES telling every install what container it should have and where to get it:
     {"version": "1", "sha256": "<hex>", "size": <bytes>, "urls": [...]}
 `urls` is an ORDERED mirror list (first that works wins); it may be EMPTY
 during development (no release cut yet) -- fetch then fails cleanly with
@@ -97,11 +97,11 @@ def _write_marker(container_path, manifest):
 
 
 # The pack's file name before pack v7. Only the one-time rename below may name it; every
-# other code path asks moonglade_gallery._container_path() (dev/tests/test_pack_file_name.py).
+# other code path asks moonglade.gallery._container_path() (dev/tests/test_pack_file_name.py).
 LEGACY_NAME = "moonglade.dat"
 
 # Where the rename writes down what it did: a child of the app's own logger, which
-# moonglade_logging lets through to local/logs/moonglade.log at every level. This module's
+# moonglade.logs lets through to local/logs/moonglade.log at every level. This module's
 # own name would not do -- the root ceiling there is WARNING, so the INFO line that says the
 # rename happened would never reach the file.
 _LOG = "moonglade.assets"

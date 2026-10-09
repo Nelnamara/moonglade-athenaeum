@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-moonglade_backup.py  (v4 - media resolution)
+moonglade/backup.py  (v4 - media resolution)
 ================================================
 Bulk-download YOUR OWN PixAI.art generated images. Replays PixAI's persisted
 GraphQL query (listUserTaskSummaries) to page backward through your entire
@@ -70,7 +70,7 @@ from moonglade.gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, lo
                             apply_artwork_views,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
-                            # The one library scan (see moonglade_gallery.py's
+                            # The one library scan (see moonglade/gallery.py's
                             # "LIBRARY SCAN" section) -- imported the same way the
                             # SQLite catalog helpers above are, because the gallery
                             # is the shared base module and this file imports it.
@@ -218,7 +218,7 @@ def set_verbose(on):
 def vlog(msg):
     """Print a diagnostic line prefixed with seconds-since-enabled, but only in
     verbose mode. Writes to stdout so the GUI log pane captures it too. Also
-    always forwarded to the persistent file logger (moonglade_logging), regardless
+    always forwarded to the persistent file logger (moonglade.logs), regardless
     of verbose state, so a run's diagnostics are on record even if -v wasn't
     passed -- this is the one call site touched to give every existing vlog()
     caller file-logging for free, rather than threading a logger through ~100
@@ -248,7 +248,7 @@ CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 def _config_path():
     """config.json's path -- THE call every reader and writer of it makes. The rule lives in
-    moonglade_paths.config_path(): the copy beside the app first, then the current working
+    moonglade.paths.config_path(): the copy beside the app first, then the current working
     directory (same order _load_config() has always read in); if neither exists yet (first
     run / a fresh write), the one beside the app. Kept as this module's function because
     the test suite pins it per test (dev/tests/conftest.py's _isolated_auth_config), so no test
@@ -312,7 +312,7 @@ def _save_config(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Web gallery login accounts -- session-based auth for moonglade_gallery.py's Flask
+# Web gallery login accounts -- session-based auth for moonglade/gallery.py's Flask
 # app (gates EVERY request, local or remote -- there is no localhost bypass; see
 # _is_authorized_request() there).
 # Stored in config.json (the existing convention for secrets -- it already holds
@@ -321,14 +321,14 @@ def _save_config(cfg):
 # werkzeug, timing-safe compare built in; no new pip install, werkzeug already
 # ships with Flask). Account lifecycle used to be CLI-only; as of the web-based
 # bootstrap + Panel Users tab (2026-07-19) it's also reachable from the browser
-# (see moonglade_gallery.py's /login bootstrap POST and /api/users/add|remove) --
+# (see moonglade/gallery.py's /login bootstrap POST and /api/users/add|remove) --
 # --add-web-user / --remove-web-user / --list-web-users remain a valid recovery
 # path. If AUTH_USERS is empty, logging in from the LAN is simply impossible --
 # there is no default/backdoor account, ever.
 #
 # _accounts_lock serializes every read-modify-write of AUTH_USERS (and the
 # atomic check-and-mutate helpers below) against every OTHER thread doing the
-# same, within this one process. moonglade_gallery.py runs `app.run(...,
+# same, within this one process. moonglade/gallery.py runs `app.run(...,
 # threaded=True)`, so two browser tabs/devices hitting /login's bootstrap POST
 # (or the Panel's Add/Remove-user endpoints) concurrently used to run
 # add_or_update_web_user()/remove_web_user()'s _load_config -> mutate ->
@@ -615,7 +615,7 @@ def add_web_user_if_new(username, password):
     resetting a stranger's password -- the whole "does it exist" check and the
     write happen under ONE `_accounts_lock` acquisition, so two concurrent
     requests trying to claim the same brand-new username can never both
-    succeed. Used by the Panel's /api/users/add (moonglade_gallery.py); the plain
+    succeed. Used by the Panel's /api/users/add (moonglade/gallery.py); the plain
     add_or_update_web_user()'s update-or-add semantics stay reserved for the
     CLI's --add-web-user recovery case. Returns True if added, False if the
     username was already taken (nothing written)."""
@@ -699,7 +699,7 @@ def remove_web_user_guarded(username, min_remaining=1):
 def get_web_user_session_epoch(username):
     """Current `sess_epoch` for `username`, or None if the account doesn't exist
     (e.g. removed via --remove-web-user). A session's cookie embeds the epoch that
-    was current at login time; moonglade_gallery.py's _is_authorized_request()
+    was current at login time; moonglade/gallery.py's _is_authorized_request()
     re-checks it against this on every request, so:
       - removing the account invalidates any outstanding session for it immediately
         (this returns None -> no epoch can ever match again), and
@@ -1003,7 +1003,7 @@ def _make_progress(out_dir=None, job_id=None):
 
     When `out_dir` + `job_id` are BOTH given, the terminal-bar callback ALSO appends a
     throttled 'running' progress heartbeat (~once per 1% tick, same throttling as the
-    Control Panel's own _panel_reader) to out_dir/jobs.jsonl via append_job_event. This is
+    Control Panel's own _panel_reader) to the library's jobs.jsonl (_moonglade/records/) via append_job_event. This is
     purely additive -- a side-channel log write -- and never changes what gets printed to
     stdout; it's what lets a bare-terminal run build the same jobs.jsonl activity trail a
     panel-spawned subprocess already gets (the panel logs its OWN job by parsing the
@@ -1052,7 +1052,7 @@ def _make_progress(out_dir=None, job_id=None):
 # tail and collapse by job_id (last event wins; a terminal done/failed never
 # reverts to running). Append-only sidesteps the read-modify-write races a
 # single mutated JSON blob would have across processes. It doubles as a plain
-# debug dump -- open jobs.jsonl and read it. Consumed by moonglade_gallery.py.
+# debug dump -- open jobs.jsonl and read it. Consumed by moonglade/gallery.py.
 # ---------------------------------------------------------------------------
 JOBS_LOG_NAME = "jobs.jsonl"
 JOBS_KEEP = 50                 # show at most this many most-recent jobs
@@ -1061,7 +1061,7 @@ _JOBS_TERMINAL = ("done", "failed", "done_with_errors")
 _JOBS_COMPACT_AT = 2000        # rewrite the raw log once it passes this many lines
 
 # How stale a 'running' job has to be before the ongoing /api/jobs reconciliation
-# sweep (resolve_orphan_jobs, called with min_age=this from moonglade_gallery.py's
+# sweep (resolve_orphan_jobs, called with min_age=this from moonglade/gallery.py's
 # api_jobs()) will re-ask PixAI for its real status. This is a *different* clock
 # from --poll-timeout: --poll-timeout (300s generate / 600s video, see argparse
 # defaults) bounds how long the CLI waits on ONE task it's actively watching --
@@ -1079,7 +1079,7 @@ JOBS_ORPHAN_SWEEP_AGE = 30 * 60
 
 # Serializes the ONE non-append writer of jobs.jsonl (maybe_compact_jobs' whole-file
 # rewrite) against every other thread in this process, exactly like _accounts_lock does
-# for AUTH_USERS and for the same reproduced reason: moonglade_gallery.py runs
+# for AUTH_USERS and for the same reproduced reason: moonglade/gallery.py runs
 # threaded=True, so two /api/jobs polls (two tabs, or the gallery plus the Loom) can both
 # see the log cross _JOBS_COMPACT_AT and start rewriting it at the same moment. Appends
 # don't need this -- they're one "a"-mode line and safe across processes by design.
@@ -1136,7 +1136,7 @@ def append_job_event(out_dir, job_id, status=None, **fields):
 # CLI-side job logging: gives a command run straight from a terminal
 # (python -m moonglade --sync / --update / --generate / ...) the SAME
 # jobs.jsonl activity trail a panel-spawned subprocess already gets from
-# moonglade_gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
+# moonglade/gallery.py's _panel_run/_panel_reader (job_id "panel-<uuid>") and
 # delete_tasks_bulk (job_id "bulkdel-<uuid>") -- this is the "cli-<uuid>" flavor.
 # Deliberately a no-op under the Control Panel itself (MOONGLADE_PROGRESS=1): the
 # panel already logs its OWN "panel-<uuid>" job for that exact subprocess, so
@@ -1378,7 +1378,7 @@ def resolve_orphan_jobs(out_dir, status_fn, min_age=0, now=None):
 # process with its own lifetime that the server knows nothing about, so sweeping one would mark a
 # genuinely-running terminal command as dead. Numeric ids are PixAI generate tasks and belong to
 # resolve_orphan_jobs() instead. "integrity-" is the Broken files list's fix run (a thread in
-# the server, moonglade_integrity.FixRunner).
+# the server, moonglade.integrity.FixRunner).
 _JOBS_SERVER_OWNED_PREFIXES = ("panel-", "import-", "bulkdel-", "integrity-")
 
 
@@ -1531,7 +1531,7 @@ def _quick_count(session, page_size=500):
 # forever.
 #
 # NOT everything gets a client. A pasted API key is validated by hand-building a
-# Session with that key as the sole credential (moonglade_gallery's
+# Session with that key as the sole credential (moonglade.gallery's
 # /api/setup/save-key) precisely BECAUSE the normal path prefers the cached
 # config -- a garbage key once verified because the real cached key answered.
 # `_client_of()` therefore wraps whatever Session it is handed without reading
@@ -2302,7 +2302,7 @@ def resolve_media(session, mid):
             break
     if not chosen and by_variant:
         variant, chosen = next(iter(by_variant.items()))
-    # `variant` says which copy `chosen` is: the Broken files re-download (moonglade_integrity)
+    # `variant` says which copy `chosen` is: the Broken files re-download (moonglade.integrity)
     # must never take a THUMBNAIL fallback for an original. Every other caller ignores it.
     info = {"width": obj.get("width"), "height": obj.get("height"),
             "type": obj.get("type", ""), "variant": variant}
@@ -2601,7 +2601,7 @@ def task_detail_gql(session, task_id, retries=3, timeout=60):
     `timeout` is the per-attempt socket timeout, handed straight to the transport. A
     caller under a wall-clock ceiling passes the time it has left rather than letting a
     stalled read run out the transport's own 60s (the delete preview's live check does
-    exactly that -- moonglade_gallery.py's DELETE_PREVIEW_LIVE_BUDGET_S).
+    exactly that -- moonglade/gallery.py's DELETE_PREVIEW_LIVE_BUDGET_S).
 
     RETRIED with backoff -- the same 3-retry shape `gql_adhoc` gives any query -- because a
     single blip here is read downstream as a LOST GENERATION. The moment that matters is the
@@ -2902,7 +2902,7 @@ def delete_task_gql(session, task_id):
 #: deletedAt stamp when it turned out to be one of those. `keep_media_deleted_at` carries WHEN
 #: PixAI deleted each of `keep_media`, as (media_id, deletedAt) pairs -- so a caller holding a
 #: catalog can record the fact off the read this plan already made, rather than making a
-#: second one (moonglade_gallery's /api/delete-image does exactly that). `artwork_ids` is the
+#: second one (moonglade.gallery's /api/delete-image does exactly that). `artwork_ids` is the
 #: task's published artworks off that same read (getTaskById's `artworkIds`), or None when the
 #: read did not carry the field -- None is "not known", never "not published". PixAI's own
 #: contract says its task delete also deletes the task's linked artwork, so the whole-task
@@ -4424,7 +4424,7 @@ def resolve_model_base_id(session, model_version_id):
     own re-resolve flow) actually wants, distinct from the VERSION id a submitted task uses
     and so the catalog's `model_id` column stores (api_generate resolves `args.model` to a
     VERSION id before submit; every catalog write path follows the same convention -- see
-    moonglade_gallery.py's api_generate and this module's own catalog-row builders).
+    moonglade/gallery.py's api_generate and this module's own catalog-row builders).
 
     Needed by the gallery's Runs-reel reuse-prefill (2026-08-02): it only has a run's
     catalog row, so it must ask PixAI 'what model is this a version of' before it can feed
@@ -4627,7 +4627,7 @@ def _with_batch_position(fm, media_id):
     ordinary case is the DELETE path: whenever the app reads a task back from PixAI for a
     delete -- the confirm dialog's question, the delete itself, and the Actions dropdown's
     bulk delete -- it stamps the row of every batch member that answer reports deleted
-    (moonglade_gallery's /api/delete-image, and _rows_the_bulk_purge_must_keep).
+    (moonglade.gallery's /api/delete-image, and _rows_the_bulk_purge_must_keep).
 
     IT IS NOT ONLY HAND-RUN ANY MORE (2026-09-06, the living library). --backfill-full-meta
     is a STEP OF --sync (see the CLI's --sync handler: run_download, then this backfill,
@@ -4897,7 +4897,7 @@ def build_catalog_row(media_id, *, fm=None, known=None,
 
     Sites: SV=run_sync_videos, IMP=run_import_local, GEN=run_generate,
     VID=_download_video_task, IMG=_download_image_task, EDIT=run_edit_image,
-    LOOM=moonglade_gallery's /api/loom/import-bundle."""
+    LOOM=moonglade.gallery's /api/loom/import-bundle."""
     row = {f: "" for f in CATALOG_FIELDS}
     row.update({
         "task_id": task_id, "media_id": media_id, "filename": filename, "url": url,
@@ -4987,7 +4987,7 @@ def cmd_convert_existing(args, out):
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 
-# The bucket classifier is `moonglade_gallery.bucket_of` -- the LIBRARY SCAN
+# The bucket classifier is `moonglade.gallery.bucket_of` -- the LIBRARY SCAN
 # section's one copy. This alias keeps the private name every caller (and
 # dev/tests/test_dedup.py's `core._bucket_of` assertions) already uses.
 _bucket_of = bucket_of
@@ -6995,7 +6995,7 @@ def run_sync_artworks(args):
     # business touching at all. It is the same lost-update class the September carry fixes
     # closed for the download writers, still open here because this function predates them.
     #
-    # apply_artwork_meta (moonglade_gallery) is the row-level twin the sweep already uses:
+    # apply_artwork_meta (moonglade.gallery) is the row-level twin the sweep already uses:
     # one UPDATE per artwork actually seen, of exactly the eleven PixAI-owned columns
     # extract_artwork_meta fills, keyed by media_id. Rows this sync never saw are not
     # written at all, so they cannot be reverted; a locally-authored column is not in the
@@ -7294,8 +7294,8 @@ def _under(path, parent):
 # better message.
 #
 # The gallery reaches this section as `core.<name>` through a function-body
-# `import moonglade_backup as core` -- module scope would be an import cycle,
-# since this module imports moonglade_gallery at the top.
+# `from moonglade import backup as core` -- module scope would be an import cycle,
+# since this module imports moonglade.gallery at the top.
 
 NO_WINDOW = _NO_WINDOW   # re-exported: no caller of this section reaches for the raw constant
 
@@ -7552,7 +7552,7 @@ def video_poster_thumb(video_path, thumb_path):
     fallback for i2v videos with no still-frame poster.
 
     Thin delegate: the ONE ffmpeg-extract implementation lives in
-    moonglade_gallery.make_video_thumbnail (which build_thumbnails' poster-less
+    moonglade.gallery.make_video_thumbnail (which build_thumbnails' poster-less
     fallback also uses) -- two copies of this wheel WILL drift. The availability
     guard stays here because import-local and sync-videos gate on it."""
     if not ffmpeg_path():
@@ -12125,7 +12125,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     params = _gen_parameters(args)
     adjusted = args.clamped
     # Recipes, step 1 (lanes w2-recipes x w2-gen): the payload's `recipeIds`, validated by
-    # moonglade_recipes.recipe_ids_from, onto the BUILT params HERE -- before the creativity
+    # moonglade.recipes.recipe_ids_from, onto the BUILT params HERE -- before the creativity
     # step-down below reads them (w2-gen review S3) and before the gate. Refuses a malformed
     # list, a gateless road, and recipes beside context images or on the Upscale road.
     # Returns `params` itself when the payload names none. Design:
@@ -12206,8 +12206,8 @@ def _shape_creativity(params, level, rs, version_id, adjusted):
     own builder does (task-*.js). Both are receipt entries. The recipe step lives HERE, at
     build, because the gate must stay idempotent; it reads the BUILT params' recipeIds, so it
     fires only when recipes are really sent (review S3). build_request attaches them before
-    this runs (moonglade_recipes.attach_to_built), and they are read here through the same
-    parser, moonglade_recipes.recipe_ids_from (recipes review finding 6)."""
+    this runs (moonglade.recipes.attach_to_built), and they are read here through the same
+    parser, moonglade.recipes.recipe_ids_from (recipes review finding 6)."""
     if rs.features is None:
         return
     feats = rs.features(version_id)
@@ -14566,7 +14566,7 @@ async def _watch_events_async(auth_header, on_event, seconds):
     silent (see `_WS_STALE_TIMEOUT`'s comment for why that happens and how the
     number was picked). WatchStaleError is just another exception out of this
     coroutine, so any caller that already reconnects on failure -- `_watch_loop`
-    in moonglade_gallery.py's outer while-True/backoff, and `run_watch` below's own
+    in moonglade/gallery.py's outer while-True/backoff, and `run_watch` below's own
     try/except -- handles it for free with no special-casing needed at the call
     site; it exists only so a caller that WANTS to tell "went stale" apart from
     "socket errored" can."""
@@ -14713,7 +14713,7 @@ _CONTEST_PAGE_SIZE = 50
 # board's own `totalPage`; this ceiling only bounds a board that keeps growing -- it was a bare
 # 6, and the 2026-09-26 board already answered totalPage 7 at 50 a page (330 contests), so the
 # oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
-# (moonglade_gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
+# (moonglade.gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
 # paced requests.
 _CONTEST_MAX_PAGES = 20
 _CONTEST_PAGE_PAUSE = 0.35
@@ -15550,7 +15550,7 @@ _PRICE_NESTED = frozenset((
 def _task_price_query(session, params):
     """THE /v2/task-price query for `params`: the backstop gate (so the quote prices the
     shape that will be sent), then the allowlists above. {} when there is nothing to price,
-    None when the gate refuses. Shared by price_task and moonglade_recipes.price_refusal, so
+    None when the gate refuses. Shared by price_task and moonglade.recipes.price_refusal, so
     the second read that asks WHY a recipe quote failed cannot ask about a different
     request than the one that failed."""
     if not params:
@@ -15673,7 +15673,7 @@ def run_suggest_prompt(args):
 
     PixAI's suggest-prompt endpoint is image-only and 500s on a video; the web gallery
     already hides the "Suggest prompt" button for a video row (`row.is_video != '1'`
-    in moonglade_gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
+    in moonglade/gallery.py). Mirror that same gate here (B18 residual) so the CLI refuses
     early with a clear message instead of surfacing that raw 500."""
     src = (getattr(args, "suggest_prompt", "") or "").strip()
     if not src:
@@ -16929,9 +16929,9 @@ def run_backfill_lineage(args):
 
 def run_backfill_phash(args):
     """--backfill-phash: compute a perceptual difference-hash (compute_dhash(), a 64-bit
-    dHash -- see its docstring in moonglade_gallery.py) for every catalog row missing
+    dHash -- see its docstring in moonglade/gallery.py) for every catalog row missing
     one. IMAGE ROWS ONLY: is_video='1' rows are skipped by design -- the near-duplicate
-    tier this feeds (near_duplicate_groups(), moonglade_gallery.py) is scoped to images,
+    tier this feeds (near_duplicate_groups(), moonglade/gallery.py) is scoped to images,
     matching the same image-only scope every other duplicate tier already has.
 
     Purely local, CPU-bound Pillow work -- no network call, so --delay/politeness pacing
@@ -17125,7 +17125,7 @@ def run_download(args, progress=None):
             # the file but not to write it) must NOT count as "already done" here --
             # indexing it means it is skipped FOREVER: no --update/--sync ever
             # re-attempts a media_id already in this index, and
-            # reconcile_catalog_with_disk's strict matcher (moonglade_gallery.py) finds
+            # reconcile_catalog_with_disk's strict matcher (moonglade/gallery.py) finds
             # nothing wrong either, so the row's filename is left pointing at a dead
             # file with no signal to the user. A stat() race (size is None) is treated
             # as fine, matching prior behaviour -- we can't tell either way, and this
@@ -17665,7 +17665,7 @@ def run_list_web_users(args):
 
 def main():
     # prog: the usage line names the command as it is typed (3.20), whether it came in by
-    # `python -m moonglade` or through the root moonglade_backup.py stand-in.
+    # `python -m moonglade` or as the code folder, `python "<app folder>\moonglade"`.
     ap = argparse.ArgumentParser(prog="python -m moonglade",
                                  description="Back up your own PixAI gallery.")
     ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
@@ -18099,7 +18099,7 @@ def main():
     ap.add_argument("--verify-library", dest="verify_library", action="store_true",
                     help="read-only integrity pass over every catalogued file: missing, zero-byte, "
                          "missing or empty thumbnails, uncataloged files. Writes "
-                         "integrity_report.csv/.json at the library root and prints a summary, "
+                         "integrity_report.csv/.json to the library's _moonglade/records folder and prints a summary, "
                          "then exit. Changes nothing else.")
     ap.add_argument("--verify-deep", dest="verify_deep", action="store_true",
                     help="with --verify-library, also check each file's end structurally "
@@ -18304,7 +18304,7 @@ def main():
             cmd_audit(args, out)
             return
         if getattr(args, "verify_library", False):
-            # Read-only (moonglade_integrity.py): no _check_read_only, nothing to gate.
+            # Read-only (moonglade/integrity.py): no _check_read_only, nothing to gate.
             from moonglade import integrity as moonglade_integrity
             _job = _cli_job_start(out, "Verify library integrity")
             try:
@@ -18316,7 +18316,7 @@ def main():
             _cli_job_finish(out, _job)
             return
         if getattr(args, "export_curation", None) is not None:
-            # Local catalog only (moonglade_curation_io.py); no PixAI call.
+            # Local catalog only (moonglade/curation_io.py); no PixAI call.
             from moonglade import curation_io as moonglade_curation_io
             moonglade_curation_io.run_export_cli(out, db_path, args.export_curation)
             return

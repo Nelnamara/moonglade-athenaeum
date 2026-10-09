@@ -1,4 +1,4 @@
-"""moonglade_inbox.py -- Sessions R + Y (2026-10-03): PixAI's inbox, a published work's
+"""moonglade/inbox.py -- Sessions R + Y (2026-10-03): PixAI's inbox, a published work's
 comment thread and the owner's replies to it, PixAI's gifts, the free cards about to expire
 and the event PixAI is running now.
 

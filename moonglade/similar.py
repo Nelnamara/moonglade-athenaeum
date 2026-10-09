@@ -268,7 +268,7 @@ def scan_dir(root, cap=None):
     """Helper: yield (media_id, path) for every embeddable image under root
     (media_id = INVARIANT 1). For bootstrap builds off the organized backup tree.
 
-    The similarity index's view of the ONE library scan (moonglade_gallery.py's
+    The similarity index's view of the ONE library scan (moonglade/gallery.py's
     "LIBRARY SCAN" section). It asks for two things the other nine walkers do not:
 
       * kinds=("embeddable",) -- {.png,.jpg,.jpeg,.webp}, deliberately NARROWER

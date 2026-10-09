@@ -1,11 +1,11 @@
-"""moonglade_contest_wins.py -- Session L, item L3: contest wins, VERIFIED.
+"""moonglade/contest_wins.py -- Session L, item L3: contest wins, VERIFIED.
 
 A win is a fact PixAI states, never one the app takes on trust. This is the pure half of the
 feature: what counts as a win, when the automatic check is due, how a pasted link is read and
 how a miss is worded. It has no I/O, reads no clock (every function that needs "now" takes
 it), and imports nothing from the app, so a test can walk a whole simulated fortnight without
 sleeping a second. The store it edits (a plain dict inside telemetry.json), the network read,
-the scheduler tick and the routes live in moonglade_gallery.py.
+the scheduler tick and the routes live in moonglade/gallery.py.
 
 WHAT THE PROBE ESTABLISHED (moonglade-internal/probes/PROBE_2026-09-29_contest-results-l3.md,
 and its read-only addendum): `GET /v2/contest/{slug}/winners` answers ONE unpaged list. Each
@@ -83,7 +83,7 @@ def _to_int(v, default=0):
 
 def entry_of(row):
     """The row's placement block as `{rank, prize, source}`, or None when the row has none.
-    Reads the mapped `entry` (moonglade_backup._contest_rows keeps `contest.entry` there);
+    Reads the mapped `entry` (moonglade.backup._contest_rows keeps `contest.entry` there);
     `rank` comes back as an int or None, never coerced."""
     ent = (row or {}).get("entry")
     if not isinstance(ent, dict):

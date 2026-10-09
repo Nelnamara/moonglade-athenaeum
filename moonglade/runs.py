@@ -1,4 +1,4 @@
-"""moonglade_runs.py -- Session M (Generate power tools): the prompt template, the Runs store,
+"""moonglade/runs.py -- Session M (Generate power tools): the prompt template, the Runs store,
 the Inspector's secret stripping and Copy as CLI.
 
 WHAT A RUN IS. A send of more than one generation from the Generate dock: a plain batch x2-4
@@ -20,13 +20,13 @@ This module is the pure half and the store:
                                        both to one set of answers, so the preview the dock
                                        draws is the set of jobs the server sends.
   run_digest                           what the acknowledgement is checked against.
-  RunsStore                            runs.db beside catalog.db: a run's template, vars,
+  RunsStore                            runs.db in the library's _moonglade/records/: a run's template, vars,
                                        each job's state and the exact request it sent.
   strip_secrets                        what the Inspector may show (NOTES 7).
   cli_command                          Copy as CLI: the REAL command and flags (Settled 1).
 
-Nothing here talks to PixAI. The sender is moonglade_backup.send_run (the spend choke), and
-the routes are moonglade_gallery's /api/generate/plan, /run, /runs/<id> and /request/<id>.
+Nothing here talks to PixAI. The sender is moonglade.backup.send_run (the spend choke), and
+the routes are moonglade.gallery's /api/generate/plan, /run, /runs/<id> and /request/<id>.
 """
 import hashlib
 import json
@@ -581,7 +581,7 @@ def strip_secrets(obj, redact=None):
 
 
 # ---------------------------------------------------------------------------------------
-# The Runs store (NOTES 3): runs.db in the library folder, beside catalog.db
+# The Runs store (NOTES 3): runs.db among the library's records (_moonglade/records/)
 # ---------------------------------------------------------------------------------------
 
 RUNS_DB = "runs.db"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-moonglade_gallery.py
+moonglade/gallery.py
 ================
 Local Flask web gallery for your PixAI backup collection.
 
@@ -275,7 +275,7 @@ def init_db(db_path):
     con.close()
 
 
-# The video engines that publish a numeric version id: moonglade_backup.VIDEO_MODELS' non-empty
+# The video engines that publish a numeric version id: moonglade.backup.VIDEO_MODELS' non-empty
 # `model_id`s, copied here because this module is the base the backup module imports (it cannot
 # import them back at load time). dev/tests/test_video_tsubaki.py fails if the two drift.
 # v3.0.1 and v2.7 have no id and are deliberately absent -- their rows keep the name.
@@ -474,7 +474,7 @@ _MIGRATIONS = [
 #                        per resolved path, so calling it is free after the first.
 #
 # LAZY SAFETY IS THE CONTRACT. Every entry point that touches the catalog -- the
-# web app, the CLI through _ensure_db, moonglade_mcp.py, moonglade_similar.py,
+# web app, the CLI through _ensure_db, moonglade/mcp_server.py, moonglade/similar.py,
 # save_catalog, and any test that calls a helper straight at a fresh tmp db --
 # used to be migrated implicitly by _connect, and still is: the FIRST catalog()
 # for a given path in this process runs migrate() for it. No entry point has to
@@ -1079,7 +1079,7 @@ def loom_render_ids(out_dir):
 # rulings 6-8 and 15; review F18/F19/N2). Pure helpers here; the routes are in create_app.
 #
 # A bed is one local audio file per storyboard, stored content-addressed at
-# out_dir/loom/_beds/<account key>/<sha1>.<ext> -- never uploaded, never sent to PixAI, and
+# out_dir/_moonglade/loom/_beds/<account key>/<sha1>.<ext> -- never uploaded, never sent to PixAI, and
 # never deleted automatically (an explicit, confirmed sweep of beds no board of the account
 # references is offered instead). Its name is the sha1 of its bytes, so a duplicated board
 # shares it and an imported bundle's bed is RE-HASHED on arrival, never trusted by name.
@@ -1122,7 +1122,7 @@ LOOM_EXPORT_SWEEP_AGE_S = 3600
 
 # THE CONTINUITY RIBBON'S FRAMES (Session P, P9; review F18). GET /api/loom/frame extracts ONE
 # small still from a local clip -- ffmpeg on this machine, never an upload, never PixAI -- and
-# keeps it in out_dir/loom/_frames/ as <mid>_<frame>.png, the time quantised to a 24 fps frame
+# keeps it in out_dir/_moonglade/loom/_frames/ as <mid>_<frame>.png, the time quantised to a 24 fps frame
 # so a trim dragged across a second makes at most 24 files, not one per float. The cache is
 # capped by count and by bytes, least-recently-used first, swept on every write; only files of
 # exactly this name shape are ever swept (the ✂ splice's own <mid>_last.png is not).
@@ -1580,7 +1580,7 @@ def remove_from_collection(db_path, media_ids, name):
 #
 # WHERE THINGS LIVE, and the fact the whole session hangs on: the app's "collections" are
 # LOCAL. A collection is nothing but a label in the comma-joined `catalog.collections`
-# column (moonglade_gallery.add_to_collection above); PixAI has no part in it and nothing in
+# column (moonglade.gallery.add_to_collection above); PixAI has no part in it and nothing in
 # this block reaches the network. Hand-picked membership stays there, unchanged. Two new
 # tables (see _MIGRATIONS) hold the rest:
 #   smart_collections  a saved SEARCH -- the query is stored, the membership never is; it is
@@ -2124,7 +2124,7 @@ def curate_apply(db_path, media_ids, op):
 
 def curation_rows(db_path):
     """The owner's whole curation layer as plain rows, for the curation sidecar export
-    (moonglade_curation_io.py): {catalog: rows carrying a rating or a collection label,
+    (moonglade/curation_io.py): {catalog: rows carrying a rating or a collection label,
     personal: every personal_meta row, smart: every smart collection, order: every manual
     position by name then position}. Read-only."""
     with catalog(db_path) as con:
@@ -2584,7 +2584,7 @@ def myart_coverage(db_path):
 
     `artworks` is the population myart_items() returns: catalog rows carrying an
     artwork_id. `media` is the whole catalog. artwork_id and is_published are written
-    EXCLUSIVELY by --sync-artworks (moonglade_backup.py's run_sync_artworks), so a
+    EXCLUSIVELY by --sync-artworks (moonglade/backup.py's run_sync_artworks), so a
     catalog holding media with zero artworks has simply never been synced -- a state the
     rows alone cannot distinguish from a genuinely unpublished library, which is exactly
     the silence the empty state used to answer with.
@@ -2689,7 +2689,7 @@ def apply_artwork_meta(db_path, metas):
     The row-level twin of --sync-artworks' merge step, and the reason the periodic
     living-library sweep is cheap enough to run every fifteen minutes: run_sync_artworks
     reads the WHOLE catalog into memory, edits the matched rows and upserts every row
-    back (`load_catalog` -> `save_catalog`, moonglade_backup.py). That is correct but it
+    back (`load_catalog` -> `save_catalog`, moonglade/backup.py). That is correct but it
     rewrites ~36k rows to touch a handful. This writes only the rows the sweep actually
     saw, only the eleven PixAI-owned columns above, and never invents a row: a media_id
     with no catalog row (an artwork whose image was never downloaded) simply matches
@@ -2885,9 +2885,9 @@ def recent_train_task_page(db_path, limit=18, before=None, q=""):
 
 
 class TrainGuard:
-    """The two spend guards the training routes keep ON DISK (train_guard.json in the library
-    folder), so neither a restart nor a second tab can clear them (spend review 2026-09-28,
-    findings 1 and 2; BUILD-w3-train.md section 7).
+    """The two spend guards the training routes keep ON DISK (train_guard.json among the
+    library's records, _moonglade/records/), so neither a restart nor a second tab can clear
+    them (spend review 2026-09-28, findings 1 and 2; BUILD-w3-train.md section 7).
 
       * BASIC START: a Basic run has no task id until PixAI creates it, so the per-task lock
         cannot cover it. The guard is keyed on what the run IS (base, dataset, name), checked
@@ -3554,7 +3554,7 @@ def fold_series_units(rows_min, by_task):
 # stats (read-only, no spend). Earning an epic tier unlocks a cosmetic skin
 # (a CSS-variable palette swap in the browser). State (which unlocks the user
 # has already been *toasted* for, plus the active skin) persists to
-# out_dir/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
+# out_dir/_moonglade/records/achievements.json. See ACHIEVEMENTS/SKINS below for the catalog.
 # ---------------------------------------------------------------------------
 # ACHIEVEMENTS roster: SEALED into the art pack (see _sealed_defs below). Read via _roster().
 
@@ -3635,7 +3635,7 @@ def _derive_sealed(defs):
     defs.setdefault("skin_unlock", {})
     defs.setdefault("ach_criteria", {})
     defs.setdefault("ladder_tracks", [])
-    # The narrator's poke lines (moonglade_narrator.clean_pools' shape). Carried whole from
+    # The narrator's poke lines (moonglade.narrator.clean_pools' shape). Carried whole from
     # the pack like the roster; a pack that has none leaves the narrator on its neutral line.
     if not isinstance(defs.get("poke_lines"), dict):
         defs["poke_lines"] = {}
@@ -3671,9 +3671,9 @@ def _poke_lines():    return _sealed_defs()["poke_lines"]      # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
-# owner's own cut marks in out_dir/branding/marks/, chosen + animated from the
-# Control Panel. branding.json = {"mark": "mark_4", "anim": "classic"}. The
-# favicon is a plain file (branding/favicon.png); the double-click launcher
+# owner's own cut marks in the art tree's marks/ (branding_root()), chosen + animated from the
+# Control Panel. settings.json's branding = {"mark": "mark_4", "animation": {"anim": "classic", ...}}.
+# The favicon is a plain file (served at /branding/favicon.png); the double-click launcher
 # icon is a Desktop .lnk whose icon we point at a mark's .ico (a .pyw can't
 # carry its own icon -- the shortcut can).
 
@@ -3688,7 +3688,7 @@ MARK_ANIMS = ["classic", "sheen", "glow", "shine", "aurora", "twinkle", "shoot",
               "eclipse", "mist", "prism", "moondust", "none"]
 # Retired by the same workshop. A stored pick of one of these is NOT an error: it
 # renders as classic (load_branding's own validation does that), the picker stops
-# offering it, and nothing has to migrate branding.json.
+# offering it, and nothing has to migrate settings.json's branding.
 MARK_ANIMS_RETIRED = ("halo", "breathe", "tilt", "float", "orbit", "ripple")
 
 # The owner-tunable animation settings the workshop asked for ("There should be a
@@ -3752,7 +3752,7 @@ def branding_root():
     requesting the friendly /branding/<role>/... URLs and the serve route
     translates once at the boundary (_public_rel_to_coded below).
 
-    The path itself is moonglade_paths.art_root(), the one place app-root paths are derived.
+    The path itself is moonglade.paths.art_root(), the one place app-root paths are derived.
     The machine files that used to be this folder's siblings by derivation (the pack, the
     branding picks, the icons) live in local/ instead (moonglade.paths, moonglade.settings),
     so the art tree and they can move separately."""
@@ -3898,9 +3898,9 @@ def _public_rel_to_coded(rel):
 
 # ---------------------------------------------------------------------------
 # The asset container -- loose-then-container resolution (2026-08-10,
-# docs/DECISIONS.md "The asset container, re-scoped from scratch").
+# moonglade-internal/DECISIONS.md "The asset container, re-scoped from scratch").
 #
-# moonglade.mgpack, the art pack (moonglade_container.py's custom format; built by
+# moonglade.mgpack, the art pack (moonglade/container.py's custom format; built by
 # dev/tools/build_container.py, delivered as a GitHub Release asset, never
 # committed) carries the app's DEFAULT branding so a fresh install is fully
 # dressed while branding/ itself stays empty -- that emptiness is a shipped
@@ -3924,11 +3924,11 @@ def _public_rel_to_coded(rel):
 # ---------------------------------------------------------------------------
 def _container_path():
     """THE path of the art pack, `moonglade.mgpack` (pack v7; `.mgpack` so Explorer can give it
-    a type of its own): local/moonglade.mgpack (moonglade_paths.local_path()), not the art
+    a type of its own): local/moonglade.mgpack (moonglade.paths.local_path()), not the art
     tree's parent. Every code path that reads, fetches, checks or builds the pack asks this;
-    its `.version` marker is derived from it (moonglade_assets._version_marker_path). The
+    its `.version` marker is derived from it (moonglade.assets._version_marker_path). The
     pack's pre-v7 name is read only by the one-time rename the move runs
-    (moonglade_assets.migrate_legacy_name, from moonglade.migrate)."""
+    (moonglade.assets.migrate_legacy_name, from moonglade.migrate)."""
     return _paths.local_path(_paths.PACK_NAME)
 
 
@@ -4080,7 +4080,7 @@ def _ranged_bytes_response(response_class, raw, mime):
 
 
 # ---------------------------------------------------------------------------
-# The bundle's unlock split, ENFORCED at the serving layer (docs/DECISIONS.md
+# The bundle's unlock split, ENFORCED at the serving layer (moonglade-internal/DECISIONS.md
 # "The bundle's unlock split" 2026-07-27 + the "Mascots-in-Branding" correction
 # 2026-08-06): achievement-bound art -- badge masters, the per-achievement
 # mascot poses under mascots/ach/, the rewards/ tree, the easter-egg ee_* assets --
@@ -4587,7 +4587,7 @@ def _mark_unlock_for(mid):
 # 4:1 banners as a real, written-through slot.
 #
 # mascots/rewards were REMOVED from this tuple 2026-08-13, enforcing the bundle's
-# unlock split (docs/DECISIONS.md 2026-07-27 + the 2026-08-06 mascots correction):
+# unlock split (moonglade-internal/DECISIONS.md 2026-07-27 + the 2026-08-06 mascots correction):
 # the Branding surface reaches banners + marks only. rewards/ is achievement data,
 # and mascots' customization ships later as a named-role checklist over an
 # owner-curated SELECTION of system roles -- not a pick-one-active gallery, and not
@@ -4784,7 +4784,7 @@ def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
 
 def load_slot_active(out_dir):
     """Which uploaded asset (by id) is the ACTIVE one per slot -- the same
-    relationship branding.json's own "mark" field already has to list_marks():
+    relationship settings.json's branding "mark" already has to list_marks():
     many stored, one worn. Self-heals exactly like load_branding() does for
     "mark": a recorded active id that no longer exists on disk (deleted file,
     corrupt manifest) falls back through resolve_slot_active() above, which is
@@ -5461,7 +5461,7 @@ def branding_role_restore(out_dir, slot, key):
     return {"slot": slot, "key": key, "removed": removed, "role": _role_payload(out_dir, slot)}, 200
 
 
-# The raw-drop path (docs/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
+# The raw-drop path (moonglade-internal/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
 # a fresh install ships the branding slot folders EMPTY, and a raw PNG/JPEG
 # placed by hand into one of the four adopt folders is ADOPTED into that slot by
 # the app itself -- no marks.json to hand-author, no upload UI, no authenticated
@@ -7498,7 +7498,7 @@ _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [
 # per app folder it has been pointed at. A dict of named snapshots rather than a
 # bare map, so a second detector can never have to rename the first one's key.
 #
-# `contest_results` is the other structured section (L3, moonglade_contest_wins.py): the
+# `contest_results` is the other structured section (L3, moonglade/contest_wins.py): the
 # VERIFIED contest wins ({"wins": {contest_id: {artwork_id: record}}}) and the schedule of the
 # automatic win check ({"checks": {contest_id: row}}). The contest-win metric counts `wins`
 # and nothing else; the flat `contest_win_keys` set an older sweep wrote is left in place,
@@ -7830,7 +7830,7 @@ def telemetry_metrics(out_dir, telem=None):
     # VERIFIED wins only (L3). `contest_win_keys` is what the old sweep wrote when a winners
     # row merely carried this account's authorId: no artwork id, no tier, no receipt. That set
     # is kept on disk but no longer counted; a win counts once a check has matched the entry's
-    # artwork id to a row with an integer rank (moonglade_contest_wins.verify).
+    # artwork id to a row with an integer rank (moonglade.contest_wins.verify).
     _cres = d.get("contest_results")
     m["contest_wins"] = contest_wins.verified_count(
         _cres.get("wins") if isinstance(_cres, dict) else None)
@@ -7949,7 +7949,7 @@ def first_sync_complete(out_dir, db_path, telem=None):
     (owner report): --sync used to set it on EVERY exit, so a first backup stopped
     part-way plus a two-page Sync claimed a finished first sync over a mostly-empty
     library. It is now set only once that library's walk has reached the end of history
-    (moonglade_backup.WALK_END_FLAG), so this gate says what its name says.
+    (moonglade.backup.WALK_END_FLAG), so this gate says what its name says.
 
     Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
     prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
@@ -8202,7 +8202,7 @@ def _contest_sync_kick(out_dir, force=False):
 # --- verified contest wins (L3) ------------------------------------------------------
 # A contest win is a fact PixAI states, so it is recorded only when PixAI's own winners list
 # says so: the entry's artwork id is in the list, its `entry.rank` is an integer, and the
-# author is this account. The rules live in moonglade_contest_wins.py (pure, tested); this is
+# author is this account. The rules live in moonglade/contest_wins.py (pure, tested); this is
 # the part that reads and writes.
 #
 #   * THE AUTOMATIC CHECK (contest_win_pass). For each contest the account entered, per the
@@ -8288,7 +8288,7 @@ def contest_win_refresh(out_dir, board, now=None):
 def contest_win_pass(out_dir, now=None, pause=None):
     """ONE automatic pass. Returns {ran, checked, recorded, errors} (for the log and the tests).
 
-    Decided from the local record first (moonglade_contest_wins.plan_pass): nothing due and
+    Decided from the local record first (moonglade.contest_wins.plan_pass): nothing due and
     nothing to seed means no network at all. Otherwise the contest board is read ONCE (the
     memoized snapshot every contest surface shares) to give new contests their schedule and
     to learn each due contest's rewardStatus, and then each due contest's winners list is
@@ -8412,7 +8412,7 @@ def contest_win_check(out_dir, body, now=None):
     `contest_id` (a contest from the account's own entries) and `slug` (a contest typed in).
     The artwork read the app already has does not carry the artwork's contest, so the contest
     comes from the row's pick, a contest link, a typed slug, or the contest the app recorded
-    the linked artwork in -- in that order (moonglade_contest_wins.plan_manual). Then ONE GET
+    the linked artwork in -- in that order (moonglade.contest_wins.plan_manual). Then ONE GET
     of that contest's winners. A miss says what did not match; nothing is recorded on a miss.
     """
     from moonglade import backup as core
@@ -8545,7 +8545,7 @@ ARTWORKS_SWEEP_S = 900.0        # owner call 3: "15 Works, I was going to say 20
 ARTWORKS_YOUNG_DAYS = 90        # owner call 4: works this young ride EVERY sweep
 ARTWORKS_DEEP_S = 172800.0      # owner call 4: older works refresh at most once per 48h
 ARTWORKS_GRACE = 2              # consecutive spent pages before stopping -- run_download's
-                                # own `update_grace` default (moonglade_backup.py), mirrored
+                                # own `update_grace` default (moonglade/backup.py), mirrored
 ARTWORKS_PAGE = 50              # listArtworks page size run_sync_artworks already uses
 ARTWORKS_PAUSE = 0.4            # paced: run_sync_artworks' own inter-page delay
 ARTWORKS_MAX_PAGES = 1000       # a hard stop (50,000 published works at 50 a page), so a
@@ -8610,7 +8610,7 @@ def artworks_page_needed(nodes, index, now, deep, local=None):
     THE SHORT-CIRCUIT AND THE TIER, in one predicate -- and the reason a quiet sweep costs
     one or two pages instead of the whole walk. `run_download --update` stops after
     `update_grace` consecutive pages whose every media_id was already on disk
-    (moonglade_backup.py's `page_new`); listArtworks pages newest-first exactly like the
+    (moonglade/backup.py's `page_new`); listArtworks pages newest-first exactly like the
     generation feed, so the same stop works here. What "already known" means is where the
     owner's tier (call 4) lives:
 
@@ -8947,7 +8947,7 @@ LIVING_MAX_INTERVAL_S = 120 * 86400.0
 
 
 def _torch_present():
-    """Is the ML stack installed? `find_spec`, never `import torch` -- moonglade_similar's
+    """Is the ML stack installed? `find_spec`, never `import torch` -- moonglade.similar's
     own is_available() imports it, which costs seconds and hundreds of MB, and this is
     asked on a sixty-second tick."""
     try:
@@ -9297,7 +9297,7 @@ def rows_for_media_ids(db_path, ids):
 
 
 def integrity_rows(db_path):
-    """Every catalog row, narrowed to what the integrity pass (moonglade_integrity.py)
+    """Every catalog row, narrowed to what the integrity pass (moonglade/integrity.py)
     needs: the file it claims, whether it is a video, and the two archive-only flags.
     Plain dicts, catalog order."""
     with catalog(db_path) as con:
@@ -9922,7 +9922,7 @@ def duplicate_groups(out_dir, limit=300):
 
 
 def same_seed_groups(db_path, limit=1000):
-    """Class-C duplicates (2026-08-02, docs/DECISIONS.md): catalog rows sharing the
+    """Class-C duplicates (2026-08-02, moonglade-internal/DECISIONS.md): catalog rows sharing the
     same non-blank (seed, prompt_full) pair -- almost certainly the same generation
     re-rolled or resubmitted. A cheap SQL GROUP BY, not a new detection algorithm; no
     filesystem access, no hashing. Returns [{seed, prompt_hash, media_ids:[...]}],
@@ -10070,9 +10070,9 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 # walkers one at a time, and `_count_backup_images` only caught up at M06
 # (2026-07-27) -- its own docstring says so. This section is the one module they
 # all ride now. It lives HERE, in the gallery, beside the SQLite catalog helpers,
-# because the import direction runs one way: `moonglade_backup` imports the
-# gallery at module top (see its `from moonglade_gallery import ...`), the gallery
-# only imports the backup lazily inside functions, and `moonglade_similar` imports
+# because the import direction runs one way: `moonglade.backup` imports the
+# gallery at module top (see its `from moonglade.gallery import ...`), the gallery
+# only imports the backup lazily inside functions, and `moonglade.similar` imports
 # the gallery lazily inside `scan_dir`. Putting the scan anywhere else would need
 # a new top-level module or a cycle.
 #
@@ -10084,7 +10084,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 #
 # THE TEN WALKERS (walker -> what it skipped -> what it asks for now):
 #
-#   moonglade_gallery.py
+#   moonglade/gallery.py
 #     find_files_for_media_id   gallery/ _duplicates/ _deleted/, .part, zero-byte,
 #                               _IMAGE_EXTS (or caller `exts`), exact-id
 #                            -> files_for(kinds=("image",) or exts,
@@ -10100,7 +10100,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 #                            -> scan_library(kinds=("image",), include=("batches",),
 #                                            exclude=())
 #
-#   moonglade_backup.py
+#   moonglade/backup.py
 #     _scan_media_files         gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
 #                            -> scan_library(kinds=("image",),
 #                                            exclude=QUARANTINE_EXCLUDE)
@@ -10125,7 +10125,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 #                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
 #                               plus its own zero-byte skip, kept at the caller
 #
-#   moonglade_similar.py
+#   moonglade/similar.py
 #     scan_dir                  gallery/ _duplicates/ _deleted/ by dir NAME at any
 #                               depth, case-insensitively; a NARROWER ext set
 #                            -> scan_library(kinds=("embeddable",),
@@ -10133,7 +10133,7 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
 #
 # NAMED DISAGREEMENTS -- kept as caller choices, NOT silently unified:
 #
-#   1. Extension set. `moonglade_similar.scan_dir` indexes only
+#   1. Extension set. `moonglade.similar.scan_dir` indexes only
 #      {.png,.jpg,.jpeg,.webp} -- it does NOT embed `.gif` or `.avif`, which the
 #      other nine walkers do read. That is the `"embeddable"` kind, deliberately a
 #      subset of `"image"`, not a bug to be widened here.
@@ -10205,7 +10205,7 @@ IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
 HEALTH_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
 
 _VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
-# What moonglade_similar's CLIP index will actually embed -- deliberately narrower
+# What moonglade.similar's CLIP index will actually embed -- deliberately narrower
 # than _IMAGE_EXTS (named disagreement 1).
 _EMBED_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
@@ -10301,7 +10301,7 @@ def _split_exclusions(exclude):
 
     A plain "gallery" prunes out_dir/gallery only. A "**/gallery" prunes any
     directory of that name at any depth, matched case-insensitively (which is what
-    moonglade_similar.scan_dir has always done, and what run_download's own
+    moonglade.similar.scan_dir has always done, and what run_download's own
     name-based prune does in practice on Windows)."""
     tops, anywhere = [], set()
     for name in exclude:
@@ -10430,7 +10430,7 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
     default -- e.g. dev/tests/test_loom_export_bundle.py pins that video media resolves
     via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
     (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
-    in moonglade_backup.py -- so the SAME exact-match + quarantine-exclusion
+    in moonglade/backup.py -- so the SAME exact-match + quarantine-exclusion
     contract applies to videos, not just images.
     """
     exclude = (QUARANTINE_EXCLUDE if not include_gallery
@@ -10743,7 +10743,7 @@ def make_video_thumbnail(video_path, thumb_path):
     not a random mid-clip moment. The literal-first-frame fallback stays for
     clips too short for the filter to get a batch.
 
-    ffmpeg is reached through moonglade_backup's media_tools section -- one cached
+    ffmpeg is reached through moonglade.backup's media_tools section -- one cached
     availability probe, one place that owns the no-window flag, the timeouts and the
     "never raises" rule. This used to run its own uncached shutil.which() per file
     and two differently-shaped subprocess.run() calls."""
@@ -10968,7 +10968,7 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
         return {"ok": False, "error": str(e)}
 
     meta = _read_trash_meta(out_dir, media_id)
-    # Deliberately NOT moonglade_backup.build_catalog_row: this is a RESTORE, not a
+    # Deliberately NOT moonglade.backup.build_catalog_row: this is a RESTORE, not a
     # capture. The sidecar already holds the whole row the user owned -- rating,
     # collections, title, published state -- and there is no task, no extract_full_meta
     # surface, and (purge_media_local deleted the row) nothing in the catalog to carry
@@ -11071,7 +11071,7 @@ def empty_trash(out_dir, thumb_dir):
 # The original path is recorded EXPLICITLY and undo restores to that EXACT
 # location -- unlike trash's restore, which only ever remembered a bare filename
 # and always restores into a flat images/ folder -- because cmd_dedup's own
-# quarantine (moonglade_backup.py's cmd_dedup, ~3889-3903) preserves the source's
+# quarantine (moonglade/backup.py's cmd_dedup) preserves the source's
 # real subfolder structure under _duplicates/, and this feature's undo is
 # specified to put a file back exactly where it came from.
 # ---------------------------------------------------------------------------
@@ -11100,7 +11100,7 @@ def _resolve_under(out_dir, rel_path):
 
 
 def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
-    """Targeted, single-row version of moonglade_backup.reconcile_catalog_with_disk
+    """Targeted, single-row version of moonglade.backup.reconcile_catalog_with_disk
     -- point media_id's catalog row at whatever copy is still actually on disk,
     without rescanning/rewriting the whole catalog (that function's own approach,
     fine for a batch CLI run, is wasteful for a single synchronous HTTP request).
@@ -11128,7 +11128,7 @@ def _reconcile_one_row_after_move(out_dir, db_path, media_id, row):
 def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, group_id):
     """Move ONE duplicate loser out of the live tree into out_dir/_duplicates/,
     mirroring cmd_dedup()'s DEFAULT (--apply without --dedup-delete) behavior at
-    moonglade_backup.py's cmd_dedup (~3889-3903) -- quarantine, never hard-delete,
+    moonglade/backup.py's cmd_dedup -- quarantine, never hard-delete,
     same collision-suffix rule (dest already exists -> "_dup" inserted before the
     extension). Called once per file by the /api/duplicates/resolve route, which
     has already re-verified the (group_id, media_id, path) triple names a real
@@ -11139,7 +11139,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
 
     _check_read_only() fires FIRST, before any path is even resolved -- the same
     position submit_generation/submit_fixer/delete_task_gql/claim_reward give it
-    (moonglade_backup.py's own contract for every account/filesystem mutation
+    (moonglade/backup.py's own contract for every account/filesystem mutation
     this app makes). READ_ONLY in config.json refuses this the same way it
     refuses those.
 
@@ -11400,7 +11400,7 @@ def probe_has_audio(path, timeout=None):
     False (never raises) -- a probe failure means the Loom export treats the clip as
     silent and pads it, which is safe; it must never crash the export.
 
-    Gallery-side face of moonglade_backup's `media_tools.has_audio`, which answers three
+    Gallery-side face of moonglade.backup's `media_tools.has_audio`, which answers three
     ways: True, False, and None for "ffprobe could not look at all". The export's contract
     is the two-way one, so the unanswerable case reads as silent -- deliberately, and in
     this one place rather than at each of the export's own branches. `timeout=None` takes
@@ -11413,7 +11413,7 @@ def probe_duration(path, timeout=None):
     """Real duration in seconds via ffprobe, or None on failure (missing ffprobe,
     unreadable file, non-numeric output). Never raises.
 
-    Gallery-side face of moonglade_backup's `media_tools.duration` -- see it for why
+    Gallery-side face of moonglade.backup's `media_tools.duration` -- see it for why
     there is only one implementation of this question now, and why it answers at full
     precision. `timeout=None` takes media_tools' probe policy."""
     from moonglade import backup as core
@@ -11646,8 +11646,8 @@ try{var _ft=JSON.parse(localStorage.getItem('fonts')||'null');if(_ft&&typeof _ft
 # ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (the React shells and _LOOM_SHELL).
 #
-# Why an interceptor and not a helper at each call site: there are ~90 fetch()
-# calls across moonglade_gallery.py's inline JS, static/*.js and the Loom bundle, and
+# Why an interceptor and not a helper at each call site: when it was written there were ~90
+# fetch() calls across moonglade_gallery.py's inline JS, static/*.js and the Loom bundle, and
 # a browser crawl found that NOT ONE of them inspects response status. The gate
 # answers an expired session with a JSON 401 -- valid JSON -- so `r.json()`
 # resolves happily, `.catch` never fires, and callers read the error body as
@@ -11880,12 +11880,12 @@ _wiki_online_lock = threading.Lock()
 
 
 def wiki_dir():
-    """The wiki/ folder shipped with this install (moonglade_paths.wiki_dir())."""
+    """The wiki/ folder shipped with this install (moonglade.paths.wiki_dir())."""
     return _paths.wiki_dir()
 
 
 def changelog_path():
-    """This install's own CHANGELOG.md (moonglade_paths.changelog_path())."""
+    """This install's own CHANGELOG.md (moonglade.paths.changelog_path())."""
     return _paths.changelog_path()
 
 
@@ -12745,7 +12745,7 @@ def _account_key(username):
     moonglade.paths.account_key, which names each login's folder
     (<library>/_moonglade/accounts/<key>/).
 
-    Account identity in this app is case-SENSITIVE: moonglade_backup.py's
+    Account identity in this app is case-SENSITIVE: moonglade/backup.py's
     _find_web_user compares the raw username with `==`, and username_problem()
     rejects only empty/too-long/control-char names -- nothing about case. So "Nel"
     and "nel" are two distinct AUTH_USERS rows. But every one of these stores
@@ -12980,12 +12980,12 @@ def account_prefs_update(out_dir, account, set_=None, unset=None):
 # ---------------------------------------------------------------------------
 # Per-account narrator state -- SERVER-ONLY, deliberately not the prefs store
 # ---------------------------------------------------------------------------
-# The narrator's ladder (moonglade_narrator.py) is progress an account earns slowly, so it
+# The narrator's ladder (moonglade/narrator.py) is progress an account earns slowly, so it
 # cannot live where the account itself can write: /api/account/prefs takes any key from the
 # browser, which would make "the count" one console line away. This is a sibling store with
 # the same key rule (_account_key), the same locking (a thread lock plus a per-account
 # lockfile) and the same atomic write, and NO route that takes a state from a client: the
-# poke route below is the only writer, and it writes what moonglade_narrator.poke() returned.
+# poke route below is the only writer, and it writes what moonglade.narrator.poke() returned.
 #
 # ON DISK: <library>/_moonglade/accounts/<key>/state.json. A missing, torn or non-object file reads as a
 # fresh state (fail soft: a torn file must not break a click); a write never fails a poke
@@ -13097,7 +13097,7 @@ def _redact_host_paths_cli(out_dir, msg):
     """THE redactor -- the one copy. create_app()'s nested `_redact_host_paths`
     delegates here (it existed as a closure twin and the two were documented as
     a drift risk; collapsed 2026-08-14 while fixing issue #14). Also called
-    directly by moonglade_backup.py's `_cli_job_finish`, which logs a
+    directly by moonglade/backup.py's `_cli_job_finish`, which logs a
     bare-terminal CLI run's failure straight to jobs.jsonl (served to any
     LOGIN-tier caller via /api/jobs). Design choices (resolve()'d out_dir,
     longest-first, case-insensitive separator-agnostic regex, the length
@@ -13175,7 +13175,7 @@ def tier(default, message=LOCALHOST_REFUSAL, **by_method):
     Pick the tier by what the handler can DO, not by what feels convenient:
       LOGIN     -- browse the library, spend the owner's credits, manage your OWN
                    account. A signed-in LAN device is NOT read-only; that is the
-                   whole point of the tier (see docs/DECISIONS.md).
+                   whole point of the tier (see moonglade-internal/DECISIONS.md).
       LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
                    PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
                    maintenance, or shelling out on the SERVER machine.
@@ -13474,8 +13474,8 @@ def scene_row(sc):
 # session's to spend. That is a real (if soft) witness, and unlike loopback it is one a
 # phone passes.
 #
-# Process-local by design, exactly like _login_attempts: one process, `python
-# moonglade_gallery.py`. Under a multi-worker server each worker would keep its own table
+# Process-local by design, exactly like _login_attempts: one process, `python -m
+# moonglade.gallery`. Under a multi-worker server each worker would keep its own table
 # and a nonce minted by worker A would read as unknown at worker B -- the page would refresh
 # once and carry on, so the failure mode is a wasted round trip, not a lost feat.
 _ACH_NONCE_TTL_S = 60.0       # a nonce is good for one event inside this window
@@ -13710,7 +13710,7 @@ def watch_close_info(exc, redact=None):
 
 def create_app(out_dir: Path):
     # Both named explicitly, because Flask's defaults are this MODULE's folder and both
-    # belong to the app folder (moonglade_paths), wherever the module sits: root_path is
+    # belong to the app folder (moonglade.paths), wherever the module sits: root_path is
     # what send_from_directory()/send_file() join a RELATIVE path onto -- the default
     # library, `pixai_backup`, is one -- and static_folder serves /static/.
     app = Flask(__name__, root_path=str(_paths.APP_ROOT),
@@ -13726,7 +13726,7 @@ def create_app(out_dir: Path):
     # REPORTS the failure rather than swallowing it -- a silent `except: pass` here is how a sweep
     # that never actually ran would look identical to one with nothing to do. `core` is imported
     # locally because this module has no module-level alias for it, and there is no module-level
-    # logger either; moonglade_logging.setup_logging() configures the root logger.
+    # logger either; moonglade.logs.setup_logging() configures the root logger.
     import logging as _logging
     try:
         from moonglade import backup as _core
@@ -13875,7 +13875,7 @@ def create_app(out_dir: Path):
             for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ()))
         if n and k}
 
-    # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
+    # The asset container's first-run fetch (2026-08-10, moonglade-internal/DECISIONS.md "The
     # asset container, re-scoped from scratch"). A real streamed-download job,
     # not a subprocess like PANEL_ACTIONS below -- one instance per server
     # process, single-flight (AssetFetchJob.start() itself), deliberately
@@ -13895,8 +13895,8 @@ def create_app(out_dir: Path):
     # updater's -- has no other way to be driven end to end. Exposes the STATE, not a
     # setter: a test occupies the slot exactly as _panel_run does, by marking it running.
     app.extensions["mg_panel_job"] = _panel_job
-    _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in moonglade_backup.py
-    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in moonglade_backup.py (D-4)
+    _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in moonglade/backup.py
+    _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in moonglade/backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
     _export_lock = threading.Lock()
     # `warning` is distinct from `error`: the export SUCCEEDS but came out different from what
@@ -13931,7 +13931,7 @@ def create_app(out_dir: Path):
         "audit-full":    {"args": ["--audit"], "label": "Duplicate audit (full — byte-compare, slower)", "destructive": False},
         "verify-dupes":  {"args": ["--verify-dupes"],
                           "label": "Verify _duplicates/ is safe to delete", "destructive": False},
-        # The integrity pass (moonglade_integrity.py): read-only, it writes only its own two
+        # The integrity pass (moonglade/integrity.py): read-only, it writes only its own two
         # report files. A deliberate click runs the quick tier AND the structural checks
         # (scope 2+3, owner question 2's recommendation); Health's tiles read the result.
         "verify-library": {"args": ["--verify-library", "--verify-deep"],
@@ -14248,13 +14248,13 @@ def create_app(out_dir: Path):
             return _panel_job["label"] if _panel_job["status"] == "running" else ""
 
     # ---- Automated tasks: run a SAFE job on an interval while the app is open ----
-    # Persisted to out_dir/schedule.json. Only non-destructive actions are schedulable.
+    # Persisted to out_dir/_moonglade/records/schedule.json. Only non-destructive actions are schedulable.
     # An in-process daemon: fires while the gallery is running (it is NOT an OS-level
     # cron -- for always-on, point Windows Task Scheduler at `--update` instead).
     _sched_lock = threading.Lock()
 
     def _log_job(job_id, **fields):
-        """Append a job event to out_dir/jobs.jsonl for the Jobs card. Fails soft --
+        """Append a job event to the library's jobs.jsonl (_moonglade/records/) for the Jobs card. Fails soft --
         activity logging must never break the request that triggered it."""
         try:
             from moonglade import backup as _core
@@ -14733,7 +14733,7 @@ def create_app(out_dir: Path):
         threading.Thread(target=_scheduler_loop, daemon=True, name="mg-scheduler").start()
 
     # ---- Live-mirror watcher: event-driven backup over PixAI's push WebSocket -----
-    # Keeps the CLI's --watch/--watch-backup machinery (moonglade_backup.py)
+    # Keeps the CLI's --watch/--watch-backup machinery (moonglade/backup.py)
     # connected for as long as the gallery runs, auto-reconnecting with backoff on any
     # drop. Each generation is downloaded + cataloged the INSTANT it completes -- this
     # is what makes --update a fallback instead of the only way gens land locally.
@@ -14803,7 +14803,7 @@ def create_app(out_dir: Path):
         So: if the task's media are already in the catalog, that IS the answer. No
         download, no upsert, nothing to lose. `force=True` keeps a deliberate re-collect
         available (no caller needs one today). This mirrors api_import_task's own
-        pre-check; the row-level carry in moonglade_backup is the second belt."""
+        pre-check; the row-level carry in moonglade.backup is the second belt."""
         tid = str(tid)
         with _collect_mu:
             ent = _collect_inflight.get(tid)
@@ -15008,7 +15008,7 @@ def create_app(out_dir: Path):
     _WEBSITE_JOB_SOURCE = "pixai"     # the app's own rows carry source "web"; this is the other one
     _WEBSITE_JOB_LABEL = "From the website"
     # PixAI's task lifecycle is waiting -> running -> completed (_WS_SUBSCRIPTION's own note in
-    # moonglade_backup.py). The pre-dispatch spellings are the same set core._never_dispatched()
+    # moonglade/backup.py). The pre-dispatch spellings are the same set core._never_dispatched()
     # keys on, so "accepted, no worker yet" means the same thing here as it does there -- and
     # that is precisely what the app's own rows record as started:false.
     _WEBSITE_QUEUED_STATUSES = ("waiting", "pending", "queued")
@@ -15019,7 +15019,7 @@ def create_app(out_dir: Path):
 
         NOTE (2026-09-07): the live subscription does NOT ask for `parameters` --
         _WS_SUBSCRIPTION selects id/status/updatedAt/mediaId/media/priority/userId
-        (moonglade_backup.py) -- so today every live frame takes the fallback. Written as a
+        (moonglade/backup.py) -- so today every live frame takes the fallback. Written as a
         read of whatever the frame happens to carry rather than as a widening of that query,
         deliberately: PixAI answers a subscription it dislikes with an `error` frame, which
         _watch_events_async RAISES on, which would take the whole live mirror down. Widening
@@ -15369,7 +15369,7 @@ def create_app(out_dir: Path):
 
     def _watch_inbox(ev):
         """Sessions R + Y (R4b): the socket's `newNotification` bumps the gift box's badge, and
-        a (re)subscribe is when the client re-reads the count. Counted in moonglade_inbox's
+        a (re)subscribe is when the client re-reads the count. Counted in moonglade.inbox's
         memory -- a push by its id only, never its title -- and carried to every open tab by
         /api/jobs. No network here (this runs on the socket's event loop), and it can never
         be the mirror's problem."""
@@ -15688,7 +15688,7 @@ def create_app(out_dir: Path):
     @tier(PUBLIC)
     def api_login():
         """JSON sign-in AND first-run account creation for the React Login page
-        (2026-08-02) -- docs/DECISIONS.md's 2026-07-31 feasibility map called
+        (2026-08-02) -- moonglade-internal/DECISIONS.md's 2026-07-31 feasibility map called
         this out explicitly: 'A SPA needs real POST /api/login -> JSON... before
         auth can be driven from React at all.' Public (@tier(PUBLIC)) -- an
         unauthenticated caller is exactly who needs to reach this.
@@ -15950,7 +15950,7 @@ def create_app(out_dir: Path):
                                      fresh=bool(request.args.get("fresh"))))
 
     # ---- Health's Broken files list (Session W, the Archive Integrity Handoff) ----
-    # The list reads the last integrity check's report (moonglade_integrity.broken_list);
+    # The list reads the last integrity check's report (moonglade.integrity.broken_list);
     # the owner's Mark lost / Keep as is are a local flag beside it (integrity_marks.json).
     # Neither touches a file, a catalog row or PixAI.
 
@@ -15993,7 +15993,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 400
         return jsonify({"ok": True, "media_id": mid, "mark": mark, "prev": prev})
 
-    # The fix run: moonglade_integrity.FixRunner, one per server, on its own thread so closing
+    # The fix run: moonglade.integrity.FixRunner, one per server, on its own thread so closing
     # Health never stops it. It refuses an archive-only row BY ITSELF (redownload_one reads the
     # catalog, whatever the client sent), READ_ONLY blocks its re-downloads but not its local
     # thumbnail rebuilds, and it deletes nothing. Test seam: app.extensions["mg_integrity_fix"].
@@ -16730,7 +16730,7 @@ def create_app(out_dir: Path):
     def export_curation_download():
         """Download the curation sidecar -- ratings, hand-picked collections and their manual
         order, smart collections, and the personal layer (tags, keeper/reject, notes) -- as
-        one JSON file keyed by media id (moonglade_curation_io.py). The same browser
+        one JSON file keyed by media id (moonglade/curation_io.py). The same browser
         download as /export-csv beside it, built in memory, never written into the library.
         It goes back in with `--import-curation` (dry run by default)."""
         import io
@@ -17413,7 +17413,7 @@ def create_app(out_dir: Path):
         said a task the read cannot find at all should be reported as already gone whole.
         It cannot be: core.task_detail_gql collapses a transport failure to None (it
         catches PixAIError/RequestException and returns None), and the 2026-09-06
-        read-only probe recorded at moonglade_backup.py's DELETING ONE IMAGE header found
+        read-only probe recorded at moonglade/backup.py's DELETING ONE IMAGE header found
         that "getTaskById still resolves a whole-task-deleted task, so it cannot be used
         to ask whether a task is gone". So None means "no answer", never "gone", and
         reading it as gone would take a network blip and turn it into a smaller reported
@@ -19148,7 +19148,7 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_similar(media_id):
         """'More like this': the k catalog images most visually similar to media_id, via the
-        moonglade_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
+        moonglade.similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
         reuses the same .card rendering. Read-only; fails soft to an empty list if the sidecar
         index or its ML stack isn't available/built yet, so it never 500s the gallery."""
         try:
@@ -19169,7 +19169,7 @@ def create_app(out_dir: Path):
                             "error": "similarity index unavailable: " + _redact_host_paths(str(e))[:180]}), 200
         # An EMPTY index is not the same as "no matches", and conflating the two hid a real
         # regression for three days. The 2026-07-25 module rename orphaned the stored index;
-        # moonglade_similar._get_table() then CREATED a fresh empty one instead of raising, so this
+        # moonglade.similar._get_table() then CREATED a fresh empty one instead of raising, so this
         # route returned zero hits with no error at all and the client fell back to "the index may
         # still be building" -- a benign transient message covering a permanent broken state.
         # Reporting the size lets the client tell the truth and say what to do about it.
@@ -19597,7 +19597,7 @@ def create_app(out_dir: Path):
     def api_duplicates():
         """Real, working duplicate-groups listing for the React Duplicate Review overlay
         (the parked affordance in HealthOverlay.jsx's Duplicates/Reclaimable stat tiles).
-        Owner-scoped "happy medium" (2026-08-02, docs/DECISIONS.md), FOUR tiers --
+        Owner-scoped "happy medium" (2026-08-02, moonglade-internal/DECISIONS.md), FOUR tiers --
         3 EXACT-match with no invented data/percentage, plus one perceptual-similarity
         tier that carries a real, derived closeness score (see near_duplicate below) --
 
@@ -19606,7 +19606,7 @@ def create_app(out_dir: Path):
                           page's own engine, reused as-is (its 300-row cap is lifted here;
                           see the call below).
           identical_file Class B: byte-identical files under DIFFERENT media_ids.
-                          moonglade_backup.audit_collection(content=True)'s size-bucketed
+                          moonglade.backup.audit_collection(content=True)'s size-bucketed
                           SHA pass -- reused as-is; not naive O(n^2).
           same_seed       Class C: catalog rows sharing (seed, prompt_full) -- a cheap
                           SQL GROUP BY (same_seed_groups(), this module), not a new
@@ -20149,7 +20149,7 @@ def create_app(out_dir: Path):
             if "401" in msg or "Unauthorized" in msg:
                 return jsonify({"error": "That key was rejected by PixAI -- double-check it."}), 200
             return jsonify({"error": "Couldn't verify that key (temporary connection issue) -- try again."}), 200
-        # THE config.json path (core._config_path(), i.e. moonglade_paths.config_path()) --
+        # THE config.json path (core._config_path(), i.e. moonglade.paths.config_path()) --
         # never rebuilt by hand: a hand-built copy is how a test once wrote the checkout's real
         # file (2026-08-02), and it would stop matching the moment the code left the app folder.
         cfg_path = core._config_path()
@@ -20203,7 +20203,7 @@ def create_app(out_dir: Path):
         non-sensitive half (this payload carries no host paths or account detail
         to redact, so unlike that route there is no local-vs-LAN split here).
 
-        `needs` is computed fresh each call (moonglade_assets.needs_download(),
+        `needs` is computed fresh each call (moonglade.assets.needs_download(),
         a marker-file comparison, not a full re-hash) so a container that just
         finished downloading -- or was hand-copied in from another machine mid-
         session -- is reflected on the very next poll, not after a restart."""
@@ -20229,7 +20229,7 @@ def create_app(out_dir: Path):
         CALLER-SUPPLIED value into config.json (the file holding PIXAI_API_KEY /
         AUTH_SECRET_KEY / AUTH_USERS) -- the caller chooses what lands. This
         route chooses nothing: it pulls ONE fixed asset, pinned in
-        moonglade_manifest.json to a single Release URL, verified against that
+        moonglade/manifest.json to a single Release URL, verified against that
         manifest's sha256 cold before the swap, into one known path
         (_container_path()). No argument reaches it -- request body ignored --
         so a LAN caller cannot aim it at a different source, a different file,
@@ -22581,7 +22581,7 @@ def create_app(out_dir: Path):
     def api_skin():
         """Set the active cosmetic skin. Only an *earned* skin may be applied (server checks
         against current unlocks), so a client can't force a locked palette. Persists to
-        out_dir/achievements.json. Cosmetic + local-only, no spend."""
+        out_dir/_moonglade/records/achievements.json. Cosmetic + local-only, no spend."""
         body = request.get_json(silent=True) or {}
         skin = str(body.get("skin") or "").strip()
         if skin not in _skin_ids():
@@ -22755,7 +22755,7 @@ def create_app(out_dir: Path):
         object carrying the two lines that poke is answered with.
 
         THE SERVER DECIDES, THE CLIENT PAINTS. The count, the clocks and the choice of line
-        are this route's and moonglade_narrator.poke()'s (a pure core that takes the time as
+        are this route's and moonglade.narrator.poke()'s (a pure core that takes the time as
         a parameter); the page is told a line and nothing else, so it can learn neither how
         far along it is, nor which stage, nor whether a poke counted. A poke that does not
         count answers exactly like one that does.
@@ -22885,7 +22885,7 @@ def create_app(out_dir: Path):
         """The banner mark (the icon beside the title) + its animation. GET and POST both
         require login (any session, local or LAN) -- cosmetic, so any authorized device may
         read or change it, same as the rest of the LOGIN-tier settings surface.
-        Persists to out_dir/branding.json."""
+        Persists to settings.json's branding (save_branding)."""
         if request.method == "GET":
             # Reflects a raw filesystem drop immediately, same as /api/achievements --
             # a caller reading branding state directly (this route, not the achievements
@@ -23211,7 +23211,7 @@ def create_app(out_dir: Path):
         different trust boundary, so this one route was NOT broadened along with
         the rest of the branding-writes group during the LAN-auth conversion
         pass (unlike GET/POST /api/branding just above, which only writes
-        out_dir/branding.json -- ordinary app data, correctly broadened)."""
+        settings.json's branding picks -- ordinary app data, correctly broadened)."""
         body = request.get_json(silent=True) or {}
         mark = str(body.get("mark") or load_branding(out_dir)["mark"])
         # Whitelist before anything touches the shell: only a known cut mark id
@@ -23401,7 +23401,7 @@ def create_app(out_dir: Path):
 
     # --- the gallery's end of the one payload road ---------------------------------
     # core.build_request is the only place a PixAI `parameters` dict is built for the web
-    # (see its section in moonglade_backup.py). These two supply the lookups it cannot do
+    # (see its section in moonglade/backup.py). These two supply the lookups it cannot do
     # on its own, and they differ in EXACTLY one field, deliberately: a quote never
     # resolves a source image.
 
@@ -25099,7 +25099,7 @@ def create_app(out_dir: Path):
         return _LOOM_REV_MISSING if text is None else hashlib.sha1(text.encode("utf-8")).hexdigest()
 
     # ---- The Loom submit journal (Session P, BUILD-w5-p §3.2, review F2/F3/F8) ------------
-    # One append-only JSONL per account: out_dir/loom/_submits/<account key>.jsonl. Every state
+    # One append-only JSONL per account: out_dir/_moonglade/loom/_submits/<account key>.jsonl. Every state
     # change of one Loom render is a line: sending -> submitted | refused | not_sent |
     # may_have_started, then finished (reported by /api/task-status) or abandoned (the owner
     # released an unclear send). It is what makes a double POST, a second tab, a lost answer
@@ -25198,7 +25198,7 @@ def create_app(out_dir: Path):
         return None
 
     # ---- The music bed's store (Session P, P3; rulings 8 and 15; review F18/F19) -------------
-    # out_dir/loom/_beds/<account key>/<sha1>.<ext>. Every read and write resolves a name that
+    # out_dir/_moonglade/loom/_beds/<account key>/<sha1>.<ext>. Every read and write resolves a name that
     # has already matched LOOM_BED_FILE_RE and then checks _is_under the CALLER's own folder, so
     # neither a crafted name nor another account's bed can be reached.
     def _loom_beds_dir(user):
@@ -25374,7 +25374,7 @@ def create_app(out_dir: Path):
     # and NOT the picker routes. It shipped under the `/next` codename through
     # the pilot; that codename is retired (issue #51) and this page answers on
     # one path. Design lock + suite-shell rationale:
-    # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
+    # moonglade-internal/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
     # Auth: covered by the global _enforce_front_door() hook like every route.
     _GALLERY_DIST = _paths.gallery_dist()
 
@@ -25524,7 +25524,7 @@ __DESIGN_TOKENS__
             "ach_nonce": _ach_mint(_ach_sid()),
             "build_stamp": build_stamp,
             # The locked default; becomes a Branding-panel setting later
-            # (docs/DECISIONS.md "Banner controls join the Branding panel").
+            # (moonglade-internal/DECISIONS.md "Banner controls join the Branding panel").
             "band": {"height": 340, "crop": 30},
             # For the Advanced flyout: the model datalist + the From/To year range.
             "models": unique_models(db_path),
@@ -26359,7 +26359,7 @@ __DESIGN_TOKENS__
     # ---- THE CONTINUITY RIBBON'S FRAMES (Session P, NOTES P9; BUILD-w5-p §5.2; review F18) ----
     # One small still from a LOCAL clip, for the ribbon's close-frame / next-open-frame pairs:
     # ffmpeg on this machine through the app's one frame primitive (core.frame_at), scaled to
-    # LOOM_FRAME_WIDTH, cached as out_dir/loom/_frames/<mid>_<frame>.png. Unlike
+    # LOOM_FRAME_WIDTH, cached as out_dir/_moonglade/loom/_frames/<mid>_<frame>.png. Unlike
     # /api/loom/handoff there is NO upload and no PixAI session at all -- it cannot spend and it
     # never talks to PixAI. The time is quantised to a 24 fps frame (at most 24 files per second
     # of clip, whatever the trims do), and the cache is LRU-capped by count and bytes on every
@@ -27221,7 +27221,7 @@ __DESIGN_TOKENS__
         """{csrf, name, edl, csv, clips: [{mid, file}], bed_file?, bed_name?} -> a zip download.
         Every name is validated against the pattern the planner uses, every mid against the
         media-id grammar, the bed against the caller's own folder (F19); the zip is written to
-        out_dir/loom/_exports/<uuid>.zip, streamed, and deleted when the response closes."""
+        out_dir/_moonglade/loom/_exports/<uuid>.zip, streamed, and deleted when the response closes."""
         import uuid
         import zipfile
         user = str(session.get("user") or "")
@@ -28219,7 +28219,7 @@ __DESIGN_TOKENS__
             import logging as _logging          # module-local, as everywhere else in this file
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
             # The traceback is the whole point for this class: it names the line to fix, and
-            # moonglade_logging keeps a rotating file log regardless of -v.
+            # moonglade.logs keeps a rotating file log regardless of -v.
             _logging.getLogger(__name__).exception("task-status poll failed for %s", tid)
             return jsonify({"phase": "failed",
                             "error": "Moonglade hit an internal error checking this job "
@@ -28374,9 +28374,9 @@ __DESIGN_TOKENS__
 
     # --- Recipes (Session K + H3/H8/H10; lane w2-recipes) --------------------------------
     # PixAI's recipe market, a recipe's page, Mine, Sets and the creator's writes, over
-    # moonglade_recipes (its module docstring has the whole contract). Reads are LOGIN, like
+    # moonglade.recipes (its module docstring has the whole contract). Reads are LOGIN, like
     # every other catalog-of-PixAI read here. Every write is a deliberate click: LOGIN,
-    # explicit-token CSRF (_check_csrf), READ_ONLY refused inside moonglade_recipes before
+    # explicit-token CSRF (_check_csrf), READ_ONLY refused inside moonglade.recipes before
     # its first network call, one attempt. Nothing here writes when a surface opens, and
     # GET /v2/recipes/draft (which CREATES a draft) is never called -- the creator's drafts
     # are the account's own prefs until the user publishes.
@@ -28723,7 +28723,7 @@ __DESIGN_TOKENS__
     # ---- The model pickers' Saved tab (Session S): PixAI's model collections ----------------
     # Reads: the rail, a model's state (the "Keep this model" menu opens on it), the removed
     # models. Writes: ⊕ Save, a menu tick, taking a removed model's entry out, + New set --
-    # each CSRF-checked here and READ_ONLY-checked first in moonglade_recipes, one attempt and
+    # each CSRF-checked here and READ_ONLY-checked first in moonglade.recipes, one attempt and
     # a read-back that decides the answer. A page of a set rides /api/model-search?src=saved.
 
     def _saved_kind():
@@ -28839,9 +28839,9 @@ __DESIGN_TOKENS__
             return _recipe_fail(e)
 
     # --- The inbox, comments, gifts and the current event (Sessions R + Y, lane R) -------
-    # Over moonglade_inbox (its docstring has the contract and the four write rules). Reads
+    # Over moonglade.inbox (its docstring has the contract and the four write rules). Reads
     # are LOGIN, like every other read of PixAI here. A write is a deliberate press: LOGIN,
-    # explicit-token CSRF (_check_csrf), then moonglade_inbox's own function -- READ_ONLY
+    # explicit-token CSRF (_check_csrf), then moonglade.inbox's own function -- READ_ONLY
     # first, one attempt, a read-back that decides the answer. Nothing here writes when the
     # panel opens, a list scrolls or a push arrives. Strangers' words pass through to the
     # browser and are never written to the catalog, a file or a log line.
@@ -28951,7 +28951,7 @@ __DESIGN_TOKENS__
         return body, None
 
     def _inbox_write(fn, *args):
-        """Run one of moonglade_inbox's writes and hand back its answer. A crash past its own
+        """Run one of moonglade.inbox's writes and hand back its answer. A crash past its own
         handling is an unclear answer, never a success."""
         ib = _inbox()
         try:
@@ -29011,7 +29011,7 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def api_comments_reply(artwork_id):
         """[Post publicly] in the reply's question: {csrf, reply_to, content}. One POST and its
-        read-back (moonglade_inbox.post_reply). Your own works only."""
+        read-back (moonglade.inbox.post_reply). Your own works only."""
         body, bad = _inbox_write_body()
         if bad:
             return bad
@@ -29025,7 +29025,7 @@ __DESIGN_TOKENS__
     @tier(LOGIN)
     def api_comments_delete(artwork_id):
         """[Delete] in "Delete my reply"'s question: {csrf, message_id}. One DELETE and its
-        read-back (moonglade_inbox.delete_reply). Your own reply on your own work only."""
+        read-back (moonglade.inbox.delete_reply). Your own reply on your own work only."""
         body, bad = _inbox_write_body()
         if bad:
             return bad

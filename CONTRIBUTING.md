@@ -40,10 +40,11 @@ tools live in `dev/`; from inside `dev/` a plain `python -m pytest` runs the sam
 (`dev/tests/test_similar.py` needs the optional `pixeltable` dependency and skips itself
 cleanly without it — drop the `--ignore` if you have it installed.)
 
-The Loom's pure-logic modules have their own suite:
+The Loom has its own node suite (its pure logic, plus components drawn with React), which needs
+its packages first:
 
 ```bash
-cd loom && node --test
+cd loom && npm ci && npm test
 ```
 
 **All tests must pass before a PR merges.** CI runs both suites on every pull request and

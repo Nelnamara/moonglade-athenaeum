@@ -1,10 +1,10 @@
 """The Moonglade asset container -- a custom packed binary format, the app's own MPQ. The
-shipped one is the art pack, `moonglade.mgpack` (moonglade_gallery._container_path()).
+shipped one is the art pack, `moonglade.mgpack` (moonglade.gallery._container_path()).
 
 WHAT THIS IS. One opaque file carrying the app's default identity: every branding
 asset (marks, banners, mascots, badges, rewards) plus reserved payload slots for
 non-file data (e.g. the achievement roster). Built by dev/tools/build_container.py from
-a real branding/ tree; read at runtime by moonglade_gallery.py's loose-then-container
+a real branding/ tree; read at runtime by moonglade/gallery.py's loose-then-container
 resolution layer, where a real file on disk always wins over the container (branding
 drop-in is a shipped feature and the discovery mechanic depends on it).
 
@@ -48,7 +48,7 @@ asset at a time, as "absent". The four TOC keys above close that:
                     names and all -- without reading one blob, so open_container can
                     check it on every open for the cost of hashing a few hundred hex
                     strings. It is NOT a whole-file checksum: that is the manifest's job
-                    (moonglade_assets.needs_download), and the two answer different
+                    (moonglade.assets.needs_download), and the two answer different
                     questions -- "are these the bytes I was told to download" versus "is
                     this TOC still describing the set it was built to describe".
     built_at        ISO-8601 UTC, when the pack was built. Written by the builder.
