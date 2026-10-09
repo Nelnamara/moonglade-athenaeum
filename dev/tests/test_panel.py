@@ -72,20 +72,13 @@ def test_panel_actions_table_reaches_the_client(tmp_path):
 
 def test_panel_summary_matches_the_page_route(tmp_path):
     """/api/panel/summary (2026-08-02, for the React Control Panel overlay) is a JSON
-    twin of /panel's own aggregation -- same data, same local/destructive visibility
-    rule. Asserted against the SAME two properties test_panel_page_renders_with_actions
-    checks on the HTML route, so a future change to either can't silently diverge."""
+    twin of /panel's own aggregation -- same data, same local visibility rule. The
+    action table itself is asserted in test_panel_actions_table_reaches_the_client;
+    this one checks the summary's stats, locality, csrf, branding and trash_count."""
     cli = _authed_client(tmp_path)
     d = cli.get("/api/panel/summary").get_json()
     assert d["stats"]["images"] == 1  # the one seeded row
-    by_action = {a["action"]: a for a in d["actions"]}
-    assert "sync" in by_action
-    assert "reconcile-deleted" not in by_action          # panel_visible: False
-    all_by_action = {a["action"]: a for a in d["all_actions"]}
-    assert "reconcile-deleted" in all_by_action            # still in the full list
-    for shown in ("undo-organize", "restore-orphans"):
-        assert by_action[shown]["destructive"] is True
-    assert d["panel_is_local"] is True                     # test client is loopback
+    assert d["panel_is_local"] is True                    # test client is loopback
     assert d["out_dir"], "a local session must see the real out_dir"
     assert "csrf" in d and d["csrf"]
     assert d["branding"]["mark"] == "logo"                 # load_branding()'s own default
@@ -394,13 +387,9 @@ def test_watch_status_default_shape(tmp_path):
     /api/watch/status must still answer safely with the never-started default shape.
     It's NOT actually localhost-only (api_watch_status() has no _is_local_request()
     check of its own, just ordinary read data) -- an authenticated LAN session can
-    read it too, same as most routes here. The anonymous check below proves an
-    UNauthenticated request is still refused outright, using a still-anonymous
-    client off the same app rather than claiming address alone gates this route."""
+    read it too, same as most routes here. (The anonymous refusal is owned by the
+    url_map sweep in test_route_tiers.py.)"""
     app = _client(tmp_path)
-    anon = app.test_client()
-    r = anon.get("/api/watch/status", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401
     cli = login_test_client(app)
     d = cli.get("/api/watch/status").get_json()
     assert d["connected"] is False and d["mirrored"] == 0 and d["events_seen"] == 0
@@ -473,14 +462,12 @@ def test_server_stop_schedules_exit_0(tmp_path, monkeypatch):
     """Per the LAN-auth pass's commit message ("/api/server/stop ... stay open to any
     logged-in LAN session" -- owner decision), this is trusted for ANY authenticated
     session, not localhost-only -- api_server_stop() has no _is_local_request() check
-    of its own. The anonymous check below proves an unauthenticated request is
-    refused regardless of address; the authenticated checks after prove a logged-in
-    session can stop it from either address."""
+    of its own. The authenticated checks below prove a logged-in session can stop it
+    from either address; the anonymous refusal is owned by the url_map sweep in
+    test_route_tiers.py."""
     codes = []
     monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
     cli = _client(tmp_path).test_client()
-    r0 = cli.post("/api/server/stop", environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r0.status_code == 401 and codes == []
     cli = login_existing_client(cli)
     d = cli.post("/api/server/stop").get_json()
     assert d == {"ok": True, "action": "stop"} and codes == [0]      # stop -> exit 0
@@ -646,12 +633,6 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: FakeProc(argv))
 
     cli = create_app(tmp_path).test_client()
-    # An unauthenticated LAN request can't kick off exports -- checked FIRST, while
-    # `cli` is still anonymous (api_loom_export() has no extra _is_local_request()
-    # check of its own; once logged in, a LAN session is trusted the same as the owner).
-    r = cli.post("/api/loom/export", json={"clips": []},
-                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401
     cli = login_existing_client(cli)
     r = cli.post("/api/loom/export",
                  json={"clips": [{"mid": "v1", "in": 0, "out": 2}], "total_seconds": 2})
@@ -1477,6 +1458,47 @@ def test_train_recent_tasks_searches_and_brings_the_whole_task(tmp_path):
                     % (c["at"], c["task"])).get_json()
         seen += [t["task_id"] for t in d["tasks"]]
     assert sorted(seen) == sorted(["tKeep"] + ["tD%d" % i for i in range(5)])
+
+
+def test_the_scheduler_thread_starts_in_the_app_and_stays_off_in_the_suite(
+        tmp_path, monkeypatch):
+    """Issue #77. The app as it ships starts exactly one scheduler thread per create_app(),
+    and the suite's switch (conftest's SCHEDULER_SWITCH, set for the whole session) leaves it
+    unstarted -- so no test's loop can wake inside a later test.
+
+    The shipped half clears the switch for this test only, and records the thread's start
+    instead of running it: a real one would sleep and tick for the rest of the run, which is
+    exactly what conftest's session-end check fails on."""
+    import os
+    import threading
+    from tests.conftest import SCHEDULER_SWITCH, SCHEDULER_THREAD_NAME
+
+    def _alive():
+        return [t for t in threading.enumerate() if t.name == SCHEDULER_THREAD_NAME]
+
+    assert os.environ.get(SCHEDULER_SWITCH) == "1", "conftest no longer sets the switch"
+    (tmp_path / "suite").mkdir()
+    create_app(tmp_path / "suite")
+    assert _alive() == [], "create_app() started its scheduler despite the suite's switch"
+
+    real_thread = threading.Thread
+    started = []
+
+    class _Recorded(real_thread):
+        def start(self):
+            if self.name == SCHEDULER_THREAD_NAME:
+                started.append(self)
+                return
+            super().start()
+
+    monkeypatch.delenv(SCHEDULER_SWITCH)
+    monkeypatch.setattr(threading, "Thread", _Recorded)
+    (tmp_path / "shipped").mkdir()
+    create_app(tmp_path / "shipped")
+    monkeypatch.setattr(threading, "Thread", real_thread)
+    assert len(started) == 1, "the shipped app must start exactly one scheduler thread"
+    assert started[0]._target.__name__ == "_scheduler_loop" and started[0].daemon
+    assert _alive() == []
 
 
 def test_the_release_check_rides_the_schedulers_own_tick():

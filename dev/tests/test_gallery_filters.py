@@ -57,11 +57,6 @@ def test_substring_search_matches_both_night(db):
     assert total == 2  # "night elf" and "nighttime"
 
 
-def test_wildcard_search_matches_substring(db):
-    rows, total = query_catalog(db, q="night*")
-    assert total == 2
-
-
 def test_a_wildcard_never_narrows_a_search(db):
     """THE invariant, and the one that was violated. Users expect a wildcard to
     broaden a search or leave it alone -- never to shrink it. Previously a
@@ -92,11 +87,6 @@ def test_search_matches_long_task_id_exactly(db):
     rows, total = query_catalog(db, q="744376191043610002")
     assert total == 1
     assert rows[0]["media_id"] == "2"
-
-
-def test_search_matches_media_id_exactly(db):
-    rows, total = query_catalog(db, q="12345678")
-    assert total == 0  # no fixture row has this id -- confirms it's an exact match, not substring
 
 
 def test_short_numeric_term_does_not_id_match(db):
@@ -316,49 +306,6 @@ def test_collections_add_remove_filter(tmp_path):
     assert query_catalog(db, collection="Elf")[1] == 0
     assert remove_from_collection(db, ["a"], "Elf Portraits") == 1
     assert query_catalog(db, collection="Elf Portraits")[1] == 1
-
-
-def test_collection_add_route(tmp_path):
-    from moonglade.gallery import load_catalog
-    from tests.conftest import login_client
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
-    (tmp_path / "images").mkdir()
-    (tmp_path / "images" / "a.png").write_bytes(b"x")
-    (tmp_path / "images" / "b.png").write_bytes(b"x")
-    client = login_client(tmp_path)
-    r = client.post("/api/collection", json={"action": "add", "collection": "Moonlit",
-                                             "media_ids": ["m1", "m2"]})
-    assert r.status_code == 200
-    d = r.get_json()
-    assert d["ok"] is True and d["count"] == 2
-    by = {x["media_id"]: x for x in load_catalog(db)}
-    assert by["m1"]["collections"] == "Moonlit"
-
-
-def test_collection_remove_route(tmp_path):
-    """The remove path (classic cut 2026-08-08 -- the filter-bar button and its
-    /collection-remove form route died with the classic page; /api/collection
-    action=remove is the one remove surface now): the route drops the label
-    without touching the row, and never bleeds onto the other member."""
-    from moonglade.gallery import load_catalog, add_to_collection
-    from tests.conftest import login_client
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [_row(media_id="m1", filename="a.png"), _row(media_id="m2", filename="b.png")])
-    (tmp_path / "images").mkdir()
-    (tmp_path / "images" / "a.png").write_bytes(b"x")
-    (tmp_path / "images" / "b.png").write_bytes(b"x")
-    add_to_collection(db, ["m1", "m2"], "Moonlit")
-    client = login_client(tmp_path)
-
-    r = client.post("/api/collection", json={"action": "remove", "collection": "Moonlit",
-                                             "media_ids": ["m1"]})
-    assert r.status_code == 200
-    assert r.get_json() == {"ok": True, "count": 1}
-    by = {x["media_id"]: x for x in load_catalog(db)}
-    assert by["m1"]["collections"] == ""      # label gone
-    assert by["m2"]["collections"] == "Moonlit"   # untouched
-    assert query_catalog(db, collection="Moonlit")[1] == 1
 
 
 def test_deleted_remote_filter(tmp_path):
@@ -632,44 +579,6 @@ def test_video_row_flagged_and_serves(tmp_path):
 
     # a non-video media id is rejected by the video route
     assert client.get("/video-file/POSTER").status_code == 404
-
-
-def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch, pixai):
-    from moonglade import backup as core
-    from moonglade.gallery import load_catalog
-    from tests.conftest import login_client
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [
-        _row(media_id="m1", filename="images/a_m1.png", task_id="T1"),
-        _row(media_id="m2", filename="images/b_m2.png", task_id="T1"),   # same task (batch)
-        _row(media_id="loc", filename="videos/c.mp4", task_id="", source="local", is_video="1"),
-    ])
-    (tmp_path / "images").mkdir()
-    (tmp_path / "images" / "a_m1.png").write_bytes(b"x")
-    (tmp_path / "images" / "b_m2.png").write_bytes(b"x")
-    (tmp_path / "videos").mkdir()
-    (tmp_path / "videos" / "c.mp4").write_bytes(b"v")
-
-    calls = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: calls.append(tid))
-    client = login_client(tmp_path)
-
-    # select ONE image of task T1, plus the local-only import
-    r = client.post("/api/delete-tasks", json={"media_ids": ["m1", "loc"]})
-    assert r.status_code == 200
-    d = r.get_json()   # async: kicked off, reports to the Activity card
-    assert d["ok"] is True and d["tasks"] == 1 and d["local_only"] == 1
-
-    import time
-    for _ in range(200):                                # wait for the background delete thread
-        if not load_catalog(db):
-            break
-        time.sleep(0.02)
-
-    assert calls == ["T1"]                       # cloud delete fired once for the task
-    remaining = {x["media_id"] for x in load_catalog(db)}
-    assert remaining == set()                    # whole task (m1+m2) + import all purged
-    assert not (tmp_path / "images" / "b_m2.png").exists()   # batch sibling gone too
 
 
 def test_edit_prompt_and_bulk_replace_routes(tmp_path):

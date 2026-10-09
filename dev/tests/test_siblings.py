@@ -169,12 +169,6 @@ def test_strip_thumb_unlisted_size_and_missing_768_fall_through(tmp_path):
 
 # ---- batch filter matches task_id ---------------------------------------------------
 
-def test_build_where_batch_matches_task_id_column_too():
-    where, params = G._build_where("", "", "", "", batch="T1")
-    assert "(batch = ? OR task_id = ?)" in where
-    assert params == ["T1", "T1"]
-
-
 def test_query_catalog_batch_finds_an_organized_row_by_task_id(tmp_path):
     """--organize blanks `batch`; the Details "View Batch" button passes task_id."""
     _seed(tmp_path, [

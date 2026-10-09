@@ -11,7 +11,7 @@ import pytest
 from moonglade import backup as core
 from moonglade import gallery as g
 from moonglade.gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
-                           purge_media_local, create_app)
+                           purge_media_local)
 
 from tests.conftest import login_client
 
@@ -114,37 +114,6 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     assert g.find_files_for_media_id(tmp_path, "77") == []
 
 
-def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypatch, pixai):
-    from moonglade import backup as core
-    db = _seed(tmp_path, [
-        _row(media_id="100", task_id="T1", filename="100.png"),
-        _row(media_id="101", task_id="T1", filename="101.png"),   # same task, NOT selected
-        _row(media_id="200", task_id="", filename="200.png", source="local"),
-    ], {"100.png": b"a", "101.png": b"b", "200.png": b"c"})
-
-    calls = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
-
-    client = login_client(tmp_path)
-    r = client.post("/api/delete-tasks", json={"media_ids": ["100", "200"]})
-    body = r.get_json()
-    assert r.status_code == 200 and body["ok"] is True and body["job_id"]  # async: kicks off + reports to the card
-    assert body["tasks"] == 1 and body["local_only"] == 1        # one task + one local-only import
-
-    import time
-    for _ in range(200):                                         # wait for the background delete thread
-        if not load_catalog(db):
-            break
-        time.sleep(0.02)
-
-    assert calls == ["T1"]                                       # cloud delete fired once, task-level
-    deleted = tmp_path / g.DELETED_DIRNAME
-    # selecting 100 purges its WHOLE task (100 + 101); 200 is a local-only import
-    for name in ("100.png", "101.png", "200.png"):
-        assert (deleted / name).exists()
-    assert {row["media_id"] for row in load_catalog(db)} == set()    # all three rows cleared
-
-
 def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch, pixai):
     """One unmovable file must not abandon every task queued behind it. The cloud
     deletes have already fired and cannot be taken back by the time the local purge
@@ -222,8 +191,8 @@ def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch, pixa
 def test_delete_preview_lists_the_siblings_the_delete_would_take(tmp_path):
     """One selected image of a four-image batch: the preview has to come back with all
     four, flagging which one was actually picked, plus the local-only import that has
-    no task to delete. Mirrors test_delete_tasks_bulk_route_quarantines_and_calls_cloud
-    above -- same seed shape, same resolution, no cloud call."""
+    no task to delete. The same seed shape and resolution as
+    test_api_bulk_json.py::test_delete_tasks_by_media_ids_matches_the_page_route, with no cloud call."""
     _seed(tmp_path, [
         _row(media_id="100", task_id="T1", filename="100.png"),
         _row(media_id="101", task_id="T1", filename="101.png"),   # same task, NOT selected
@@ -327,82 +296,6 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
     assert len(scans) <= 3, (
         "the preview issued {} task_id lookups for 30 selected tasks -- task_id is "
         "unindexed, so that is one full table scan each".format(len(scans)))
-
-
-def test_delete_preview_refuses_an_authenticated_lan_session(tmp_path):
-    """LOCALHOST, mirroring the action it previews: the preview of an irreversible
-    cloud delete is not a lower trust tier than the delete. Same shape as
-    test_bulk_delete_cloud_refuses_authenticated_lan_session below -- prove the
-    session really is authorized first, then prove this route still refuses it."""
-    _seed(tmp_path, [_row(media_id="p1", task_id="TP", filename="p1.png")], {})
-    client = login_client(tmp_path)
-    LAN = "203.0.113.5"
-    assert client.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    r = client.post("/api/delete-preview", json={"media_ids": ["p1"]},
-                    environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403
-
-
-def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch, pixai):
-    """A LAN request must NOT be able to delete from the owner's PixAI account.
-
-    An unauthenticated request never reaches the route body at all: the global
-    front-door hook (_enforce_front_door(), see moonglade_gallery.py) denies it
-    first, answering 401 on the /api/ JSON tier -- the security-relevant
-    invariants below (nothing fired, nothing deleted) are unchanged from when
-    this covered the classic /delete-tasks-bulk form route."""
-    import time
-    from moonglade import backup as core
-    db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
-    fired = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
-
-    client = create_app(tmp_path).test_client()
-    r = client.post("/api/delete-tasks", json={"media_ids": ["z1"]},
-                    environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 401                     # refused before the handler ran, not a delete
-    time.sleep(0.1)                                  # give any wrongly-spawned thread a beat
-    assert fired == []                               # nothing deleted from the cloud
-    assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact
-
-
-def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypatch, pixai):
-    """A logged-in LAN account must NOT be able to trigger /api/delete-tasks --
-    same trust tier as /api/branding/shortcut and destructive Panel actions: this
-    destroys on the owner's real PixAI account, irreversibly. A LAN login unlocks
-    browsing and spending the owner's credits, not deleting the owner's cloud
-    generations. Regression test: the classic route's own _is_local_request()
-    re-check was dropped during the LAN-auth conversion pass (0fd8cee) and never
-    replaced -- the global front-door hook alone let ANY logged-in LAN session
-    through, unlike its siblings test_panel.py::test_destructive_action_refuses_authenticated_lan_session
-    and test_branding.py::test_shortcut_refuses_authenticated_lan_session, which
-    already covered this shape. Flagged by adversarial review and fixed 2026-07-19;
-    ported to the surviving JSON route when the classic form route died 2026-08-08."""
-    import time
-    from moonglade import backup as core
-    db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
-    fired = []
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
-
-    client = login_client(tmp_path)
-    LAN = "203.0.113.5"
-    # Prove the session really is authenticated (it can reach an ordinary
-    # authorized-LAN route) before proving it still can't reach this one.
-    assert client.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    r = client.post("/api/delete-tasks", json={"media_ids": ["z2"]},
-                    environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403                       # refused by the route itself (its own
-    assert "localhost" in (r.get_json() or {}).get("error", "")  # _is_local_request re-check),
-    # NOT the front door (that would be a 401 "authentication required")
-    time.sleep(0.1)                                   # give any wrongly-spawned thread a beat
-    assert fired == []                                # nothing deleted from the cloud
-    assert {x["media_id"] for x in load_catalog(db)} == {"z2"}   # row intact
-
-    # The same account, from the actual local machine, still works (this isn't
-    # broken for the owner -- just not exposed to remote LAN sessions).
-    r2 = client.post("/api/delete-tasks", json={"media_ids": ["z2"]})
-    body2 = r2.get_json()
-    assert r2.status_code == 200 and body2["ok"] is True and body2["job_id"]
 
 
 # ---------------------------------------------------------------------------

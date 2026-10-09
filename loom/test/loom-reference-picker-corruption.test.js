@@ -70,24 +70,6 @@ describe("reference picker corruption (AUDIT_2026-07-21.md owner-2026-07-23 row)
     assert.deepEqual(payload.images, ["mid-nel", "mid-greg"]);
   });
 
-  test("shotText cites each cast member by the drawer's OWN positional slot, not their raw project-global tag", () => {
-    const project = makeProject();
-    const entry = flat(project)[0];
-    const text = shotText(entry, project, imgSrc);
-    // Position 1 in shotPayload's bank is Nelnamara's picture, position 2 is Greg's (see the
-    // previous test) -- the composed prompt's citation for each of them must match THAT, not
-    // their stable, project-global cast tags (@image3 / @image4).
-    assert.match(text, /Nelnamara — reference @image1/);
-    assert.match(text, /Greg — reference @image2/);
-    // The exact corruption traced from the owner's video: citing Greg's raw project-global
-    // tag (@image4) is a real, valid-looking "@imageN" token that the drawer's OWN numbering
-    // never assigns to Greg's picture at all in this shot (its bank only ever has 2 slots) --
-    // exactly the kind of citation that can be silently reinterpreted, or simply orphaned,
-    // once the drawer's chip system gets a chance to round-trip the text.
-    assert.doesNotMatch(text, /Greg — reference @image4/);
-    assert.doesNotMatch(text, /Nelnamara — reference @image3/);
-  });
-
   test("positionTag() agrees with shotPayload's own image order for every resolvable picture in the shot", () => {
     const project = makeProject();
     const entry = flat(project)[0];
@@ -123,6 +105,10 @@ describe("reference picker corruption (AUDIT_2026-07-21.md owner-2026-07-23 row)
       assert.ok(m, `expected a "Keep consistent" citation line for ${as.name}`);
       assert.equal(m[1], wantTag, `${as.name}'s citation must match the drawer's own positional slot, not a raw project-global tag`);
     });
+    // The corruption traced from the owner's video: a raw project-global tag cited here is a
+    // valid-looking @imageN the drawer's own numbering never assigns to that picture.
+    assert.doesNotMatch(text, /Greg — reference @image4/);
+    assert.doesNotMatch(text, /Nelnamara — reference @image3/);
   });
 
   test("shotPayload's own composed prompt (what the drawer's prefill() actually receives) carries the positional citations too", () => {

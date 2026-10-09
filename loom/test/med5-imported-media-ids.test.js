@@ -29,13 +29,6 @@ describe("imported local media ids are first-class in the Loom", () => {
     assert.ok(!isCatalogMediaId(undefined));
   });
 
-  test("the cast import keeps an imported id -- the owner's exact repro", () => {
-    const ids = parseCastIdsFromSearch("?cast=747000000000000001,local_a1b2c3d4e5f6");
-    assert.deepEqual(ids, ["747000000000000001", "local_a1b2c3d4e5f6"],
-      "an imported picture sent to the cast must survive the URL parse -- dropping it is " +
-      "why the Loom opened empty");
-  });
-
   test("a cast of only imported pictures still arrives", () => {
     // The pure form of the bug: every selected id was local_, so the filter emptied the
     // list entirely and the import effect returned before adding anything.

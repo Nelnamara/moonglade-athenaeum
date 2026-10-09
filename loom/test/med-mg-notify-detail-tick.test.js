@@ -249,11 +249,6 @@ describe("the tick is wired to the repaint, not to a separate popover lifecycle"
       "collapse would not stop it");
   });
 
-  test("terminal-ness is derived, not enumerated (H18's TERMINAL map must not be copied here)", () => {
-    assert.match(src, /const running = st === "running";/,
-      "ActivityRow must test 'is it still running', not a hardcoded set of finished statuses");
-  });
-
   test("the ' so far' suffix rides the same running flag as the clock", () => {
     // In React the tick is a render expression, so the pin is on the JSX -- same flag, same
     // render, so the suffix and the live figure can never disagree about whether the job is

@@ -129,14 +129,6 @@ class TestMapperKeepsTheEntry:
         _register_board(pixai, [{"id": "c2", "slug": "s2"}])
         assert core.list_contests(pixai)[0]["reward_status"] == ""
 
-    def test_the_winners_route_uses_the_real_tier_and_prize(self, tmp_path, pixai):
-        pixai.on("/contest/s1/winners", [_placed("a1", "u-x", 1, 500000),
-                                         _placed("a2", "u-test", 2, 200000)])
-        cli = login_client(tmp_path)
-        d = cli.get("/api/contest/s1/winners").get_json()
-        assert [(w["rank"], w["prize_amount"]) for w in d["winners"]] == [(1, 500000), (2, 200000)]
-        assert [w["mine"] for w in d["winners"]] == [False, True]
-
 
 # ============================================================================ what counts as a win
 

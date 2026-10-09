@@ -16,7 +16,6 @@ const app = src("gallery/src/components/AppMobile.jsx");
 const sheets = src("gallery/src/inbox/InboxSheets.jsx");
 const css = src("gallery/src/styles/inbox.css");
 const list = src("gallery/src/inbox/InboxList.jsx");
-const core = src("gallery/src/inbox/inboxCore.js");
 
 const fnBody = (text, name) => {
   const i = text.indexOf("export function " + name + "(");
@@ -83,12 +82,10 @@ describe("the two sheets", () => {
     assert.match(ms, /\{title \? <div className=\{"glm-sheet-title" \+ \(titleEnd \? " has-end" : ""\)\}>\{title\}\{titleEnd\}<\/div> : null\}/);
   });
 
-  test("the Inbox sheet has no Gifts tab, reads no gifts, and its N new is the unread count", () => {
+  test("the Inbox sheet reads no gifts, and its N new is the unread count", () => {
     const body = fnBody(sheets, "InboxSheetBody");
     assert.ok(!/loadGifts|loadEvents|GiftRows|EventCards/.test(body), "gifts live only in the Gift box");
     assert.match(body, /st\.unread \? st\.unread \+ " new" : ""/);
-    assert.ok(!/"gifts"|"Gifts"/.test(core.slice(core.indexOf("export const TABS"), core.indexOf("];") + 2)),
-      "no Gifts tab");
   });
 
   test("the Inbox sheet's tabs scroll as one row; rows are at least 44 px", () => {

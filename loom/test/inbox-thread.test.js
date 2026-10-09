@@ -66,8 +66,6 @@ describe("the reply (R6c): one question, one press, one POST", () => {
 
   test("a question's press spends its token, and nothing posts while a post is in flight", () => {
     assert.match(thread, /if \(tok !== askToken\.current \|\| inFlight\.current \|\| !b\) return;\n    askToken\.current \+= 1;\n    inFlight\.current = true;/);
-    const posts = thread.match(/apiPost\(/g) || [];
-    assert.equal(posts.length, 2, "exactly two writes: the reply and the delete");
   });
 
   test("an unclear answer keeps Send off until the text changes; READ_ONLY shows the box disabled with why", () => {

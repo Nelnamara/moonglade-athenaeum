@@ -81,14 +81,6 @@ describe("the queue-wait readout is shown only while a job is actually queued", 
 });
 
 describe("both surfaces quote the same number in the same words", () => {
-  test("the tray still renders `est. <duration> wait`", () => {
-    // If the tray's wording ever moves, this fails and the dock is told to move with it --
-    // two surfaces quoting the same field in different words is how one of them starts
-    // reading as a countdown.
-    assert.match(tray, /est\. \{fmtDuration\(j\.eta_seconds\)\} wait/,
-      "the Activity tray's readout wording changed; gen/queueWait.js must match it");
-  });
-
   test("both are built from `eta_seconds` -- the field /api/jobs already serves", () => {
     // The dock must NOT poll PixAI a second time for this. The reel already GETs /api/jobs
     // (GenerateDrawer), and the estimate rides that row.

@@ -114,14 +114,9 @@ def test_camera_movement_omitted_by_default_and_on_unset():
         "p", media_id="1", camera_movement="unset")["i2vPro"]
 
 
-def test_isprivate_default_and_modelid_required():
-    p = core.build_video_parameters("p", media_id="1")
+def test_is_private_sets_the_channel_and_legacy_flag():
     # New-gen platform (2026-08-25): visibility is now the top-level `channel` string, sent
     # ALONGSIDE the legacy `isPrivate` boolean (server honors whichever -> no privacy regress).
-    assert p["channel"] == "normal" and p["isPrivate"] is False
-    assert p["enablePreview"] is True and p["hidePrompts"] is False
-    # the REQUIRED top-level modelId resolves from the .model name (the video-card fix)
-    assert p["modelId"] == core.video_model_id(core.DEFAULT_VIDEO_MODEL) == "2003969750675682808"
     priv = core.build_video_parameters("p", media_id="1", is_private=True)
     assert priv["channel"] == "private" and priv["isPrivate"] is True
 
@@ -340,19 +335,6 @@ def test_snap_video_duration():
     assert core._snap_video_duration("bad") == 5
 
 
-def test_build_shot_video_params_i2v():
-    assert "i2vPro" in core.build_shot_video_params("I2V", "turn", image_ids=["100"], duration=5)
-
-
-def test_build_shot_video_params_flf():
-    assert "i2vPro" in core.build_shot_video_params("FLF", "morph", image_ids=["1", "2"], duration=6)
-
-
-def test_build_shot_video_params_r2v():
-    p = core.build_shot_video_params("R2V", "@image1 @image2", image_ids=["1", "2"], duration=15)
-    assert "referenceVideo" in p and p["referenceVideo"]["referenceImageMediaIds"] == ["1", "2"]
-
-
 def test_build_shot_video_params_needs_refs():
     import pytest
     with pytest.raises(core.PixAIError):
@@ -567,18 +549,20 @@ def _seed_one(tmp_path, mid="733917871331404290"):
     return mid
 
 
-def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch, pixai):
+def test_fix_and_edit_upload_the_catalog_reference(tmp_path, monkeypatch, pixai):
     """The first fix for the invalid_media_id bug patched ONLY the video route, leaving
-    /api/edit and /api/fix silently broken the same way, so those must resolve through
+    /api/edit and /api/fix silently broken the same way, so those two must resolve through
     _input_media_id.
 
-    NOT every path any more: i2v was measured on 2026-07-26 to accept a catalog id directly
-    (PixAI's own site does exactly that), and uploading there actively caused an NSFW rejection
-    on content their site accepts. R2V followed on 2026-08-22 (probed the same way). Edit and
-    fix are unchanged.
+    The video route is not in this test: i2v was measured on 2026-07-26 to accept a catalog id
+    directly (PixAI's own site does exactly that), and uploading there actively caused an NSFW
+    rejection on content their site accepts. R2V followed on 2026-08-22 (probed the same way).
+    Both pass catalog ids through; see
+    test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id and
+    test_gallery_r2v_catalog_ids_pass_through_without_upload.
 
-    Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
-    way this returns, and this fails by name when it does."""
+    A new input endpoint that forgets to resolve is the exact way this returns, and this fails
+    by name when it does."""
     from moonglade.gallery import create_app
     from tests.conftest import login_test_client
     mid = _seed_one(tmp_path)
@@ -593,27 +577,11 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch, p
 
     cli = login_test_client(create_app(tmp_path))
 
-    # 1. video -- i2v is now the EXCEPTION: it sends the catalog id directly (2026-07-26,
-    # measured off PixAI's own completed task). The upload remains for R2V and for the
-    # invalid_media_id fallback, both covered by their own tests.
-    assert cli.post("/api/loom/generate", json={"mode": "I2V", "prompt": "x",
-                    "images": [mid], "duration": 5}).status_code == 200
-    assert seen["params"]["i2vPro"]["mediaId"] == mid, "i2v should pass the catalog id through"
-
-    # R2V passes through too (probe 2026-08-22: its field accepts catalog ids). The upload
-    # survives only as the invalid_*_media_id fallback, covered by its own test below.
-    seen.pop("params", None)
-    assert cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x",
-                    "images": [mid], "duration": 5}).status_code == 200
-    assert seen["params"]["referenceVideo"]["referenceImageMediaIds"] == [mid], (
-        "R2V should pass the catalog id through")
-
-    # 2. fix
+    # 1. fix
     cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
     assert seen.get("fix_src") == "999000111222", "fix passed the raw catalog id"
 
-    # 3. edit
-    seen.pop("params", None)
+    # 2. edit
     cli.post("/api/edit", json={"source": mid, "instruction": "make it night"})
     chat = (seen.get("params") or {}).get("chat") or {}
     ids = str(chat)

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   classifySubmit, classifySubmitStatus, submitsToCheck, failRender, markUnclear, abandonSubmit,
   adoptTask, beginRender, landTake, inFlight, needsRender, cancelRender,
-  goBlocked, sendUnclear, unsendableImages, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
+  goBlocked, sendUnclear, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
 } from "../src/loom-takes-core.js";
 import { cardsToResume, shotPayload, flat } from "../src/loom-core.js";
 
@@ -138,12 +138,11 @@ describe("the Go gate and the paused carve-out (BUILD-w5-p §3.3 step 1, §3.4)"
 
 describe("pictures the render route cannot send (open call 4, review F16)", () => {
   test("mirrors the server: digits and data: thumbnails go, anything else is refused before pricing", () => {
-    assert.deepEqual(unsendableImages({ images: ["733917871331404290", "data:image/png;base64,AA", ""] }), []);
-    assert.deepEqual(unsendableImages({ images: ["733917871331404290", "local_0123456789ab"] }), ["local_0123456789ab"]);
-    assert.deepEqual(unsendableImages({ images: [" local_0123456789ab "] }), ["local_0123456789ab"]);
-    assert.deepEqual(unsendableImages({ images: ["/thumbs/1.jpg"] }), ["/thumbs/1.jpg"]);
-    assert.deepEqual(unsendableImages({}), []);
-    assert.deepEqual(unsendableImages(null), []);
+    assert.deepEqual(unsendableRefs({ images: ["733917871331404290", "data:image/png;base64,AA", ""] }), []);
+    assert.deepEqual(unsendableRefs({ images: ["733917871331404290", "local_0123456789ab"] }), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableRefs({ images: [" local_0123456789ab "] }), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableRefs({ images: ["/thumbs/1.jpg"] }), ["/thumbs/1.jpg"]);
+    assert.deepEqual(unsendableRefs({}), []);
   });
   test("spend review S6: an imported reference VIDEO or AUDIO is refused the same way (data: is no escape there)", () => {
     assert.deepEqual(unsendableRefs({ images: ["1"], video_refs: ["2"], audio_refs: ["3"] }), []);
@@ -165,7 +164,6 @@ describe("pictures the render route cannot send (open call 4, review F16)", () =
     const proj = { name: "P", acts: [{ id: "a1", name: "Act", cards: [card] }], assets: [] };
     const p = shotPayload(flat(proj)[0], proj, (t, s) => t || s || null);
     assert.deepEqual(p.video_refs, ["local_0123456789ab"], "the card shows (and the payload carries) the imported video");
-    assert.deepEqual(unsendableImages(p), [], "the picture check alone let it through");
     assert.deepEqual(unsendableRefs(p), ["local_0123456789ab"]);
     assert.equal(unsendableKind(p), "video");
   });

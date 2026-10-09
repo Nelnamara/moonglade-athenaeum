@@ -63,11 +63,20 @@ def test_pushed_since_reads_the_newest_rows_once_and_answers_only_newer_pushes(p
 
 def test_the_mirror_counts_a_notification_frame_and_a_reconnect(tmp_path):
     app = _app(tmp_path)
+    # A connect asks for the catch-up sweep, and the app's own spawn starts a real thread that
+    # waits WATCH_SUBSCRIBE_SETTLE and then reads PixAI -- by then inside whichever test is
+    # running, through THAT test's network stand-in. It once landed in
+    # test_the_pushed_route_answers_the_new_rows below as a `persisted` call that test never
+    # made. The sweep is not what this test is about (dev/tests/test_watch.py drives it), so
+    # the request is recorded and nothing is started.
+    sweeps = []
+    app.extensions["mg_watch_catchup_env"]["spawn"] = sweeps.append
     on_event = app.extensions["mg_watch_on_event"]
     on_event({"__meta__": "subscribed"})
     on_event({"newNotification": {"id": "n9", "title": "x", "createdAt": "", "userId": "u"}})
     st = inbox.live_state()
     assert st["seq"] == 1 and st["connects"] == 1
+    assert len(sweeps) == 1, "the connect asked for its catch-up sweep through the stand-in"
 
 
 def test_the_jobs_poll_carries_the_live_count(tmp_path, pixai):

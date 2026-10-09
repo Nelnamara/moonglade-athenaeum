@@ -92,13 +92,6 @@ def _count(tmp_path, user="tester"):
 
 # ---- who may poke, and what a refusal writes --------------------------------------------------
 
-def test_a_poke_needs_a_signed_in_session(tmp_path):
-    app = g.create_app(tmp_path)
-    r = app.test_client().post(URL, json={"csrf": "x"})
-    assert r.status_code in (302, 401, 403)
-    assert not _state_dir(tmp_path).exists()
-
-
 @pytest.mark.parametrize("body", [{}, {"csrf": ""}, {"csrf": "not-the-token"}])
 def test_a_poke_without_the_session_token_is_refused_and_writes_nothing(tmp_path, clock, body):
     cli = _client(tmp_path)

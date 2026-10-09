@@ -8,7 +8,7 @@ from moonglade import gallery as g
 from moonglade import paths as moonglade_paths
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_existing_client, login_test_client
+from tests.conftest import login_test_client
 
 # Captured at IMPORT time -- collection runs before any autouse fixture, so this is the genuine
 # resolver rather than the tmp_path-redirected one conftest._isolated_branding installs. Needed
@@ -29,9 +29,10 @@ def _app(tmp_path):
 
 def _client(tmp_path):
     """Authenticated version of _app() -- for the plain functionality tests below that
-    don't care about the auth boundary itself (see test_shortcut_refuses_authenticated_lan_session
-    for the one that deliberately logs in its own separate account instead of using this, and
-    needs _app()'s bare, unauthenticated app to start from)."""
+    don't care about the auth boundary itself (the LAN-session refusal of the localhost-only
+    routes is pinned by dev/tests/test_route_tiers.py::
+    test_localhost_only_routes_refuse_an_authenticated_lan_session, which logs in its own
+    separate account instead of using this)."""
     return login_test_client(_app(tmp_path))
 
 
@@ -134,44 +135,6 @@ def test_shortcut_writes_lnk_via_powershell(tmp_path, monkeypatch):
         str(moonglade_paths.icons_dir() / "mark_4.ico") + ",0"
     assert d["lnk"] == str(tmp_path / "Desktop" / "Moonglade Athenaeum.lnk")
     assert env["MOONGLADE_LNK_PATH"] == d["lnk"]
-    # LAN can't write shortcuts onto the owner's Desktop even for THIS already-logged-in
-    # session -- it passes the global front door (real session) but is then refused by
-    # the route's OWN, stricter _is_local_request() re-check (403), same property
-    # test_shortcut_refuses_authenticated_lan_session below exercises end-to-end.
-    r = cli.post("/api/branding/shortcut", json={"mark": "mark_4"},
-                 environ_overrides={"REMOTE_ADDR": "192.168.1.9"})
-    assert r.status_code == 403
-
-
-def test_shortcut_refuses_authenticated_lan_session(tmp_path, monkeypatch):
-    """A logged-in LAN account must NOT be able to trigger the Desktop-shortcut
-    writer -- unlike ordinary app-data writes (POST /api/branding above), this
-    shells out to PowerShell/WScript.Shell COM on the SERVER's own machine
-    (make_launcher_shortcut's docstring: "caller must gate to localhost"). A
-    LAN login is meant to unlock spend-the-owner's-credits generation features,
-    not host-machine execution -- a materially different trust boundary.
-    Regression test: the LAN-auth conversion pass had broadened this route's
-    gate from _is_local_request() to the wider _is_authorized_request(),
-    flagged and reverted 2026-07-19."""
-    import subprocess
-    _cut_fake_marks(tmp_path)
-
-    class R:
-        returncode = 0
-        stderr = ""
-        stdout = ""
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
-    cli = _app(tmp_path).test_client()
-    LAN = "203.0.113.5"
-    # a real account, logged in the one way that exists since the classic cut
-    # (GET /login for the MG_BOOT csrf, then POST /api/login)
-    login_existing_client(cli, "alice", "hunter2")
-    # Prove the session really is authenticated (it can reach an ordinary
-    # authorized-LAN route) before proving it still can't reach this one.
-    assert cli.get("/api/jobs", environ_overrides={"REMOTE_ADDR": LAN}).status_code == 200
-    r = cli.post("/api/branding/shortcut", json={"mark": "mark_4"},
-                 environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403
 
 
 def test_branding_survives_corrupt_manifests(tmp_path):
@@ -260,7 +223,8 @@ def io_bytes(b):
 def test_branding_slots_empty_on_fresh_install(tmp_path):
     """The Branding slots are the three banners ONLY (the 2026-08-13
     unlock-split enforcement -- mascots/rewards are achievement-adjacent and
-    not slots; see dev/tests/test_unlock_split.py for that boundary)."""
+    not slots; see dev/tests/test_branding_roles.py::
+    test_the_banner_payload_and_routes_are_unchanged for that boundary)."""
     cli = _client(tmp_path)
     d = cli.get("/api/branding").get_json()
     assert set(d["slots"].keys()) == {"banner_main", "banner_login", "banner_loom"}
@@ -394,6 +358,7 @@ def test_discovery_tree_creates_empty_slot_folders_and_one_readme(tmp_path, monk
         d = g._role_dir(slot)
         assert d.is_dir()
         assert list(d.iterdir()) == []   # empty -- nothing to find yet
+        assert not (tmp_path / "branding" / slot).exists(), slot   # no role-named folder on disk (bundle-v2: only coded names)
     # The one breadcrumb now lives at the GONK spot inside the coded tree...
     crumb = tmp_path / "branding" / g._role_rel("breadcrumb", "README.txt")
     assert crumb.is_file()

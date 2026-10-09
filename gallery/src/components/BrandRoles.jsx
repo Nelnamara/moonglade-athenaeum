@@ -42,11 +42,21 @@ function RoleRow({ role, csrf, open, onOpen, onClose, onSaved }) {
     return () => document.removeEventListener("keydown", onKey, true);
   });   // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (!open) { ed.drop(); setAsking(null); } }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ownFold = useRef(false);                     // the close now landing is this row's own fold's
+  useEffect(() => {
+    const own = ownFold.current; ownFold.current = false;
+    if (open) return;
+    ed.drop();
+    // fold() dropped the ask as it began. A single-image row's ask sits in the row itself, not in
+    // the editor, so one opened DURING the fold is newer than the fold and outlives its end (the
+    // same rule as the row's close, which shuts only its own row). A multi-image row's ask is
+    // inside the editor that just went, and any other close drops the ask as before.
+    if (!(own && role.images.length === 1)) setAsking(null);
+  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const fold = () => {
     setLeaving(true); setAsking(null);
-    setTimeout(() => { setLeaving(false); ed.drop(); onClose(); }, 350);
+    setTimeout(() => { setLeaving(false); ed.drop(); ownFold.current = true; onClose(); }, 350);
   };
 
   const img = role.images.find((i) => i.key === ed.key) || role.images[0];
@@ -146,7 +156,11 @@ export default function RolesSection({ summary, onSaved }) {
       {roles.map((role) => (
         <RoleRow key={role.slot} role={role} csrf={summary.csrf} onSaved={onSaved}
           open={openSlot === role.slot}
-          onOpen={() => setOpenSlot(role.slot)} onClose={() => setOpenSlot("")} />
+          onOpen={() => setOpenSlot(role.slot)}
+          /* A row closes only ITSELF. Its close lands at the end of its .35 s fold, and a
+             Change pressed on another row inside that exit has opened that row by then: an
+             unconditional "" shut the new editor under the user's hand. */
+          onClose={() => setOpenSlot((cur) => (cur === role.slot ? "" : cur))} />
       ))}
     </div>
   );

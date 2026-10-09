@@ -428,14 +428,6 @@ def test_a_one_cell_matrix_is_an_ordinary_single_send_and_its_card_applies(cli, 
     assert rig.mutations[1] == rig.mutations[0]
 
 
-def test_a_matrix_of_two_cells_never_calls_the_card_check_at_plan_or_send(cli, rig):
-    rig.card_default = CARD
-    _, d, _ = plan_and_run(cli, rig, prompt="{a|b} x", var_mode="matrix")
-    assert d["status"] == "sent" and len(rig.mutations) == 2
-    assert rig.count("match_kaisuuken") == 0
-    assert all("kaisuukenId" not in m for m in rig.mutations)
-
-
 def test_a_fixed_seed_matrix_whose_cells_share_a_prompt_is_refused(cli, rig):
     """Review N4: with the seed field set every cell carries that one seed, so two cells that
     resolve to the same prompt are one picture paid for twice -- refused, locally."""

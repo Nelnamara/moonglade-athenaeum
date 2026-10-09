@@ -54,9 +54,3 @@ export function stateFromPrefs(v) {
   }
   return out;
 }
-
-/* The dock's profile, for the Lightbox edit bar (T3a: "the dock's profile"). */
-export function prefsMode(v) {
-  const p = stateFromPrefs(v);
-  return p.mode || "auto";
-}

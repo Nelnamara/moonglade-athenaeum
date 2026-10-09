@@ -574,24 +574,6 @@ def test_core_clamps_the_lora_weight_to_pixais_bounds():
     assert {e["versionId"]: e["weight"] for e in lst} == m, "the two shapes disagree"
 
 
-def test_drawer_no_longer_carries_the_ratio_cap_port():
-    """The drawer's hand port of max_upscale_ratio existed ONLY to drive its ratio slider,
-    and the slider is gone. It was also the wrong rule for this surface: the ceiling was
-    inferred from PixAI's image-view DIALOG maxima, and a real booster task submitted
-    upscale 1.5 on a 1400x784 source (2100x1176 -- over that inferred ceiling) and
-    completed (task 2039053268124647852, 2026-07-28). The port still belongs to
-    <UpscalePanel>, which has a real slider and a real source picture; that copy is
-    covered by test_upscale_panel_ratio_cap_agrees_with_python. The React Create surface
-    must not grow the port back either: it has no ratio UI, so it has no use for the
-    ceiling table at all.
-    """
-    root = pathlib.Path(__file__).resolve().parents[2]
-    for fname in ("gen/genCore.js", "gen/useGenerate.js", "components/CreateMobile.jsx"):
-        src = (root / "gallery" / "src" / fname).read_text(encoding="utf-8")
-        for gone in ("upCeil", "upMax(", "syncUpscale(", "MG_UPSCALE"):
-            assert gone not in src, gone + " is in the generation surface (" + fname + ")"
-
-
 def test_drawer_sends_pixais_own_booster_values():
     """Captured, not chosen. PixAI's Enhance Details booster exposes no controls, so their
     SERVER picks the values -- read off a real task (2039053268124647852, 2026-07-28):

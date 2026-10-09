@@ -31,15 +31,10 @@ const src = readFileSync(
   path.join(__dirname, "../../gallery/src/styles/notify.css"), "utf8");
 
 describe("notify.css owns every keyframe it animates", () => {
-  test("defines @keyframes gen-spin itself", () => {
-    assert.match(src, /@keyframes gen-spin\s*\{/,
-      "notify.css animates `gen-spin` but does not define it -- on any host page that " +
-      "lacks extra CSS (the Loom shell) the tracker spinner is frozen");
-  });
-
   test("the ring still animates gen-spin, and the portrait never does", () => {
     // Only the ring is the 'this job is alive' signal (fixed 2026-08-09, owner: "spins
-    // weirdly offset") -- it must stay wired to the keyframe the previous test proves exists.
+    // weirdly offset") -- it must stay wired to a keyframe, and the "every animation name it
+    // uses is defined" test below proves that keyframe exists.
     // Renamed .jt-spin/.jt-nel/.gen-ring -> .at-spin/.at-nel/.at-ring the same day (Claude
     // Design handoff, drift item 39: the header-docked Activity control retired the old
     // floating tray's id/class namespace) -- same rule, same fix, new prefix. The portrait

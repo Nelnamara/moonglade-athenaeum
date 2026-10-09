@@ -202,7 +202,7 @@ def test_submit_refuses_under_read_only_before_any_network_call(
     req = _build(payload)
     monkeypatch.setattr(core, "READ_ONLY", True)
     for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
-               "submit_generation", "submit_fixer", "_session_for_create"):
+               "submit_generation", "submit_fixer", "_session_for_create", "gql_mutate"):
         monkeypatch.setattr(core, fn, tripwire(fn))
 
     with pytest.raises(core.PixAIError) as err:
@@ -370,22 +370,6 @@ def test_with_a_changing_gate_the_card_is_still_the_only_difference(road):
     assert after == before
 
 
-def test_a_gated_request_still_refuses_under_read_only_before_any_tripwire(monkeypatch):
-    req = _gated_build(GATED_IMAGE)
-
-    def tripwire(name):
-        def _boom(*a, **k):
-            raise AssertionError("READ_ONLY did not stop the call before " + name)
-        return _boom
-    monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
-               "submit_generation", "submit_fixer", "_session_for_create"):
-        monkeypatch.setattr(core, fn, tripwire(fn))
-    with pytest.raises(core.PixAIError) as err:
-        core.submit(FakeSession(), req)
-    assert "READ_ONLY" in str(err.value)
-
-
 def test_price_carries_no_receipt_key_when_nothing_was_changed(road):
     """A key on every answer is a key clients learn to ignore -- the same rule
     /api/generate's response follows."""
@@ -438,19 +422,3 @@ def test_a_resolver_without_the_lane_check_refuses_a_lane_request(road):
             core.build_request(dict(GATED_IMAGE, unlimited=True), mode="image", resolve=rs)
         assert "can't be checked on this road" in str(err.value)
     assert road["priced"] == road["submitted"] == road["matched"] == []
-
-
-def test_a_lane_request_still_refuses_under_read_only_before_any_tripwire(monkeypatch):
-    req = _lane_build(GATED_IMAGE)
-
-    def tripwire(name):
-        def _boom(*a, **k):
-            raise AssertionError("READ_ONLY did not stop the call before " + name)
-        return _boom
-    monkeypatch.setattr(core, "READ_ONLY", True)
-    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
-               "submit_generation", "_session_for_create", "gql_mutate"):
-        monkeypatch.setattr(core, fn, tripwire(fn))
-    with pytest.raises(core.PixAIError) as err:
-        core.submit(FakeSession(), req)
-    assert "READ_ONLY" in str(err.value)

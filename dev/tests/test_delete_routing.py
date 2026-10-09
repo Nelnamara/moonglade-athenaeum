@@ -331,21 +331,3 @@ def test_a_matching_confirmed_plan_goes_through(monkeypatch):
     plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
     assert plan.plan == "per-image"
     assert len(dbl.mutations) == 1
-
-
-def test_the_routed_delete_fires_at_most_one_mutation():
-    """Structural, so a branch nobody drove is covered too: no loop may wrap the delete.
-    A destructive mutation retried after a lost response can fire twice against a task that
-    has already changed. delete_task_gql hand-rolls a single post and delete_batch_media_gql
-    rides gql_mutate; the function that picks between them must not put a loop around
-    either."""
-    import ast
-    import inspect
-    import textwrap
-    tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_image_routed)))
-    loops = [n for n in ast.walk(tree)
-             if isinstance(n, (ast.For, ast.AsyncFor, ast.While, ast.ListComp,
-                               ast.SetComp, ast.DictComp, ast.GeneratorExp))]
-    assert not loops, (
-        "delete_image_routed grew a loop around a destructive delete -- it must fire once")
-

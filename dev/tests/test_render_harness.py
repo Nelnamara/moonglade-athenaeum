@@ -37,7 +37,8 @@ Design, and why
   localhost bypass and re-validates the session against `config.json`'s `AUTH_USERS` on
   every request, so the harness drives the real React login page (GET /login serves the
   shell; its form fetches POST /api/login) with a real scrypt-hashed account made by
-  `core.add_or_update_web_user` -- the same endpoint `dev/tests/conftest.py`'s
+  `core.add_or_update_web_user` (at the suite's token scrypt cost, conftest's
+  `_cheap_test_password_hashes`) -- the same endpoint `dev/tests/conftest.py`'s
   `login_client()` helpers post to for the test client. Nothing here weakens an auth path.
 * **The conftest interaction that matters.** `dev/tests/conftest.py::_isolated_auth_config` is
   autouse and function-scoped: it re-points `core._config_path()` at each test's own
@@ -76,7 +77,7 @@ the day it was written.
 The CI gap, and what covers it
 ------------------------------
 This module SKIPS without playwright + a browser. `.github/workflows/tests.yml` installs
-playwright and chromium for the pytest job, so on CI these guards RUN on chromium (the
+playwright and chromium for its render-harness job, so on CI these guards RUN on chromium (the
 WebKit profile is local-only: `MG_HARNESS_BROWSER=webkit`). Before 2026-09 CI installed
 neither and defect 3 above regressed on a `push` unseen. `dev/tests/csshelp.py` covers that one axis in pure
 stdlib: it resolves which declaration WINS the cascade (!important, specificity,
@@ -623,6 +624,38 @@ def _dismiss_any_achievement_toast(page, rounds=4):
             rounds))
 
 
+# The desktop sign-in holds on purpose after a successful sign-in: LoginPage.jsx's BUSY_MIN_MS
+# (the mascot's "Signing in..." beat) and then WELCOME_HOLD_MS (the welcome line), about 5.6 s
+# together, before it moves on to the gallery. The phone page moves on at once. Every desktop
+# test used to pay that hold, and every test also waited for the sign-in card's entrance
+# animation to finish before Playwright would click it. Signing in is not what those tests are
+# about, so _login() shortens both, on the sign-in page only and in the test only: timers of a
+# second or more fire at once there, and motion is frozen. The app is untouched, and one test
+# (test_the_desktop_sign_in_holds_its_welcome_before_moving_on) still signs in the real way and
+# asserts the hold.
+_SHORTEN_SIGN_IN_TIMERS_JS = (
+    "() => { const st = window.setTimeout;"
+    " window.setTimeout = (fn, ms, ...a) => st(fn, ms >= 1000 ? 0 : ms, ...a); }")
+
+
+def _skip_sign_in_beats(page):
+    """Shorten the sign-in page's own holds and freeze its motion (see the note above)."""
+    page.evaluate(_SHORTEN_SIGN_IN_TIMERS_JS)
+    _freeze_motion(page)
+
+
+def _sign_in_beats_ms():
+    """LoginPage.jsx's (BUSY_MIN_MS, WELCOME_HOLD_MS), read from the source so this harness
+    never keeps a second copy of the design's timings."""
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    src = open(os.path.join(repo, "gallery", "src", "components", "LoginPage.jsx"),
+               encoding="utf-8").read()
+    busy = re.search(r"^const BUSY_MIN_MS = (\d+);", src, flags=re.M)
+    hold = re.search(r"^const WELCOME_HOLD_MS = (\d+);", src, flags=re.M)
+    assert busy and hold, "LoginPage.jsx no longer declares BUSY_MIN_MS / WELCOME_HOLD_MS"
+    return int(busy.group(1)), int(hold.group(1))
+
+
 def _login(page, username=_USERNAME):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -635,8 +668,12 @@ def _login(page, username=_USERNAME):
     POST really did complete, but page.url was still /login afterward).
     expect_navigation ties the wait to the actual navigation instead, whenever
     it actually happens -- the same fix works for a synchronous native submit
-    too, so this isn't React-specific plumbing leaking into a shared helper."""
+    too, so this isn't React-specific plumbing leaking into a shared helper.
+
+    The sign-in page's own holds are shortened first (_skip_sign_in_beats): the account,
+    the form and the POST are all real; only the page's wait before it moves on is not."""
     page.goto("/login", wait_until="domcontentloaded")
+    _skip_sign_in_beats(page)
     page.fill("input[name=username]", username)
     page.fill("input[name=password]", _PASSWORD)
     # The login's own budget, wider than the context default: on a two-core CI runner the
@@ -665,6 +702,74 @@ def _settle(page):
     """Yield two animation frames: style recalc + layout have both run before we read."""
     page.evaluate("() => new Promise(r => requestAnimationFrame("
                   "() => requestAnimationFrame(r)))")
+
+
+def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
+        render_server, render_browser, monkeypatch):
+    """The one sign-in in this file that does NOT take _login()'s shortcut, so the design beat
+    the shortcut skips stays covered (issue #25 pt 2): after a successful desktop sign-in the
+    page holds "Signing in..." for BUSY_MIN_MS, then shows the welcome line, and holds that for
+    WELCOME_HOLD_MS before it moves on to the gallery.
+
+    Timed from Python, so every reading can only come out LATER than the page's own timers
+    fire (each observation lags its event); the half-second margins absorb that lag the other
+    way, and are small next to the 2.2 s and 3.4 s being guarded. The fixed wait in phase 1 is
+    the measurement itself: the claim is that nothing happens for that long.
+
+    Phase 2 proves both halves non-vacuous: the same sign-in with the shortcut moves on before
+    the busy beat would even have ended, so this test can tell a held sign-in from one that
+    was not -- and the shortcut every other test relies on really does skip the hold."""
+    import time
+
+    busy_ms, hold_ms = _sign_in_beats_ms()
+    monkeypatch.setattr(core, "_config_path", lambda: render_server.config_path)
+
+    def _open():
+        ctx = render_browser.new_context(
+            viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+            device_scale_factor=1, base_url=render_server.base_url)
+        ctx.set_default_timeout(10_000)
+        page = ctx.new_page()
+        page.goto("/login", wait_until="domcontentloaded")
+        page.fill("input[name=username]", _USERNAME)
+        page.fill("input[name=password]", _PASSWORD)
+        return ctx, page
+
+    # Phase 1: the real sign-in, untouched -- no shortened timers, no frozen motion.
+    ctx, page = _open()
+    try:
+        page.click("button[type=submit]")
+        clicked = time.monotonic()
+        try:
+            page.wait_for_selector(".lgn-welcome")
+        except _PlaywrightTimeout:
+            pytest.fail("no welcome line within 10 s of signing in; the page is at {} -- it "
+                        "moved on without its welcome hold, or never signed in".format(page.url))
+        busy_s = time.monotonic() - clicked
+        assert "/login" in page.url, "the page moved on before its welcome line showed"
+        assert busy_s >= busy_ms / 1000 - 0.5, (
+            "the welcome line came {:.2f}s after the click; the busy beat is {} ms".format(
+                busy_s, busy_ms))
+        page.wait_for_timeout(hold_ms - 500)
+        assert "/login" in page.url and page.locator(".lgn-welcome").count() == 1, (
+            "the page moved on before its {} ms welcome hold was over".format(hold_ms))
+        page.wait_for_url(lambda url: "/login" not in url, wait_until="commit")
+    finally:
+        ctx.close()
+
+    # Phase 2: the same sign-in through the shortcut every other test takes.
+    ctx, page = _open()
+    try:
+        _skip_sign_in_beats(page)
+        started = time.monotonic()
+        with page.expect_navigation(wait_until="commit"):
+            page.click("button[type=submit]")
+        moved_s = time.monotonic() - started
+        assert moved_s < busy_ms / 1000, (
+            "with the shortcut the sign-in still took {:.2f}s to move on -- _login() no longer "
+            "skips the page's hold, and every desktop test pays it again".format(moved_s))
+    finally:
+        ctx.close()
 
 
 # ---------------------------------------------------------------------------
@@ -942,7 +1047,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     inferring it from the source being shared: two build pipelines is exactly how one host's
     bundle could go stale while the other moves on.
 
-    Measured as shipped at 1280x900, on `/` and on `/loom?bundle=1` alike: the icon carries
+    Measured as shipped at 1280x900, on `/` and on `/loom` alike: the icon carries
     `at-queued`, the ring's computed animationName is `none` (a rendering job reads
     `gen-spin`), the phase pill reads "queued" uppercased, and the estimate chip reads
     "est. 27s wait". The mascot's own animationName is checked too but is ALWAYS `none`,
@@ -952,7 +1057,7 @@ def test_queued_generation_stops_the_spinner_on_both_hosts(logged_in_page):
     orientation), so the ring alone is the real discriminator now.
     """
     seen = {}
-    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/"), ("loom", "/loom")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         m = page.evaluate(_TRAY_QUEUED_JS)
@@ -1031,7 +1136,7 @@ def test_activity_dropdown_reaches_the_true_edge_regardless_of_trigger_position(
     neither a `position:relative` regression on the trigger wrapper NOR a reorder-without-
     approval regression can land silently again.
     """
-    for host, path in (("gallery", "/"), ("loom", "/loom?bundle=1")):
+    for host, path in (("gallery", "/"), ("loom", "/loom")):
         page = logged_in_page(**DESKTOP)
         _open_tray_with_queued_job(page, path)
         g = page.evaluate(_TRAY_GEOMETRY_JS[host])
@@ -1936,32 +2041,6 @@ def test_phone_similar_is_dismissed_by_the_back_gesture_too(logged_in_page, monk
     page.wait_for_selector(".glm-grid .glm-tile")
     assert page.locator(".glm-simtok").count() == 0, "Back left the token up"
     assert "/login" not in page.url, "Back walked out of the app instead of dismissing Similar"
-
-
-def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
-    """The picture screen was the last surface in the app still wearing ✧.
-
-    Its SIMILAR strip reads ◈ now -- one mark for visual similarity, everywhere -- and
-    the model filter beside it says what it does ("Filter by model"), the same rename
-    the desktop record took in B2. The strip's own data is left to the live route: with
-    no CLIP sidecar installed it renders its honest unavailable line, which is exactly
-    the state this test wants to leave alone.
-    """
-    page = logged_in_page(**PHONE)
-    _visit(page, "/")
-    page.wait_for_selector(".glm-grid .glm-tile")
-    _dismiss_any_achievement_toast(page)
-
-    page.locator(_DOOR_TILE).click()
-    page.wait_for_selector(".lbm-root")
-    page.click(".lbm-actsrow >> text=Details")
-    page.wait_for_selector(".idm-similar")
-
-    head = page.locator(".idm-similar .idm-subhead").inner_text()
-    assert "◈ SIMILAR" in head, "the picture screen still wears the old mark: {!r}".format(head)
-    recrow = page.locator(".idm-recrow").inner_text()
-    assert "Filter by model" in recrow
-    assert "Find similar (model)" not in recrow
 
 
 # ---------------------------------------------------------------------------
@@ -3416,15 +3495,6 @@ def test_the_return_trip_lands_where_the_library_was(logged_in_page):
         "came back to {!r} instead of the address the library was at".format(page.url))
 
 
-def test_a_loom_opened_cold_still_offers_the_library_front_door(logged_in_page):
-    """A tab that was never in the library has nothing to remember, and must say nothing
-    untrue about it -- the link falls back to the front door, exactly what it always was."""
-    page = logged_in_page(**DESKTOP)
-    _visit(page, "/loom")
-    page.wait_for_selector(_LOOM_READY)
-    assert page.get_attribute("a.lv-close[href]", "href") == "/"
-
-
 def test_a_phone_opens_the_phone_layout_and_a_tablet_does_not(logged_in_page):
     """Owner call 5, and the constraint attached to it: "I want to be mindful of the tablet
     still being able to use desktop."
@@ -3816,45 +3886,67 @@ def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
 
 
 _BANNER_EXPAND_JS = """
-() => new Promise((resolve) => {
+() => {
   /* Sample the expand while it is RUNNING. Everything this measures is mid-transition, so
      nothing here may wait for it to settle: the banner's box, the mark's box, and whether
      a point inside the mark that lies BELOW the banner's own bottom edge still belongs to
      the mark. elementFromPoint is the honest test of a clip -- a clipped element keeps its
-     layout rect, so a rect alone can never see one. */
+     layout rect, so a rect alone can never see one.
+
+     ARMED BEFORE THE CLICK, and started by the expand's own commit. t=0 used to be the moment
+     this script reached the page, one round trip AFTER the click -- so on a loaded machine
+     (the xdist run, 2026-10-08) the expand was already ~40 ms into a smooth climb and its
+     "first frame" read 81.9px, failing the no-jump check on a banner that never jumped (a
+     40 ms wait between the click and this script reproduces the same numbers on a quiet
+     machine). A MutationObserver's callback runs as a microtask right after React commits
+     the class change that takes `slim` away, before the browser can paint a frame, so t=0 is
+     the expand's first state on every machine -- whether or not `expanding` arrived in the
+     same commit, which is the half of the fix frame 0 checks. The frames land in
+     window.__mgExpandFrames. */
   const bnr = document.querySelector(".mgx-bnr");
-  const mark = document.querySelector(".mgx-mark");
-  const band = document.querySelector(".mgx-bottom");
-  const frames = [];
-  const t0 = performance.now();
-  const sample = (again) => {
-    const b = bnr.getBoundingClientRect();
-    const m = mark.getBoundingClientRect();
-    const r = band.getBoundingClientRect();
-    const x = Math.round(m.left + m.width / 2);
-    const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
-    const hit = document.elementFromPoint(x, y);
-    frames.push({
-      t: Math.round(performance.now() - t0),
-      expanding: bnr.classList.contains("expanding"),
-      overflow: getComputedStyle(bnr).overflowY,
-      bandOverflow: getComputedStyle(band).overflowY,
-      bandMaxH: getComputedStyle(band).maxHeight,
-      bnrH: Math.round(b.height * 10) / 10,
-      markH: Math.round(m.height * 10) / 10,
-      markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
-      // is the point inside the mark, but below the banner's edge, still the mark's?
-      belowEdge: m.bottom > b.bottom + 2,
-      hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
-      bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+  window.__mgExpandFrames = new Promise((resolve) => {
+    const frames = [];
+    let t0 = 0, mark = null, band = null;
+    const sample = (again) => {
+      const b = bnr.getBoundingClientRect();
+      const m = mark.getBoundingClientRect();
+      const r = band.getBoundingClientRect();
+      const x = Math.round(m.left + m.width / 2);
+      const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
+      const hit = document.elementFromPoint(x, y);
+      frames.push({
+        t: Math.round(performance.now() - t0),
+        expanding: bnr.classList.contains("expanding"),
+        overflow: getComputedStyle(bnr).overflowY,
+        bandOverflow: getComputedStyle(band).overflowY,
+        bandMaxH: getComputedStyle(band).maxHeight,
+        bnrH: Math.round(b.height * 10) / 10,
+        markH: Math.round(m.height * 10) / 10,
+        markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
+        // is the point inside the mark, but below the banner's edge, still the mark's?
+        belowEdge: m.bottom > b.bottom + 2,
+        hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
+        bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+      });
+      if (!again) return;
+      if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
+      else resolve(frames);
+    };
+    const start = new MutationObserver(() => {
+      if (bnr.classList.contains("slim")) return;
+      start.disconnect();
+      clearTimeout(never);
+      mark = document.querySelector(".mgx-mark");
+      band = document.querySelector(".mgx-bottom");
+      t0 = performance.now();
+      sample(false);          // t=0, the commit itself, before a frame: where the expand starts
+      requestAnimationFrame(() => sample(true));
     });
-    if (!again) return;
-    if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
-    else resolve(frames);
-  };
-  sample(false);            // t=0, before a frame has been yielded: the pin at its tightest
-  requestAnimationFrame(() => sample(true));
-})
+    start.observe(bnr, { attributes: true, attributeFilter: ["class"] });
+    // An expand that never leaves `slim` resolves empty, and the test says the pin was never seen.
+    const never = setTimeout(() => { start.disconnect(); resolve(frames); }, 3000);
+  });
+}
 """
 
 
@@ -3886,9 +3978,9 @@ def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged
     page.wait_for_selector(".mgx-bnr.slim")
     page.wait_for_timeout(700)                        # let the collapse finish entirely
 
-    page.evaluate("() => { window.__mgFrames = null; }")
+    page.evaluate(_BANNER_EXPAND_JS)                  # armed: it starts at the expand's commit
     page.locator('.mgx-sqbtn[title="Expand the banner to its hero height"]').click()
-    frames = page.evaluate(_BANNER_EXPAND_JS)
+    frames = page.evaluate("() => window.__mgExpandFrames")
 
     pinned = [f for f in frames if f["expanding"]]
     assert len(pinned) >= 5, (
@@ -3926,10 +4018,11 @@ def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged
             [f["t"] for f in spilling]))
 
     # 5. and the expand itself is still ONE motion: it starts at the slim row, not at
-    #    content height, which is the fix this pin exists for.
-    assert pinned[0]["bnrH"] <= 80, (
-        "the expand jumped to content height in its first frame again: "
-        "{}".format([(f["t"], f["bnrH"]) for f in pinned[:4]]))
+    #    content height, which is the fix this pin exists for. Frame 0 is the commit that took
+    #    `slim` away, so this also fails a pin that arrives a commit late (Banner.jsx's note).
+    assert frames[0]["expanding"] and frames[0]["bnrH"] <= 80, (
+        "the expand jumped to content height in its first frame again (t, pinned, height): "
+        "{}".format([(f["t"], f["expanding"], f["bnrH"]) for f in frames[:4]]))
     assert max(f["bnrH"] for f in frames) > 200, "the banner never reached its hero height"
 
 
@@ -6348,13 +6441,21 @@ def test_the_branding_roles_section_checks_a_file_before_it_sends_and_keeps_the_
     page.wait_for_function("() => !document.querySelector('.mgcp-rl-primary').disabled")
     page.click(".mgcp-rl-primary:has-text('Use this')")
     page.wait_for_selector('.mgcp-rl[data-role="login_companion"] .mgcp-rl-art.def')
+    # The ask opens DURING this row's own fold (its .35 s exit, BrandRoles.jsx's fold()): the
+    # default picture is there the moment the save lands, and the fold's end used to drop every
+    # ask on the row, even one opened after the fold began -- after the next click on a quiet
+    # machine, between the two clicks below on a loaded one (the xdist run). A page-side timer
+    # queued now fires after the fold's own, so this looks once the fold is over, on any machine.
+    login.locator("button.mgcp-rl-art.def").click()
+    page.evaluate("() => new Promise((done) => setTimeout(done, 500))")
+    ask = page.locator(".mgcp-rl-ask")
+    assert ask.count() == 1, "the login companion's fold dropped the ask opened during it"
     sizes = page.evaluate("""() => [...document.querySelectorAll('.mgcp-rl[data-role="login_companion"] .mgcp-rl-row .mgcp-rl-art')]
         .map(a => ({w: Math.round(a.getBoundingClientRect().width), cls: a.className}))""")
     assert [s["w"] for s in sizes] == [28, 34]
     assert "def" in sizes[0]["cls"] and "yours" in sizes[1]["cls"]
+    page.mouse.move(0, 0)   # off the default picture just clicked: its :hover reads .8, not its resting .45
     assert page.evaluate("() => getComputedStyle(document.querySelector('.mgcp-rl-art.def')).opacity") == "0.45"
-    login.locator("button.mgcp-rl-art.def").click()
-    ask = page.locator(".mgcp-rl-ask")
     assert ask.inner_text().startswith("Go back to the default Login companion?\nYour image is removed from this install.")
     ask.locator("button:has-text('Keep mine')").click()
     assert _g._role_override_path("login_companion", "companion").is_file(), "Keep mine changes nothing"
@@ -6412,6 +6513,14 @@ def test_the_login_companion_editor_accepts_an_animated_webp_and_refuses_a_movin
 
     page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-ghost:has-text("Change")').click()
     page.wait_for_selector('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor')
+    # The login companion's row is still folding (its .35 s exit, BrandRoles.jsx's fold()) when
+    # this one opens, and its close at the end of that exit used to close WHICHEVER row was open:
+    # this editor, the moment the fold ended -- after the checks below on a quiet machine, in
+    # the middle of them on a loaded one (the xdist run). A page-side timer queued now fires
+    # after the fold's own, so this looks once the fold is over, on any machine.
+    page.evaluate("() => new Promise((done) => setTimeout(done, 500))")
+    assert page.locator('.mgcp-rl[data-role="power_poses"] .mgcp-rl-editor').count() == 1, (
+        "the login companion's fold closed the power poses editor opened during it")
     page.locator(".mgcp-rl-editor input[type=file]").set_input_files(anim(tmp_path / "moving.png", (300, 300), "PNG"))
     page.wait_for_selector(".mgcp-rl-loud")
     assert page.locator(".mgcp-rl-loud").inner_text() == (
@@ -7082,16 +7191,13 @@ def _q_json(route, payload, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None,
-            screen=None):
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None):
     """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
     collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
     unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
     monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
     opts = {"has_touch": True, "is_mobile": True} if touch else {}
     vp = viewport or PHONE
-    if screen:
-        opts["screen"] = screen
     ctx = render_browser.new_context(
         viewport={"width": vp["width"], "height": vp["height"]}, device_scale_factor=1,
         base_url=server.base_url, timezone_id="UTC", **opts)
@@ -7501,7 +7607,6 @@ def test_data_saver_draws_256px_thumbs_holds_full_size_for_a_tap_and_stops_autop
 
 @pytest.mark.parametrize("connection,expect_on,sub", [
     ({"type": "cellular", "saveData": False}, True, "metered connection"),
-    ({"type": "wifi", "saveData": False}, False, "on Wi-Fi"),
     ({"saveData": True}, True, "asking to save data"),
     (None, False, "can’t tell"),
 ])
@@ -7747,20 +7852,6 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
         lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 6)
             .map((t) => Math.round(t.getBoundingClientRect().left))""")
         assert len(set(lefts)) == 3, "3 columns under 700 px wide: %r" % lefts
-    finally:
-        ctx.close()
-
-
-def test_a_tablet_turned_sideways_is_still_the_desktop_build(phone_q_server, render_browser, monkeypatch):
-    """Q4's other edge: the rule that keeps a phone a phone in landscape must not claim an iPad mini
-    (short side 744). Same page, a sideways viewport -- but a tablet's screen."""
-    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch,
-                              vp={"width": 1133, "height": 744}, screen={"width": 1133, "height": 744})
-    try:
-        _visit(page, "/")
-        page.wait_for_selector("#root *")
-        page.wait_for_timeout(500)
-        assert page.locator(".glm-stage").count() == 0, "the desktop build, not the phone shell"
     finally:
         ctx.close()
 

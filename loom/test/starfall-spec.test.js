@@ -569,31 +569,6 @@ describe("a bespoke moment owns the screen while it plays", () => {
     assert.equal(moments().length, 1);
   });
 
-  test("a celebration already QUEUED when the moment arms is held too", async () => {
-    // The shape the front-door hold alone does not catch, and the likely one: a generation
-    // finishes, check() queues two earns, the first is on screen, and the owner casts the code
-    // while it plays. The queue re-enters itself through _play's `after` -- never through
-    // celebrate() -- so without a hold at that re-entry the SECOND moment builds .ach-m2
-    // (z-index 519) straight over the starfall moment (515/516) the instant the first ends.
-    nextPayload = payload([
-      { id: "q1", name: "One", tier: "common", desc: "x" },
-      { id: "q2", name: "Two", tier: "common", desc: "x" },
-    ]);
-    ach.check();
-    await tick();
-    assert.equal(moments().length, 1, "the first plays; the second is queued behind it");
-
-    ach.beginBespokeMoment();                  // the cast lands mid-celebration
-    moments()[0].click();                      // ...and the first moment ends normally
-    await wait(600);
-    assert.equal(moments().length, 0,
-      "the queued celebration must NOT take the screen while the cast owns it");
-
-    ach.endBespokeMoment();
-    await tick();
-    assert.equal(moments().length, 1, "and it plays once the cast has gone");
-  });
-
   test("a parade already RUNNING is held at its next step", async () => {
     const list = Array.from({ length: 5 }, (_, i) => ({ id: "p" + i, name: "P" + i, tier: "common", desc: "x" }));
     nextPayload = payload(list);

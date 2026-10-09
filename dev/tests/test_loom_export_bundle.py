@@ -2,7 +2,7 @@
 the lightweight JSON, is pure client-side and untested here). /api/loom/export-bundle
 zips project.json plus every media file a project actually references; /api/loom/
 import-bundle reconciles that media into the receiving catalog, skipping anything
-already resolvable there. Both localhost-gated, same trust level as /export-zip."""
+already resolvable there."""
 import io
 import json
 import zipfile
@@ -11,7 +11,7 @@ from PIL import Image
 
 from moonglade.gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_existing_client, login_test_client
+from tests.conftest import login_test_client
 
 
 def _row(**kw):
@@ -24,15 +24,9 @@ def _png_bytes(color=(120, 40, 200), size=(16, 16)):
     return buf.getvalue()
 
 
-def _client(tmp_path, rows=()):
-    if rows:
-        save_catalog(tmp_path / "catalog.db", list(rows))
-    return create_app(tmp_path).test_client()
-
-
 def _authed_client(tmp_path, rows=()):
-    """Like _client(), but logged in for real -- for every test below EXCEPT the
-    "localhost_only" pair (which deliberately stay anonymous to test the gate itself)."""
+    """A test client logged in for real. The anonymous refusal of these two routes is swept
+    for every route at once by test_route_tiers.py, so nothing here drives them anonymous."""
     if rows:
         save_catalog(tmp_path / "catalog.db", list(rows))
     return login_test_client(create_app(tmp_path))
@@ -150,20 +144,6 @@ def test_export_bundle_carries_every_take_not_only_the_selected_one(tmp_path):
     assert {"media/501.mp4", "media/502.mp4", "media/503.mp4"} <= names
 
 
-def test_export_bundle_localhost_only(tmp_path):
-    """An unauthenticated request is refused regardless of address -- checked FIRST,
-    while `cli` is still anonymous (api_loom_export_bundle() has no extra
-    _is_local_request() check of its own, so once logged in a LAN session is trusted
-    the same as the owner, same as most of this LAN-auth pass's other routes)."""
-    cli = _client(tmp_path, [])
-    r_lan = cli.post("/api/loom/export-bundle", data=json.dumps({"project": _project()}),
-                      content_type="application/json", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r_lan.status_code == 401
-    cli = login_existing_client(cli)
-    r = _post_json(cli, "/api/loom/export-bundle", {"project": _project()})
-    assert r.status_code == 200
-
-
 # --- import-bundle -----------------------------------------------------------------
 
 def test_import_bundle_catalogs_new_media_and_returns_project(tmp_path):
@@ -252,14 +232,6 @@ def test_import_bundle_requires_a_file(tmp_path):
     cli = _authed_client(tmp_path, [])
     r = cli.post("/api/loom/import-bundle", data={}, content_type="multipart/form-data")
     assert r.status_code == 400
-
-
-def test_import_bundle_localhost_only(tmp_path):
-    cli = _client(tmp_path, [])
-    zip_bytes = _make_bundle(_project())
-    r = cli.post("/api/loom/import-bundle", data={"file": (io.BytesIO(zip_bytes), "b.zip")},
-                 content_type="multipart/form-data", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 401
 
 
 def test_import_bundle_skips_every_entry_that_is_not_a_plain_picture_or_video(tmp_path):

@@ -14724,7 +14724,13 @@ def create_app(out_dir: Path):
             except Exception:              # noqa: BLE001 -- a bad schedule must not kill the loop
                 pass
 
-    threading.Thread(target=_scheduler_loop, daemon=True).start()
+    # MOONGLADE_DISABLE_SCHEDULER=1 leaves the loop unstarted -- set by the test suite's
+    # conftest for the whole run, the way MOONGLADE_DISABLE_WATCH keeps the watcher off. The
+    # loop never stops once started, so every app a test built used to leave one ticking for
+    # the rest of the run, where it could wake inside a later test (issue #77). Tests that are
+    # about the scheduler call its ticks directly. The launcher never sets it.
+    if os.environ.get("MOONGLADE_DISABLE_SCHEDULER") != "1":
+        threading.Thread(target=_scheduler_loop, daemon=True, name="mg-scheduler").start()
 
     # ---- Live-mirror watcher: event-driven backup over PixAI's push WebSocket -----
     # Keeps the CLI's --watch/--watch-backup machinery (moonglade_backup.py)

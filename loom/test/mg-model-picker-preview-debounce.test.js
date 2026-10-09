@@ -23,9 +23,9 @@ const src = readFileSync(path.join(__dirname, "../../gallery/src/components/Mode
 test("ModelPicker card hover is debounced, not instant", () => {
   assert.match(src, /onMouseEnter=\{[^}]*schedulePreview\(m,/,
     "card onMouseEnter must go through the debounced scheduler, not straight to showPreview");
-  assert.match(src, /schedulePreview\s*=\s*\(m,\s*anchorEl\)\s*=>\s*\{[\s\S]*?setTimeout\([\s\S]*?,\s*130\)/,
+  assert.match(src, /schedulePreview\s*=\s*\(m,\s*anchorEl\)\s*=>\s*\{[\s\S]*?setTimeout\(\(\)\s*=>\s*showPreview\(m,\s*anchorEl\),\s*130\)/,
     "schedulePreview must actually delay via setTimeout, and keep the 130ms hover-intent delay");
-  assert.match(src, /hidePreview\s*=\s*\(\)\s*=>\s*\{[\s\S]*?clearTimeout/,
+  assert.match(src, /hidePreview\s*=\s*\(\)\s*=>\s*\{\s*clearTimeout\(previewTimerRef\.current\)/,
     "hidePreview must clear the pending timer, or a fast scan still opens a stale popup");
   assert.match(src, /onMouseLeave=\{hidePreview\}/,
     "leaving a card must cancel any pending preview, so a fast scan can't fire a stale popup");

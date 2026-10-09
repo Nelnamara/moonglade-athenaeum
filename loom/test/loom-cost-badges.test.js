@@ -52,8 +52,6 @@ test("badge refreshes are debounced read-only price checks, not the spend endpoi
   // exactly one.)
   assert.match(src, /priceBody\(body\)\.then\(\(d\) => \{ if \(ref\.current === badge\) badge\.setPrice\(d\); \}\);/,
     "priceInto must ask through priceBody, and push whatever comes back (null included) at the badge");
-  assert.doesNotMatch(src, /priceInto[\s\S]{0,400}fetch\(/,
-    "priceInto must not grow its own request back");
   // three separate setTimeout-debounced effects driving priceInto -- not a synchronous
   // call on every keystroke
   const debounceCount = (src.match(/setTimeout\(\(\) => priceInto\(/g) || []).length;

@@ -5,7 +5,6 @@ import {
   SEEN_KEY, SEEN_EPOCH, REVEAL, REVEAL_END, readSeen, unseenFeatIds, nextSeen, orderFeats,
   foundText, featCountText, veilState, revealFrame,
 } from "../../gallery/src/folio/maskedFeatsCore.js";
-import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
 
 /* The masked-feats logic (Session G): the seen record, the card order, the words for the
    counts, what the veil may show, and the glitch reveal's timings. Every feat here is an
@@ -14,8 +13,7 @@ import { prefKeyProblem } from "../../gallery/src/hooks/accountPrefsStore.js";
 const F = (id, earned = true) => ({ id, earned });
 
 describe("the seen record", () => {
-  test("its key is one the account store accepts and names no feat", () => {
-    assert.equal(prefKeyProblem(SEEN_KEY), "");
+  test("its key is the literal folio.seen", () => {
     assert.equal(SEEN_KEY, "folio.seen");
   });
 

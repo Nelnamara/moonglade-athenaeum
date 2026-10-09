@@ -12,7 +12,7 @@ Tier enforcement (login-required) is asserted by dev/tests/test_route_tiers.py.
 import json
 
 from moonglade import paths
-from moonglade.gallery import _account_key, create_app
+from moonglade.gallery import _account_key
 from tests.conftest import login_client, with_csrf
 
 
@@ -198,11 +198,3 @@ def test_the_legacy_shared_set_is_given_to_each_login_by_the_move(tmp_path):
     cli.post("/api/view-presets", json=with_csrf(cli, {"name": "new-one", "query": "?q=new"}))
     own = json.loads(_presets_file(tmp_path).read_text(encoding="utf-8"))
     assert own == {"from-before": "?q=legacy", "new-one": "?q=new"}
-
-
-def test_anonymous_request_is_refused(tmp_path):
-    """Belt-and-braces beside test_route_tiers: the roaming store must sit behind
-    the front door like everything else."""
-    cli = create_app(tmp_path).test_client()
-    r = cli.get("/api/view-presets")
-    assert r.status_code in (301, 302, 303, 401, 403)

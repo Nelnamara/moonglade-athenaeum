@@ -255,6 +255,7 @@ describe("the scan sees the roster at all", () => {
 
   test("the budget is read out of shell.css, not typed in here", () => {
     assert.equal(MARK_PX, 96);                 // the marks workshop's hero size
+    assert.equal(markTokenPx("mark-slim"), 56); // the slim override's size
     assert.equal(GUTTER_PX, 22);               // .mgx-navcol's right padding
     assert.ok(BUDGET_PCT > 22 && BUDGET_PCT < 23, "budget drifted: " + BUDGET_PCT);
   });

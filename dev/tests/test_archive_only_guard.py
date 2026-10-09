@@ -108,15 +108,6 @@ def test_the_trash_restores_an_only_copy_with_its_row(tmp_path):
     assert cli.get("/api/detail/200").get_json()["archive_only"] is True
 
 
-def test_the_single_image_path_removes_one_like_any_other(tmp_path):
-    db = _three(tmp_path)
-    cli = login_client(tmp_path)
-    d = cli.post("/api/delete-local", json={"media_ids": ["200"]}).get_json()
-    assert d == {"ok": True, "count": 1, "failed": 0}
-    assert (tmp_path / g.DELETED_DIRNAME / "p_200.png").exists()
-    assert "200" not in {r["media_id"] for r in load_catalog(db)}
-
-
 # ---------------------------------------------------------------------------
 # Payloads: the card, the detail read, the duplicate members
 # ---------------------------------------------------------------------------

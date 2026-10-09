@@ -397,16 +397,6 @@ def test_assets_fetch_route_admits_a_signed_in_lan_session(tmp_path):
     assert r.get_json().get("error") == "no asset manifest present"
 
 
-def test_assets_fetch_route_still_refuses_an_anonymous_lan_caller(tmp_path):
-    """LOGIN is not PUBLIC: dropping the localhost half must not drop the
-    session half with it."""
-    from moonglade.gallery import create_app
-    client = create_app(tmp_path).test_client()
-    r = client.post("/api/assets/fetch", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 401
-    assert r.get_json() == {"error": "authentication required"}
-
-
 # ---------------------------------------------------------------------------
 # The one-time rename (pack v7): the pack's pre-v7 name -> moonglade.mgpack. A real start
 # runs it before anything asks whether the pack is current (main(); its call site is held in

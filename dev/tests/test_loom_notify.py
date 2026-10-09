@@ -18,30 +18,6 @@ from moonglade import gallery as moonglade_gallery
 from tests.conftest import login_client
 
 
-def test_loom_shell_loads_shared_notify_script_and_anchors(tmp_path):
-    # Port note 2026-08-08: this test used to assert the OPPOSITE -- that the shell loads
-    # /static/mg-notify.js and carries the #jobs-fab/#jobs-tray anchor divs. Both are gone
-    # on purpose (the bundle carries notify; React renders the anchors), so the guard now
-    # points the other way: a reappearing script tag or anchor div means the shell edit
-    # was reverted to the vanilla wiring.
-    #
-    # Re-port 2026-08-09: the ids themselves are retired now (drift item 39) -- the Activity
-    # control lives inline in the toolbar, not portaled to body -- so there is no longer a
-    # z-index override for the shell to carry for them at all; asserting their absence covers
-    # both "reverted to vanilla" and "reverted to the 2026-08-08 floating-tray shape".
-    cli = login_client(tmp_path)
-    body = cli.get("/loom").get_data(as_text=True)
-    assert "/static/mg-notify.js" not in body, (
-        "the Loom shell references the deleted mg-notify.js -- the React bundle carries "
-        "the notify system now")
-    assert 'id="jobs-fab"' not in body and 'id="jobs-tray"' not in body, (
-        "the shell ships its own anchor divs, or the retired floating Activity tray's ids "
-        "reappeared -- the Activity control is inline in the toolbar now, not body-portaled")
-    assert "z-index: 401 !important" not in body and "z-index: 402 !important" not in body, (
-        "a Loom-scoped z-index override for the old floating tray reappeared -- the inline "
-        "Activity control (.lv-top-act-wrap) is a normal .lv-overlay descendant and needs none")
-
-
 def test_loom_shell_lifts_help_widget_above_the_overlay(tmp_path):
     """LoomV2's .lv-overlay (z-index:400, opaque) buried the ? help FAB (#eb-help-btn, z300)
     so it was invisible on /loom though the wiki documents it as usable there. The shell

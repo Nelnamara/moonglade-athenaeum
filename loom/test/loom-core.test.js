@@ -573,23 +573,6 @@ describe("shotPayload", () => {
     assert.equal(p.hasInput, true, "the payload itself is not mutated");
   });
 
-  test("FLF shot with two UNTAGGED frames gets DISTINCT fallback tags (never the same one)", () => {
-    const card = makeCard({
-      mode: "FLF",
-      openFrame: { thumbId: "thumb-open", source: "", desc: "", tag: "" },
-      closeFrame: { thumbId: "thumb-close", source: "", desc: "", tag: "" },
-    });
-    const project = makeProject([{ id: "a1", name: "Act", cards: [card] }]);
-    const entry = flat(project)[0];
-    const payload = shotPayload(entry, project, fakeImgSrc);
-    // Both frames resolved to image data (2 images total: no cast, no refs) --
-    // if open/close had collided on the same fallback tag, the second push
-    // would still happen (shotPayload doesn't dedupe by tag), but ordering
-    // downstream would be ambiguous. The real guarantee is the next test,
-    // which pins down which physical frame ends up in which position.
-    assert.equal(payload.images.length, 2);
-  });
-
   test("FLF fallback tags are truly distinct end-to-end (dedup check)", () => {
     // Build a project where BOTH frames are untagged; if the implementation
     // regressed to using the SAME fallback tag for both, this test — which

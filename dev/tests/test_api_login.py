@@ -226,23 +226,11 @@ def test_api_login_bootstrap_enforces_password_policy_server_side(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Error-string wording pins (were parity checks against the classic /login form;
-# the form is gone, so the exact strings are pinned here directly instead)
+# Error-string wording pin (was a parity check against the classic /login form; the form is
+# gone, so the lockout string is pinned here directly instead. The generic bad-credentials
+# string is pinned verbatim by test_api_login_wrong_password_generic_error_and_no_session, and
+# its equality for an unknown user by test_api_login_unknown_user_same_error_as_wrong_password.)
 # ---------------------------------------------------------------------------
-
-def test_api_login_wrong_password_error_text_pinned_verbatim(tmp_path):
-    """The generic bad-credentials string, pinned VERBATIM for both failure
-    shapes (wrong password, unknown user). This used to be enforced by parity
-    with the classic form's rendered page; with that route gone, the exact
-    wording -- capitalization, period and all -- is asserted here so a reworded
-    message (especially one that leaks which field was wrong) fails by name."""
-    core.add_or_update_web_user("alice", "hunter2")
-    cli = _client(tmp_path).test_client()
-    wrong_pw = _api_login(cli, {"username": "alice", "password": "wrong-pw"})["error"]
-    unknown = _api_login(cli, {"username": "nobody-at-all", "password": "wrong-pw"})["error"]
-    assert wrong_pw == "Invalid username or password."
-    assert unknown == "Invalid username or password."
-
 
 def test_api_login_lockout_error_text_pinned_verbatim(tmp_path):
     """The lockout wording, pinned exactly -- sentence AND the rounded minutes

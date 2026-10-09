@@ -165,7 +165,8 @@ test("5b. the desktop Filters pill KEEPS its ⚲ -- it is filters, not search", 
 });
 
 test("6. the phone's Folio button wears the trophy", () => {
-  assert.match(appMobile, /glm-iconbtn-gold[\s\S]{0,140}<Icon name="folio" \/><\/button>/);
+  // the drawn trophy being PRESENT is asserted in phone-back-layers.test.js ("the Folio's own
+  // title chip wears the drawn trophy..."); this is the ledger's absence half, the old glyph.
   assert.doesNotMatch(appMobile, /onClick=\{openFolio\}>🌙</);
 });
 

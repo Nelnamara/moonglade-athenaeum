@@ -5,8 +5,6 @@ files with correct lineage. The art-filter generation stays deleted (the browser
 for free). All pure/mocked -- no network, no spend (submit is always mocked)."""
 from pathlib import Path
 
-import pytest
-
 from moonglade import backup as core
 from moonglade import gallery as moonglade_gallery
 
@@ -65,30 +63,6 @@ def test_no_art_filter_submit_path_survives():
         assert "filterId" not in src, mod + " still builds a filter task's inputs"
 
 
-def test_the_enhance_command_is_gone_from_the_cli(monkeypatch, capsys):
-    """--enhance had exactly two halves and both are now gone: panelplugin workflows (which
-    PixAI never runs for an API-key client) and art filters (which cost nothing locally). A
-    command with no builder left is not a command, so the flag, its three companions and
-    run_enhance itself were removed rather than kept as an entry point to nothing.
-
-    Driven through main()'s real parser rather than asserted against the source, because the
-    property that matters is that the CLI does not ACCEPT these -- a leftover add_argument keeps
-    a flag accepted no matter what the source around run_enhance looks like. main() is pure
-    argparse up to parse_args(), so no command runs and no network is touched."""
-    assert not hasattr(core, "run_enhance")
-    monkeypatch.setattr("sys.argv", ["moonglade/backup.py", "--enhance", "--src", "1",
-                                     "--filter-id", "filter-v1-m2", "--strength", "0.77"])
-    with pytest.raises(SystemExit) as ex:
-        core.main()
-    assert ex.value.code != 0
-    err = capsys.readouterr().err
-    assert "unrecognized arguments" in err
-    # argparse lists every argument it did not recognise, so checking all four means one
-    # surviving flag cannot hide behind its neighbours failing.
-    for flag in ("--enhance", "--src", "--filter-id", "--strength"):
-        assert flag in err, flag + " is still accepted by the parser"
-
-
 def test_the_local_filter_module_ships_with_the_recipes_baked_in():
     """The replacement has to work with no connection -- offline is a property of the whole
     app, not a nicety -- so the 7 recipes are baked into the module rather than fetched, and it
@@ -125,32 +99,6 @@ def test_panelplugin_surface_restored_mirror_gated():
     # bare CLI flag could submit a panelplugin task on the API key (the reaped-at-60-min bug).
     assert '"--workflow-id"' not in core_src
     assert not hasattr(core, "run_enhance")          # no CLI runner either
-
-
-def test_the_enhance_and_workflows_routes_are_restored(tmp_path):
-    """The route-level half of the reversal: the mirror-gated submit route and its catalog route
-    both exist again. (Whether the submit REFUSES with the mirror off is
-    test_enhance_refuses_when_mirror_off; here we only assert the routes are registered.)"""
-    app = moonglade_gallery.create_app(tmp_path)
-    rules = {str(r.rule) for r in app.url_map.iter_rules()}
-    assert "/api/enhance" in rules
-    assert "/api/workflows" in rules
-    # The free art-filters panel still saves through the existing local-import path, unchanged.
-    assert "/api/import-local" in rules
-
-
-def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
-    """ENHANCE_PLUGINS ("detail-fix"/"hand-fix"/"face-fix") had zero production callers: the
-    Edit tab's Enhance UI never sent a `plugin` key, so the dict and the route's `elif plug:`
-    branch that read it were unreachable dead code (audit: sweep-bcd, orphaned, 2026-07-21).
-    The route itself is gone now too, which makes that branch unreachable twice over -- this
-    still guards the plugin-name shortcut specifically, so a future refinement surface cannot
-    resurrect it as a way back into a panelplugin submit. hand-fix and face-fix are superseded
-    by the real, working box-based /api/fix (submit_fixer)."""
-    assert not hasattr(moonglade_gallery, "ENHANCE_PLUGINS")
-    src = (ROOT / "moonglade" / "gallery.py").read_text(encoding="utf-8")
-    assert "ENHANCE_PLUGINS" not in src
-    assert 'p.get("plugin")' not in src
 
 
 # ---- the Bridge tier: mirror gate, deferred telemetry, lineage ----

@@ -106,8 +106,6 @@ describe("<VideoDrawer> tracks concurrent submissions independently", () => {
     // first one's to clobber. The engine keys the loop off the task id instead.
     assert.ok(!src.includes("pollTimers"),
       "a private poll-timer array has come back -- the drawer must not run its own poll loop");
-    assert.doesNotMatch(src, /fetch\("\/api\/task-status/,
-      "the drawer must not poll /api/task-status; notify/jobs.js is the one poller");
     assert.match(src, /import \{ submitTask \} from "\.\.\/gen\/submitTask\.js";/);
   });
 

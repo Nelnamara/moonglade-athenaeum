@@ -9,7 +9,8 @@ breaking the other two, so each is pinned here:
     (or being overridden by) the shared setting.
   * the launcher must NOT pass --out itself. It used to pass the literal default, which made
     the stored setting permanently unreachable no matter what was in it -- the setting would
-    have looked saved and done nothing.
+    have looked saved and done nothing. (Pinned in
+    test_launcher_runs_the_package.py.)
   * the route writes only after the folder is known good, and never moves anything.
 """
 import json
@@ -70,20 +71,6 @@ def test_a_broken_settings_file_does_not_stop_the_server_starting(tmp_path):
     fall back to the default rather than take the whole server down with it."""
     paths.settings_path().write_text("{ not json", encoding="utf-8")
     assert resolve_library_dir(None) == str(paths.library_anchor() / DEFAULT_LIBRARY_DIR)
-
-
-def test_the_launcher_does_not_hardcode_the_folder():
-    """It used to pass `--out pixai_backup` on every start. An always-present flag beats the
-    stored setting by the resolution order above, so the Panel's field would have saved
-    correctly and then changed nothing at all -- the worst kind of broken."""
-    launcher = (ROOT / "Moonglade Launcher.pyw").read_text(encoding="utf-8")
-    body = launcher[launcher.index("cmd = "):]
-    body = body[:body.index("\n")]
-    assert body.strip() == 'cmd = [sys.executable, "-m", "moonglade.gallery"]', \
-        "the launcher pins the folder and the setting cannot win"
-    # serve.txt is gone (the move folds its --out into settings.json's library_dir): nothing
-    # in the launcher reads it any more.
-    assert "serve.txt" not in launcher
 
 
 def test_setting_the_folder_writes_it_and_creates_nothing_by_accident(tmp_path):

@@ -5,7 +5,7 @@ server, panel subprocess, CLI-from-terminal) appends one line per job event, and
 read_jobs() collapses by job_id (last event wins; a terminal done/failed is sticky).
 This is the paper trail that survives a reload -- so these tests pin the collapse,
 stickiness, dismissal, ageing, cap, and compaction behavior, plus the register /
-list / dismiss endpoints and their localhost gate.
+list / dismiss endpoints (their login gate is pinned in test_route_tiers.py).
 """
 import threading
 import time
@@ -20,24 +20,11 @@ def _row(**kw):
     return {f: "" for f in CATALOG_FIELDS} | kw
 
 
-def _client(tmp_path):
-    save_catalog(tmp_path / "catalog.db", [
-        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
-    return create_app(tmp_path).test_client()
-
-
 def _authed_client(tmp_path):
-    """Like _client(), but logged in for real -- for every endpoint test below EXCEPT
-    test_jobs_endpoints_are_localhost_only, which deliberately stays anonymous to prove
-    the gate itself (an unauthenticated request is refused regardless of address)."""
+    """A logged-in client over a one-row catalog, for every endpoint test below."""
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     return login_client(tmp_path)
-
-
-def _lan(cli, method, url, **kw):
-    kw.setdefault("environ_overrides", {})["REMOTE_ADDR"] = "192.168.1.9"
-    return getattr(cli, method)(url, **kw)
 
 
 # --------------------------------------------------------------------------- core
@@ -366,20 +353,6 @@ def test_resolve_orphan_jobs_survives_lookup_errors(tmp_path):
     assert n == 1
     by_id = {j["job_id"]: j for j in core.read_jobs(tmp_path)}
     assert by_id["111"]["status"] == "running" and by_id["222"]["status"] == "done"
-
-
-def test_jobs_endpoints_are_localhost_only(tmp_path):
-    cli = _client(tmp_path)
-    core.append_job_event(tmp_path, "j1", status="running")
-    # GET from the LAN reveals nothing and 401s (the global front-door hook, not
-    # api_jobs()'s own body -- see moonglade_gallery.py's _enforce_front_door())
-    r = _lan(cli, "get", "/api/jobs")
-    assert r.status_code == 401 and "jobs" not in r.get_json()
-    # register + dismiss are refused from the LAN
-    assert _lan(cli, "post", "/api/jobs", json={"job_id": "x"}).status_code == 401
-    assert _lan(cli, "post", "/api/jobs/dismiss", json={"job_id": "j1"}).status_code == 401
-    # ...and nothing was written by those rejected calls
-    assert [j["job_id"] for j in core.read_jobs(tmp_path)] == ["j1"]
 
 
 def test_reaper_accepts_what_generation_status_actually_returns(tmp_path):

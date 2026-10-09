@@ -155,9 +155,9 @@ describe("every thumbnail surface carries the class", () => {
 
 describe("the stylesheets answer the class the components set", () => {
   test("nothing is keyed on <body> any more -- that selector never matched", () => {
-    assert.ok(!pickerCss.includes("body.privacy-blur .mg-gallery-picker"),
+    assert.ok(!pickerCss.includes("body.privacy-blur"),
       "gallery-picker.css is body-scoped again; nothing sets a class on <body>");
-    assert.ok(!drawerCss.includes("body.privacy-blur .gen-drawer"),
+    assert.ok(!drawerCss.includes("body.privacy-blur"),
       "gen-drawer.css is body-scoped again; nothing sets a class on <body>");
   });
 

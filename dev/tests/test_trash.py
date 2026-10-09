@@ -3,15 +3,17 @@ shipped 2026-07-24): _deleted/ had ~12k files with no restore UI even though the
 delete confirm promises files are "recoverable". Covers the pure directory-scan/
 restore/delete helpers (list_quarantined, restore_quarantined_media,
 delete_quarantined_forever, empty_trash, the purge-time sidecar snapshot) and the
-four /api/trash/* routes, including the tier gate itself (restore=LOGIN,
-delete-forever/empty=LOCALHOST+confirm=true) -- see dev/tests/test_purge.py and
-dev/tests/test_web_pick.py for the conventions this file follows."""
+four /api/trash/* routes, including the confirm gate (restore=LOGIN,
+delete-forever/empty=LOCALHOST+confirm=true; the anonymous and authenticated-LAN
+tier refusals themselves are pinned by dev/tests/test_route_tiers.py) -- see
+dev/tests/test_purge.py and dev/tests/test_web_pick.py for the conventions this file
+follows."""
 import json
 import os
 import time
 
 from moonglade import gallery as g
-from moonglade.gallery import (CATALOG_FIELDS, create_app, load_catalog, save_catalog,
+from moonglade.gallery import (CATALOG_FIELDS, load_catalog, save_catalog,
                            purge_media_local)
 
 from tests.conftest import login_client
@@ -343,15 +345,6 @@ def test_api_trash_list_paginates(tmp_path):
     assert d["total"] == 3 and len(d["items"]) == 2 and d["page"] == 1 and d["limit"] == 2
 
 
-def test_api_trash_list_requires_login(tmp_path):
-    """Covered structurally by dev/tests/test_route_tiers.py too; pinned here as a
-    concrete example alongside this file's other route tests."""
-    _seed_quarantined(tmp_path, "1")
-    cli = create_app(tmp_path).test_client()
-    r = cli.get("/api/trash/list", environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401
-
-
 def test_api_trash_restore_route_restores_and_updates_catalog(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [])
@@ -386,29 +379,9 @@ def test_api_trash_restore_works_over_lan_when_logged_in(tmp_path):
     assert r.get_json()["restored"] == ["1"]
 
 
-def test_api_trash_restore_requires_login(tmp_path):
-    _seed_quarantined(tmp_path, "1")
-    cli = create_app(tmp_path).test_client()
-    r = cli.post("/api/trash/restore", json={"media_ids": ["1"]},
-                environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 401
-    assert (tmp_path / g.DELETED_DIRNAME / "1.png").exists()   # nothing moved
-
-
 # ---------------------------------------------------------------------------
 # Routes: /api/trash/delete-forever, /api/trash/empty -- LOCALHOST + confirm=true
 # ---------------------------------------------------------------------------
-
-def test_api_trash_delete_forever_refuses_an_authenticated_lan_session(tmp_path):
-    """The security-relevant case: being logged in over the LAN is NOT enough --
-    same shape as dev/tests/test_purge.py's delete_tasks_bulk LAN test."""
-    p = _seed_quarantined(tmp_path, "1")
-    cli = login_client(tmp_path)
-    r = cli.post("/api/trash/delete-forever", json={"media_ids": ["1"], "confirm": True},
-                environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403
-    assert p.exists()                                    # nothing destroyed
-
 
 def test_api_trash_delete_forever_requires_confirm_true(tmp_path):
     p = _seed_quarantined(tmp_path, "1")
@@ -424,15 +397,6 @@ def test_api_trash_delete_forever_works_from_localhost_with_confirm(tmp_path):
     r = cli.post("/api/trash/delete-forever", json={"media_ids": ["1"], "confirm": True})
     assert r.get_json() == {"deleted": 1}
     assert not p.exists()
-
-
-def test_api_trash_empty_refuses_an_authenticated_lan_session(tmp_path):
-    p = _seed_quarantined(tmp_path, "1")
-    cli = login_client(tmp_path)
-    r = cli.post("/api/trash/empty", json={"confirm": True},
-                environ_overrides={"REMOTE_ADDR": LAN})
-    assert r.status_code == 403
-    assert p.exists()
 
 
 def test_api_trash_empty_requires_confirm_true(tmp_path):

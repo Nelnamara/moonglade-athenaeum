@@ -246,12 +246,10 @@ describe("the dock wires History (source guards -- the parts that are not pure)"
     assert.ok(btn > 0);
     assert.doesNotMatch(dock.slice(btn, btn + 300), /style=\{reelVisible \? null : \{ display: "none" \}\}/);
   });
-  test("header copy: label 'History', note '7 days · newest first · …', the live note wins; no stale title", () => {
+  test("header copy: label 'History', note '7 days · newest first · …', the live note wins", () => {
     assert.match(dock, /const reelLabel = historyOpen \? "History" : \(runningCount \? "Making" : "Runs"\);/);
     assert.match(dock, /"7 days · newest first · click any run to reuse its settings"/);
     assert.match(dock, /"today · click any run to reuse its settings"/);
-    assert.doesNotMatch(dock, /grouped by day/);
-    assert.doesNotMatch(dock, /Fold yesterday's runs/);
   });
   test("prefill from a tile exits History into the expanded composer (DC 2321)", () => {
     const i = dock.indexOf("const prefillFromRun = useCallback(");

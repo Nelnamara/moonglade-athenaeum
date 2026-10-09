@@ -211,10 +211,10 @@ describe("the press survives the crossing from the Loom", () => {
 });
 
 describe("carrying the intent is still announce-only", () => {
-  test("the store that writes the note can still not apply anything", () => {
+  // (That bannerStore.js names no apply route and makes no network call is pinned by
+  // mg-update-announce.test.js's "announce-only, on the client side too".)
+  test("the crossing note lives in sessionStorage, never localStorage", () => {
     const src = read("notify/bannerStore.js");
-    assert.ok(!src.includes("/api/update/apply"), "the banner store may not name the apply route");
-    assert.ok(!/\bfetch\s*\(/.test(src), "nor call the network at all");
     assert.ok(src.includes("window.sessionStorage") && !/localStorage\s*[.[]/.test(src),
       "the crossing note is sessionStorage: this tab's navigation, not a per-browser memory");
   });

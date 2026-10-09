@@ -246,13 +246,6 @@ def test_the_token_is_opaque_and_install_specific():
     assert g._feat_mask_token("secret-a", "other-id") != t1
 
 
-def test_the_route_needs_a_login(tmp_path):
-    cli = _client(tmp_path)
-    anon = cli.application.test_client()
-    r = anon.get("/feat-mask/" + "0" * 32 + ".png")
-    assert r.status_code in (302, 401, 403)
-
-
 def test_the_cut_is_cached_by_token_never_by_id(tmp_path):
     cli = _client(tmp_path)
     sf.earn(tmp_path, sf.FEAT_IDS[1])

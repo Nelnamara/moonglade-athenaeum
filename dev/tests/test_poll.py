@@ -202,17 +202,12 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     `{deleteBatchMedia: {mediaId}}`."""
     seen = {}
     monkeypatch.setattr(core.PixAIClient, "_graphql_post",
-                        lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {},
-                                                                    retries=retries) or
+                        lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {}) or
                         {"updateGenerationTask": {"id": "T1"}})
     core.delete_batch_media_gql(object(), "T1", "M9")
-    # A retry re-POSTs on a RequestException or a 429/5xx, and a read timeout can arrive
-    # AFTER PixAI has processed the delete -- re-firing a destructive mutation against a
-    # batch that has already changed. The docstring promised SINGLE ATTEMPT from the day
-    # this was written; the call did not pass retries=0 until 2026-07-25, so the promise
-    # was prose only. It now rides gql_mutate, which hard-codes it for every mutating
-    # path -- dev/tests/test_spend_no_retry.py holds the general rule.
-    assert seen["retries"] == 0, "a destructive mutation must never be retried"
+    # (That this destructive mutation is never retried -- retries == 0 at the loop -- is held
+    # by dev/tests/test_spend_no_retry.py::TestSpendingPathsAreSingleAttempt::test_delete_batch_media
+    # and, over the real transport, dev/tests/test_delete_image.py::test_the_cloud_delete_is_single_attempt.)
     assert "updateGenerationTask" in seen["q"]
     assert seen["v"]["id"] == "T1"
     assert seen["v"]["input"] == {"deleteBatchMedia": {"mediaId": "M9"}}, \
@@ -233,19 +228,6 @@ def test_delete_one_image_honors_read_only(monkeypatch):
     with pytest.raises(core.PixAIError):
         core.delete_batch_media_gql(object(), "T1", "M9")
     assert not called, "the network call fired despite READ_ONLY"
-
-
-def test_delete_one_image_is_single_attempt(monkeypatch):
-    """Deliberately NO retry loop, mirroring delete_task_gql: a flaky network must never be
-    able to fire a destructive delete twice."""
-    calls = []
-    def boom(*a, **k):
-        calls.append(1)
-        raise core.PixAIError("network blip")
-    monkeypatch.setattr(core.PixAIClient, "_graphql_post", boom)
-    with pytest.raises(core.PixAIError):
-        core.delete_batch_media_gql(object(), "T1", "M9")
-    assert len(calls) == 1, "retried a destructive delete {} times".format(len(calls))
 
 
 def test_delete_one_image_requires_both_ids(monkeypatch):

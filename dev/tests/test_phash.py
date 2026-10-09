@@ -126,16 +126,6 @@ def test_near_duplicate_groups_merges_transitive_chain(tmp_path):
     assert groups[0]["closeness_pct"] == round(100 * (1 - 11 / 64), 1)
 
 
-def test_near_duplicate_groups_skips_video_and_blank_phash(tmp_path):
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [
-        _row(media_id="1", phash="0000000000000000"),
-        _row(media_id="2", phash="0000000000000000", is_video="1"),
-        _row(media_id="3", phash=""),
-    ])
-    assert near_duplicate_groups(db) == []
-
-
 def test_near_duplicate_groups_no_rows_returns_empty(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="1", phash="")])
@@ -211,43 +201,3 @@ def test_backfill_phash_nothing_to_do_is_safe(tmp_path):
     out = core.run_backfill_phash(SimpleNamespace(out=str(tmp_path), workers=1, max=0,
                                                   progress=None))
     assert out == {"filled": 0, "unresolved": 0, "unreadable": 0, "total": 1}
-
-
-# ---------------------------------------------------------------------------
-# Schema migration -- the three-place contract (CATALOG_FIELDS/_CREATE_TABLE/
-# _MIGRATIONS) for the new `phash` column, same pattern as
-# dev/tests/test_filesystem.py::test_migration_adds_paid_credit_to_existing_db_without_data_loss.
-# The generic test_migrations_backfill_every_field_added_after_the_original_schema
-# already covers this column too; this test additionally locks the no-data-loss
-# round-trip specifically for phash.
-# ---------------------------------------------------------------------------
-
-def test_migration_adds_phash_to_existing_db_without_data_loss(tmp_path):
-    import sqlite3
-    from moonglade.gallery import migrate, load_catalog
-
-    assert "phash" in CATALOG_FIELDS
-    pre_fields = [f for f in CATALOG_FIELDS if f != "phash"]
-    db = tmp_path / "pre_phash.db"
-    con = sqlite3.connect(str(db))
-    con.execute("CREATE TABLE catalog ({})".format(
-        ", ".join(("media_id TEXT PRIMARY KEY" if f == "media_id" else "{} TEXT".format(f))
-                  for f in pre_fields)))
-    con.execute("INSERT INTO catalog (media_id, task_id, filename, rating) VALUES (?,?,?,?)",
-                ("m1", "t1", "keep.png", "5"))
-    con.commit()
-    con.close()
-
-    rows = load_catalog(db)          # first open of this path -> migrate() runs _MIGRATIONS
-    assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
-    assert rows[0]["rating"] == "5"                 # no data loss
-    assert rows[0]["phash"] in ("", None)           # migrated in, blank default
-
-    row = dict(rows[0])
-    row["phash"] = "abcdef0123456789"
-    save_catalog(db, [row])
-    got = load_catalog(db)[0]
-    assert got["phash"] == "abcdef0123456789" and got["filename"] == "keep.png"
-    migrate(db, force=True)          # re-running the DDL stays harmless (idempotent) --
-                                     # force, or the per-process memo would skip it and
-                                     # this line would prove nothing

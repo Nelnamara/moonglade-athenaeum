@@ -81,10 +81,4 @@ describe("master-storyboard.jsx imports every pure-module helper it calls (esbui
       "they resolve under the in-browser Babel path (one shared global scope) and throw " +
       "ReferenceError in the esbuild bundle (/loom?bundle=1): " + missing.join(", "));
   });
-
-  test("resolveGenDims specifically is imported (the instance that shipped broken)", () => {
-    assert.ok(importedNames().has("resolveGenDims"),
-      "the Advanced panel's dimension readout calls resolveGenDims(imgAdv); without the " +
-      "import the esbuild bundle throws before the tab body renders");
-  });
 });

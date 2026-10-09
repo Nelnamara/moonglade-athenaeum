@@ -80,8 +80,9 @@ def stub_code_module(monkeypatch, name, module):
 def pack_art():
     """{(slot, key): bytes} of the pack's nine role images (login companion, tracker mascots, reward
     icons, power poses), read from the folder the MOONGLADE_PACK_ART environment variable names. The
-    folder holds the pack's art in its public layout (login_nel.webp, nel_spinner.png or
-    system/nel_spinner.png, mascots/trk_done.png, rewards/claim.png ...). Skipped when the variable is
+    folder holds the pack's art in its public layout (system/login_nel.webp or login_nel.webp,
+    system/nel_spinner.png, mascots/trk_done.png, rewards/claim.png ...), as the private repo's design
+    mirror (`../moonglade-internal/design/handoff-*/assets/branding`) does. Skipped when the variable is
     unset or the folder lacks any of them, so a checkout without the art runs everything else. A
     test never reads the checkout's own pack (see the hermeticity rule at the top of this file)."""
     folder = os.environ.get("MOONGLADE_PACK_ART", "").strip()
@@ -91,7 +92,10 @@ def pack_art():
     for slot, role in gallery.ROLE_SLOTS.items():
         for key, img in role["images"].items():
             public = img["public"]
-            hit = next((p for p in (root / public, root / "system" / public) if p.is_file()), None)
+            # The private design mirror (tools/mirror_pack_to_design.py) writes each role under its
+            # readable role path, system/ for these; its top level also keeps older copies the
+            # design pages use. So the role path wins, and a bare top-level file is the fallback.
+            hit = next((p for p in (root / "system" / public, root / public) if p.is_file()), None)
             if hit is None:
                 missing.append(public)
             else:
@@ -457,6 +461,42 @@ def _real_machine_files_untouched():
                     "across (moonglade.migrate) -- pin local_dir / migrate.old_app_root, or run "
                     "the migration on a tmp folder. Changed (before, after): {}"
                     .format(changed))
+
+
+# The switch create_app() reads to leave its sixty-second scheduler thread unstarted, and the
+# name that thread carries when it does start (issue #77). Tied to moonglade.gallery by
+# dev/tests/test_panel.py::test_the_scheduler_thread_starts_in_the_app_and_stays_off_in_the_suite.
+SCHEDULER_SWITCH = "MOONGLADE_DISABLE_SCHEDULER"
+SCHEDULER_THREAD_NAME = "mg-scheduler"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_scheduler_threads():
+    """PREVENTION, then a check: no test leaves the app's scheduler thread running (#77).
+
+    Every create_app() used to start `_scheduler_loop`, a daemon that sleeps sixty seconds and
+    ticks forever, and nothing stopped it when its test ended -- a whole run left hundreds
+    alive. One that woke inside a later test could catch that test's patched `time.sleep`, or
+    start a job from its own (still present) tmp library through the later test's stand-in
+    Popen. The switch is set for the whole session, before any module- or session-scoped
+    fixture builds an app; a test that is about the scheduler calls its tick directly (the
+    `mg_living` / `mg_mirror_renew_tick` seams) or clears the switch for itself.
+
+    At session end it fails the run if any scheduler thread is still alive, naming how many,
+    so a fixture or test that builds an app with the switch cleared and leaves its loop
+    behind cannot pass unseen."""
+    import threading
+    mp = pytest.MonkeyPatch()
+    mp.setenv(SCHEDULER_SWITCH, "1")
+    try:
+        yield
+        alive = [t for t in threading.enumerate() if t.name == SCHEDULER_THREAD_NAME]
+        if alive:
+            pytest.fail("{} scheduler thread(s) ({!r}) still running at session end -- a test "
+                        "built an app with {} cleared and left its loop behind (issue #77)"
+                        .format(len(alive), SCHEDULER_THREAD_NAME, SCHEDULER_SWITCH))
+    finally:
+        mp.undo()
 
 
 def is_a_real_panel_job(args):
@@ -919,6 +959,44 @@ def mock_session(mocker):
 
 
 # ---------------------------------------------------------------------------
+# Password hashing for the suite's own accounts
+# ---------------------------------------------------------------------------
+# What moonglade.backup ships, read at import -- before the session fixture below swaps it.
+SHIPPED_PASSWORD_HASH_METHOD = core.WEB_PASSWORD_HASH_METHOD
+# scrypt at a token cost: the same "scrypt:" hash format and the same code path, in a fraction
+# of a millisecond. (werkzeug sizes scrypt's memory limit from n, so n much below this fails.)
+TEST_PASSWORD_HASH_METHOD = "scrypt:256:1:1"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cheap_test_password_hashes():
+    """The suite's throwaway accounts are hashed cheaply.
+
+    A real hash is scrypt at werkzeug's full cost, about a tenth of a second to make and
+    the same again to check, and most of the suite makes an account and signs in through the
+    real login route. core.WEB_PASSWORD_HASH_METHOD decides how new hashes are made, and a
+    stored hash carries its own cost, so swapping it makes both the account and every sign-in
+    against it cheap -- with nothing else about the auth path changed. Session scope, so the
+    accounts module- and session-scoped fixtures make (the render harness's) are cheap too.
+
+    The auth tests (test_web_auth, test_session_revocation, test_panel_users, which asserts
+    the stored format) take `real_password_hashing` and run with the shipped cost, and
+    test_web_auth holds that shipped cost to full strength."""
+    mp = pytest.MonkeyPatch()
+    mp.setattr(core, "WEB_PASSWORD_HASH_METHOD", TEST_PASSWORD_HASH_METHOD)
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
+@pytest.fixture()
+def real_password_hashing(monkeypatch):
+    """The shipped password hashing for one test, instead of the suite's cheap one."""
+    monkeypatch.setattr(core, "WEB_PASSWORD_HASH_METHOD", SHIPPED_PASSWORD_HASH_METHOD)
+
+
+# ---------------------------------------------------------------------------
 # Real-login test helpers
 # ---------------------------------------------------------------------------
 # moonglade_gallery.py's _is_authorized_request() has NO localhost bypass -- login is
@@ -993,11 +1071,13 @@ def record_own_sleeps(monkeypatch):
     """Patch time.sleep to RECORD this thread's naps instead of taking them; every other
     thread keeps sleeping for real. Returns the list the naps land in.
 
-    time.sleep is process-wide, and the process is never quiet: every create_app() starts a
-    daemon _scheduler_loop that calls time.sleep(60) forever, and a whole run leaves hundreds
-    of them alive. One that wakes while a bare `monkeypatch.setattr(time, "sleep",
-    naps.append)` is in place calls the patch instead, records 60, and spins on it -- a pacing
-    assertion then fails on naps the code under test never took (ci_local, 2026-10-03)."""
+    time.sleep is process-wide, and the process is never quiet. Until issue #77's switch
+    (_no_scheduler_threads above) every create_app() started a daemon _scheduler_loop that
+    calls time.sleep(60) forever, and one that woke while a bare `monkeypatch.setattr(time,
+    "sleep", naps.append)` was in place called the patch instead, recorded 60, and spun on it --
+    a pacing assertion then failed on naps the code under test never took (ci_local,
+    2026-10-03). Other threads (a module's live server, a job's reader) still sleep, so a
+    pacing test still records only its own."""
     import threading
     import time as _time
     naps, me, real = [], threading.get_ident(), _time.sleep

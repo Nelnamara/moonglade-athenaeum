@@ -553,23 +553,6 @@ def test_resolve_blocked_when_read_only(tmp_path, monkeypatch):
     assert (images / "b_2.webp").exists(), "it moved the file on a blocked request"
 
 
-def test_resolve_requires_login(tmp_path):
-    from moonglade.gallery import create_app
-    images = tmp_path / "images"; images.mkdir()
-    (images / "a_1.webp").write_bytes(b"X")
-    (images / "b_2.webp").write_bytes(b"X")
-    save_catalog(tmp_path / "catalog.db", [_row(media_id="1", filename="a_1.webp"),
-                                           _row(media_id="2", filename="b_2.webp")])
-    cli = create_app(tmp_path).test_client()
-    r = cli.post("/api/duplicates/resolve", json={
-        "group_id": "identical_file:g1",
-        "keep": {"media_id": "1", "path": "images/a_1.webp"},
-        "remove": [{"media_id": "2", "path": "images/b_2.webp"}],
-    }, environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
-    assert r.status_code == 401
-    assert (images / "b_2.webp").exists()
-
-
 # ---------------------------------------------------------------------------
 # POST /api/duplicates/undo -- the real route
 # ---------------------------------------------------------------------------
@@ -630,13 +613,3 @@ def test_undo_missing_record_returns_a_clear_error(tmp_path):
     d = r.get_json()
     assert d["ok"] is False
     assert "no undo record" in d["error"]
-
-
-def test_undo_requires_login(tmp_path):
-    from moonglade.gallery import create_app
-    save_catalog(tmp_path / "catalog.db", [])
-    cli = create_app(tmp_path).test_client()
-    r = cli.post("/api/duplicates/undo",
-                json={"quarantine_path": "_duplicates/images/x.webp"},
-                environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
-    assert r.status_code == 401

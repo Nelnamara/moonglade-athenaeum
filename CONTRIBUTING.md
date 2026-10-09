@@ -32,7 +32,9 @@ for how the modules fit together.
 python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py
 ```
 
-That is CI's command, run from the repo root. The suite, its `pytest.ini` and the developer
+That runs the whole suite from the repo root; CI runs the same command in two halves, the
+browser-driven render harness (`-m render`) and everything else (`-m "not render"`), each
+spread over pytest-xdist workers (`-n auto`). The suite, its `pytest.ini` and the developer
 tools live in `dev/`; from inside `dev/` a plain `python -m pytest` runs the same suite.
 
 (`dev/tests/test_similar.py` needs the optional `pixeltable` dependency and skips itself

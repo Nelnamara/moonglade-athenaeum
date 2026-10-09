@@ -739,6 +739,14 @@ describe("placement pins", () => {
   test("no landing reads genTargetRef (it is gone): every landing is keyed by its own submit / task id", () => {
     assert.doesNotMatch(M.code, /(?<![\w$])genTargetRef(?![\w$])/, "genTargetRef is back in master-storyboard.jsx");
   });
+  test("the board card's Render button is gated by the Go gate (goBlocked)", () => {
+    // Read off the raw SRC, not M.code: the tokenizer blanks strings, and these pins are JSX attribute text.
+    assert.match(SRC,
+      /<button type="button" className="lv-render" disabled=\{renderBlocked\}[\s\S]{0,700}?onClick=\{\(\) => generateShot\(e\)\}>/,
+      "the card's Render button is disabled while the shot's render is out, and its onClick is generateShot(e)");
+    assert.match(SRC, /const renderBlocked = goBlocked\(e\.c, paused\);/,
+      "the Render button is gated by the same Go gate as the drawer and the phone");
+  });
 });
 
 describe("the pure modules can reach nothing", () => {

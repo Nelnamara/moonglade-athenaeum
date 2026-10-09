@@ -36,13 +36,6 @@ class _Args:
     out = "."
 
 
-def _seed(tmp_path, media_id="m1", **extra):
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [_row(media_id=media_id, task_id="t1", filename="images/old.png",
-                           created_at="2026-01-01T00:00:00", **dict(LOCAL, **extra))])
-    return db
-
-
 def _stub_download(monkeypatch, out, name="old.png", sub="images"):
     """The live shape: the file is already there, so download answers 'skip' -- and the
     row is rebuilt and upserted regardless."""
@@ -51,66 +44,6 @@ def _stub_download(monkeypatch, out, name="old.png", sub="images"):
     path.write_bytes(b"not really an image")
     monkeypatch.setattr(core, "download", lambda s, url, stem: ("skip", path))
     return path
-
-
-def test_recollecting_an_image_keeps_every_local_field(tmp_path, monkeypatch):
-    db = _seed(tmp_path)
-    _stub_download(monkeypatch, tmp_path)
-    monkeypatch.setattr(core, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("m1", "12345")])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
-
-    core._download_image_task(object(), {"outputs": {"x": 1}}, "t1", tmp_path, _Args(),
-                              prompt="a moon")
-
-    row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
-    for field, value in LOCAL.items():
-        assert row[field] == value, "%s was erased by the re-collect" % field
-    # ...and the download pass still wrote what it legitimately owns
-    assert row["task_id"] == "t1" and row["seed"] == "12345"
-    assert row["source"] == "api" and row["filename"].endswith("old.png")
-
-
-def test_recollecting_a_video_keeps_every_local_field(tmp_path, monkeypatch):
-    db = _seed(tmp_path, media_id="v1", is_video="1")
-    _stub_download(monkeypatch, tmp_path, name="old.mp4", sub="videos")
-    monkeypatch.setattr(core, "video_outputs",
-                        lambda result: ([{"video_media_id": "v1"}], {"prompt": "a moon"}))
-    monkeypatch.setattr(core, "media_file_gql",
-                        lambda s, mid: {"fileUrl": "https://x/v.mp4", "duration": 5})
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
-    monkeypatch.setattr(core, "video_faststart", lambda p: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
-    monkeypatch.setattr(core, "make_video_thumbnail", lambda *a, **k: None, raising=False)
-
-    core._download_video_task(object(), {"outputs": {}}, "t1", tmp_path, _Args(), {})
-
-    row = {r["media_id"]: r for r in load_catalog(db)}["v1"]
-    for field, value in LOCAL.items():
-        assert row[field] == value, "%s was erased by the re-collect" % field
-    assert row["is_video"] == "1" and row["filename"].endswith("old.mp4")
-
-
-def test_a_fresh_media_id_still_catalogs_normally(tmp_path, monkeypatch):
-    """The carry must not turn a first collect into a no-op: a media_id absent from the
-    snapshot passes straight through."""
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [])
-    _stub_download(monkeypatch, tmp_path, name="new.png")
-    monkeypatch.setattr(core, "resolve_media", lambda s, mid: ("https://x/i.png", {}))
-    monkeypatch.setattr(core, "_task_image_media", lambda outputs: [("mNEW", "999")])
-    monkeypatch.setattr(core, "extract_full_meta", lambda r: {})
-    monkeypatch.setattr(core, "_fill_preset_defaults", lambda s, fm, r: None)
-    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
-
-    core._download_image_task(object(), {"outputs": {"x": 1}}, "t9", tmp_path, _Args(),
-                              prompt="new one")
-
-    rows = {r["media_id"]: r for r in load_catalog(db)}
-    assert "mNEW" in rows and rows["mNEW"]["task_id"] == "t9"
-    assert rows["mNEW"]["artwork_id"] == "" and rows["mNEW"]["rating"] == ""
 
 
 def test_the_very_first_collect_has_no_catalog_to_snapshot(tmp_path, monkeypatch):

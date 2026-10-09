@@ -107,9 +107,3 @@ class TestNoCommandLineDelete:
             core.main()
         assert exc.value.code == 2                       # argparse: unrecognized arguments
         assert "unrecognized arguments" in capsys.readouterr().err
-
-    def test_the_runner_and_its_notice_are_gone_but_the_shared_pieces_stay(self):
-        assert not hasattr(core, "run_delete_tasks")
-        assert not hasattr(core, "_DELETE_TASK_DEPRECATED")
-        # what the gallery's delete routes call
-        assert callable(core.delete_task_gql) and callable(core.delete_image_routed)

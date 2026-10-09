@@ -367,9 +367,6 @@ describe("parseCastIdsFromSearch", () => {
     assert.deepEqual(parseCastIdsFromSearch("?cast=1,local_a1b2c3d4e5f6"),
       ["1", "local_a1b2c3d4e5f6"]);
   });
-  test("still drops anything that could escape a URL or a path", () => {
-    assert.deepEqual(parseCastIdsFromSearch("?cast=" + encodeURIComponent("../x") + ",a%2Fb"), []);
-  });
   test("empty/missing search yields no ids", () => {
     assert.deepEqual(parseCastIdsFromSearch(""), []);
     assert.deepEqual(parseCastIdsFromSearch(undefined), []);

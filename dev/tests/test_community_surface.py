@@ -307,23 +307,6 @@ def test_the_view_sweep_never_re_reads_a_page_after_a_lost_response(mocker):
     assert (views, complete) == ({}, False)
 
 
-def test_the_view_sweep_asks_the_transport_for_no_retries_at_all(mocker):
-    """The value itself, observed where the loop actually counts with it -- so this
-    cannot pass because some caller happened to swallow the retry."""
-    seen = {}
-
-    def _post(self, document, variables, retries):
-        seen["retries"] = retries
-        return {"artworks": {"edges": [], "pageInfo": {"hasNextPage": False}}}
-
-    mocker.patch.object(core.PixAIClient, "_graphql_post", _post)
-    client = core.PixAIClient.__new__(core.PixAIClient)
-    client._session = None
-    client._user_id = "u1"
-    core.artwork_views_bulk(client, page_size=40, delay=0)
-    assert seen["retries"] == 0
-
-
 def test_the_views_merge_leaves_a_row_alone_when_the_sweep_missed_it(tmp_path):
     """A partial sweep must not blank the rows it did not reach.
 

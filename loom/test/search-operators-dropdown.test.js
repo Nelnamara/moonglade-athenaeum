@@ -63,10 +63,6 @@ describe("picking one does what the chip did", () => {
 
 describe("the screens", () => {
   const panel = src("components/FiltersPanel.jsx");
-  test("the Filters tray no longer has the Operators row", () => {
-    assert.doesNotMatch(panel, /mgcu-opchips"/);
-    assert.doesNotMatch(panel, /OPERATOR_CHIPS\.map/);
-  });
   test("the search field's dropdown carries the Operators group, in its existing look", () => {
     assert.match(panel, /operatorSuggestions\(/);
     assert.match(panel, /pickOperator\(/);

@@ -15,7 +15,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.0 — Moving Day,
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.1 — Clean Sweep,
   2026-10-08), per the rule at the top of this file.
 
 ---
@@ -30,13 +30,13 @@ why this section exists.
 
 ## Next — scoped, not started
 
-- **A faster full test run.** *(owner, 2026-10-05)* The full local run takes about 38 minutes and is
-  the longest wait in every release. Measure first: per-test and per-file timings, from the 3.20
-  release's one full run. Then cut: one shared app for the tests that only read, instead of a fresh
-  app per test (each also starts a scheduler nobody stops, #77); isolated tests run in parallel; the
-  browser harness runs as its own job beside the rest; duplicate and over-broad tests go; fixed
-  sleeps become waits on the real condition. Target: under 10 minutes with the same coverage.
-  `dev/tools/ci_local.py` and the CI workflow change to match.
+- **Convert the rest of the tests that read code as text.** *(test review, 2026-10-05)* Many Loom
+  and gallery tests look for words in a component's source instead of running it, so a small change
+  means editing many tests that prove little, and some hide real money-safety checks. The setup to
+  draw a component in a node test (`loom/test-support/render.mjs`) shipped with the first converted
+  files; the per-test inventory (render / logic / keep / delete-covered, with the money-safety
+  guards flagged) is in the private repo's `scopes/test-audit/render_2026-10-08/`. Convert file by
+  file, each conversion checked by mutating the code it guards, as the first ones were.
 
 - **Tsubaki.3 feature controls.** *(2026-09-26)* What is left of PixAI's Tsubaki.3 release: style
   keys and custom styles, which the app cannot express yet. Needs a design session first.

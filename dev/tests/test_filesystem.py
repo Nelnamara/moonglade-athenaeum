@@ -195,15 +195,6 @@ def test_import_local_external_copies_in(tmp_path):
     assert len(copied) == 1, [p.name for p in (out / "imported").glob("*")]
 
 
-def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
-    # ffmpeg absent -> returns False gracefully, no thumbnail written
-    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
-    vid = tmp_path / "clip.mp4"; vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    thumb = tmp_path / "out.jpg"
-    assert core.video_poster_thumb(vid, thumb) is False
-    assert not thumb.exists()
-
-
 def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
@@ -784,18 +775,21 @@ def test_bulk_replace_prompt_empty_find_is_noop(tmp_path):
 
 def test_count_backup_images_excludes_thumbnails(tmp_path):
     """The disk counter must count ORIGINALS only -- not the one-per-image gallery/thumbs
-    previews (which made files-on-disk look ~2x the catalog) and not quarantined _duplicates."""
+    previews (which made files-on-disk look ~2x the catalog), not quarantined _duplicates,
+    and not the soft-deleted _deleted trash (its bytes must stay out of the byte total)."""
     from moonglade import backup as core
     (tmp_path / "images").mkdir()
     (tmp_path / "2026-07").mkdir()
     (tmp_path / "gallery" / "thumbs").mkdir(parents=True)
     (tmp_path / "_duplicates").mkdir()
+    (tmp_path / "_deleted").mkdir()
     (tmp_path / "images" / "a_1.png").write_bytes(b"x" * 100)      # original
     (tmp_path / "2026-07" / "b_2.webp").write_bytes(b"y" * 200)   # original (month folder)
     (tmp_path / "gallery" / "thumbs" / "1.jpg").write_bytes(b"t")   # thumbnail -> excluded
     (tmp_path / "gallery" / "thumbs" / "2.jpg").write_bytes(b"t")   # thumbnail -> excluded
     (tmp_path / "_duplicates" / "c_3.png").write_bytes(b"z")         # quarantined -> excluded
+    (tmp_path / "_deleted" / "t_4.png").write_bytes(b"T" * 400)      # soft-deleted -> excluded
     (tmp_path / "images" / "half.part").write_bytes(b"nope")         # partial -> excluded
     n, b, thumbs = core._count_backup_images(tmp_path)
-    assert n == 2 and b == 300          # two originals, their bytes; grid/thumbs/dupes excluded
+    assert n == 2 and b == 300          # two originals, their bytes; grid/thumbs/dupes/trash excluded
     assert thumbs == 2                  # thumbnails reported separately, not in the total

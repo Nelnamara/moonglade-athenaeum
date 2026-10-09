@@ -126,12 +126,14 @@ def test_a_live_gallery_is_recognised_as_ours_even_though_it_401s(tmp_path):
         srv.server_close()
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "::", ""])
+@pytest.mark.parametrize("host", ["::", ""])
 def test_wildcard_bind_addresses_probe_loopback(host, tmp_path):
     """0.0.0.0/::/"" are bind addresses, not connectable ones -- socket.create_connection
     to "0.0.0.0" is not a meaningful health check, so port_owner rewrites them to
     127.0.0.1 before probing. Without that rewrite the LAN-facing launch (--host
-    0.0.0.0, the one the tablet uses) would skip the pre-flight entirely.
+    0.0.0.0, the one the tablet uses) would skip the pre-flight entirely. (The 0.0.0.0
+    case itself is asserted against a live gallery in
+    test_a_live_gallery_is_recognised_as_ours_even_though_it_401s; "::" and "" are here.)
 
     The previous version of this test only probed a FREE port and asserted "" --
     which a wildcard host returns whether or not the rewrite happens (a connection

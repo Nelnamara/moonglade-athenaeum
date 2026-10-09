@@ -41,9 +41,20 @@ def _patch_chain(monkeypatch, calls, *, reconcile_exc=None):
 def test_sync_runs_full_chain_in_order(monkeypatch, tmp_path):
     calls = []
     _patch_chain(monkeypatch, calls)
+    # Re-patch the download stage with one that also records the progress callback main()
+    # hands it (the chain's own stub discards it).
+    seen = {}
+
+    def _download(args, progress=None):
+        calls.append("download")
+        seen["progress"] = progress
+    monkeypatch.setattr(core, "run_download", _download)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
     core.main()
     assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
+    # The download step must receive args.progress (main() sets it via _make_progress),
+    # else the panel's progress bar is blank during the sync's download.
+    assert callable(seen["progress"])
 
 
 def test_sync_sets_update_and_full_meta(monkeypatch, tmp_path):

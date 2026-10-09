@@ -293,7 +293,9 @@ lives in `../moonglade-internal/ART.md` — don't restate hexes or sizes here.
 ## Test suite
 
 The suite, its `pytest.ini` and the developer tools live in `dev/` (since 3.20). From the repo
-root, CI's command is `python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py`; from
+root, `python -m pytest -q dev/tests --ignore=dev/tests/test_similar.py` runs the whole suite;
+CI runs that command in two pytest-xdist halves split by the `render` marker (`-m render` and
+`-m "not render"`, each `-n auto`, as separate jobs); from
 inside `dev/`, a plain `python -m pytest` runs the same suite. Full run instructions live in
 `../moonglade-internal/architecture.md`'s Testing section. **Never write the
 test count in this or any live doc** — `dev/tests/test_docs_dont_hardcode_counts.py` fails the
@@ -301,7 +303,8 @@ suite if you do; it was wrong in every one of six-plus files it was ever stated 
 recently within hours of a "correction." All tests must pass before merging to master.
 
 - **`python dev/tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
-  exactly as CI invokes it, then the loom build, the stale-`loom/dist` check (via
+  in CI's two halves (side by side when the machine has the cores, each half on xdist
+  workers), then the loom build, the stale-`loom/dist` check (via
   `git status --porcelain`, the same comparison CI makes, so a new untracked or
   already-staged file in `dist/` fails here too) and the Loom's `node --test` suite — on
   *this* machine's Python, Node, OS and installed packages, and exits non-zero if any of
@@ -313,8 +316,8 @@ recently within hours of a "correction." All tests must pass before merging to m
   It **refuses to start** until three things hold — `gallery/node_modules` and
   `loom/node_modules` are present, the harness's browser engine actually *launches*
   (chromium by default, or whatever `MG_HARNESS_BROWSER` names, which is the engine the
-  harness itself will launch), and every package on CI's `pip install` line imports here
-  (read off the workflow file, not copied into the script, so it follows CI; a token on that
+  harness itself will launch), and every package on CI's `pip install` lines imports here
+  (read off the workflow file, not copied into the script, so it follows CI; a token on a
   line that is not a plain distribution name refuses the run and is printed verbatim rather
   than quietly dropped) — because
   the three checks that need them (both committed-bundle freshness tests and the whole render
@@ -323,12 +326,13 @@ recently within hours of a "correction." All tests must pass before merging to m
   command for each gap and installs nothing. `--dry-run` lists the jobs and runs those file
   and package presence checks only: it launches no browser and executes no job.
   **And it checks afterwards that those three
-  really ran**, off the run's own junit report, because a preflight can only answer "could
+  really ran**, off both halves' own junit reports, because a preflight can only answer "could
   this check run": the harness skips on a failed browser *launch*, not on a missing path, and
   each bundle test also skips on its own `MOONGLADE_SKIP_*_BUILD` env var or a half-missing
   `dist/`. A gate that skipped fails the run and is named. Be exact about which of the three
-  CI itself runs: its pytest job installs node, `npm ci`s `gallery/` and installs chromium,
-  so the gallery-bundle test and the render harness really run there; it never installs
+  CI itself runs: its `pytest` job installs node and `npm ci`s `gallery/`, so the
+  gallery-bundle test really runs there, and its `render-harness` job installs chromium, so
+  the harness does; neither installs
   `loom/node_modules`, so the **loom-bundle test skips in CI every time** and CI catches a
   stale `loom/dist` in its other job instead — the `git status --porcelain` step this script
   mirrors. A green that skipped the gate you needed is worse than a red.

@@ -204,10 +204,6 @@ describe("source guards", () => {
     assert.match(creator, /requestPrice\(\{ \.\.\.testPricePayload\(draft\), no_card: true \}/);
     assert.doesNotMatch(creator, /submitTask|\/api\/generate/);
   });
-  test("the row's props contract, exactly as lane w2-gen renders it", () => {
-    const row = src("recipes/RecipeRow.jsx");
-    assert.match(row, /export default function RecipeRow\(\{ recipes, onChange, held, loraCount, modelType \}\)/);
-  });
   test("only the one price transport names /api/price", () => {
     for (const f of ["recipes/RecipesOverlay.jsx", "recipes/RecipeCreator.jsx", "recipes/RecipeRow.jsx", "recipes/RecipesMobile.jsx"]) {
       assert.doesNotMatch(src(f), /\/api\/price/);

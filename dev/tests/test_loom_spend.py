@@ -149,13 +149,6 @@ def test_one_unreadable_row_degrades_to_unpriced_instead_of_500ing_the_batch(tmp
     assert rows["5"]["paid_credit"] == 90, "one bad row must not cost the good ones"
 
 
-def test_login_required(tmp_path):
-    """Anonymous callers get the same gate every other /api/loom/* route has -- this reads
-    real catalog rows off disk."""
-    cli = create_app(tmp_path).test_client()
-    assert _spend(cli, ["1"]).status_code in (401, 403)
-
-
 def test_route_writes_nothing_and_needs_no_pixai_session(tmp_path):
     """Read-only by construction: the catalog is untouched and the answer is identical
     when the same ids are asked for twice."""

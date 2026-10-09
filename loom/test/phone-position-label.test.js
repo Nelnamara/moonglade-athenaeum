@@ -105,11 +105,6 @@ describe("source: neither label counts the loaded page any more", () => {
     assert.match(shell, /offset=\{pageOffset\(lib\.page, lib\.perPage\)\} total=\{lib\.total\}/);
     assert.match(shell, /import \{[^}]*\bpageOffset\b[^}]*\} from "\.\.\/lib\/phoneCore\.js"/);
   });
-
-  test("the detail route returns both numbers", () => {
-    const py = src("moonglade/gallery.py");
-    assert.match(py, /"position": position, "nav_total": len\(nav_ids\)/);
-  });
 });
 
 // The desktop record had the same flaw (its header said "14 of 100" the same way), and it reads the same

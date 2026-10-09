@@ -157,9 +157,11 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
     `pip install -r ... && pytest` checkout (and the Python CI job, which never runs
     `npm ci`) is unaffected.
 
-    build.mjs only knows one output path, so this necessarily rebuilds in place; the
-    original bytes are restored afterwards, and a stale bundle is REPORTED, never
-    silently fixed. Set MOONGLADE_SKIP_LOOM_BUILD=1 to opt out entirely."""
+    The fresh build goes to a temp file (build.mjs's `--outfile`), never over the committed
+    one: a rebuild in place left a window in which anything reading loom/dist/ -- a parallel
+    test, a running server -- could see a half-written bundle, and it rewrote the bundle's CSS
+    beside it without putting it back. A stale bundle is REPORTED, never silently fixed. Set
+    MOONGLADE_SKIP_LOOM_BUILD=1 to opt out entirely."""
     root = Path(__file__).resolve().parents[2]
     loom = root / "loom"
     bundle = loom / "dist" / "master-storyboard.bundle.js"
@@ -176,22 +178,22 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
 
     committed = bundle.read_bytes()
     out = tmp_path / "build.out"
+    fresh_path = tmp_path / "dist" / bundle.name
+    # Same spawn shape as test_embedded_js_is_valid: real file handles + DEVNULL
+    # stdin, because some sandboxes can't duplicate pytest's captured handles.
     try:
-        # Same spawn shape as test_embedded_js_is_valid: real file handles + DEVNULL
-        # stdin, because some sandboxes can't duplicate pytest's captured handles.
-        try:
-            with open(out, "w", encoding="utf-8") as fh, open(os.devnull) as nul:
-                rc = subprocess.call([NODE, str(script)], cwd=str(loom),
-                                     stdin=nul, stdout=fh, stderr=subprocess.STDOUT)
-        except OSError as e:
-            pytest.skip("cannot spawn node in this environment: {}".format(e))
-        log = out.read_text(encoding="utf-8", errors="replace")
-        assert rc == 0, "loom's `npm run build` failed, so the bundle can't be " \
-                        "checked for staleness:\n" + log
-        fresh = bundle.read_bytes()
-    finally:
-        if bundle.read_bytes() != committed:
-            bundle.write_bytes(committed)   # leave the checkout exactly as we found it
+        with open(out, "w", encoding="utf-8") as fh, open(os.devnull) as nul:
+            rc = subprocess.call([NODE, str(script), "--outfile", str(fresh_path)],
+                                 cwd=str(loom), stdin=nul, stdout=fh, stderr=subprocess.STDOUT)
+    except OSError as e:
+        pytest.skip("cannot spawn node in this environment: {}".format(e))
+    log = out.read_text(encoding="utf-8", errors="replace")
+    assert rc == 0, "loom's `npm run build` failed, so the bundle can't be " \
+                    "checked for staleness:\n" + log
+    assert bundle.read_bytes() == committed, (
+        "the staleness build wrote over the committed loom/dist/ bundle -- build.mjs must "
+        "honour --outfile")
+    fresh = fresh_path.read_bytes()
 
     def _norm(b):
         return b.replace(b"\r\n", b"\n")

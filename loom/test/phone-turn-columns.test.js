@@ -3,28 +3,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { LANDSCAPE_QUERY, TURN_SETTLE_MS, phoneColumns } from "../../gallery/src/lib/phoneCore.js";
+import { LANDSCAPE_QUERY, TURN_SETTLE_MS } from "../../gallery/src/lib/phoneCore.js";
 
 /* The owner's walk, 2026-10-03: after the phone was held sideways, the upright gallery kept the
    sideways column count -- a column hung off the right edge and the page scrolled sideways. A phone can
    deliver a turn's events while the orientation query still answers for the old way up, and fire
    nothing once it settles; the columns were read only on those events. The render harness reproduces
    it (test_a_turn_back_upright_puts_the_phone_grid_back_to_two_columns, with a lagging turn); these pin
-   the pieces: the column choice, the re-read after the turn settles, and the CSS that holds an upright
-   phone to two columns whatever the script last read. */
+   the pieces: the re-read after the turn settles, and the CSS that holds an upright phone to two
+   columns whatever the script last read. (The column choice itself is pinned in phone-landscape.test.js.) */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, "..", "..", "gallery", "src", rel), "utf8").split("\r\n").join("\n");
-
-describe("the column choice", () => {
-  test("upright is always two, at any width", () => {
-    for (const w of [320, 390, 430, 520, 844]) assert.equal(phoneColumns(w, false), 2, w);
-  });
-  test("sideways is four, three under 700 px", () => {
-    assert.equal(phoneColumns(844, true), 4);
-    assert.equal(phoneColumns(640, true), 3);
-  });
-});
 
 describe("a turn is read again once it has settled", () => {
   const hook = read("hooks/usePhoneLandscape.js");

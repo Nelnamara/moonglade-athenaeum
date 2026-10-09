@@ -54,14 +54,6 @@ def _rels(entries):
     return {str(e.rel).replace("\\", "/") for e in entries}
 
 
-def test_every_shared_exclusion_names_it():
-    for name, excl in (("QUARANTINE_EXCLUDE", g.QUARANTINE_EXCLUDE),
-                       ("IMPORT_EXCLUDE", g.IMPORT_EXCLUDE),
-                       ("HEALTH_EXCLUDE", g.HEALTH_EXCLUDE)):
-        assert REC in excl, name
-    assert "**/" + REC in g.QUARANTINE_EXCLUDE_ANYWHERE
-
-
 @pytest.mark.parametrize("exclude", ["QUARANTINE_EXCLUDE", "QUARANTINE_EXCLUDE_ANYWHERE",
                                      "IMPORT_EXCLUDE", "HEALTH_EXCLUDE"])
 def test_the_scan_never_enters_it(library, exclude):

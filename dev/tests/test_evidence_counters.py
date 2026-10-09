@@ -24,7 +24,6 @@ Feats are referred to by metric key only.
 import datetime as _dt
 import inspect
 import json
-from unittest import mock
 
 from moonglade import backup as core
 from moonglade import gallery as g
@@ -55,21 +54,6 @@ def _aware(local_dt):
 # ---------------------------------------------------------------------------
 # session_hour: a NEW generation made in the window, never a page load
 # ---------------------------------------------------------------------------
-
-class _ThreeAM(_dt.datetime):
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2025, 6, 11, 3, 0, 0) if tz is None else \
-            cls(2025, 6, 11, 3, 0, 0).astimezone(tz)
-
-
-def test_a_page_load_in_the_window_arms_nothing(tmp_path):
-    save_catalog(tmp_path / "catalog.db", [])
-    cli = login_client(tmp_path)
-    with mock.patch("datetime.datetime", _ThreeAM):
-        assert cli.get("/api/achievements").status_code == 200
-    assert "session_hour" not in g.load_telemetry(tmp_path)["flags"]
-
 
 def test_the_window_rule_on_one_timestamp():
     made = _local_today(2, 30)

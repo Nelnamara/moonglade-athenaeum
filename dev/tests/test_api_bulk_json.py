@@ -9,7 +9,7 @@ the SAME thing the page routes do: the same trash mechanism (restorable via
 /api/trash/restore), the same collection helpers, the same task-level cloud delete
 through core.delete_task_gql. Tier enforcement (401/403 shapes) is owned by
 dev/tests/test_route_tiers.py; here only the contracts that go beyond a bare tier are
-re-proven (the LAN refusal wording, READ_ONLY).
+re-proven (READ_ONLY).
 """
 import time
 
@@ -146,6 +146,7 @@ def test_collection_add_then_remove_round_trips(tmp_path):
     assert d == {"ok": True, "count": 1}
     by_id = {r["media_id"]: r["collections"] for r in load_catalog(db)}
     assert by_id == {"1": "", "2": "Faves"}
+    assert g.query_catalog(db, collection="Faves")[1] == 1  # the collection filter agrees after a route remove
 
 
 def test_collection_validates_its_inputs(tmp_path):
@@ -404,20 +405,6 @@ def test_delete_tasks_read_only_refuses_before_the_job_starts(tmp_path, monkeypa
     assert "READ_ONLY" in (r.get_json().get("error") or "")
     assert not [j for j in cli.get("/api/jobs").get_json()["jobs"]
                 if j.get("type") == "delete"], "a job was logged for a refused delete"
-
-
-def test_delete_tasks_refuses_an_authenticated_lan_session(tmp_path, monkeypatch):
-    """Same LOCALHOST tier as the page route, JSON refusal shape. The generic tier
-    sweep in test_route_tiers.py also covers this; asserted here too because the
-    wording is part of this route's contract."""
-    _cloud_batch(tmp_path)
-    monkeypatch.setattr(core, "delete_task_gql",
-                        lambda *a, **k: pytest.fail("a LAN session reached the cloud delete"))
-    cli = login_client(tmp_path)
-    r = cli.post("/api/delete-tasks", json={"media_ids": ["m1"]},
-                 environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 403
-    assert "localhost-only" in (r.get_json().get("error") or "")
 
 
 def test_delete_tasks_requires_ids(tmp_path):

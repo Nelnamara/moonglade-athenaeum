@@ -6,56 +6,77 @@
                                             # presence checks; launches no browser and
                                             # executes no job
 
-WHAT THIS IS, in one statement. It runs CI's commands -- pytest exactly as CI invokes it,
-then the loom build, the stale-bundle check and `node --test` -- on THIS machine's Python,
-Node, OS and installed packages. It does not reproduce CI's environment. Green here means
-those commands passed here and the skip-prone gates really ran; only CI's own run proves CI.
+WHAT THIS IS, in one statement. It runs CI's commands -- the two pytest halves as CI invokes
+them, then the loom build, the stale-bundle check and `node --test` -- on THIS machine's
+Python, Node, OS and installed packages. It does not reproduce CI's environment. Green here
+means those commands passed here and the skip-prone gates really ran; only CI's own run
+proves CI.
 
-THE JOBS. `.github/workflows/tests.yml` has two, and this runs both:
+THE JOBS. `.github/workflows/tests.yml` has three, and this runs all of them:
 
-  1. pytest -- CI's command, `pytest -q dev/tests --ignore=dev/tests/test_similar.py` (plus
-     `--junitxml`, which only feeds job [1b]), from the repo root
-     (test_similar needs the optional Pixeltable/CLIP index; CI skips it too). The
-     browser-driven render harness is INCLUDED: a harness test that fails here is a bug
-     to trace, not a reason to skip the file.
-  2. loom-node-tests -- rebuild loom/dist, FAIL if the committed bundle is stale, then run
-     the Loom's `node --test` source-structure + logic suite. This is the job a Python-only
-     local run misses: a front-end MOVE/rename goes red here while pytest stays green
-     (learned twice, 2026-09-08/09).
+  1. pytest, in two halves -- CI's command, `pytest -q dev/tests
+     --ignore=dev/tests/test_similar.py` (test_similar needs the optional Pixeltable/CLIP
+     index; CI skips it too), split by the `render` marker the way CI's `render-harness`
+     and `pytest` jobs split it, each half spread over pytest-xdist workers and each with
+     its own `--junitxml` (which only feeds job [1c]), from the repo root:
+       [1a] `-m render -n 3` -- the browser-driven render harness. INCLUDED: a harness test
+            that fails here is a bug to trace, not a reason to skip the file. Its browser and
+            its app server are module-scoped, so every worker launches its own browser and
+            serves its own app on its own ephemeral port.
+       [1b] `-m "not render" -n <the rest of the cores>` -- everything else.
+     They are separate RUNS, not one run with a deselect: the harness's playwright keeps an
+     asyncio loop running in its worker's thread, and a test of its own that calls
+     `asyncio.run()` (dev/tests/test_watch.py) must never share a process with it. On a
+     machine with the cores for it (RENDER_WORKERS plus two) the halves run side by side,
+     each line of output prefixed with its half's name; on a smaller one they run one after
+     the other, the rest on `-n auto`. Worker counts are this machine's, not CI's: each CI
+     job has a runner of its own and uses `-n auto`.
+  2. loom-node-tests -- AFTER both halves: rebuild loom/dist, FAIL if the committed bundle is
+     stale, then run the Loom's `node --test` source-structure + logic suite. This is the job
+     a Python-only local run misses: a front-end MOVE/rename goes red here while pytest stays
+     green (learned twice, 2026-09-08/09). It waits for pytest because the rebuild writes
+     loom/dist in place, under a run whose loom-bundle test reads it.
 
-PREFLIGHT, and why it refuses rather than warns. Three checks in the pytest job are written
-to SKIP themselves when their toolchain is absent -- the committed-gallery-bundle and
-committed-loom-bundle freshness tests (they need node_modules) and the whole render harness
-(it needs a browser that launches). A run missing any of them prints the same "green" while
-saying nothing about the bundle it would have rebuilt or the layout it would have measured.
-So the run refuses to start until three things hold: gallery/node_modules and
-loom/node_modules are present, the harness engine actually launches, and every package on
-CI's `pip install` line imports on this interpreter. It names the command that fixes each
-gap and installs nothing -- an install is the kind of thing you should watch.
+PREFLIGHT, and why it refuses rather than warns. Some checks in the pytest jobs are written
+to SKIP themselves when what they need is absent -- the committed-gallery-bundle and
+committed-loom-bundle freshness tests (they need node_modules), the whole render harness
+(it needs a browser that launches) and the pack-art tests in test_branding_roles.py (they
+read the pack's role art from the folder MOONGLADE_PACK_ART names; the art is not in the
+repo). A run missing any of them prints the same "green" while saying nothing about the
+bundle it would have rebuilt, the layout it would have measured or the art it would have
+checked. So the run refuses to start until these hold: gallery/node_modules and
+loom/node_modules are present, the harness engine actually launches, MOONGLADE_PACK_ART
+names a folder, and every package on CI's `pip install` line imports on this interpreter.
+It names the command that fixes each gap and installs nothing -- an install is the kind of
+thing you should watch.
 
-CI's pip line is READ OFF the workflow (`ci_pip_packages`), never copied into this file, so
-it follows CI when the line changes; a token on it that is not a plain distribution name
-refuses the run rather than being half-read.
+CI's pip lines are READ OFF the workflow (`ci_pip_packages`), never copied into this file, so
+they follow CI when a line changes; a token on one that is not a plain distribution name
+refuses the run rather than being half-read. pytest-xdist is on them, so preflight requires
+it: both halves are `-n` runs.
 
 AND THEN IT CHECKS THAT THEY REALLY RAN, which is the half a preflight cannot do. A
 preflight answers "could this check run", and those are not the same sentence: a browser
 binary can be on disk and still refuse to launch, and the harness skips on the LAUNCH, not
 on the path; `gallery/dist/app.css` can be missing, or `MOONGLADE_SKIP_GALLERY_BUILD` set,
-and the bundle test skips itself with every preflight box ticked. So the pytest job is run
-with a junit report and the report is read afterwards: both bundle-freshness tests must
-have actually executed, and the render harness must have contributed at least one
-non-skipped test. A gate that skipped fails this run. A green that skipped the gate you
-needed is worse than a red.
+and the bundle test skips itself with every preflight box ticked. So each pytest half is run
+with a junit report and both reports are read afterwards: both bundle-freshness tests and
+the pack-art tests must have actually executed, and the render harness must have contributed
+at least one non-skipped test. A gate that skipped fails this run. A green that skipped the
+gate you needed is worse than a red.
 
-Exit 0 only if every job passes. It is a long run -- start it when you are done editing,
-not between edits.
+Exit 0 only if every job passes. It prints each pytest half's wall-clock and the whole run's.
+Start it when you are done editing, not between edits.
 """
 import importlib.util
+import locale
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
 
 # This file is dev/tools/ci_local.py: the repo root is two folders up.
@@ -65,12 +86,42 @@ GALLERY = os.path.join(ROOT, "gallery")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "tests.yml")
 
 JOBS = [
-    "[1] pytest  (CI's command plus --junitxml for [1b]; render harness included)",
-    "[1b] the skip-prone checks actually ran  (read off the junit report)",
+    "[1a] pytest, render half  (CI's command, -m render, xdist; the browser harness)",
+    "[1b] pytest, the rest  (CI's command, -m \"not render\", xdist)",
+    "[1c] the skip-prone checks actually ran  (read off both halves' junit reports)",
     "[2a] loom: rebuild the esbuild bundle",
     "[2b] loom/dist is a fresh build  (git status --porcelain, as CI checks it)",
     "[3] loom node suite  (node --test)",
 ]
+
+# CI's pytest command; each half adds its marker, its worker count and its own junit report.
+PYTEST = [sys.executable, "-m", "pytest", "-q", "dev/tests", "--ignore=dev/tests/test_similar.py"]
+
+# Workers for the render half. Each one launches a browser of its own and serves an app of its
+# own (dev/tests/test_render_harness.py's module-scoped render_browser and render_server), so
+# a worker costs a browser's processes, not one core; three keep the harness moving while
+# leaving the rest of the machine to the other half.
+RENDER_WORKERS = 3
+
+
+def pytest_halves(cpus=None):
+    """(side_by_side, [(name, job, marker args), ...]) for this machine.
+
+    Side by side when there are cores for both: the render half's workers plus at least two
+    for the rest, which then takes every core the harness does not. Otherwise one after the
+    other, the rest on `-n auto` (every core, once the harness is done with them)."""
+    cpus = cpus or os.cpu_count() or 1
+    side_by_side = cpus >= RENDER_WORKERS + 2
+    rest = str(cpus - RENDER_WORKERS) if side_by_side else "auto"
+    return side_by_side, [
+        ("render", JOBS[0], ["-m", "render", "-n", str(RENDER_WORKERS)]),
+        ("rest", JOBS[1], ["-m", "not render", "-n", rest]),
+    ]
+
+
+def _clock(seconds):
+    m, s = divmod(int(round(seconds)), 60)
+    return "%dm %02ds" % (m, s)
 
 
 def _run(desc, cmd, cwd=None, shell=False):
@@ -79,9 +130,74 @@ def _run(desc, cmd, cwd=None, shell=False):
     return subprocess.run(cmd, cwd=cwd or ROOT, shell=shell).returncode == 0
 
 
+_PRINT = threading.Lock()
+
+
+def _pump(proc, prefix, ended):
+    """Copy a child's output to ours a line at a time, each line under its half's name, so two
+    runs sharing one console stay readable; then wait for the child and note when it exited,
+    so a half that finishes first is timed to ITS exit, not to the other's. The child writes
+    its pipe in this machine's locale encoding (pytest escapes what that cannot carry), so
+    that is what is decoded."""
+    enc = locale.getpreferredencoding(False)
+    for raw in iter(proc.stdout.readline, b""):
+        line = raw.decode(enc, errors="replace").rstrip("\r\n")
+        with _PRINT:
+            print(prefix + line)
+            sys.stdout.flush()
+    proc.stdout.close()
+    proc.wait()
+    ended.append(time.monotonic())
+
+
+def run_pytest_halves(tmp):
+    """Run both pytest halves. Returns [(name, passed, seconds, junit path), ...] and the
+    phase's own wall-clock."""
+    side_by_side, halves = pytest_halves()
+    out = []
+    t_phase = time.monotonic()
+    if not side_by_side:
+        for name, job, args in halves:
+            report = os.path.join(tmp, name + ".xml")
+            t0 = time.monotonic()
+            ok = _run(job, PYTEST + args + ["--junitxml=%s" % report])
+            out.append((name, ok, time.monotonic() - t0, report))
+        return out, time.monotonic() - t_phase
+
+    width = max(len(name) for name, _, _ in halves)
+    running = []
+    try:
+        for name, job, args in halves:
+            report = os.path.join(tmp, name + ".xml")
+            # `-u`: a pipe gets Python's block buffering, which held each half's progress back
+            # in 8 KB lumps; unbuffered, its lines arrive as pytest writes them. It changes
+            # nothing else about the run (the workers already run unbuffered under xdist).
+            cmd = PYTEST[:1] + ["-u"] + PYTEST[1:] + args + ["--junitxml=%s" % report]
+            with _PRINT:
+                print("\n== %s ==\n   side by side; its lines carry [%s]: %s"
+                      % (job, name, subprocess.list2cmdline(cmd[1:])))
+                sys.stdout.flush()
+            t0 = time.monotonic()
+            proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            ended = []
+            pump = threading.Thread(target=_pump, daemon=True,
+                                    args=(proc, "[%s] " % name.ljust(width), ended))
+            pump.start()
+            running.append((name, proc, pump, t0, ended, report))
+        for name, proc, pump, t0, ended, report in running:
+            pump.join()
+            out.append((name, proc.returncode == 0, ended[0] - t0, report))
+    finally:
+        for _, proc, _, _, _, _ in running:
+            if proc.poll() is None:                 # interrupted: leave no run behind
+                proc.kill()
+    return out, time.monotonic() - t_phase
+
+
 # Distribution name -> the module that proves it is importable, where the two differ.
 # Everything else is its own name with `-` as `_` (pytest-mock -> pytest_mock).
-_IMPORT_NAME = {"pillow": "PIL"}
+_IMPORT_NAME = {"pillow": "PIL", "pytest-xdist": "xdist"}
 # A plain distribution name and nothing else: no specifier, no marker, no extra, no quote.
 _DIST_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -108,10 +224,11 @@ def ci_pip_packages():
     """CI's install list, READ OFF the workflow. Returns (packages, problem).
 
     Read, never copied: a list transcribed into this file is a list that silently stops
-    being CI's the first time .github/workflows/tests.yml is edited. Exactly one
-    `pip install` line must be findable -- zero means the step moved or was renamed, more
-    than one means this script cannot tell which belongs to the pytest job, and both are
-    gaps rather than guesses."""
+    being CI's the first time .github/workflows/tests.yml is edited. Each pytest job has its
+    own `pip install` line (the render half and the rest run as separate jobs), and this run
+    executes both halves, so the list is every package on any of them, in first-seen order.
+    At least one line must be findable -- none means the step moved or was renamed -- and
+    every line must read cleanly; both are gaps rather than guesses."""
     rel = os.path.relpath(WORKFLOW, ROOT).replace(os.sep, "/")
     try:
         with open(WORKFLOW, encoding="utf-8") as fh:
@@ -120,18 +237,20 @@ def ci_pip_packages():
         return None, "%s is unreadable (%s)" % (rel, exc)
     lines = [ln for ln in text.splitlines()
              if "pip install" in ln and not ln.lstrip().startswith("#")]
-    if len(lines) != 1:
-        return None, ("%s has %d `pip install` line(s) -- this script can only read CI's "
-                      "install step when there is exactly one" % (rel, len(lines)))
-    tokens = lines[0].split("pip install", 1)[1].split()
-    pkgs, offender = _dist_names(tokens)
-    if pkgs is None:
-        return None, ("CI's `pip install` line carries the token %r, which is not a plain "
-                      "distribution name -- this script does not interpret it, and will "
-                      "not read the rest of the line as though it were not there" % offender)
-    if not pkgs:
-        return None, "CI's `pip install` line names no packages"
-    return pkgs, ""
+    if not lines:
+        return None, "%s has no `pip install` line -- CI's install step moved" % rel
+    out = []
+    for line in lines:
+        pkgs, offender = _dist_names(line.split("pip install", 1)[1].split())
+        if pkgs is None:
+            return None, ("a CI `pip install` line carries the token %r, which is not a plain "
+                          "distribution name -- this script does not interpret it, and will "
+                          "not read the rest of the line as though it were not there"
+                          % offender)
+        if not pkgs:
+            return None, "a CI `pip install` line names no packages"
+        out.extend(p for p in pkgs if p not in out)
+    return out, ""
 
 
 def _import_name(dist):
@@ -193,6 +312,25 @@ def _engine_unusable(engine):
     return ""
 
 
+def default_pack_art():
+    """The pack's role art in its public layout, when MOONGLADE_PACK_ART is unset: the private
+    repo's design mirror beside this checkout (`../moonglade-internal/design/handoff-*/assets/
+    branding`, the newest handoff), which tools/mirror_pack_to_design.py refreshes from every
+    new pack. A worktree under `_wt/<name>/` reaches it the same way, through the
+    `moonglade-internal` junction beside the checkout. "" when there is none."""
+    for base in (os.path.join(ROOT, "..", "moonglade-internal"),):
+        design = os.path.join(base, "design")
+        try:
+            handoffs = sorted(d for d in os.listdir(design) if d.startswith("handoff-"))
+        except OSError:
+            continue
+        for h in reversed(handoffs):
+            art = os.path.join(design, h, "assets", "branding")
+            if os.path.isdir(art):
+                return os.path.normpath(art)
+    return ""
+
+
 def preflight(launch_engine=True):
     """The three things a meaningful run needs. Returns a list of (gap, fix) pairs.
 
@@ -202,13 +340,13 @@ def preflight(launch_engine=True):
     ci_pkgs, problem = ci_pip_packages()
     if ci_pkgs is None:
         gaps.append(("CI's own `pip install` step could not be read, so this run cannot say "
-                     "whether this interpreter carries what CI's pytest job installs -- %s"
+                     "whether this interpreter carries what CI's pytest jobs install -- %s"
                      % problem,
                      "fix the workflow line, or teach dev/tools/ci_local.py to read it"))
     else:
         missing = [p for p in ci_pkgs if not _importable(p)]
         if missing:
-            gaps.append(("CI's pytest job installs %s, which this interpreter cannot import "
+            gaps.append(("CI's pytest jobs install %s, which this interpreter cannot import "
                          "-- a test that touches one runs differently here than on CI"
                          % ", ".join("%s (tried `import %s`)" % (p, _import_name(p))
                                      for p in missing),
@@ -235,42 +373,80 @@ def preflight(launch_engine=True):
                          "python -m playwright install --with-deps %s   (CI's own step for "
                          "chromium; --with-deps is what supplies the browser's system "
                          "libraries on Linux)" % engine))
+    # The pytest child inherits this environment, so the variable reaches conftest's pack_art
+    # fixture as it is. There is no default folder: the art is not in the repo, and a test may
+    # not read the checkout's own pack (conftest's hermeticity rule).
+    art = os.environ.get("MOONGLADE_PACK_ART", "").strip() or default_pack_art()
+    if art:
+        os.environ["MOONGLADE_PACK_ART"] = art
+    if not art:
+        gaps.append(("MOONGLADE_PACK_ART is unset and no private design mirror sits beside this "
+                     "checkout, so the pack-art tests in "
+                     "dev/tests/test_branding_roles.py SKIP (conftest's pack_art fixture) and "
+                     "nothing in this run checks the pack's own role art against its roles",
+                     "set MOONGLADE_PACK_ART to the folder holding the pack's role art in its "
+                     "public layout (login_nel.webp, nel_spinner.png, mascots/trk_done.png, "
+                     "rewards/claim.png ...)"))
+    elif not os.path.isdir(art):
+        gaps.append(("MOONGLADE_PACK_ART names %r, which is not a folder, so the pack-art "
+                     "tests in dev/tests/test_branding_roles.py SKIP" % art,
+                     "point MOONGLADE_PACK_ART at the folder holding the pack's role art"))
     return gaps
 
 
-# The checks inside the pytest job that are written to skip themselves. Preflight argues
-# they CAN run; this is how the run proves they DID. (module, test) for a named test;
-# (module, None) for "this whole module must have contributed something".
+# The checks inside the pytest jobs that are written to skip themselves. Preflight argues
+# they CAN run; this is how the run proves they DID. (module, test, gate) for a named test;
+# (module, None, None) for "this whole module must have contributed something".
 #
-# Two of the three are also gates in CI's own pytest job. The loom bundle test is not --
-# CI's pytest job never installs loom/node_modules, so it skips there and CI catches a
-# stale loom/dist in the loom-node-tests job instead ([2b] below). It is required here
-# anyway: it is the one check that compares the committed bundle to a rebuild inside the
-# pytest run, and a local gate going quiet is still a local gate going quiet.
+# The gallery bundle test and the harness are also gates in CI's own pytest jobs (`pytest`
+# and `render-harness`). The loom bundle test is not -- neither job installs
+# loom/node_modules, so it skips there and CI catches a stale loom/dist in the
+# loom-node-tests job instead ([2b] below). It is
+# required here anyway: it is the one check that compares the committed bundle to a rebuild
+# inside the pytest run, and a local gate going quiet is still a local gate going quiet.
+# The pack-art tests are the same kind: the art is not in the repo, so they skip in CI every
+# time, and this run is the only place they can bite. Preflight refuses a run without
+# MOONGLADE_PACK_ART; a skip here means the folder it names lacks one of the role images.
 REQUIRED_TO_RUN = [
-    ("tests.test_js_syntax", "test_committed_gallery_bundle_matches_a_fresh_build"),
-    ("tests.test_js_syntax", "test_committed_loom_bundle_matches_a_fresh_build"),
-    ("tests.test_render_harness", None),
+    ("tests.test_js_syntax", "test_committed_gallery_bundle_matches_a_fresh_build",
+     "the stale-bundle gate"),
+    ("tests.test_js_syntax", "test_committed_loom_bundle_matches_a_fresh_build",
+     "the stale-bundle gate"),
+    ("tests.test_render_harness", None, None),
+    ("tests.test_branding_roles", "test_every_pack_default_passes_its_own_roles_check",
+     "the pack-art gate"),
+    ("tests.test_branding_roles", "test_every_pack_default_can_be_uploaded_as_the_override_of_itself",
+     "the pack-art gate"),
+    ("tests.test_branding_roles", "test_the_shape_rule_is_not_vacuous_on_the_packs_own_art",
+     "the pack-art gate"),
 ]
 
 
-def gates_that_did_not_run(xml_path):
-    """Read the junit report; return a list of gates that skipped or never appeared.
+def gates_that_did_not_run(xml_paths):
+    """Read the pytest halves' junit reports; return a list of gates that skipped or never
+    appeared in any of them.
 
-    Empty list == every skip-prone check in the pytest job actually executed here. This is
+    Empty list == every skip-prone check in the pytest halves actually executed here. This is
     the difference between "the environment looks right" and "the gate ran": the harness
-    skips on a failed browser LAUNCH, and the bundle test skips on an env var or a missing
-    dist file, neither of which a preflight can see from outside the run."""
-    try:
-        root = ET.parse(xml_path).getroot()
-    except Exception as exc:                     # noqa: BLE001 -- no report is its own answer
-        return ["the pytest run produced no readable junit report (%s), so nothing here can "
-                "say whether the skip-prone checks ran" % exc]
-    cases = [(c.get("classname") or "", c.get("name") or "",
-              c.find("skipped") is not None)
-             for c in root.iter("testcase")]
-    gaps = []
-    for module, name in REQUIRED_TO_RUN:
+    skips on a failed browser LAUNCH, the bundle test skips on an env var or a missing
+    dist file, and the pack-art tests skip on a folder that lacks one of the role images,
+    none of which a preflight can see from outside the run. A half with no readable report
+    is a gap of its own: whatever it held cannot be said to have run."""
+    if isinstance(xml_paths, str):
+        xml_paths = [xml_paths]
+    cases, gaps = [], []
+    for xml_path in xml_paths:
+        try:
+            root = ET.parse(xml_path).getroot()
+        except Exception as exc:                 # noqa: BLE001 -- no report is its own answer
+            gaps.append("the pytest run that writes %s produced no readable junit report (%s), "
+                        "so nothing here can say whether the skip-prone checks in it ran"
+                        % (os.path.basename(xml_path), exc))
+            continue
+        cases.extend((c.get("classname") or "", c.get("name") or "",
+                      c.find("skipped") is not None)
+                     for c in root.iter("testcase"))
+    for module, name, gate in REQUIRED_TO_RUN:
         if name is None:
             ran = [c for c in cases if c[0] == module and not c[2]]
             if not ran:
@@ -282,11 +458,17 @@ def gates_that_did_not_run(xml_path):
         if not matches:
             gaps.append("%s::%s was never collected" % (module, name))
         elif all(c[2] for c in matches):
-            gaps.append("%s::%s SKIPPED -- the stale-bundle gate did not run" % (module, name))
+            gaps.append("%s::%s SKIPPED -- %s did not run" % (module, name, gate))
     return gaps
 
 
 def main(argv=None):
+    try:
+        # Two halves' output passes through here; a character this console cannot show must
+        # not take the run down mid-report.
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
     argv = list(sys.argv[1:] if argv is None else argv)
     dry = False
     for arg in argv:
@@ -307,16 +489,25 @@ def main(argv=None):
             print("     fix:  %s" % fix)
     elif dry:
         print("\n== preflight (--dry-run): CI's pip list imports here, gallery/node_modules "
-              "and\n   loom/node_modules are present. %s was NOT launched -- a dry run "
-              "starts no\n   browser, so it cannot say whether the harness would run =="
-              % harness_engine())
+              "and\n   loom/node_modules are present, MOONGLADE_PACK_ART names a folder. %s was "
+              "NOT\n   launched -- a dry run starts no browser, so it cannot say whether the "
+              "harness would run ==" % harness_engine())
     else:
         print("\n== preflight: CI's pip list imports here, gallery/node_modules and "
-              "loom/node_modules\n   are present, and %s launches ==" % harness_engine())
+              "loom/node_modules\n   are present, MOONGLADE_PACK_ART names a folder, and %s "
+              "launches ==" % harness_engine())
 
     if dry:
+        side_by_side, halves = pytest_halves()
         print("\n-- dry run: nothing below is executed --")
-        for job in JOBS:
+        for name, job, args in halves:
+            print("   would run: %s\n              %s" % (
+                job, subprocess.list2cmdline(PYTEST[1:] + args + ["--junitxml=<tmp>/%s.xml"
+                                                                  % name])))
+        print("              (%s, on this machine's %d core(s))"
+              % ("side by side" if side_by_side else "one after the other",
+                 os.cpu_count() or 1))
+        for job in JOBS[2:]:
             print("   would run: %s" % job)
     if gaps:
         print("\nFAIL: preflight -- a run without these would report green on checks that\n"
@@ -326,36 +517,44 @@ def main(argv=None):
         return 0
 
     fails = []
+    t_start = time.monotonic()
 
-    # The junit report goes to a temp dir, never into the checkout: `git status --porcelain`
+    # The junit reports go to a temp dir, never into the checkout: `git status --porcelain`
     # is the loom job's own instrument a few lines down, and a stray report file would be
     # noise in it (and in the owner's next `git status`).
     with tempfile.TemporaryDirectory(prefix="mg-ci-local-") as tmp:
-        report = os.path.join(tmp, "pytest.xml")
-        if not _run(JOBS[0], [sys.executable, "-m", "pytest", "-q", "dev/tests",
-                              "--ignore=dev/tests/test_similar.py",
-                              "--junitxml=%s" % report]):
-            fails.append("pytest")
-        skipped_gates = gates_that_did_not_run(report)
+        halves, t_pytest = run_pytest_halves(tmp)
+        for name, ok, _, _ in halves:
+            if not ok:
+                fails.append("pytest (%s half)" % name)
+        skipped_gates = gates_that_did_not_run([report for _, _, _, report in halves])
 
-    print("\n== %s ==" % JOBS[1])
+    print("\n== pytest wall-clock ==")
+    for name, ok, seconds, _ in halves:
+        print("  %-6s half  %s  %s" % (name, _clock(seconds), "passed" if ok else "FAILED"))
+    print("  both halves %s" % _clock(t_pytest))
+
+    print("\n== %s ==" % JOBS[2])
     if skipped_gates:
         for gap in skipped_gates:
             print("  DID NOT RUN: %s" % gap)
         print("  A green pytest that skipped one of these says nothing about the bundle it\n"
               "  never rebuilt or the layout it never measured.\n"
-              "  Which of these CI itself runs, exactly: its pytest job installs node,\n"
-              "  `npm ci`s gallery/ and installs chromium --with-deps, so the GALLERY bundle\n"
-              "  test and the RENDER HARNESS really run there. It never installs\n"
-              "  loom/node_modules, so the LOOM bundle test skips in CI every time -- CI\n"
-              "  catches a stale loom/dist in its other job instead, the check mirrored\n"
-              "  below as [2b]. So a loom-bundle skip here is a local-only gate going\n"
-              "  quiet, and the other two are gates CI will run whether you did or not.")
+              "  Which of these CI itself runs, exactly: its pytest job installs node and\n"
+              "  `npm ci`s gallery/, so the GALLERY bundle test really runs there, and its\n"
+              "  render-harness job installs chromium --with-deps, so the RENDER HARNESS\n"
+              "  does. Neither installs loom/node_modules, so the LOOM bundle test skips in\n"
+              "  CI every time -- CI catches a stale loom/dist in its loom job instead, the\n"
+              "  check mirrored below as [2b]. The PACK-ART tests skip in CI every time too:\n"
+              "  the art is not in the repo. So a loom-bundle or pack-art skip here is a\n"
+              "  local-only gate going quiet, and the gallery bundle and the harness are\n"
+              "  gates CI will run whether you did or not.")
         fails.append("a CI check skipped locally")
     else:
-        print("  both bundle-freshness tests ran, and the render harness really rendered.")
+        print("  both bundle-freshness tests and the pack-art tests ran, and the render "
+              "harness\n  really rendered.")
 
-    build_ok = _run(JOBS[2], "npm run build", cwd=LOOM, shell=True)
+    build_ok = _run(JOBS[3], "npm run build", cwd=LOOM, shell=True)
     if not build_ok:
         fails.append("loom build")
     else:
@@ -369,11 +568,11 @@ def main(argv=None):
         dirty = subprocess.run(["git", "status", "--porcelain", "--", "loom/dist"],
                                cwd=ROOT, capture_output=True, text=True)
         if dirty.returncode != 0:
-            print("\n== %s ==" % JOBS[3])
+            print("\n== %s ==" % JOBS[4])
             print("  git status failed:\n" + (dirty.stderr or "").strip())
             fails.append("loom/dist check")
         elif dirty.stdout.strip():
-            print("\n== %s ==" % JOBS[3])
+            print("\n== %s ==" % JOBS[4])
             print("  STALE: loom/dist does not match a fresh build.")
             print("  Fix:  cd loom && npm run build   then commit loom/dist/")
             print(dirty.stdout.rstrip())
@@ -381,10 +580,16 @@ def main(argv=None):
                            cwd=ROOT)
             fails.append("loom/dist stale")
         else:
-            print("\n== %s ==\n  matches a fresh build." % JOBS[3])
+            print("\n== %s ==\n  matches a fresh build." % JOBS[4])
 
-    if not _run(JOBS[4], "node --test", cwd=LOOM, shell=True):
+    if not _run(JOBS[5], "node --test", cwd=LOOM, shell=True):
         fails.append("loom node tests")
+
+    print("\n== wall-clock ==")
+    for name, ok, seconds, _ in halves:
+        print("  pytest, %-6s half  %s" % (name, _clock(seconds)))
+    print("  pytest, both        %s" % _clock(t_pytest))
+    print("  the whole run       %s" % _clock(time.monotonic() - t_start))
 
     print()
     if fails:

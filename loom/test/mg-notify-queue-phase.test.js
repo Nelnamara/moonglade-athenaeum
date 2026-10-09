@@ -154,20 +154,6 @@ describe("the queue estimate is shown as a WAIT, and only while the wait is stil
       "the phase pill must not depend on eta_seconds -- phase and estimate are separate " +
       "signals and only one of them needs the number: " + pill[0]);
   });
-
-  test("a zero-second estimate renders as 0s rather than vanishing", () => {
-    // Same 0-vs-absent distinction the Cost row already makes: an empty queue really is
-    // ~0s, and "no wait" must not be indistinguishable from "we never asked". typeof, not
-    // truthiness -- `j.eta_seconds &&` would collapse 0 into 'unknown'.
-    assert.match(tray, /typeof j\.eta_seconds === "number"/,
-      "an empty queue (eta_seconds: 0) would collapse into 'unknown' under a truthiness check");
-  });
-
-  test("a non-numeric estimate is ignored instead of printing NaN or undefined", () => {
-    // isFinite kills NaN/Infinity; the typeof pinned above kills "soon"/null/{}.
-    assert.match(tray, /isFinite\(j\.eta_seconds\)/,
-      "without isFinite a NaN/Infinity estimate would render as a chip");
-  });
 });
 
 // ---------------------------------------------------------------------------

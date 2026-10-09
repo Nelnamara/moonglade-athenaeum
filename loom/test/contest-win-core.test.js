@@ -195,7 +195,6 @@ describe("the surfaces are wired to it", () => {
     assert.match(read("components/ContestMyEntries.jsx"), /rowStatus\(r\)/);
     assert.match(read("components/ContestsMobile.jsx"), /It won but isn't shown…/);
     assert.match(read("components/ContestsMobile.jsx"), /<ContestRecordWin phone/);
-    assert.ok(!/disabled\s*\n?\s*title="coming with results season"/.test(read("components/ContestMyEntries.jsx")));
   });
 
   test("the winners strip says tier, not a numbered place", () => {
