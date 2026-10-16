@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the Moonglade art pack (moonglade.mgpack) from the coded branding source tree.
 
-    python dev/tools/build_container.py                      # branding_root() -> <app root>/moonglade.mgpack
+    python dev/tools/build_container.py                      # branding_root() -> <app root>/local/moonglade.mgpack
     python dev/tools/build_container.py --root path/to/tree  # pack a source tree that lives elsewhere
     python dev/tools/build_container.py --out path/to.mgpack # explicit output
 
@@ -211,7 +211,7 @@ def main():
                          "when it lives away from the code; files are keyed relative "
                          "to this root either way, so the layout seals in as found.")
     ap.add_argument("--out", default=None,
-                    help="output path (default: <app root>/moonglade.mgpack, even when "
+                    help="output path (default: <app root>/local/moonglade.mgpack, even when "
                          "--root points elsewhere -- that is where the app looks)")
     ap.add_argument("--version", default=None,
                     help="manifest version string (default: bump the current "

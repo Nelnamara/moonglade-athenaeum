@@ -406,24 +406,32 @@ def test_a_runs_db_that_fails_its_check_is_set_aside_and_the_new_home_stays(r):
 
 # ---- the owner's integrity marks ----------------------------------------------------------------
 
-def test_integrity_marks_keep_the_new_home_s_and_gain_the_older_install_s(r):
+def test_integrity_marks_gain_the_older_install_s_and_the_later_choice_wins_a_clash(r):
+    """Every media id's mark from both copies. Where both hold one and they differ, the LATER
+    choice wins by the mark's own time: the older install's mark set after the move is the
+    person's last word, and one older than the new home's (a copy restored from a backup) loses
+    and is logged."""
     _moved(r)
     new_marks = {"format": 1, "marks": {
         "m1": {"mark": "lost", "at": "2026-10-07T10:00:00Z"},
-        "m2": {"mark": "kept", "at": "2026-10-07T10:01:00Z"}}}
+        "m2": {"mark": "kept", "at": "2026-10-07T10:01:00Z"},
+        "m4": {"mark": "lost", "at": "2026-10-09T08:00:00Z"}}}
     write(r.lib / "_moonglade" / "decisions" / "integrity_marks.json", new_marks)
     # 3.19's set_mark on a missing file writes one holding only the mark it just set.
     _older_install_writes(r.lib / "integrity_marks.json", {"format": 1, "marks": {
         "m1": {"mark": "kept", "at": "2026-10-08T09:00:00Z"},
-        "m3": {"mark": "lost", "at": "2026-10-08T09:05:00Z"}}})
+        "m3": {"mark": "lost", "at": "2026-10-08T09:05:00Z"},
+        "m4": {"mark": "kept", "at": "2026-10-08T09:10:00Z"}}})
     done = _bring_in(r)
     marks = integrity.read_marks(r.lib)
-    assert marks["m1"] == new_marks["marks"]["m1"], "a clash keeps the new home's mark"
+    assert marks["m1"] == {"mark": "kept", "at": "2026-10-08T09:00:00Z"}, (
+        "a clash goes to the later choice: the older install's, set after the new home's")
     assert marks["m2"] == new_marks["marks"]["m2"]
     assert marks["m3"] == {"mark": "lost", "at": "2026-10-08T09:05:00Z"}
+    assert marks["m4"] == new_marks["marks"]["m4"], "the new home's was the later choice"
     assert not (r.lib / "integrity_marks.json").exists()
     said = _said(done)
-    assert "m1=" in said and "kept" in said, "the older copy's clashing mark is logged"
+    assert "m4=" in said and "kept" in said, "the older choice that lost is logged"
 
 
 # ---- a login's own stores -----------------------------------------------------------------------

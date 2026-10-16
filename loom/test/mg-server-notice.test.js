@@ -9,8 +9,11 @@ import path from "node:path";
    gallery/src/notify/serverNotice.js decides when to show it and runs the button; the
    existing corner toast says it.
 
-     1. ONCE PER SERVER START. The same key on every poll, a reload or a second tab: one toast.
-        A new key (the server started again, something still unfixed): one more.
+     1. ONCE PER SERVER START. The same key on every poll of a page: one toast. A new key (the
+        server started again, something still unfixed): one more. A notice with a button
+        stays until it is acted on or dismissed: a page that loads meets it again until its
+        toast was closed (the tab left open from an update shows it to nobody); a notice of
+        words alone is written down as it is shown.
      2. NOTHING TO SAY IS NOTHING SHOWN. null, a dropped poll, a notice with no key.
      3. A BROWSER THAT BLOCKS STORAGE still says it once, not on every poll.
      4. IT RIDES THE POLL every tab already runs (jobsStore.js), not a loop of its own.
@@ -61,7 +64,8 @@ const OUTSIDE = { key: "a1", title: "Some things outside Moonglade still use its
 function shown() { return toasts.getToasts().filter((t) => !t.out); }
 function clearToasts() { toasts.getToasts().forEach((t) => toasts.dismiss(t.id)); }
 
-beforeEach(() => { bag.clear(); blocked = false; clearToasts(); });
+// (Toasts first: closing one writes its notice's key down, and the next test starts without it.)
+beforeEach(() => { clearToasts(); bag.clear(); blocked = false; });
 
 test("the same server start says it once, however often the poll brings it", async () => {
   const { noteServerNotice } = await freshNotice();
@@ -77,11 +81,32 @@ test("the same server start says it once, however often the poll brings it", asy
   assert.equal(added[0].kind, "");
 });
 
-test("a reload or a second tab does not say it again; the next server start does", async () => {
+test("a notice with a button is said again to a page that loads, until it is acted on or dismissed", async () => {
+  // The tab left open from the update shows it to nobody; the person who opens the app later
+  // (a reload, a second tab) must still meet it.
+  const before = shown().length;
   (await freshNotice()).noteServerNotice(OUTSIDE);
+  const tab2 = await freshNotice();
+  assert.equal(tab2.noteServerNotice(OUTSIDE), true);
+  assert.equal(tab2.noteServerNotice(OUTSIDE), false, "but not stacked by the poll");
+  assert.equal(shown().length - before, 2);
+});
+
+test("once its toast is closed, a reload or a second tab does not say it again; the next server start does", async () => {
+  const before = shown().length;
+  (await freshNotice()).noteServerNotice(OUTSIDE);
+  toasts.dismiss(shown().slice(before)[0].id);                  // the x, or the button
   const tab2 = await freshNotice();
   assert.equal(tab2.noteServerNotice(OUTSIDE), false);
   assert.equal(tab2.noteServerNotice({ ...OUTSIDE, key: "b2" }), true);
+});
+
+test("a notice of words alone is written down as it is shown: once per server start", async () => {
+  const words = { key: "w1", title: "Just words." };
+  (await freshNotice()).noteServerNotice(words);
+  const tab2 = await freshNotice();
+  assert.equal(tab2.noteServerNotice(words), false);
+  assert.equal(tab2.noteServerNotice({ ...words, key: "w2" }), true);
 });
 
 test("nothing to say shows nothing", async () => {
@@ -96,7 +121,10 @@ test("nothing to say shows nothing", async () => {
 test("a browser that blocks storage still says it once", async () => {
   blocked = true;
   const { noteServerNotice } = await freshNotice();
+  const before = shown().length;
   assert.equal(noteServerNotice(OUTSIDE), true);
+  assert.equal(noteServerNotice(OUTSIDE), false);
+  toasts.dismiss(shown().slice(before)[0].id);                  // closed: the memory copy holds it
   assert.equal(noteServerNotice(OUTSIDE), false);
 });
 

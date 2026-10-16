@@ -295,7 +295,8 @@ def desktop_dir():
 class Item:
     """One thing outside the app that names this install's old files."""
 
-    def __init__(self, kind, key, label, data, auto=False):
+    def __init__(self, kind, key, label, data, auto=False, plural=False):
+        self.plural = plural      # the label is a plural subject: "Claude Code's Moonglade tools"
         self.kind = kind          # "task" | "claude" | "shortcut"
         self.key = key            # the task's name, the config's path, the shortcut's path
         self.label = label        # plain words: the scheduled task “Moonglade sync”
@@ -308,6 +309,7 @@ class Item:
 
 class Result:
     def __init__(self, label, fixed, reason="", note=""):
+        self.plural = False       # fix() copies the item's: "tools now use", not "now uses"
         self.label = label
         self.fixed = bool(fixed)
         self.reason = reason
@@ -344,7 +346,8 @@ def notice_words(items):
     items = list(items)
     labels = [i.label for i in items]
     if len(labels) == 1:
-        return (_cap(labels[0]) + " still uses Moonglade's old file names.",
+        verb = "still use" if items[0].plural else "still uses"
+        return (_cap(labels[0]) + " " + verb + " Moonglade's old file names.",
                 "Press Fix it to point it at the new names.")
     return ("Some things outside Moonglade still use its old file names.",
             "They are " + _and(labels) + ". Press Fix them to point them at the new names.")
@@ -364,8 +367,9 @@ def result_words(results):
                 "Nothing outside Moonglade names its old files any more.")
     if not failed:
         head = _cap(_and(r.label for r in fixed))
+        many = len(fixed) > 1 or fixed[0].plural
         return ("ok", "Fixed.", (head + " now use the new names."
-                                 if len(fixed) > 1 else head + " now uses the new names.") + tail)
+                                 if many else head + " now uses the new names.") + tail)
     parts = []
     if fixed:
         parts.append("Fixed " + _and(r.label for r in fixed) + ".")
@@ -970,7 +974,7 @@ def find_claude(install, m):
         n, problems = _rewrite_claude_doc(doc, install, m.python, m.platform)
         if n or problems:
             found.append(Item("claude", str(path), "%s's Moonglade tools" % who,
-                              {"path": str(path)}))
+                              {"path": str(path)}, plural=True))
     return found
 
 
@@ -1516,6 +1520,7 @@ def fix(items=None, install=None, m=None, snapshot=None, icons=None, provide_ico
                 r = fix_shortcut(item, install, m, snapshot, icons, provide_icon)
         except Exception as e:                          # noqa: BLE001 -- reported, never raised
             r = Result(item.label, False, _reason(e))
+        r.plural = item.plural
         logging.getLogger(LOGGER_NAME).log(logging.INFO if r.fixed else logging.WARNING,
                                            "outside the app: %s", r.line())
         results.append(r)

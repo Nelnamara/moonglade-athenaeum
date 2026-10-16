@@ -20161,7 +20161,8 @@ def create_app(out_dir: Path):
         # that never had it, silently erasing the account. Same lock, so same queue.
         with core._accounts_lock:
             try:
-                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+                cfg = json.loads(_paths.decode_text(cfg_path.read_bytes())) \
+                    if cfg_path.exists() else {}
             except ValueError:
                 # Present but unparseable -- REFUSE rather than overwrite. The old
                 # bare `cfg = {}` fallback wrote back a one-key stub, destroying
@@ -20176,7 +20177,10 @@ def create_app(out_dir: Path):
                     _redact_host_paths(str(e)))}), 200
             cfg["PIXAI_API_KEY"] = key
             try:
-                cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+                # The atomic writer (a temp, flushed, then swapped in): a write cut short here
+                # would leave a torn config.json, which stops every start in the move
+                # (moonglade.migrate) where 3.19 still started.
+                core._save_config(cfg)
             except OSError as e:
                 return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(
                     _redact_host_paths(str(e)))}), 200
@@ -20336,7 +20340,12 @@ def create_app(out_dir: Path):
                     return jsonify({"error": "snippets must be a list"}), 400
                 clean = [str(s)[:800] for s in snips if str(s).strip()][:200]
                 try:
-                    _snips_path(user).write_text(json.dumps(clean), encoding="utf-8")
+                    # A temp beside it, then swapped in: a write cut short never leaves a
+                    # torn snippets.json (the move reads a torn new home as damaged).
+                    target = _snips_path(user)
+                    tmp = target.with_name(target.name + ".tmp")
+                    tmp.write_text(json.dumps(clean), encoding="utf-8")
+                    os.replace(tmp, target)
                 except OSError as e:
                     return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
                 return jsonify({"snippets": clean})
@@ -29149,6 +29158,19 @@ def _say_port_refused(owner, port):
     if owner == "moonglade":
         print("  Open the one that's already running:  http://localhost:{}/\n"
               .format(port), file=sys.stderr)
+    if _supervised():
+        # Started by Moonglade Launcher, which passes no flags: the port and the switches are
+        # in settings.json, and that is where the way out is.
+        settings = _paths.settings_path()
+        print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
+              "  Or use a different port: set \"port\" to {} in {} (the launcher passes\n"
+              "  no flags), then start Moonglade again.\n"
+              "\n"
+              "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
+              "  allows that -- and requests would land on either one at random. Add\n"
+              "  \"--allow-port-reuse\" to \"launch_args\" in the same file if you genuinely\n"
+              "  want that.\n".format(port, port + 1, settings), file=sys.stderr)
+        return
     print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
           "  Or just use a different port:  --port {}\n"
           "\n"
@@ -29156,6 +29178,21 @@ def _say_port_refused(owner, port):
           "  allows that -- and requests would land on either one at random. Pass\n"
           "  --allow-port-reuse if you genuinely want that.\n".format(port, port + 1),
           file=sys.stderr)
+
+
+def _say_port_unbindable(port, err):
+    """The server could not open its port at all (a Windows excluded port range, a privileged
+    port, another program that holds it exclusively): the same way out as a taken port."""
+    print("\nRefusing to start: Moonglade can't open port {} ({}).\n".format(
+        port, getattr(err, "strerror", None) or err), file=sys.stderr)
+    if _supervised():
+        print("  Use a different port: set \"port\" to {} in {} (the launcher passes no\n"
+              "  flags), then start Moonglade again.\n".format(port + 1, _paths.settings_path()),
+              file=sys.stderr)
+    else:
+        print("  Use a different port:  --port {}\n".format(port + 1), file=sys.stderr)
+    print("  On Windows a port can be held back by the system (an excluded range); list those\n"
+          "  with:  netsh int ipv4 show excludedportrange protocol=tcp\n", file=sys.stderr)
 
 
 def _port_taken_early(args, planned):
@@ -29297,7 +29334,18 @@ def main():
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a
     # chance to render. Create the folder and an empty, schema-initialized catalog instead
     # and let the server boot; the wizard banner is what guides them from there.
+    folder_was_there = out_dir.is_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A library folder that was missing when prepare() looked but was here by now (a NAS waking
+    # up, a drive put back) was not looked at: do it now, before anything reads it, or this
+    # session would serve an un-moved library over empty spend guards. A folder this very
+    # mkdir made holds nothing to move.
+    if folder_was_there:
+        try:
+            prepared.late_library()
+        except moonglade_setup.MoveStopped as e:
+            print("\n" + PREPARE_MARK + str(e) + "\n", file=sys.stderr)
+            return 3
 
     db_path = out_dir / "catalog.db"
 
@@ -29409,7 +29457,11 @@ def main():
     # (web Stop/Restart) or Ctrl+C; the pending exit code then rides `sys.exit(main())` to the
     # supervisor (0 = stop, 42 = relaunch).
     from werkzeug.serving import make_server as _make_server
-    srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    try:
+        srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    except OSError as e:
+        _say_port_unbindable(args.port, e)
+        return 2
     _SERVER_CONTROL["srv"] = srv
     _SERVER_CONTROL["exit_code"] = 0
     # S1: this start counts toward deleting the move's safety snapshots only once it has
