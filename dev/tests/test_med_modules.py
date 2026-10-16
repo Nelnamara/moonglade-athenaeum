@@ -32,8 +32,10 @@ def _install_fastmcp_stub():
     fastmcp = types.ModuleType("fastmcp")
 
     class _StubFastMCP:
-        def __init__(self, name):
+        def __init__(self, name, version=None):
+            # The real FastMCP takes version= (fastmcp>=3.4); the server passes the app's own.
             self.name = name
+            self.version = version
 
         def tool(self, fn):
             # The real @mcp.tool returns a FunctionTool wrapper around fn; _fn() below
