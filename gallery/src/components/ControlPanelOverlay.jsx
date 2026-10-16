@@ -24,6 +24,7 @@ import { openAbout } from "../help/helpStore.js";
 import { useSwrGet } from "../hooks/swrCache.js";
 import { openBrokenFiles } from "../lib/brokenFilesNav.js";
 import { reviewLabel } from "../lib/brokenFilesCore.js";
+import { trashOnlyCopyNote } from "../lib/onlyCopy.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -843,8 +844,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               <div className="mgcp-tendlbl">Thumbnails &amp; Similar index</div>
                               <div className="mgcp-chips">
                                 <ActionChip spec={actionSpec("rebuild-thumbs")} label="Rebuild ALL thumbnails" armed={confirmArm === "rebuild-thumbs"} onRun={() => runAction("rebuild-thumbs")} />
-                                <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" onRun={() => runAction("sync-similar")} />
-                                <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" onRun={() => runAction("rebuild-similar")} />
+                                <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("sync-similar")} />
+                                <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("rebuild-similar")} />
                                 <ActionChip spec={actionSpec("backfill-phash")} label="Backfill perceptual hashes" onRun={() => runAction("backfill-phash")} />
                               </div>
                             </div>
@@ -2139,13 +2140,22 @@ export function TrashSubOverlay({ isLocal, onClose }) {
   // changing if the grid stays interactive, so the delete call must use this, not the
   // live Set (see docs/DECISIONS.md's Control Panel review entry, 2026-08-02).
   const [confirmIds, setConfirmIds] = useState([]);
+  // #66: which trashed files are the only copy (PixAI no longer has them). The list says so per file,
+  // and for the whole trash once; the typed-DELETE confirms below name the count. `onlyFlags` fills
+  // as pages load, so a selection that spans pages is still counted.
+  const [onlyTotal, setOnlyTotal] = useState(0);
+  const onlyFlags = useRef(new Map());
 
   const load = async (p) => {
     setLoading(true);
     try {
       const d = await apiGet("/api/trash/list?page=" + p + "&limit=" + TRASH_LIMIT);
       if (d.error) { setMsg("Network error loading the trash."); }
-      else { setItems(d.items || []); setTotal(d.total || 0); setPage(d.page || p); }
+      else {
+        setItems(d.items || []); setTotal(d.total || 0); setPage(d.page || p);
+        setOnlyTotal(d.archive_only_total || 0);
+        (d.items || []).forEach((it) => onlyFlags.current.set(it.media_id, !!it.archive_only));
+      }
     } catch { setMsg("Network error loading the trash."); }
     setLoading(false);
   };
@@ -2193,6 +2203,9 @@ export function TrashSubOverlay({ isLocal, onClose }) {
   };
 
   const confirming = !!confirmMode;
+  const onlyNote = confirmMode
+    ? trashOnlyCopyNote(confirmMode, { total, onlyTotal, ids: confirmIds, flags: onlyFlags.current })
+    : "";
 
   return (
     <>
@@ -2258,7 +2271,7 @@ export function TrashSubOverlay({ isLocal, onClose }) {
           {confirmMode && (
             <div className="mgcp-userform" style={{ marginTop: 12 }}>
               <span className="mgcp-tilenote" style={{ padding: 0 }}>
-                Type DELETE to permanently {confirmMode === "all"
+                {onlyNote ? onlyNote + " " : ""}Type DELETE to permanently {confirmMode === "all"
                   ? "empty the trash (" + total + " items)"
                   : "delete " + confirmIds.length + " selected file" + (confirmIds.length !== 1 ? "s" : "")}:
               </span>

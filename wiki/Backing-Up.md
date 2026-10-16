@@ -234,7 +234,8 @@ python -m moonglade --import-local <DIR>          # copy an external folder in
 Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
 drop-zone window. Drop images, a folder, or a `.zip` (or browse), review the preview, optionally
 add everything to a collection, and import. A big drop previews a capped grid, but the whole
-selection is imported. Web import writes files onto the machine the gallery is hosted from, so
+selection is imported — a folder of thousands is sent in batches and added up, and if the server
+ever leaves files out, the finished message says how many. Web import writes files onto the machine the gallery is hosted from, so
 the **↑ Import** button is visible to everyone signed in, but the import itself is refused for
 anyone connecting from another device on the LAN — only a session on the server's own machine
 can actually complete it. A LAN device can browse and generate, just not write files onto the host.
@@ -343,7 +344,9 @@ Similar index**).
 | `--sync-similar` | tops up the **Similar** index — embeds only the images it doesn't have yet. This is the one you normally want: it can't lose existing rows, and after an interrupted build it resumes instead of starting over. |
 | `--rebuild-similar` | drops the Similar index and re-embeds every image from your files. Only for an index that is actually broken (wrong or duplicated results). No network. |
 
-Both Similar commands need the optional `torch` and `pixeltable` packages.
+Both Similar commands need the optional `torch` and `pixeltable` packages. Both are heavy:
+don't run either one beside GPU- or RAM-heavy programs, because the index build holds a
+large working set in memory.
 
 ## Account: credits, coupons & cards (read-only)
 
@@ -359,7 +362,6 @@ python -m moonglade --card-history           # recent benefit-card history (uses
 | Modifier | Applies to | Effect |
 |---|---|---|
 | `--credit-log-count N` | `--credit-log` | how many recent entries to show (default 30) |
-| `--credit-log-reason TYPE` | `--credit-log` | filter to one raw type (e.g. `task_cost`, `daily`, `event_gift`, `extra_package`) |
 | `--credit-log-before CURSOR` | `--credit-log` | page further back using a cursor printed by a previous run |
 | `--coupons-history` | `--coupons` | show the past (redeemed + expired) view instead of what you hold now |
 | `--card-history-all` | `--card-history` | page all the way back and print every card TYPE ever used |

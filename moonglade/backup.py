@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.20.1"
+__version__ = "3.20.2"
 
 import argparse
 import base64
@@ -111,6 +111,19 @@ except Exception:
 
 class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
+
+
+class PersistedQueryNotRecognized(PixAIError):
+    """PixAI answered a saved (hash-only) request with "not found". Still a PixAIError with
+    the same message as before, so every existing catch site is unchanged; a reader of a
+    read-only query catches this one to retry the same read with its full document."""
+
+
+class HistoryPageRefused(PixAIError):
+    """PixAI refused the history feed on both roads: the saved request was not recognized AND
+    the same read as a full document came back as a GraphQL error. Raised by `history_page`
+    only; a network failure, a 401 or a 5xx on the retry is NOT this (those stay what they
+    were), so a caller that names this one knows PixAI itself answered "no" twice."""
 
 
 class LocalRefusal(PixAIError):
@@ -264,8 +277,10 @@ def _load_config():
     if not cfg_path.exists():
         return {}
     try:
-        with open(cfg_path, encoding="utf-8") as f:
-            return json.load(f)
+        # Read the way the move reads it (paths.decode_text): a byte order mark or a UTF-16
+        # file (PowerShell 5.1's `>`) is the same config, not an empty one -- an empty one
+        # would drop /login into bootstrap mode.
+        return json.loads(_paths.decode_text(cfg_path.read_bytes()))
     except (ValueError, OSError) as e:
         print("Warning: could not read config.json: {}".format(e))
         return {}
@@ -1735,8 +1750,9 @@ class PixAIClient:
                     r.status_code, r.text[:800]))
             if data.get("errors"):
                 if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                    raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
-                                     "(see RECAPTURE at the bottom of this file).")
+                    raise PersistedQueryNotRecognized(
+                        "Persisted-query hash not recognized. Recapture the hash "
+                        "(see RECAPTURE at the bottom of this file).")
                 print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
                 print(json.dumps(data["errors"], indent=2)[:3000])
                 raise PixAIError("GraphQL error (see log above).")
@@ -1835,6 +1851,44 @@ def gql(session, variables, retries=4):
     """Replay the history-feed persisted query. Thin delegate onto
     `PixAIClient.persisted` -- the road itself lives in the pixai_client section."""
     return _client_of(session).persisted(OPERATION_NAME, variables, retries=retries)
+
+
+# The history feed as a full document: the same page `gql` reads, selecting the same task
+# summary fields, for a reader that must not depend on the saved request being recognized.
+_HISTORY_PAGE_DOC = (
+    "query($userId: ID!, $last: Int, $before: String) { user(id: $userId) { id "
+    "taskSummaries(last: $last, before: $before) { "
+    "pageInfo { hasNextPage hasPreviousPage endCursor startCursor } "
+    "edges { node { id userId status priority runnerId startedAt endAt createdAt paidCredit "
+    "mediaId batchMediaIds i2vProModel characteristics artworkCount promptsPreview "
+    "enrolledExperiment } } } } }")
+
+
+def history_page(session, variables, retries=4):
+    """One page of the history feed, surviving a saved request PixAI does not recognize.
+
+    Reads with `gql` first. If PixAI answers that the saved request is not recognized, the
+    same page is read once more as a full document (`_HISTORY_PAGE_DOC`, same variables,
+    same result shape, so `find_connection` reads either). Returns `(data, via_document)`;
+    `via_document` is True when the retry produced the page. If PixAI answers the retry with
+    a GraphQL error too, that is `HistoryPageRefused`: what `gql_adhoc` really raises there
+    is a plain PixAIError "GraphQL error: ...", never PersistedQueryNotRecognized, so the
+    translation is made here, chained from the original. Any other failure of the retry (a
+    network error, a 401, a 5xx) raises as it would from `gql_adhoc`, and any other failure
+    of the first read raises untouched. Read-only on both roads, so the second attempt costs
+    nothing but a request."""
+    try:
+        return gql(session, variables, retries=retries), False
+    except PersistedQueryNotRecognized:
+        pass
+    try:
+        return gql_adhoc(session, _HISTORY_PAGE_DOC, variables), True
+    except PixAIError as e:
+        if str(e).startswith("GraphQL error"):
+            raise HistoryPageRefused(
+                "PixAI refused the history feed as a saved request and as a full "
+                "document: " + str(e)) from e
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -15270,7 +15324,7 @@ CREDIT_LOG_REASONS = {
 }
 
 
-def list_credit_log(session, last=50, before=None, reason=None):
+def list_credit_log(session, last=50, before=None):
     """Read the account's full credit transaction ledger via ad-hoc GraphQL
     `user(id).quotaLogs` -- every credit gain AND loss (purchases, daily claims, event
     gifts, generation spend, refunds, ...), not just generation cost. Distinct from
@@ -15289,17 +15343,12 @@ def list_credit_log(session, last=50, before=None, reason=None):
     codebase's OWN established connection style for history listings (see
     page_variables()) -- the opposite direction from kaisuuken/coupons' forward
     first/after. Pass a previous call's `next_cursor` as `before` to page further into the
-    past. Optional `reason` filters server-side to one raw type, mirroring the site's own
-    per-category filter dropdown. Read-only; fails soft on error, matching every other
-    reader in this module."""
+    past. There is no type filter: the `me` connection takes no such argument. Read-only;
+    fails soft on error, matching every other reader in this module."""
     try:
         variables = {"last": int(last)}
         if before:
             variables["before"] = str(before)
-        # `reason` is accepted for API compatibility but no longer sent -- the `me`
-        # connection doesn't take it (see _QUOTA_LOG_QUERY's note). Kept as a param so the
-        # route/CLI signatures don't change; a filter UI would need a probed arg name.
-        _ = reason
         data = gql_adhoc(session, _QUOTA_LOG_QUERY, variables) or {}
     except (PixAIError, requests.RequestException, ValueError):
         return {"entries": [], "has_more": False, "next_cursor": None}
@@ -16080,13 +16129,11 @@ def run_coupons(args):
 def run_credit_log(args):
     """Print the account's full credit transaction ledger (list_credit_log) -- the real
     spend/purchase/gift history behind Membership & Credits -> Credit log, not just
-    generation cost. Read-only. Pass --credit-log-reason to filter to one raw type (see
-    CREDIT_LOG_REASONS for the ones with a confirmed friendly label) or --credit-log-before
-    <cursor> to page further into the past."""
+    generation cost. Read-only. Pass --credit-log-before <cursor> to page further into the
+    past."""
     session = _make_session(getattr(args, "token", None))
     page = list_credit_log(session, last=int(getattr(args, "credit_log_count", 0) or 30),
-                            before=getattr(args, "credit_log_before", "") or None,
-                            reason=getattr(args, "credit_log_reason", "") or None)
+                            before=getattr(args, "credit_log_before", "") or None)
     entries = page["entries"]
     if not entries:
         print("No credit log entries found (read-only; nothing was spent).")
@@ -17867,9 +17914,6 @@ def main():
                          "gifts, generation spend, refunds), then exit. Read-only")
     ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
                     help="with --credit-log, how many recent entries to show (default 30)")
-    ap.add_argument("--credit-log-reason", default="", metavar="TYPE",
-                    help="with --credit-log, filter to one raw type (e.g. task_cost, daily, "
-                         "event_gift, extra_package -- see CREDIT_LOG_REASONS)")
     ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
                     help="with --credit-log, page further into the past using a cursor "
                          "printed by a previous --credit-log run")
@@ -18138,12 +18182,14 @@ def main():
     ap.add_argument("--rebuild-similar", action="store_true",
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
-                         "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+                         "named index. ~decode-bound, no network. Needs torch/pixeltable. "
+                         "Heavy: don't run it beside GPU- or RAM-heavy programs.")
     ap.add_argument("--sync-similar", action="store_true",
                     help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
                          "The incremental counterpart to --rebuild-similar and the one you "
                          "normally want -- it cannot lose existing rows, and after an interrupted "
-                         "build it resumes instead of starting over. Needs torch/pixeltable.")
+                         "build it resumes instead of starting over. Needs torch/pixeltable. "
+                         "Heavy: don't run it beside GPU- or RAM-heavy programs.")
     webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
     webauth.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "
@@ -18161,8 +18207,15 @@ def main():
     # line never moves a library's files (X1): one still in an older Moonglade's layout stops
     # the command with a plain sentence, as does a move that cannot finish.
     from moonglade import setup as moonglade_setup
+    # --list-web-users and --add-web-user read and write config.json alone, so the library is
+    # not checked for them (an older layout, or an older Moonglade still writing it, must not
+    # block them). --remove-web-user does touch the library (it deletes the login's folder
+    # there), so it keeps every check. The dispatch below runs list, then remove, then add.
+    accounts_only = bool(args.list_web_users or
+                         (args.add_web_user and not args.remove_web_user))
     try:
-        prepared = moonglade_setup.prepare("cli", explicit_out=args.out)
+        prepared = moonglade_setup.prepare("cli", explicit_out=args.out,
+                                           library_half=not accounts_only)
     except moonglade_setup.MoveStopped as e:
         sys.exit(str(e))
     args.out = str(prepared.library)

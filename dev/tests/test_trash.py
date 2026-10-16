@@ -414,3 +414,68 @@ def test_api_trash_empty_works_from_localhost_with_confirm(tmp_path):
     r = cli.post("/api/trash/empty", json={"confirm": True})
     assert r.get_json() == {"deleted": 3}
     assert list((tmp_path / g.DELETED_DIRNAME).glob("*")) == []
+
+
+# ---------------------------------------------------------------------------
+# #66: which trashed files are the only copy (Delete forever / Empty trash name the count)
+# ---------------------------------------------------------------------------
+
+def _trash_with_only_copies(tmp_path):
+    """Four files in the trash, purged the real way so each has its row snapshot:
+    a: its task left the owner's PixAI history (deleted_remote == "1")   -> only copy
+    b: PixAI dropped this one image (cloud_deleted_at set)               -> only copy
+    c: a normal picture PixAI still has                                  -> not
+    d: quarantined before sidecars existed (no snapshot)                 -> not claimed"""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="a", filename="a.png", deleted_remote="1"),
+        _row(media_id="b", filename="b.png", cloud_deleted_at="2026-09-30T10:00:00Z"),
+        _row(media_id="c", filename="c.png"),
+    ])
+    img = tmp_path / "images"
+    img.mkdir()
+    thumb = tmp_path / "gallery" / "thumbs"
+    thumb.mkdir(parents=True)
+    for mid in ("a", "b", "c"):
+        (img / "{}.png".format(mid)).write_bytes(_png_bytes())
+        purge_media_local(tmp_path, thumb, db, mid, "{}.png".format(mid))
+    _seed_quarantined(tmp_path, "d")                         # no sidecar
+    return db
+
+
+def test_list_quarantined_flags_each_file_that_is_the_only_copy(tmp_path):
+    _trash_with_only_copies(tmp_path)
+    items, total, _bytes = g.list_quarantined(tmp_path, page=1, page_size=10)
+    assert total == 4
+    flags = {it["media_id"]: it["archive_only"] for it in items}
+    assert flags == {"a": True, "b": True, "c": False, "d": False}
+
+
+def test_trash_list_route_counts_the_only_copies_across_every_page(tmp_path):
+    """Empty trash takes EVERY page, so the count its confirm names cannot come from the
+    page on screen: a one-file page still reports the whole trash's two only copies."""
+    _trash_with_only_copies(tmp_path)
+    cli = login_client(tmp_path)
+    d = cli.get("/api/trash/list?page=1&limit=1").get_json()
+    assert d["total"] == 4 and len(d["items"]) == 1
+    assert d["archive_only_total"] == 2
+    assert isinstance(d["items"][0]["archive_only"], bool)
+    everything = cli.get("/api/trash/list?page=1&limit=10").get_json()
+    assert {i["media_id"] for i in everything["items"] if i["archive_only"]} == {"a", "b"}
+    assert everything["archive_only_total"] == 2
+
+
+def test_trash_list_route_says_zero_when_nothing_is_an_only_copy(tmp_path):
+    _seed_quarantined(tmp_path, "1")
+    d = login_client(tmp_path).get("/api/trash/list").get_json()
+    assert d["archive_only_total"] == 0 and d["items"][0]["archive_only"] is False
+
+
+def test_the_count_leaves_with_the_files(tmp_path):
+    """After Delete forever takes one only copy, the list reports one fewer."""
+    _trash_with_only_copies(tmp_path)
+    cli = login_client(tmp_path)
+    r = cli.post("/api/trash/delete-forever", json={"media_ids": ["a"], "confirm": True})
+    assert r.get_json() == {"deleted": 1}
+    d = cli.get("/api/trash/list").get_json()
+    assert d["total"] == 3 and d["archive_only_total"] == 1

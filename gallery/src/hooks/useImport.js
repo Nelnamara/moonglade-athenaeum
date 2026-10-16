@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiUpload } from "../api.js";
+import { importInBatches } from "../lib/importBatches.js";
 
 /* useImport -- ImportOverlay.jsx's file-staging/upload state and handlers,
    mechanically lifted out (2026-08-03), same precedent as useMyArt.js/
@@ -103,23 +104,19 @@ export default function useImport({ onImported } = {}) {
     if (coll === null) { setCollOpen(true); return; } // "New collection…" left blank
     setBusy(true);
     setResult(null);
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files", f, f.name));
-    if (coll) fd.append("collection", coll);
-    try {
-      const d = await apiUpload("/api/import-local", fd);
-      setBusy(false);
-      if (d.error) {
-        setResult({ ok: false, error: d.error });
-        return;
-      }
-      setResult({ ok: true, imported: d.imported, skipped: d.skipped, collection: d.collection });
-      setFiles([]);
-      onImported && onImported();
-    } catch {
-      setBusy(false);
-      setResult({ ok: false, error: "network error" });
+    /* Sent in batches (#82): the server takes at most a thousand files a request and used to drop the
+       rest silently. importInBatches (lib/importBatches.js) adds the answers up; a failure part-way
+       keeps the files that were NOT sent staged for a retry, and says how far it got. */
+    const d = await importInBatches(files, coll, (fd) => apiUpload("/api/import-local", fd));
+    setBusy(false);
+    if (!d.ok) {
+      setResult({ ok: false, error: d.error });
+      if (d.sent > 0) { setFiles(files.slice(d.sent)); onImported && onImported(); }
+      return;
     }
+    setResult({ ok: true, imported: d.imported, skipped: d.skipped, notTaken: d.notTaken, collection: d.collection });
+    setFiles([]);
+    onImported && onImported();
   };
 
   const previewCapped = files.length > CAP;

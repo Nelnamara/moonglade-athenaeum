@@ -380,7 +380,8 @@ so you can bookmark one, and the browser's Back button closes it.
 
   Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
   with `python -m moonglade --rebuild-similar` (run that while the gallery isn't
-  serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
+  serving Similar queries — both use the same embedded database, and both are heavy: don't
+  run them beside GPU- or RAM-heavy programs). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
   view just tells you so; nothing else breaks.
 
 Scroll position and your selections are preserved when you open an image and come
@@ -470,7 +471,9 @@ filter does not contain shows no number on its record.
 
 **View batch** on a picture's record shows the other pictures made in the same generation. It
 appears for any picture that came from a generation, not only ones filed in an old batch folder.
-To get your whole library back, press **Clear** in **Advanced search**.
+Open a picture from that batch and its record's number (*2 of 4*) and **‹** / **›** stay inside the
+batch, on the desktop and on the phone. To get your whole library back, press **Clear** in
+**Advanced search**.
 
 ### Pages or Continuous on the phone
 

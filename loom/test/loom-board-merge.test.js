@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoards, mergeNotice, landTake, attachTake, deleteTake, selectTake, takesOf, selectedTakeOf } from "../src/loom-takes-core.js";
+import { mergeBoards, mergeNotice, landTake, attachTake, deleteTake, selectTake, takesOf, selectedTakeOf,
+  beginRender, adoptTask, failRender, abandonSubmit, markUnclear, resolvedSubmitOf } from "../src/loom-takes-core.js";
 import { flat } from "../src/loom-core.js";
 import { makeSaveQueue } from "../src/loom-store-core.js";
 
@@ -42,6 +43,104 @@ describe("mergeBoards", () => {
     const c3 = card(mergeBoards(resolved, base()).project, "c");
     assert.equal(c3.pendingSubmitId, "S4", "an unresolved render in flight survives the merge");
     assert.equal(c3.status, "wip");
+  });
+
+  // The stale-tab tombstone edge (review of #86): this tab's in-memory resolvedSubmits only knows
+  // what THIS tab saw end. Tab A settled the send S and saved; stale tab B still holds S with no
+  // task. The merge must read A's own record on the board and not bring S back.
+  describe("a send marker the other side already settled stays gone", () => {
+    const withCard = (p, fn) => ({ ...p, acts: p.acts.map((a) => ({ ...a, cards: a.cards.map((c) => c.id !== "c" ? c : fn(c)) })) });
+    // Tab B, stale: it began the render S and never saw an answer (no task).
+    const staleB = () => withCard(base(), (c) => beginRender(c, { submitId: "S" }));
+    // Tab A's card as it was while S was out, with the task the journal named.
+    const aWaiting = () => withCard(base(), (c) => adoptTask(beginRender(c, { submitId: "S" }), "S", "T"));
+    const settled = (p) => card(mergeBoards(staleB(), p).project, "c");
+    const clean = (c) => {
+      ["pendingSubmitId", "pendingTaskId", "pendingSettings", "pendingAnchor", "pendingBoard", "pendingQuote", "genStartedAt"]
+        .forEach((k) => assert.ok(c[k] == null, k + " is not resurrected"));
+    };
+
+    test("tab A landed the render as a take: B's merge does not make the card 'wip' with S pending again", () => {
+      const remote = withCard(aWaiting(), (c) => landTake(c, { mid: "M2", taskId: "T" }).card);
+      assert.equal(card(remote, "c").pendingSubmitId, null, "A cleared its markers");
+      const c = settled(remote);
+      clean(c);
+      assert.equal(c.status, "done");
+      assert.deepEqual(takesOf(c).map((t) => t.mid), ["M1", "M2"], "A's take is the result");
+      assert.equal(c.resultMid, "M2");
+    });
+    test("...whether A's clip was already a take (another path landed it first)", () => {
+      const remote = withCard(aWaiting(), (c) => landTake({ ...c,
+        takes: [{ id: "t1", n: 1, mid: "M1", trimIn: 0, trimOut: null }, { id: "t2", n: 2, mid: "M2", trimIn: 0, trimOut: null }],
+        selectedTake: 1, takeSeq: 2 }, { mid: "M2", taskId: "T" }).card);
+      assert.equal(card(remote, "c").pendingSubmitId, null);
+      clean(settled(remote));
+    });
+    test("tab A landed the render and then DELETED that take: B still does not bring S back", () => {
+      const landed = withCard(aWaiting(), (c) => landTake(c, { mid: "M2", taskId: "T" }).card);
+      const remote = withCard(landed, (c) => deleteTake(selectTake(c, 1), 2, "t").card);
+      const rc = card(remote, "c");
+      assert.deepEqual(takesOf(rc).map((t) => t.mid), ["M1"], "the take is gone from A's board");
+      assert.equal(resolvedSubmitOf(rc, "S"), true, "its ledger entry still names the send");
+      const c = settled(remote);
+      clean(c);
+      assert.deepEqual(takesOf(c).map((t) => t.mid), ["M1"], "and the delete stands");
+    });
+    test("deleteTake adds the send's id to the ledger entry only when the take has one", () => {
+      const withS = landTake(adoptTask(beginRender(base().acts[0].cards[0], { submitId: "S" }), "S", "T"), { mid: "M2", taskId: "T" }).card;
+      const del = deleteTake(selectTake(withS, 1), 2, "t").card;
+      assert.deepEqual(del.attempts, [{ media_id: "M2", at: "t", submitId: "S" }]);
+      const plain = deleteTake(selectTake(landTake({ ...base().acts[0].cards[0], status: "wip", pendingTaskId: "T3" }, { mid: "M3", taskId: "T3" }).card, 1), 2, "t").card;
+      assert.deepEqual(plain.attempts, [{ media_id: "M3", at: "t" }], "a take with no send id leaves the ledger entry as it was");
+      // A ledger entry that already exists (an older build) gains the id instead of a duplicate.
+      const pre = { ...selectTake(withS, 1), attempts: [{ media_id: "M2", at: "old" }] };
+      assert.deepEqual(deleteTake(pre, 2, "t").card.attempts, [{ media_id: "M2", at: "old", submitId: "S" }]);
+    });
+    test("tab A's send was refused: B does not bring S back", () => {
+      const remote = withCard(aWaiting(), (c) => failRender(c, { submitId: "S", state: "refused", msg: "no", at: "t" }));
+      const c = settled(remote);
+      clean(c);
+      assert.equal(c.lastAttempt.state, "refused", "A's word about it stands");
+    });
+    test("tab A's task failed (named by the task, not the send): B does not bring S back", () => {
+      const remote = withCard(aWaiting(), (c) => failRender(c, { taskId: "T", state: "failed", msg: "policy", at: "t" }));
+      clean(settled(remote));
+    });
+    test("tab A's owner released the send: B does not bring S back", () => {
+      const remote = withCard(staleB(), (c) => abandonSubmit(markUnclear(c, "S", "x", "t"), "S", "t"));
+      clean(settled(remote));
+    });
+    test("a genuinely pending send in B, settled nowhere, is still kept", () => {
+      // Remote holds nothing about S: the card is idle, as it was before B clicked Render.
+      const c = settled(base());
+      assert.equal(c.pendingSubmitId, "S");
+      assert.equal(c.status, "wip");
+      assert.equal(card(mergeBoards(withCard(staleB(), (x) => markUnclear(x, "S", "x", "t")), base()).project, "c").pendingSubmitId, "S",
+        "an unclear mark on B's side changes nothing");
+    });
+    test("...and a record about ANOTHER send does not settle it", () => {
+      // A landed an earlier render (S0) and failed another (S1); B's S is neither of them.
+      const earlier = withCard(base(), (c) => landTake(adoptTask(beginRender(c, { submitId: "S0" }), "S0", "T0"), { mid: "M0", taskId: "T0" }).card);
+      const failed = withCard(earlier, (c) => failRender(beginRender(c, { submitId: "S1" }), { submitId: "S1", state: "refused", msg: "", at: "t" }));
+      const c = card(mergeBoards(staleB(), failed).project, "c");
+      assert.equal(c.pendingSubmitId, "S", "B's own send is still in flight");
+      assert.equal(c.status, "wip");
+      assert.deepEqual(takesOf(c).map((t) => t.mid), ["M1", "M0"], "A's take is still there");
+    });
+    test("a send A has in flight now (its own markers) is A's: B's marker is not added over it", () => {
+      const c = card(mergeBoards(staleB(), aWaiting()).project, "c");
+      assert.equal(c.pendingTaskId, "T", "remote's render wins, as before");
+    });
+    test("resolvedSubmitOf reads the take and the failure record, nothing else", () => {
+      const landed = landTake(adoptTask(beginRender({ id: "x" }, { submitId: "S" }), "S", "T"), { mid: "M", taskId: "T" }).card;
+      assert.equal(resolvedSubmitOf(landed, "S"), true);
+      assert.equal(resolvedSubmitOf(landed, "S2"), false);
+      assert.equal(resolvedSubmitOf(failRender(beginRender({ id: "x" }, { submitId: "S" }), { submitId: "S", state: "refused" }), "S"), true);
+      assert.equal(resolvedSubmitOf(markUnclear(beginRender({ id: "x" }, { submitId: "S" }), "S", "m", "t"), "S"), false,
+        "an unclear mark does not name its send, and does not settle it");
+      assert.equal(resolvedSubmitOf(null, "S"), false);
+      assert.equal(resolvedSubmitOf(landed, ""), false);
+    });
   });
 
   test("F6b: a take deleted in one tab is not brought back by the other", () => {

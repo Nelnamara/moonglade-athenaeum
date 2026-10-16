@@ -1,0 +1,9 @@
+# Developer packages: everything above requirements.txt that running the test suite needs.
+# The app itself needs only requirements.txt (the line below brings it in). Install with:
+#     python -m pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest
+pytest-mock
+pytest-cov   # coverage: python -m pytest --cov=moonglade
+pytest-xdist   # the suite on parallel workers (-n auto); dev/tools/ci_local.py runs it that way

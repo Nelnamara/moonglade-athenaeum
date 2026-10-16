@@ -2207,13 +2207,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    if series:
-        member_ids = _series_member_task_ids(db_path, series)
-        if member_ids:
-            where += " AND task_id IN ({})".format(",".join("?" * len(member_ids)))
-            params = list(params) + member_ids
-        else:
-            where += " AND 1=0"   # unknown sid -> empty result, not an error
+    where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         if page_size is None:
@@ -2233,6 +2227,22 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             list(params) + order_params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
+
+
+def _narrow_to_series(db_path, series, where, params):
+    """(where, params) narrowed to one dial-in series' members when `series` is set, else
+    returned untouched. The ONE place the ?series=<sid> clause is built, so the paged
+    listing (query_catalog) and the ordered id walk behind the picture page
+    (list_media_ids) cannot drift apart: an UNKNOWN sid becomes an always-false clause
+    (an empty result, never a bare `IN ()`), and the member task_ids are bound as
+    placeholders."""
+    if not series:
+        return where, params
+    member_ids = _series_member_task_ids(db_path, series)
+    if member_ids:
+        where += " AND task_id IN ({})".format(",".join("?" * len(member_ids)))
+        return where, list(params) + member_ids
+    return where + " AND 1=0", params   # unknown sid -> empty result, not an error
 
 
 def _series_member_task_ids(db_path, sid):
@@ -8899,7 +8909,8 @@ LIVING_JOBS = (
     {"action": "reconcile-deleted", "interval_s": 7 * 86400.0, "enabled": True,
      "label": "Reconcile deleted", "note": "weekly — flags rows whose task is gone from PixAI"},
     {"action": "sync-similar", "interval_s": 24 * 3600.0, "enabled": True, "needs": "torch",
-     "label": "Top up Similar", "note": "nightly, when the ML stack is installed"},
+     "label": "Top up Similar",
+     "note": "nightly, when the ML stack is installed. Heavy: don't run it beside GPU- or RAM-heavy programs."},
 )
 # THE STALENESS BACKSTOP (owner call 5). These three are the scope's "safe but wasteful on
 # a timer" row: full re-walk, rebuild Similar, rebuild thumbnails. They have no incremental
@@ -8915,7 +8926,8 @@ LIVING_STALE_JOBS = (
     {"action": "resync-full", "interval_s": STALE_BACKSTOP_S, "enabled": True,
      "label": "Full re-walk", "note": "only if it has not run in 60 days"},
     {"action": "rebuild-similar", "interval_s": STALE_BACKSTOP_S, "enabled": True,
-     "needs": "torch", "label": "Rebuild Similar", "note": "only if it has not run in 60 days"},
+     "needs": "torch", "label": "Rebuild Similar",
+     "note": "only if it has not run in 60 days. Heavy: don't run it beside GPU- or RAM-heavy programs."},
     {"action": "rebuild-thumbs", "interval_s": STALE_BACKSTOP_S, "enabled": True,
      "label": "Rebuild ALL thumbnails", "note": "only if it has not run in 60 days"},
 )
@@ -9308,12 +9320,17 @@ def integrity_rows(db_path):
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
-                   media_type="", source="", collection=""):
-    """Return ordered list of media_ids matching the filter (no row data)."""
+                   media_type="", source="", collection="", series=""):
+    """Return ordered list of media_ids matching the filter (no row data).
+
+    `series` narrows the walk to one dial-in series' members, exactly as query_catalog's
+    does (_narrow_to_series), so the picture page opened from an opened stack counts and
+    steps inside that stack. Empty = no narrowing, the walk is what it always was."""
     q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
+    where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
@@ -10199,6 +10216,10 @@ QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME, RECO
 QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
 # --import-local's internal scan: the three above plus legacy branding/.
 IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
+# Web Import's per-request ceiling on uploaded parts (/api/import-local). The page sends a big
+# folder in batches well under it (gallery/src/lib/importBatches.js); the route keeps it as a
+# guard and reports whatever it did not take.
+IMPORT_REQUEST_CAP = 1000
 # collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
 # IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
 # the health memo's correctness depends on THIS one matching the health walk exactly.
@@ -10828,11 +10849,25 @@ def list_quarantined(out_dir, page=1, page_size=60):
     scanned alongside (which has no sidecars to read at all, by definition -- nothing
     wrote one before this feature existed). Only os.scandir() + stat() (metadata
     only, no content read) touches every file in the backlog; JSON parsing is
-    bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
+    bounded by however many sidecars actually exist. Returns (items, total, total_bytes).
+
+    Each item also carries `archive_only` (#66): True when its sidecar snapshot says PixAI no
+    longer has that picture, so the file in the trash is the only copy anywhere. The Trash's
+    Delete forever / Empty trash name how many before they destroy them. A file with no
+    sidecar (everything quarantined before 2026-07-24) is not claimed to be one: nothing
+    recorded says so. _list_quarantined also hands back the count across the WHOLE trash,
+    not just this page, because Empty trash takes every file."""
+    items, total, total_bytes, _only = _list_quarantined(out_dir, page, page_size)
+    return items, total, total_bytes
+
+
+def _list_quarantined(out_dir, page=1, page_size=60):
+    """list_quarantined's body, plus a fourth value: how many media files in the whole trash
+    are the only copy (their sidecar snapshot passes is_archive_only). See list_quarantined."""
     from moonglade import backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
-        return [], 0, 0
+        return [], 0, 0, 0
 
     media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
     entries = []
@@ -10857,6 +10892,8 @@ def list_quarantined(out_dir, page=1, page_size=60):
 
     total = len(entries)
     total_bytes = sum(s for _, s, _ in entries)
+    only_total = sum(1 for name, _s, _m in entries
+                     if is_archive_only(meta_by_id.get(media_id_of(name))))
 
     def _sort_key(entry):
         name, _size, mtime = entry
@@ -10880,8 +10917,9 @@ def list_quarantined(out_dir, page=1, page_size=60):
             "media_id": media_id, "filename": name, "size": size,
             "deleted_at": deleted_at, "is_video": "1" if is_video else "",
             "prompt": prompt[:2000], "has_meta": bool(meta),
+            "archive_only": is_archive_only(meta),
         })
-    return items, total, total_bytes
+    return items, total, total_bytes, only_total
 
 
 def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
@@ -12312,6 +12350,22 @@ def _schedule_server_exit(code):
         else:
             os._exit(code)                    # fallback: server was never stashed (shouldn't happen)
     threading.Thread(target=_die, daemon=True).start()
+
+
+RESTART_EXIT_CODE = 42        # the supervisor's "relaunch me" signal (see _schedule_server_exit)
+
+
+def _power_in_progress():
+    """"stop" or "restart" once _schedule_server_exit has been called and the process has not
+    yet gone, else "". This is the server's own record that a Stop/Restart is under way: the
+    Control Panel reads it off /api/panel/status when it mounts, so a panel reopened (or a
+    page remounted) after the click picks the reconnect watch back up instead of showing an
+    idle panel (#84). It lives in the process and dies with it, so a fresh process always
+    starts at "" -- there is no stale marker to clear."""
+    with _EXIT_LOCK:
+        if not _SERVER_CONTROL.get("exit_scheduled"):
+            return ""
+        return "restart" if _SERVER_CONTROL.get("exit_code") == RESTART_EXIT_CODE else "stop"
 
 
 # ---------------------------------------------------------------------------
@@ -13941,10 +13995,12 @@ def create_app(out_dir: Path):
         # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for
         # rebuild there costs ~3x the time AND discards every row that survived.
         "sync-similar":  {"args": ["--sync-similar"],
-                          "label": "Top up the Similar index (adds only what's missing)",
+                          "label": "Top up the Similar index (adds only what's missing; "
+                                   "heavy: don't run it beside GPU- or RAM-heavy programs)",
                           "destructive": False},
         "rebuild-similar": {"args": ["--rebuild-similar"],
-                            "label": "Rebuild the Similar index (slow, needs pixeltable)",
+                            "label": "Rebuild the Similar index (slow, needs pixeltable; "
+                                     "heavy: don't run it beside GPU- or RAM-heavy programs)",
                             "destructive": False},
         # Same trust class as sync-similar/rebuild-similar just above: computes and writes
         # a catalog column only (phash), no image files touched, so not destructive despite
@@ -15157,6 +15213,12 @@ def create_app(out_dir: Path):
                       "started": None, "ok": None}
     # task id -> worker-clock time its collect last failed; skipped for WATCH_COLLECT_RETRY_S.
     _catchup_failed = {}
+    # How the sweep's read of the history feed has been going. `misses` counts the sweeps in a
+    # row where PixAI did not recognize the saved request (an isolated one is read again the
+    # long way and is not worth a warning); `reported` latches the one plain-words warning
+    # until the saved request is recognized again.
+    WATCH_CATCHUP_QUERY_MISSES = 3
+    _catchup_query = {"misses": 0, "reported": False}
 
     def _spawn_daemon(fn):
         threading.Thread(target=fn, daemon=True).start()
@@ -15192,9 +15254,11 @@ def create_app(out_dir: Path):
         _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
-            conn = core.find_connection(
-                core.gql(session, core.page_variables(
-                    WATCH_CATCHUP_TASKS, core._client_of(session).user_id)))
+            data, via_document = core.history_page(
+                session, core.page_variables(
+                    WATCH_CATCHUP_TASKS, core._client_of(session).user_id))
+            _note_catchup_query(reason, via_document)
+            conn = core.find_connection(data)
             edges = (conn or {}).get("edges") or []
             missed = []
             nodes = {}
@@ -15257,9 +15321,52 @@ def create_app(out_dir: Path):
                 _time.sleep(1.0)          # paced -- be polite to their servers
             return True
         except Exception as e:
+            if isinstance(e, core.HistoryPageRefused):
+                # PixAI refused both reads (the saved request, then the full document;
+                # history_page raises this for that case, never PersistedQueryNotRecognized):
+                # say so once, in plain words, then stay quiet while it lasts. The sweep still runs on its clock and reads again.
+                _catchup_query["misses"] += 1
+                if not _catchup_query["reported"]:
+                    _catchup_query["reported"] = True
+                    _log.warning(
+                        "live mirror: catch-up cannot read your recent generations because "
+                        "PixAI is refusing the app's history request. New "
+                        "generations still arrive over the live connection. Updating the "
+                        "app refreshes the request; this is said once until it works "
+                        "again.")
+                else:
+                    _log.debug("live mirror: catch-up after %s failed, history request "
+                               "still refused", reason)
+                return False
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
             return False
+
+    def _note_catchup_query(reason, via_document):
+        """Keep the account of the sweep's history read (see _catchup_query). A page that came
+        through the saved request clears it; one that needed the full document counts a miss,
+        and the third miss in a row is the one plain-words warning."""
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        if not via_document:
+            if _catchup_query["reported"]:
+                _log.info("live mirror: PixAI recognizes the app's saved history request again")
+            _catchup_query.update(misses=0, reported=False)
+            return
+        _catchup_query["misses"] += 1
+        if _catchup_query["misses"] < WATCH_CATCHUP_QUERY_MISSES:
+            _log.info("live mirror: catch-up after %s -- PixAI did not recognize the saved "
+                      "history request, read it the long way instead", reason)
+        elif not _catchup_query["reported"]:
+            _catchup_query["reported"] = True
+            _log.warning(
+                "live mirror: PixAI has not recognized the app's saved history request for "
+                "%d catch-up sweeps in a row. Catch-up is reading your recent generations "
+                "the long way instead, so nothing is missed. Updating the app refreshes the "
+                "request; this is said once until it works again.", _catchup_query["misses"])
+        else:
+            _log.debug("live mirror: catch-up after %s -- history request still not "
+                       "recognized, read the long way", reason)
 
     # Test seam (same rationale as mg_watch_mirror above): the self-heal sweep is a closure
     # only ever called from the watcher thread, which the suite disables (MOONGLADE_DISABLE_WATCH).
@@ -16900,6 +17007,9 @@ def create_app(out_dir: Path):
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
                             "warn_count": _panel_job.get("warn_count") or 0,
+                            # "stop" | "restart" while one is under way, else "" (#84): the
+                            # panel resumes its reconnect watch from this on mount.
+                            "power": _power_in_progress(),
                             "lines": lines})
 
     @app.route("/api/watch/status")
@@ -17863,11 +17973,17 @@ def create_app(out_dir: Path):
             limit = max(1, min(int(request.args.get("limit") or 60), 200))
         except ValueError:
             page, limit = 1, 60
-        items, total, total_bytes = list_quarantined(out_dir, page=page, page_size=limit)
+        items, total, total_bytes, archive_only_total = _list_quarantined(
+            out_dir, page=page, page_size=limit)
         _ensure_trash_thumbs(out_dir, thumb_dir, items)
         for it in items:
             it["thumb"] = "/thumbs/{}.jpg".format(it["media_id"])
+        # `archive_only` per file and `archive_only_total` for the whole trash (#66): the
+        # typed-DELETE confirms of Delete forever and Empty trash name how many files are
+        # the only copy anywhere before they go for good (Empty takes every page, so the
+        # page alone cannot answer it).
         return jsonify({"items": items, "total": total, "total_bytes": total_bytes,
+                        "archive_only_total": archive_only_total,
                         "page": page, "limit": limit})
 
     @app.route("/api/trash/restore", methods=["POST"])
@@ -18354,7 +18470,8 @@ def create_app(out_dir: Path):
                                 enote = core.embed_metadata(work, {
                                     "prompt": row.get("prompt_full") or row.get("prompt") or "",
                                     "media_id": mid, "task_id": row.get("task_id") or "",
-                                    "model": row.get("model") or "", "seed": row.get("seed") or "",
+                                    "model": row.get("model_name") or row.get("model_id") or "",
+                                    "seed": row.get("seed") or "",
                                     "date": row.get("created_at") or ""})
                                 if enote != "ok":
                                     warnings.append("{}: embed prompt -> {} (not embedded)"
@@ -20065,13 +20182,12 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_account_credit_log():
         """Full credit movement history (purchase/gift/spend/refund). Newest-first;
-        BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
+        BACKWARD-paginated via ?before=<cursor>. Read-only."""
         try:
             core, session = _gen_session()
             before = request.args.get("before") or None
-            reason = request.args.get("reason") or None
             return jsonify(core.list_credit_log(session, last=_acct_count(30),
-                                                before=before, reason=reason))
+                                                before=before))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -20161,7 +20277,8 @@ def create_app(out_dir: Path):
         # that never had it, silently erasing the account. Same lock, so same queue.
         with core._accounts_lock:
             try:
-                cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+                cfg = json.loads(_paths.decode_text(cfg_path.read_bytes())) \
+                    if cfg_path.exists() else {}
             except ValueError:
                 # Present but unparseable -- REFUSE rather than overwrite. The old
                 # bare `cfg = {}` fallback wrote back a one-key stub, destroying
@@ -20176,7 +20293,10 @@ def create_app(out_dir: Path):
                     _redact_host_paths(str(e)))}), 200
             cfg["PIXAI_API_KEY"] = key
             try:
-                cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+                # The atomic writer (a temp, flushed, then swapped in): a write cut short here
+                # would leave a torn config.json, which stops every start in the move
+                # (moonglade.migrate) where 3.19 still started.
+                core._save_config(cfg)
             except OSError as e:
                 return jsonify({"error": "Key verified, but couldn't write config.json: {}".format(
                     _redact_host_paths(str(e)))}), 200
@@ -20336,7 +20456,12 @@ def create_app(out_dir: Path):
                     return jsonify({"error": "snippets must be a list"}), 400
                 clean = [str(s)[:800] for s in snips if str(s).strip()][:200]
                 try:
-                    _snips_path(user).write_text(json.dumps(clean), encoding="utf-8")
+                    # A temp beside it, then swapped in: a write cut short never leaves a
+                    # torn snippets.json (the move reads a torn new home as damaged).
+                    target = _snips_path(user)
+                    tmp = target.with_name(target.name + ".tmp")
+                    tmp.write_text(json.dumps(clean), encoding="utf-8")
+                    os.replace(tmp, target)
                 except OSError as e:
                     return jsonify({"error": _redact_host_paths(str(e))[:160]}), 200
                 return jsonify({"snippets": clean})
@@ -23368,9 +23493,15 @@ def create_app(out_dir: Path):
         tmp = tempfile.mkdtemp(prefix="mg_import_")
         try:
             saved = 0
-            for i, f in enumerate(files[:1000]):          # hard cap on one request
+            # A guard, not the design: the web page sends a big folder in several requests
+            # (hooks/useImport.js), so this is only reached by a caller that sends more at
+            # once. What it does not take it COUNTS, and says so in the answer (#82) -- it
+            # used to drop everything past the cap without a word.
+            not_taken = max(0, len(files) - IMPORT_REQUEST_CAP)
+            for i, f in enumerate(files[:IMPORT_REQUEST_CAP]):
                 base = _os.path.basename(f.filename or "")
                 if not base:
+                    not_taken += 1          # a part with no file name: nothing to import
                     continue
                 # Own subdir per upload so two files sharing a basename don't collide in the
                 # temp dir; run_import_local then copies each into imported/ by basename, so the
@@ -23393,7 +23524,7 @@ def create_app(out_dir: Path):
             if collection and mids:
                 add_to_collection(db_path, mids, collection)
             return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
-                            "collection": collection or None})
+                            "not_taken": not_taken, "collection": collection or None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
@@ -25751,6 +25882,12 @@ __DESIGN_TOKENS__
             date_from=(request.args.get("from") or "").strip(),
             date_to=(request.args.get("to") or "").strip(),
             art_tag=(request.args.get("tag") or "").strip(),
+            # The View batch drill-down (#81): the list route filters by it, so the walk
+            # this picture sits in -- its "k of N" and Prev/Next -- must stay inside it too.
+            batch=(request.args.get("batch") or "").strip(),
+            # The opened stack (?series=<sid>), same reason: /api/library honours it, so the
+            # walk a picture opened from a stack sits in stays inside that stack.
+            series=(request.args.get("series") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
         try:
             idx = nav_ids.index(media_id)
@@ -26949,19 +27086,28 @@ __DESIGN_TOKENS__
         """What the journal knows about one Loom render (Session P, BUILD-w5-p §3.3): the
         client asks this -- never re-POSTs -- when its own POST got no answer. Local only.
         {state: sending | submitted | refused | not_sent | may_have_started | abandoned |
-        unknown, task_id?, error?, finished?}"""
+        unknown, task_id?, error?, finished?, sending?}
+
+        `sending: true` (GitHub #86) is added when the request is still running in THIS
+        process -- the same set submit-abandon consults to refuse a release. The journal's
+        `state: "sending"` alone cannot tell a live send from one that died with an earlier
+        process, so a reloaded tab reads this flag to stop offering a release the server
+        would refuse. A read only: it changes nothing about what submit-abandon allows."""
         user = str(session.get("user") or "")
         sid = str(request.args.get("submit_id") or "")
         if not _LOOM_ID_RE.match(sid):
             return jsonify({"state": "unknown"})
         with _loom_journal_lock:
             e = dict(_loom_journal_load(user)["subs"].get(sid) or {})
+            live = (_account_key(user), sid) in _loom_sending_now
         if not e:
             return jsonify({"state": "unknown"})
         out = {"state": e.get("state") or "unknown"}
         for k in ("task_id", "error", "finished"):
             if e.get(k):
                 out[k] = e[k]
+        if live and out["state"] == "sending":
+            out["sending"] = True
         return jsonify(out)
 
     @app.route("/api/loom/submit-abandon", methods=["POST"])
@@ -29149,6 +29295,19 @@ def _say_port_refused(owner, port):
     if owner == "moonglade":
         print("  Open the one that's already running:  http://localhost:{}/\n"
               .format(port), file=sys.stderr)
+    if _supervised():
+        # Started by Moonglade Launcher, which passes no flags: the port and the switches are
+        # in settings.json, and that is where the way out is.
+        settings = _paths.settings_path()
+        print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
+              "  Or use a different port: set \"port\" to {} in {} (the launcher passes\n"
+              "  no flags), then start Moonglade again.\n"
+              "\n"
+              "  Starting anyway would bind a SECOND server to the same port -- Windows\n"
+              "  allows that -- and requests would land on either one at random. Add\n"
+              "  \"--allow-port-reuse\" to \"launch_args\" in the same file if you genuinely\n"
+              "  want that.\n".format(port, port + 1, settings), file=sys.stderr)
+        return
     print("  Find it:  netstat -ano | findstr :{}      (then: taskkill /F /PID <pid>)\n"
           "  Or just use a different port:  --port {}\n"
           "\n"
@@ -29156,6 +29315,21 @@ def _say_port_refused(owner, port):
           "  allows that -- and requests would land on either one at random. Pass\n"
           "  --allow-port-reuse if you genuinely want that.\n".format(port, port + 1),
           file=sys.stderr)
+
+
+def _say_port_unbindable(port, err):
+    """The server could not open its port at all (a Windows excluded port range, a privileged
+    port, another program that holds it exclusively): the same way out as a taken port."""
+    print("\nRefusing to start: Moonglade can't open port {} ({}).\n".format(
+        port, getattr(err, "strerror", None) or err), file=sys.stderr)
+    if _supervised():
+        print("  Use a different port: set \"port\" to {} in {} (the launcher passes no\n"
+              "  flags), then start Moonglade again.\n".format(port + 1, _paths.settings_path()),
+              file=sys.stderr)
+    else:
+        print("  Use a different port:  --port {}\n".format(port + 1), file=sys.stderr)
+    print("  On Windows a port can be held back by the system (an excluded range); list those\n"
+          "  with:  netsh int ipv4 show excludedportrange protocol=tcp\n", file=sys.stderr)
 
 
 def _port_taken_early(args, planned):
@@ -29297,7 +29471,18 @@ def main():
     # the web app's own first-run wizard (paste a key, run the first sync) ever had a
     # chance to render. Create the folder and an empty, schema-initialized catalog instead
     # and let the server boot; the wizard banner is what guides them from there.
+    folder_was_there = out_dir.is_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A library folder that was missing when prepare() looked but was here by now (a NAS waking
+    # up, a drive put back) was not looked at: do it now, before anything reads it, or this
+    # session would serve an un-moved library over empty spend guards. A folder this very
+    # mkdir made holds nothing to move.
+    if folder_was_there:
+        try:
+            prepared.late_library()
+        except moonglade_setup.MoveStopped as e:
+            print("\n" + PREPARE_MARK + str(e) + "\n", file=sys.stderr)
+            return 3
 
     db_path = out_dir / "catalog.db"
 
@@ -29409,7 +29594,11 @@ def main():
     # (web Stop/Restart) or Ctrl+C; the pending exit code then rides `sys.exit(main())` to the
     # supervisor (0 = stop, 42 = relaunch).
     from werkzeug.serving import make_server as _make_server
-    srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    try:
+        srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    except OSError as e:
+        _say_port_unbindable(args.port, e)
+        return 2
     _SERVER_CONTROL["srv"] = srv
     _SERVER_CONTROL["exit_code"] = 0
     # S1: this start counts toward deleting the move's safety snapshots only once it has

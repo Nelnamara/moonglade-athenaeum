@@ -12,16 +12,23 @@
    `action` -- no new surface.
 
    ONCE PER SERVER START. The notice carries a key that is new each time the server starts.
-   The key last shown is written down (localStorage, with a memory copy for a browser that
-   blocks it), so a reload, a second tab or the next poll says nothing more -- and the next
-   server start, if something is still unfixed, says it again. Sticky: it asks for a choice,
-   and must not fade before it is read. */
+   The next poll of a page that already shows it says nothing more, and the next server start,
+   if something is still unfixed, says it again. Sticky: it asks for a choice, and must not
+   fade before it is read.
+
+   A NOTICE WITH A BUTTON STAYS UNTIL IT IS ACTED ON OR DISMISSED. Showing it is not seeing it:
+   after an update the tab left open reloads when the server comes back and shows the notice to
+   nobody, and the person who opens the app later must still meet it. So its key is written
+   down (localStorage, with a memory copy for a browser that blocks it) only when the toast
+   closes -- the Fix button, or the x -- and until then every page that loads says it. A notice
+   of words alone has no choice to wait for: its key is written down as it is shown, as ever. */
 
 import { apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
 
 const SEEN_KEY = "mg_server_notice";
 let seenHere = "";                 // the memory copy, for a browser that blocks storage
+let onScreen = "";                 // the key this page is showing now (a poll does not stack it)
 
 function lastShown() {
   try { return localStorage.getItem(SEEN_KEY) || seenHere; } catch { return seenHere; }
@@ -54,12 +61,14 @@ export function runFix(fix) {
 export function noteServerNotice(notice) {
   if (!notice || !notice.key || (!notice.title && !notice.msg)) return false;
   const key = String(notice.key);
-  if (lastShown() === key) return false;
-  markShown(key);
+  if (lastShown() === key || onScreen === key) return false;
   const fix = notice.fix && notice.fix.label ? notice.fix : null;
+  onScreen = key;
+  if (!fix) markShown(key);
   toastShow({
     kind: "", sticky: true, title: String(notice.title || ""), msg: String(notice.msg || ""),
     action: fix ? { label: String(fix.label), run: () => { runFix(fix); } } : undefined,
+    onClose: fix ? () => markShown(key) : undefined,
   });
   return true;
 }

@@ -16,6 +16,39 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.2] - 2026-10-15 — First Light
+
+### First start
+- **A PC with no Python can get Moonglade going with one double-click.** A new file in the app's folder, **Install Moonglade**, does the first-time setup: it finds Python 3.10 or newer, installs one for your account only (no administrator) if there is none, installs the packages Moonglade needs, then opens Moonglade in your browser. It copes with a folder name that has spaces, brackets, an ampersand or an accented letter, and if you open it from inside the downloaded zip it tells you to extract the zip first. Windows may ask "Do you want to run this file?" for a downloaded file. (2026-10-15)
+- **A first start installs what Moonglade needs.** If a package the app needs isn't installed, Moonglade Launcher names it and offers to install it with the Python that runs Moonglade, then starts; it used to stop with "Flask is required…" (#87). Saying No, or an install that fails, shows the exact command to paste. (2026-10-15)
+
+### The move (from the 3.20 release gate, #79)
+- **The move keeps more of what it used to set aside and delete.** An older art pack in the app folder that differs from the one in `local\` is kept in the safety copy instead of deleted; two `runs.db` files meeting at the first move are merged run by run; a library banner your install can't wear (it already wears another) is kept in `local\banners\`; a login file named by the login's plain name never replaces the live one because a copy tool gave it a newer time; an empty file (a save cut short) never replaces a real record just because it is newer; and a file named like a temp (`.part`, `.tmp`, `.lock`) goes into the safety copy before it is removed. (2026-10-15)
+- **A damaged or empty file in `_moonglade\` no longer stops every start.** An empty file is read as empty and the older copy takes its place; a file saved with a byte order mark reads as it is; a line file with torn bytes is still merged; and the stop that remains for a really damaged file names the safety copy and says deleting the file lets the next start bring the older copy in. Prompt snippets and the setup key are saved through a temp file, so a write cut short can't damage them. (2026-10-15)
+- **The first move of a big Loom folder no longer takes minutes.** It rewrote its whole journal twice for every file; it now writes it once per group of files, and a start cut short part-way is still finished by the next one. (2026-10-15)
+- **When an older install and this one both set a Mark lost or Keep as is choice for the same picture, the later one wins** (the choice it replaces is kept in the safety copy), and an older install's skin is kept where this one never chose one. A merge made while another PC's server writes the same file is read again instead of written over it. (2026-10-15)
+- **A start cut short while bringing in a banner no longer leaves it unworn,** and an older launcher's log that Windows won't let go of is added to once, not copied into `serve.log` again at every start. (2026-10-15)
+- **Libraries on a network share or mapped drive are recognised,** a `local\settings.json` that belongs to another program no longer makes a library fail, and Moonglade's own `local` folder can't be chosen as the library. (2026-10-15)
+- **A library folder that appears just after the start (a NAS waking up) is moved before it is served,** a record with a file time before 1980 no longer stops every start, a `config.json` saved as UTF-16 or with a byte order mark reads, and a lock Windows briefly refuses to delete is retried. (2026-10-15)
+- **The command line's `--list-web-users` and `--add-web-user` work even while the library is still in an older layout,** and the sentence for a run that names its own library (`--out`) says how to move it from a server with no launcher: set `library_dir` and start once without the flag. (2026-10-15)
+- **The launcher says why the server stopped this time, not an earlier start's reason,** bows out when the stored `--https` server is already running, and a port that is taken or can't be opened points at `port` in `local\settings.json` instead of flags the launcher can't pass. (2026-10-15)
+- **The notice about Claude's tools and scheduled tasks stays until you press Fix it or dismiss it,** even if a tab left open from the update showed it first; it reads "still use" and "now use"; and the Claude tools report the app's own version. (2026-10-15)
+
+### Fixed
+- **Live Mirror: the catch-up no longer fails about once an hour.** When PixAI doesn't recognize the app's saved history request (it answers it most of the time), the catch-up reads the same page once more the long way and carries on; if PixAI stops accepting it altogether, the log says so once in plain words instead of on every sweep (#80). (2026-10-15)
+- **The Loom doesn't offer Release in a tab reloaded while a render is still being sent.** The shot says it is still being sent to PixAI and checks again by itself a few times (the same read ↻ Check makes, which sends nothing); two tabs saving one board no longer bring back a render marker the other tab already finished (#86). (2026-10-15)
+- **View batch: a picture opened from a batch shows its place in that batch, and Prev and Next stay inside it,** on the desktop and the phone (#81). A picture opened from an opened stack does the same. (2026-10-15)
+- **Import takes a folder of more than 1,000 files.** It sends them in batches and imports every one; if the server ever leaves files out, the finished message says how many (#82). (2026-10-15)
+- **Control Panel: closing the Panel or reloading while Stop or Restart waits for the server no longer loses the wait;** reopening picks it back up (#84). (2026-10-15)
+- **Trash: Delete forever and Empty trash say how many of the files are the only copy** (PixAI no longer has them) before you type DELETE. (2026-10-15)
+- **Zip export's "embed prompt" writes the model** (its name, else its id) into each file; it wrote an empty model every time (#83). (2026-10-15)
+- **The Similar index jobs say they are heavy** and shouldn't run beside GPU- or RAM-heavy programs: in the command-line help, on the Control Panel's Top up Similar and Rebuild Similar, in the "Runs itself" schedule notes and on the wiki pages (#85). (2026-10-15)
+
+### Under the hood
+- For developers: the test tools (pytest, pytest-mock, pytest-cov, and pytest-xdist for the parallel runs) moved from `requirements.txt` to a new `requirements-dev.txt`, which includes `requirements.txt`; `requirements.txt` now holds only what the app needs at run time. `Install Moonglade.cmd` is the one script allowed at the install root beside the launcher, kept in CRLF by `.gitattributes`; `"Install Moonglade.cmd" --check` reports what it found without installing or starting anything. (2026-10-15)
+- The dead credit-log reason filter is gone (`--credit-log-reason`, the unused argument on `list_credit_log`, the route's `?reason=` and its wiki row): PixAI's read never took a filter and nothing sent it. The phone app calls its tested background-read helper instead of repeating the check inline. (2026-10-15)
+- `/api/loom/submit-status` says `sending: true` while a render's request is still running in the server, so a reloaded Loom can tell a live send from one that died with an earlier run; the release's own refusal is unchanged. The pack builder's help names `local/moonglade.mgpack`, and Troubleshooting covers a damaged `_moonglade` file, a start without `--out` and a `config.json` restored from before 3.20. (2026-10-15)
+
 ## [3.20.1] - 2026-10-08 — Clean Sweep
 
 ### Fixed

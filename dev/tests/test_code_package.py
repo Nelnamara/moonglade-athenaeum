@@ -117,8 +117,11 @@ def test_python_m_moonglade_gallery_is_the_server():
 
 _FASTMCP_STUB = textwrap.dedent('''
     class FastMCP:
-        def __init__(self, name):
+        def __init__(self, name, version=None):
+            # The real FastMCP takes version= (fastmcp>=3.4, requirements-mcp.txt); the server
+            # passes the app's own version, so the stub accepts it too.
             self.name = name
+            self.version = version
         def tool(self, fn):
             return fn
         def run(self, transport=None):

@@ -26,6 +26,12 @@ launch switches are all settings.json's, set from the Control Panel; the server 
 itself, so nothing is passed on its command line. The server's console output goes to
 local\\logs\\serve.log. A server that stops as it starts (a move it could not finish, a port
 taken, a crash) is said in a message box, with the reason from serve.log.
+
+Just before the server starts, it looks that the packages requirements.txt names are installed in
+the Python that runs this launcher (moonglade.deps). A first install often has none of them: the
+manual `pip install` ran for some other Python, and the server would die with "Flask is required".
+It names what is missing and, on a Yes in a message box, installs it with that same Python;
+nothing is installed without one.
 """
 import os
 import subprocess
@@ -42,6 +48,7 @@ import webbrowser
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from moonglade import paths as _paths    # noqa: E402
+from moonglade import deps as _deps      # noqa: E402 -- standard library only: runs before flask exists
 
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
@@ -51,18 +58,23 @@ def _serve_log_path():
     return _paths.logs_dir() / "serve.log"
 
 
+def _log_line(line):
+    """One "[launcher] ..." line in serve.log, when that can be written."""
+    try:
+        log = _serve_log_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(log), "a", encoding="utf-8") as f:
+            f.write("[launcher] " + line + "\n")
+    except Exception:                                   # noqa: BLE001 -- never stops a start
+        pass
+
+
 def _stop(message):
     """Say plainly why Moonglade cannot start, where a person will see it, and stop. Under
     pythonw there is no console, so it is a Windows message box (and a line in serve.log when
     that can be written); elsewhere, stderr."""
     text = "Moonglade couldn't get ready to start.\n\n" + message
-    try:
-        log = _serve_log_path()
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(log), "a", encoding="utf-8") as f:
-            f.write("[launcher] " + text.replace("\n\n", " ") + "\n")
-    except Exception:                                   # noqa: BLE001 -- the box still shows
-        pass
+    _log_line(text.replace("\n\n", " "))
     if sys.platform == "win32":
         try:
             import ctypes
@@ -91,11 +103,21 @@ import urllib.request
 import urllib.error
 
 
-def _moonglade_on_port(port):
-    """True iff one of OUR servers is already answering on `port` (any HTTP status)."""
-    url = "http://localhost:{}/api/ping".format(port)
+def _moonglade_on_port(port, https=False):
+    """True iff one of OUR servers is already answering on `port` (any HTTP status). `https`:
+    the server takes the stored --https switch, so it speaks TLS (with its own certificate,
+    which is not verified: the header is what identifies it)."""
+    url = "{}://localhost:{}/api/ping".format("https" if https else "http", port)
+    kw = {"timeout": 1.5}
+    if https:
+        # Not verified, on purpose: this asks localhost only whether one of OUR servers
+        # answers (the X-Moonglade header), sends no credential and reads nothing but that
+        # header, and the server's own certificate is self-signed, so a verifying probe could
+        # never say yes.
+        import ssl
+        kw["context"] = ssl._create_unverified_context()
     try:
-        with urllib.request.urlopen(url, timeout=1.5) as _r:
+        with urllib.request.urlopen(url, **kw) as _r:
             return _r.headers.get("X-Moonglade") is not None
     except urllib.error.HTTPError as _e:      # answered with a status (e.g. the 401 gate) -> up
         return _e.headers.get("X-Moonglade") is not None
@@ -103,11 +125,14 @@ def _moonglade_on_port(port):
         return False
 
 
-def _bow_out_if_running(port):
-    """One of our servers already answers on `port`: open the browser on it and stop."""
-    if _moonglade_on_port(port):
+def _bow_out_if_running(port, https=False):
+    """One of our servers already answers on `port`: open the browser on it and stop. With
+    --https stored it is probed over TLS, so a second double-click bows out here too -- it
+    would otherwise run prepare() under the live server, and then its own server would refuse
+    the port as taken."""
+    if _moonglade_on_port(port, https):
         try:
-            webbrowser.open("http://localhost:{}/".format(port))
+            webbrowser.open("{}://localhost:{}/".format("https" if https else "http", port))
         except Exception:
             pass
         sys.exit(0)
@@ -137,8 +162,11 @@ def _import_setup():
 # or the one an older version's settings are about to bring across (moonglade.setup.peek_server
 # reads them the way the merge will).
 _setup = _getting_ready(_import_setup)
-_early_port = _getting_ready(lambda: _setup.peek_server()["port"])
-_bow_out_if_running(_early_port)
+_early = _getting_ready(lambda: _setup.peek_server())
+_early_port = _early["port"]
+# The stored launch switches as the move will leave them: with --https the server speaks TLS.
+_early_https = "--https" in (_early.get("launch_args") or [])
+_bow_out_if_running(_early_port, _early_https)
 
 # Get the install ready (B2), before anything reads a setting: under the install's lock, merge
 # the settings into local\settings.json and bring this install's own files into their homes,
@@ -162,8 +190,9 @@ BOOT_S = 30.0
 # after an update, and then the probe runs again.
 from moonglade import settings as _settings    # noqa: E402
 PORT = _settings.server()["port"]
-if PORT != _early_port:
-    _bow_out_if_running(PORT)
+HTTPS = "--https" in _settings.launch_args()
+if PORT != _early_port or HTTPS != _early_https:
+    _bow_out_if_running(PORT, HTTPS)
 
 # The server runs as the package's module (3.20), from this folder: `-m` finds the moonglade
 # package through the working directory, which is why cwd=here below matters.
@@ -187,13 +216,13 @@ def _open_when_ready():
     while time.time() < deadline:
         if _server_gone.is_set():
             return                  # it stopped as it started: the launcher says why
-        if _moonglade_on_port(PORT):
+        if _moonglade_on_port(PORT, HTTPS):
             break                   # server is up
         time.sleep(0.5)
     if _server_gone.is_set():
         return
     try:
-        webbrowser.open("http://localhost:{}/".format(PORT))
+        webbrowser.open("{}://localhost:{}/".format("https" if HTTPS else "http", PORT))
     except Exception:
         pass
 
@@ -228,13 +257,28 @@ except Exception:                                       # noqa: BLE001 -- a log 
     pass
 
 
-def _why_it_stopped(rc):
+def _log_size():
+    """How much of serve.log is written now: where this server's own output will begin."""
+    try:
+        if _log is not subprocess.DEVNULL:
+            _log.flush()
+        return os.path.getsize(str(_serve_log))
+    except (OSError, ValueError):
+        return 0
+
+
+def _why_it_stopped(rc, since=0):
     """The sentence for a server that stopped as it started: a move it could not finish says
     so on its own line in serve.log (moonglade.gallery.PREPARE_MARK); anything else is told by
-    the log's last lines."""
+    the log's last lines. Only what the log holds from byte `since` on -- this server's own
+    output: a "[prepare] " line left by an earlier start (a move that stopped last time and
+    was put right since) must never be given as the reason a later start (a port taken, a
+    crash) stopped."""
     try:
-        with open(str(_serve_log), encoding="utf-8", errors="replace") as f:
-            tail = [ln.rstrip("\n") for ln in f.readlines()[-200:]]
+        with open(str(_serve_log), "rb") as f:
+            f.seek(max(0, since))
+            text = f.read().decode("utf-8", errors="replace")
+        tail = [ln.rstrip("\r\n") for ln in text.splitlines()[-200:]]
     except OSError:
         tail = []
     marked = [ln.split("[prepare] ", 1)[1] for ln in tail if "[prepare] " in ln]
@@ -261,6 +305,64 @@ def _repoint_shortcuts():
         pass
 
 
+def _asked_yes(text):
+    """A Yes/No message box (MB_YESNO | MB_ICONQUESTION); True only for Yes. Where there is no
+    box (not Windows) or it cannot be shown, the answer is No: nothing installs unasked."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.user32.MessageBoxW(None, text, "Moonglade Athenaeum", 0x24) == 6
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def _packages_it_needs():
+    """Make sure the packages requirements.txt names are installed in THIS Python, which is the
+    one that runs the server below. A first install usually relies on a manual `pip install`,
+    and on Windows that often lands in a different Python than the one that opens this launcher,
+    so the server died with "Flask is required" (issue #87). Missing ones are named and, on a
+    Yes, installed here with this Python's own pip; a No (or no message box) is told the command
+    to run instead. The check itself failing never stops a start."""
+    req = _paths.requirements_path()
+    try:
+        lacking = _deps.missing(req)
+    except Exception:                                   # noqa: BLE001 -- a courtesy, not a gate
+        return
+    if not lacking:
+        return
+    names = ", ".join(lacking)
+    manual = _deps.manual_command(req)
+    said_yes = False
+    if sys.platform == "win32":
+        question = ("Moonglade needs some Python packages that aren't installed yet: " + names
+                    + ".\n\nInstall them now? This runs pip for the Python that runs Moonglade:\n"
+                    + sys.executable + "\n\nIt can take a minute or two. Moonglade starts when "
+                    "it's done.")
+        _log_line(question.replace("\n\n", " ").replace("\n", " "))
+        said_yes = _asked_yes(question)
+    if not said_yes:
+        _stop("Moonglade needs some Python packages that aren't installed yet: " + names
+              + ".\n\nTo install them, run:\n" + manual)
+    code, tail = _deps.install(req, _serve_log)
+    try:
+        still = _deps.missing(req)
+    except Exception:                                   # noqa: BLE001
+        still = []
+    if code == 0 and not still:
+        _log_line("Installed " + names + ".")
+        return
+    if "No module named pip" in tail:
+        _stop("Installing the packages didn't work: this Python has no pip.\n\n" + sys.executable
+              + "\n\nInstall Python from python.org (it includes pip), or run\n"
+              + _deps.ensurepip_command() + "\nfirst, then start Moonglade again.")
+    _stop("Installing the packages didn't work (pip ended with code %s). " % code
+          + ("The end of local\\logs\\serve.log says:\n\n" + tail + "\n\n" if tail else "\n\n")
+          + "To install them by hand, run:\n" + manual)
+
+
+_packages_it_needs()
+
 # Off the start's path: the server starts while the shortcuts are looked at.
 if sys.platform == "win32":
     threading.Thread(target=_repoint_shortcuts, daemon=True,
@@ -269,6 +371,7 @@ if sys.platform == "win32":
 first = True
 while True:
     _began = time.monotonic()
+    _log_from = _log_size()
     proc = subprocess.Popen(cmd, env=env, cwd=here,
                             stdin=subprocess.DEVNULL, stdout=_log, stderr=_log)
     if first:
@@ -285,5 +388,5 @@ while True:
                 _log.flush()
         except Exception:                               # noqa: BLE001
             pass
-        _stop(_why_it_stopped(rc))
+        _stop(_why_it_stopped(rc, _log_from))
     break                           # 0 = stop; a crash after it ran -> supervisor exits

@@ -20,6 +20,7 @@
 *.toml  text
 
 # Platform-native scripts keep their expected endings
+# (Install Moonglade.cmd at the install root must be CRLF: cmd.exe's labels and goto misbehave with bare LF.)
 *.sh    text eol=lf
 *.bat   text eol=crlf
 *.cmd   text eol=crlf

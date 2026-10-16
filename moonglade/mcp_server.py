@@ -36,6 +36,7 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
 from moonglade import gallery as g   # catalog helpers -- the single source of truth for SQL
+from moonglade.backup import __version__   # gallery already imports backup: no new cost
 
 # The library the tools read: bound by main() once the move has run and the library is
 # resolved (bind_library). Importing this module reads nothing.
@@ -49,7 +50,8 @@ def bind_library(path):
     OUT = Path(path)
     DB = str(OUT / "catalog.db")
 
-mcp = FastMCP("moonglade-athenaeum")
+# serverInfo.version is the app's own version (a client shows it), not the fastmcp library's.
+mcp = FastMCP("moonglade-athenaeum", version=__version__)
 
 # ---------------------------------------------------------------------------
 # PixAI session. The ACCOUNT-acting tools (tag_suggest today; generate / delete /

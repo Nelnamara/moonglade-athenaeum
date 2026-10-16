@@ -136,7 +136,10 @@ describe("A. URL page addressing (App.jsx)", () => {
     const i = app.indexOf("const onPop = () => {");
     assert.ok(i > 0);
     const pop = app.slice(i, app.indexOf('window.addEventListener("popstate", onPop);', i));
-    assert.match(pop, /setDetailsFor\(readImage\(window\.location\.search\)\);/);
+    // The image is read off the address (kept in a const since 3.20.2, so Back onto an address with
+    // no record can also drop the stack scope) and handed to Details.
+    assert.match(pop, /const popImage = readImage\(window\.location\.search\);/);
+    assert.match(pop, /setDetailsFor\(popImage\);/);
     assert.match(pop, /const p = readPage\(window\.location\.search\);/);
     assert.match(pop, /if \(p !== pageRef\.current\) userLoadRef\.current\(p, true\);/);
   });

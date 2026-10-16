@@ -54,12 +54,39 @@ class Prepared:
     """What prepare() found: the library this run uses (`library`, a Path), and what the move
     did (`report`). log() writes the move's lines to the app's log."""
 
-    def __init__(self, kind, library, report, library_moves=False):
+    def __init__(self, kind, library, report, library_moves=False, library_ran=False,
+                 named=False):
         self.kind = kind
         self.library = library
         self.report = report
         self.library_moves = library_moves       # the library half ran here (it may move)
+        self.library_ran = library_ran           # the library half was looked at (the folder was there)
+        self.named = named                       # this run named its own library
         self.counted = False
+
+    def late_library(self):
+        """The library folder was not there when prepare() looked, and is now (a NAS waking up,
+        a removable drive put back, a folder made between the look and the server's own
+        mkdir): the library half runs now, before anything reads the library -- otherwise this
+        session would serve an un-moved library with empty spend guards in the new homes. A
+        no-op when prepare() already looked, and when there is still no folder. Takes the
+        install lock first, as prepare() does. Raises MoveStopped."""
+        if self.library_ran or not Path(self.library).is_dir():
+            return
+        moves = self.kind in MOVING_KINDS and not self.named
+        late = _migrate.Report()
+        with _migrate.FolderLock(_paths.local_dir(), "the app folder"):
+            _migrate.prepare_library(self.library, late, moves=moves, named=self.named)
+        self.library_ran = True
+        self.library_moves = moves
+        # Logging is up by now (the server sets it up after prepare()): what the late look did
+        # is written at once, and kept with the rest of the report.
+        self.report.items += late.items
+        self.report.lines += late.lines
+        self.report.parked += late.parked
+        for half, worked in late.worked.items():
+            self.report.worked[half] = self.report.worked.get(half, False) or worked
+        late.log()
 
     def log(self):
         self.report.log()
@@ -122,10 +149,14 @@ def peek_server(host_arg=None, port_arg=None):
     return out
 
 
-def prepare(kind, explicit_out=None):
+def prepare(kind, explicit_out=None, library_half=True):
     """Run the move (install half, then the library's) and resolve the library. `kind` is
     one of KINDS; `explicit_out` is this run's own library choice (--out / MOONGLADE_OUT), if
-    any. Returns a Prepared. Raises MoveStopped (str(e) is the sentence to show)."""
+    any. `library_half=False` is for a command that never touches the library (the command
+    line's --list-web-users and --add-web-user, which read and write config.json alone): the
+    install half still runs, but the library is not checked, so a library still in an older
+    layout, or an older Moonglade still writing it, does not block a command that never reads
+    it. Returns a Prepared. Raises MoveStopped (str(e) is the sentence to show)."""
     if kind not in KINDS:
         raise ValueError("prepare(kind): kind is one of %s" % (KINDS,))
     report = _migrate.Report()
@@ -136,12 +167,17 @@ def prepare(kind, explicit_out=None):
         raise MoveStopped("Moonglade can't make its folder %s (%s), so it can't start. %s"
                           % (local, _migrate._reason(e), _migrate._advice(e)))
     library_moves = False
+    library_ran = False
     with _migrate.FolderLock(local, "the app folder") as install_lock:
         _check_settings()
         _migrate.migrate_install(report, lock=install_lock)
         library = _settings.library_path(explicit_out)
         moves = kind in MOVING_KINDS and not explicit_out
-        if Path(library).is_dir():
+        if library_half and Path(library).is_dir():
             _migrate.prepare_library(library, report, moves=moves, named=bool(explicit_out))
             library_moves = moves
-    return Prepared(kind, library, report, library_moves=library_moves)
+            library_ran = True
+    # A command that never touches the library (library_half=False) is done with it: it never
+    # asks for the late look either.
+    return Prepared(kind, library, report, library_moves=library_moves,
+                    library_ran=library_ran or not library_half, named=bool(explicit_out))

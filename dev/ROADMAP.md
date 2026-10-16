@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-10-08.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.1 — Clean Sweep,
-  2026-10-08), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.2 — First Light,
+  2026-10-15), per the rule at the top of this file.
 
 ---
 
@@ -37,13 +37,6 @@ why this section exists.
 ## Next — ready to build, nothing waiting
 
 In the recommended order.
-
-- **The 3.20 follow-ups ([#79](https://github.com/Nelnamara/moonglade-athenaeum/issues/79)).** The
-  release gate's edge cases for the move: none blocked 3.20, all are worth closing. Take first the
-  ones next to data loss (an old file winning on a copied timestamp, a pack removed without a
-  comparison, two `runs.db` copies not merged, a banner parked and then deleted), then the slow first
-  move on a large Loom folder, then the wording and setup edges. Touches `moonglade/migrate.py`,
-  `moonglade/outside.py`, `moonglade/setup.py`.
 
 - **Split the two megamodules, phases 0-3 (`moonglade/backup.py` / `moonglade/gallery.py`).** The
   last open part of Wave 4 (owner, 2026-10-04), planned as 3.21.0. They are the repo's two largest,
@@ -70,16 +63,6 @@ In the recommended order.
   multi-hour give-up tiers tested against an injected clock, and a drawn check of the Enhance
   drawer's layout. The tests that cover only older-version fallbacks retire with those fallbacks (see
   the expiry rule under Needs a call).
-
-- **Finish the approved 2026-10-05 cleanup.** Two pieces the 3.20.1 pass missed: the
-  `--credit-log-reason` flag and the credit log's `?reason=` parameter are accepted and never sent
-  (PixAI's read takes no filter), and `wiki/Backing-Up.md` still promises the filter, so the flag, its
-  help and the wiki row go; and the phone app repeats its own background-read check inline instead of
-  calling the tested helper in `phoneCore.js`. Small.
-
-- **Trash: say how many files are the only copy.** The bulk delete has shown the archive-only count
-  since 3.16.0; **Delete forever** and **Empty trash** don't yet. Read each trashed file's saved row and
-  name the count in their typed confirms. Small.
 
 - **Honor counts after an edit.** The memo behind the achievements' counts is keyed on the catalog's
   row count and newest picture, so rating, tagging or publishing an existing picture may not move a
