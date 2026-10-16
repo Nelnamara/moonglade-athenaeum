@@ -2,7 +2,9 @@
 
 ## 1. Install
 
-Python 3.9+ (`python --version`), then:
+**On Windows, first time?** Double-click **Install Moonglade** (`Install Moonglade.cmd`) in the app's folder, once. It looks for Python 3.10 or newer and, if the PC has none, installs Python 3.13 for your account only (it uses winget and needs no administrator; if winget is missing it opens python.org and tells you what to tick). Then it installs the packages and opens Moonglade in your browser. For a downloaded folder Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **Moonglade Launcher** whenever you want Moonglade, and skip the rest of this section. `Install Moonglade.cmd --check` only reports what it found and what it would do, and installs nothing. The setup file does not run from a network share (`\\server\share`); copy the folder to the PC first.
+
+Everyone else, on any system: Python 3.10 or newer (`python --version`), then:
 
 ```bash
 python -m pip install -r requirements.txt

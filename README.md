@@ -6,7 +6,7 @@
 
 **Back up · browse · generate · curate** — a complete local companion for **your own** [PixAI.art](https://pixai.art) work.
 
-![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
+![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
 
 *The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
@@ -21,6 +21,8 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 ---
 
 ## ⚡ Quickstart — one key, that's it
+
+**On Windows, first time?** Double-click **`Install Moonglade.cmd`** in the app's folder, once. It installs Python for your account if the PC has no Python 3.10 or newer (no administrator needed), installs the packages Moonglade needs, then opens Moonglade in your browser. If you downloaded the folder, Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **`Moonglade Launcher.pyw`** whenever you want Moonglade. Everyone else follows the steps below.
 
 ```bash
 python -m pip install -r requirements.txt
