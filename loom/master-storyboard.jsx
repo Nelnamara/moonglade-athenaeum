@@ -61,6 +61,7 @@ import {
 // takeSeq itself (loom/test/loom-render-lifecycle-wiring.test.js).
 import {
   landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
+  sendHeld, wayOutShown, releaseOffered, STILL_SENDING_MSG, sendingRecheckDelay,
   beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
   classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards, mergeNotice, tookOf,
   splicePatch, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
@@ -2775,13 +2776,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                     {/* Session P (review F3/F8): a render whose send was never confirmed keeps the
                         shot locked; this is the way out. ↻ Check reads the server's journal again
                         (never a re-send); the release is the owner's own call, after Activity. */}
-                    {sendUnclear(e.c) && !(gs && gs.phase === "checking") && (
-                      <div className="lv-unclear" role="status" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
-                        <span>The server didn't confirm this render. Check Activity before rendering again.</span>
-                        <button type="button" className="lv-unclearbtn" onClick={() => recheckSubmit(e.c.id)}>&#8635; Check</button>
-                        <button type="button" className="lv-unclearbtn" onClick={() => releaseSubmit(e.c.id)}>I checked Activity — release this shot</button>
-                      </div>
-                    )}
+                    <SendWayOut card={e.c} gs={gs} boxClass="lv-unclear" btnClass="lv-unclearbtn" stopClicks
+                      onCheck={() => recheckSubmit(e.c.id)} onRelease={() => releaseSubmit(e.c.id)} />
                     {/* THE TAKES STRIP, RENDER / RE-RENDER AND THE STALE ANCHOR (Session P, Stage A2;
                         Loom Handoff.dc.html section A's card). A take chip shows that take's clip
                         thumbnail where the page draws a tint pair. Only the Render button can start a
@@ -6953,16 +6949,13 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   submit in this file. No new endpoint, no new price math, no new confirm
                   dialog belongs to this screen. */}
               <button type="button" className="lm-genbtn" disabled={genBusy || genSubmitting || gp.noInput} onClick={genSubmit}>
-                {genBusy ? (sendUnclear(c) ? "not confirmed yet — see below" : "already rendering…") : genSubmitting ? "submitting…" : "Generate video"}
+                {genBusy ? (sendUnclear(c) ? "not confirmed yet — see below" : sendHeld(c, gsSelf) ? "still being sent — see below" : "already rendering…") : genSubmitting ? "submitting…" : "Generate video"}
               </button>
               {/* Session P: why a render did not go out, and the way out of an unclear send --
                   peach, beside the button that would send it. */}
-              {sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? (
-                <div className="lm-unclear" role="status">
-                  <span>The server didn't confirm this render. Check Activity before rendering again.</span>
-                  <button type="button" className="lm-unclearbtn" onClick={() => recheckSubmit(c.id)}>&#8635; Check</button>
-                  <button type="button" className="lm-unclearbtn" onClick={() => releaseSubmit(c.id)}>I checked Activity — release this shot</button>
-                </div>
+              {wayOutShown(c, gsSelf) ? (
+                <SendWayOut card={c} gs={gsSelf} boxClass="lm-unclear" btnClass="lm-unclearbtn"
+                  onCheck={() => recheckSubmit(c.id)} onRelease={() => releaseSubmit(c.id)} />
               ) : (gsSelf && gsSelf.held && gsSelf.msg ? <div className="lm-held" role="status">{gsSelf.msg}</div>
                 : (unsendableKind(buildShotPayload(dfLive, project, imgSrc))
                   ? <div className="lm-held" role="status">Imported {unsendableKind(buildShotPayload(dfLive, project, imgSrc))} — it can't be sent to PixAI yet.</div> : null))}
@@ -8637,7 +8630,6 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
   const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
   const CHECKING_MSG = "Checking whether the render was sent…";
-  const STILL_SENDING_MSG = "Still being sent to PixAI — it can't be released until PixAI answers. Check again in a moment.";
 
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
@@ -8798,6 +8790,46 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     }
   };
 
+  // GitHub #86 follow-up: a shot held on "Still being sent..." asks the journal again by itself --
+  // one check a few seconds after the hold, then a few spaced ones (sendingRecheckDelay's budget),
+  // so PixAI answering a moment after a reload does not wait for the owner's ↻ Check. Every one
+  // of them is checkSubmit: the single GET /api/loom/submit-status read, never a send, a release
+  // or a render. It stops when the hold clears (a task, a refusal, an unclear mark, a release),
+  // when the shot or board is no longer the one held, when the budget is spent, and on unmount.
+  const autoRecheckRef = useRef({ timers: {}, done: {}, closed: false });   // submit id -> pending timer / checks scheduled
+  const stopAutoRecheck = (submitId) => {
+    const r = autoRecheckRef.current;
+    if (r.timers[submitId]) clearTimeout(r.timers[submitId]);
+    delete r.timers[submitId];
+    delete r.done[submitId];
+  };
+  const scheduleAutoRecheck = (cardId, submitId, boardId) => {
+    const r = autoRecheckRef.current;
+    if (r.closed) return;                                  // the tab's pipeline is gone: a late answer starts nothing
+    if (r.timers[submitId]) return;                        // one pending check per send
+    const ms = sendingRecheckDelay(r.done[submitId] || 0);
+    if (ms == null) return;                                // budget spent: only ↻ Check reads now
+    r.done[submitId] = (r.done[submitId] || 0) + 1;
+    r.timers[submitId] = setTimeout(() => {
+      delete r.timers[submitId];
+      if (activeIdRef.current !== boardId) return;          // that board's resume asks when it is open again
+      const e = cardOn(cardId);
+      const gs = genStateRef.current[cardId];
+      if (!e || e.c.pendingSubmitId !== submitId || e.c.pendingTaskId) return;
+      if (!gs || gs.phase !== "sending") return;            // cleared, or a check is already out
+      checkSubmit(cardId, submitId, boardId);
+    }, ms);
+  };
+  useEffect(() => {
+    autoRecheckRef.current.closed = false;
+    return () => {
+      const r = autoRecheckRef.current;
+      r.closed = true;                                     // a check still out when the tab closes must not re-arm
+      Object.keys(r.timers).forEach((k) => clearTimeout(r.timers[k]));
+      r.timers = {};
+      r.done = {};
+    };
+  }, []);
   // ONE read of the journal for a render whose POST answer never came (BUILD-w5-p §3.3 step 5):
   // accepted -> the card adopts the task and polls it; refused / not sent / released -> the card
   // says so; still unclear -> the peach way-out (↻ Check, or release after checking Activity).
@@ -8820,10 +8852,20 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const cls = classifySubmitStatus(st);
       // Another board is open now: nothing is patched; that board's resume asks again.
       if (!here()) return cls.kind === "accepted" ? { accepted: true, taskId: cls.taskId } : { [cls.kind]: true };
+      // GitHub #86: the server's request for this send is STILL RUNNING (a reload, a board
+      // switch or another tab while PixAI is slow to answer). The send is slow, not unclear:
+      // nothing is marked, and the release is not offered -- the server would refuse it with a
+      // 409. ↻ Check reads the journal again once PixAI has answered.
+      if (cls.kind === "sending") {
+        holdCard(cardId, "still sending", "sending");
+        scheduleAutoRecheck(cardId, submitId, boardId);
+        return { sending: true };
+      }
       if (cls.kind === "accepted") {
         adoptFromJournal(cardId, submitId, cls.taskId, boardId);
         return { accepted: true, taskId: cls.taskId };
       }
+      stopAutoRecheck(submitId);
       if (cls.kind === "refused") {
         noteResolved(submitId);
         const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
@@ -8846,6 +8888,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const e0 = cardOn(cardId);
     if (!e0) return;
     const startedAt = e0.c.genStartedAt || Date.now();
+    stopAutoRecheck(submitId);
     patchCardNow(cardId, (cc) => adoptTask(cc, submitId, taskId));
     if (window.Jobs && window.Jobs.register) window.Jobs.register(taskId, e0.code + " · " + (e0.c.title || "untitled"));
     pollShot(cardId, taskId, startedAt, boardId);
@@ -8878,6 +8921,7 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     if (activeIdRef.current !== boardId) return;
     if (d && d.ok) {
       noteResolved(submitId);
+      stopAutoRecheck(submitId);
       patchCardNow(cardId, (cc) => abandonSubmit(cc, submitId, nowIso()));
       holdCard(cardId, "Released. If that render was sent after all, its clip is in your library.");
       return;
@@ -8885,7 +8929,11 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     if (status === 409 && d && d.task_id) { adoptFromJournal(cardId, submitId, String(d.task_id), boardId); return; }
     // The server still has this render's request running (another tab's, or this page's before
     // a reload): it refused the release. The shot stays locked; ↻ Check reads the answer later.
-    if (status === 409 && d && d.sending) { holdCard(cardId, STILL_SENDING_MSG, "unclear"); return; }
+    if (status === 409 && d && d.sending) {
+      holdCard(cardId, "still sending", "sending");
+      scheduleAutoRecheck(cardId, submitId, boardId);
+      return;
+    }
     holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " — " + d.error : " — the server didn't answer.") + " Nothing was sent.", "unclear");
   };
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
@@ -10264,6 +10312,29 @@ const takeSummary = (t) => {
   if (!s) return t.imported ? "from your library · no settings recorded" : "no settings recorded";
   return [s.mode, s.duration != null ? s.duration + " s" : "", s.quality].filter(Boolean).join(" · ");
 };
+// The way-out under a shot whose send is not settled (Session P review F3/F8; GitHub #86). Two
+// looks, one bar, shared by the board card (lv- classes, clicks stop at the card) and the phone's
+// shot sheet (lm- classes): an UNCLEAR send offers ↻ Check and, after the owner has looked at
+// Activity, the release; a send the SERVER still holds (its request is running, so PixAI has
+// not answered) offers ↻ Check only and says why -- the server refuses that release with a 409,
+// and the button is not drawn at all so a reloaded tab never offers what cannot happen. It
+// reads the card and this tab's view of it (gs); it can send nothing.
+function SendWayOut({ card, gs, boxClass, btnClass, onCheck, onRelease, stopClicks }) {
+  if (!wayOutShown(card, gs)) return null;
+  const stop = stopClicks ? (ev) => ev.stopPropagation() : undefined;
+  const release = releaseOffered(card, gs);
+  return (
+    <div className={boxClass} role="status" onClick={stop} onDoubleClick={stop}>
+      <span>{release ? "The server didn't confirm this render. Check Activity before rendering again."
+        : STILL_SENDING_MSG}</span>
+      <button type="button" className={btnClass} onClick={onCheck}>&#8635; Check</button>
+      {release && (
+        <button type="button" className={btnClass} onClick={onRelease}>I checked Activity — release this shot</button>
+      )}
+    </div>
+  );
+}
+
 function TakeList({ card, code, onUse, onReuse, onDelete }) {
   const list = takesOf(card);
   const selN = selectedTakeOf(card);

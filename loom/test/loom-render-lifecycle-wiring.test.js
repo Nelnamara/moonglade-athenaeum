@@ -7,7 +7,7 @@ import React from "react";
 import { loadModule, renderElement, query, one, LOOM_MOCKS } from "../test-support/render.mjs";
 import { newCardShape, flat, shotPayload as buildShotPayload, priceFingerprint } from "../src/loom-core.js";
 import { patchCardByIdWith } from "../src/loom-mutations.js";
-import { attachTake, splicePatch, tookOf, cutPointOf } from "../src/loom-takes-core.js";
+import { attachTake, splicePatch, tookOf, cutPointOf, SENDING_RECHECK_MS } from "../src/loom-takes-core.js";
 
 /* THE RENDER LIFECYCLE, AS WIRED (Session P, Stage A1 -- BUILD-w5-p §1.2, §3.3-§3.5 and review
    F1, F3-F8, F12-F17). The pure reducers are unit-tested in loom-takes-core.test.js,
@@ -154,7 +154,7 @@ globalThis.history = { replaceState() {} };
 // master-storyboard.jsx exactly as it ships, plus one line exporting what it already declares.
 const LOOM_SRC = "loom/master-storyboard.jsx";
 const UNDER_TEST = "\nexport const __lifecycleUnderTest = { useProjectStore, useGenerationPipeline, useShotMutations,"
-  + " useTakeActions, VideoDrawer, CostBadge };\n";
+  + " useTakeActions, VideoDrawer, CostBadge, SendWayOut };\n";
 const LOOM_MOD = await loadModule(LOOM_SRC, { mocks: { ...LOOM_MOCKS, [LOOM_SRC]: SRC + UNDER_TEST } });
 const LOOM = { ...LOOM_MOD.__lifecycleUnderTest, App: LOOM_MOD.default };
 // The drawer portals its ref preview into document.body; nothing else here touches a document.
@@ -412,6 +412,8 @@ async function mountLoom(t, { boards = { b1: boardOf([shot("c1")]) }, active = "
     card: (id) => { const e = flat(h.current.store.projectRef.current).find((x) => x.c.id === id); return e ? e.c : undefined; },
     settle: () => settle(h),
     async tick(ms) { await settle(h); t.mock.timers.tick(ms); await settle(h); },
+    /** The tab closes: effect cleanups run, nothing re-renders again. */
+    unmount: () => h.unmount(),
     /** The Mobile toggle (App hands mobileUI to the pipeline): a re-render with the new prop,
      *  which re-runs the resume effect. */
     async toggleMobile() { props.mobileUI = !props.mobileUI; h.rerender(); await settle(h); },
@@ -701,8 +703,212 @@ describe("the unclear-send way-out, the resume and every landing cannot reach a 
     const c = loom.card("c1");
     assert.equal(c.pendingSubmitId, "s-prev", "the lock stays");
     assert.equal(c.lastAttempt.state, "unclear");
-    assert.deepEqual(loom.gen.genState.c1, { phase: "unclear", held: true, msg: STILL_SENDING },
-      "the still-sending answer is told apart from a failed release");
+    assert.deepEqual(loom.gen.genState.c1, { phase: "sending", held: true, msg: "still sending" },
+      "the still-sending answer is told apart from a failed release, and the release is no longer offered (#86)");
+    const $ = query(renderElement(React.createElement(LOOM.SendWayOut,
+      { card: c, gs: loom.gen.genState.c1, boxClass: "lv-unclear", btnClass: "lv-unclearbtn", onCheck() {}, onRelease() {} })));
+    assert.equal($.byText("I checked Activity — release this shot").length, 0);
+  });
+  // GitHub #86: a tab reloaded while the server's request for a render is still running. The
+  // board it loads holds the marker (a submit id, no task, no "unclear" mark: the page that
+  // wrote it never saw an answer), and the one journal read the resume makes says the request is
+  // live. The shot must stay locked with NO release offered, and the card must say why.
+  const SENDING_CARD = { status: "wip", pendingSubmitId: "s-live", pendingBoard: "b1" };
+  const wayOutOf = (loom, id = "c1", prefix = "lv") => query(renderElement(React.createElement(LOOM.SendWayOut,
+    { card: loom.card(id), gs: loom.gen.genState[id], boxClass: prefix + "-unclear", btnClass: prefix + "-unclearbtn",
+      onCheck() {}, onRelease() {} })));
+  const RELEASE = "I checked Activity — release this shot";
+
+  test("a reloaded tab whose send the server still holds offers ↻ Check and no release, and says why (#86)", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+      routes: { "/api/loom/submit-status": () => ({ body: { state: "sending", sending: true } }) } });
+    assert.deepEqual(fetches("/api/loom/submit-status").map((f) => f.url), ["/api/loom/submit-status?submit_id=s-live"],
+      "the resume's one journal read is how the board learns it");
+    const c = loom.card("c1");
+    assert.equal(c.pendingSubmitId, "s-live", "the lock stays");
+    assert.equal(c.lastAttempt, undefined, "a slow send is not marked unclear");
+    assert.deepEqual(loom.gen.genState.c1, { phase: "sending", held: true, msg: "still sending" });
+    const $ = wayOutOf(loom);
+    assert.equal($.byText(RELEASE).length, 0, "no release is drawn");
+    assert.equal($.byText("↻ Check").length, 1, "↻ Check stays");
+    assert.equal(one($.byClass("lv-unclear")).attr("role"), "status");
+    assert.match(one($.byClass("lv-unclear")).text, /Still being sent to PixAI — it can't be released until PixAI answers/);
+    assert.equal(wayOutOf(loom, "c1", "lm").byClass("lm-unclearbtn").length, 1, "the phone's sheet draws the same bar");
+    assert.equal(fetches("/api/loom/submit-abandon").length, 0, "nothing asked the server to release");
+    assert.equal(fetches("/api/loom/generate").length, 0, "and nothing was sent");
+  });
+  test("...and once the server has answered, ↻ Check adopts the task", async (t) => {
+    let live = true;
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+      routes: { "/api/loom/submit-status": () => ({ body: live ? { state: "sending", sending: true }
+        : { state: "submitted", task_id: "T8" } }) } });
+    assert.equal(loom.gen.genState.c1.phase, "sending");
+    live = false;
+    loom.gen.recheckSubmit("c1");
+    await loom.settle();
+    assert.equal(loom.card("c1").pendingTaskId, "T8", "the card waits for the task the journal names");
+    assert.equal(wayOutOf(loom).byText("↻ Check").length, 0, "the bar is gone");
+    assert.equal(fetches("/api/loom/generate").length, 0);
+  });
+  // GitHub #86 follow-up: a held shot asks the journal again by itself (bounded), with the same
+  // single read ↻ Check makes, and sends nothing else.
+  describe("a held shot re-checks on its own, with the one journal read (#86)", () => {
+    const statusReads = () => fetches("/api/loom/submit-status").length;
+    const sendingForever = { "/api/loom/submit-status": () => ({ body: { state: "sending", sending: true } }) };
+    const nothingElseWentOut = () => {
+      assert.equal(fetches("/api/loom/generate").length, 0, "nothing was sent");
+      assert.equal(fetches("/api/loom/submit-abandon").length, 0, "nothing was released");
+      assert.equal(fetches("/api/price").length, 0, "nothing was priced");
+    };
+    test("PixAI answering a moment after the reload is picked up without a press of ↻ Check", async (t) => {
+      let live = true;
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+        routes: { "/api/loom/submit-status": () => ({ body: live ? { state: "sending", sending: true }
+          : { state: "submitted", task_id: "T9" } }) } });
+      assert.equal(statusReads(), 1, "the resume's own read");
+      assert.equal(loom.gen.genState.c1.phase, "sending");
+      await loom.tick(2900);
+      assert.equal(statusReads(), 1, "not before the short delay");
+      live = false;
+      await loom.tick(200);
+      assert.equal(statusReads(), 2, "one automatic check after about three seconds");
+      assert.equal(loom.card("c1").pendingTaskId, "T9", "the shot follows the render, with no click");
+      assert.equal(wayOutOf(loom).byText("↻ Check").length, 0, "the bar is gone");
+      await loom.tick(120000);
+      assert.equal(statusReads(), 2, "the hold cleared: no more checks");
+      nothingElseWentOut();
+    });
+    test("a send that stays held is checked a bounded number of times, then only ↻ Check reads", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      assert.equal(statusReads(), 1);
+      for (const ms of SENDING_RECHECK_MS) await loom.tick(ms);
+      assert.equal(statusReads(), 1 + SENDING_RECHECK_MS.length, "the resume's read plus every scheduled check");
+      await loom.tick(600000);
+      assert.equal(statusReads(), 1 + SENDING_RECHECK_MS.length, "then it stops by itself");
+      assert.equal(loom.gen.genState.c1.phase, "sending", "the shot is still held, still locked");
+      assert.equal(loom.card("c1").pendingSubmitId, "s-live");
+      assert.equal(wayOutOf(loom).byText(RELEASE).length, 0, "and still no release");
+      loom.gen.recheckSubmit("c1");               // the owner's own ↻ Check still reads
+      await loom.settle();
+      assert.equal(statusReads(), 2 + SENDING_RECHECK_MS.length);
+      await loom.tick(600000);
+      assert.equal(statusReads(), 2 + SENDING_RECHECK_MS.length, "a press does not restart the budget");
+      nothingElseWentOut();
+    });
+    test("the spacing grows: the checks are not a tight loop", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      await loom.tick(SENDING_RECHECK_MS[0]);
+      assert.equal(statusReads(), 2);
+      await loom.tick(SENDING_RECHECK_MS[1] - 1);
+      assert.equal(statusReads(), 2, "the second wait is longer than the first");
+      await loom.tick(1);
+      assert.equal(statusReads(), 3);
+    });
+    test("a press of ↻ Check while a check is already scheduled does not stack a second timer", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      loom.gen.recheckSubmit("c1");
+      await loom.settle();
+      loom.gen.recheckSubmit("c1");
+      await loom.settle();
+      assert.equal(statusReads(), 3, "two presses, two reads");
+      await loom.tick(SENDING_RECHECK_MS[0]);
+      assert.equal(statusReads(), 4, "ONE scheduled check, not three");
+    });
+    test("closing the tab stops the checks", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      assert.equal(statusReads(), 1);
+      loom.unmount();
+      await loom.tick(600000);
+      assert.equal(statusReads(), 1, "no timer outlives the tab");
+    });
+    test("closing the tab while a check is out: its late 'still sending' answer starts no new timer", async (t) => {
+      const late = hold();
+      let calls = 0;
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+        routes: { "/api/loom/submit-status": () => (++calls === 1 ? { body: { state: "sending", sending: true } } : late.route()) } });
+      await loom.tick(SENDING_RECHECK_MS[0]);          // the automatic check goes out and waits
+      assert.equal(statusReads(), 2);
+      loom.unmount();                                  // the tab closes with the answer still on its way
+      const real = globalThis.setTimeout;
+      let timersStarted = 0;
+      globalThis.setTimeout = (...a) => { timersStarted += 1; return real(...a); };
+      try {
+        late.answer({ body: { state: "sending", sending: true } });
+        await loom.settle();
+      } finally { globalThis.setTimeout = real; }
+      assert.equal(timersStarted, 0, "the late answer started no timer: nothing outlives the tab");
+      await loom.tick(600000);
+      assert.equal(statusReads(), 2, "and no further read went out");
+    });
+    test("a press of ↻ Check while the first automatic check is already scheduled leaves the schedule alone", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      loom.gen.recheckSubmit("c1");
+      await loom.settle();
+      assert.equal(statusReads(), 2);
+      await loom.tick(SENDING_RECHECK_MS[0]);
+      assert.equal(statusReads(), 3, "the one scheduled check");
+      await loom.tick(SENDING_RECHECK_MS[1] - 1);
+      assert.equal(statusReads(), 3, "the next waits its own (longer) time: the press added no timer");
+      await loom.tick(1);
+      assert.equal(statusReads(), 4);
+    });
+    test("a release the server refuses with 'sending' schedules the same checks (and still sends no release again)", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", UNCLEAR)]) },
+        routes: { "/api/loom/submit-status": () => ({ body: { state: "unknown" } }),
+          "/api/loom/submit-abandon": () => ({ status: 409, body: { error: "still sending", sending: true } }) } });
+      const before = statusReads();
+      await loom.gen.releaseSubmit("c1");
+      await loom.settle();
+      assert.equal(loom.gen.genState.c1.phase, "sending");
+      assert.equal(fetches("/api/loom/submit-abandon").length, 1);
+      await loom.tick(SENDING_RECHECK_MS[0]);
+      assert.equal(statusReads(), before + 1, "the journal is read again");
+      assert.equal(fetches("/api/loom/submit-abandon").length, 1, "the release is never repeated by a timer");
+      assert.equal(fetches("/api/loom/generate").length, 0);
+    });
+    test("a shot that left the held state before the timer fires is not read again", async (t) => {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) }, routes: sendingForever });
+      // The shot is settled some other way (the other tab's save lands here): the lock is gone.
+      loom.store.setProject((p) => ({ ...p, acts: p.acts.map((a) => ({ ...a, cards: a.cards.map((c) => c.id !== "c1" ? c
+        : { ...c, status: "todo", pendingSubmitId: null, pendingBoard: null }) })) }));
+      await loom.settle();
+      const reads = statusReads();
+      await loom.tick(SENDING_RECHECK_MS[0]);
+      assert.equal(statusReads(), reads, "nothing to check");
+    });
+  });
+  test("a journal 'sending' the server does not own (a send that died with an earlier process) keeps the release (#86)", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+      routes: { "/api/loom/submit-status": () => ({ body: { state: "sending" } }) } });
+    assert.equal(loom.card("c1").lastAttempt.state, "unclear");
+    assert.equal(loom.gen.genState.c1.phase, "unclear");
+    const $ = wayOutOf(loom);
+    assert.equal($.byText(RELEASE).length, 1, "the owner is not stranded");
+    assert.equal($.byText("↻ Check").length, 1);
+    assert.match(one($.byClass("lv-unclear")).text, /The server didn't confirm this render/);
+  });
+  test("the unclear bar a tab saved earlier loses its release the moment the server says it still holds the send (#86)", async (t) => {
+    // A card another page already marked unclear (persisted), reloaded while the server's
+    // request is still running: the saved mark alone would offer the release.
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", UNCLEAR)]) },
+      routes: { "/api/loom/submit-status": () => ({ body: { state: "sending", sending: true } }) } });
+    assert.equal(loom.gen.genState.c1.phase, "sending");
+    assert.equal(wayOutOf(loom).byText(RELEASE).length, 0);
+    assert.equal(wayOutOf(loom).byText("↻ Check").length, 1);
+  });
+  test("the render button of a held shot stays disabled (no render goes out where none could before)", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SENDING_CARD)]) },
+      routes: { "/api/loom/submit-status": () => ({ body: { state: "sending", sending: true } }) } });
+    const r = await loom.gen.generateShot(loom.entry("c1"));
+    assert.deepEqual(r, { ok: false, reason: "in-flight" });
+    assert.equal(fetches("/api/loom/generate").length, 0);
+    assert.equal(fetches("/api/price").length, 0, "not even priced");
+  });
+  test("the release button is drawn in ONE place, behind the held-send check, on the board card and the phone alike (#86)", () => {
+    // Both surfaces go through SendWayOut (which withholds the release for a held send). A
+    // second, inline release button would bypass that check and offer what the server refuses.
+    assert.equal(SRC.split(">I checked Activity — release this shot</button>").length - 1, 1, "one release button in the source");
+    assert.equal(SRC.split("<SendWayOut ").length - 1, 2, "the board card and the phone's sheet both use SendWayOut");
   });
   test("pollShot registers its own task, so a later resume never starts a second poll of it (F4)", async (t) => {
     const loom = await mountLoom(t);

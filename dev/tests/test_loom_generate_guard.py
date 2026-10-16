@@ -418,6 +418,52 @@ def test_a_send_that_died_with_an_earlier_process_can_still_be_released(tmp_path
     assert cli.get("/api/loom/submit-status?submit_id=sDead").get_json()["state"] == "abandoned"
 
 
+def test_submit_status_says_whether_the_server_still_holds_the_send(rig):
+    """GitHub #86. A tab reloaded while a render is still being sent reads submit-status, and
+    the journal's "sending" alone cannot tell a live request from a dead one. The route says
+    `sending: true` exactly while the request runs in this process -- the same set that makes
+    submit-abandon answer 409 -- so the Loom can stop offering a release the server would
+    refuse. The flag is a read: the release is refused the same way with or without it."""
+    gate = threading.Event()
+    rig["behaviour"] = lambda params: (gate.wait(5), "task-slow")[1]
+    app = rig["app"]
+    first = []
+    t = threading.Thread(target=lambda: first.append(
+        _another_tab(app).post("/api/loom/generate", json=_body(submit_id="sSlow"))))
+    t.start()
+    try:
+        deadline = time.time() + 5
+        while not rig["submits"] and time.time() < deadline:
+            time.sleep(0.01)
+        assert rig["submits"], "the first render reached the mutation"
+        live = rig["cli"].get("/api/loom/submit-status?submit_id=sSlow").get_json()
+        assert live == {"state": "sending", "sending": True}
+        rel = rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "sSlow"})
+        assert rel.status_code == 409 and rel.get_json().get("sending") is True, "the refusal is unchanged"
+    finally:
+        gate.set()
+        t.join(10)
+    # Answered: the flag is gone with the request, and the journal's own answer stands.
+    assert rig["cli"].get("/api/loom/submit-status?submit_id=sSlow").get_json() == {
+        "state": "submitted", "task_id": "task-slow"}
+
+
+def test_submit_status_does_not_claim_a_send_that_died_with_an_earlier_process(tmp_path):
+    """GitHub #86, the other half: a journal "sending" for a request no running process owns
+    carries NO `sending` flag, so the Loom still offers the release for it (and the server
+    still allows it). Hiding the release on the journal state alone would strand that shot."""
+    d = _paths.loom_root(tmp_path) / "_submits"
+    d.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    (d / (_account_key(_TEST_USERNAME) + ".jsonl")).write_text(json.dumps(
+        {"submit_id": "sDead", "board": "b1", "card": "c1", "state": "sending", "at": now,
+         "first_at": now}) + "\n", encoding="utf-8")
+    cli = login_test_client(create_app(tmp_path))
+    assert cli.get("/api/loom/submit-status?submit_id=sDead").get_json() == {"state": "sending"}
+    r = cli.post("/api/loom/submit-abandon", json={"csrf": _csrf(cli), "submit_id": "sDead"})
+    assert r.status_code == 200 and r.get_json()["ok"]
+
+
 def test_a_sent_render_cannot_be_released(rig):
     rig["cli"].post("/api/loom/generate", json=_body(submit_id="s1"))
     r = rig["cli"].post("/api/loom/submit-abandon", json={"csrf": _csrf(rig["cli"]), "submit_id": "s1"})

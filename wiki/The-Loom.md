@@ -361,6 +361,14 @@ again.**
   server knows that render did go out, the shot follows it instead of being released. And if it
   somehow went through anyway, its clip still lands in your library.
 
+If you reload the page while PixAI is still being asked, the server is still holding that send.
+The card then says **Still being sent to PixAI — it can't be released until PixAI answers.
+Check again in a moment.**, and only **↻ Check** is offered: there is no release to press until PixAI
+has answered. The card also checks again by itself a few times (after about three seconds, then at
+longer gaps) and follows the render the moment PixAI answers; if it is still waiting after that, press
+↻ Check yourself and the shot follows the render, or shows what
+became of it.
+
 A copy of a storyboard (⎘ Duplicate, or a restored backup) never carries a render in flight — the
 render belongs to the storyboard it was made on.
 
