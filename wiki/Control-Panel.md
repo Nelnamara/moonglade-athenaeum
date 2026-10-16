@@ -377,7 +377,8 @@ Things worth knowing:
 - **■ Stop server** — shuts it down cleanly from the browser. No Task Manager.
 
 Both are available to any signed-in session. A reconnect overlay waits for the server to
-come back after a restart.
+come back after a restart. If you close the Panel (or the page reloads it) while that wait is
+running, reopening it picks the wait back up instead of showing an idle Panel.
 
 ## Updates and About
 

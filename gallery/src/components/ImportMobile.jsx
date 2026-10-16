@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import useImport from "../hooks/useImport.js";
+import { notImportedNote } from "../lib/importBatches.js";
 import "../styles/import-overlay.css";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
@@ -68,6 +69,7 @@ export default function ImportMobile({ collections, onImported }) {
           <div className="mgim-result ok">
             ✓ Imported <b>{result.imported}</b> file{result.imported !== 1 ? "s" : ""}
             {result.skipped ? " · " + result.skipped + " skipped (already in library)" : ""}
+            {notImportedNote(result)}
             {result.collection ? " · added to “" + result.collection + "”" : ""}.
           </div>
           <div className="glm-sheet-actions" style={{ marginTop: 10 }}>

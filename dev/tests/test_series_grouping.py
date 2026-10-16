@@ -348,3 +348,62 @@ def test_export_csv_filter_extraction_carries_series():
     assert "series" not in G._filters_from_args({"series": ""})            # empty  -> dropped (falsy)
     both = G._filters_from_args({"series": "S1", "batch": "B2"})           # rides beside batch
     assert both.get("series") == "S1" and both.get("batch") == "B2"
+
+
+# --- the picture page opened from an opened stack: /api/detail honours ?series= ---------------
+
+def test_detail_route_stays_inside_an_opened_series_walk(tmp_path):
+    """The picture page's "k of N" and Prev/Next must be the walk /api/library?series=<sid>
+    lists. /api/detail ignored ?series, so a picture opened from an opened stack counted the
+    whole library and Prev/Next stepped out of the stack (the same defect #81 fixed for
+    ?batch=). Without ?series the route is what it was."""
+    _seed_mixed(tmp_path)
+    cli = _client(tmp_path)
+    walk = [it["media_id"] for it in
+            cli.get("/api/library?series=X1&sort=newest&page_size=200").get_json()["items"]]
+    assert set(walk) == _SERIES_MIDS and len(walk) == 7
+
+    # every member answers with its own place in THAT walk and neighbours that are members
+    for i, mid in enumerate(walk):
+        d = cli.get("/api/detail/%s?sort=newest&series=X1" % mid).get_json()
+        assert (d["position"], d["nav_total"]) == (i + 1, 7)
+        assert d["prev_id"] == (walk[i - 1] if i > 0 else None)
+        assert d["next_id"] == (walk[i + 1] if i < 6 else None)
+
+    # without ?series the same picture sits in the whole library (14 rows), as before
+    mid = walk[3]
+    d = cli.get("/api/detail/%s?sort=newest" % mid).get_json()
+    assert d["nav_total"] == 14
+    assert d["position"] is not None
+
+    # an added filter intersects with the stack, like the list route's
+    d = cli.get("/api/detail/x3a?sort=newest&series=X1&rating_min=3").get_json()
+    assert (d["position"], d["nav_total"]) == (1, 1)
+    assert d["prev_id"] is None and d["next_id"] is None
+
+
+def test_detail_route_series_excludes_non_members_and_unknown_sids(tmp_path):
+    _seed_mixed(tmp_path)
+    cli = _client(tmp_path)
+    # a picture outside the stack has no place in it (the client then shows none)
+    d = cli.get("/api/detail/z1?sort=newest&series=X1").get_json()
+    assert d["position"] is None and d["nav_total"] == 7
+    assert d["prev_id"] is None and d["next_id"] is None
+    # an unknown sid is an empty walk, never an error and never the whole library
+    r = cli.get("/api/detail/x1a?sort=newest&series=NOPExx")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["position"] is None and d["nav_total"] == 0
+    assert d["prev_id"] is None and d["next_id"] is None
+    # a blank ?series= is no stack at all
+    d = cli.get("/api/detail/x1a?sort=newest&series=").get_json()
+    assert d["nav_total"] == 14
+
+
+def test_list_media_ids_series_matches_query_catalog(tmp_path):
+    db = _seed_mixed(tmp_path)
+    rows, total = G.query_catalog(db, sort="newest", page_size=None, series="X1")
+    assert G.list_media_ids(db, sort="newest", series="X1") == [r["media_id"] for r in rows]
+    assert total == 7
+    assert len(G.list_media_ids(db, sort="newest")) == 14                  # default: no narrowing
+    assert G.list_media_ids(db, sort="newest", series="NOPExx") == []

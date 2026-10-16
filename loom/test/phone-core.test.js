@@ -1,5 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 import {
   DEFAULT_SAVER_MODE, PULL_HOLD, PULL_MAX, PULL_THRESHOLD, SAVER_THUMB,
@@ -89,6 +92,22 @@ describe("Q7 Data saver: what it changes", () => {
   test("background reads wait while the saver acts; a pull never asks (it has no such check)", () => {
     assert.equal(backgroundReadAllowed(true), false);
     assert.equal(backgroundReadAllowed(false), true);
+  });
+
+  /* This rule used to be pinned only as a function nothing called: AppMobile.jsx did the same check inline
+     (`if (saverRef.current) return;`), so the test above passed while the app ran its own copy. The app now
+     calls the helper; this reads the shell and fails if the call goes away or the copy comes back. */
+  test("the phone shell asks backgroundReadAllowed for the finished-generation reload, with no inline copy", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const shell = readFileSync(path.join(here, "..", "..", "gallery/src/components/AppMobile.jsx"), "utf8")
+      .replace(/\r\n/g, "\n");
+    assert.match(shell, /import \{[^}]*\bbackgroundReadAllowed\b[^}]*\} from "\.\.\/lib\/phoneCore\.js";/);
+    assert.match(shell, /if \(!backgroundReadAllowed\(saverRef\.current\)\) return;/);
+    assert.doesNotMatch(shell, /if \(saverRef\.current\) return;/);
+    // ...and the call sits ahead of the page-1 reload it guards, inside the mg-gen-done / mg-result handler.
+    const call = shell.indexOf("backgroundReadAllowed(saverRef.current)");
+    const reload = shell.indexOf("genLoadRef.current(1, true)", call);
+    assert.ok(call > 0 && reload > call, "the check comes before the page-1 reload");
   });
 
   test("the size line is honest: bytes to KB / MB, and nothing when unknown", () => {

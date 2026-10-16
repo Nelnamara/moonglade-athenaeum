@@ -18,9 +18,11 @@ import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useInstallNudge from "../hooks/useInstallNudge.js";
 import { NudgeBubble } from "./InstallNudge.jsx";
 import {
-  continuousDone, continuousPageSize, isFrontPage, makeMarker, nextContinuousPage, pageOffset, syncOutcomeText,
+  backgroundReadAllowed, continuousDone, continuousPageSize, isFrontPage, makeMarker, nextContinuousPage, pageOffset,
+  syncOutcomeText,
 } from "../lib/phoneCore.js";
 import { readMarker, writeMarker } from "../lib/phonePrefs.js";
+import { detailAdvParams } from "../lib/detailParams.js";
 import { syncNow } from "../lib/syncNow.js";
 import { VIDEO_NOTE, remixImageInto, remixVideoInto, sendStartFrame } from "../gen/phoneRemix.js";
 import { buildUrl, readPage, readImage } from "../gen/urlState.js";
@@ -905,14 +907,11 @@ export default function AppMobile({ boot }) {
   // every render re-fires it every render: setState -> re-render -> new
   // object -> effect fires again -> ... an infinite loop that never lets
   // `loading` settle. useMemo keyed on the real underlying values fixes it.
-  const detailsAdvParams = useMemo(() => ({
-    q: lib.applied, media: lib.media, collection: lib.shelf,
-    sort: lib.adv.sort !== "newest" ? lib.adv.sort : "", rating_min: lib.adv.ratingMin || "",
-    model: lib.adv.model, lora: lib.adv.lora, from: lib.adv.dateFrom, to: lib.adv.dateTo,
-    source: lib.adv.source, tag: lib.adv.tag, published: lib.adv.publishedOnly ? "1" : "",
-  }), [lib.applied, lib.media, lib.shelf, lib.adv.sort, lib.adv.ratingMin, lib.adv.model,
+  const detailsAdvParams = useMemo(
+    () => detailAdvParams({ applied: lib.applied, media: lib.media, shelf: lib.shelf, adv: lib.adv }),
+    [lib.applied, lib.media, lib.shelf, lib.adv.sort, lib.adv.ratingMin, lib.adv.model,
       lib.adv.lora, lib.adv.dateFrom, lib.adv.dateTo, lib.adv.source, lib.adv.tag,
-      lib.adv.publishedOnly]);
+      lib.adv.publishedOnly, lib.adv.batch, lib.adv.series]);
 
   // App.jsx's own rate(), ported: optimistic update of the lifted useLibrary()
   // items array + the real POST. No equivalent existed on mobile before this
@@ -1111,7 +1110,7 @@ export default function AppMobile({ boot }) {
       /* Data saver (Q7): this reload is the phone's own BACKGROUND read -- nobody asked for it -- so it
          waits while the saver acts. The new picture is one pull away (a pull is explicit and never
          asks). The credits chip and the achievement check above are tiny and still run. */
-      if (saverRef.current) return;
+      if (!backgroundReadAllowed(saverRef.current)) return;
       /* Continuous (Session U): a stacked list never reflows under the owner except by a pull he made
          (U3a, "the library stands still"); a reload of page 1 would also throw away every page loaded. */
       if (continuousRef.current) return;

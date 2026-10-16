@@ -6,6 +6,10 @@
    Duplicate Review take only copies with the rest, and their confirm names them first. The words say
    what really happens next, which dev/tests/test_archive_only_guard.py proves on the server: the Trash's
    Restore puts the picture AND its catalog row back, and Duplicate Review's Undo does the same.
+
+   The Trash's Delete forever and Empty trash are the one step where an only copy is destroyed for good,
+   so their typed-DELETE confirms name the count in the SAME sentence (road "forever": nothing restores
+   it afterwards, and the words say so).
    loom/test/only-copy.test.js pins this file. */
 
 /* The duplicate tiers whose members are DIFFERENT pictures. In the byte-identical tiers (same_media,
@@ -20,8 +24,9 @@ export function onlyCopyMembers(g, keeperPath) {
 }
 
 /* The confirm's sentence: `k` of the `n` pictures about to go are only copies. `road` is where they go:
-   "trash" (Delete locally: the _deleted/ folder, which the Trash restores from) or "duplicates"
-   (Duplicate Review: _duplicates/, which its Undo restores from). "" when k is 0. */
+   "trash" (Delete locally: the _deleted/ folder, which the Trash restores from), "duplicates"
+   (Duplicate Review: _duplicates/, which its Undo restores from) or "forever" (the Trash's Delete forever
+   and Empty trash: gone for good, nothing restores them). "" when k is 0. */
 export function onlyCopyNote(k, n, road) {
   const many = Math.floor(Number(k)) || 0;
   if (many <= 0) return "";
@@ -31,11 +36,28 @@ export function onlyCopyNote(k, n, road) {
   const head = one && all === 1
     ? "This is the only copy"
     : many + " of these " + (one ? "is" : "are") + " the only copy";
+  if (road === "forever") {
+    return head + " — PixAI no longer has " + them + ". " + (one ? "It is" : "They are")
+      + " deleted for good, and nothing can bring " + them + " back.";
+  }
   const rest = many < all ? " with the rest" : "";
   const tail = road === "duplicates"
     ? " to _duplicates/" + rest + ", and Undo puts " + them + " back."
     : " to the Trash" + rest + ", and the Trash can restore " + them + ".";
   return head + " — PixAI no longer has " + them + ". " + (one ? "It goes" : "They go") + tail;
+}
+
+/* How many of the files a Trash confirm is about to destroy are the only copy, as the sentence (or ""). The
+   Trash's list says which loaded files are (`flags`: media_id -> archive_only, filled as each page loads, so a
+   selection that spans pages is still counted) and, for the WHOLE trash, how many (`onlyTotal`), because Empty
+   trash takes every page and not just the one on screen.
+     mode "all"      -> onlyTotal of `total` files
+     mode "selected" -> the selected ids (`ids`) that `flags` marks, of ids.length */
+export function trashOnlyCopyNote(mode, { total, onlyTotal, ids, flags }) {
+  if (mode === "all") return onlyCopyNote(onlyTotal, total, "forever");
+  const picked = ids || [];
+  const k = picked.filter((id) => flags && flags.get && flags.get(id)).length;
+  return onlyCopyNote(k, picked.length, "forever");
 }
 
 /* The same fact in a few words, for a button that has no confirm of its own. */

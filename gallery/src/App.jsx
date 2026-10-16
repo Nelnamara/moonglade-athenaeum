@@ -69,6 +69,7 @@ import { openHelp, OPEN_SURFACE_EVENT, isHelpUp, isAboutUp, isWhatsNewUp } from 
 import { useGuideIndex } from "./help/helpData.js";
 import { githubSlug } from "./help/helpCore.js";
 import { LIBRARY, DETAIL_PREFIX } from "./apiRoutes.js";
+import { detailAdvParams, detailStackOf } from "./lib/detailParams.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -439,6 +440,15 @@ export default function App({ boot }) {
      ?image= on first load so a shared/bookmarked link opens straight there;
      back/forward (popstate) stays in sync since pushState never fires it. */
   const [detailsFor, setDetailsFor] = useState(() => readImage(window.location.search));
+  /* The stack (series or batch: { kind, id }) the open record was opened FROM, or null -- the walk
+     Details counts and steps in ("k of N", Prev/Next). It rides with the Details-open state and NOT
+     in `adv.series` / `adv.batch`, because the stack is a modal over an untouched library (B3):
+     writing adv would re-load the grid behind it and leave the CSV export scoped after Details
+     closed. detailAdvParams turns it into `series` or `batch`, never both. Set only by
+     openDetailsFromStack; every way Details closes (closeDetails, goLibrary, Back onto a record-less
+     address) drops it, and stepping between pictures inside Details (onNavigate -> openDetails)
+     keeps it. Desktop only -- the phone has no stack modal. */
+  const [detailsStack, setDetailsStack] = useState(null);
   /* The ONE history writer (gen/urlState.js; #31 "Where the Refit Broke" #7).
      Every pushState/replaceState in the shell goes through here, so ?page= and
      ?image= can never overwrite each other: the builder patches only the keys it
@@ -481,6 +491,7 @@ export default function App({ boot }) {
   const closeDetails = useCallback(() => {
     setUrl({ image: null });   // keeps ?page=N -- the grid underneath is still on it
     setDetailsFor(null);
+    setDetailsStack(null);
   }, [setUrl]);
   /* Back/forward re-read BOTH params: the image (as before) and the page -- a
      ?page= that differs from the grid's current page loads it. Refs, because the
@@ -548,7 +559,11 @@ export default function App({ boot }) {
   });
   useEffect(() => {
     const onPop = () => {
-      setDetailsFor(readImage(window.location.search));
+      const popImage = readImage(window.location.search);
+      setDetailsFor(popImage);
+      // Back onto an address with no record closes Details, and the stack scope goes with it;
+      // Back/Forward between two records keeps it (they are the same walk).
+      if (!popImage) setDetailsStack(null);
       // B3: the open SERIES stack is addressable too, so Back closes it (or reopens
       // the one the entry it landed on had up) exactly like it does for Details. A
       // BATCH stack has no address (2026-09-07), so the address answering 'no series'
@@ -653,9 +668,13 @@ export default function App({ boot }) {
      Back from the record goes straight to the stack that was open. */
   const openDetailsFromStack = useCallback((mid) => {
     setUrl({ series: null, image: mid });
+    /* The record counts and steps inside THIS stack (detailsStack, above): its series id for a
+       series stack, its task id for a batch stack. Read off stackFor before closeStack() clears it. */
+    const scope = detailStackOf(stackFor);
     closeStack();
+    setDetailsStack(scope);
     openDetails(mid);
-  }, [setUrl, closeStack, openDetails]);
+  }, [setUrl, closeStack, openDetails, stackFor]);
 
   /* Generation completions refresh the credits chip -- and the library, but only from
      the perch where refreshing it moves nothing (see THE POLICY below).
@@ -1396,6 +1415,7 @@ export default function App({ boot }) {
     if (dockStateRef.current.open) closeDock();
     setUrl({ image: null, series: null });
     setDetailsFor(null);
+    setDetailsStack(null);
   }, [closeDock, setUrl]);
 
   /* "Jump to Search" (/). The library bar's field lives two components down inside the
@@ -1705,13 +1725,11 @@ export default function App({ boot }) {
      Loading/rapid-flash bug (reproduced live: ~1000 identical requests in
      a few seconds). useMemo keyed on the real underlying values fixes it --
      the reference only changes when a value inside it actually does. */
-  const detailsAdvParams = useMemo(() => ({
-    q: applied, media, collection: shelf,
-    sort: adv.sort !== "newest" ? adv.sort : "", rating_min: adv.ratingMin || "",
-    model: adv.model, lora: adv.lora, from: adv.dateFrom, to: adv.dateTo,
-    source: adv.source, tag: adv.tag, published: adv.publishedOnly ? "1" : "",
-  }), [applied, media, shelf, adv.sort, adv.ratingMin, adv.model, adv.lora,
-      adv.dateFrom, adv.dateTo, adv.source, adv.tag, adv.publishedOnly]);
+  const detailsAdvParams = useMemo(
+    () => detailAdvParams({ applied, media, shelf, adv, stack: detailsStack }),
+    [applied, media, shelf, adv.sort, adv.ratingMin, adv.model, adv.lora,
+      adv.dateFrom, adv.dateTo, adv.source, adv.tag, adv.publishedOnly, adv.batch, adv.series,
+      detailsStack]);
 
   return (
     <div className="app">

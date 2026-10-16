@@ -643,3 +643,49 @@ def test_detail_route_reports_the_true_position_and_total_of_the_filtered_walk(t
     d = client.get("/api/detail/e4?rating_min=3").get_json()
     assert d["position"] is None and d["nav_total"] == 3
     assert d["prev_id"] is None and d["next_id"] is None
+
+
+def test_detail_route_stays_inside_a_view_batch_walk(tmp_path):
+    """#81: the picture page's "k of N" and Prev/Next left the batch. The list route
+    filtered by ?batch=<task_id> but api_detail never read it, so a picture opened from a
+    View batch drill-down counted the whole library and stepped out of the batch. Five
+    pictures, three of them one task (newest first: t3 t2 t1 among others)."""
+    from tests.conftest import login_client
+    db = tmp_path / "catalog.db"
+    tasks = {1: "TASK_A", 2: "TASK_B", 3: "TASK_A", 4: "TASK_B", 5: "TASK_A"}
+    save_catalog(db, [
+        _row(media_id="b%d" % n, filename="b%d.png" % n, task_id=tasks[n],
+             created_at="2026-01-0%dT00:00:00" % n)
+        for n in range(1, 6)
+    ])
+    client = login_client(tmp_path)
+
+    # no batch: the whole library -- b3 is third of five and its neighbours are the other task's
+    d = client.get("/api/detail/b3?sort=newest").get_json()
+    assert (d["position"], d["nav_total"]) == (3, 5)
+    assert (d["prev_id"], d["next_id"]) == ("b4", "b2")
+
+    # inside TASK_A (b5 b3 b1): b3 is second of three, Prev/Next are batch members
+    d = client.get("/api/detail/b3?sort=newest&batch=TASK_A").get_json()
+    assert (d["position"], d["nav_total"]) == (2, 3)
+    assert (d["prev_id"], d["next_id"]) == ("b5", "b1")
+
+    # the ends of the batch have no neighbour on that side -- Prev/Next never leave it
+    d = client.get("/api/detail/b5?sort=newest&batch=TASK_A").get_json()
+    assert d["prev_id"] is None and d["next_id"] == "b3"
+    d = client.get("/api/detail/b1?sort=newest&batch=TASK_A").get_json()
+    assert d["prev_id"] == "b3" and d["next_id"] is None
+
+    # the sort still decides the order inside the batch
+    d = client.get("/api/detail/b3?sort=oldest&batch=TASK_A").get_json()
+    assert (d["prev_id"], d["next_id"]) == ("b1", "b5")
+
+    # a picture that is not in the batch has no position there (the client then shows none)
+    d = client.get("/api/detail/b2?sort=newest&batch=TASK_A").get_json()
+    assert d["position"] is None and d["nav_total"] == 3
+    assert d["prev_id"] is None and d["next_id"] is None
+
+    # and it agrees with the list route it is the walk of
+    lib = client.get("/api/library?sort=newest&batch=TASK_A").get_json()
+    assert [i["media_id"] for i in lib["items"]] == ["b5", "b3", "b1"]
+    assert lib["total"] == 3
