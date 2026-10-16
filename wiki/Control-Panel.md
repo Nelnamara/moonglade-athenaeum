@@ -80,11 +80,13 @@ The buttons are grouped exactly as the risk splits.
   visual-similarity index doesn't have yet and leaves everything already in it alone.
   **This is the one you normally want.** It can't lose existing work, and if a previous
   build was interrupted it carries on from where that stopped instead of starting over.
-  No network; needs the optional `pixeltable` install.
+  No network; needs the optional `pixeltable` install. Heavy: don't run it beside GPU- or
+  RAM-heavy programs.
 - **Rebuild the Similar index (slow, needs pixeltable)** — drops the index and re-embeds
   **every** image from scratch. Reach for this only when the index is actually *broken*
   (wrong or duplicated results), not merely incomplete — on a large library it takes
-  roughly three times as long as a top-up and discards whatever was already there.
+  roughly three times as long as a top-up and discards whatever was already there. Heavy
+  as well: don't run it beside GPU- or RAM-heavy programs.
 - **Organize — preview (dry run)** and **Dedup — preview (dry run)** — show the plan
   without moving anything.
 - **Sync published-artwork metadata (full re-walk)** — merges titles, tags, likes and
@@ -163,8 +165,8 @@ change its cadence.
 | **View counts** | weekly | Reads how many views each published work has. Asking adds one view to each, so this is the only job that touches those numbers — see below. |
 | **Sync i2v videos** | daily | Backs up your image-to-video generations. |
 | **Reconcile deleted** | weekly | Flags catalog rows whose task is gone from PixAI. |
-| **Top up Similar** | daily | Embeds anything the visual-similarity index is missing. Needs the optional ML install; without it the row stays asleep rather than failing nightly. |
-| **Full re-walk** · **Rebuild Similar** · **Rebuild ALL thumbnails** | only if it hasn't run in 60 days | The three jobs with no incremental form. They are not on a cadence — this is a floor under them, so a library can't drift for months untended. |
+| **Top up Similar** | daily | Embeds anything the visual-similarity index is missing. Needs the optional ML install; without it the row stays asleep rather than failing nightly. Heavy: don't run it beside GPU- or RAM-heavy programs. |
+| **Full re-walk** · **Rebuild Similar** · **Rebuild ALL thumbnails** | only if it hasn't run in 60 days | The three jobs with no incremental form. They are not on a cadence — this is a floor under them, so a library can't drift for months untended. Rebuild Similar is the heavy one: don't let it run beside GPU- or RAM-heavy programs. |
 
 ### The sweep, and why it's cheap
 

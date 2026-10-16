@@ -15324,7 +15324,7 @@ CREDIT_LOG_REASONS = {
 }
 
 
-def list_credit_log(session, last=50, before=None, reason=None):
+def list_credit_log(session, last=50, before=None):
     """Read the account's full credit transaction ledger via ad-hoc GraphQL
     `user(id).quotaLogs` -- every credit gain AND loss (purchases, daily claims, event
     gifts, generation spend, refunds, ...), not just generation cost. Distinct from
@@ -15343,17 +15343,12 @@ def list_credit_log(session, last=50, before=None, reason=None):
     codebase's OWN established connection style for history listings (see
     page_variables()) -- the opposite direction from kaisuuken/coupons' forward
     first/after. Pass a previous call's `next_cursor` as `before` to page further into the
-    past. Optional `reason` filters server-side to one raw type, mirroring the site's own
-    per-category filter dropdown. Read-only; fails soft on error, matching every other
-    reader in this module."""
+    past. There is no type filter: the `me` connection takes no such argument. Read-only;
+    fails soft on error, matching every other reader in this module."""
     try:
         variables = {"last": int(last)}
         if before:
             variables["before"] = str(before)
-        # `reason` is accepted for API compatibility but no longer sent -- the `me`
-        # connection doesn't take it (see _QUOTA_LOG_QUERY's note). Kept as a param so the
-        # route/CLI signatures don't change; a filter UI would need a probed arg name.
-        _ = reason
         data = gql_adhoc(session, _QUOTA_LOG_QUERY, variables) or {}
     except (PixAIError, requests.RequestException, ValueError):
         return {"entries": [], "has_more": False, "next_cursor": None}
@@ -16134,13 +16129,11 @@ def run_coupons(args):
 def run_credit_log(args):
     """Print the account's full credit transaction ledger (list_credit_log) -- the real
     spend/purchase/gift history behind Membership & Credits -> Credit log, not just
-    generation cost. Read-only. Pass --credit-log-reason to filter to one raw type (see
-    CREDIT_LOG_REASONS for the ones with a confirmed friendly label) or --credit-log-before
-    <cursor> to page further into the past."""
+    generation cost. Read-only. Pass --credit-log-before <cursor> to page further into the
+    past."""
     session = _make_session(getattr(args, "token", None))
     page = list_credit_log(session, last=int(getattr(args, "credit_log_count", 0) or 30),
-                            before=getattr(args, "credit_log_before", "") or None,
-                            reason=getattr(args, "credit_log_reason", "") or None)
+                            before=getattr(args, "credit_log_before", "") or None)
     entries = page["entries"]
     if not entries:
         print("No credit log entries found (read-only; nothing was spent).")
@@ -17921,9 +17914,6 @@ def main():
                          "gifts, generation spend, refunds), then exit. Read-only")
     ap.add_argument("--credit-log-count", type=int, default=0, metavar="N",
                     help="with --credit-log, how many recent entries to show (default 30)")
-    ap.add_argument("--credit-log-reason", default="", metavar="TYPE",
-                    help="with --credit-log, filter to one raw type (e.g. task_cost, daily, "
-                         "event_gift, extra_package -- see CREDIT_LOG_REASONS)")
     ap.add_argument("--credit-log-before", default="", metavar="CURSOR",
                     help="with --credit-log, page further into the past using a cursor "
                          "printed by a previous --credit-log run")
@@ -18192,12 +18182,14 @@ def main():
     ap.add_argument("--rebuild-similar", action="store_true",
                     help="drop + re-embed the visual-similarity ('Similar') index from scratch off "
                          "the on-disk backup. Cures a corrupted/duplicate index; builds ONE clean "
-                         "named index. ~decode-bound, no network. Needs torch/pixeltable.")
+                         "named index. ~decode-bound, no network. Needs torch/pixeltable. "
+                         "Heavy: don't run it beside GPU- or RAM-heavy programs.")
     ap.add_argument("--sync-similar", action="store_true",
                     help="TOP UP the 'Similar' index: embed only images it doesn't already have. "
                          "The incremental counterpart to --rebuild-similar and the one you "
                          "normally want -- it cannot lose existing rows, and after an interrupted "
-                         "build it resumes instead of starting over. Needs torch/pixeltable.")
+                         "build it resumes instead of starting over. Needs torch/pixeltable. "
+                         "Heavy: don't run it beside GPU- or RAM-heavy programs.")
     webauth = ap.add_argument_group("web gallery login accounts (session-based auth)")
     webauth.add_argument("--add-web-user", action="store_true",
                     help="add or update a gallery web-login account: interactively prompts "

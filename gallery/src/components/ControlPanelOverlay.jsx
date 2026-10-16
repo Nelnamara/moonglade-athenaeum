@@ -843,8 +843,8 @@ export default function ControlPanelOverlay({ onClose, boot, account, tabRequest
                               <div className="mgcp-tendlbl">Thumbnails &amp; Similar index</div>
                               <div className="mgcp-chips">
                                 <ActionChip spec={actionSpec("rebuild-thumbs")} label="Rebuild ALL thumbnails" armed={confirmArm === "rebuild-thumbs"} onRun={() => runAction("rebuild-thumbs")} />
-                                <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" onRun={() => runAction("sync-similar")} />
-                                <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" onRun={() => runAction("rebuild-similar")} />
+                                <ActionChip spec={actionSpec("sync-similar")} label="Top up Similar" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("sync-similar")} />
+                                <ActionChip spec={actionSpec("rebuild-similar")} label="Rebuild Similar (slow)" title="Heavy: don't run it beside GPU- or RAM-heavy programs." onRun={() => runAction("rebuild-similar")} />
                                 <ActionChip spec={actionSpec("backfill-phash")} label="Backfill perceptual hashes" onRun={() => runAction("backfill-phash")} />
                               </div>
                             </div>

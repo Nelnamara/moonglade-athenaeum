@@ -52,7 +52,7 @@ def test_list_credit_log_unmapped_type_falls_back_to_raw(monkeypatch):
     assert row["type"] == "mio2_gem_exchange" and row["label"] == "mio2_gem_exchange"
 
 
-def test_list_credit_log_passes_before_and_ignores_reason(monkeypatch):
+def test_list_credit_log_passes_before(monkeypatch):
     seen = {}
 
     def fake_gql(session, query, variables=None):
@@ -60,9 +60,9 @@ def test_list_credit_log_passes_before_and_ignores_reason(monkeypatch):
         return _resp([])
 
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
-    # `reason` is accepted by the signature but NOT sent -- the `me` connection doesn't
-    # offer it (2026-08-07). `before` still pages backward.
-    core.list_credit_log(object(), last=10, before="cursor-past", reason="task_cost")
+    # The `me` connection offers no type filter, so there is no `reason` argument at all
+    # (the dead one was removed 2026-10-15). `before` still pages backward.
+    core.list_credit_log(object(), last=10, before="cursor-past")
     assert seen["variables"] == {"last": 10, "before": "cursor-past"}
 
 
@@ -91,7 +91,7 @@ def test_run_credit_log_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_credit_log", lambda s, **k: {
         "entries": [], "has_more": False, "next_cursor": None})
     res = core.run_credit_log(SimpleNamespace(
-        token=None, credit_log_count=0, credit_log_reason="", credit_log_before=""))
+        token=None, credit_log_count=0, credit_log_before=""))
     assert res == {"entries": 0}
     assert "No credit log entries" in capsys.readouterr().out
 
@@ -106,7 +106,7 @@ def test_run_credit_log_lists_signed_amounts_and_more_hint(monkeypatch, capsys, 
              "created_at": "2026-08-01T10:08:00Z", "updated_at": ""},
         ], "has_more": True, "next_cursor": "cursor-older"})
     res = core.run_credit_log(SimpleNamespace(
-        token=None, credit_log_count=0, credit_log_reason="", credit_log_before=""))
+        token=None, credit_log_count=0, credit_log_before=""))
     out = capsys.readouterr().out
     assert res == {"entries": 2}
     assert "+30,000" in out and "Daily Claim" in out
