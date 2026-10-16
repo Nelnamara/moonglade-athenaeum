@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.2] - 2026-10-15 — First Light
+
 ### First start
 - **A PC with no Python can get Moonglade going with one double-click.** A new file in the app's folder, **Install Moonglade**, does the first-time setup: it finds Python 3.10 or newer, installs one for your account only (no administrator) if there is none, installs the packages Moonglade needs, then opens Moonglade in your browser. It copes with a folder name that has spaces, brackets, an ampersand or an accented letter, and if you open it from inside the downloaded zip it tells you to extract the zip first. Windows may ask "Do you want to run this file?" for a downloaded file. (2026-10-15)
 - **A first start installs what Moonglade needs.** If a package the app needs isn't installed, Moonglade Launcher names it and offers to install it with the Python that runs Moonglade, then starts; it used to stop with "Flask is required…" (#87). Saying No, or an install that fails, shows the exact command to paste. (2026-10-15)

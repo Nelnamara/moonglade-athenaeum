@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-10-08.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.1 — Clean Sweep,
-  2026-10-08), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.2 — First Light,
+  2026-10-15), per the rule at the top of this file.
 
 ---
 
@@ -30,12 +30,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **3.20.2** (branch `release/3.20.2`): first-time setup on a PC with no Python (Install Moonglade) and the
-  launcher installing missing packages (#87); the move's edge cases from the release gate (#79); the Live
-  Mirror catch-up (#80); View batch and opened stacks (#81), Import past 1,000 files (#82), the zip
-  export's model (#83), Stop/Restart resuming (#84), the Similar warning (#85), the Loom's Release in a
-  reloaded tab (#86), Trash's only-copy count and the leftover approved cleanup. Review sheet: the 3.20.2
-  walk sheet. Merges on the owner's boop after his walk.
+- Nothing in review.
 
 ---
 
@@ -153,14 +148,6 @@ Each is a decision only the owner can make; most carry a recommendation.
   covers them all. Also recommended to decline: replaying a stale split after a two-tab conflict
   (option B of #59; option A shipped in 3.16.0), editing the Loom's Look from the phone, and the
   advanced-training capture (about 1,500 credits).
-
-- **Three edge cases of a library shared by two PCs or touched by Task Scheduler** (left as they are from
-  [#79](https://github.com/Nelnamara/moonglade-athenaeum/issues/79)): a library banner that is the only
-  copy goes to the first PC's `local\banners` and the other PC can't wear it (banners are per PC by the
-  2026-10-07 layout); a login's preferences, views, presets and cast members carry no time of their own,
-  so when two copies clash the new home wins; and the one-click fixer re-registers a scheduled task
-  whole, which might fire an "at creation" trigger (unverified on a real Task Scheduler). Recommended:
-  keep all three as they are.
 
 - **Housekeeping on the owner's say.** The old worktree folders and the leftover remote branches; the
   `D:\moonglade-dev` test libraries; a loose art file in this PC's coded art tree that makes the
