@@ -30,22 +30,18 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **First start installs what Moonglade needs** (branch `fix/first-run-deps`,
-  [#87](https://github.com/Nelnamara/moonglade-athenaeum/issues/87)): the launcher names missing packages and
-  offers to install them with its own Python. For 3.20.2; merges on the owner's boop after his walk.
+- **3.20.2** (branch `release/3.20.2`): first-time setup on a PC with no Python (Install Moonglade) and the
+  launcher installing missing packages (#87); the move's edge cases from the release gate (#79); the Live
+  Mirror catch-up (#80); View batch and opened stacks (#81), Import past 1,000 files (#82), the zip
+  export's model (#83), Stop/Restart resuming (#84), the Similar warning (#85), the Loom's Release in a
+  reloaded tab (#86), Trash's only-copy count and the leftover approved cleanup. Review sheet: the 3.20.2
+  walk sheet. Merges on the owner's boop after his walk.
 
 ---
 
 ## Next — ready to build, nothing waiting
 
 In the recommended order.
-
-- **The 3.20 follow-ups ([#79](https://github.com/Nelnamara/moonglade-athenaeum/issues/79)).** The
-  release gate's edge cases for the move: none blocked 3.20, all are worth closing. Take first the
-  ones next to data loss (an old file winning on a copied timestamp, a pack removed without a
-  comparison, two `runs.db` copies not merged, a banner parked and then deleted), then the slow first
-  move on a large Loom folder, then the wording and setup edges. Touches `moonglade/migrate.py`,
-  `moonglade/outside.py`, `moonglade/setup.py`.
 
 - **Split the two megamodules, phases 0-3 (`moonglade/backup.py` / `moonglade/gallery.py`).** The
   last open part of Wave 4 (owner, 2026-10-04), planned as 3.21.0. They are the repo's two largest,
@@ -72,16 +68,6 @@ In the recommended order.
   multi-hour give-up tiers tested against an injected clock, and a drawn check of the Enhance
   drawer's layout. The tests that cover only older-version fallbacks retire with those fallbacks (see
   the expiry rule under Needs a call).
-
-- **Finish the approved 2026-10-05 cleanup.** Two pieces the 3.20.1 pass missed: the
-  `--credit-log-reason` flag and the credit log's `?reason=` parameter are accepted and never sent
-  (PixAI's read takes no filter), and `wiki/Backing-Up.md` still promises the filter, so the flag, its
-  help and the wiki row go; and the phone app repeats its own background-read check inline instead of
-  calling the tested helper in `phoneCore.js`. Small.
-
-- **Trash: say how many files are the only copy.** The bulk delete has shown the archive-only count
-  since 3.16.0; **Delete forever** and **Empty trash** don't yet. Read each trashed file's saved row and
-  name the count in their typed confirms. Small.
 
 - **Honor counts after an edit.** The memo behind the achievements' counts is keyed on the catalog's
   row count and newest picture, so rating, tagging or publishing an existing picture may not move a
@@ -167,6 +153,14 @@ Each is a decision only the owner can make; most carry a recommendation.
   covers them all. Also recommended to decline: replaying a stale split after a two-tab conflict
   (option B of #59; option A shipped in 3.16.0), editing the Loom's Look from the phone, and the
   advanced-training capture (about 1,500 credits).
+
+- **Three edge cases of a library shared by two PCs or touched by Task Scheduler** (left as they are from
+  [#79](https://github.com/Nelnamara/moonglade-athenaeum/issues/79)): a library banner that is the only
+  copy goes to the first PC's `local\banners` and the other PC can't wear it (banners are per PC by the
+  2026-10-07 layout); a login's preferences, views, presets and cast members carry no time of their own,
+  so when two copies clash the new home wins; and the one-click fixer re-registers a scheduled task
+  whole, which might fire an "at creation" trigger (unverified on a real Task Scheduler). Recommended:
+  keep all three as they are.
 
 - **Housekeeping on the owner's say.** The old worktree folders and the leftover remote branches; the
   `D:\moonglade-dev` test libraries; a loose art file in this PC's coded art tree that makes the
