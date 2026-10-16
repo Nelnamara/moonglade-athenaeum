@@ -24,7 +24,9 @@ set "PYEXE="
 set "PYVER="
 set "OLDVER="
 set "INSTALLED="
-set "PROBE=%TEMP%\moonglade_python_probe.txt"
+rem The Python probe writes into a folder of its own per check (see :new_probe).
+set "PROBE="
+set "PROBEDIR="
 
 echo.
 echo  Moonglade - first-time setup
@@ -190,16 +192,33 @@ rem the console's OEM code page, which is what "for /f" reads the file back in, 
 rem with an accent in it still gives a path that exists.
 set "TRYEXE="
 set "TRYVER="
-del "%PROBE%" >nul 2>&1
+call :new_probe
 %* -c "import sys; sys.stdout.reconfigure(encoding='oem'); print(sys.executable); print(sys.version.split()[0]); sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)" >"%PROBE%" 2>nul
 set "RC=%errorlevel%"
-if not exist "%PROBE%" exit /b 0
-for /f "usebackq delims=" %%L in ("%PROBE%") do if not defined TRYEXE (set "TRYEXE=%%L") else set "TRYVER=%%L"
-del "%PROBE%" >nul 2>&1
+if exist "%PROBE%" for /f "usebackq delims=" %%L in ("%PROBE%") do if not defined TRYEXE (set "TRYEXE=%%L") else set "TRYVER=%%L"
+if defined PROBEDIR rmdir /s /q "%PROBEDIR%" >nul 2>&1
 if not defined TRYEXE exit /b 0
 if not exist "%TRYEXE%" exit /b 0
 if not "%RC%"=="0" set "OLDVER=%TRYVER%"
 if not "%RC%"=="0" exit /b 0
 set "PYEXE=%TRYEXE%"
 set "PYVER=%TRYVER%"
+exit /b 0
+
+:new_probe
+rem A folder of this check's own for the probe's answer. cmd seeds %RANDOM% from the clock in
+rem whole seconds, so two windows started in the same second draw the same numbers; mkdir
+rem succeeds for only one of them, and the other simply tries the next name. After 50 misses
+rem (a TEMP that cannot be written) the probe file is never made and the Python is not counted.
+set /a PROBETRIES=0
+:new_probe_try
+set /a PROBETRIES+=1
+set "PROBEDIR=%TEMP%\moonglade_probe_%RANDOM%%RANDOM%"
+mkdir "%PROBEDIR%" >nul 2>&1 && goto :new_probe_made
+if %PROBETRIES% lss 50 goto :new_probe_try
+set "PROBEDIR="
+set "PROBE=%TEMP%\moonglade_probe_unwritable\python.txt"
+exit /b 0
+:new_probe_made
+set "PROBE=%PROBEDIR%\python.txt"
 exit /b 0

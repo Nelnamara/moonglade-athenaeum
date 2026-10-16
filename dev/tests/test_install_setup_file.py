@@ -204,10 +204,60 @@ def test_check_reports_what_it_found_and_installs_nothing():
 
 
 @WINDOWS
-def test_check_leaves_no_probe_file_behind():
-    probe = os.path.join(os.environ.get("TEMP", ""), "moonglade_python_probe.txt")
-    _run(SETUP, "--check")
-    assert not os.path.exists(probe)
+def test_check_leaves_no_probe_file_behind(tmp_path):
+    # Its own TEMP, so another run's probe (a parallel test, a second double-click) can't count.
+    env = dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path))
+    code, out = _run(SETUP, "--check", env=env)
+    assert code == 0, out
+    assert not list(tmp_path.glob("moonglade_probe*")), list(tmp_path.iterdir())
+
+
+def test_each_check_has_its_own_probe_folder():
+    # Two runs at once (a double double-click, or tests in parallel) used to share one fixed probe
+    # file in %TEMP%, so one could read or delete the other's answer. A %RANDOM% name alone is not
+    # enough: cmd seeds %RANDOM% from the clock in whole seconds, so windows started in the same
+    # second draw the same numbers. Each check makes its own folder with mkdir, which succeeds for
+    # one process only, and retries a capped number of times.
+    text = SETUP.read_text(encoding="utf-8")
+    sub = text[text.index(":new_probe"):]
+    assert 'mkdir "%PROBEDIR%"' in sub and "goto :new_probe_try" in sub
+    assert "lss 50" in sub                                         # never loops forever
+    assert 'rmdir /s /q "%PROBEDIR%"' in text                     # and cleans up after reading
+
+
+@WINDOWS
+def test_two_checks_started_together_each_find_their_own_python(tmp_path):
+    """Two setup windows in the same second, each with a different Python first on PATH, must each
+    report their own: the shared probe file let one read the other's answer."""
+    import concurrent.futures as cf
+    pys = []
+    for name in ("one", "two"):
+        venv_dir = tmp_path / ("py " + name)
+        made = subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv_dir)],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=300)
+        py = venv_dir / "Scripts" / "python.exe"
+        if made.returncode != 0 or not py.is_file():
+            pytest.skip("could not make a venv here")
+        pys.append(py)
+    apps = []
+    for name in ("one", "two"):
+        app = tmp_path / ("app " + name)
+        app.mkdir()
+        (app / SETUP.name).write_bytes(SETUP.read_bytes())
+        (app / "requirements.txt").write_text("# none\n", encoding="utf-8")
+        (app / "Moonglade Launcher.pyw").write_text("", encoding="utf-8")
+        apps.append(app)
+    system32 = os.path.join(os.environ["SystemRoot"], "System32")
+    for _round in range(4):
+        with cf.ThreadPoolExecutor(max_workers=2) as pool:
+            futs = [pool.submit(_run, apps[i] / SETUP.name, "--check",
+                                env=dict(os.environ, PATH=str(pys[i].parent) + os.pathsep + system32))
+                    for i in range(2)]
+            results = [f.result() for f in futs]
+        for i, (code, out) in enumerate(results):
+            assert code == 0, out
+            assert _found_path(out) == str(pys[i]), out
 
 
 @WINDOWS
