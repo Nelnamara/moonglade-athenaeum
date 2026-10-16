@@ -113,6 +113,19 @@ class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
 
 
+class PersistedQueryNotRecognized(PixAIError):
+    """PixAI answered a saved (hash-only) request with "not found". Still a PixAIError with
+    the same message as before, so every existing catch site is unchanged; a reader of a
+    read-only query catches this one to retry the same read with its full document."""
+
+
+class HistoryPageRefused(PixAIError):
+    """PixAI refused the history feed on both roads: the saved request was not recognized AND
+    the same read as a full document came back as a GraphQL error. Raised by `history_page`
+    only; a network failure, a 401 or a 5xx on the retry is NOT this (those stay what they
+    were), so a caller that names this one knows PixAI itself answered "no" twice."""
+
+
 class LocalRefusal(PixAIError):
     """Refused HERE, before any network call: READ_ONLY, or the request's own validation.
     Nothing reached PixAI, so a spend guard treats it as a definite refusal
@@ -1735,8 +1748,9 @@ class PixAIClient:
                     r.status_code, r.text[:800]))
             if data.get("errors"):
                 if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                    raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
-                                     "(see RECAPTURE at the bottom of this file).")
+                    raise PersistedQueryNotRecognized(
+                        "Persisted-query hash not recognized. Recapture the hash "
+                        "(see RECAPTURE at the bottom of this file).")
                 print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
                 print(json.dumps(data["errors"], indent=2)[:3000])
                 raise PixAIError("GraphQL error (see log above).")
@@ -1835,6 +1849,44 @@ def gql(session, variables, retries=4):
     """Replay the history-feed persisted query. Thin delegate onto
     `PixAIClient.persisted` -- the road itself lives in the pixai_client section."""
     return _client_of(session).persisted(OPERATION_NAME, variables, retries=retries)
+
+
+# The history feed as a full document: the same page `gql` reads, selecting the same task
+# summary fields, for a reader that must not depend on the saved request being recognized.
+_HISTORY_PAGE_DOC = (
+    "query($userId: ID!, $last: Int, $before: String) { user(id: $userId) { id "
+    "taskSummaries(last: $last, before: $before) { "
+    "pageInfo { hasNextPage hasPreviousPage endCursor startCursor } "
+    "edges { node { id userId status priority runnerId startedAt endAt createdAt paidCredit "
+    "mediaId batchMediaIds i2vProModel characteristics artworkCount promptsPreview "
+    "enrolledExperiment } } } } }")
+
+
+def history_page(session, variables, retries=4):
+    """One page of the history feed, surviving a saved request PixAI does not recognize.
+
+    Reads with `gql` first. If PixAI answers that the saved request is not recognized, the
+    same page is read once more as a full document (`_HISTORY_PAGE_DOC`, same variables,
+    same result shape, so `find_connection` reads either). Returns `(data, via_document)`;
+    `via_document` is True when the retry produced the page. If PixAI answers the retry with
+    a GraphQL error too, that is `HistoryPageRefused`: what `gql_adhoc` really raises there
+    is a plain PixAIError "GraphQL error: ...", never PersistedQueryNotRecognized, so the
+    translation is made here, chained from the original. Any other failure of the retry (a
+    network error, a 401, a 5xx) raises as it would from `gql_adhoc`, and any other failure
+    of the first read raises untouched. Read-only on both roads, so the second attempt costs
+    nothing but a request."""
+    try:
+        return gql(session, variables, retries=retries), False
+    except PersistedQueryNotRecognized:
+        pass
+    try:
+        return gql_adhoc(session, _HISTORY_PAGE_DOC, variables), True
+    except PixAIError as e:
+        if str(e).startswith("GraphQL error"):
+            raise HistoryPageRefused(
+                "PixAI refused the history feed as a saved request and as a full "
+                "document: " + str(e)) from e
+        raise
 
 
 # ---------------------------------------------------------------------------
