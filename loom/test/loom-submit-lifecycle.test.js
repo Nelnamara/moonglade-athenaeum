@@ -4,6 +4,7 @@ import {
   classifySubmit, classifySubmitStatus, submitsToCheck, failRender, markUnclear, abandonSubmit,
   adoptTask, beginRender, landTake, inFlight, needsRender, cancelRender,
   goBlocked, sendUnclear, unsendableRefs, unsendableKind, cardForSubmit, cardForTask,
+  sendHeld, wayOutShown, releaseOffered, STILL_SENDING_MSG, sendingRecheckDelay, SENDING_RECHECK_MS,
 } from "../src/loom-takes-core.js";
 import { cardsToResume, shotPayload, flat } from "../src/loom-core.js";
 
@@ -32,7 +33,14 @@ describe("classifySubmitStatus", () => {
     assert.deepEqual(classifySubmitStatus({ state: "submitted", task_id: "T" }), { kind: "accepted", taskId: "T" });
     assert.equal(classifySubmitStatus({ state: "refused", error: "x" }).kind, "refused");
     assert.equal(classifySubmitStatus({ state: "not_sent" }).kind, "refused");
-    assert.equal(classifySubmitStatus({ state: "sending" }).kind, "unclear");
+    assert.equal(classifySubmitStatus({ state: "sending" }).kind, "unclear",
+      "a journal 'sending' the server does not own (a send that died with an earlier process) keeps its way out");
+    assert.deepEqual(classifySubmitStatus({ state: "sending", sending: true }), { kind: "sending" },
+      "GitHub #86: the server says the request is still running");
+    assert.equal(classifySubmitStatus({ state: "sending", sending: "yes" }).kind, "unclear", "only a literal true counts");
+    assert.equal(classifySubmitStatus({ state: "submitted", task_id: "T", sending: true }).kind, "accepted",
+      "an answered send is accepted whatever the flag says");
+    assert.equal(classifySubmitStatus({ state: "refused", sending: true }).kind, "refused");
     assert.equal(classifySubmitStatus({ state: "may_have_started" }).kind, "unclear");
     assert.equal(classifySubmitStatus({ state: "unknown" }).kind, "unclear");
   });
@@ -57,7 +65,8 @@ describe("failures describe the ★ take (F14)", () => {
   test("a failed retake on a rendered shot leaves it done, with the failure recorded", () => {
     const c = failRender(rendered, { taskId: "T", state: "failed", msg: "content policy", at: "t" });
     assert.equal(c.status, "done");
-    assert.deepEqual(c.lastAttempt, { state: "failed", msg: "content policy", at: "t" });
+    assert.deepEqual(c.lastAttempt, { state: "failed", msg: "content policy", at: "t", submitId: "S" },
+      "the failure names the send it ended, so a stale tab's merge cannot bring that send's marker back");
     assert.equal(c.pendingTaskId, null);
     assert.equal(needsRender(c), false, "Generate all does not pay for it again");
   });
@@ -133,6 +142,49 @@ describe("the Go gate and the paused carve-out (BUILD-w5-p §3.3 step 1, §3.4)"
     assert.equal(sendUnclear(u), true);
     assert.equal(sendUnclear(adoptTask(u, "S", "T")), false, "a task id settles it");
     assert.equal(sendUnclear(abandonSubmit(u, "S", "t")), false, "released");
+  });
+  // GitHub #86: the way-out bar and the release, as the card and this tab's view of it say.
+  test("sendHeld / wayOutShown / releaseOffered: a send the server holds shows ↻ Check and never the release", () => {
+    const out = beginRender({ id: "a" }, { submitId: "S" });         // a reloaded tab: no unclear mark
+    const u = markUnclear(out, "S", "x", "t");
+    const sending = { phase: "sending", held: true, msg: "still sending" };
+    assert.equal(sendHeld(out, sending), true);
+    assert.equal(wayOutShown(out, sending), true, "even a card never marked unclear gets the bar");
+    assert.equal(releaseOffered(out, sending), false);
+    assert.equal(releaseOffered(u, sending), false, "an unclear mark does not bring the release back");
+    assert.equal(wayOutShown(u, sending), true);
+    // Unclear and not held: the bar with the release, exactly as before.
+    const unclear = { phase: "unclear", held: true, msg: "unconfirmed" };
+    assert.equal(sendHeld(u, unclear), false);
+    assert.equal(wayOutShown(u, unclear), true);
+    assert.equal(releaseOffered(u, unclear), true);
+    assert.equal(releaseOffered(u, undefined), true);
+    // A slow send of this tab's own, or a check under way, shows no bar at all.
+    assert.equal(wayOutShown(u, { phase: "checking", held: true, msg: "" }), false);
+    assert.equal(wayOutShown(out, { phase: "checking" }), false);
+    assert.equal(wayOutShown(out, undefined), false);
+    // The view state only counts while the card still waits for that send.
+    assert.equal(sendHeld(adoptTask(out, "S", "T"), sending), false, "a task id settles it");
+    assert.equal(sendHeld(abandonSubmit(out, "S", "t"), sending), false, "released elsewhere");
+    assert.equal(sendHeld({ id: "a" }, sending), false, "no send, nothing held");
+    assert.equal(sendHeld(null, sending), false);
+    assert.equal(releaseOffered(adoptTask(u, "S", "T"), sending), false);
+  });
+  test("sendingRecheckDelay: one check soon, then a few spaced ones, then none (bounded)", () => {
+    assert.deepEqual(SENDING_RECHECK_MS, [3000, 6000, 12000, 20000, 30000]);
+    assert.equal(sendingRecheckDelay(0), 3000, "the first check comes a few seconds after the hold");
+    assert.equal(sendingRecheckDelay(1), 6000);
+    assert.equal(sendingRecheckDelay(SENDING_RECHECK_MS.length - 1), 30000);
+    assert.equal(sendingRecheckDelay(SENDING_RECHECK_MS.length), null, "the budget ends");
+    assert.equal(sendingRecheckDelay(99), null);
+    assert.equal(sendingRecheckDelay(-1), null);
+    assert.equal(sendingRecheckDelay("x"), null);
+    assert.equal(sendingRecheckDelay(undefined), null);
+    assert.ok(SENDING_RECHECK_MS.every((ms, i, a) => ms >= 1000 && (i === 0 || ms >= a[i - 1])), "spaced, never a tight loop");
+  });
+  test("STILL_SENDING_MSG is the Loom's one wording for a send PixAI has not answered", () => {
+    assert.equal(STILL_SENDING_MSG,
+      "Still being sent to PixAI — it can't be released until PixAI answers. Check again in a moment.");
   });
 });
 

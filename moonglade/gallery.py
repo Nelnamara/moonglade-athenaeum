@@ -27013,19 +27013,28 @@ __DESIGN_TOKENS__
         """What the journal knows about one Loom render (Session P, BUILD-w5-p §3.3): the
         client asks this -- never re-POSTs -- when its own POST got no answer. Local only.
         {state: sending | submitted | refused | not_sent | may_have_started | abandoned |
-        unknown, task_id?, error?, finished?}"""
+        unknown, task_id?, error?, finished?, sending?}
+
+        `sending: true` (GitHub #86) is added when the request is still running in THIS
+        process -- the same set submit-abandon consults to refuse a release. The journal's
+        `state: "sending"` alone cannot tell a live send from one that died with an earlier
+        process, so a reloaded tab reads this flag to stop offering a release the server
+        would refuse. A read only: it changes nothing about what submit-abandon allows."""
         user = str(session.get("user") or "")
         sid = str(request.args.get("submit_id") or "")
         if not _LOOM_ID_RE.match(sid):
             return jsonify({"state": "unknown"})
         with _loom_journal_lock:
             e = dict(_loom_journal_load(user)["subs"].get(sid) or {})
+            live = (_account_key(user), sid) in _loom_sending_now
         if not e:
             return jsonify({"state": "unknown"})
         out = {"state": e.get("state") or "unknown"}
         for k in ("task_id", "error", "finished"):
             if e.get(k):
                 out[k] = e[k]
+        if live and out["state"] == "sending":
+            out["sending"] = True
         return jsonify(out)
 
     @app.route("/api/loom/submit-abandon", methods=["POST"])

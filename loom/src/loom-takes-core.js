@@ -142,6 +142,39 @@ export const goBlocked = (card, paused) => {
 export const sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pendingTaskId
   && card.lastAttempt && card.lastAttempt.state === "unclear");
 
+/** What the card says while the SERVER still holds this shot's send (its request is running,
+ *  so PixAI has not answered yet): the one reason a release is not offered. */
+export const STILL_SENDING_MSG = "Still being sent to PixAI — it can't be released until PixAI answers. Check again in a moment.";
+
+/** GitHub #86: this tab learned (submit-status `sending`, or a release the server refused with
+ *  `sending`) that the server's request for this shot's send is still running. `gs` is the
+ *  shot's view state in THIS tab (genState[card.id]); it only counts while the card still
+ *  waits for that send (a submit id, no task). Such a send cannot be released -- the server
+ *  refuses it with a 409 -- so the way-out offers ↻ Check and no release. */
+export const sendHeld = (card, gs) => !!(card && card.pendingSubmitId && !card.pendingTaskId
+  && gs && gs.phase === "sending");
+
+/** GitHub #86 follow-up: a tab that learned the server still holds a shot's send does not wait
+ *  for the owner's ↻ Check -- it asks again by itself, a bounded number of times, with the same
+ *  one journal read ↻ Check makes. The waits (ms) before the 1st, 2nd... automatic re-check:
+ *  one soon after the reload (PixAI usually answers within moments), then a few spaced ones. */
+export const SENDING_RECHECK_MS = [3000, 6000, 12000, 20000, 30000];
+
+/** The wait before the next automatic re-check, given how many have been scheduled for this
+ *  send already; null once the budget is spent (then only the owner's ↻ Check reads again). */
+export const sendingRecheckDelay = (done) => {
+  const n = Number(done);
+  return Number.isInteger(n) && n >= 0 && n < SENDING_RECHECK_MS.length ? SENDING_RECHECK_MS[n] : null;
+};
+
+/** Does the shot's way-out bar show? An unclear send (↻ Check, and a release after Activity)
+ *  or a send the server still holds (↻ Check only). Never while the check itself is running. */
+export const wayOutShown = (card, gs) => (sendUnclear(card) || sendHeld(card, gs))
+  && !(gs && gs.phase === "checking");
+
+/** Is the release offered? Only for an unclear send the server does not hold. */
+export const releaseOffered = (card, gs) => sendUnclear(card) && !sendHeld(card, gs);
+
 /** The pictures of a shot payload the server's render route cannot send (open call 4, review
  *  F16): anything that is neither a catalog id (digits) nor a data: thumbnail -- an imported
  *  `local_` picture above all. Mirrors the server's own test, so the client refuses exactly
@@ -272,6 +305,26 @@ const untomb = (card, mid) => {
 
 /* ---------- a render lands (F1, F4) ---------- */
 
+// The take `n` records the send it answered (a clip another path landed first keeps its own).
+const noteLandedSubmit = (card, n, submitId) => {
+  const sid = str(submitId);
+  if (!sid) return card;
+  return { ...card, takes: (card.takes || []).map((t) => (t.n === n && !t.submitId ? { ...t, submitId: sid } : t)) };
+};
+
+/** Has this board's card RECORDED that the send `submitId` is settled? (the persisted half of
+ *  F6a's resolvedSubmits, which a tab keeps only in memory): a take landed from that send
+ *  (take.submitId, or the ledger entry of that take once deleted), or a failure/release that ended it (lastAttempt.submitId, set by failRender).
+ *  An unclear mark never names its send, so it never counts. */
+export const resolvedSubmitOf = (card, submitId) => {
+  const sid = str(submitId);
+  if (!card || !sid) return false;
+  if (takesOf(card).some((t) => str(t.submitId) === sid)) return true;
+  // A take that landed from that send and was deleted since: deleteTake kept the send's id on its ledger entry.
+  if ((card.attempts || []).some((a) => a && str(a.submitId) === sid)) return true;
+  return !!(card.lastAttempt && str(card.lastAttempt.submitId) === sid);
+};
+
 /**
  * landTake(card, {mid, taskId, dur, at, board}) -> {card, outcome}
  *   outcome "landed"     appended and selected (the render this card is waiting for)
@@ -307,6 +360,7 @@ export const landTake = (card, rep) => {
     let c = withTakes(card);
     const sel = selectedTakeOf(c);
     if (existing.n !== sel) c = selectTake(c, existing.n);
+    c = noteLandedSubmit(c, existing.n, card.pendingSubmitId);
     c = clearPending(c);
     return { card: { ...c, status: "done", lastAttempt: null }, outcome: "repeat" };
   }
@@ -320,6 +374,9 @@ export const landTake = (card, rep) => {
     anchor: isPending ? (card.pendingAnchor || null) : null,
     imported: false, source: "render",
   };
+  // The send this clip answers rides on the take (see resolvedSubmitOf): the markers clear below,
+  // and a stale tab's two-tab merge reads this to know that send is settled.
+  if (isPending && card.pendingSubmitId) take.submitId = str(card.pendingSubmitId);
   if (isPending && card.pendingQuote) take.quoted = card.pendingQuote;
   const withTake = untomb({ ...c0, takes: c0.takes.concat([take]), takeSeq: n }, mid);
   if (!isPending) return { card: withoutSuperseded(withTake, taskId), outcome: "unselected" };
@@ -411,8 +468,17 @@ export const deleteTake = (card, n, at) => {
   if (!t) return { card, refused: "missing" };
   const mid = str(t.mid);
   const had = c.attempts || [];
-  const attempts = (!t.imported && mid && !had.some((a) => a && str(a.media_id) === mid))
-    ? had.concat([{ media_id: mid, at: str(at) }]) : had;
+  // The ledger entry also names the send this clip answered (take.submitId), so deleting the take
+  // does not erase the record that send is settled (resolvedSubmitOf reads it for a stale tab's merge).
+  const sid = str(t.submitId);
+  let attempts = had;
+  if (!t.imported && mid) {
+    if (!had.some((a) => a && str(a.media_id) === mid)) {
+      attempts = had.concat([sid ? { media_id: mid, at: str(at), submitId: sid } : { media_id: mid, at: str(at) }]);
+    } else if (sid) {
+      attempts = had.map((a) => (a && str(a.media_id) === mid && !a.submitId ? { ...a, submitId: sid } : a));
+    }
+  }
   const tomb = (c.deletedTakes || []).includes(mid) ? (c.deletedTakes || []) : (c.deletedTakes || []).concat([mid]);
   return { card: { ...c, takes: c.takes.filter((x) => x.n !== n), attempts, deletedTakes: tomb } };
 };
@@ -542,8 +608,11 @@ export const failRender = (card, rep) => {
     }
     return card;
   }
+  const sid = str(r.submitId || card.pendingSubmitId);
   const c = clearPending(card);
-  return { ...c, status: settledStatus(c), lastAttempt: { state: str(r.state || "failed"), msg: str(r.msg), at: str(r.at) } };
+  const lastAttempt = { state: str(r.state || "failed"), msg: str(r.msg), at: str(r.at) };
+  if (sid) lastAttempt.submitId = sid;     // so a stale tab's merge cannot bring this send's marker back
+  return { ...c, status: settledStatus(c), lastAttempt };
 };
 
 /** An unclear send (no answer, or an answer that said the render may have started): the
@@ -573,11 +642,16 @@ export const classifySubmit = ({ threw, status, body } = {}) => {
   return { kind: "refused", error: str(body.error || "submit failed") };
 };
 
-/** The submit-status answer as the card should take it. */
+/** The submit-status answer as the card should take it.
+ *  "sending" is its own kind ONLY when the server says the request is live in its process
+ *  (`sending: true`, GitHub #86): that is a send the server will not let anyone release. A
+ *  journal "sending" without the flag (a send that died with an earlier process, or an older
+ *  server that does not say) stays UNCLEAR, so the owner still has the way out. */
 export const classifySubmitStatus = (body) => {
   const b = body || {};
   if (b.state === "submitted" && b.task_id) return { kind: "accepted", taskId: str(b.task_id) };
   if (b.state === "refused" || b.state === "not_sent" || b.state === "abandoned") return { kind: "refused", error: str(b.error) };
+  if (b.state === "sending" && b.sending === true) return { kind: "sending" };
   return { kind: "unclear", state: str(b.state || "unknown") };
 };
 
@@ -789,7 +863,9 @@ const cardsById = (project) => {
  *    holds as a take (spend review S2: a re-attached clip, an older build's re-roll);
  *  - ★ stays remote's unless remote has none;
  *  - a local pending marker is kept only when remote has no take for that task, has no
- *    render of its own in flight, and the submit is not known to be resolved (F6);
+ *    render of its own in flight, and the submit is not known to be resolved (F6) -- by this
+ *    tab (resolvedSubmits) or by remote's own record: a take landed from that send, or the
+ *    failure / release that ended it (resolvedSubmitOf);
  *  - a card only local has is kept, in its act (or the first), only when it holds a clip that
  *    landed HERE: a take whose clip is on no card of the remote board and was not on that card
  *    in `base` (the board this tab last read or wrote). Without that check a shot the other tab
@@ -869,7 +945,11 @@ export const mergeBoards = (local, remote, opts) => {
     const lpTask = str(lc.pendingTaskId), lpSub = str(lc.pendingSubmitId);
     const remoteBusy = !!(rc.pendingTaskId || rc.pendingSubmitId);
     const taskLanded = lpTask && takesOf(out).some((t) => str(t.taskId) === lpTask);
-    if ((lpTask || lpSub) && !remoteBusy && !taskLanded && !(lpSub && resolved.has(lpSub))) {
+    // A send the OTHER side already settled is not brought back: this tab's in-memory `resolved`
+    // set only knows what THIS tab saw end, so remote's own record counts too -- a take landed
+    // from that send, or a failure / release that ended it (resolvedSubmitOf).
+    const subSettled = !!lpSub && (resolved.has(lpSub) || resolvedSubmitOf(out, lpSub));
+    if ((lpTask || lpSub) && !remoteBusy && !taskLanded && !subSettled) {
       PENDING.forEach((k) => { if (lc[k] != null) out = { ...out, [k]: lc[k] }; });
       out = { ...out, status: "wip" };
     }
