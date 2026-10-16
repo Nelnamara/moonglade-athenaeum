@@ -380,7 +380,8 @@ so you can bookmark one, and the browser's Back button closes it.
 
   Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
   with `python -m moonglade --rebuild-similar` (run that while the gallery isn't
-  serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
+  serving Similar queries — both use the same embedded database, and both are heavy: don't
+  run them beside GPU- or RAM-heavy programs). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
   view just tells you so; nothing else breaks.
 
 Scroll position and your selections are preserved when you open an image and come

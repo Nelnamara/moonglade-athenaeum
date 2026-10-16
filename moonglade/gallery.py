@@ -8899,7 +8899,8 @@ LIVING_JOBS = (
     {"action": "reconcile-deleted", "interval_s": 7 * 86400.0, "enabled": True,
      "label": "Reconcile deleted", "note": "weekly — flags rows whose task is gone from PixAI"},
     {"action": "sync-similar", "interval_s": 24 * 3600.0, "enabled": True, "needs": "torch",
-     "label": "Top up Similar", "note": "nightly, when the ML stack is installed"},
+     "label": "Top up Similar",
+     "note": "nightly, when the ML stack is installed. Heavy: don't run it beside GPU- or RAM-heavy programs."},
 )
 # THE STALENESS BACKSTOP (owner call 5). These three are the scope's "safe but wasteful on
 # a timer" row: full re-walk, rebuild Similar, rebuild thumbnails. They have no incremental
@@ -8915,7 +8916,8 @@ LIVING_STALE_JOBS = (
     {"action": "resync-full", "interval_s": STALE_BACKSTOP_S, "enabled": True,
      "label": "Full re-walk", "note": "only if it has not run in 60 days"},
     {"action": "rebuild-similar", "interval_s": STALE_BACKSTOP_S, "enabled": True,
-     "needs": "torch", "label": "Rebuild Similar", "note": "only if it has not run in 60 days"},
+     "needs": "torch", "label": "Rebuild Similar",
+     "note": "only if it has not run in 60 days. Heavy: don't run it beside GPU- or RAM-heavy programs."},
     {"action": "rebuild-thumbs", "interval_s": STALE_BACKSTOP_S, "enabled": True,
      "label": "Rebuild ALL thumbnails", "note": "only if it has not run in 60 days"},
 )
@@ -13941,10 +13943,12 @@ def create_app(out_dir: Path):
         # cannot lose existing rows. After an interrupted build the top-up resumes -- reaching for
         # rebuild there costs ~3x the time AND discards every row that survived.
         "sync-similar":  {"args": ["--sync-similar"],
-                          "label": "Top up the Similar index (adds only what's missing)",
+                          "label": "Top up the Similar index (adds only what's missing; "
+                                   "heavy: don't run it beside GPU- or RAM-heavy programs)",
                           "destructive": False},
         "rebuild-similar": {"args": ["--rebuild-similar"],
-                            "label": "Rebuild the Similar index (slow, needs pixeltable)",
+                            "label": "Rebuild the Similar index (slow, needs pixeltable; "
+                                     "heavy: don't run it beside GPU- or RAM-heavy programs)",
                             "destructive": False},
         # Same trust class as sync-similar/rebuild-similar just above: computes and writes
         # a catalog column only (phash), no image files touched, so not destructive despite
@@ -18354,7 +18358,8 @@ def create_app(out_dir: Path):
                                 enote = core.embed_metadata(work, {
                                     "prompt": row.get("prompt_full") or row.get("prompt") or "",
                                     "media_id": mid, "task_id": row.get("task_id") or "",
-                                    "model": row.get("model") or "", "seed": row.get("seed") or "",
+                                    "model": row.get("model_name") or row.get("model_id") or "",
+                                    "seed": row.get("seed") or "",
                                     "date": row.get("created_at") or ""})
                                 if enote != "ok":
                                     warnings.append("{}: embed prompt -> {} (not embedded)"
@@ -20065,13 +20070,12 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_account_credit_log():
         """Full credit movement history (purchase/gift/spend/refund). Newest-first;
-        BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
+        BACKWARD-paginated via ?before=<cursor>. Read-only."""
         try:
             core, session = _gen_session()
             before = request.args.get("before") or None
-            reason = request.args.get("reason") or None
             return jsonify(core.list_credit_log(session, last=_acct_count(30),
-                                                before=before, reason=reason))
+                                                before=before))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 

@@ -343,7 +343,9 @@ Similar index**).
 | `--sync-similar` | tops up the **Similar** index — embeds only the images it doesn't have yet. This is the one you normally want: it can't lose existing rows, and after an interrupted build it resumes instead of starting over. |
 | `--rebuild-similar` | drops the Similar index and re-embeds every image from your files. Only for an index that is actually broken (wrong or duplicated results). No network. |
 
-Both Similar commands need the optional `torch` and `pixeltable` packages.
+Both Similar commands need the optional `torch` and `pixeltable` packages. Both are heavy:
+don't run either one beside GPU- or RAM-heavy programs, because the index build holds a
+large working set in memory.
 
 ## Account: credits, coupons & cards (read-only)
 
@@ -359,7 +361,6 @@ python -m moonglade --card-history           # recent benefit-card history (uses
 | Modifier | Applies to | Effect |
 |---|---|---|
 | `--credit-log-count N` | `--credit-log` | how many recent entries to show (default 30) |
-| `--credit-log-reason TYPE` | `--credit-log` | filter to one raw type (e.g. `task_cost`, `daily`, `event_gift`, `extra_package`) |
 | `--credit-log-before CURSOR` | `--credit-log` | page further back using a cursor printed by a previous run |
 | `--coupons-history` | `--coupons` | show the past (redeemed + expired) view instead of what you hold now |
 | `--card-history-all` | `--card-history` | page all the way back and print every card TYPE ever used |
