@@ -67,6 +67,15 @@ def config_path():
     return APP_ROOT / "config.json"
 
 
+def decode_text(raw):
+    """The text of a hand-editable JSON file's bytes (config.json): UTF-8, a byte order mark
+    read through (an editor or PowerShell 5.1 can write one), or UTF-16 with its mark (what
+    PowerShell 5.1's `>` writes). Raises UnicodeDecodeError (a ValueError) for anything else."""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig")
+
+
 def token_paths():
     """Where the legacy token.txt credential is looked for, in order: beside the app, then
     the working directory (the same rule config.json keeps)."""

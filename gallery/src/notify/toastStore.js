@@ -19,6 +19,9 @@
                toast that asks a question (the narrator's choice). Pressing one runs it and
                dismisses the toast; `tone: "ruby"` draws it in the destructive/spicy red.
                Ignored when `action` is given.
+       onClose: called once when the toast goes (the ×, a button on it, or its remove()): the
+              server's "Fix them" notice is only written down as seen when it is acted on or
+              dismissed, never merely because a tab happened to show it
        foot: a small line under the buttons (the choice's "you can change this later")
        quote: a block of quoted text under the title, clamped at six lines with a fade (the
               reply's question quotes the reply in full -- Sessions R + Y, R6c)
@@ -46,6 +49,7 @@ export function dismiss(id) {
   t.out = true;                                  // plays mg-toast-out
   toasts = toasts.slice();
   emit();
+  if (typeof t.onClose === "function") { try { t.onClose(); } catch { /* its own */ } }
   setTimeout(() => {
     toasts = toasts.filter((x) => x.id !== id);  // unmount after the 340ms exit
     emit();
@@ -70,6 +74,7 @@ export function show(o) {
       ? o.actions.filter((a) => a && typeof a.run === "function").slice(0, 2)
         .map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" }))
       : [],
+    onClose: typeof o.onClose === "function" ? o.onClose : null,
     foot: o.foot ? String(o.foot) : "",
     quote: o.quote ? String(o.quote) : "",
     wide: !!o.wide,

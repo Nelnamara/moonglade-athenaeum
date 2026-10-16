@@ -264,8 +264,10 @@ def _load_config():
     if not cfg_path.exists():
         return {}
     try:
-        with open(cfg_path, encoding="utf-8") as f:
-            return json.load(f)
+        # Read the way the move reads it (paths.decode_text): a byte order mark or a UTF-16
+        # file (PowerShell 5.1's `>`) is the same config, not an empty one -- an empty one
+        # would drop /login into bootstrap mode.
+        return json.loads(_paths.decode_text(cfg_path.read_bytes()))
     except (ValueError, OSError) as e:
         print("Warning: could not read config.json: {}".format(e))
         return {}
@@ -18161,8 +18163,15 @@ def main():
     # line never moves a library's files (X1): one still in an older Moonglade's layout stops
     # the command with a plain sentence, as does a move that cannot finish.
     from moonglade import setup as moonglade_setup
+    # --list-web-users and --add-web-user read and write config.json alone, so the library is
+    # not checked for them (an older layout, or an older Moonglade still writing it, must not
+    # block them). --remove-web-user does touch the library (it deletes the login's folder
+    # there), so it keeps every check. The dispatch below runs list, then remove, then add.
+    accounts_only = bool(args.list_web_users or
+                         (args.add_web_user and not args.remove_web_user))
     try:
-        prepared = moonglade_setup.prepare("cli", explicit_out=args.out)
+        prepared = moonglade_setup.prepare("cli", explicit_out=args.out,
+                                           library_half=not accounts_only)
     except moonglade_setup.MoveStopped as e:
         sys.exit(str(e))
     args.out = str(prepared.library)

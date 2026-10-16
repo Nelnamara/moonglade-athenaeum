@@ -258,7 +258,7 @@ def test_the_command_line_refuses_a_library_still_in_an_older_layout(r, monkeypa
     write_config(r)
     settings.set_values(library_dir=str(r.lib))
     write(r.lib / "jobs.jsonl", '{"id": 1}\n')
-    monkeypatch.setattr(sys, "argv", ["moonglade", "--list-web-users"])
+    monkeypatch.setattr(sys, "argv", ["moonglade", "--catalog-stats"])
     with pytest.raises(SystemExit) as e:
         core.main()
     assert "older Moonglade's layout" in str(e.value.code)

@@ -101,7 +101,10 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
 
 - *"The library … is still in an older Moonglade's layout."* A command line, the Claude tools
   and a run that names its own library (`--out`) never move a library's files. Open the library
-  once with its own install's launcher (updated to 3.20), then run the command again.
+  once with its own install's launcher (updated to 3.20), then run the command again. Where
+  there is no launcher (a server on Linux, a systemd unit, a scheduled task that passes `--out`),
+  set `library_dir` in `local\settings.json` to that library and start the server once without
+  `--out`: it moves the library, and the unit can carry on as before.
 - *"An older Moonglade is still using the library …"* An older install wrote to the library's
   old places after the move. Stop it with **Stop server** in its Control Panel, or end its
   `python` or `pythonw` process: closing its browser tab doesn't stop it. Turn off its scheduled
@@ -114,6 +117,11 @@ ten minutes or was stopped from the Control Panel). Nothing is left for you to d
   Moonglade, close the program that has the log open. Then start again. Nothing was moved. To
   see which program has it, open **Resource Monitor** (search for it in the Start menu), go to
   the **CPU** tab, and under **Associated Handles** search for `moonglade.log`.
+- *"… won't read as what it should be: it fails its own check."* A file in the library's
+  `_moonglade\` is damaged (a write that was cut short), and an older Moonglade wrote a newer
+  copy that the move can't merge into it. Delete the damaged file, or restore it from a backup,
+  and start again: the move brings the older copy in as the new one. (An empty file needs
+  neither; it is read as empty.) The sentence names the safety copy that holds the older file.
 - *"Moonglade's settings file … is damaged"* or *"can't read its settings file"*: Moonglade
   won't guess which library to open, or write over the file. Close whatever has
   `local\settings.json` open, or fix the file (it is plain JSON), and start again.
@@ -127,6 +135,13 @@ When the gallery can't start, the launcher shows that sentence in a message box.
 the launcher that was running can't find the files it used to start. Double-click **Moonglade
 Launcher** in the program's folder once. That start re-points your Desktop and Start-menu
 shortcuts to it, icon and all.
+
+**A `config.json` restored from before 3.20.** If it still holds `LIBRARY_DIR`, `HOST`, `PORT`,
+`BONJOUR_ENABLED`, `BONJOUR_NAME` or `MIRROR_TO_PIXAI`, the next start reads them as an older
+install's settings, brings them into `local\settings.json` where they win over what is there
+(the library folder, and the **Mirror to PixAI** switch, which decides which account a create
+uses, included), and removes them from `config.json`. After restoring one, look at those
+settings in the Control Panel.
 
 **A launch switch you kept in `serve.txt`** (`--https`, `--skip-thumbs`, `--allow-port-reuse`,
 `-v`) still applies at every start: it is in `local\settings.json`, under `launch_args`. To add

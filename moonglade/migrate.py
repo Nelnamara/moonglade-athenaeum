@@ -28,7 +28,10 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     Nothing is ever renamed across folders or volumes. An interrupted move is finished by the
     next start: a leftover temp is this module's own and is discarded, and a destination the
     journal says the move made is trusted. Every swap (_replace) waits out a refusal Windows
-    gives for a moment (a scan, the indexer, OneDrive), as every delete does.
+    gives for a moment (a scan, the indexer, OneDrive), as every delete does. A long run of
+    plain renames (a Loom folder of thousands of frames) is journalled in groups, one write
+    before and one after each group, never two writes per file (_rename_group): a group cut
+    short is settled file by file by the next start, as one file was.
   * CONFLICTS, AT THE FIRST MOVE. A copy in the new place wins only when the journal says the
     move made it: the old copy is still the very bytes it copied (and is simply removed), or
     was written after the move made the new home -- it sits at the very old place the move
@@ -38,9 +41,15 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     aside for it. Any other two-copy case:
     JSONL and other append-only line files are merged (lines the other lacks are appended); the
     counters and sets of telemetry.json, achievements.json and the spend guard are merged where
-    the format allows; anything else keeps the newer copy and parks the other in
-    .snapshot\\parked\\, with a log line. Nothing is deleted on a guess. (Two copies with the
-    same bytes are one.)
+    the format allows; runs.db (the Runs and their spend reservations) in both places is
+    folded run by run (_two_dbs), the kept one whole; anything else keeps the newer copy and
+    parks the other in .snapshot\\parked\\, with a log line -- except a login's file named by
+    the login's plain name (before the hashed keys), which no version since has read: the
+    hashed file is the live one whatever the two times say (a copy tool resets them), so the
+    plain-name one is the one parked. Nothing is deleted on a guess: the art pack at the old
+    place is compared with the one in local\\ first, and parked when it differs. (Two copies
+    with the same bytes are one.) A merge is made from the new home as it is read, and made
+    again if it changed before the swap (_merge_into: a second PC's server may write it).
   * AFTER THE MOVE HAS FINISHED, THE NEW HOME ALWAYS WINS (_fold_in). An old-layout file
     written later -- by an older install still on the library, or by a version gone back to --
     holds only that install's additions (the move had emptied its homes), so it never replaces
@@ -51,19 +60,26 @@ The rules (each one is a test in dev/tests/test_move_*.py):
     added), the spend guard entry by entry, whichever blocks longer; runs.db (the Runs and
     their spend reservations) run by run, inside the new home itself under SQLite's write
     lock, after both files pass their integrity check -- a run both hold keeps the new home's
-    rows whole, and the older copy's is named in the log; integrity_marks.json mark by mark, a
-    login's stores key by key, and the Loom's cast library and boards inside the JSON text the
-    Loom keeps in each file -- on a clash the new home's value stays and the older one is
-    logged, except a board: one both copies changed is kept whole beside its new home under a
-    key of its own, so no card or render record of either is lost. What can't be merged is set
-    aside and named in the log; a Loom value that can't is kept beside its new home under a key
-    of its own, outside the snapshot. When the NEW home is the side that won't read, the start
-    stops and names it: the healthy older copy is never set aside.
+    rows whole, and the older copy's is named in the log; integrity_marks.json mark by mark
+    (a clash goes to the LATER choice, by the mark's own time -- the person's last word; one
+    with no time to compare keeps the new home's), a login's stores key by key, and the Loom's
+    cast library and boards inside the JSON text the Loom keeps in each file -- on a clash the
+    new home's value stays and the older one is logged, except a board: one both copies changed
+    is kept whole beside its new home under a key of its own, so no card or render record of
+    either is lost. What can't be merged is set aside and named in the log; a Loom value that
+    can't is kept beside its new home under a key of its own, outside the snapshot. When the
+    NEW home is the side that won't read, the start stops and names it: the healthy older copy
+    is never set aside. An EMPTY new home (a write cut short before its first byte: the app
+    reads it as empty) holds nothing to lose, so the older copy becomes the new home; a record
+    saved with a byte order mark reads as it is; a line file is lines whatever its bytes.
   * THE SNAPSHOT (the owner's pick 4). Before a run moves, removes or parks anything, the small
     records it is about to touch are zipped into its half's .snapshot\\ (one zip per run that has
     work, so every later sweep is covered too) -- never pictures, catalog.db, the art pack, the
-    logs, a cache, or the Mirror's sign-in (a stale token is a credential lying around). Parked
-    copies go beside the zip. Once the move has finished, the journal counts clean server
+    logs, a cache, or the Mirror's sign-in (a stale token is a credential lying around). A small
+    file named like a temp (.lock, .part, .tmp) that is about to be removed goes in too: a
+    person's own file can carry such a name (only the bulky scratch of a render is not kept). A
+    record whose modified time a zip cannot hold (before 1980) is stored at the nearest date it
+    can. Parked copies go beside the zip. Once the move has finished, the journal counts clean server
     starts -- a server that served for a while, or was stopped cleanly (count_clean_start,
     called by the server, never by prepare) -- and the first one after a run that moved
     anything does not count. At CLEAN_STARTS the app deletes .snapshot\\.
@@ -144,6 +160,7 @@ import shutil
 import socket
 import sqlite3
 import stat
+import struct
 import sys
 import tempfile
 import time
@@ -688,6 +705,12 @@ class FolderLock:
             made = float(parts[2]) if len(parts) > 2 else None
         except ValueError:
             made = None
+        # A lock this very process holds right now (another thread of it: the server's
+        # clean-start timer against Fix them's reset, the launcher's shortcut thread) is live,
+        # whatever _pid_alive says of its own number below.
+        if pid == os.getpid() and any(lk.held and lk.token.encode("utf-8") == seen.strip()
+                                      for lk in list(_HELD)):
+            return False, seen
         # The process first (#6): the boot time follows this PC's clock, so a clock stepped
         # forward after a live start made its lock would read it as made before the last boot.
         if not _pid_alive(pid):
@@ -798,15 +821,25 @@ class FolderLock:
                 pass
 
     def release(self):
+        """Give the lock up. The file is removed only while it still holds this one's own
+        line, and a refusal Windows gives for a moment (a scanner, OneDrive or the indexer
+        opening the file) is tried again like every other delete (REMOVE_TRIES): a lock left
+        behind with a live server's pid would make every CLI, MCP and Control Panel job wait
+        out LOCK_WAIT_S and stop until that server restarted."""
         if self.held:
             self.held = False
             if self in _HELD:
                 _HELD.remove(self)
-            try:
-                if self.path.read_text(encoding="utf-8") == self.token:
-                    os.remove(self.path)
-            except (OSError, UnicodeDecodeError):
-                pass
+            for attempt in range(REMOVE_TRIES):
+                try:
+                    if self.path.read_text(encoding="utf-8") == self.token:
+                        os.remove(self.path)
+                    return
+                except PermissionError:
+                    if attempt + 1 < REMOVE_TRIES:
+                        time.sleep(REMOVE_BACKOFF_S * (2 ** attempt))
+                except (OSError, UnicodeDecodeError):
+                    return
 
     def __enter__(self):
         return self if self.held else self.acquire()
@@ -1056,6 +1089,9 @@ def _plan_link_targets(moves, removals):
     the very place it names: right while the plan leaves that place alone, and pointing at an
     emptied, pruned old folder when the plan takes it (round 3 #9). That one stops the start,
     before anything moves."""
+    if not any(kind == "link" or _is_link(src) for src, _d, kind, _v in moves):
+        return {}, {}                            # no link moves: nothing to point (and the
+        #                                          realpath of every file would cost seconds)
     homes = {os.path.normcase(_real_entry(s)): _real_entry(d)
              for s, d, _k, _v in moves if _movable(s)}
     removed = {os.path.normcase(_real_entry(p)) for p in removals}
@@ -1286,6 +1322,15 @@ def _same(a, b):
         return False
 
 
+def _same_bytes(a, b):
+    """Do the files `a` and `b` hold the same bytes? (An unreadable one is "no": the caller
+    then keeps both.)"""
+    try:
+        return os.stat(a).st_size == os.stat(b).st_size and _sha256(a) == _sha256(b)
+    except OSError:
+        return False
+
+
 def _db_counts(p):
     """{table: rows} for a SQLite file that passes PRAGMA integrity_check, else None. A file
     that is busy or can't be opened (sqlite3.OperationalError: locked by another program, no
@@ -1436,6 +1481,10 @@ class _Half:
         # The target each relative symbolic link the plan moves must hold at its new home
         # (_plan_link_targets: None for one renamed as it is), by its old path.
         self.link_targets = {}
+        # The login files named by the login's plain name (before the hashed keys), by their
+        # old path (normcased): a version before 3.10 wrote them and nothing since has read
+        # them, so where one meets the live hashed file it is the one set aside.
+        self.plain_names = set()
 
     def rel(self, p):
         p = Path(p)
@@ -1605,18 +1654,43 @@ def _merge_guard(a, b, b_newer):
     return out
 
 
+def _read_lines(p):
+    """The lines of a line file (JSONL, a CSV), cut at "\\n" and nothing else. str.splitlines()
+    also cuts at U+2028, U+2029 and U+0085, which a JSON line written with ensure_ascii=False
+    (raw_tasks.jsonl) can hold inside a string: that rewrote one record as two invalid halves.
+    Bytes that are not UTF-8 (a torn write) come back as surrogate escapes and go out again
+    byte for byte (_lines_bytes), so a damaged line file is still a mergeable one."""
+    text = Path(p).read_bytes().decode("utf-8", errors="surrogateescape")
+    text = text.replace("\r\n", "\n")
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def _lines_bytes(lines):
+    """The bytes of `lines` as a file: each ended by "\\n" (see _read_lines)."""
+    text = "\n".join(lines)
+    return (text + "\n" if text else "").encode("utf-8", errors="surrogateescape")
+
+
+def _read_json(p):
+    """The JSON document in the file `p`. A byte order mark is read through (a record saved by
+    hand in an editor or by PowerShell 5.1 carries one); the file is never rewritten with it.
+    Raises ValueError (UnicodeDecodeError included) or OSError."""
+    return json.loads(Path(p).read_text(encoding="utf-8-sig"))
+
+
 def _merged_bytes(src, dest, kind):
     """The merged content for `dest` (bytes), or None when the two cannot be merged."""
     if kind == "lines":
-        a = dest.read_text(encoding="utf-8").splitlines()
-        b = src.read_text(encoding="utf-8").splitlines()
+        a, b = _read_lines(dest), _read_lines(src)
         have = set(a)
         extra = [ln for ln in b if ln not in have]
-        text = "\n".join(a + extra)
-        return (text + "\n" if text else "").encode("utf-8")
+        return _lines_bytes(a + extra)
     if kind.startswith("json:"):
-        a = json.loads(dest.read_text(encoding="utf-8"))
-        b = json.loads(src.read_text(encoding="utf-8"))
+        a = _read_json(dest)
+        b = _read_json(src)
         if not isinstance(a, dict) or not isinstance(b, dict):
             return None
         b_newer = src.stat().st_mtime > dest.stat().st_mtime
@@ -1632,11 +1706,12 @@ def _merged_bytes(src, dest, kind):
 
 # ---- after the library's move has finished: the new home always wins ----------------------------
 def _under(p, folder):
-    try:
-        Path(p).relative_to(folder)
-        return True
-    except ValueError:
-        return False
+    """Is `p` the folder `folder` or inside it? Compared as text (the way the platform compares
+    paths): it runs for every file a large Loom folder moves, where Path.relative_to cost
+    seconds."""
+    a = os.path.normcase(os.path.normpath(str(p)))
+    b = os.path.normcase(os.path.normpath(str(folder)))
+    return a == b or a.startswith(b.rstrip("\\/") + os.sep)
 
 
 def _settled_kind(kind, dest, loom_kv=None):
@@ -1680,13 +1755,33 @@ def _union_new_wins(a, b):
     return None, []
 
 
+def _mark_later(theirs, mine):
+    """Is the mark `theirs` {mark, at} set after `mine`, by the times they carry (UTC, ISO)?
+    False when either has none to compare: the new home's then stays."""
+    if not isinstance(theirs, dict) or not isinstance(mine, dict):
+        return False
+    t, m = theirs.get("at"), mine.get("at")
+    return isinstance(t, str) and isinstance(m, str) and t > m
+
+
 def _union_marks(a, b):
     """integrity_marks.json ({"format", "marks": {media id: {mark, at}}}): every media id's
-    mark from both copies, the new home's where both hold one (a clash)."""
+    mark from both copies. Where both hold one and they differ (a clash) the LATER choice wins,
+    by the mark's own `at` -- a mark the older copy's install set after the move is the
+    person's last word, and an older copy restored from a backup has an older `at` and loses.
+    Where neither time can be compared, the new home's stays. The clashes returned are the
+    older values that lost."""
     if not isinstance(a, dict) or not isinstance(b, dict) \
             or not isinstance(a.get("marks"), dict) or not isinstance(b.get("marks"), dict):
         return None, []
     marks, clashes = _union_new_wins(a["marks"], b["marks"])
+    lost = []
+    for k, v in clashes:
+        if _mark_later(v, a["marks"].get(k)):
+            marks[k] = v
+        else:
+            lost.append((k, v))
+    clashes = lost
     out = dict(a)
     out["marks"] = marks
     for k, v in b.items():
@@ -1772,8 +1867,8 @@ def _loom_kv_merged(src, dest):
     won't read."""
     from urllib.parse import unquote
     key = unquote(Path(dest).stem)
-    a_outer = json.loads(dest.read_text(encoding="utf-8"))
-    b_outer = json.loads(src.read_text(encoding="utf-8"))
+    a_outer = _read_json(dest)
+    b_outer = _read_json(src)
     if a_outer == b_outer:
         return dest.read_bytes(), []
     if key == LOOM_ACTIVE_KEY:
@@ -1842,17 +1937,24 @@ def _settled_bytes(src, dest, how):
         return _merged_log(src, dest), []
     if how != "lines" and not how.startswith("json:"):
         return None, []
+    if how == "lines":                                   # any bytes are lines: never a broken home
+        return _merged_bytes(src, dest, "lines"), []
     try:                                                 # the new home first: is it the failing side?
-        a = dest.read_text(encoding="utf-8")
-        if how != "lines":
-            a = json.loads(a)
+        raw = dest.read_bytes()
+        blank = not raw.strip()
+        a = None if blank else json.loads(raw.decode("utf-8-sig"))
     except (ValueError, UnicodeDecodeError):
         raise _NewHomeBroken(dest)
-    if how == "lines":
-        return _merged_bytes(src, dest, "lines"), []
+    if blank:
+        # An empty new home (a write cut short before its first byte): the app reads it as
+        # empty, so it holds nothing the older copy could overwrite, and the older copy
+        # (which must read -- if it does not, that is the older copy's failure, set aside by
+        # the caller, never the new home's) becomes the new home: not a stop on every start.
+        _read_json(src)
+        return src.read_bytes(), []
     if how == "json:loom":
         return _loom_kv_merged(src, dest)
-    b = json.loads(src.read_text(encoding="utf-8"))
+    b = _read_json(src)
     clashes = []
     if how == "json:keys":
         doc, clashes = _union_new_wins(a, b)
@@ -1861,7 +1963,9 @@ def _settled_bytes(src, dest, how):
     elif not isinstance(a, dict) or not isinstance(b, dict):
         doc = None
     elif how == "json:achievements":
-        doc = _merge_achievements(a, b, b_newer=False)       # the new home's skin
+        # The new home's skin stays; the older copy's fills in only where the new home has
+        # none (a skin an older install picked is not dropped for a home that never chose one).
+        doc = _merge_achievements(a, b, b_newer=not a.get("skin"))
     elif how == "json:guard":
         doc = _merge_guard(a, b, False)                      # more guarding, never less
     elif how == "json:telemetry":
@@ -2082,17 +2186,43 @@ def _park(path, half, said=True):
     return target
 
 
-def _swap_in(tmp, dest, half, key, src_hash, merged_sha):
-    """Swap the verified temp `tmp` in over `dest`, journalled first (verified, then made)."""
-    half.journal.items[key] = {"src": None, "src_sha256": src_hash, "sha256": merged_sha,
-                               "state": "verified", "time": _now(), "merged": True}
+class _Changed(Exception):
+    """The new home changed between reading it to merge and swapping the merge in: another
+    program (a second PC's server on a shared library) wrote it meanwhile."""
+
+
+MERGE_TRIES = 5      # a merge is made again this many times when its new home changes under it
+
+
+def _stamp(p):
+    """(size, modified time in ns) of the file `p`, or None: what a merge was made from."""
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def _swap_in(tmp, dest, half, key, src_hash, merged_sha, expect=None, src_size=None):
+    """Swap the verified temp `tmp` in over `dest`, journalled first (verified, then made).
+    `expect`: the (size, time) `dest` had when the merge was read (_stamp); if it has changed
+    by the moment of the swap, nothing is swapped and _Changed is raised (_merge_into reads it
+    again), so a line another program appended meanwhile is not written over."""
+    entry = {"src": None, "src_sha256": src_hash, "sha256": merged_sha,
+             "state": "verified", "time": _now(), "merged": True}
+    if src_size is not None:
+        entry["src_size"] = src_size
+    half.journal.items[key] = entry
     half.journal.save()
+    if expect is not None and _stamp(dest) != expect:
+        _discard(tmp)
+        raise _Changed(str(dest))
     _replace(tmp, dest)
     _fsync_dir(dest.parent)
     half.journal.made(key)
 
 
-def _replace_with(dest, data, half, key, src_hash):
+def _replace_with(dest, data, half, key, src_hash, expect=None, src_size=None):
     """Write merged bytes over `dest` safely and record the move made it."""
     tmp = dest.with_name(dest.name + MOVING_SUFFIX)
     _discard(tmp)
@@ -2103,7 +2233,28 @@ def _replace_with(dest, data, half, key, src_hash):
     if tmp.read_bytes() != data:
         _discard(tmp)
         raise _Failed("couldn't write the merged %s" % dest)
-    _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest())
+    _swap_in(tmp, dest, half, key, src_hash, hashlib.sha256(data).hexdigest(),
+             expect=expect, src_size=src_size)
+
+
+def _merge_into(dest, half, key, src_hash, compute, src_size=None):
+    """Merge into the file `dest`: compute() reads it (and the older copy) and returns
+    (the merged bytes or None, extra); the bytes are written over it. If `dest` changed while
+    that was being worked out, the merge is read and made again (MERGE_TRIES times) rather than
+    written over what the other program added. Returns (True, extra) when it wrote, (False,
+    extra) when compute() found nothing to write; raises _Failed when `dest` never holds
+    still."""
+    for _ in range(MERGE_TRIES):
+        before = _stamp(dest)
+        data, extra = compute()
+        if data is None:
+            return False, extra
+        try:
+            _replace_with(dest, data, half, key, src_hash, expect=before, src_size=src_size)
+        except _Changed:
+            continue
+        return True, extra
+    raise _Failed("%s keeps changing while it is merged (another program is writing it)" % dest)
 
 
 class _NewHomeBroken(Exception):
@@ -2114,11 +2265,19 @@ class _NewHomeBroken(Exception):
         self.path = Path(path)
 
 
-def _new_home_broken_words(dest, src):
+def _new_home_broken_words(dest, src, half=None):
+    """The stop for a new home that fails its own check (_NewHomeBroken). It names the safety
+    copy when this run made one (it holds the older file), and says the other way out: delete
+    the damaged file, and the next start brings the older copy in as the new home."""
+    snap = half.journal.doc.get("snapshot") if half is not None else None
+    zipname = snap.get("zip") if isinstance(snap, dict) else None
+    kept = (" (the older file is also in the safety copy %s)"
+            % (half.snapshot_dir / zipname)) if zipname else ""
     return ("%s won't read as what it should be: it fails its own check. Moonglade can't bring "
             "in %s, which an older Moonglade wrote after the move, without reading it, so "
-            "nothing was moved or set aside. Restore %s from a backup, then start Moonglade "
-            "again." % (dest, src, dest.name))
+            "nothing was moved or set aside%s. Restore %s from a backup, or delete that damaged "
+            "file: the next start then brings %s in as the new one. Then start Moonglade "
+            "again." % (dest, src, kept, dest.name, src.name))
 
 
 def _fold_db(src, dest, half, key, src_hash):
@@ -2174,9 +2333,9 @@ def _fold_in(src, dest, kind, half, key, src_hash):
                 return "merged"
             why = "the older copy fails its own integrity check"
         elif how != "park":
-            data, clashes = _settled_bytes(src, dest, how)
-            if data is not None:
-                _replace_with(dest, data, half, key, src_hash)
+            wrote, clashes = _merge_into(dest, half, key, src_hash,
+                                         lambda: _settled_bytes(src, dest, how))
+            if wrote:
                 _remove(src)
                 if clashes:
                     item("In %s the new home's value was kept for %d key(s); the older copy "
@@ -2194,7 +2353,7 @@ def _fold_in(src, dest, kind, half, key, src_hash):
     except _NewHomeBroken as e:
         # The new home is the side that fails: the healthy older copy is never set aside for
         # the damaged one to stay. Stop, and name the file.
-        raise MoveStopped(_new_home_broken_words(e.path, src))
+        raise MoveStopped(_new_home_broken_words(e.path, src, half))
     except (ValueError, UnicodeDecodeError, sqlite3.DatabaseError):
         why = "the older copy can't be read as what it should be"
     if how == "json:loom":
@@ -2230,6 +2389,68 @@ def _merged_log(src, dest):
     return a + (b"\n" if a and not a.endswith(b"\n") else b"") + b
 
 
+def _log_grown(src, entry):
+    """The bytes the old log `src` has grown by since the move copied it (the move's journal
+    `entry` holds the copied length and hash), or None when it hasn't grown, or isn't that log
+    any more: its first src_size bytes no longer hash to what was copied. Returned with the
+    whole file's size and hash, from the one read: (delta, size, sha256 of all of it)."""
+    size, want = entry.get("src_size"), entry.get("src_sha256")
+    if not isinstance(size, int) or size <= 0 or not want:
+        return None
+    try:
+        data = Path(src).read_bytes()
+    except OSError:
+        return None
+    if len(data) <= size or hashlib.sha256(data[:size]).hexdigest() != want:
+        return None
+    return data[size:], len(data), hashlib.sha256(data).hexdigest()
+
+
+def _bring_log_growth(src, dest, half, key, grown):
+    """An old log a still-running older launcher holds (Windows refused to delete it after it
+    was copied) has grown since: only the lines it grew by are new -- what it held at the copy
+    is already in `dest`. They are appended, once, and the journal remembers the new length and
+    hash, so a later start appends only what it grew by again (a full merge would write the
+    copied lines a second time, every start). Returns "merged"."""
+    delta, size, sha = grown
+
+    def compute():
+        cur = dest.read_bytes()
+        return cur + (b"\n" if cur and not cur.endswith(b"\n") else b"") + delta, None
+
+    _merge_into(dest, half, key, sha, compute, src_size=size)
+    half.report.item("Added the %d byte(s) %s grew by since it was copied to %s.", len(delta),
+                     half.rel(src), half.rel(dest))
+    _remove(src)
+    return "merged"
+
+
+def _two_dbs(src, dest, half, key, src_hash):
+    """The first move found a SQLite file (runs.db, with the Runs and their spend reservations)
+    in both places. Not "keep the newer, park the other": that parked a copy holding runs the
+    kept one lacks, and deleted it after the safety snapshot. When both pass their integrity
+    check the older copy's runs are folded into the new home run by run (_fold_in, as after a
+    finished move: the new home's rows stay whole); when only the old place's is whole it
+    replaces a damaged new home, which is set aside. Returns what was done, or None when neither
+    is whole (the caller keeps the newer and parks the other, as for any file)."""
+    dest_ok, src_ok = _db_counts(dest) is not None, _db_counts(src) is not None
+    if dest_ok and src_ok:
+        return _fold_in(src, dest, "db", half, key, src_hash)
+    if src_ok:
+        _park(dest, half)
+        return _bring(src, dest, "db", half)
+    return None
+
+
+def _blank(p):
+    """Is the file `p` empty, or only whitespace (a few bytes at most)? Unreadable is "no"."""
+    try:
+        size = os.stat(p).st_size
+        return size == 0 or (size <= 64 and not Path(p).read_bytes().strip())
+    except OSError:
+        return False
+
+
 def _two_copies(src, dest, kind, half, vouched):
     """Both the old place and the new hold the item. Returns what was done. "Newer" is each
     copy's own modified time: the move keeps a copy's time (_keep_times), so a copy it made
@@ -2247,6 +2468,10 @@ def _two_copies(src, dest, kind, half, vouched):
     dest_hash = _sha256(dest)
     made = entry.get("state") == "made" or (entry.get("state") == "verified"
                                             and entry.get("sha256") == dest_hash)
+    if kind == "log" and made and entry.get("src_sha256") != src_hash:
+        grown = _log_grown(src, entry)
+        if grown is not None:
+            return _bring_log_growth(src, dest, half, key, grown)
     if made and entry.get("src_sha256") == src_hash:
         if entry.get("state") != "made":     # it died between the swap and the journal
             half.journal.made(key)
@@ -2275,20 +2500,42 @@ def _two_copies(src, dest, kind, half, vouched):
         # always wins (A). A home the move made is never set aside for such a copy.
         return _fold_in(src, dest, kind, half, key, src_hash)
     # The first move.
-    data = None
-    try:
-        if kind == "log":
-            data = _merged_log(src, dest)
-        elif kind == "lines" or kind.startswith("json:"):
-            data = _merged_bytes(src, dest, kind)
-    except (OSError, ValueError, UnicodeDecodeError):
-        data = None
-    if data is not None:
-        _replace_with(dest, data, half, key, src_hash)
+    if kind == "db":
+        done = _two_dbs(src, dest, half, key, src_hash)
+        if done is not None:
+            return done
+
+    def compute():
+        try:
+            if kind == "log":
+                return _merged_log(src, dest), None
+            if kind == "lines" or kind.startswith("json:"):
+                return _merged_bytes(src, dest, kind), None
+        except (OSError, ValueError, UnicodeDecodeError):
+            pass
+        return None, None
+
+    wrote, _extra = _merge_into(dest, half, key, src_hash, compute)
+    if wrote:
         _remove(src)
         item("Merged %s into %s.", half.rel(src), half.rel(dest))
         return "merged"
-    # Anything else: keep the newer, park the other.
+    # An empty copy (a write cut short before its first byte: the app reads it as empty) holds
+    # nothing to lose and nothing to keep: the other, whichever is newer, is the one that stays
+    # -- "keep the newer" would park a person's real record for an empty file written later.
+    if _blank(dest) and not _blank(src):
+        _park(dest, half, said=False)
+        return _bring(src, dest, kind, half)
+    if _blank(src) and not _blank(dest):
+        _park(src, half, said=False)
+        return "parked"
+    # Anything else: keep the newer, park the other -- except a file the old version never
+    # read (a login's file named by its plain name, from before the hashed keys): the hashed
+    # file beside it is the live one whatever the two modified times say (a copy tool resets
+    # them), so the plain-name file is the one set aside.
+    if os.path.normcase(str(src)) in half.plain_names:
+        _park(src, half)
+        return "parked"
     if src.stat().st_mtime > dest.stat().st_mtime:
         _park(dest, half)
         return _bring(src, dest, kind, half)
@@ -2415,6 +2662,10 @@ def _bring(src, dest, kind, half, vouched=False):
         half.journal.items[key] = {"src": half.rel(src), "src_sha256": src_hash,
                                    "sha256": _sha256(tmp), "state": "verified",
                                    "time": _now()}
+        if kind == "log":
+            # How much of the log was copied: a log an older launcher still holds open grows
+            # after it, and only what it grew by is new (_bring_log_growth).
+            half.journal.items[key]["src_size"] = tmp.stat().st_size
         half.journal.save()
         _replace(tmp, dest)
         _fsync_dir(dest.parent)
@@ -2446,6 +2697,99 @@ def _bring_or_say(src, dest, kind, half, vouched=False):
         half.report.warn("An old log could not be moved yet (%s); it is tried again at the "
                          "next start.", e)
         return None
+
+
+# A first move's renames are journalled in groups, not one file at a time: every group's
+# "renaming" entries are saved in ONE journal write before any file in it moves, and its "made"
+# entries in ONE write after. The journal is written whole with a flush to disk, so a save per
+# entry made a folder of N files cost O(N^2) bytes and 2N flushes (3000 Loom frames took 57 s
+# on an SSD; tens of thousands on a hard disk or a NAS took many minutes with no window). The
+# guarantee is the same: a group cut short leaves "renaming" entries that settle_renames
+# finishes (the file is at its new place and gone from its old one: made) or forgets (it never
+# left: the next start moves it again), file by file.
+RENAME_GROUP_MIN = 25       # a run of renames shorter than this goes one file at a time
+RENAME_BATCH_MIN = 100      # a group is at least this big when there are more than a few...
+RENAME_BATCH_MAX = 2000     # ...and at most this big (one journal write is then ~2000 entries)
+
+
+def _renamable(src, dest, kind, taken):
+    """Can the move of `src` to `dest` go by one plain rename in a group (_bring's rename path:
+    a file, not a database, a log or a link, with no file at `dest`, on one volume), with no
+    other member of the group going to the same place (`taken`: their normcased homes)?"""
+    src, dest = Path(src), Path(dest)
+    if kind in ("db", "link", "log") or _is_link(src) or not src.is_file():
+        return False
+    if _same(src, dest) or os.path.normcase(str(dest)) in taken or dest.exists():
+        return False
+    return _same_volume(src, _nearest_existing(dest.parent))
+
+
+def _rename_group(group, half):
+    """Move the (src, dest, kind) files in `group` by rename under one "renaming" and one
+    "made" journal write. Returns (how many moved, [the members whose rename was refused: the
+    caller moves those by the copy path])."""
+    keys, refused, done = [], [], []
+    for src, dest, kind in group:
+        key = half.rel(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _discard(dest.with_name(dest.name + MOVING_SUFFIX))    # a crashed run's own temp
+        entry = {"src": half.rel(src), "state": "renaming", "time": _now()}
+        if kind != "log" and src.stat().st_size <= SMALL_RECORD_BYTES:
+            entry["src_sha256"] = _sha256(src)     # a small record's very bytes, as _bring does
+        half.journal.items[key] = entry
+        keys.append(key)
+    half.report.worked[half.name] = True
+    half.journal.save()
+    for (src, dest, kind), key in zip(group, keys):
+        try:
+            _rename_into(src, dest)
+        except OSError:
+            half.journal.items.pop(key, None)        # copy it instead
+            refused.append((src, dest, kind))
+            continue
+        done.append((src, dest, key))
+        _heartbeat()
+    if done:
+        for parent in {d.parent for _s, d, _k in done}:
+            _fsync_dir(parent)
+        stamp = {"made_ns": half.journal.saved_ns} if half.journal.saved_ns else {}
+        for _src, _dest, key in done:
+            half.journal.items[key].update(state="made", how="renamed", **stamp)
+        half.journal.save()
+        for src, dest, _key in done:
+            half.report.item("Moved %s to %s.", half.rel(src), half.rel(dest))
+    half.tick()
+    return len(done), refused
+
+
+def _bring_all(moves, half):
+    """Bring every (src, dest, kind, vouched) in `moves`, in order: a run of plain renames goes
+    in groups (_rename_group), anything else one at a time (_bring_or_say). Returns how many
+    were moved."""
+    size = max(RENAME_BATCH_MIN, min(RENAME_BATCH_MAX, len(moves) // 20))
+    moved, i = 0, 0
+    while i < len(moves):
+        group, taken, j = [], set(), i
+        while j < len(moves) and len(group) < size:
+            src, dest, kind, _vouched = moves[j]
+            if not _renamable(src, dest, kind, taken):
+                break
+            group.append((src, dest, kind))
+            taken.add(os.path.normcase(str(dest)))
+            j += 1
+        if len(group) >= RENAME_GROUP_MIN:
+            n, refused = _rename_group(group, half)
+            moved += n
+            for src, dest, kind in refused:
+                if _bring_or_say(src, dest, kind, half) == "moved":
+                    moved += 1
+            i = j
+            continue
+        src, dest, kind, vouched = moves[i]
+        if _bring_or_say(src, dest, kind, half, vouched=vouched) == "moved":
+            moved += 1
+        i += 1
+    return moved
 
 
 def _copy_new(src, dest):
@@ -2556,7 +2900,10 @@ def _make_snapshot(half, members, extra=None):
     tmp = target.with_name(target.name + MOVING_SUFFIX)
     count = 0
     try:
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        # strict_timestamps=False: a record whose modified time a zip cannot hold (before 1980
+        # or after 2107, from a bad clock or a copy tool) is stored at the nearest date the
+        # zip can, never a ValueError out of prepare() that stops every start.
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
             for path, arc in members:
                 path = Path(path)
                 if _is_link(path) or not path.is_file():
@@ -2577,7 +2924,7 @@ def _make_snapshot(half, members, extra=None):
         with open(tmp, "rb+") as f:
             os.fsync(f.fileno())
         _replace(tmp, target)
-    except (OSError, zipfile.BadZipFile, sqlite3.Error) as e:
+    except (OSError, zipfile.BadZipFile, sqlite3.Error, ValueError, struct.error) as e:
         _discard(tmp)
         raise _Failed("couldn't make the safety snapshot in %s (%s)" % (snap, _reason(e)),
                       e if isinstance(e, (OSError, sqlite3.Error)) else None)
@@ -2643,13 +2990,15 @@ def _read_config_strict():
     """(document, state) of config.json: state "ok", "missing" or "corrupt"."""
     p = _paths.config_path()
     try:
-        raw = p.read_text(encoding="utf-8")
+        raw = p.read_bytes()
     except FileNotFoundError:
         return {}, "missing"
     except OSError:
         return {}, "corrupt"
     try:
-        doc = json.loads(raw)
+        # A byte order mark or UTF-16 (PowerShell 5.1's `>`) is read through, as any editor
+        # shows it; bytes that are neither are "corrupt", never a codec error out of prepare().
+        doc = json.loads(_paths.decode_text(raw))
     except ValueError:
         return {}, "corrupt"
     return (doc, "ok") if isinstance(doc, dict) else ({}, "corrupt")
@@ -3098,11 +3447,22 @@ def _install_half(half, local, old, copyfirst, report):
     if not same_folder:
         old_pack, new_pack = old / PACK_NAME, local / PACK_NAME
         if old_pack.is_file() and new_pack.is_file():
-            _remove(old_pack)
-            if stray_marker.is_file():
-                _remove(stray_marker)
-            report.info("Removed an older copy of the art pack from the app folder; the one in "
-                        "local/ is used.")
+            if _same_bytes(old_pack, new_pack):
+                _remove(old_pack)
+                if stray_marker.is_file():
+                    _remove(stray_marker)
+                report.info("Removed an older copy of the art pack from the app folder; the one "
+                            "in local/ is used.")
+            else:
+                # Two different packs: the one in local/ is the one in use, so the other is
+                # set aside (never deleted on a guess -- it may be a pack put there by hand),
+                # with its marker, beside the safety copy.
+                _park(old_pack, half, said=False)
+                if stray_marker.is_file():
+                    _park(stray_marker, half, said=False)
+                report.warn("The art pack in the app folder differs from the one in local/, "
+                            "which is used. The other was set aside in %s.",
+                            half.rel(half.snapshot_dir / PARKED_DIRNAME))
         elif old_pack.is_file():
             if (local / PACK_MARKER).is_file():
                 _remove(local / PACK_MARKER)     # a marker whose pack is not there
@@ -3236,6 +3596,7 @@ class _Plan:
         self.dead_unlink = []    # links in the dead branding\ that can't be set aside by a
         #                          rename (another drive): removed where they are, as links
         self.link_targets = {}   # {old path: the target a relative link holds at its new home}
+        self.plain = set()       # per-login files named by the login's plain name (normcased)
 
 
 # The Loom's own entries in its folder (3.10-3.19's <library>\loom\): the boards (kv\, and the
@@ -3274,6 +3635,22 @@ def _first_line(p, size=4096):
         return ""
 
 
+def _ro_uri_of(resolved):
+    """The read-only SQLite URI for the resolved path `resolved`. A UNC path (a NAS share, or a
+    mapped drive that resolve() turns into one) cannot be Path.as_uri()'s file://server/share/
+    form: SQLite takes the part after file:// for an authority and refuses any but an empty or
+    "localhost" one ("invalid uri authority"). It takes the path form, file:////server/share/,
+    which it opens as \\\\server\\share\\. Windows' \\\\?\\ prefixes are dropped first."""
+    s = str(resolved)
+    if s.startswith("\\\\?\\UNC\\"):
+        s = "\\\\" + s[len("\\\\?\\UNC\\"):]
+    elif s.startswith("\\\\?\\"):
+        s = s[len("\\\\?\\"):]
+    if s.startswith("\\\\") or s.startswith("//"):
+        return "file:////" + _quote(s[2:].replace("\\", "/"), safe="/") + "?mode=ro"
+    return Path(s).as_uri() + "?mode=ro"
+
+
 def _db_has_table(p, table):
     """Does the SQLite file `p` hold `table`? Opened read-only; a busy or broken file is "no"."""
     p = Path(p)
@@ -3281,7 +3658,7 @@ def _db_has_table(p, table):
         return False
     con = None
     try:
-        con = sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
+        con = sqlite3.connect(_ro_uri_of(p.resolve()), uri=True, timeout=2.0)
         return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                            (table,)).fetchone() is not None
     except (sqlite3.Error, OSError, ValueError):
@@ -3401,6 +3778,17 @@ def _plan_library(out, app, copyfirst, logins, half):
                                           "link"))
         reports = None
 
+    def doomed(p):
+        """A file named like a temp (a lock, a half-written .part/.tmp): removed, but a small
+        one goes into the safety copy first -- a person's own file can carry such a name, and
+        only the bulky scratch of a render (over SMALL_RECORD_BYTES) is not worth keeping."""
+        plan.removals.append(p)
+        try:
+            if p.stat().st_size <= SMALL_RECORD_BYTES:
+                plan.snap.append((p, half.rel(p)))
+        except OSError:
+            pass
+
     def two(name, primary, secondary, dest, kind, vouch_name=None):
         if primary is not None and _movable(primary):
             plan.moves.append((primary, dest, kind, False))
@@ -3452,7 +3840,7 @@ def _plan_library(out, app, copyfirst, logins, half):
             for p in files + links:
                 link = p in links
                 if not link and _TRANSIENT_RE.search(p.name):
-                    plan.removals.append(p)
+                    doomed(p)
                     continue
                 key, _dot, rest = p.name.partition(".")
                 if p.parent == folder and _KEY_RE.match(key) and rest:
@@ -3460,6 +3848,7 @@ def _plan_library(out, app, copyfirst, logins, half):
                 elif p.parent == folder and _plain_name_login(p.name, logins):
                     login, rest = _plain_name_login(p.name, logins)
                     dest = _paths.account_dir(out, login) / (new_stem + "." + rest)
+                    plan.plain.add(os.path.normcase(str(p)))
                 else:
                     plan.kept.append(p)
                     continue
@@ -3500,7 +3889,7 @@ def _plan_library(out, app, copyfirst, logins, half):
                 e = loom_old / n
                 if n not in LOOM_ENTRIES:
                     if not _is_link(e) and e.is_file() and _TRANSIENT_RE.search(n):
-                        plan.removals.append(e)
+                        doomed(e)
                     else:
                         plan.left.append(e)
                     continue
@@ -3513,7 +3902,7 @@ def _plan_library(out, app, copyfirst, logins, half):
                 for p in files:
                     rel = p.relative_to(loom_old)
                     if _TRANSIENT_RE.search(p.name):
-                        plan.removals.append(p)
+                        doomed(p)
                         continue
                     kind = "lines" if rel.parts[0] == "_submits" and p.suffix == ".jsonl" \
                         else "file"
@@ -3667,19 +4056,65 @@ def _shared_presets(half, out, app, copyfirst, keys, report):
         report.info("Gave the shared %s to each login that had none of its own.", name)
 
 
+def _wear(slot, value):
+    """Record in settings.json's worn_banner that `slot` wears `value` -- unless it already
+    wears something: a choice settings.json holds is never overwritten."""
+    from moonglade import settings as _settings
+
+    def _apply(b):
+        worn = b.get("worn_banner")
+        if not isinstance(worn, dict):
+            worn = {}
+        worn.setdefault(slot, value)
+        b["worn_banner"] = worn
+    _settings.update_branding(_apply)
+
+
+def _spare_banner(out, name, src):
+    """Where the render `src` that is not worn is kept in local\\banners\\: the slot's file
+    name with the library's folder name in it (banner-from-pixai_backup.png), numbered when
+    another render has that name; the name it already has there when that is this very
+    render (a start cut short before the old one went)."""
+    stem, dot, suffix = name.rpartition(".")
+    lib = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(out).name)[:40] or "library"
+    n = 0
+    while True:
+        tail = "" if n == 0 else "-%d" % (n + 1)
+        cand = _paths.banners_dir() / ("%s-from-%s%s%s%s" % (stem, lib, tail, dot, suffix))
+        if not cand.exists() or _same_bytes(cand, src):
+            return cand
+        n += 1
+
+
 def _banners(half, out, report):
     """The banner renders a library held in gallery\\cache\\_banners\\ (B6). A slot render is
     rebuilt from the pick, and an earned one from the pack (its banner id goes into
     settings.json's worn_banner): both are deleted. A migrated render, or one with no record,
     is the only copy of what the install wears: it moves whole into local\\banners\\, and
-    worn_banner says so. A choice settings.json already holds is never overwritten."""
+    worn_banner says so at once -- and a start cut short between the two is finished by the
+    next (a render the journal says the move made, with no worn_banner for its slot, is
+    recorded then). A choice settings.json already holds is never overwritten: when the
+    install already wears a banner for that slot (a second library moved by the same install),
+    the library's render is not rebuildable either, so it is kept, unworn, in local\\banners\\
+    under a name of its own (_spare_banner) -- never set aside with the safety copy, which
+    goes after a few starts."""
     from moonglade import settings as _settings
+    worn = dict((_settings.branding().get("worn_banner") or {}))
+    for slot, name in BANNER_FLATS.items():
+        kept = _paths.banners_dir() / name
+        entry = half.journal.items.get(half.rel(kept))
+        # Only while this move is still the first one (cut short and resumed): once it has
+        # finished, a slot that wears nothing is the person's choice (picking a banner clears
+        # what a slot wore and leaves the kept render), never a record to put back.
+        if (not half.journal.doc.get("finished") and slot not in worn and kept.is_file()
+                and isinstance(entry, dict) and entry.get("state") == "made"):
+            _wear(slot, {"kind": "migrated"})
+            worn[slot] = {"kind": "migrated"}
+            report.info("Kept the banner this install wears (%s) in local/banners/.", name)
     folder = out / "gallery" / "cache" / "_banners"
     if _via_link(folder, out) or _banners_linked(folder) or not folder.is_dir():
         return             # through a link, or holding a linked render: left, never read from
     half.report.worked["library"] = True
-    worn = dict((_settings.branding().get("worn_banner") or {}))
-    changed = False
     for slot, name in BANNER_FLATS.items():
         png, rec_path = folder / name, folder / (name + ".json")
         rec = None
@@ -3694,19 +4129,21 @@ def _banners(half, out, report):
             continue                                     # rebuilt from the pick
         if kind == "earned":
             if slot not in worn and rec.get("banner_id"):
-                worn[slot] = {"kind": "earned", "banner_id": str(rec["banner_id"])}
-                changed = True
+                value = {"kind": "earned", "banner_id": str(rec["banner_id"])}
+                _wear(slot, value)
+                worn[slot] = value
             continue                                     # rebuilt from the pack
         # migrated, unrecorded, or a kind this build does not know: the only copy.
         if slot in worn:
-            _park(png, half)
+            spare = _spare_banner(out, name, png)
+            _bring(png, spare, "file", half)
+            report.warn("This install already wears a banner for that slot, so the library's "
+                        "own (%s) was kept, not worn, in %s.", half.rel(png), half.rel(spare))
             continue
         _bring(png, _paths.banners_dir() / name, "file", half)
+        _wear(slot, {"kind": "migrated"})
         worn[slot] = {"kind": "migrated"}
-        changed = True
         report.info("Kept the banner this install wears (%s) in local/banners/.", name)
-    if changed:
-        _settings.update_branding(lambda b: b.__setitem__("worn_banner", worn))
 
 
 def _caches(out):
@@ -3850,8 +4287,11 @@ def _refusal_words(out, named):
     if named:
         return ("The library %s is still in an older Moonglade's layout, and a run that names "
                 "its own library (--out or MOONGLADE_OUT) never moves one. Open it once with "
-                "the launcher of the Moonglade it belongs to, updated to this version, then "
-                "run this again." % out)
+                "the launcher of the Moonglade it belongs to, updated to this version -- or, "
+                "where there is no launcher (a server on Linux, a systemd unit, a scheduled "
+                "task), set library_dir in %s to this library and start the server once "
+                "without --out and without MOONGLADE_OUT -- then run this again." % (
+                    out, _paths.settings_path()))
     return ("The library %s is still in an older Moonglade's layout. Open it once with this "
             "install's launcher (Moonglade Launcher), then run this again." % out)
 
@@ -3956,15 +4396,34 @@ def library_refusal(path):
     try:
         if _same(p, old_app_root()):
             return "it is Moonglade's own program folder"
+        # This install's own local\ is no library either: its logs\ is the library's log
+        # folder to the move, so every other start stopped on the log the app itself holds.
+        if _same(p, old_app_root() / _paths.LOCAL_DIRNAME):
+            return "it is Moonglade's own machine folder (local)"
         if ((p / "moonglade" / "__init__.py").is_file()
                 or (p / _paths.LAUNCHER_NAME).is_file()
                 or (p / "moonglade_gallery.py").is_file()       # an install before 3.20
-                or (p / _paths.LOCAL_DIRNAME / _paths.SETTINGS_NAME).is_file()
+                or _is_moonglade_settings(p / _paths.LOCAL_DIRNAME / _paths.SETTINGS_NAME)
                 or (p / _paths.LOCAL_DIRNAME / _paths.JOURNAL_NAME).is_file()):
             return "it holds a Moonglade program (its code, its local folder or its launcher)"
     except (OSError, ValueError):
         return None
     return None
+
+
+def _is_moonglade_settings(p):
+    """Is the file `p` a Moonglade settings.json: a JSON object whose keys are all ones
+    moonglade.settings stores (or an empty file, which one a Moonglade began looks like)? A
+    folder of someone's own can hold a local\\settings.json of another program; that is not an
+    install, and no library may be refused for it."""
+    from moonglade import settings as _settings
+    doc = _json_doc(p)
+    if doc is None:
+        try:                                    # an empty file is one a Moonglade left (or began)
+            return Path(p).is_file() and not _is_link(p) and not Path(p).read_bytes().strip()
+        except OSError:
+            return False
+    return isinstance(doc, dict) and all(k in _settings.KEYS for k in doc)
 
 
 def _install_folder_words(out, why, named):
@@ -4103,6 +4562,7 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # since, and the new home always wins (A). Before that, the first move's rules hold.
     half.settled = bool(j.doc.get("finished"))
     half.link_targets = plan.link_targets
+    half.plain_names = plan.plain
     report.worked["library"] = True
     j.worked()
     app.mkdir(parents=True, exist_ok=True)
@@ -4110,9 +4570,12 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # banner renders that may be the only copy, and 3.20's record.
     snap = list(plan.snap) + [(p, half.rel(p)) for p in shared]
     # A fold writes telemetry.json's new home in place: its own copy goes into this run's zip
-    # first, beside the older copy (after the move, or where this move already made it).
+    # first, beside the older copy (after the move, or where this move already made it). So does
+    # integrity_marks.json's: a clash goes to the LATER choice, and the fold then replaces a
+    # mark the new home holds (_union_marks) -- the replaced choice must not be gone for good.
     homes = {Path(d) for s, d, k, _v in plan.moves
-             if k == "json:telemetry" and _movable(s) and Path(d).is_file()
+             if (k == "json:telemetry" or Path(d).name == "integrity_marks.json")
+             and _movable(s) and Path(d).is_file()
              and (half.settled or _made_at(j.items.get(half.rel(d))) is not None)}
     snap += [(d, half.rel(d)) for d in sorted(homes)]
     bfolder = out / "gallery" / "cache" / "_banners"
@@ -4125,12 +4588,12 @@ def _library_half(half, out, app, copyfirst, logins, report):
     # it moves before any of them do. A start cut short between the two then never finds a
     # link whose target's files have already left (it would see an emptied folder, and stop
     # or point the link at the old place the move then prunes).
+    # The plain-name login files go last of the files: the hashed file a login's live data is
+    # in must be the one that takes the home, so a plain-name file meeting it is the one set
+    # aside (_two_copies), never the other way round.
     links_first = sorted(plan.moves, key=lambda m: 0 if (m[2] == "link" or _is_link(m[0]))
-                         else 1)
-    moved = 0
-    for src, dest, kind, vouched in links_first:
-        if _bring_or_say(src, dest, kind, half, vouched=vouched) == "moved":
-            moved += 1
+                         else 2 if os.path.normcase(str(m[0])) in plan.plain else 1)
+    moved = _bring_all(links_first, half)
     if plan.dead:
         set_aside = []
         for p in [p for p in plan.dead if _movable(p)]:

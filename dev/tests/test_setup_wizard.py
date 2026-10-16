@@ -153,16 +153,13 @@ class TestSaveKeyEndpoint:
         _redact_host_paths wrapper) and this fails."""
         _redirect_config_to(monkeypatch, tmp_path)
         monkeypatch.setattr(core, "account_info", lambda session, raise_on_error=False: {"quotaAmount": 500})
-        from pathlib import Path as RealPath
-        orig_write_text = RealPath.write_text
+        # The route saves through the atomic writer (core._save_config: a temp, then a swap),
+        # so that is where a refusal shows up.
+        def boom_save(cfg):
+            raise OSError("[Errno 13] Permission denied: '{}'".format(tmp_path / "config.json"))
 
-        def boom_write(self, *a, **k):
-            if self.name == "config.json":
-                raise OSError("[Errno 13] Permission denied: '{}'".format(self))
-            return orig_write_text(self, *a, **k)
-        monkeypatch.setattr(RealPath, "write_text", boom_write)
-
-        cli = _authed_client(tmp_path)
+        cli = _authed_client(tmp_path)          # (signing in saves config.json: patch after it)
+        monkeypatch.setattr(core, "_save_config", boom_save)
         r = cli.post("/api/setup/save-key", data=json.dumps({"api_key": "sk-real-key"}),
                      content_type="application/json")
         body = r.get_data(as_text=True)
