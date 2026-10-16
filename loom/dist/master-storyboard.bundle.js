@@ -106,6 +106,15 @@ var LoomBundle = (() => {
     return !paused;
   };
   var sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pendingTaskId && card.lastAttempt && card.lastAttempt.state === "unclear");
+  var STILL_SENDING_MSG = "Still being sent to PixAI \u2014 it can't be released until PixAI answers. Check again in a moment.";
+  var sendHeld = (card, gs) => !!(card && card.pendingSubmitId && !card.pendingTaskId && gs && gs.phase === "sending");
+  var SENDING_RECHECK_MS = [3e3, 6e3, 12e3, 2e4, 3e4];
+  var sendingRecheckDelay = (done) => {
+    const n = Number(done);
+    return Number.isInteger(n) && n >= 0 && n < SENDING_RECHECK_MS.length ? SENDING_RECHECK_MS[n] : null;
+  };
+  var wayOutShown = (card, gs) => (sendUnclear(card) || sendHeld(card, gs)) && !(gs && gs.phase === "checking");
+  var releaseOffered = (card, gs) => sendUnclear(card) && !sendHeld(card, gs);
   var unsendableIn = (list, dataOk) => (Array.isArray(list) ? list : []).map((x) => str(x).trim()).filter((s) => s && !/^\d+$/.test(s) && !(dataOk && s.startsWith("data:")));
   var unsendableRefs = (payload) => {
     const p = payload || {};
@@ -227,6 +236,18 @@ var LoomBundle = (() => {
     else delete next.deletedTakes;
     return next;
   };
+  var noteLandedSubmit = (card, n, submitId) => {
+    const sid = str(submitId);
+    if (!sid) return card;
+    return { ...card, takes: (card.takes || []).map((t) => t.n === n && !t.submitId ? { ...t, submitId: sid } : t) };
+  };
+  var resolvedSubmitOf = (card, submitId) => {
+    const sid = str(submitId);
+    if (!card || !sid) return false;
+    if (takesOf(card).some((t) => str(t.submitId) === sid)) return true;
+    if ((card.attempts || []).some((a) => a && str(a.submitId) === sid)) return true;
+    return !!(card.lastAttempt && str(card.lastAttempt.submitId) === sid);
+  };
   var landTake = (card, rep) => {
     const r = rep || {};
     const mid = str(r.mid), taskId = str(r.taskId);
@@ -246,6 +267,7 @@ var LoomBundle = (() => {
       let c = withTakes(card);
       const sel = selectedTakeOf(c);
       if (existing.n !== sel) c = selectTake(c, existing.n);
+      c = noteLandedSubmit(c, existing.n, card.pendingSubmitId);
       c = clearPending(c);
       return { card: { ...c, status: "done", lastAttempt: null }, outcome: "repeat" };
     }
@@ -266,6 +288,7 @@ var LoomBundle = (() => {
       imported: false,
       source: "render"
     };
+    if (isPending && card.pendingSubmitId) take2.submitId = str(card.pendingSubmitId);
     if (isPending && card.pendingQuote) take2.quoted = card.pendingQuote;
     const withTake = untomb({ ...c0, takes: c0.takes.concat([take2]), takeSeq: n }, mid);
     if (!isPending) return { card: withoutSuperseded(withTake, taskId), outcome: "unselected" };
@@ -341,7 +364,15 @@ var LoomBundle = (() => {
     if (!t) return { card, refused: "missing" };
     const mid = str(t.mid);
     const had = c.attempts || [];
-    const attempts = !t.imported && mid && !had.some((a) => a && str(a.media_id) === mid) ? had.concat([{ media_id: mid, at: str(at) }]) : had;
+    const sid = str(t.submitId);
+    let attempts = had;
+    if (!t.imported && mid) {
+      if (!had.some((a) => a && str(a.media_id) === mid)) {
+        attempts = had.concat([sid ? { media_id: mid, at: str(at), submitId: sid } : { media_id: mid, at: str(at) }]);
+      } else if (sid) {
+        attempts = had.map((a) => a && str(a.media_id) === mid && !a.submitId ? { ...a, submitId: sid } : a);
+      }
+    }
     const tomb = (c.deletedTakes || []).includes(mid) ? c.deletedTakes || [] : (c.deletedTakes || []).concat([mid]);
     return { card: { ...c, takes: c.takes.filter((x) => x.n !== n), attempts, deletedTakes: tomb } };
   };
@@ -468,8 +499,11 @@ var LoomBundle = (() => {
       }
       return card;
     }
+    const sid = str(r.submitId || card.pendingSubmitId);
     const c = clearPending(card);
-    return { ...c, status: settledStatus(c), lastAttempt: { state: str(r.state || "failed"), msg: str(r.msg), at: str(r.at) } };
+    const lastAttempt = { state: str(r.state || "failed"), msg: str(r.msg), at: str(r.at) };
+    if (sid) lastAttempt.submitId = sid;
+    return { ...c, status: settledStatus(c), lastAttempt };
   };
   var markUnclear = (card, submitId, msg, at) => {
     if (!card || str(card.pendingSubmitId) !== str(submitId)) return card;
@@ -496,6 +530,7 @@ var LoomBundle = (() => {
     const b = body || {};
     if (b.state === "submitted" && b.task_id) return { kind: "accepted", taskId: str(b.task_id) };
     if (b.state === "refused" || b.state === "not_sent" || b.state === "abandoned") return { kind: "refused", error: str(b.error) };
+    if (b.state === "sending" && b.sending === true) return { kind: "sending" };
     return { kind: "unclear", state: str(b.state || "unknown") };
   };
   var submitsToCheck = (project, seen2) => {
@@ -711,7 +746,8 @@ var LoomBundle = (() => {
       const lpTask = str(lc.pendingTaskId), lpSub = str(lc.pendingSubmitId);
       const remoteBusy = !!(rc.pendingTaskId || rc.pendingSubmitId);
       const taskLanded = lpTask && takesOf(out).some((t) => str(t.taskId) === lpTask);
-      if ((lpTask || lpSub) && !remoteBusy && !taskLanded && !(lpSub && resolved.has(lpSub))) {
+      const subSettled = !!lpSub && (resolved.has(lpSub) || resolvedSubmitOf(out, lpSub));
+      if ((lpTask || lpSub) && !remoteBusy && !taskLanded && !subSettled) {
         PENDING.forEach((k) => {
           if (lc[k] != null) out = { ...out, [k]: lc[k] };
         });
@@ -7077,6 +7113,12 @@ ${"=".repeat(48)}
     t.out = true;
     toasts = toasts.slice();
     emit();
+    if (typeof t.onClose === "function") {
+      try {
+        t.onClose();
+      } catch {
+      }
+    }
     setTimeout(() => {
       toasts = toasts.filter((x) => x.id !== id);
       emit();
@@ -7098,6 +7140,7 @@ ${"=".repeat(48)}
       code: o.code || "",
       action: o.action && typeof o.action.run === "function" ? { label: String(o.action.label || ""), run: o.action.run } : null,
       actions: !o.action && Array.isArray(o.actions) ? o.actions.filter((a) => a && typeof a.run === "function").slice(0, 2).map((a) => ({ label: String(a.label || ""), run: a.run, tone: a.tone === "ruby" ? "ruby" : "" })) : [],
+      onClose: typeof o.onClose === "function" ? o.onClose : null,
       foot: o.foot ? String(o.foot) : "",
       quote: o.quote ? String(o.quote) : "",
       wide: !!o.wide,
@@ -7330,6 +7373,7 @@ ${"=".repeat(48)}
   // ../gallery/src/notify/serverNotice.js
   var SEEN_KEY = "mg_server_notice";
   var seenHere = "";
+  var onScreen = "";
   function lastShown() {
     try {
       return localStorage.getItem(SEEN_KEY) || seenHere;
@@ -7368,9 +7412,10 @@ ${"=".repeat(48)}
   function noteServerNotice(notice) {
     if (!notice || !notice.key || !notice.title && !notice.msg) return false;
     const key = String(notice.key);
-    if (lastShown() === key) return false;
-    markShown(key);
+    if (lastShown() === key || onScreen === key) return false;
     const fix = notice.fix && notice.fix.label ? notice.fix : null;
+    onScreen = key;
+    if (!fix) markShown(key);
     show({
       kind: "",
       sticky: true,
@@ -7378,7 +7423,8 @@ ${"=".repeat(48)}
       msg: String(notice.msg || ""),
       action: fix ? { label: String(fix.label), run: () => {
         runFix(fix);
-      } } : void 0
+      } } : void 0,
+      onClose: fix ? () => markShown(key) : void 0
     });
     return true;
   }
@@ -15123,7 +15169,18 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             },
             gs && gs.msg ? gs.msg : st
           )),
-          sendUnclear(e.c) && !(gs && gs.phase === "checking") && /* @__PURE__ */ React.createElement("div", { className: "lv-unclear", role: "status", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => recheckSubmit(e.c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => releaseSubmit(e.c.id) }, "I checked Activity \u2014 release this shot")),
+          /* @__PURE__ */ React.createElement(
+            SendWayOut,
+            {
+              card: e.c,
+              gs,
+              boxClass: "lv-unclear",
+              btnClass: "lv-unclearbtn",
+              stopClicks: true,
+              onCheck: () => recheckSubmit(e.c.id),
+              onRelease: () => releaseSubmit(e.c.id)
+            }
+          ),
           /* @__PURE__ */ React.createElement("div", { className: "lv-takes" }, /* @__PURE__ */ React.createElement("div", { className: "lv-takerow", onClick: stopCard, onDoubleClick: stopCard }, olderTakes > 0 && /* @__PURE__ */ React.createElement("span", { className: "lv-takemore", title: olderTakes + " older take" + (olderTakes === 1 ? "" : "s") + " \u2014 the shot's full take list is under its preview in the timeline" }, "+", olderTakes), shownTakes.map((t) => {
             const on = t.n === selN;
             return /* @__PURE__ */ React.createElement(
@@ -18665,7 +18722,17 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         /* @__PURE__ */ React.createElement("option", { value: "chinese" }, "Chinese"),
         /* @__PURE__ */ React.createElement("option", { value: "korean" }, "Korean"),
         /* @__PURE__ */ React.createElement("option", { value: "none" }, "SE only (no dialogue)")
-      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? /* @__PURE__ */ React.createElement("div", { className: "lm-unclear", role: "status" }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => recheckSubmit(c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => releaseSubmit(c.id) }, "I checked Activity \u2014 release this shot")) : gsSelf && gsSelf.held && gsSelf.msg ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, gsSelf.msg) : unsendableKind(shotPayload(dfLive, project, imgSrc)) ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, "Imported ", unsendableKind(shotPayload(dfLive, project, imgSrc)), " \u2014 it can't be sent to PixAI yet.") : null, /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : sendHeld(c, gsSelf) ? "still being sent \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), wayOutShown(c, gsSelf) ? /* @__PURE__ */ React.createElement(
+        SendWayOut,
+        {
+          card: c,
+          gs: gsSelf,
+          boxClass: "lm-unclear",
+          btnClass: "lm-unclearbtn",
+          onCheck: () => recheckSubmit(c.id),
+          onRelease: () => releaseSubmit(c.id)
+        }
+      ) : gsSelf && gsSelf.held && gsSelf.msg ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, gsSelf.msg) : unsendableKind(shotPayload(dfLive, project, imgSrc)) ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, "Imported ", unsendableKind(shotPayload(dfLive, project, imgSrc)), " \u2014 it can't be sent to PixAI yet.") : null, /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -20178,7 +20245,6 @@ Generate anyway?`)) return { go: false };
     const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
     const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
     const CHECKING_MSG = "Checking whether the render was sent\u2026";
-    const STILL_SENDING_MSG = "Still being sent to PixAI \u2014 it can't be released until PixAI answers. Check again in a moment.";
     const generateShot = async (entry, opts = {}) => {
       const cardId = entry.c.id;
       const boardId = activeIdRef.current;
@@ -20290,6 +20356,40 @@ Generate anyway?`)) return { go: false };
         inflightRef.current.delete(cardId);
       }
     };
+    const autoRecheckRef = useRef2({ timers: {}, done: {}, closed: false });
+    const stopAutoRecheck = (submitId) => {
+      const r = autoRecheckRef.current;
+      if (r.timers[submitId]) clearTimeout(r.timers[submitId]);
+      delete r.timers[submitId];
+      delete r.done[submitId];
+    };
+    const scheduleAutoRecheck = (cardId, submitId, boardId) => {
+      const r = autoRecheckRef.current;
+      if (r.closed) return;
+      if (r.timers[submitId]) return;
+      const ms = sendingRecheckDelay(r.done[submitId] || 0);
+      if (ms == null) return;
+      r.done[submitId] = (r.done[submitId] || 0) + 1;
+      r.timers[submitId] = setTimeout(() => {
+        delete r.timers[submitId];
+        if (activeIdRef.current !== boardId) return;
+        const e = cardOn(cardId);
+        const gs = genStateRef.current[cardId];
+        if (!e || e.c.pendingSubmitId !== submitId || e.c.pendingTaskId) return;
+        if (!gs || gs.phase !== "sending") return;
+        checkSubmit(cardId, submitId, boardId);
+      }, ms);
+    };
+    useEffect2(() => {
+      autoRecheckRef.current.closed = false;
+      return () => {
+        const r = autoRecheckRef.current;
+        r.closed = true;
+        Object.keys(r.timers).forEach((k) => clearTimeout(r.timers[k]));
+        r.timers = {};
+        r.done = {};
+      };
+    }, []);
     const checkSubmit = async (cardId, submitId, boardId) => {
       const here = () => activeIdRef.current === boardId;
       if (inflightRef.current.has(cardId)) return { pending: true };
@@ -20306,10 +20406,16 @@ Generate anyway?`)) return { go: false };
         }
         const cls = classifySubmitStatus(st);
         if (!here()) return cls.kind === "accepted" ? { accepted: true, taskId: cls.taskId } : { [cls.kind]: true };
+        if (cls.kind === "sending") {
+          holdCard(cardId, "still sending", "sending");
+          scheduleAutoRecheck(cardId, submitId, boardId);
+          return { sending: true };
+        }
         if (cls.kind === "accepted") {
           adoptFromJournal(cardId, submitId, cls.taskId, boardId);
           return { accepted: true, taskId: cls.taskId };
         }
+        stopAutoRecheck(submitId);
         if (cls.kind === "refused") {
           noteResolved(submitId);
           const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
@@ -20328,6 +20434,7 @@ Generate anyway?`)) return { go: false };
       const e0 = cardOn(cardId);
       if (!e0) return;
       const startedAt = e0.c.genStartedAt || Date.now();
+      stopAutoRecheck(submitId);
       patchCardNow(cardId, (cc) => adoptTask(cc, submitId, taskId));
       if (window.Jobs && window.Jobs.register) window.Jobs.register(taskId, e0.code + " \xB7 " + (e0.c.title || "untitled"));
       pollShot(cardId, taskId, startedAt, boardId);
@@ -20362,6 +20469,7 @@ Generate anyway?`)) return { go: false };
       if (activeIdRef.current !== boardId) return;
       if (d && d.ok) {
         noteResolved(submitId);
+        stopAutoRecheck(submitId);
         patchCardNow(cardId, (cc) => abandonSubmit(cc, submitId, nowIso()));
         holdCard(cardId, "Released. If that render was sent after all, its clip is in your library.");
         return;
@@ -20371,7 +20479,8 @@ Generate anyway?`)) return { go: false };
         return;
       }
       if (status === 409 && d && d.sending) {
-        holdCard(cardId, STILL_SENDING_MSG, "unclear");
+        holdCard(cardId, "still sending", "sending");
+        scheduleAutoRecheck(cardId, submitId, boardId);
         return;
       }
       holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " \u2014 " + d.error : " \u2014 the server didn't answer.") + " Nothing was sent.", "unclear");
@@ -21768,6 +21877,12 @@ Generate anyway?`)) return { go: false };
     if (!s) return t.imported ? "from your library \xB7 no settings recorded" : "no settings recorded";
     return [s.mode, s.duration != null ? s.duration + " s" : "", s.quality].filter(Boolean).join(" \xB7 ");
   };
+  function SendWayOut({ card, gs, boxClass, btnClass, onCheck, onRelease, stopClicks }) {
+    if (!wayOutShown(card, gs)) return null;
+    const stop = stopClicks ? (ev) => ev.stopPropagation() : void 0;
+    const release = releaseOffered(card, gs);
+    return /* @__PURE__ */ React.createElement("div", { className: boxClass, role: "status", onClick: stop, onDoubleClick: stop }, /* @__PURE__ */ React.createElement("span", null, release ? "The server didn't confirm this render. Check Activity before rendering again." : STILL_SENDING_MSG), /* @__PURE__ */ React.createElement("button", { type: "button", className: btnClass, onClick: onCheck }, "\u21BB Check"), release && /* @__PURE__ */ React.createElement("button", { type: "button", className: btnClass, onClick: onRelease }, "I checked Activity \u2014 release this shot"));
+  }
   function TakeList({ card, code, onUse, onReuse, onDelete }) {
     const list = takesOf(card);
     const selN = selectedTakeOf(card);
