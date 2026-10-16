@@ -146,9 +146,9 @@ CATALOG_FIELDS = [
     "batch_index", "batch_size",
     # VIEWS, SYNCED (2026-09-06). Views used to be LIVE-only: twelve GraphQL calls on
     # every My Art open, thrown away after summing. PROBE_2026-09-06 settled that the
-    # ad-hoc bulk `artworks(authorId, first:N)` form accepts a `views` field (the
-    # persisted listArtworks cannot be edited), so views now ride --sync-artworks in a
-    # handful of paced calls and land here like liked_count does.
+    # ad-hoc bulk `artworks(authorId, first:N)` form accepts a `views` field (the metadata
+    # listing never selects it: a read of `views` counts as a view), so views now ride
+    # --sync-artworks in a handful of paced calls and land here like liked_count does.
     #
     # FOUR columns, not one, and the reason is the spike rule: a single `views` number
     # can only ever say "how many", never "is this taking off". The previous sweep's
@@ -8556,7 +8556,7 @@ ARTWORKS_YOUNG_DAYS = 90        # owner call 4: works this young ride EVERY swee
 ARTWORKS_DEEP_S = 172800.0      # owner call 4: older works refresh at most once per 48h
 ARTWORKS_GRACE = 2              # consecutive spent pages before stopping -- run_download's
                                 # own `update_grace` default (moonglade/backup.py), mirrored
-ARTWORKS_PAGE = 50              # listArtworks page size run_sync_artworks already uses
+ARTWORKS_PAGE = 50              # artwork list page size run_sync_artworks already uses
 ARTWORKS_PAUSE = 0.4            # paced: run_sync_artworks' own inter-page delay
 ARTWORKS_MAX_PAGES = 1000       # a hard stop (50,000 published works at 50 a page), so a
                                 # pageInfo that never says "no more" cannot turn a
@@ -8574,6 +8574,24 @@ _artworks_lock = threading.Lock()
 # sweep already in flight) leaves no other trace anywhere, which made "did the publish
 # route really ask?" unanswerable except by reading the source.
 _artworks_state = {"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0, "kicks": 0}
+# Whether the sweep has already said, in plain words, why it could not read the published
+# list. A sweep that is refused every fifteen minutes says so ONCE and then stays quiet at
+# debug level; the first sweep that reads the whole list again clears it.
+_artworks_refusal = {"reported": False}
+
+
+def _note_artworks_refusal(log, out_dir, page, err):
+    """Say why the sweep could not read the published list: once, in plain words, with the
+    reason PixAI or the network gave (folder paths hidden), then quietly while it lasts."""
+    reason = _redact_host_paths_cli(out_dir, str(err))[:300]
+    if _artworks_refusal["reported"]:
+        log.debug("artworks sweep: page %d still cannot be read: %s", page, reason)
+        return
+    _artworks_refusal["reported"] = True
+    log.warning(
+        "artworks sweep: the app cannot read your published artworks from PixAI (page %d), "
+        "so their titles, likes and tags are not refreshing. Reason: %s. The sweep tries "
+        "again on its schedule; this is said once until a read works again.", page, reason)
 
 
 def published_index(db_path):
@@ -8615,12 +8633,12 @@ def published_local_ids(db_path):
 
 
 def artworks_page_needed(nodes, index, now, deep, local=None):
-    """Does this page of listArtworks nodes contain anything this sweep needs to write?
+    """Does this page of artwork-list nodes contain anything this sweep needs to write?
 
     THE SHORT-CIRCUIT AND THE TIER, in one predicate -- and the reason a quiet sweep costs
     one or two pages instead of the whole walk. `run_download --update` stops after
     `update_grace` consecutive pages whose every media_id was already on disk
-    (moonglade/backup.py's `page_new`); listArtworks pages newest-first exactly like the
+    (moonglade/backup.py's `page_new`); the artwork list pages newest-first exactly like the
     generation feed, so the same stop works here. What "already known" means is where the
     owner's tier (call 4) lives:
 
@@ -8705,7 +8723,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
     index = published_index(db_path)
     local = published_local_ids(db_path)
     metas, before, pages, artworks, spent = [], None, 0, 0, 0
-    incomplete = False
+    incomplete = refused = False
     while True:
         if pages >= ARTWORKS_MAX_PAGES:
             # A hard stop, so a pageInfo that never says "no more" cannot turn a background
@@ -8716,14 +8734,15 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
                         ARTWORKS_MAX_PAGES)
             incomplete = True
             break
-        conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE)
-        if not conn:
-            # artwork_list_gql fails SOFT to None (no retry of its own). Whatever was
-            # collected is real and is written below; the run is simply incomplete, and
-            # an incomplete sweep must NOT buy fifteen minutes of silence -- see the
-            # `at` stamp at the end, which only a clean finish reaches.
-            log.warning("artworks sweep: page %d fetch failed -- stopping early", pages + 1)
-            incomplete = True
+        try:
+            conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE, retries=0)
+        except core.ArtworkListRefused as e:
+            # A page that cannot be read. Whatever was collected is real and is written
+            # below; the run is simply incomplete, and an incomplete sweep must NOT buy
+            # fifteen minutes of silence -- see the `at` stamp at the end, which only a
+            # clean finish reaches. The reason is said once, not on every sweep.
+            _note_artworks_refusal(log, out_dir, pages + 1, e)
+            incomplete = refused = True
             break
         pages += 1
         edges = conn.get("edges") or []
@@ -8764,6 +8783,12 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
             break
         before = pi.get("startCursor")
         time.sleep(ARTWORKS_PAUSE)
+
+    if not refused and _artworks_refusal["reported"]:
+        # Every page this sweep asked for was read: the earlier refusal is over, and the
+        # next one is worth saying again.
+        _artworks_refusal["reported"] = False
+        log.info("artworks sweep: your published artworks can be read from PixAI again")
 
     changed = 0
     if metas:

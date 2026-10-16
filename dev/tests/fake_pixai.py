@@ -137,7 +137,7 @@ class FakePixAI:
 
     def _record(self, **kw):
         fields = dict(verb=None, op="", document=None, variables=None, retries=0,
-                      path=None, params=None, body=None, client_library=None, headers=None)
+                      path=None, params=None, body=None)
         fields.update(kw)
         call = SimpleNamespace(**fields)
         self.calls.append(call)
@@ -159,18 +159,14 @@ class FakePixAI:
                             retries=retries)
         return self._resolve(op, "GraphQL operation", call)
 
-    def persisted(self, op_name, variables=None, sha256=None, retries=4,
-                  client_library=None, headers=None, timeout=60):
+    def persisted(self, op_name, variables=None, sha256=None, retries=4, timeout=60):
         """Keyed by `op_name`, the whole point of the seam-level road: a test registers a
         canned answer with `fake.on(op_name, ...)` and it is returned here, or refuses by name
-        if nobody did. `client_library`, `headers` and `timeout` mirror the real client's
-        signature (the listArtworks GET passes the first two; a caller under a wall-clock
-        ceiling passes the last) and are recorded on the call so a test can assert the
-        `x-apollo-operation-name` header -- or the timeout the read was given -- rode along,
-        exactly as it does on the wire."""
+        if nobody did. `timeout` mirrors the real client's signature (a caller under a
+        wall-clock ceiling passes it) and is recorded on the call so a test can assert the
+        timeout the read was given, exactly as it does on the wire."""
         call = self._record(verb="persisted", op=op_name, variables=variables,
-                            retries=retries, client_library=client_library, headers=headers,
-                            timeout=timeout)
+                            retries=retries, timeout=timeout)
         return self._resolve(op_name, "persisted operation", call)
 
     def rest_get(self, path, params=None, timeout=30):
@@ -203,8 +199,8 @@ class FakePixAI:
             "FakePixAI has no requests.Session -- that is the point. A path that reaches "
             "for `.session` (or calls `.get`/`.post` on the client) is one of the call "
             "sites still speaking HTTP itself: resolve_media, download, delete_task_gql, "
-            "refresh_jwt. (The six persisted GETs -- task_detail_gql, _bookmarks_persisted, "
-            "model_name_gql, resolve_model_base_id, _resolve_model_preset, artwork_list_gql "
+            "refresh_jwt. (The persisted GETs -- task_detail_gql, _bookmarks_persisted, "
+            "model_name_gql, resolve_model_base_id, _resolve_model_preset "
             "-- ride persisted() now, so register them with fake.on(<operationName>, ...).) "
             "Stub the HTTP call directly instead of routing it through the fake.")
 

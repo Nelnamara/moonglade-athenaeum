@@ -12,8 +12,9 @@ settled two facts that the code cannot check for itself, so the fixtures below a
 like the probe's own answers rather than like something convenient:
 
   1. The AD-HOC bulk `artworks(authorId, first:N)` query ACCEPTS a `views` field. The
-     persisted `listArtworks` the sync already pages does not carry it and cannot be edited
-     to (fixed hash). `viewCount` / `viewsCount` / `totalViews` / `impressions` are all
+     listing the sync already pages for metadata (artwork_list_gql) never selects it: it
+     was a saved request that could not be edited to, and is a full document that leaves
+     it out on purpose now. `viewCount` / `viewsCount` / `totalViews` / `impressions` are all
      rejected by name -- `views` is the only spelling. 101 published works came back in
      three paced pages of 40.
 

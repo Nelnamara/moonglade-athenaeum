@@ -13,7 +13,8 @@ a single real sleep -- the sixty-day one being the obvious reason: there is no o
 test it at all.
 
 NO REAL PIXAI. The sweep talks to the transport seam, so it is driven here by a FakePixAI
-answering `listArtworks`, exactly as dev/tests/test_pixai_client.py drives the real client.
+answering the `artworks` operation, exactly as dev/tests/test_pixai_client.py drives the
+real client.
 """
 import inspect
 import io
@@ -65,10 +66,13 @@ def _fresh_sweep_state():
     not to one create_app). Reset around every test so one test's sweep cannot buy the
     next one fifteen minutes of silence."""
     before = dict(g._artworks_state)
+    said = dict(g._artworks_refusal)
     g._artworks_state.update({"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0,
                               "kicks": 0})
+    g._artworks_refusal.update(reported=False)
     yield
     g._artworks_state.update(before)
+    g._artworks_refusal.update(said)
 
 
 # =====================================================================================
@@ -357,7 +361,7 @@ def test_an_undateable_row_is_treated_as_young_rather_than_silently_abandoned():
 
 
 class _Pages:
-    """A fake listArtworks: newest-first pages, walked by the `before` cursor exactly as
+    """A fake artwork list: newest-first pages, walked by the `before` cursor exactly as
     PixAI's own Relay connection is."""
 
     def __init__(self, pages):
@@ -378,7 +382,7 @@ class _Pages:
 
 def _sweep_env(monkeypatch, pages):
     feed = _Pages(pages)
-    fake = FakePixAI(user_id="u-test").on("listArtworks", feed)
+    fake = FakePixAI(user_id="u-test").on("artworks", feed)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: fake)
     monkeypatch.setattr(g.time, "sleep", lambda *_a, **_k: None)   # no real pacing waits
     return feed
@@ -497,12 +501,14 @@ def test_the_sweep_announces_only_when_it_actually_changed_something(tmp_path, m
 
 def test_a_failed_page_does_not_buy_the_sweep_fifteen_minutes_of_silence(tmp_path,
                                                                         monkeypatch):
-    """artwork_list_gql fails SOFT to None. An incomplete sweep still writes what it got --
-    that data is real -- but the fifteen-minute guard measures COMPLETED sweeps, exactly as
-    the contest sweep's does, and a broken run must not stamp the 48-hour tier either: that
-    would tell two days' worth of sweeps that old works had been refreshed when they had
-    not."""
-    monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: None)
+    """A page artwork_list_gql cannot read ends the walk. An incomplete sweep still writes
+    what it got -- that data is real -- but the fifteen-minute guard measures COMPLETED
+    sweeps, exactly as the contest sweep's does, and a broken run must not stamp the 48-hour
+    tier either: that would tell two days' worth of sweeps that old works had been refreshed
+    when they had not."""
+    def _refused(*_a, **_k):
+        raise core.ArtworkListRefused("test refusal")
+    monkeypatch.setattr(core, "artwork_list_gql", _refused)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
     now = NOW
     res = g.artworks_sweep(tmp_path, tmp_path / "catalog.db", force=True, now=now)

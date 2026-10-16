@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **Published artworks' titles, likes and tags refresh again.** The fifteen-minute sweep and `--sync-artworks` (Control Panel → Maintenance → Sync published-artwork metadata) read your published list with a request PixAI no longer accepted, so every run since late September failed and nothing refreshed. They now ask PixAI with the full request, which it still answers, and never read view counts (reading them counts as a view) (#88). (2026-10-16)
+- **When PixAI won't give the app your published artworks, the log says why, once,** instead of a bare "page 1 fetch failed" every fifteen minutes, and `--sync-artworks` ends with a plain error that names the reason. (2026-10-16)
+
 ## [3.20.2] - 2026-10-15 — First Light
 
 ### First start

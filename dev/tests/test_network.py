@@ -760,10 +760,9 @@ def test_extract_artwork_meta_no_extra():
 def _views_sweep(pixai, views=None):
     """Register the VIEW SWEEP --sync-artworks has made since 2026-09-06.
 
-    The sync is two passes now, not one: the persisted `listArtworks` for metadata, and an
-    ad-hoc bulk `artworks(authorId, first:N)` for view counts -- which is the only form
-    that accepts a `views` field (PROBE_2026-09-06; the persisted query's selection set is
-    a fixed hash and cannot be edited).
+    The sync is two passes now, not one: the artwork listing for metadata (which never
+    selects `views`), and an ad-hoc bulk `artworks(authorId, first:N)` for view counts
+    (PROBE_2026-09-06 found that form accepts a `views` field).
 
     Registered EXPLICITLY here rather than swallowed, because that is the whole point of
     the `pixai` fixture: an operation nobody anticipated fails by name instead of reaching
@@ -878,14 +877,11 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
 
 
 def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker, pixai):
-    """B15: unlike gql() (retries 4x, then RAISES), artwork_list_gql swallows a
-    RequestException/non-200/bad-JSON with NO retry and just returns None (see its
-    own docstring: 'Returns the Relay connection dict ... or None on failure'). On
-    page 1 that correctly raises; on page 2+ the pagination loop treats it EXACTLY
-    like a legitimate 'no more pages' and breaks silently -- the run then reports a
-    complete-looking total for what is actually a partial sync. FAILS before the
-    fix: run_sync_artworks's return dict has no 'fail' key at all, so res['fail']
-    raises KeyError."""
+    """B15: a page after the first that artwork_list_gql cannot read (it raises
+    ArtworkListRefused) must not be treated EXACTLY like a legitimate 'no more pages' --
+    the run would report a complete-looking total for what is actually a partial sync.
+    On page 1 the refusal ends the run with a plain error; on page 2+ the run keeps what
+    it has and reports itself incomplete through res['fail']."""
     from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
@@ -894,8 +890,9 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
                                  "visibility": "PUBLIC", "isNsfw": False,
                                  "likedCount": 1, "commentCount": 0}}],
              "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
-    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode: None).
-    mocker.patch.object(core, "artwork_list_gql", side_effect=[page1, None])
+    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode).
+    mocker.patch.object(core, "artwork_list_gql",
+                        side_effect=[page1, core.ArtworkListRefused("page 2 refused")])
     _views_sweep(pixai, {"aw1": 5})
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))

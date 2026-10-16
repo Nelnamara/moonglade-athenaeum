@@ -30,7 +30,9 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- Nothing in review.
+- **Published-artwork sync** (branch `fix/artworks-sweep-88`, [#88](https://github.com/Nelnamara/moonglade-athenaeum/issues/88)):
+  the sweep and `--sync-artworks` read the published list with the full request PixAI still answers. For 3.20.3;
+  merges on the owner's boop after his walk.
 
 ---
 
