@@ -16,6 +16,12 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **A first start installs what Moonglade needs.** If a package the app needs isn't installed, Moonglade Launcher names it and offers to install it with the Python that runs Moonglade, then starts; it used to stop with "Flask is required…" (#87). (2026-10-15)
+
+### Under the hood
+- For developers: the test tools (pytest, pytest-mock, pytest-cov, and pytest-xdist for the parallel runs) moved from `requirements.txt` to a new `requirements-dev.txt`, which includes `requirements.txt`; `requirements.txt` now holds only what the app needs at run time. (2026-10-15)
+
 ## [3.20.1] - 2026-10-08 — Clean Sweep
 
 ### Fixed

@@ -29,7 +29,7 @@ import webbrowser
 
 import pytest
 
-from moonglade import paths
+from moonglade import deps, paths
 from tests.conftest import REPO_ROOT
 
 LAUNCHER = REPO_ROOT / "Moonglade Launcher.pyw"
@@ -72,6 +72,7 @@ def launch(monkeypatch, tmp_path):
         monkeypatch.setattr(time, "sleep", lambda s: None)
         monkeypatch.setattr(threading, "Thread", _NoThread)
         monkeypatch.setattr(sys, "path", list(sys.path))
+        monkeypatch.setattr(deps, "missing", lambda path: [])   # see test_first_run_deps.py
         monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(
             user32=types.SimpleNamespace(
                 MessageBoxW=lambda hwnd, text, title, flags: run.boxes.append(text) or 1)),

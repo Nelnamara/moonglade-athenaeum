@@ -28,6 +28,7 @@ import webbrowser
 
 import pytest
 
+from moonglade import deps
 from moonglade import gallery as g
 from moonglade import outside
 from moonglade import paths
@@ -216,6 +217,7 @@ def _launch(monkeypatch, platform):
     monkeypatch.setattr(threading, "Thread", _Thread)
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(deps, "missing", lambda path: [])   # see test_first_run_deps.py
     monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(
         user32=types.SimpleNamespace(MessageBoxW=lambda *a: 1)), raising=False)
     ready = types.SimpleNamespace(summary=lambda: "")

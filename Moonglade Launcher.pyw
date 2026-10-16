@@ -26,6 +26,12 @@ launch switches are all settings.json's, set from the Control Panel; the server 
 itself, so nothing is passed on its command line. The server's console output goes to
 local\\logs\\serve.log. A server that stops as it starts (a move it could not finish, a port
 taken, a crash) is said in a message box, with the reason from serve.log.
+
+Just before the server starts, it looks that the packages requirements.txt names are installed in
+the Python that runs this launcher (moonglade.deps). A first install often has none of them: the
+manual `pip install` ran for some other Python, and the server would die with "Flask is required".
+It names what is missing and, on a Yes in a message box, installs it with that same Python;
+nothing is installed without one.
 """
 import os
 import subprocess
@@ -42,6 +48,7 @@ import webbrowser
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from moonglade import paths as _paths    # noqa: E402
+from moonglade import deps as _deps      # noqa: E402 -- standard library only: runs before flask exists
 
 os.chdir(here)                     # so config.json / pixai_backup resolve here
 
@@ -51,18 +58,23 @@ def _serve_log_path():
     return _paths.logs_dir() / "serve.log"
 
 
+def _log_line(line):
+    """One "[launcher] ..." line in serve.log, when that can be written."""
+    try:
+        log = _serve_log_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(log), "a", encoding="utf-8") as f:
+            f.write("[launcher] " + line + "\n")
+    except Exception:                                   # noqa: BLE001 -- never stops a start
+        pass
+
+
 def _stop(message):
     """Say plainly why Moonglade cannot start, where a person will see it, and stop. Under
     pythonw there is no console, so it is a Windows message box (and a line in serve.log when
     that can be written); elsewhere, stderr."""
     text = "Moonglade couldn't get ready to start.\n\n" + message
-    try:
-        log = _serve_log_path()
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(log), "a", encoding="utf-8") as f:
-            f.write("[launcher] " + text.replace("\n\n", " ") + "\n")
-    except Exception:                                   # noqa: BLE001 -- the box still shows
-        pass
+    _log_line(text.replace("\n\n", " "))
     if sys.platform == "win32":
         try:
             import ctypes
@@ -260,6 +272,64 @@ def _repoint_shortcuts():
     except Exception:                                   # noqa: BLE001 -- never stops a start
         pass
 
+
+def _asked_yes(text):
+    """A Yes/No message box (MB_YESNO | MB_ICONQUESTION); True only for Yes. Where there is no
+    box (not Windows) or it cannot be shown, the answer is No: nothing installs unasked."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.user32.MessageBoxW(None, text, "Moonglade Athenaeum", 0x24) == 6
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def _packages_it_needs():
+    """Make sure the packages requirements.txt names are installed in THIS Python, which is the
+    one that runs the server below. A first install usually relies on a manual `pip install`,
+    and on Windows that often lands in a different Python than the one that opens this launcher,
+    so the server died with "Flask is required" (issue #87). Missing ones are named and, on a
+    Yes, installed here with this Python's own pip; a No (or no message box) is told the command
+    to run instead. The check itself failing never stops a start."""
+    req = _paths.requirements_path()
+    try:
+        lacking = _deps.missing(req)
+    except Exception:                                   # noqa: BLE001 -- a courtesy, not a gate
+        return
+    if not lacking:
+        return
+    names = ", ".join(lacking)
+    manual = _deps.manual_command(req)
+    said_yes = False
+    if sys.platform == "win32":
+        question = ("Moonglade needs some Python packages that aren't installed yet: " + names
+                    + ".\n\nInstall them now? This runs pip for the Python that runs Moonglade:\n"
+                    + sys.executable + "\n\nIt can take a minute or two. Moonglade starts when "
+                    "it's done.")
+        _log_line(question.replace("\n\n", " ").replace("\n", " "))
+        said_yes = _asked_yes(question)
+    if not said_yes:
+        _stop("Moonglade needs some Python packages that aren't installed yet: " + names
+              + ".\n\nTo install them, run:\n" + manual)
+    code, tail = _deps.install(req, _serve_log)
+    try:
+        still = _deps.missing(req)
+    except Exception:                                   # noqa: BLE001
+        still = []
+    if code == 0 and not still:
+        _log_line("Installed " + names + ".")
+        return
+    if "No module named pip" in tail:
+        _stop("Installing the packages didn't work: this Python has no pip.\n\n" + sys.executable
+              + "\n\nInstall Python from python.org (it includes pip), or run\n"
+              + _deps.ensurepip_command() + "\nfirst, then start Moonglade again.")
+    _stop("Installing the packages didn't work (pip ended with code %s). " % code
+          + ("The end of local\\logs\\serve.log says:\n\n" + tail + "\n\n" if tail else "\n\n")
+          + "To install them by hand, run:\n" + manual)
+
+
+_packages_it_needs()
 
 # Off the start's path: the server starts while the shortcuts are looked at.
 if sys.platform == "win32":

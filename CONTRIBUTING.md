@@ -18,7 +18,7 @@ build a feature, ask in an issue instead of trying to reconstruct it.
 ```bash
 git clone https://github.com/Nelnamara/moonglade-athenaeum.git
 cd moonglade-athenaeum
-pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt   # the app's packages (requirements.txt) plus the test tools
 cp config.example.json config.json   # add your own PIXAI_API_KEY
 ```
 
