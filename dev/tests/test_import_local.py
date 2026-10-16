@@ -90,3 +90,43 @@ def test_import_local_zip_slip_is_blocked(tmp_path):
     # the escaping member did not write outside the backup
     assert not (tmp_path.parent / "escape.png").exists()
     assert not (tmp_path / "escape.png").exists()
+
+
+def _coloured_png(colour):
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (8, 8), colour).save(b, "PNG")
+    b.seek(0)
+    return b
+
+
+def test_import_local_reports_the_files_it_did_not_take(monkeypatch, tmp_path):
+    """#82: the route took files[:1000] and said nothing about the rest, so a folder of
+    1,200 pictures imported 1,000 and the page reported success. The cap stays as a guard
+    (the page now sends batches), but whatever it leaves out is COUNTED in the answer:
+    `not_taken`, which the page prints. A request inside the cap reports zero."""
+    pytest.importorskip("PIL")
+    from moonglade import gallery
+    monkeypatch.setattr(gallery, "IMPORT_REQUEST_CAP", 2)
+    cli = login_client(tmp_path)
+    r = cli.post("/api/import-local",
+                 data={"files": [(_coloured_png((10 * n, 20, 30)), "p%d.png" % n) for n in range(1, 4)]},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    d = r.get_json()
+    assert d["ok"] and d["imported"] == 2 and d["not_taken"] == 1, d
+    names = sorted(p.name for p in (tmp_path / "imported").glob("*.png"))
+    assert len(names) == 2 and not any(n.startswith("p3_") for n in names), names
+
+    # inside the cap nothing is left out
+    r2 = cli.post("/api/import-local",
+                  data={"files": [(_coloured_png((200, 1, 1)), "q1.png"), (_coloured_png((1, 200, 1)), "q2.png")]},
+                  content_type="multipart/form-data")
+    assert r2.get_json()["not_taken"] == 0
+
+
+def test_import_local_default_cap_is_the_documented_thousand():
+    """The page's batch size (gallery/src/lib/importBatches.js) is pinned under this number in
+    loom/test/import-batches.test.js; the route's ceiling is one named constant, not a literal."""
+    from moonglade import gallery
+    assert gallery.IMPORT_REQUEST_CAP == 1000

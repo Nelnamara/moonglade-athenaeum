@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import useImport from "../hooks/useImport.js";
+import { notImportedNote } from "../lib/importBatches.js";
 import "../styles/overlays.css";
 import "../styles/import-overlay.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -77,6 +78,7 @@ export default function ImportOverlay({ onClose, collections, onImported }) {
               <div className="mgim-result ok">
                 ✓ Imported <b>{result.imported}</b> file{result.imported !== 1 ? "s" : ""}
                 {result.skipped ? " · " + result.skipped + " skipped (already in library)" : ""}
+                {notImportedNote(result)}
                 {result.collection ? " · added to “" + result.collection + "”" : ""}.
               </div>
               <div className="mgim-actions">

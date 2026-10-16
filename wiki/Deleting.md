@@ -21,7 +21,11 @@ in the gallery:
 > catalog row. To get something back, open the **Control Panel → Trash** panel: it lists
 > everything in `_deleted/` with thumbnails, and **Restore selected** puts the files back
 > and re-catalogs them for you. Restoring works from any signed-in device; *Delete forever*
-> and *Empty trash* are localhost-only and ask you to type `DELETE` first.
+> and *Empty trash* are localhost-only and ask you to type `DELETE` first. They are the one
+> step that cannot be undone, so that prompt also says how many of the files are the only copy
+> (*"3 of these are the only copy — PixAI no longer has them."*), judged from what the app knew
+> about each picture when you deleted it locally. Files that went to the Trash before the app kept
+> that record are not counted.
 >
 > (Hand-copying files out of `_deleted/` and re-running `--import-local` still works as a
 > fallback, but you shouldn't need it.)

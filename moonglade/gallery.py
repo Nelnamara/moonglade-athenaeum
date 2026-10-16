@@ -2207,13 +2207,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    if series:
-        member_ids = _series_member_task_ids(db_path, series)
-        if member_ids:
-            where += " AND task_id IN ({})".format(",".join("?" * len(member_ids)))
-            params = list(params) + member_ids
-        else:
-            where += " AND 1=0"   # unknown sid -> empty result, not an error
+    where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         if page_size is None:
@@ -2233,6 +2227,22 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             list(params) + order_params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
+
+
+def _narrow_to_series(db_path, series, where, params):
+    """(where, params) narrowed to one dial-in series' members when `series` is set, else
+    returned untouched. The ONE place the ?series=<sid> clause is built, so the paged
+    listing (query_catalog) and the ordered id walk behind the picture page
+    (list_media_ids) cannot drift apart: an UNKNOWN sid becomes an always-false clause
+    (an empty result, never a bare `IN ()`), and the member task_ids are bound as
+    placeholders."""
+    if not series:
+        return where, params
+    member_ids = _series_member_task_ids(db_path, series)
+    if member_ids:
+        where += " AND task_id IN ({})".format(",".join("?" * len(member_ids)))
+        return where, list(params) + member_ids
+    return where + " AND 1=0", params   # unknown sid -> empty result, not an error
 
 
 def _series_member_task_ids(db_path, sid):
@@ -9310,12 +9320,17 @@ def integrity_rows(db_path):
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
-                   media_type="", source="", collection=""):
-    """Return ordered list of media_ids matching the filter (no row data)."""
+                   media_type="", source="", collection="", series=""):
+    """Return ordered list of media_ids matching the filter (no row data).
+
+    `series` narrows the walk to one dial-in series' members, exactly as query_catalog's
+    does (_narrow_to_series), so the picture page opened from an opened stack counts and
+    steps inside that stack. Empty = no narrowing, the walk is what it always was."""
     q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
+    where, params = _narrow_to_series(db_path, series, where, params)
     order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
@@ -10201,6 +10216,10 @@ QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME, RECO
 QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
 # --import-local's internal scan: the three above plus legacy branding/.
 IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
+# Web Import's per-request ceiling on uploaded parts (/api/import-local). The page sends a big
+# folder in batches well under it (gallery/src/lib/importBatches.js); the route keeps it as a
+# guard and reports whatever it did not take.
+IMPORT_REQUEST_CAP = 1000
 # collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
 # IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
 # the health memo's correctness depends on THIS one matching the health walk exactly.
@@ -10830,11 +10849,25 @@ def list_quarantined(out_dir, page=1, page_size=60):
     scanned alongside (which has no sidecars to read at all, by definition -- nothing
     wrote one before this feature existed). Only os.scandir() + stat() (metadata
     only, no content read) touches every file in the backlog; JSON parsing is
-    bounded by however many sidecars actually exist. Returns (items, total, total_bytes)."""
+    bounded by however many sidecars actually exist. Returns (items, total, total_bytes).
+
+    Each item also carries `archive_only` (#66): True when its sidecar snapshot says PixAI no
+    longer has that picture, so the file in the trash is the only copy anywhere. The Trash's
+    Delete forever / Empty trash name how many before they destroy them. A file with no
+    sidecar (everything quarantined before 2026-07-24) is not claimed to be one: nothing
+    recorded says so. _list_quarantined also hands back the count across the WHOLE trash,
+    not just this page, because Empty trash takes every file."""
+    items, total, total_bytes, _only = _list_quarantined(out_dir, page, page_size)
+    return items, total, total_bytes
+
+
+def _list_quarantined(out_dir, page=1, page_size=60):
+    """list_quarantined's body, plus a fourth value: how many media files in the whole trash
+    are the only copy (their sidecar snapshot passes is_archive_only). See list_quarantined."""
     from moonglade import backup as core
     qdir = Path(out_dir) / DELETED_DIRNAME
     if not qdir.exists():
-        return [], 0, 0
+        return [], 0, 0, 0
 
     media_exts = _IMAGE_EXTS | core._VIDEO_EXTS
     entries = []
@@ -10859,6 +10892,8 @@ def list_quarantined(out_dir, page=1, page_size=60):
 
     total = len(entries)
     total_bytes = sum(s for _, s, _ in entries)
+    only_total = sum(1 for name, _s, _m in entries
+                     if is_archive_only(meta_by_id.get(media_id_of(name))))
 
     def _sort_key(entry):
         name, _size, mtime = entry
@@ -10882,8 +10917,9 @@ def list_quarantined(out_dir, page=1, page_size=60):
             "media_id": media_id, "filename": name, "size": size,
             "deleted_at": deleted_at, "is_video": "1" if is_video else "",
             "prompt": prompt[:2000], "has_meta": bool(meta),
+            "archive_only": is_archive_only(meta),
         })
-    return items, total, total_bytes
+    return items, total, total_bytes, only_total
 
 
 def _ensure_trash_thumbs(out_dir, thumb_dir, items, workers=6):
@@ -12314,6 +12350,22 @@ def _schedule_server_exit(code):
         else:
             os._exit(code)                    # fallback: server was never stashed (shouldn't happen)
     threading.Thread(target=_die, daemon=True).start()
+
+
+RESTART_EXIT_CODE = 42        # the supervisor's "relaunch me" signal (see _schedule_server_exit)
+
+
+def _power_in_progress():
+    """"stop" or "restart" once _schedule_server_exit has been called and the process has not
+    yet gone, else "". This is the server's own record that a Stop/Restart is under way: the
+    Control Panel reads it off /api/panel/status when it mounts, so a panel reopened (or a
+    page remounted) after the click picks the reconnect watch back up instead of showing an
+    idle panel (#84). It lives in the process and dies with it, so a fresh process always
+    starts at "" -- there is no stale marker to clear."""
+    with _EXIT_LOCK:
+        if not _SERVER_CONTROL.get("exit_scheduled"):
+            return ""
+        return "restart" if _SERVER_CONTROL.get("exit_code") == RESTART_EXIT_CODE else "stop"
 
 
 # ---------------------------------------------------------------------------
@@ -16955,6 +17007,9 @@ def create_app(out_dir: Path):
                             "label": _panel_job["label"], "rc": _panel_job["rc"],
                             "progress": _panel_job["progress"],
                             "warn_count": _panel_job.get("warn_count") or 0,
+                            # "stop" | "restart" while one is under way, else "" (#84): the
+                            # panel resumes its reconnect watch from this on mount.
+                            "power": _power_in_progress(),
                             "lines": lines})
 
     @app.route("/api/watch/status")
@@ -17918,11 +17973,17 @@ def create_app(out_dir: Path):
             limit = max(1, min(int(request.args.get("limit") or 60), 200))
         except ValueError:
             page, limit = 1, 60
-        items, total, total_bytes = list_quarantined(out_dir, page=page, page_size=limit)
+        items, total, total_bytes, archive_only_total = _list_quarantined(
+            out_dir, page=page, page_size=limit)
         _ensure_trash_thumbs(out_dir, thumb_dir, items)
         for it in items:
             it["thumb"] = "/thumbs/{}.jpg".format(it["media_id"])
+        # `archive_only` per file and `archive_only_total` for the whole trash (#66): the
+        # typed-DELETE confirms of Delete forever and Empty trash name how many files are
+        # the only copy anywhere before they go for good (Empty takes every page, so the
+        # page alone cannot answer it).
         return jsonify({"items": items, "total": total, "total_bytes": total_bytes,
+                        "archive_only_total": archive_only_total,
                         "page": page, "limit": limit})
 
     @app.route("/api/trash/restore", methods=["POST"])
@@ -23432,9 +23493,15 @@ def create_app(out_dir: Path):
         tmp = tempfile.mkdtemp(prefix="mg_import_")
         try:
             saved = 0
-            for i, f in enumerate(files[:1000]):          # hard cap on one request
+            # A guard, not the design: the web page sends a big folder in several requests
+            # (hooks/useImport.js), so this is only reached by a caller that sends more at
+            # once. What it does not take it COUNTS, and says so in the answer (#82) -- it
+            # used to drop everything past the cap without a word.
+            not_taken = max(0, len(files) - IMPORT_REQUEST_CAP)
+            for i, f in enumerate(files[:IMPORT_REQUEST_CAP]):
                 base = _os.path.basename(f.filename or "")
                 if not base:
+                    not_taken += 1          # a part with no file name: nothing to import
                     continue
                 # Own subdir per upload so two files sharing a basename don't collide in the
                 # temp dir; run_import_local then copies each into imported/ by basename, so the
@@ -23457,7 +23524,7 @@ def create_app(out_dir: Path):
             if collection and mids:
                 add_to_collection(db_path, mids, collection)
             return jsonify({"ok": True, "imported": res["imported"], "skipped": res["skipped"],
-                            "collection": collection or None})
+                            "not_taken": not_taken, "collection": collection or None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
         finally:
@@ -25815,6 +25882,12 @@ __DESIGN_TOKENS__
             date_from=(request.args.get("from") or "").strip(),
             date_to=(request.args.get("to") or "").strip(),
             art_tag=(request.args.get("tag") or "").strip(),
+            # The View batch drill-down (#81): the list route filters by it, so the walk
+            # this picture sits in -- its "k of N" and Prev/Next -- must stay inside it too.
+            batch=(request.args.get("batch") or "").strip(),
+            # The opened stack (?series=<sid>), same reason: /api/library honours it, so the
+            # walk a picture opened from a stack sits in stays inside that stack.
+            series=(request.args.get("series") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
         try:
             idx = nav_ids.index(media_id)

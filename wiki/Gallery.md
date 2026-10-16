@@ -471,7 +471,9 @@ filter does not contain shows no number on its record.
 
 **View batch** on a picture's record shows the other pictures made in the same generation. It
 appears for any picture that came from a generation, not only ones filed in an old batch folder.
-To get your whole library back, press **Clear** in **Advanced search**.
+Open a picture from that batch and its record's number (*2 of 4*) and **‹** / **›** stay inside the
+batch, on the desktop and on the phone. To get your whole library back, press **Clear** in
+**Advanced search**.
 
 ### Pages or Continuous on the phone
 

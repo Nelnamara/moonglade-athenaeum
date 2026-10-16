@@ -5,6 +5,7 @@ import { note as noteUpdate, subscribe as subscribeUpdate,
 import { invalidate, peek, put } from "./swrCache.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { DETAIL_PREFIX } from "../apiRoutes.js";
+import { clearPowerNote, notePower, powerToResume, readPowerNote } from "../lib/powerResume.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
    ControlPanelOverlay.jsx (2026-08-03) into its own hook -- summary/achievements fetch,
@@ -46,12 +47,14 @@ import { DETAIL_PREFIX } from "../apiRoutes.js";
    it does not retroactively show the finished job's own jobResult/jobError banner, so a
    job that completed while the tab was away renders as a plain idle console on return, not
    silently mistracked, just not retroactively narrated.) The Stop/Restart ping-poll (`power`)
-   has NO equivalent resume-on-mount check on either surface -- a pre-existing gap, not
-   introduced here, and not fixed in this pass (no server-side "restart in progress" signal
-   exists to resume FROM; /api/ping only answers up/down, it can't distinguish "mid-restart"
-   from "briefly slow" on a fresh mount). Not a billing/credit risk either way: the POST that
-   starts it fires once, before any unmount could happen, and there is no retry-on-remount
-   path that could double-fire it. */
+   used to have NO resume-on-mount check on either surface (#84); it has one now. The server
+   carries a marker of a stop or restart under way (`power` on /api/panel/status, read off
+   _schedule_server_exit's own state), the mount check below reads it, and the same hook
+   instance on desktop and phone picks the watch back up (lib/powerResume.js has the whole
+   rule, including the browser-side note for a mount that lands after the process has
+   already gone). Not a billing/credit risk either way: the POST that starts it fires once,
+   and a resumed watch only POLLS /api/ping -- resumePower never sends the stop or restart
+   again. */
 
 const POLL_MS = 1200;
 const PING_MS = 800;
@@ -158,6 +161,9 @@ export default function useControlPanel() {
   const [powerErr, setPowerErr] = useState("");
   const pingRef = useRef(null);
   const powerCancelledRef = useRef(false);
+  // True between resumePower() and the doPower() run it triggers: that run must WATCH, not
+  // send the stop/restart a second time.
+  const resumedPowerRef = useRef(false);
 
   const fetchSummary = async () => {
     try {
@@ -270,6 +276,12 @@ export default function useControlPanel() {
     (async () => {
       try {
         const d = await apiGet("/api/panel/status");
+        // A Stop or Restart already under way (#84): the server says so, or it has stopped
+        // answering right after this tab asked it to. Pick the reconnect watch back up --
+        // it only polls; nothing is sent again.
+        const resume = powerToResume(d, readPowerNote());
+        if (resume) { resumePower(resume); return; }
+        if (!d.error) clearPowerNote();      // the server answered with nothing under way: a leftover note is stale
         if (d.status === "running") {
           runningKeyRef.current = d.action;
           setRunning({ action: d.action, label: d.label || d.action });
@@ -678,18 +690,33 @@ export default function useControlPanel() {
   };
   const startPower = (mode) => {
     powerCancelledRef.current = false;
+    resumedPowerRef.current = false;
+    setPower(mode); setPowerPhase("busy"); setPowerErr("");
+  };
+  /* The mount check's way back into the watch (#84): the same state startPower sets, but doPower
+     is told not to POST again -- the click already happened, before this panel remounted. */
+  const resumePower = (mode) => {
+    powerCancelledRef.current = false;
+    resumedPowerRef.current = true;
     setPower(mode); setPowerPhase("busy"); setPowerErr("");
   };
   const doPower = async () => {
+    if (resumedPowerRef.current) {
+      resumedPowerRef.current = false;
+      _watch(power !== "stop");
+      return;
+    }
     if (power === "stop") {
       const d = await apiPost("/api/server/stop", {}).catch(() => null);
       if (powerCancelledRef.current) return; // Cancel was clicked while this was in flight
       if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
+      notePower("stop");
       _watch(false);
     } else {
       const d = await apiPost("/api/server/restart", {}).catch(() => null);
       if (powerCancelledRef.current) return;
       if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
+      notePower("restart");
       _watch(true);
     }
   };
@@ -706,6 +733,7 @@ export default function useControlPanel() {
     // and keeps the straight reload it has always had.
     const back = () => {
       clearInterval(pingRef.current);
+      clearPowerNote();            // the server answered again: the wait is over, a leftover note would only mislead (#84)
       if (onBack) onBack();
       else window.location.reload();
     };
@@ -738,6 +766,8 @@ export default function useControlPanel() {
   useEffect(() => { if (power) doPower(); /* eslint-disable-next-line */ }, [power]);
   const closePower = () => {
     powerCancelledRef.current = true;
+    resumedPowerRef.current = false;
+    clearPowerNote();
     if (pingRef.current) clearInterval(pingRef.current);
     setPower(null); setPowerConfirm(null); setPowerPhase("busy"); setPowerErr("");
   };

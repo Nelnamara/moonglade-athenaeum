@@ -234,7 +234,8 @@ python -m moonglade --import-local <DIR>          # copy an external folder in
 Or from the **gallery** — click **↑ Import** in the header (next to Generate) to open the
 drop-zone window. Drop images, a folder, or a `.zip` (or browse), review the preview, optionally
 add everything to a collection, and import. A big drop previews a capped grid, but the whole
-selection is imported. Web import writes files onto the machine the gallery is hosted from, so
+selection is imported — a folder of thousands is sent in batches and added up, and if the server
+ever leaves files out, the finished message says how many. Web import writes files onto the machine the gallery is hosted from, so
 the **↑ Import** button is visible to everyone signed in, but the import itself is refused for
 anyone connecting from another device on the LAN — only a session on the server's own machine
 can actually complete it. A LAN device can browse and generate, just not write files onto the host.

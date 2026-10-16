@@ -489,6 +489,53 @@ def test_server_restart_needs_supervisor(tmp_path, monkeypatch):
     assert d["action"] == "restart" and codes == [42]
 
 
+def test_panel_status_names_a_stop_or_restart_in_progress(tmp_path, monkeypatch):
+    """#84: the Panel's Stop/Restart reconnect watch could not resume after the panel
+    remounted, because nothing on the server said a stop was under way. The route the
+    panel already reads on mount (/api/panel/status) now carries `power`: "" at rest,
+    "stop" or "restart" from the moment the exit is scheduled until the process is gone."""
+    cli = _authed_client(tmp_path)
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_scheduled", False)
+    assert cli.get("/api/panel/status").get_json()["power"] == ""
+
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_scheduled", True)
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_code", 0)
+    assert cli.get("/api/panel/status").get_json()["power"] == "stop"
+
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_code", 42)
+    assert cli.get("/api/panel/status").get_json()["power"] == "restart"
+
+
+def test_the_stop_and_restart_routes_set_the_marker_through_the_real_exit_funnel(tmp_path, monkeypatch):
+    """The marker is not a second record the routes must remember to write: it is read off
+    _schedule_server_exit's own state, so a click on Stop or Restart sets it, and the
+    first click wins (a Restart after a Stop does not turn the marker into "restart")."""
+    import threading
+
+    class FakeServer:
+        def __init__(self):
+            self.stopped = threading.Event()
+
+        def shutdown(self):
+            self.stopped.set()
+
+    fake = FakeServer()
+    monkeypatch.setitem(g._SERVER_CONTROL, "srv", fake)
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_scheduled", False)
+    monkeypatch.setitem(g._SERVER_CONTROL, "exit_code", 0)
+    monkeypatch.setattr(g, "_supervised", lambda: True)
+    cli = _authed_client(tmp_path)
+    assert cli.get("/api/panel/status").get_json()["power"] == ""
+    assert cli.post("/api/server/restart").get_json()["action"] == "restart"
+    assert cli.get("/api/panel/status").get_json()["power"] == "restart"
+    cli.post("/api/server/stop")                       # a second click: first-wins
+    assert cli.get("/api/panel/status").get_json()["power"] == "restart"
+    # The funnel's exit thread wakes after its flush window and asks the server to shut down;
+    # let it finish BEFORE the monkeypatched "srv" is put back, or it would find none and take
+    # the os._exit fallback -- killing the test run itself with the restart code.
+    assert fake.stopped.wait(5), "the exit funnel never reached the server"
+
+
 def test_panel_summary_reports_restart_state(tmp_path, monkeypatch):
     """PORTED from the classic /panel page-scrape (test_panel_shows_restart_state; the
     page and its inline Restart/Stop buttons died in the 2026-08-08 classic cut). The
