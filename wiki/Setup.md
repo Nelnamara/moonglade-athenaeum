@@ -2,11 +2,20 @@
 
 ## 1. Install
 
-Python 3.9+ (`python --version`), then:
+**On Windows, first time?** Double-click **Install Moonglade** (`Install Moonglade.cmd`) in the app's folder, once. It looks for Python 3.10 or newer and, if the PC has none, installs Python 3.13 for your account only (it uses winget and needs no administrator; if winget is missing it opens python.org and tells you what to tick). Then it installs the packages and opens Moonglade in your browser. For a downloaded folder Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **Moonglade Launcher** whenever you want Moonglade, and skip the rest of this section. `Install Moonglade.cmd --check` only reports what it found and what it would do, and installs nothing. The setup file does not run from a network share (`\\server\share`); copy the folder to the PC first.
+
+Everyone else, on any system: Python 3.10 or newer (`python --version`), then:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
+
+Or skip that line: double-click **Moonglade Launcher** (`Moonglade Launcher.pyw`) and, if a
+package Moonglade needs isn't installed yet, it names it and asks before installing it. Either
+way the packages must land in the Python that *runs* Moonglade, which is the one that opens the
+launcher. A bare `pip` on Windows often belongs to a different Python, which is how a first
+start used to stop with "Flask is required"; the launcher installs with the Python that runs
+it, and `python -m pip` installs for the `python` you typed.
 
 | Package | Needed for |
 |---|---|
@@ -17,7 +26,7 @@ pip install -r requirements.txt
 | `truststore` | optional — fixes HTTPS cert errors behind corporate proxies / AV |
 | `cryptography` (**not** in `requirements.txt` — `pip install cryptography` separately) | optional — only for the gallery's `--https` mode |
 | `ffmpeg` (on PATH) | optional — posters for backed-up/imported videos; required for The Loom's video export, last-frame splice, re-anchor and music bed, and it cuts the frames the Loom's continuity ribbon shows |
-| `pytest`, `pytest-mock`, `pytest-cov` | dev only — running the test suite |
+| `pytest`, `pytest-mock`, `pytest-cov`, `pytest-xdist` | dev only — running the test suite (`requirements-dev.txt`, which includes `requirements.txt`) |
 
 ## 2. Configure — one value
 

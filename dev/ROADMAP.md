@@ -30,7 +30,9 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- Nothing in review.
+- **First start installs what Moonglade needs** (branch `fix/first-run-deps`,
+  [#87](https://github.com/Nelnamara/moonglade-athenaeum/issues/87)): the launcher names missing packages and
+  offers to install them with its own Python. For 3.20.2; merges on the owner's boop after his walk.
 
 ---
 

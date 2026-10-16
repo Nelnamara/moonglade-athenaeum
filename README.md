@@ -6,7 +6,7 @@
 
 **Back up · browse · generate · curate** — a complete local companion for **your own** [PixAI.art](https://pixai.art) work.
 
-![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
+![Version](https://img.shields.io/github/v/release/Nelnamara/moonglade-athenaeum?color=8839ef) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey) [![Tests](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml/badge.svg)](https://github.com/Nelnamara/moonglade-athenaeum/actions/workflows/tests.yml)
 
 *The local web gallery — your entire PixAI history, full-resolution, searchable.*
 
@@ -22,8 +22,10 @@ PixAI's site only shows a handful of images at a time and nothing older is easy 
 
 ## ⚡ Quickstart — one key, that's it
 
+**On Windows, first time?** Double-click **`Install Moonglade.cmd`** in the app's folder, once. It installs Python for your account if the PC has no Python 3.10 or newer (no administrator needed), installs the packages Moonglade needs, then opens Moonglade in your browser. If you downloaded the folder, Windows may ask "Do you want to run this file?"; choose Run. After that, double-click **`Moonglade Launcher.pyw`** whenever you want Moonglade. Everyone else follows the steps below.
+
 ```bash
-pip install requests pillow flask truststore websockets
+python -m pip install -r requirements.txt
 ```
 
 1. Generate an API key at **[platform.pixai.art](https://platform.pixai.art)** (lifetime up to ~2 years).
@@ -38,7 +40,9 @@ pip install requests pillow flask truststore websockets
    python -m moonglade                      # back up everything
    ```
    Or double-click **`Moonglade Launcher.pyw`** in the app's folder: it starts the gallery with
-   no console window and opens it in your browser.
+   no console window and opens it in your browser. If a package Moonglade needs isn't
+   installed yet, the launcher names it and offers to install it first, so the install line
+   above is only a head start.
 4. First time opening the web gallery: sign in from the machine running the server — the
    login page doubles as an account-creation form the very first time, before any account
    exists (see the [FAQ](../../wiki/FAQ)).
@@ -88,10 +92,10 @@ In-repo: [`CONTRIBUTING.md`](CONTRIBUTING.md) (how to contribute) — the deep m
 
 ## Requirements
 
-`requests` is the only hard dependency. `pillow` (thumbnails/convert), `flask` (gallery), `truststore` (HTTPS behind AV/proxies), and `websockets` (`--watch` and the gallery's live-mirror) are recommended; `ffmpeg` on PATH is required for the Loom's export and frame handoff, and optional for video posters.
+`requirements.txt` lists what Moonglade needs: `requests` (all network work), `pillow` (thumbnails/convert), `flask` (the gallery), `truststore` (HTTPS behind AV/proxies), `websockets` (`--watch` and the gallery's live-mirror), `numpy` (similar-image search) and `zeroconf` (LAN discovery; the app runs without it). **Moonglade Launcher** checks that file at every start and offers to install whatever is missing. `ffmpeg` on PATH is not a Python package: it is required for the Loom's export and frame handoff, and optional for video posters.
 
 ```bash
-pip install requests pillow flask truststore websockets
+python -m pip install -r requirements.txt
 ```
 
 ---

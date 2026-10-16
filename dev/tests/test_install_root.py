@@ -7,6 +7,9 @@
     tests). Every live reference -- code, front end, built bundles, wiki, README, CLAUDE.md --
     says the new name.
   * Nothing reads the old stand-in's flag any more.
+  * One batch file sits at the root beside the launcher: "Install Moonglade.cmd", the
+    first-time setup for a Windows PC with no Python. It has to be a file at the root because
+    a person double-clicks it before any Python exists to run anything else.
 
 Read from what git tracks, so a stray file on a developer's machine never decides it.
 """
@@ -19,6 +22,10 @@ from tests.conftest import REPO_ROOT, first_party_sources
 
 OLD_LAUNCHER = "Serve Gallery.pyw"
 NEW_LAUNCHER = "Moonglade Launcher.pyw"
+# The one non-Python script allowed at the root. A batch file runs on a PC with no Python at
+# all, which is the point: it is what installs Python and the packages (issue #87). It lives at
+# the root, not in dev/ or moonglade/, because it is the first thing a new user double-clicks.
+SETUP_FILE = "Install Moonglade.cmd"
 
 # Where the old launcher's name may still be written, and why.
 _OLD_NAME_ALLOWED = {
@@ -48,6 +55,13 @@ def test_no_python_file_at_the_install_root():
     assert [p for p in root if p.endswith((".py", ".pyw"))] == [NEW_LAUNCHER]
     assert (REPO_ROOT / NEW_LAUNCHER).is_file()
     assert not (REPO_ROOT / OLD_LAUNCHER).exists()
+
+
+def test_the_only_script_at_the_root_besides_the_launcher_is_the_setup_file():
+    scripts = [p for p in _tracked()
+               if "/" not in p and p.lower().endswith((".cmd", ".bat", ".ps1", ".sh", ".vbs"))]
+    assert set(scripts) <= {SETUP_FILE}, "an unexpected script at the install root: %s" % scripts
+    assert (REPO_ROOT / SETUP_FILE).is_file()
 
 
 def test_the_old_launcher_name_lives_only_where_it_must():

@@ -5,13 +5,9 @@ numpy        # moonglade/similar.py's CLIP-embedding array output (module-scope 
              # that same file's genuinely lazy heavy deps -- pixeltable/torch/transformers)
 websockets   # --watch / --watch-backup, and the web gallery's auto-starting live-mirror thread
 
-# gallery server (optional)
+# gallery server
 flask
 
-# dev / testing
-pytest
-pytest-mock
-pytest-cov   # coverage: python -m pytest --cov=moonglade
-
-# Optional: mDNS/Bonjour LAN discovery (the Control Panel Bonjour chip). Absent = no broadcast, app unaffected.
+# mDNS/Bonjour LAN discovery (the Control Panel Bonjour chip). The app runs without it (no broadcast),
+# but the launcher installs it with the rest of this file.
 zeroconf>=0.130
