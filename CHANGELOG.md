@@ -19,6 +19,7 @@ git tags. Full prose notes for tagged versions live on
 ### Fixed
 - **Published artworks' titles, likes and tags refresh on every sweep.** The fifteen-minute sweep and `--sync-artworks` (Control Panel → Maintenance → Sync published-artwork metadata) read your published list with a saved request PixAI has turned down part of the time since late September (about half the sweeps on most days, nearly all of them on some), so a refresh landed only when a sweep happened to get through. They now ask PixAI with the full request, which needs no saved copy on PixAI's side, and never read view counts (reading them counts as a view) (#88). (2026-10-16)
 - **When PixAI won't give the app your published artworks, the log says why, once,** instead of a bare "page 1 fetch failed" every fifteen minutes, and `--sync-artworks` ends with a plain error that names the reason. (2026-10-16)
+- **When PixAI turns down your sign-in at the free-card check, Moonglade now says so, instead of "wait a moment and try again."** Waiting can't fix a refused sign-in, and the old words sent you to wait and retry; the check is now asked once, and the message says nothing was submitted or spent. With Mirror to PixAI on, it tells you to sign in at pixai.art and press **↻ Refresh session** on the Mirror to PixAI tile in the Control Panel; with it off, it names the API key in `config.json`. A check that fails for any other reason is still tried twice, with the same words as before. (2026-10-19)
 
 ## [3.20.2] - 2026-10-15 — First Light
 

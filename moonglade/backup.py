@@ -15923,6 +15923,27 @@ def run_claims(args):
     return {"claimed": claimed}
 
 
+# The spend-time free-card check came back 401: PixAI no longer accepts the sign-in this
+# create rides, so the words depend on WHICH sign-in that was (_session_for_create: the
+# website session when Mirror to PixAI is on, the API key otherwise). Both end with the raw
+# error in parentheses, like the "Lost to the Void" message beside them.
+_SIGNIN_REFUSED_MIRROR = (
+    "PixAI no longer accepts this app's website sign-in, so nothing was submitted and "
+    "nothing was spent. If pixai.art has signed you out, sign in there first, then press "
+    "↻ Refresh session on the Mirror to PixAI tile in the Control Panel and try again. "
+    "({})")
+_SIGNIN_REFUSED_API_KEY = (
+    "PixAI no longer accepts this app's API key, so nothing was submitted and nothing was "
+    "spent. Make a new key on PixAI and put it in config.json as PIXAI_API_KEY (the Setup "
+    "page in the wiki shows where), then try again. ({})")
+
+
+def _is_signin_refusal(err):
+    """True when `err` is a REST answer of HTTP 401 (PixAIRestError.status). Read off the
+    status the transport already carries, never by matching the message text."""
+    return isinstance(err, PixAIRestError) and err.status == 401
+
+
 def _apply_kaisuuken(session, params, args):
     """Attach a free-card ticket id (`kaisuukenId`) to `params` in place, mirroring the
     web client. Precedence: explicit --kaisuuken-id > --no-card (skip) > auto-match via
@@ -15972,9 +15993,18 @@ def _apply_kaisuuken(session, params, args):
             break
         except (PixAIError, ValueError) as e:
             check_err = e
+            # A 401 is PixAI refusing the sign-in itself: waiting and asking again cannot
+            # change that answer, so it is not retried (no second call, no sleep). The status
+            # rides on the PixAIRestError that _rest_error built, through match_kaisuuken's
+            # re-raise, so it is read from there and never from the message text.
+            if _is_signin_refusal(e):
+                break
             if attempt == 0:
                 time.sleep(1.5)
     if check_err is not None:
+        if _is_signin_refusal(check_err):
+            raise PixAIError((_SIGNIN_REFUSED_MIRROR if mirror_enabled()
+                              else _SIGNIN_REFUSED_API_KEY).format(check_err))
         # On-theme wording: mirrors the "job lost"
         # message PixAI's own site shows on a similar random failure, rather than a raw
         # technical error -- still refuses to guess and silently spend credits, just

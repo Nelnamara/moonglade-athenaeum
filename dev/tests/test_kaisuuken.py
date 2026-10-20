@@ -194,6 +194,61 @@ def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(pixai):
     assert len(pixai.calls_for("/kaisuuken/check")) >= 2
 
 
+def _refused_401():
+    """The 401 PixAI sent when the sign-in itself was dead (seen live 2026-10-19), as the REST
+    helpers raise it: a PixAIRestError carrying the HTTP status, not a bare PixAIError."""
+    return core.PixAIRestError(
+        'REST POST /kaisuuken/check -> 401: {"message":"Invalid token: signature '
+        'verification failed","code":40100001}',
+        status=401, body={"message": "Invalid token: signature verification failed",
+                          "code": 40100001})
+
+
+def _no_sleep(monkeypatch):
+    slept = []
+    monkeypatch.setattr(core.time, "sleep", lambda s: slept.append(s))
+    return slept
+
+
+def test_apply_kaisuuken_401_on_mirror_says_refresh_the_session_and_asks_once(monkeypatch, pixai):
+    """A 401 can never be fixed by waiting, so it is not retried and does not say 'wait and try
+    again'. With Mirror to PixAI on, the sign-in that was refused is the website session: the
+    words point at the Mirror tile's Refresh session button. Nothing is submitted."""
+    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(core, "make_mirror_session", lambda *a, **k: pixai)
+    slept = _no_sleep(monkeypatch)
+    pixai.fail("/kaisuuken/check", _refused_401())
+    params = {"modelId": "m"}
+    with pytest.raises(core.PixAIError) as caught:
+        core._apply_kaisuuken(pixai, params, _args())
+    msg = str(caught.value)
+    assert "website sign-in" in msg and "Refresh session" in msg
+    assert "Mirror to PixAI" in msg and "nothing was spent" in msg
+    assert "Lost to the Void" not in msg and "Wait a moment" not in msg
+    assert "401" in msg and "signature verification failed" in msg    # the raw error, kept
+    assert len(pixai.calls_for("/kaisuuken/check")) == 1               # asked once, not twice
+    assert slept == []                                                 # and did not wait
+    assert "kaisuukenId" not in params and pixai.mutations() == 0      # nothing submitted
+
+
+def test_apply_kaisuuken_401_with_mirror_off_blames_the_api_key(monkeypatch, pixai):
+    """Same 401 with the Mirror off: the sign-in that was refused is the API key, so the words
+    say that and point at config.json -- not at a Mirror button the user may never have used."""
+    monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+    slept = _no_sleep(monkeypatch)
+    pixai.fail("/kaisuuken/check", _refused_401())
+    params = {"modelId": "m"}
+    with pytest.raises(core.PixAIError) as caught:
+        core._apply_kaisuuken(pixai, params, _args())
+    msg = str(caught.value)
+    assert "API key" in msg and "config.json" in msg and "nothing was spent" in msg
+    assert "Refresh session" not in msg and "Lost to the Void" not in msg
+    assert "401" in msg and "signature verification failed" in msg    # the raw error, kept
+    assert len(pixai.calls_for("/kaisuuken/check")) == 1
+    assert slept == []
+    assert "kaisuukenId" not in params and pixai.mutations() == 0
+
+
 # ---- run_cards display (list_kaisuukens stubbed) ----
 
 def test_run_cards_empty(monkeypatch, capsys, pixai):
