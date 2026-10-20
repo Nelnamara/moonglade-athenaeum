@@ -656,6 +656,55 @@ def _sign_in_beats_ms():
     return int(busy.group(1)), int(hold.group(1))
 
 
+# The sign-in page's own clock, for the one test that judges how long the page holds. Installed
+# before the page loads, it stamps (performance.now(), ms) the submit click, the moment
+# .lgn-welcome enters the DOM, and the moment the page starts leaving, and keeps the stamps in
+# localStorage because the page that wrote them is gone when Python reads them (the gallery it
+# navigates to is the same origin).
+_SIGN_IN_CLOCK_KEY = "mg-sign-in-clock"
+_SIGN_IN_CLOCK_JS = (
+    "(() => {"
+    " if (!location.pathname.startsWith('/login')) return;"
+    " const rec = {};"
+    " const save = () => { try { localStorage.setItem('" + _SIGN_IN_CLOCK_KEY + "',"
+    " JSON.stringify(rec)); } catch (e) {} };"
+    " document.addEventListener('click', (e) => {"
+    "   if (!('click' in rec) && e.target.closest && e.target.closest('button[type=submit]'))"
+    "     { rec.click = performance.now(); save(); } }, true);"
+    " new MutationObserver(() => {"
+    "   if (!('welcome' in rec) && document.querySelector('.lgn-welcome'))"
+    "     { rec.welcome = performance.now(); save(); } })"
+    "   .observe(document, { childList: true, subtree: true });"
+    " window.addEventListener('beforeunload', () => {"
+    "   rec.leaving = performance.now();"
+    "   rec.welcome_still_up = !!document.querySelector('.lgn-welcome'); save(); });"
+    "})();")
+
+# How far short of a beat the page's own clock may read. The page starts a hold's timer in the
+# same task that asks React to show the beat, so the beat reaches the DOM a moment AFTER its
+# timer started: 1-2 ms in every one of 25 traced sign-ins (2026-10-19, quiet and with the CPU
+# oversubscribed twofold). A quarter of a second is two orders of magnitude over that, and still
+# far under the beats it guards.
+_SIGN_IN_CLOCK_MARGIN_MS = 250
+
+
+def _read_sign_in_clock(page):
+    """The stamps _SIGN_IN_CLOCK_JS left behind, read once the page has left /login."""
+    rec = {}
+    for _ in range(50):
+        try:
+            raw = page.evaluate("k => localStorage.getItem(k)", _SIGN_IN_CLOCK_KEY)
+        except _pw.Error:                  # the new document was still being swapped in
+            raw = None
+        rec = json.loads(raw) if raw else {}
+        if all(k in rec for k in ("click", "welcome", "leaving", "welcome_still_up")):
+            return rec
+        page.wait_for_timeout(100)
+    pytest.fail("the sign-in page left no complete clock reading (got {!r}) -- it never showed "
+                "its welcome line, never left, or the stamps did not survive the "
+                "navigation".format(rec))
+
+
 def _login(page, username=_USERNAME):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -711,10 +760,16 @@ def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
     page holds "Signing in..." for BUSY_MIN_MS, then shows the welcome line, and holds that for
     WELCOME_HOLD_MS before it moves on to the gallery.
 
-    Timed from Python, so every reading can only come out LATER than the page's own timers
-    fire (each observation lags its event); the half-second margins absorb that lag the other
-    way, and are small next to the 2.2 s and 3.4 s being guarded. The fixed wait in phase 1 is
-    the measurement itself: the claim is that nothing happens for that long.
+    The beats are judged on the PAGE's own clock (_SIGN_IN_CLOCK_JS: the click, the welcome line
+    entering the DOM, the page starting to leave), not on a stopwatch in Python. A stopwatch
+    here reads every event late by however long Python takes to hear of it -- about 0.17 s on a
+    quiet machine, and up to 0.9 s with the CPU oversubscribed (traced 2026-10-19: the page held
+    the welcome 3.41 s on its own clock in the very runs where Python first saw the line 0.69 s
+    and 0.88 s after it appeared). The old form waited a fixed 2.9 s (the hold less half a
+    second) after Python saw the line and then asserted the page had not left, so that lag ate
+    the half-second and a correct page failed it (once, in a full local run). Python's side of
+    this test now only waits for the page to finish leaving; what it asserts is what the page
+    itself recorded, to within _SIGN_IN_CLOCK_MARGIN_MS.
 
     Phase 2 proves both halves non-vacuous: the same sign-in with the shortcut moves on before
     the busy beat would even have ended, so this test can tell a held sign-in from one that
@@ -724,38 +779,43 @@ def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
     busy_ms, hold_ms = _sign_in_beats_ms()
     monkeypatch.setattr(core, "_config_path", lambda: render_server.config_path)
 
-    def _open():
+    def _open(clock=False):
         ctx = render_browser.new_context(
             viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
             device_scale_factor=1, base_url=render_server.base_url)
         ctx.set_default_timeout(10_000)
         page = ctx.new_page()
+        if clock:
+            page.add_init_script(_SIGN_IN_CLOCK_JS)
         page.goto("/login", wait_until="domcontentloaded")
         page.fill("input[name=username]", _USERNAME)
         page.fill("input[name=password]", _PASSWORD)
         return ctx, page
 
     # Phase 1: the real sign-in, untouched -- no shortened timers, no frozen motion.
-    ctx, page = _open()
+    ctx, page = _open(clock=True)
     try:
         page.click("button[type=submit]")
-        clicked = time.monotonic()
         try:
             page.wait_for_selector(".lgn-welcome")
         except _PlaywrightTimeout:
             pytest.fail("no welcome line within 10 s of signing in; the page is at {} -- it "
                         "moved on without its welcome hold, or never signed in".format(page.url))
-        busy_s = time.monotonic() - clicked
         assert "/login" in page.url, "the page moved on before its welcome line showed"
-        assert busy_s >= busy_ms / 1000 - 0.5, (
-            "the welcome line came {:.2f}s after the click; the busy beat is {} ms".format(
-                busy_s, busy_ms))
-        page.wait_for_timeout(hold_ms - 500)
-        assert "/login" in page.url and page.locator(".lgn-welcome").count() == 1, (
-            "the page moved on before its {} ms welcome hold was over".format(hold_ms))
         page.wait_for_url(lambda url: "/login" not in url, wait_until="commit")
+        clock = _read_sign_in_clock(page)
     finally:
         ctx.close()
+    busy_beat = clock["welcome"] - clock["click"]
+    hold_beat = clock["leaving"] - clock["welcome"]
+    assert busy_beat >= busy_ms - _SIGN_IN_CLOCK_MARGIN_MS, (
+        "the welcome line came {:.0f} ms after the click on the page's own clock; the busy "
+        "beat is {} ms".format(busy_beat, busy_ms))
+    assert clock["welcome_still_up"], (
+        "the welcome line was already gone from the page when it started leaving")
+    assert hold_beat >= hold_ms - _SIGN_IN_CLOCK_MARGIN_MS, (
+        "the page moved on {:.0f} ms after showing its welcome line on its own clock, before "
+        "its {} ms welcome hold was over".format(hold_beat, hold_ms))
 
     # Phase 2: the same sign-in through the shortcut every other test takes.
     ctx, page = _open()
