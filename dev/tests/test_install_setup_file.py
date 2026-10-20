@@ -96,8 +96,13 @@ def test_it_says_when_python_was_just_installed_not_that_nothing_needed_installi
 
 def test_it_reads_the_probe_back_in_the_consoles_code_page():
     # A user name with an accent puts a non-ASCII letter in the Python path. Python writes the
-    # probe file in the ANSI page unless told otherwise, and "for /f" reads it in the OEM page.
-    assert "reconfigure(encoding='oem')" in _text()
+    # probe file in the ANSI page unless told otherwise, and "for /f" reads it in the console's
+    # CURRENT code page (what chcp shows), which is the OEM page only until something changes it
+    # (a console set to UTF-8, an AutoRun chcp). So the probe asks the console, and falls back to
+    # the OEM page only when there is no console or no codec for its page.
+    text = _text()
+    assert "GetConsoleOutputCP()" in text
+    assert "reconfigure(encoding=" in text and "else 'oem')" in text
 
 
 def test_it_says_what_to_do_next_time():
@@ -155,14 +160,26 @@ def test_the_setup_doc_says_the_setup_file_does_not_run_from_a_network_share():
 
 # ---- running it (Windows only) ----------------------------------------------------------------
 
-def _run(script, args="", cwd=None, env=None, timeout=300):
+def _run(script, args="", cwd=None, env=None, timeout=300, codepage=None):
     """`cmd /s /c ""<script>" <args>"`, the quoting that survives a space in the file's name, with
-    no stdin so a `pause` or `timeout` ends at once."""
-    cmd = 'cmd /s /c ""%s" %s"' % (script, args)
+    no stdin so a `pause` or `timeout` ends at once.
+
+    `codepage` runs it in a console of its own (no window) set to that code page with `chcp`,
+    whatever console this test run inherited: a run from a UTF-8 console and one from a plain
+    OEM-437 console must both pass, and `chcp` on the inherited console would change it for
+    everything else attached to it."""
+    flags = 0
+    if codepage:
+        # "chcp 437>nul" would redirect handle 7 and leave the page at 43, so the space matters
+        cmd = 'cmd /s /c "chcp %d >nul & "%s" %s"' % (codepage, script, args)
+        flags = subprocess.CREATE_NO_WINDOW
+    else:
+        cmd = 'cmd /s /c ""%s" %s"' % (script, args)
     r = subprocess.run(cmd, cwd=str(cwd or script.parent), env=env, stdin=subprocess.DEVNULL,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout,
+                       creationflags=flags)
     try:
-        text = r.stdout.decode("oem", errors="replace")     # the console's own code page
+        text = r.stdout.decode("cp%d" % codepage if codepage else "oem", errors="replace")   # the console's own page
     except LookupError:
         text = r.stdout.decode("cp437", errors="replace")
     return r.returncode, text
@@ -287,9 +304,12 @@ def test_check_survives_a_folder_name_with_spaces_parentheses_and_an_ampersand(t
 
 
 @WINDOWS
-def test_check_accepts_a_python_whose_path_has_an_accented_letter(tmp_path):
+@pytest.mark.parametrize("codepage", [437, 65001], ids=["console-437", "console-utf8"])
+def test_check_accepts_a_python_whose_path_has_an_accented_letter(tmp_path, codepage):
+    # Each code page is forced on a console of the run's own (see _run), not read off the console
+    # this test run inherited: the probe file is written and read back in whichever page is set.
     try:
-        "é".encode("oem")
+        "é".encode("cp%d" % codepage)
     except (LookupError, UnicodeEncodeError):
         pytest.skip("this console's code page has no e-acute")
     venv_dir = tmp_path / "José Python"
@@ -307,7 +327,7 @@ def test_check_accepts_a_python_whose_path_has_an_accented_letter(tmp_path):
     # python on PATH is the accented one; the py launcher is not on this PATH at all
     env = dict(os.environ, PATH=str(py.parent) + os.pathsep
                + os.path.join(os.environ["SystemRoot"], "System32"))
-    code, out = _run(app / SETUP.name, "--check", env=env)
+    code, out = _run(app / SETUP.name, "--check", env=env, codepage=codepage)
     assert code == 0, out
     assert _found_path(out) == str(py), out
 
