@@ -18,6 +18,17 @@ app and are shared by everyone, so when one breaks it breaks for all users.
 - If it's still broken on the latest version, **open an issue** so the default can be
   updated for everyone.
 
+Reading the pages of your history (the list **Sync now**, `--sync`, `--update` and `--count`
+walk) no longer uses a built-in identifier. Sync's later steps (filling in a picture's full
+details, model names) still do, so everything above still applies to those. "Recapture" now
+applies only to the few saved operations that remain (a picture's full details, model names,
+deleting a picture from PixAI).
+
+## "PixAI refused the history feed; nothing was changed"
+PixAI turned down the request for your history. It does this now and then, and answers the
+same request a minute later. Nothing was changed. Wait a minute and run it again
+(**Sync now**, or the same command). There is no identifier to update or recapture for this one.
+
 ## "401 Unauthorized"
 Your `PIXAI_API_KEY` is missing, mistyped, or expired. Regenerate at
 [platform.pixai.art](https://platform.pixai.art) and update `config.json`.

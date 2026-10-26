@@ -29,20 +29,22 @@ def _make_response(mocker, status_code=200, json_body=None, text="", raises=None
 # ---------------------------------------------------------------------------
 
 class TestGql:
+    """The history feed reads its full document over the ad-hoc POST (#89), so its stubs
+    answer `post`; the saved-request GET is never made."""
     def test_returns_data_on_success(self, mock_session):
         payload = {"data": {"user": {"taskSummaries": {"edges": [], "pageInfo": {}}}}}
-        mock_session.get.return_value = _make_response(
+        mock_session.post.return_value = _make_response(
             pytest.importorskip("unittest.mock"), json_body=payload
         )
         # Re-mock properly
-        mock_session.get.return_value.status_code = 200
-        mock_session.get.return_value.json.return_value = payload
+        mock_session.post.return_value.status_code = 200
+        mock_session.post.return_value.json.return_value = payload
         result = core.gql(mock_session, {"last": 10, "userId": "u1"})
         assert result == payload["data"]
 
     def test_raises_on_401(self, mock_session, mocker):
         resp = _make_response(mocker, status_code=401, json_body={})
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="401"):
             core.gql(mock_session, {"last": 10, "userId": "u1"})
 
@@ -52,7 +54,7 @@ class TestGql:
         resp.text = "not json at all"
         resp.json.side_effect = ValueError("no json")
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="non-JSON"):
             core.gql(mock_session, {"last": 10, "userId": "u1"})
 
@@ -62,19 +64,24 @@ class TestGql:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
-        with pytest.raises(core.PixAIError, match="GraphQL error"):
+        mock_session.post.return_value = resp
+        with pytest.raises(core.HistoryPageRefused, match="refused the history feed") as ei:
             core.gql(mock_session, {"last": 10, "userId": "u1"})
+        assert "GraphQL error" in str(ei.value.__cause__)
 
-    def test_raises_persisted_query_not_found(self, mock_session, mocker):
+    def test_never_asks_for_the_saved_request(self, mock_session, mocker):
+        """A refusal shaped like the retired saved request's "not found" is just a refusal:
+        the GET is never made, and nothing tells the user to recapture a hash."""
         payload = {"errors": [{"message": "PersistedQueryNotFound"}]}
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
-        with pytest.raises(core.PixAIError, match="hash not recognized"):
+        mock_session.post.return_value = resp
+        with pytest.raises(core.HistoryPageRefused) as ei:
             core.gql(mock_session, {"last": 10, "userId": "u1"})
+        assert "hash" not in str(ei.value) and "Recapture" not in str(ei.value)
+        mock_session.get.assert_not_called()
 
 
 class TestPageVariablesTakesTheIdFromTheClient:
@@ -259,7 +266,7 @@ class TestQuickCount:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         result = core._quick_count(mock_session, page_size=10)
         assert result == 0
 
@@ -276,7 +283,7 @@ class TestQuickCount:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         # edge 1 → 1 id, edge 2 → 2 ids  (m2 deduped + m3)
         result = core._quick_count(mock_session, page_size=10)
         assert result == 3
