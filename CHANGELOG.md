@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### For developers
+- **The picture list a client reads now carries each picture's star rating**, so a viewer such as the Apple TV client in development can show and change stars without a second request. `dev/tools/tv_fixtures.py` captures that list and four other read-only answers from a library into a folder, for a client's tests. (2026-10-26)
+
 ## [3.20.3] - 2026-10-26 — Full Scene
 
 ### Fixed
