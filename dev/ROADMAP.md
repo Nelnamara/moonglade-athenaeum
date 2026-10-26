@@ -215,6 +215,9 @@ A visible change gets a design or workshop step first.
 - **Remember this device** (opt-in longer LAN session, designed as Session V): waits on the security
   review's rulings (lifetime, whether a remembered device may spend). The "Log Out signs out only this
   device" half shipped in 3.16.0.
+- **Apple TV client** — a native tvOS viewer in its own repo (Nelnamara/moonglade-tv); scope and plan
+  in moonglade-internal/scopes (SCOPE_2026-10-26_apple-tv-client.md, PLAN_2026-10-26_apple-tv.md). The
+  server half of pairing waits on the app security review with Session V.
 - **The phone layouts** wait on the mobile-surface audit's defect list; the Chrome-on-iPhone column
   jump after a turn needs a measurement on the device itself.
 - **Windows Explorer's Network folder** *(scoped 2026-10-02)*. Moonglade shows up for phones through
