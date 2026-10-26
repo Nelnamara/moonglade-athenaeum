@@ -2,8 +2,8 @@
 """
 moonglade/backup.py  (v4 - media resolution)
 ================================================
-Bulk-download YOUR OWN PixAI.art generated images. Replays PixAI's persisted
-GraphQL query (listUserTaskSummaries) to page backward through your entire
+Bulk-download YOUR OWN PixAI.art generated images. Reads PixAI's history-feed
+GraphQL query (taskSummaries, as a full document) to page backward through your entire
 generation history, turns each task's mediaId / batchMediaIds into full-resolution
 image URLs, downloads them (with resume), paces itself, and writes a catalog with
 the prompt preview next to each image.
@@ -115,15 +115,18 @@ class PixAIError(Exception):
 
 class PersistedQueryNotRecognized(PixAIError):
     """PixAI answered a saved (hash-only) request with "not found". Still a PixAIError with
-    the same message as before, so every existing catch site is unchanged; a reader of a
-    read-only query catches this one to retry the same read with its full document."""
+    the same message as before, so every existing catch site is unchanged. Raised by
+    `persisted()` for the saved operations that remain (task detail, model detail,
+    bookmarks); the history feed no longer rides a saved request (#89)."""
 
 
 class HistoryPageRefused(PixAIError):
-    """PixAI refused the history feed on both roads: the saved request was not recognized AND
-    the same read as a full document came back as a GraphQL error. Raised by `history_page`
-    only; a network failure, a 401 or a 5xx on the retry is NOT this (those stay what they
-    were), so a caller that names this one knows PixAI itself answered "no" twice."""
+    """PixAI answered a page of the history feed with a GraphQL error: any refusal of the full
+    document, or its passing "Internal server error" that a wait and a smaller page did not
+    get past. The message is HISTORY_REFUSED, the plain sentence a user sees; PixAI's own
+    error is the chained cause. Raised by `gql` only; a network failure, a 401 or a 5xx is
+    NOT this (those stay what they were), so a caller that names this one knows PixAI itself
+    answered "no"."""
 
 
 class ArtworkListRefused(PixAIError):
@@ -261,6 +264,9 @@ REST_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/v2"
 # CAPTURED FROM YOUR BROWSER -- loaded from config.json (see config.example.json)
 # Update config.json when the site changes (see RECAPTURE at the bottom).
 # ===========================================================================
+# The history feed's operation name. Its saved request retired (#89: the feed is read as a
+# full document, _HISTORY_PAGE_DOC); the name survives as the x-apollo-operation-name value
+# the sessions send for Apollo's CSRF check, which needs one present, not a matching one.
 OPERATION_NAME = "listUserTaskSummaries"
 CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
@@ -887,12 +893,10 @@ def _check_read_only(action):
 
 # Persisted-query hashes are PUBLIC, non-secret identifiers of PixAI's own frontend
 # GraphQL operations (the same for every user, embedded in their JS bundle). The
-# history feed / task detail / delete operations are NOT exposed on the public API
-# the API key talks to, so these hashes are the only way to reach them. They change
+# task detail / delete operations are reached through these hashes. They change
 # only when PixAI overhauls their frontend -- captured 2026-06-28. Override any in
-# config.json if one rotates (you'll get a clear "recapture" error if it does).
-PERSISTED_QUERY_HASH = _cfg.get("PERSISTED_QUERY_HASH", "") or \
-    "d30424c72dc7d75d14c09d9fe447e1ac3dea8e767668092e2113efb8c817573e"
+# config.json if one rotates (you'll get a clear "recapture" error if it does). The
+# history feed has none any more: it is read as a full document (_HISTORY_PAGE_DOC, #89).
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")  # auto-resolved from the API key (me{id}) if blank
 TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "") or \
@@ -1521,7 +1525,8 @@ def _quick_count(session, page_size=500):
 #     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
 #     after PixAI already created and CHARGED for the task pays twice.
 #   * the two roads to PixAI -- the persisted-hash GET (`persisted()`), which is
-#     how the personal-history operations are reached, and the ad-hoc POST
+#     how the saved operations (task detail, model detail, bookmarks) are reached,
+#     and the ad-hoc POST
 #     (`query()`/`mutate()`), which is everything the API key can ask for
 #     directly -- plus the oRPC `/v2` REST road (`rest_get()`/`rest_post()`).
 #   * WHICH credential a create rides (`for_create()`): the browser-JWT mirror
@@ -1691,9 +1696,9 @@ class PixAIClient:
     # -- persisted-hash GET --------------------------------------------------
     def persisted(self, op_name, variables=None, sha256=None, retries=4, timeout=60):
         """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
-        params their frontend sends. `sha256=None` resolves the captured hash for
-        `op_name` (the history feed is the operation that rides this road out of the box);
-        every other captured op rides here by passing its OWN `sha256=`. `timeout` is the
+        params their frontend sends. Every captured op rides here by passing its OWN
+        `sha256=`; none is resolved from `op_name` any more (the history feed, the one that
+        used to be, reads its full document through `gql` since #89). `timeout` is the
         per-ATTEMPT socket timeout in seconds (60, this road's long-standing value, unless a caller says
         otherwise): a caller working against a wall-clock ceiling of its own -- the
         delete preview's live check is the one today -- passes the time it has left, so a
@@ -1701,7 +1706,7 @@ class PixAIClient:
         PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
         bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
         credential or an edge refusal answered in its own JSON)."""
-        sha = sha256 or (PERSISTED_QUERY_HASH if op_name == OPERATION_NAME else "")
+        sha = sha256
         if not sha:
             raise PixAIError(
                 "no persisted hash is known for operation {!r} -- pass sha256=... or add "
@@ -1840,16 +1845,13 @@ def _client_of(session):
 
 
 # ---------------------------------------------------------------------------
-# Persisted GraphQL GET (with Apollo CSRF headers)
+# The history feed: one road, the full document over the ad-hoc POST
 # ---------------------------------------------------------------------------
-def gql(session, variables, retries=4):
-    """Replay the history-feed persisted query. Thin delegate onto
-    `PixAIClient.persisted` -- the road itself lives in the pixai_client section."""
-    return _client_of(session).persisted(OPERATION_NAME, variables, retries=retries)
-
-
-# The history feed as a full document: the same page `gql` reads, selecting the same task
-# summary fields, for a reader that must not depend on the saved request being recognized.
+# The history feed as a full document, selecting the task summary fields every reader uses.
+# It needs no saved copy on PixAI's side. The saved request it replaced (a hash of the site's
+# old document) was answered from a cache part of the time and refused the rest -- about one
+# read in five on the owner's install on 2026-10-25 -- and the site itself no longer sends it
+# (#89). Same ids, same order, same result shape, so `find_connection` reads it.
 _HISTORY_PAGE_DOC = (
     "query($userId: ID!, $last: Int, $before: String) { user(id: $userId) { id "
     "taskSummaries(last: $last, before: $before) { "
@@ -1858,32 +1860,103 @@ _HISTORY_PAGE_DOC = (
     "mediaId batchMediaIds i2vProModel characteristics artworkCount promptsPreview "
     "enrolledExperiment } } } } }")
 
+# What a user is told when PixAI refuses a page of the feed, in plain words: the read
+# changed nothing, and asking again later is all there is to do.
+HISTORY_REFUSED = ("PixAI refused the history feed; nothing was changed -- try again in a "
+                   "minute.")
+# PixAI's passing failure on a big page: a GraphQL "Internal server error" (its database
+# layer) after about 5 s, seen only at 5000 rows, 2 reads of 4, the same read answering 5 s
+# later (PROBE_2026-10-25). `gql` waits this long and asks once more, then once more at
+# HISTORY_FALLBACK_LAST rows, a size that answered every time it was measured.
+HISTORY_RETRY_WAIT_S = 5.0
+HISTORY_FALLBACK_LAST = 2000
+# --count's page size (--count-page-size). 2000, not the 5000 it was: the count asks 2.5x as
+# many pages, and never the size PixAI fails now and then.
+COUNT_PAGE_SIZE = 2000
 
-def history_page(session, variables, retries=4):
-    """One page of the history feed, surviving a saved request PixAI does not recognize.
 
-    Reads with `gql` first. If PixAI answers that the saved request is not recognized, the
-    same page is read once more as a full document (`_HISTORY_PAGE_DOC`, same variables,
-    same result shape, so `find_connection` reads either). Returns `(data, via_document)`;
-    `via_document` is True when the retry produced the page. If PixAI answers the retry with
-    a GraphQL error too, that is `HistoryPageRefused`: what `gql_adhoc` really raises there
-    is a plain PixAIError "GraphQL error: ...", never PersistedQueryNotRecognized, so the
-    translation is made here, chained from the original. Any other failure of the retry (a
-    network error, a 401, a 5xx) raises as it would from `gql_adhoc`, and any other failure
-    of the first read raises untouched. Read-only on both roads, so the second attempt costs
-    nothing but a request."""
+def _history_wait(seconds):
+    """The wait before `gql` asks again after an internal-server failure. Its own name, so a
+    test records the wait instead of taking it."""
+    time.sleep(seconds)
+
+
+def _feed_refusal(exc):
+    """`(refused, internal)` for an error the feed's document read raised. `refused` is True
+    when PixAI answered with GraphQL errors (`_graphql_post` hangs the list on the error; a
+    bare "GraphQL error: ..." message counts too); `internal` is True when one of them is the
+    passing "Internal server error". A network error, a 401, a 5xx or a non-JSON body is
+    neither."""
+    errors = getattr(exc, "graphql_errors", None)
+    if isinstance(errors, list):
+        return True, any(isinstance(err, dict) and "internal server error"
+                         in str(err.get("message") or "").lower() for err in errors)
+    text = str(exc)
+    if text.startswith("GraphQL error"):
+        return True, "internal server error" in text.lower()
+    return False, False
+
+
+def gql(session, variables, retries=4):
+    """One page of the history feed: `_HISTORY_PAGE_DOC` POSTed through `gql_adhoc` with the
+    page variables (`page_variables`), a query. Returns the `data` dict; `find_connection`
+    reads the page out of it. `retries` is `gql_adhoc`'s, covering network errors and 5xx as
+    it always has.
+
+    PixAI answering with a GraphQL error is `HistoryPageRefused` (message HISTORY_REFUSED,
+    chained from PixAI's own error), at once -- with one exception. Its "Internal server error"
+    on a big page passes: wait HISTORY_RETRY_WAIT_S (`_history_wait`) and ask once more, and if
+    that fails the same way and the page asked for more than HISTORY_FALLBACK_LAST rows, ask
+    once more for HISTORY_FALLBACK_LAST rows with the same `before`. A page that comes back
+    smaller than asked is still a page: every caller walks on from the returned page's own
+    `pageInfo.startCursor`, never from the size it asked for. Network errors, a 401 and a 5xx
+    raise as they do from `gql_adhoc`. Read-only, so asking again costs nothing but a request.
+
+    An answer with no page in it is `HistoryPageRefused` too (`_history_answer`), never an
+    empty history: a body that is not GraphQL at all -- `{"message": "Forbidden"}` at a 200,
+    400 or 403, an edge's or a stale credential's own JSON -- comes back from the ad-hoc POST
+    as {}, and every caller would read the missing connection as the end of the feed."""
     try:
-        return gql(session, variables, retries=retries), False
-    except PersistedQueryNotRecognized:
-        pass
-    try:
-        return gql_adhoc(session, _HISTORY_PAGE_DOC, variables), True
+        data = gql_adhoc(session, _HISTORY_PAGE_DOC, variables, retries=retries)
     except PixAIError as e:
-        if str(e).startswith("GraphQL error"):
-            raise HistoryPageRefused(
-                "PixAI refused the history feed as a saved request and as a full "
-                "document: " + str(e)) from e
+        refused, internal = _feed_refusal(e)
+        if not refused:
+            raise
+        if not internal:
+            raise HistoryPageRefused(HISTORY_REFUSED) from e
+    else:
+        return _history_answer(data)
+    _history_wait(HISTORY_RETRY_WAIT_S)
+    try:
+        data = gql_adhoc(session, _HISTORY_PAGE_DOC, variables, retries=retries)
+    except PixAIError as e:
+        refused, internal = _feed_refusal(e)
+        if not refused:
+            raise
+        last = (variables or {}).get("last")
+        if not internal or not isinstance(last, int) or last <= HISTORY_FALLBACK_LAST:
+            raise HistoryPageRefused(HISTORY_REFUSED) from e
+    else:
+        return _history_answer(data)
+    try:
+        data = gql_adhoc(session, _HISTORY_PAGE_DOC,
+                         dict(variables, last=HISTORY_FALLBACK_LAST), retries=retries)
+    except PixAIError as e:
+        if _feed_refusal(e)[0]:
+            raise HistoryPageRefused(HISTORY_REFUSED) from e
         raise
+    return _history_answer(data)
+
+
+def _history_answer(data):
+    """`data` when it holds a page of the feed (a connection: `edges` and `pageInfo`); else
+    `HistoryPageRefused`, chained from a PixAIError that says what came back. A user with no
+    generations still gets a connection, with no edges, so no real answer is refused. The
+    same check the artworks list makes (`artwork_list_gql`, #88)."""
+    if find_connection(data or {}) is None:
+        raise HistoryPageRefused(HISTORY_REFUSED) from PixAIError(
+            "PixAI answered, but with no history page in it")
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -3041,8 +3114,8 @@ def gql_adhoc(session, query, variables=None, retries=None):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has
     read+write scope), so NO persisted sha256Hash capture is needed -- this is the
-    generic foundation for every read/write op beyond the reverse-engineered
-    listing path. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
+    generic foundation for every read/write op, the history feed's page read (`gql`)
+    included. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
 
     Mutations must be POST (Apollo blocks them over GET); this always POSTs, so it
     works for queries and mutations alike.
@@ -5691,11 +5764,10 @@ def _make_session(token_val, resolve_user=True):
     it holds, and every primitive resolves whatever it is handed through `_client_of`), so
     the ~70 session-taking functions are unchanged. The name stays `_make_session` because
     thirty-odd call sites and a hundred-odd tests say it."""
-    global PERSISTED_QUERY_HASH, U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
+    global U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
     global DELETE_TASK_HASH
     fresh = _load_config()
     if fresh:
-        PERSISTED_QUERY_HASH = fresh.get("PERSISTED_QUERY_HASH", "") or PERSISTED_QUERY_HASH
         U3T = fresh.get("U3T", "") or U3T
         USER_ID = fresh.get("USER_ID", "") or USER_ID
         TASK_DETAIL_HASH = fresh.get("TASK_DETAIL_HASH", "") or TASK_DETAIL_HASH
@@ -6715,7 +6787,7 @@ def run_probe(args):
 def run_count(args):
     """Tally total tasks and images in the library without downloading."""
     session = _make_session(getattr(args, "token", None))
-    count_size = getattr(args, "count_page_size", 5000)
+    count_size = getattr(args, "count_page_size", COUNT_PAGE_SIZE)
     print("Counting your whole library (page size {})...".format(count_size))
     before = None
     tasks = images = page = 0
@@ -16251,7 +16323,12 @@ def run_reconcile_deleted(args):
     _prog = getattr(args, "progress", None)
 
     print("Scanning your live PixAI feed for existing task ids...")
-    live, before, page = set(), None, 0
+    # `complete` is set ONLY by a page saying there is nothing older. Every row missing from
+    # `live` is flagged below, so a walk that stopped anywhere else (no page in the answer, an
+    # empty page while PixAI says older ones exist) must flag nothing: a partial `live` would
+    # mark tasks that still exist on PixAI as deleted, and the gallery offers those for a
+    # bulk local Delete.
+    live, before, page, complete = set(), None, 0, False
     while True:
         conn = find_connection(gql(session, page_variables(
             getattr(args, "page_size", 250) or 250,
@@ -16259,7 +16336,9 @@ def run_reconcile_deleted(args):
         if not conn:
             break
         edges = conn.get("edges") or []
+        pi = conn.get("pageInfo") or {}
         if not edges:
+            complete = not pi.get("hasPreviousPage")
             break
         for e in edges:
             tid = (e.get("node") or {}).get("id")
@@ -16267,10 +16346,12 @@ def run_reconcile_deleted(args):
                 live.add(str(tid))
         page += 1
         vlog("reconcile: page {}, {} live tasks so far".format(page, len(live)))
-        pi = conn.get("pageInfo") or {}
         if not pi.get("hasPreviousPage"):
+            complete = True
             break
         before = pi.get("startCursor")
+    if not complete:
+        raise PixAIError("Live feed ended early -- nothing was flagged.")
     print("Live tasks in your feed: {:,}".format(len(live)))
     if not live:
         raise PixAIError("Live feed returned no tasks -- aborting so we don't flag "
@@ -17844,9 +17925,9 @@ def main():
                     help="show first page + auto-detect the full-res variant, then exit")
     ap.add_argument("--count", action="store_true",
                     help="tally total tasks + images via the API (no downloads), then exit")
-    ap.add_argument("--count-page-size", type=int, default=5000,
-                    help="page size used by --count (bigger = fewer requests; "
-                         "server errors above ~10000 so default is 5000)")
+    ap.add_argument("--count-page-size", type=int, default=COUNT_PAGE_SIZE,
+                    help="page size used by --count (bigger = fewer requests; default "
+                         "2000, because PixAI fails a 5000-row page now and then)")
     ap.add_argument("--catalog-stats", action="store_true",
                     help="summarize the existing catalog.db (counts only), then exit")
     ap.add_argument("--collect-only", action="store_true",
@@ -18623,7 +18704,9 @@ if __name__ == "__main__":
     main()
 
 # ===========================================================================
-# RECAPTURE (only if the site changes): re-grab the persisted sha256Hash, U3T,
-# and USER_ID from Network tab -> graphql row -> Payload, and update config.json.
+# RECAPTURE (only if the site changes): re-grab a saved operation's sha256Hash
+# (task detail, model detail, delete, refreshToken, bookmarks), U3T and USER_ID from
+# Network tab -> graphql row -> Payload, and update config.json. The history feed
+# needs none: it is read as a full document (_HISTORY_PAGE_DOC).
 # Keep your token private.
 # ===========================================================================

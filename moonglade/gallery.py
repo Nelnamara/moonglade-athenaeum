@@ -15238,12 +15238,6 @@ def create_app(out_dir: Path):
                       "started": None, "ok": None}
     # task id -> worker-clock time its collect last failed; skipped for WATCH_COLLECT_RETRY_S.
     _catchup_failed = {}
-    # How the sweep's read of the history feed has been going. `misses` counts the sweeps in a
-    # row where PixAI did not recognize the saved request (an isolated one is read again the
-    # long way and is not worth a warning); `reported` latches the one plain-words warning
-    # until the saved request is recognized again.
-    WATCH_CATCHUP_QUERY_MISSES = 3
-    _catchup_query = {"misses": 0, "reported": False}
 
     def _spawn_daemon(fn):
         threading.Thread(target=fn, daemon=True).start()
@@ -15279,10 +15273,9 @@ def create_app(out_dir: Path):
         _log = _logging.getLogger(__name__)
         try:
             session = core._make_session(None)
-            data, via_document = core.history_page(
-                session, core.page_variables(
-                    WATCH_CATCHUP_TASKS, core._client_of(session).user_id))
-            _note_catchup_query(reason, via_document)
+            # The feed's one road (core.gql: the full document, #89), as every other reader.
+            data = core.gql(session, core.page_variables(
+                WATCH_CATCHUP_TASKS, core._client_of(session).user_id))
             conn = core.find_connection(data)
             edges = (conn or {}).get("edges") or []
             missed = []
@@ -15346,52 +15339,11 @@ def create_app(out_dir: Path):
                 _time.sleep(1.0)          # paced -- be polite to their servers
             return True
         except Exception as e:
-            if isinstance(e, core.HistoryPageRefused):
-                # PixAI refused both reads (the saved request, then the full document;
-                # history_page raises this for that case, never PersistedQueryNotRecognized):
-                # say so once, in plain words, then stay quiet while it lasts. The sweep still runs on its clock and reads again.
-                _catchup_query["misses"] += 1
-                if not _catchup_query["reported"]:
-                    _catchup_query["reported"] = True
-                    _log.warning(
-                        "live mirror: catch-up cannot read your recent generations because "
-                        "PixAI is refusing the app's history request. New "
-                        "generations still arrive over the live connection. Updating the "
-                        "app refreshes the request; this is said once until it works "
-                        "again.")
-                else:
-                    _log.debug("live mirror: catch-up after %s failed, history request "
-                               "still refused", reason)
-                return False
+            # A failed read (PixAI's refusal, HistoryPageRefused, included) is one plain line,
+            # and is not coverage: the sweep runs again on its clock.
             _log.warning("live mirror: catch-up after %s failed: %s: %s",
                          reason, type(e).__name__, _redact_host_paths(str(e))[:200])
             return False
-
-    def _note_catchup_query(reason, via_document):
-        """Keep the account of the sweep's history read (see _catchup_query). A page that came
-        through the saved request clears it; one that needed the full document counts a miss,
-        and the third miss in a row is the one plain-words warning."""
-        import logging as _logging
-        _log = _logging.getLogger(__name__)
-        if not via_document:
-            if _catchup_query["reported"]:
-                _log.info("live mirror: PixAI recognizes the app's saved history request again")
-            _catchup_query.update(misses=0, reported=False)
-            return
-        _catchup_query["misses"] += 1
-        if _catchup_query["misses"] < WATCH_CATCHUP_QUERY_MISSES:
-            _log.info("live mirror: catch-up after %s -- PixAI did not recognize the saved "
-                      "history request, read it the long way instead", reason)
-        elif not _catchup_query["reported"]:
-            _catchup_query["reported"] = True
-            _log.warning(
-                "live mirror: PixAI has not recognized the app's saved history request for "
-                "%d catch-up sweeps in a row. Catch-up is reading your recent generations "
-                "the long way instead, so nothing is missed. Updating the app refreshes the "
-                "request; this is said once until it works again.", _catchup_query["misses"])
-        else:
-            _log.debug("live mirror: catch-up after %s -- history request still not "
-                       "recognized, read the long way", reason)
 
     # Test seam (same rationale as mg_watch_mirror above): the self-heal sweep is a closure
     # only ever called from the watcher thread, which the suite disables (MOONGLADE_DISABLE_WATCH).

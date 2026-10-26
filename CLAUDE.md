@@ -204,7 +204,7 @@ shipped bug.
 - `token.txt`, `pixai_backup/`, `*.webp` are also git-ignored.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
-- **Server page-size cap:** `last` above ~8,000–10,000 triggers a Prisma `Internal server error`. Keep download `--page-size` ≤ ~8,000.
+- **Server page-size cap:** PixAI fails a big page now and then with a Prisma `Internal server error` (5,000 rows failed 2 of 4 reads on 2026-10-25; 2,000 and under answered every time). Keep `--page-size` and `--count-page-size` ≤ 2,000.
 - **A mutation that spends or changes the account goes through `gql_mutate()`, never
   `gql_adhoc()`.** `gql_mutate` hard-codes `retries=0` and offers no retries argument; a
   re-POST after a lost response (read timeout, dropped connection, proxy 502 *after* the
