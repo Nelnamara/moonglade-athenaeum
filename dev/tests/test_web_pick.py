@@ -125,6 +125,19 @@ def test_gallery_images_includes_is_nsfw_for_privacy_blur(tmp_path):
     assert by_id["2"]["is_nsfw"] == ""
 
 
+def test_rows_carry_rating(tmp_path):
+    """The Apple TV client reads each work's star rating off /api/gallery-images: a rated
+    row carries it as a string, an unrated row reads "0"."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.png", rating="4", created_at="2025-01-01T00:00:00"),
+        _row(media_id="2", filename="b_2.png", created_at="2025-01-02T00:00:00"),
+    ])
+    d = cli.get("/api/gallery-images?type=all").get_json()
+    by_id = {m["media_id"]: m for m in d["images"]}
+    assert by_id["1"]["rating"] == "4"
+    assert by_id["2"]["rating"] == "0"
+
+
 def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     """Audit 2026-07-21, S5 (the client half): with is_nsfw now on the wire (test above),
     every surface rendering /api/gallery-images results needs to set data-nsfw on the card
