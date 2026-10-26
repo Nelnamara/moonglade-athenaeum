@@ -5,7 +5,10 @@ import requests
 
 from moonglade import backup as core
 from moonglade import paths
-from tests.fake_pixai import FakePixAI
+from tests.fake_pixai import FakePixAI, operation_name
+
+TASK_DETAIL = operation_name(core._TASK_DETAIL_DOC)        # "TaskDetail"
+MODEL_VERSION = operation_name(core._MODEL_VERSION_DOC)    # "ModelVersion"
 
 
 def _make_response(mocker, status_code=200, json_body=None, text="", raises=None):
@@ -181,35 +184,36 @@ class TestResolveMedia:
 # ---------------------------------------------------------------------------
 
 class TestTaskDetailGql:
-    """task_detail_gql now rides the transport seam (PixAIClient.persisted). It is exercised
-    against a FakePixAI, the second adapter behind that seam: a registered `getTaskById`
-    answer is returned; a `fail` stands in for a read that raised at the seam."""
-    def test_returns_task_on_success(self, monkeypatch):
-        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "fakehash")
+    """task_detail_gql reads the task detail document (#91) through the transport seam's
+    ad-hoc road. It is exercised against a FakePixAI, the second adapter behind that seam: a
+    registered `TaskDetail` answer is returned; a `fail` stands in for a read that raised at
+    the seam."""
+    def test_returns_task_on_success(self):
         task = {"id": "t1", "parameters": {"prompts": "full prompt"}, "outputs": {}}
-        fake = FakePixAI().on("getTaskById", {"task": task})
+        fake = FakePixAI().on(TASK_DETAIL, {"task": task})
         assert core.task_detail_gql(fake, "t1")["id"] == "t1"
 
-    def test_returns_none_on_server_failure(self, monkeypatch):
+    def test_returns_none_on_server_failure(self):
         """A read that fails at the seam (a 500 surfaces there as an HTTPError; a 401/GraphQL
         error as a PixAIError) must come back as None, never raise -- a blip here is read
         downstream as a LOST GENERATION, and this path exists so an outage is not reported as
         'your images are gone'."""
-        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "fakehash")
-        fake = FakePixAI().fail("getTaskById", requests.HTTPError("HTTP 500"))
+        fake = FakePixAI().fail(TASK_DETAIL, requests.HTTPError("HTTP 500"))
         assert core.task_detail_gql(fake, "t1") is None
 
-    def test_raises_when_hash_missing(self, monkeypatch):
-        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "")
-        with pytest.raises(core.PixAIError, match="TASK_DETAIL_HASH"):
-            core.task_detail_gql(FakePixAI(), "t1")
+    def test_an_answer_with_no_task_in_it_fails_soft(self, capsys):
+        """There is no hash to be missing any more (the empty-hash raise went with it, #91).
+        What replaces it at this edge: a body that is not GraphQL comes back from the ad-hoc
+        POST as {}, and that is a failed read -- None, with the sentence -- not a task."""
+        fake = FakePixAI().on(TASK_DETAIL, {})
+        assert core.task_detail_gql(fake, "t1") is None
+        assert "could not read task t1 back from PixAI" in capsys.readouterr().out
 
 
 class TestModelNameGql:
-    def test_returns_model_title_and_version(self, monkeypatch):
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
+    def test_returns_model_title_and_version(self):
         mv = {"name": "v1", "model": {"title": "Tsubaki.2"}}
-        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": mv})
+        fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
         # A unique id keeps the module-level lookup cache from answering with a prior test's.
         assert core.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
 
@@ -221,41 +225,39 @@ class TestModelNameGql:
 class TestResolveModelBaseId:
     """The reuse-prefill's version->base-model reverse lookup (2026-08-02), fixing a real
     bug found live: the catalog's model_id is a VERSION id, and feeding that straight into
-    applyModelRow's base-model version listing returns nothing every time. Now rides the
-    transport seam; exercised against the FakePixAI adapter."""
-    def test_returns_the_base_models_own_id(self, monkeypatch):
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
+    applyModelRow's base-model version listing returns nothing every time. Reads the model
+    version document (#91) through the transport seam; exercised against the FakePixAI
+    adapter."""
+    def test_returns_the_base_models_own_id(self):
         mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
-        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": mv})
+        fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": mv})
         assert core.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
 
     def test_empty_id_short_circuits(self):
         assert core.resolve_model_base_id(FakePixAI(), "") == ""
         assert core.resolve_model_base_id(FakePixAI(), None) == ""
 
-    def test_no_hash_configured_fails_soft(self, monkeypatch):
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "")
-        assert core.resolve_model_base_id(FakePixAI(), "V1") == ""
-
-    def test_graphql_error_fails_soft_not_raises(self, monkeypatch):
-        """A GraphQL error is raised at the seam (persisted turns an `errors` array into a
-        PixAIError); this soft-restore path swallows it and returns '' rather than surfacing a
-        wrong-id toast for a case that is not the user's mistake."""
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        fake = FakePixAI().fail("getGenerationModelByVersionId",
-                                core.PixAIError("GraphQL error: nope"))
+    def test_an_answer_that_is_not_graphql_fails_soft(self):
+        """No hash to be unconfigured any more (#91). A body that is not GraphQL comes back
+        from the ad-hoc POST as {}: no model in it, so ''."""
+        fake = FakePixAI().on(MODEL_VERSION, {})
         assert core.resolve_model_base_id(fake, "V1") == ""
 
-    def test_removed_model_fails_soft(self, monkeypatch):
+    def test_graphql_error_fails_soft_not_raises(self):
+        """A GraphQL error is raised at the seam (the ad-hoc POST turns an `errors` array into
+        a PixAIError); this soft-restore path swallows it and returns '' rather than surfacing
+        a wrong-id toast for a case that is not the user's mistake."""
+        fake = FakePixAI().fail(MODEL_VERSION, core.PixAIError("GraphQL error: nope"))
+        assert core.resolve_model_base_id(fake, "V1") == ""
+
+    def test_removed_model_fails_soft(self):
         """generationModelVersion: null (the model/version is gone) -- same '' answer as
         any other unresolvable case, never a crash."""
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": None})
+        fake = FakePixAI().on(MODEL_VERSION, {"generationModelVersion": None})
         assert core.resolve_model_base_id(fake, "V1") == ""
 
-    def test_network_exception_fails_soft(self, monkeypatch):
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        fake = FakePixAI().fail("getGenerationModelByVersionId", RuntimeError("boom"))
+    def test_network_exception_fails_soft(self):
+        fake = FakePixAI().fail(MODEL_VERSION, RuntimeError("boom"))
         assert core.resolve_model_base_id(fake, "V1") == ""
 
 

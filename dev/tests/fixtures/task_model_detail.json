@@ -1,0 +1,1330 @@
+{
+ "_comment": "PixAI's answers to the task detail and model detail reads, recorded by the read-only probe of 2026-10-26 (#91; moonglade-internal/probes/PROBE_2026-10-26_task-model-detail.md). Each task was read twice: 'saved' through the retired saved request (its answer carries __typename), 'document' through _TASK_DETAIL_DOC. Scrubbed the same way on both sides: prompt and title text is a numbered placeholder, the account id is u-test, task/media/artwork ids and image URLs are synthetic; model ids, seeds, timestamps, sizes and flags are as PixAI sent them. The model answers are PixAI's public model catalog, read through _MODEL_VERSION_DOC; 'name' is what model_name_gql made of the saved request's answer.",
+ "documents": {
+  "TaskDetail": "query TaskDetail($id: ID!) { task(id: $id) { id userId parameters outputs status priority runnerId startedAt endAt createdAt updatedAt retryCount paidCredit cancelability moderationAction { promptsModerationAction } enrolledExperiment detectPromptHelperResult { needToEnable enableReasonCode } favoritedAt artworkId artworkIds artworks { createdAt hidePrompts id isNsfw isSensitive visibility mediaId title updatedAt flag { shouldBlur } } mediaId media { id type width height urls { variant url } imageType fileUrl duration thumbnailUrl hlsUrl size flag { shouldBlur } } stages { id } } }",
+  "ModelVersion": "query ModelVersion($id: ID!) { generationModelVersion(id: $id) { id name modelType status extra model { id title type } } }"
+ },
+ "tasks": {
+  "batch": {
+   "what": "multi-image batch (4 outputs), SD-family model dreamix, 2025 task",
+   "saved": {
+    "id": "700000000000000001",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 768,
+     "height": 1280,
+     "prompts": "prompt text 1",
+     "negativePrompts": "prompt text 2",
+     "batchSize": 4,
+     "cfgScale": 6,
+     "samplingSteps": 28,
+     "samplingMethod": "Euler a",
+     "clipSkip": 2,
+     "promptHelper": {
+      "enable": true,
+      "userWantToEnable": true
+     },
+     "controlNets": [],
+     "lora": {},
+     "loraParameters": [],
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1646526366255862898",
+     "extra": {
+      "naturalPrompts": "prompt text 3"
+     }
+    },
+    "outputs": {
+     "batch": [
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000002"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000003"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000004"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000005"
+      }
+     ],
+     "mediaId": "700000000000000006",
+     "seed": 822850112438941,
+     "width": 768,
+     "height": 1280
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2025-10-14T23:18:42.935Z",
+    "endAt": "2025-10-14T23:19:05.527Z",
+    "createdAt": "2025-10-14T23:18:35.053Z",
+    "updatedAt": "2025-10-14T23:19:05.528Z",
+    "retryCount": 0,
+    "paidCredit": 3200,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": null,
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000006",
+    "media": {
+     "id": "700000000000000006",
+     "type": "IMAGE",
+     "width": 1536,
+     "height": 2560,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/1.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/2.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/3.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": true,
+      "__typename": "ModerationFlag"
+     },
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000001",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 768,
+     "height": 1280,
+     "prompts": "prompt text 1",
+     "negativePrompts": "prompt text 2",
+     "batchSize": 4,
+     "cfgScale": 6,
+     "samplingSteps": 28,
+     "samplingMethod": "Euler a",
+     "clipSkip": 2,
+     "promptHelper": {
+      "enable": true,
+      "userWantToEnable": true
+     },
+     "controlNets": [],
+     "lora": {},
+     "loraParameters": [],
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1646526366255862898",
+     "extra": {
+      "naturalPrompts": "prompt text 3"
+     }
+    },
+    "outputs": {
+     "batch": [
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000002"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000003"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000004"
+      },
+      {
+       "seed": 822850112438941,
+       "extra": {
+        "node_id": "save_image"
+       },
+       "mediaId": "700000000000000005"
+      }
+     ],
+     "mediaId": "700000000000000006",
+     "seed": 822850112438941,
+     "width": 768,
+     "height": 1280
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2025-10-14T23:18:42.935Z",
+    "endAt": "2025-10-14T23:19:05.527Z",
+    "createdAt": "2025-10-14T23:18:35.053Z",
+    "updatedAt": "2025-10-14T23:19:05.528Z",
+    "retryCount": 0,
+    "paidCredit": 3200,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": null
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000006",
+    "media": {
+     "id": "700000000000000006",
+     "type": "IMAGE",
+     "width": 1536,
+     "height": 2560,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/1.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/2.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/3.webp"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": true
+     }
+    },
+    "stages": null
+   }
+  },
+  "lone": {
+   "what": "lone image, Tsubaki.2, detectPromptHelperResult present",
+   "saved": {
+    "id": "700000000000000007",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 500,
+     "width": 1024,
+     "height": 1024,
+     "prompts": "prompt text 4",
+     "negativePrompts": "prompt text 5",
+     "batchSize": 1,
+     "inferenceProfile": "ultra",
+     "promptHelper": {
+      "enable": true,
+      "withStage": true,
+      "userWantToEnable": true,
+      "forcePromptHelperDetectionSide": "server"
+     },
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1983308862240288769",
+     "extra": {
+      "naturalPrompts": "prompt text 6"
+     }
+    },
+    "outputs": {
+     "extra": null,
+     "mediaId": "700000000000000008",
+     "seed": 8612857366990032,
+     "width": 1024,
+     "height": 1024
+    },
+    "status": "completed",
+    "priority": 500,
+    "runnerId": null,
+    "startedAt": "2026-10-11T04:00:30.823Z",
+    "endAt": "2026-10-11T04:00:56.022Z",
+    "createdAt": "2026-10-11T03:59:46.794Z",
+    "updatedAt": "2026-10-11T04:00:56.023Z",
+    "retryCount": 0,
+    "paidCredit": 3700,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS",
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": {
+     "needToEnable": true,
+     "enableReasonCode": "user-want-to-enable",
+     "__typename": "DetectNeedToEnablePromptHelperResult"
+    },
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000008",
+    "media": {
+     "id": "700000000000000008",
+     "type": "IMAGE",
+     "width": 1024,
+     "height": 1024,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/file/4.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/file/5.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/file/6.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null,
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000007",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 500,
+     "width": 1024,
+     "height": 1024,
+     "prompts": "prompt text 4",
+     "negativePrompts": "prompt text 5",
+     "batchSize": 1,
+     "inferenceProfile": "ultra",
+     "promptHelper": {
+      "enable": true,
+      "withStage": true,
+      "userWantToEnable": true,
+      "forcePromptHelperDetectionSide": "server"
+     },
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1983308862240288769",
+     "extra": {
+      "naturalPrompts": "prompt text 6"
+     }
+    },
+    "outputs": {
+     "extra": null,
+     "mediaId": "700000000000000008",
+     "seed": 8612857366990032,
+     "width": 1024,
+     "height": 1024
+    },
+    "status": "completed",
+    "priority": 500,
+    "runnerId": null,
+    "startedAt": "2026-10-11T04:00:30.823Z",
+    "endAt": "2026-10-11T04:00:56.022Z",
+    "createdAt": "2026-10-11T03:59:46.794Z",
+    "updatedAt": "2026-10-11T04:00:56.023Z",
+    "retryCount": 0,
+    "paidCredit": 3700,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS"
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": {
+     "needToEnable": true,
+     "enableReasonCode": "user-want-to-enable"
+    },
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000008",
+    "media": {
+     "id": "700000000000000008",
+     "type": "IMAGE",
+     "width": 1024,
+     "height": 1024,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/file/4.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/file/5.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/file/6.webp"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null
+    },
+    "stages": null
+   }
+  },
+  "i2v": {
+   "what": "image-to-video (parameters.i2vPro), derive source in i2vPro.mediaId",
+   "saved": {
+    "id": "700000000000000009",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 960,
+     "height": 960,
+     "channel": "private",
+     "i2vPro": {
+      "mode": "professional",
+      "model": "v4.0.1",
+      "mediaId": "700000000000000010",
+      "prompts": "prompt text 7",
+      "duration": "5",
+      "audioLanguage": "english",
+      "generateAudio": true,
+      "usePromptsHelper": false
+     },
+     "isPrivate": true,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "2003969750675682808"
+    },
+    "outputs": {
+     "videos": [
+      {
+       "seed": 206089812094832,
+       "extra": {
+        "node_id": "6"
+       },
+       "mediaId": "700000000000000011"
+      }
+     ],
+     "mediaId": "700000000000000010",
+     "width": 960,
+     "height": 960,
+     "baseMediaId": "700000000000000010"
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-10-20T00:08:20.606Z",
+    "endAt": "2026-10-20T00:10:54.115Z",
+    "createdAt": "2026-10-20T00:08:20.529Z",
+    "updatedAt": "2026-10-20T00:10:54.116Z",
+    "retryCount": 0,
+    "paidCredit": 27500,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS",
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000010",
+    "media": {
+     "id": "700000000000000010",
+     "type": "IMAGE",
+     "width": 960,
+     "height": 960,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/7.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/8.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/9.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": false,
+      "__typename": "ModerationFlag"
+     },
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000009",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 960,
+     "height": 960,
+     "channel": "private",
+     "i2vPro": {
+      "mode": "professional",
+      "model": "v4.0.1",
+      "mediaId": "700000000000000010",
+      "prompts": "prompt text 7",
+      "duration": "5",
+      "audioLanguage": "english",
+      "generateAudio": true,
+      "usePromptsHelper": false
+     },
+     "isPrivate": true,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "2003969750675682808"
+    },
+    "outputs": {
+     "videos": [
+      {
+       "seed": 206089812094832,
+       "extra": {
+        "node_id": "6"
+       },
+       "mediaId": "700000000000000011"
+      }
+     ],
+     "mediaId": "700000000000000010",
+     "width": 960,
+     "height": 960,
+     "baseMediaId": "700000000000000010"
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-10-20T00:08:20.606Z",
+    "endAt": "2026-10-20T00:10:54.115Z",
+    "createdAt": "2026-10-20T00:08:20.529Z",
+    "updatedAt": "2026-10-20T00:10:54.116Z",
+    "retryCount": 0,
+    "paidCredit": 27500,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS"
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000010",
+    "media": {
+     "id": "700000000000000010",
+     "type": "IMAGE",
+     "width": 960,
+     "height": 960,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/7.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/8.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/9.webp"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": false
+     }
+    },
+    "stages": null
+   }
+  },
+  "edit": {
+   "what": "instruct chat edit (parameters.chat), Edit Pro v1",
+   "saved": {
+    "id": "700000000000000012",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 512,
+     "height": 512,
+     "prompts": "prompt text 8",
+     "mediaId": "700000000000000013",
+     "chat": {
+      "mediaId": "700000000000000013",
+      "modelId": "2006468692917575683",
+      "prompts": "prompt text 8",
+      "mediaIds": [
+       "700000000000000013"
+      ],
+      "modelConfig": {
+       "quality": "medium",
+       "resolution": "2K",
+       "aspectRatio": "4:5"
+      }
+     },
+     "isPrivate": false,
+     "enablePreview": true,
+     "hidePrompts": false,
+     "modelId": "2006468692917575683"
+    },
+    "outputs": {
+     "mediaId": "700000000000000014"
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-09-06T20:49:16.391Z",
+    "endAt": "2026-09-06T20:50:06.534Z",
+    "createdAt": "2026-09-06T20:49:16.321Z",
+    "updatedAt": "2026-09-06T20:50:06.534Z",
+    "retryCount": 0,
+    "paidCredit": 10000,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS",
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000014",
+    "media": {
+     "id": "700000000000000014",
+     "type": "IMAGE",
+     "width": 1728,
+     "height": 2160,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/10.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/11.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/12.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "png",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null,
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000012",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "width": 512,
+     "height": 512,
+     "prompts": "prompt text 8",
+     "mediaId": "700000000000000013",
+     "chat": {
+      "mediaId": "700000000000000013",
+      "modelId": "2006468692917575683",
+      "prompts": "prompt text 8",
+      "mediaIds": [
+       "700000000000000013"
+      ],
+      "modelConfig": {
+       "quality": "medium",
+       "resolution": "2K",
+       "aspectRatio": "4:5"
+      }
+     },
+     "isPrivate": false,
+     "enablePreview": true,
+     "hidePrompts": false,
+     "modelId": "2006468692917575683"
+    },
+    "outputs": {
+     "mediaId": "700000000000000014"
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-09-06T20:49:16.391Z",
+    "endAt": "2026-09-06T20:50:06.534Z",
+    "createdAt": "2026-09-06T20:49:16.321Z",
+    "updatedAt": "2026-09-06T20:50:06.534Z",
+    "retryCount": 0,
+    "paidCredit": 10000,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS"
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000014",
+    "media": {
+     "id": "700000000000000014",
+     "type": "IMAGE",
+     "width": 1728,
+     "height": 2160,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/10.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/11.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/12.webp"
+      }
+     ],
+     "imageType": "png",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null
+    },
+    "stages": null
+   }
+  },
+  "video2": {
+   "what": "reference video (parameters.referenceVideo); no hand/face Fix exists in the probe's catalog",
+   "saved": {
+    "id": "700000000000000015",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "channel": "private",
+     "referenceVideo": {
+      "mode": "professional",
+      "model": "v4.0.1",
+      "prompt": "prompt text 9",
+      "duration": 15,
+      "audioLanguage": "english",
+      "generateAudio": true,
+      "inputVideoDurations": [],
+      "referenceAudioMediaIds": [],
+      "referenceImageMediaIds": [
+       "700000000000000016"
+      ],
+      "referenceVideoMediaIds": []
+     },
+     "isPrivate": true,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "2003969750675682808"
+    },
+    "outputs": {
+     "videos": [
+      {
+       "seed": 2279767859491592,
+       "extra": {
+        "node_id": "6"
+       },
+       "mediaId": "700000000000000017",
+       "thumbnailMediaId": "700000000000000018"
+      }
+     ],
+     "mediaId": "700000000000000018",
+     "seed": 2279767859491592,
+     "width": 786,
+     "height": 1056
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-10-26T07:23:32.816Z",
+    "endAt": "2026-10-26T07:27:04.829Z",
+    "createdAt": "2026-10-26T07:23:32.745Z",
+    "updatedAt": "2026-10-26T07:27:04.830Z",
+    "retryCount": 0,
+    "paidCredit": 82500,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS",
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000018",
+    "media": {
+     "id": "700000000000000018",
+     "type": "IMAGE",
+     "width": 786,
+     "height": 1056,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/13.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/14.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/15.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "jpg",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null,
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000015",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1000,
+     "channel": "private",
+     "referenceVideo": {
+      "mode": "professional",
+      "model": "v4.0.1",
+      "prompt": "prompt text 9",
+      "duration": 15,
+      "audioLanguage": "english",
+      "generateAudio": true,
+      "inputVideoDurations": [],
+      "referenceAudioMediaIds": [],
+      "referenceImageMediaIds": [
+       "700000000000000016"
+      ],
+      "referenceVideoMediaIds": []
+     },
+     "isPrivate": true,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "2003969750675682808"
+    },
+    "outputs": {
+     "videos": [
+      {
+       "seed": 2279767859491592,
+       "extra": {
+        "node_id": "6"
+       },
+       "mediaId": "700000000000000017",
+       "thumbnailMediaId": "700000000000000018"
+      }
+     ],
+     "mediaId": "700000000000000018",
+     "seed": 2279767859491592,
+     "width": 786,
+     "height": 1056
+    },
+    "status": "completed",
+    "priority": 1000,
+    "runnerId": null,
+    "startedAt": "2026-10-26T07:23:32.816Z",
+    "endAt": "2026-10-26T07:27:04.829Z",
+    "createdAt": "2026-10-26T07:23:32.745Z",
+    "updatedAt": "2026-10-26T07:27:04.830Z",
+    "retryCount": 0,
+    "paidCredit": 82500,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": "PASS"
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": null,
+    "artworkIds": [],
+    "artworks": [],
+    "mediaId": "700000000000000018",
+    "media": {
+     "id": "700000000000000018",
+     "type": "IMAGE",
+     "width": 786,
+     "height": 1056,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/orig/13.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/thumb/14.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/stillThumb/15.webp"
+      }
+     ],
+     "imageType": "jpg",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": null
+    },
+    "stages": null
+   }
+  },
+  "published": {
+   "what": "a task with a published artwork (artworkIds and artworks[] non-empty), Tsubaki.2 lone image",
+   "saved": {
+    "id": "700000000000000019",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1500,
+     "width": 1536,
+     "height": 864,
+     "prompts": "prompt text 10",
+     "batchSize": 1,
+     "inferenceProfile": "lite",
+     "promptHelper": {
+      "enable": true,
+      "withStage": true
+     },
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1983308862240288769",
+     "extra": {
+      "naturalPrompts": "prompt text 11"
+     }
+    },
+    "outputs": {
+     "extra": {
+      "node_id": "save_image"
+     },
+     "mediaId": "700000000000000020",
+     "seed": 1812577636458638,
+     "width": 1536,
+     "height": 864
+    },
+    "status": "completed",
+    "priority": 1500,
+    "runnerId": null,
+    "startedAt": "2026-07-03T05:31:23.133Z",
+    "endAt": "2026-07-03T05:31:27.377Z",
+    "createdAt": "2026-07-03T05:31:18.412Z",
+    "updatedAt": "2026-07-03T05:31:27.378Z",
+    "retryCount": 0,
+    "paidCredit": 0,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": null,
+     "__typename": "ModerationAction"
+    },
+    "enrolledExperiment": null,
+    "__typename": "Task",
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": "700000000000000021",
+    "artworkIds": [
+     "700000000000000021"
+    ],
+    "artworks": [
+     {
+      "createdAt": "2026-07-15T19:21:49.929Z",
+      "hidePrompts": false,
+      "id": "700000000000000021",
+      "isNsfw": false,
+      "isSensitive": true,
+      "visibility": "PUBLIC",
+      "mediaId": "700000000000000020",
+      "title": "title 12",
+      "updatedAt": "2026-07-15T19:21:50.529Z",
+      "flag": {
+       "shouldBlur": false,
+       "__typename": "ModerationFlag"
+      },
+      "__typename": "Artwork"
+     }
+    ],
+    "mediaId": "700000000000000020",
+    "media": {
+     "id": "700000000000000020",
+     "type": "IMAGE",
+     "width": 1536,
+     "height": 864,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/file/16.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/file/17.webp",
+       "__typename": "ImageUrl"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/file/18.webp",
+       "__typename": "ImageUrl"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": true,
+      "__typename": "ModerationFlag"
+     },
+     "__typename": "Media"
+    },
+    "stages": null
+   },
+   "document": {
+    "id": "700000000000000019",
+    "userId": "u-test",
+    "parameters": {
+     "priority": 1500,
+     "width": 1536,
+     "height": 864,
+     "prompts": "prompt text 10",
+     "batchSize": 1,
+     "inferenceProfile": "lite",
+     "promptHelper": {
+      "enable": true,
+      "withStage": true
+     },
+     "isPrivate": false,
+     "enablePreview": false,
+     "hidePrompts": false,
+     "modelId": "1983308862240288769",
+     "extra": {
+      "naturalPrompts": "prompt text 11"
+     }
+    },
+    "outputs": {
+     "extra": {
+      "node_id": "save_image"
+     },
+     "mediaId": "700000000000000020",
+     "seed": 1812577636458638,
+     "width": 1536,
+     "height": 864
+    },
+    "status": "completed",
+    "priority": 1500,
+    "runnerId": null,
+    "startedAt": "2026-07-03T05:31:23.133Z",
+    "endAt": "2026-07-03T05:31:27.377Z",
+    "createdAt": "2026-07-03T05:31:18.412Z",
+    "updatedAt": "2026-07-03T05:31:27.378Z",
+    "retryCount": 0,
+    "paidCredit": 0,
+    "cancelability": "NOT_CANCELABLE",
+    "moderationAction": {
+     "promptsModerationAction": null
+    },
+    "enrolledExperiment": null,
+    "detectPromptHelperResult": null,
+    "favoritedAt": null,
+    "artworkId": "700000000000000021",
+    "artworkIds": [
+     "700000000000000021"
+    ],
+    "artworks": [
+     {
+      "createdAt": "2026-07-15T19:21:49.929Z",
+      "hidePrompts": false,
+      "id": "700000000000000021",
+      "isNsfw": false,
+      "isSensitive": true,
+      "visibility": "PUBLIC",
+      "mediaId": "700000000000000020",
+      "title": "title 12",
+      "updatedAt": "2026-07-15T19:21:50.529Z",
+      "flag": {
+       "shouldBlur": false
+      }
+     }
+    ],
+    "mediaId": "700000000000000020",
+    "media": {
+     "id": "700000000000000020",
+     "type": "IMAGE",
+     "width": 1536,
+     "height": 864,
+     "urls": [
+      {
+       "variant": "PUBLIC",
+       "url": "https://images.example.invalid/file/16.webp"
+      },
+      {
+       "variant": "THUMBNAIL",
+       "url": "https://images.example.invalid/file/17.webp"
+      },
+      {
+       "variant": "STILL_THUMBNAIL",
+       "url": "https://images.example.invalid/file/18.webp"
+      }
+     ],
+     "imageType": "webp",
+     "fileUrl": null,
+     "duration": null,
+     "thumbnailUrl": null,
+     "hlsUrl": null,
+     "size": null,
+     "flag": {
+      "shouldBlur": true
+     }
+    },
+    "stages": null
+   }
+  }
+ },
+ "models": {
+  "sd": {
+   "version_id": "1646526366255862898",
+   "name": "dreamix v1.0",
+   "document": {
+    "generationModelVersion": {
+     "id": "1646526366255862898",
+     "name": "v1.0",
+     "modelType": "SD_V1_MODEL",
+     "status": "available",
+     "extra": {},
+     "model": {
+      "id": "1646526355153540141",
+      "title": "dreamix",
+      "type": "SD_V1_MODEL"
+     }
+    }
+   }
+  },
+  "tsubaki": {
+   "version_id": "1983308862240288769",
+   "name": "Tsubaki.2 v1",
+   "document": {
+    "generationModelVersion": {
+     "id": "1983308862240288769",
+     "name": "v1",
+     "modelType": "MMDIT26A_MODEL",
+     "status": "available",
+     "extra": {
+      "category": "mmdit26a",
+      "defaults": {},
+      "capabilities": [
+       "multi-character",
+       "lighting-control",
+       "dynamic-poses",
+       "prompt-following"
+      ],
+      "restrictions": {
+       "samplingSteps": {
+        "max": 50,
+        "min": 16
+       }
+      },
+      "compatibility": {
+       "vae": false,
+       "shift": false,
+       "upscale": false,
+       "cfgScale": false,
+       "styleKey": true,
+       "watermark": true,
+       "controlnet": false,
+       "rescaleCfg": false,
+       "samplingSteps": false,
+       "negativePrompt": true,
+       "samplingMethod": false
+      },
+      "samplingSteps": 16,
+      "inferenceConfig": {
+       "modelSampling": {
+        "type": "ModelSamplingAuraFlow",
+        "inputs": {
+         "shift": 3
+        }
+       }
+      },
+      "negativePrompts": "worst quality, photorealistic, bad anatomy, blur, low resolution",
+      "previewArtworkIds": [
+       "1985488174142102557",
+       "1985857269279694700",
+       "1985857597983872583",
+       "1985864072124090425",
+       "1985864703684735662",
+       "1985858098322395287",
+       "1985864455108875187",
+       "1985857791803968679",
+       "1985864751186986246"
+      ]
+     },
+     "model": {
+      "id": "1982880136609467518",
+      "title": "Tsubaki.2",
+      "type": "MMDIT26A_MODEL"
+     }
+    }
+   }
+  },
+  "edit": {
+   "version_id": "2006468692917575683",
+   "name": "PixAI Edit Pro v1.0",
+   "document": {
+    "generationModelVersion": {
+     "id": "2006468692917575683",
+     "name": "v1.0",
+     "modelType": "CHAT",
+     "status": "available",
+     "extra": {
+      "chatEditing": {
+       "defaultQuality": "medium",
+       "defaultResolution": "1K",
+       "defaultAspectRatio": "3:5",
+       "maxInputImageCount": 4,
+       "supportedQualityOptions": [
+        "low",
+        "medium",
+        "high"
+       ],
+       "supportedResolutionOptions": [
+        "1K",
+        "2K"
+       ],
+       "supportedAspectRatioOptions": [
+        "3:5",
+        "5:3",
+        "16:9",
+        "9:16",
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "1:3",
+        "3:1"
+       ]
+      },
+      "capabilities": [
+       "multi-image-reference",
+       "image-editing",
+       "style-reference"
+      ]
+     },
+     "model": {
+      "id": "2006468692900798466",
+      "title": "PixAI Edit Pro",
+      "type": "CHAT"
+     }
+    }
+   }
+  },
+  "unknown": {
+   "version_id": "1000000000000000001",
+   "document": {
+    "generationModelVersion": null
+   }
+  }
+ }
+}

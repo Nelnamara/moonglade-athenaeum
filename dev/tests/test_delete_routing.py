@@ -29,6 +29,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from moonglade import backup as core  # noqa: E402
+from tests.fake_pixai import operation_name  # noqa: E402
 
 DELETED_AT = "2026-09-06T11:22:33.000Z"
 
@@ -213,10 +214,10 @@ def test_it_never_reads_updated_at():
 # ---------------------------------------------------------------------------
 
 class _Double:
-    """Stands in for the PixAI client on both roads a delete can take: `persisted` answers
-    the getTaskById read, `mutate` takes the per-image mutation, `post` takes the whole-task
-    one (which hand-rolls its own request). Every call is recorded, so "nothing was sent"
-    is checkable rather than assumed."""
+    """Stands in for the PixAI client on both roads a delete can take: `query` answers the
+    task detail read (the full document, #91), `mutate` takes the per-image mutation, `post`
+    takes the whole-task one (which hand-rolls its own request). Every call is recorded, so
+    "nothing was sent" is checkable rather than assumed."""
 
     _is_pixai_client = True
 
@@ -224,8 +225,8 @@ class _Double:
         self.task = task
         self.reads, self.mutations, self.posts = [], [], []
 
-    def persisted(self, op_name, variables=None, sha256=None, retries=4, **kw):
-        self.reads.append((op_name, dict(variables or {})))
+    def query(self, document, variables=None, retries=None, timeout=120):
+        self.reads.append((operation_name(document), dict(variables or {})))
         return {"task": self.task}
 
     def mutate(self, document, variables=None):
@@ -257,7 +258,7 @@ def test_the_plan_reads_the_live_task_and_sends_nothing():
     plan = core.plan_image_delete(dbl, "TASK-BATCH", "m0")
     assert plan.plan == "per-image"
     assert plan.live_siblings == 2, "the deleted member was counted as a survivor"
-    assert dbl.reads and dbl.reads[0][0] == "getTaskById"
+    assert dbl.reads and dbl.reads[0] == ("TaskDetail", {"id": "TASK-BATCH"})
     assert dbl.sent() == 0, "the preview sent a mutation"
 
 

@@ -958,18 +958,22 @@ def test_run_edit_image_saves_batch_individuals_not_the_grid(monkeypatch, tmp_pa
     assert res["images"] == 2
 
 
-def test_task_detail_query_adhoc_fallback(monkeypatch):
-    """When TASK_DETAIL_HASH is missing, _task_detail_query uses the ad-hoc task(id:) query
-    (no persisted hash) -- unblocking --full-meta. When present, it uses task_detail_gql."""
-    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "")
-    monkeypatch.setattr(core, "gql_adhoc",
-                        lambda s, q, v=None: {"task": {"id": v["id"], "status": "completed"}})
+def test_task_detail_query_reads_the_full_document(monkeypatch):
+    """_task_detail_query (the --task-id / --dump-params recovery read) is task_detail_gql's
+    full document (#91), with no config to consult: the ad-hoc `task(id:)` fallback it used
+    to carry for a missing saved hash went with the hash."""
+    sent = []
+
+    def fake_adhoc(s, q, v=None, retries=None, timeout=120):
+        sent.append((q, v))
+        return {"task": {"id": v["id"], "status": "completed"}}
+
+    monkeypatch.setattr(core, "gql_adhoc", fake_adhoc)
     t = core._task_detail_query(object(), "T7")
     assert t["id"] == "T7" and t["status"] == "completed"
-    # with a hash present it delegates to the persisted getTaskById
-    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "deadbeef")
-    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {"id": tid, "via": "persisted"})
-    assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "persisted"}
+    assert sent == [(core._TASK_DETAIL_DOC, {"id": "T7"})]
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {"id": tid, "via": "detail"})
+    assert core._task_detail_query(object(), "T8") == {"id": "T8", "via": "detail"}
 
 
 def test_submit_generation(monkeypatch):

@@ -31,12 +31,15 @@ defaults. See [Setup](Setup) and [How It Works](How-It-Works).
 
 **Why are there "hashes" if I don't need to set them?**
 They're public identifiers of PixAI's own frontend queries (not secrets), baked in so
-you don't capture anything. Reading your history doesn't use one any more: Sync reads the
-full request, and if PixAI turns it down you see "PixAI refused the history feed; nothing
-was changed -- try again in a minute." Wait a minute and run it again. For the few saved
-operations that remain, if PixAI overhauls their frontend and one goes stale, you don't
-recapture it yourself — see [Troubleshooting](Troubleshooting): update to the
-latest release, or open an issue so the shared default gets refreshed for everyone.
+you don't capture anything. Reading your history, a picture's full details and a model's
+name don't use one any more: Sync reads the full request. If PixAI turns the history feed
+down you see "PixAI refused the history feed; nothing was changed -- try again in a
+minute." Wait a minute and run it again. If it turns down a picture's details you see a
+"could not read task ... back from PixAI" line, and a model it does not answer for keeps
+its number as its label; a later Sync fills both in. For the few saved operations that
+remain, if PixAI overhauls their frontend and one goes stale, you don't recapture it
+yourself — see [Troubleshooting](Troubleshooting): update to the latest release, or open
+an issue so the shared default gets refreshed for everyone.
 
 **Where do my files and credentials go?**
 Everything is local. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.

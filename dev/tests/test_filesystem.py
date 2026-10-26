@@ -113,7 +113,7 @@ def real_config_rule(tmp_path, monkeypatch):
 
 
 def test_load_config_reads_file(real_config_rule):
-    cfg = {"USER_ID": "u1", "U3T": "t1", "TASK_DETAIL_HASH": "h1"}
+    cfg = {"USER_ID": "u1", "U3T": "t1", "DELETE_TASK_HASH": "h1"}
     (real_config_rule / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
     result = core._load_config()
     assert result["USER_ID"] == "u1"

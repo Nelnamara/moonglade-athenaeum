@@ -95,29 +95,11 @@ def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc
 
 
 # ---------------------------------------------------------------------------
-# P6, doc half only: _task_detail_query's docstring overclaims fallback coverage.
-# Its only real caller is collect_generation (the --task-id/--dump-params recovery
-# path). run_backfill_full_meta and run_download's --full-meta branch both call
-# task_detail_gql directly, bypassing this function's ad-hoc fallback entirely.
+# P6 residual: the _task_detail_query docstring test was retired on 2026-10-26 (#91).
+# It pinned the docstring's account of which callers got the function's ad-hoc fallback
+# for a missing saved hash; the hash and the fallback are gone (task_detail_gql reads the
+# full document for every caller), so the claim it policed no longer exists to overclaim.
 # ---------------------------------------------------------------------------
-
-def test_task_detail_query_docstring_names_its_real_caller_and_the_two_that_bypass_it():
-    """Verified independently against current source: run_backfill_full_meta raises
-    PixAIError itself when TASK_DETAIL_HASH is empty (its own guard, unconditional --
-    proof it never reaches this function's fallback), and both call sites in
-    run_download's --full-meta branch (parallel and serial) call task_detail_gql
-    directly. collect_generation is the only real caller of _task_detail_query."""
-    from moonglade import backup as core
-    doc = core._task_detail_query.__doc__ or ""
-    assert "collect_generation" in doc, (
-        "docstring doesn't name its one real caller (collect_generation)")
-    assert "run_backfill_full_meta" in doc, (
-        "docstring doesn't name run_backfill_full_meta as a function that bypasses it")
-    assert "run_download" in doc, (
-        "docstring doesn't name run_download's --full-meta branch as bypassing it")
-    assert "no longer HARD-FAIL" not in doc, (
-        "docstring still makes the disproven claim that --full-meta/--backfill-full-meta "
-        "benefit from this function's ad-hoc fallback")
 
 
 # ---------------------------------------------------------------------------

@@ -191,7 +191,6 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
                 "outputs": {}, "updatedAt": "2026-08-01T00:00:00Z",
                 "moderationAction": {"promptsModerationAction": "PASS"}}
 
-    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")            # gate guard: must be truthy
     monkeypatch.setattr(core, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
@@ -222,7 +221,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
 
 
 def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp_path, pixai):
-    """A big backfill (a 36k-image catalog is tens of thousands of getTaskById calls) must
+    """A big backfill (a 36k-image catalog is tens of thousands of task detail reads) must
     persist AS IT GOES, so a Ctrl-C or dropped connection partway keeps its progress instead of
     writing nothing. With the checkpoint interval forced to 1, each fetched task flushes its own
     save -- provable by counting save_catalog calls (a single end-save would be exactly one)."""
@@ -239,7 +238,6 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
         return {"parameters": {"modelId": "V1", "inferenceProfile": "lite", "prompts": "a cat"},
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
-    monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")
     monkeypatch.setattr(core, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")

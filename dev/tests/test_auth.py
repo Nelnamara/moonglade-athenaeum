@@ -5,11 +5,12 @@ from moonglade import backup as core
 
 def test_persisted_hashes_have_builtin_defaults():
     # All the frontend-private ops we rely on must work without any config.json. (The history
-    # feed has no saved hash to default since #89: it reads a full document.)
-    assert not hasattr(core, "PERSISTED_QUERY_HASH")
-    assert len(core.TASK_DETAIL_HASH) == 64
+    # feed has no saved hash to default since #89, task detail and model detail since #91:
+    # each reads a full document.)
+    for retired in ("PERSISTED_QUERY_HASH", "TASK_DETAIL_HASH", "MODEL_DETAIL_HASH"):
+        assert not hasattr(core, retired), retired
     assert len(core.DELETE_TASK_HASH) == 64
-    assert len(core.MODEL_DETAIL_HASH) == 64
+    assert len(core.REFRESH_TOKEN_HASH) == 64
 
 
 def test_resolve_user_id_from_me(monkeypatch):
