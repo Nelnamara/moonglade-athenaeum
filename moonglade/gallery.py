@@ -19258,7 +19258,8 @@ def create_app(out_dir: Path):
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
                         "duration": (r.get("video_duration") or "") if isv else "",
                         # Session H: a context image's size, for the drawer's Auto frame
-                        "w": str(r.get("width") or ""), "h": str(r.get("height") or "")})
+                        "w": str(r.get("width") or ""), "h": str(r.get("height") or ""),
+                        "rating": str(r.get("rating") or "0")})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
