@@ -31,8 +31,11 @@ defaults. See [Setup](Setup) and [How It Works](How-It-Works).
 
 **Why are there "hashes" if I don't need to set them?**
 They're public identifiers of PixAI's own frontend queries (not secrets), baked in so
-you don't capture anything. If PixAI overhauls their frontend and one goes stale, you
-don't recapture it yourself — see [Troubleshooting](Troubleshooting): update to the
+you don't capture anything. Reading your history doesn't use one any more: Sync reads the
+full request, and if PixAI turns it down you see "PixAI refused the history feed; nothing
+was changed -- try again in a minute." Wait a minute and run it again. For the few saved
+operations that remain, if PixAI overhauls their frontend and one goes stale, you don't
+recapture it yourself — see [Troubleshooting](Troubleshooting): update to the
 latest release, or open an issue so the shared default gets refreshed for everyone.
 
 **Where do my files and credentials go?**

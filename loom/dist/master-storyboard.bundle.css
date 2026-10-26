@@ -4494,6 +4494,19 @@ html.mg-noblur .rcp-scrim {
   font-size: 9.5px;
   color: var(--overlay0,#6a6088);
 }
+.gen-drawer .mgd-applyall {
+  align-self: flex-end;
+  font: 700 10.5px/1 system-ui;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--subtext,#9a93ab);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gen-drawer .mgd-applyall:hover {
+  color: var(--accent,#b692e6);
+}
 .gen-drawer .mgd-caps {
   display: flex;
   flex-wrap: wrap;

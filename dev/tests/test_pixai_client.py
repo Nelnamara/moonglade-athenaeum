@@ -132,26 +132,35 @@ class TestVerbsMakeTheRightCall:
     def test_persisted_gets_graphql_with_the_apollo_persisted_params(self):
         s = RecordingSession(FakeResponse({"data": {"page": 1}}))
         c = core.PixAIClient(s)
-        assert c.persisted(core.OPERATION_NAME, {"last": 5}) == {"page": 1}
+        assert c.persisted("getTaskById", {"id": "T5"},
+                           sha256=core.TASK_DETAIL_HASH) == {"page": 1}
         (verb, url, kwargs), = s.calls
         assert verb == "GET" and url == core.API_URL
         p = kwargs["params"]
-        assert p["operation"] == core.OPERATION_NAME
-        assert p["operationName"] == core.OPERATION_NAME
-        assert json.loads(p["variables"]) == {"last": 5}
+        assert p["operation"] == "getTaskById"
+        assert p["operationName"] == "getTaskById"
+        assert json.loads(p["variables"]) == {"id": "T5"}
         ext = json.loads(p["extensions"])
         assert ext["persistedQuery"] == {"version": 1,
-                                         "sha256Hash": core.PERSISTED_QUERY_HASH}
+                                         "sha256Hash": core.TASK_DETAIL_HASH}
 
     def test_persisted_refuses_an_operation_with_no_known_hash(self):
         c = core.PixAIClient(RecordingSession())
         with pytest.raises(core.PixAIError, match="no persisted hash"):
             c.persisted("someOperationNobodyCaptured", {})
 
+    def test_persisted_knows_no_hash_for_the_history_feed_any_more(self):
+        """The feed's saved request retired (#89): its operation name resolves no hash, and
+        nothing is sent."""
+        s = RecordingSession()
+        with pytest.raises(core.PixAIError, match="no persisted hash"):
+            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
+        assert s.calls == []
+
     def test_persisted_names_the_recapture_step_on_a_stale_hash(self):
         s = RecordingSession(FakeResponse({"errors": [{"message": "PersistedQueryNotFound"}]}))
         with pytest.raises(core.PixAIError, match="Recapture"):
-            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
+            core.PixAIClient(s).persisted("getTaskById", {}, sha256=core.TASK_DETAIL_HASH)
 
     def test_rest_get_hits_the_v2_base(self):
         s = RecordingSession(FakeResponse({"kaisuukens": []}))
@@ -183,14 +192,19 @@ class TestThePrimitivesAreThinDelegates:
                                       "_rest_get", "_rest_post"])
     def test_it_routes_through_the_client(self, name, real_rest):
         src = inspect.getsource(getattr(core, name))
-        assert "_client_of(" in src, "{} no longer routes through the client".format(name)
+        # gql reads the history feed's document through gql_adhoc, itself one of these five
+        road = "gql_adhoc(" if name == "gql" else "_client_of("
+        assert road in src, "{} no longer routes through the client".format(name)
         assert "session.post(" not in src and "session.get(" not in src, \
             "{} speaks HTTP itself again -- it must delegate".format(name)
 
-    def test_gql_delegates_to_persisted(self):
-        s = RecordingSession(FakeResponse({"data": {"page": 1}}))
-        assert core.gql(s, {"last": 3}) == {"page": 1}
-        assert s.calls[0][0] == "GET"
+    def test_gql_posts_the_history_document(self):
+        page = {"user": {"taskSummaries": {"edges": [], "pageInfo": {}}}}  # a page, no edges
+        s = RecordingSession(FakeResponse({"data": page}))
+        assert core.gql(s, {"last": 3}) == page
+        (verb, _url, kwargs), = s.calls
+        assert verb == "POST"
+        assert kwargs["json"] == {"query": core._HISTORY_PAGE_DOC, "variables": {"last": 3}}
 
     def test_gql_adhoc_takes_a_raw_session(self):
         s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
@@ -239,8 +253,8 @@ class TestTheTransitionSurface:
     """resolve_media, download, delete_task_gql, refresh_jwt and run_watch still reach for
     the Session themselves (delete_task_gql POSTs a persisted mutation, which Apollo blocks
     over GET, so it does not ride `persisted()`). Those calls have to keep working when what
-    they hold is a client. The six persisted GETs no longer belong on this list -- they ride
-    `persisted()` now; see TestTheSixPersistedGetsRideTheClient below."""
+    they hold is a client. The persisted GETs no longer belong on this list -- they ride
+    `persisted()` now; see TestThePersistedGetsRideTheClient below."""
     def test_get_post_headers_cookies_delegate_to_the_session(self):
         s = RecordingSession(FakeResponse({"ok": 1}))
         s.headers["Authorization"] = "Bearer k"
@@ -253,8 +267,8 @@ class TestTheTransitionSurface:
         assert [v for v, _u, _k in s.calls] == ["GET", "POST"]
 
 
-class TestTheSixPersistedGetsRideTheClient:
-    """The last six hand-rolled persisted GETs now ride `PixAIClient.persisted()` like every
+class TestThePersistedGetsRideTheClient:
+    """The hand-rolled persisted GETs now ride `PixAIClient.persisted()` like every
     other PixAI call. Two things are pinned: they no longer build params or call the Session
     themselves (they delegate through `_client_of`), and the wire they put on the socket is
     BYTE-IDENTICAL to what they sent before -- same operationName, same captured
@@ -262,10 +276,10 @@ class TestTheSixPersistedGetsRideTheClient:
     The hashes asserted here are the module constants, and those are unchanged from
     origin/master, so matching them is matching master's wire."""
 
-    SIX = ["task_detail_gql", "_bookmarks_persisted", "model_name_gql",
-           "resolve_model_base_id", "_resolve_model_preset", "artwork_list_gql"]
+    RIDERS = ["task_detail_gql", "_bookmarks_persisted", "model_name_gql",
+              "resolve_model_base_id", "_resolve_model_preset"]
 
-    @pytest.mark.parametrize("name", SIX)
+    @pytest.mark.parametrize("name", RIDERS)
     def test_it_delegates_through_the_client_and_speaks_no_http_itself(self, name):
         src = inspect.getsource(getattr(core, name))
         assert "_client_of(" in src, "{} no longer routes through the client".format(name)
@@ -276,22 +290,22 @@ class TestTheSixPersistedGetsRideTheClient:
     # -- the wire each one puts on the socket is byte-identical to master -----------------
     def _get(self, driver, data):
         """Drive `driver(client)` against a RecordingSession answering `{"data": data}`,
-        and return (params, headers) of the single GET it made."""
+        and return the params of the single GET it made."""
         s = RecordingSession(FakeResponse({"data": data}))
         driver(core.PixAIClient(s))
         (verb, url, kwargs) = s.calls[0]
         assert verb == "GET" and url == core.API_URL
-        return kwargs["params"], kwargs.get("headers")
+        return kwargs["params"]
 
     def test_task_detail_gql_wire(self):
-        p, _ = self._get(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
+        p = self._get(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
         assert p["operationName"] == "getTaskById"
         assert json.loads(p["variables"]) == {"id": "T7"}
         ext = json.loads(p["extensions"])
         assert ext["persistedQuery"] == {"version": 1, "sha256Hash": core.TASK_DETAIL_HASH}
 
     def test_bookmarks_persisted_wire(self):
-        p, _ = self._get(
+        p = self._get(
             lambda c: core._bookmarks_persisted(c, {}, False, "", "", "", 24),
             {"me": {"bookmarkedGenerationModels": {}}})
         assert p["operationName"] == core.BOOKMARKED_MODELS_OP == "listMyBookmarkedGenerationModels"
@@ -300,7 +314,7 @@ class TestTheSixPersistedGetsRideTheClient:
         assert ext["persistedQuery"]["sha256Hash"] == core.BOOKMARKED_MODELS_HASH
 
     def test_model_name_gql_wire(self):
-        p, _ = self._get(
+        p = self._get(
             lambda c: core.model_name_gql(c, "wire-model-id-0001"),
             {"generationModelVersion": {"name": "v1", "model": {"title": "T"}}})
         assert p["operationName"] == "getGenerationModelByVersionId"
@@ -309,7 +323,7 @@ class TestTheSixPersistedGetsRideTheClient:
         assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
 
     def test_resolve_model_base_id_wire(self):
-        p, _ = self._get(
+        p = self._get(
             lambda c: core.resolve_model_base_id(c, "V-wire-1"),
             {"generationModelVersion": {"model": {"id": "B1"}}})
         assert p["operationName"] == "getGenerationModelByVersionId"
@@ -318,26 +332,13 @@ class TestTheSixPersistedGetsRideTheClient:
         assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
 
     def test_resolve_model_preset_wire(self):
-        p, _ = self._get(
+        p = self._get(
             lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
             {"generationModelVersion": {"extra": {}}})
         assert p["operationName"] == "getGenerationModelByVersionId"
         assert json.loads(p["variables"]) == {"id": "V-preset-wire-1"}
         ext = json.loads(p["extensions"])
         assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
-
-    def test_artwork_list_gql_wire(self):
-        """The one outlier: it sends its OWN clientLibrary block and an x-apollo-operation-name
-        CSRF header. Both must survive the move onto the shared seam byte-for-byte."""
-        p, headers = self._get(lambda c: core.artwork_list_gql(c, last=50),
-                               {"artworks": {"edges": [], "pageInfo": {}}})
-        assert p["operationName"] == "listArtworks"
-        assert json.loads(p["variables"]) == {"authorId": str(core.USER_ID), "last": 50,
-                                              "tackLanguage": "en"}
-        ext = json.loads(p["extensions"])
-        assert ext["persistedQuery"]["sha256Hash"] == core.ARTWORK_LIST_HASH
-        assert ext["clientLibrary"] == core.CLIENT_LIBRARY_ARTWORK
-        assert headers == {"x-apollo-operation-name": "listArtworks"}
 
     # -- FakePixAI is the second adapter on this same road -------------------------------
     def test_fake_pixai_answers_a_registered_persisted_op(self):
@@ -352,13 +353,6 @@ class TestTheSixPersistedGetsRideTheClient:
         fake = FakePixAI()
         with pytest.raises(UnregisteredOperation, match="getTaskById"):
             core.task_detail_gql(fake, "T9")
-
-    def test_fake_pixai_records_the_artwork_client_library_and_header(self):
-        fake = FakePixAI().on("listArtworks", {"artworks": {"edges": [], "pageInfo": {}}})
-        core.artwork_list_gql(fake, last=50)
-        call = fake.calls_for("listArtworks")[0]
-        assert call.headers == {"x-apollo-operation-name": "listArtworks"}
-        assert call.client_library == core.CLIENT_LIBRARY_ARTWORK
 
 
 # ---------------------------------------------------------------------------
@@ -417,8 +411,16 @@ class TestRetryPolicy:
     def test_persisted_retries_four_times_by_default(self):
         s = RecordingSession(requests.ConnectionError("connection dropped"))
         with pytest.raises(requests.RequestException):
-            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
+            core.PixAIClient(s).persisted("getTaskById", {}, sha256=core.TASK_DETAIL_HASH)
         assert len(s.calls) == 5                      # the original + 4 retries
+
+    def test_the_history_feed_keeps_its_four_retries(self):
+        """gql's retries=4 rides onto the document POST: a dropped connection is asked five
+        times, as the saved-request GET was."""
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.gql(s, {"last": 1})
+        assert len(s.calls) == 5 and all(v == "POST" for v, _u, _k in s.calls)
 
     def test_rest_post_makes_exactly_one_attempt(self):
         """submit_fixer and claim_reward ride this. No loop, by construction."""
@@ -623,14 +625,15 @@ class TestTheFixtureIsWhatTheAppIsHanded:
 
     def test_every_primitive_routes_to_the_fake(self, pixai):
         pixai.on("me", {"me": {"id": "9"}})
-        pixai.on("listUserTaskSummaries", {"edges": []})
+        page = {"edges": [], "pageInfo": {}}                    # the feed's answer: a page
+        pixai.on(operation_name(core._HISTORY_PAGE_DOC), page)   # the feed's document
         pixai.on("/claim", {"claims": []})
         pixai.on("/claim/1", {"ok": True})
         assert core.gql_adhoc(pixai, "query me { id }") == {"me": {"id": "9"}}
-        assert core.gql(pixai, {"last": 1}) == {"edges": []}
+        assert core.gql(pixai, {"last": 1}) == page
         assert core._rest_get(pixai, "/claim") == {"claims": []}
         assert core._rest_post(pixai, "/claim/1", {}) == {"ok": True}
-        assert [c.verb for c in pixai.calls] == ["query", "persisted", "rest_get",
+        assert [c.verb for c in pixai.calls] == ["query", "query", "rest_get",
                                                  "rest_post"]
 
     def test_an_unstubbed_call_fails_loudly_instead_of_going_to_the_network(self, pixai):

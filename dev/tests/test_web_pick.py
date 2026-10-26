@@ -1377,7 +1377,7 @@ def test_your_art_ranks_published_and_reads_swept_views(tmp_path, pixai):
     It used to fire twelve live `artwork(id){views}` calls on every open and this test
     monkeypatched `core.artwork_views` to stand in for them. Views ride --sync-artworks
     into a `views` column now (PROBE_2026-09-06: the ad-hoc bulk artworks query accepts the
-    field the persisted listArtworks cannot be asked for), so the route makes NO network
+    field the metadata listing deliberately never asks for), so the route makes NO network
     call at all -- which is what this test's total absence of a mock is asserting.
 
     The totals are the other half of the change: `views` here is a real lifetime sum over

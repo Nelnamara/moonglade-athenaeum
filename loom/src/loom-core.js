@@ -19,10 +19,19 @@
         import.meta, no imports of anything but this file itself.
    ========================================================================= */
 
-// The per-card take walk the spend ledger uses (Session P). The one import this file makes:
-// loom-takes-core.js imports nothing, so there is no cycle, and the Loom is bundle-only
-// (the in-browser Babel inline path this header describes was retired 2026-08-08).
-import { spendMidsOf } from "./loom-takes-core.js";
+// The per-card take walk the spend ledger uses (Session P), and the ★ take's view for the
+// apply-to-every-shot audio rule. The Loom is bundle-only (the in-browser Babel inline path
+// this header describes was retired 2026-08-08). loom-takes-core.js imports engineOf back from
+// here for its settings snapshot: a cycle, safe because neither file calls the other at load
+// time -- every use is inside a function -- so keep it that way.
+import { spendMidsOf, selectedTakeView } from "./loom-takes-core.js";
+// The video drawer's own roster and gating (issue #90), so a Loom shot is priced, sent and
+// refused on exactly the engine rules the drawer shows -- no second roster. The loom bundle
+// already holds this module through VideoDrawer.jsx. priceKey is the drawer's price identity,
+// re-exported there from priceProbeCore.js.
+import {
+  MODELS, DEFAULT_MODEL, MODEL_VMODES, SHOT_LABEL, refCap, gatedShot, priceKey,
+} from "../../gallery/src/gen/videoDrawerCore.js";
 
 // ---------- continuity / connection-method metadata ----------
 
@@ -142,8 +151,161 @@ export const newCardShape = (id, extra = {}) => ({
   // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
   // see shotText() and effectivePrompt() below.
   promptOverride: false, promptOverrideText: "",
+  // The shot's engine, Channel and prompt helper (issue #90): the drawer's Engine card,
+  // Normal/Private and helper switch, kept per SHOT. They used to live only in the drawer, so
+  // every price, Generate all and card Render went out on the default engine whatever the
+  // drawer showed. videoModel "" means "no engine chosen" and reads as DEFAULT_MODEL through
+  // engineOf() below -- which is also how a board saved before these keys existed reads.
+  videoModel: "", isPrivate: false, videoHelper: false,
   ...extra,
 });
+
+// ---------- the shot's engine (issue #90) ----------
+
+// The engine id a stored value means: blank, whitespace or an id the drawer's roster does not
+// list reads as DEFAULT_MODEL, so nothing downstream ever prices or sends an unknown string.
+const engineId = (v) => {
+  const s = String(v == null ? "" : v).trim();
+  return MODELS.some((m) => m.value === s) ? s : DEFAULT_MODEL;
+};
+/** The engine a card renders on: its videoModel when that is a real engine, else the default. */
+export const engineOf = (c) => engineId(c && c.videoModel);
+/** The drawer's name for an engine ("Tsubaki Video"); an unknown id names the default's. */
+export const engineLabel = (v) => { const id = engineId(v); const m = MODELS.find((x) => x.value === id); return m ? m.label : id; };
+
+// The card mode <-> drawer vmode pair. The drawer has three vmodes; a card has four modes, and
+// V2V shares the drawer's Multi-Reference (r2v) with R2V -- so the way back is not an exact
+// mirror: r2v always means R2V. (master-storyboard.jsx holds a local copy of each.)
+export const drawerModeFor = (m) => { const u = (m || "R2V").toUpperCase(); return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v"; };
+export const cardModeForVmode = (v) => (v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V");
+
+// The card mode a shot is SENT in: its own when its engine has that mode, else the mode the
+// drawer's gating lands it on (gatedShot: the engine's last supported one -- V3.2 takes a
+// Multi-Reference shot to First & Last). The card's own string survives whenever the drawer
+// mode agrees, so a V2V shot on an engine with Multi-Reference stays V2V.
+export const shotModeOf = (c) => {
+  const x = c || {};
+  const g = gatedShot(drawerModeFor(x.mode), x.duration, engineOf(x));
+  return g.mode === drawerModeFor(x.mode) ? (x.mode || "R2V") : cardModeForVmode(g.mode);
+};
+// The entry as it is sent: the SAME object when its mode stands, else a copy whose card carries
+// the gated mode -- so the images, their @imageN numbering and the prompt that cites them are
+// all composed for the one mode that goes out (the closing frame joins the numbering for some
+// modes and not others; see usesCloseFrame).
+export const gatedEntry = (entry) => {
+  const mode = shotModeOf(entry.c);
+  return mode === entry.c.mode ? entry : { ...entry, c: { ...entry.c, mode } };
+};
+
+// ---------- what a new shot inherits (issue #90, part 1 of the ask) ----------
+
+// The five per-shot generation settings: what "Use these settings for every shot" writes and
+// what a picture-built shot inherits. A missing key reads as its default.
+export const SHOT_SETTINGS_FIELDS = ["videoModel", "isPrivate", "videoHelper", "audioGen", "audioLanguage"];
+export const shotSettingsOf = (c) => {
+  const x = c || {};
+  return { videoModel: String(x.videoModel || ""), isPrivate: !!x.isPrivate, videoHelper: !!x.videoHelper,
+    audioGen: !!x.audioGen, audioLanguage: x.audioLanguage || "english" };
+};
+
+// What a new shot takes from the one before it: a WHITELIST of seven, never a spread of the
+// card (connect, frames, cast, prompt and every render field stay the new shot's own). Mode
+// and duration are the values the drawer would show for `prev` -- gated onto its engine -- so
+// the new shot starts coherent even when `prev` was not. {} for no card: the defaults stand.
+export const inheritedShotSettings = (prev) => {
+  if (!prev) return {};
+  const s = shotSettingsOf(prev);
+  const g = gatedShot(drawerModeFor(prev.mode), prev.duration, engineOf(prev));
+  return { videoModel: s.videoModel, isPrivate: s.isPrivate, videoHelper: s.videoHelper,
+    audioGen: s.audioGen, audioLanguage: s.audioLanguage, mode: shotModeOf(prev), duration: g.duration };
+};
+
+// The card a new shot inherits from: the nearest preceding card that is not imported footage
+// (borrowed clips were never rendered with this board's settings), searched from the END of
+// the target act, then each earlier act. No act id -- or one not on the board -- searches from
+// the end of the board (a picture-built act is appended there). null when there is none.
+export const inheritSourceCard = (project, actId) => {
+  const acts = (project && project.acts) || [];
+  let i = acts.findIndex((a) => a && a.id === actId);
+  if (i < 0) i = acts.length - 1;
+  for (; i >= 0; i--) {
+    const cards = (acts[i] && acts[i].cards) || [];
+    for (let j = cards.length - 1; j >= 0; j--) if (cards[j] && !cards[j].imported) return cards[j];
+  }
+  return null;
+};
+
+// "Use these settings for every shot" (issue #90, part 2; the owner's yes 2026-10-25): the five
+// settings onto every card of every act. `settings` is the drawer's mg-apply-all-request detail,
+// {model, isPrivate, audioGen, audioLanguage, videoHelper} (`videoModel` is read in place of
+// `model` when given). Mode and duration are never touched -- a shot's frames and refs are
+// shaped by its mode.
+//
+// A card comes back as the SAME object when nothing on it changes, and as a spread (never a
+// JSON clone) when something does, so cast/refs/openFrame/closeFrame keep their identity and
+// the drawer's prefill effect has nothing to echo. An engine is compared through engineOf, so
+// a card on "" is already on V4.0 Lite and is left alone when that is the pick. Acts and the
+// project keep their identity too when none of their cards changed.
+//
+// Left as they are, and counted:
+//   - imported footage (`imported`): a borrowed clip, never rendered with these settings;
+//   - a card whose mode the engine has no road for (MODEL_VMODES): V3.2 on a Multi-Reference
+//     shot would gate it to First & Last -- that is the owner's call on that shot, not this
+//     button's. `modes` lists the drawer modes that were missing, for the confirm;
+//   - a Multi-Reference card (R2V/V2V, the one mode that sends video references) holding more
+//     of them than the engine takes (refCap: none on Tsubaki): the button would quietly make it
+//     a job without them -- a V2V shot of a picture and two clips going out picture-only (issue
+//     #90 review). `videoLacking` counts these, and `videoCap` is the engine's cap, for the
+//     confirm;
+// and, for the AUDIO fields only, a card whose ★ take recorded no settings snapshot (a legacy
+// or attached take): hasOwnAudio (loom-bed-core.js) reads such a take's audio off the card, so
+// writing audioGen would change how the music bed ducks under a clip that is already made.
+// Its engine, channel and helper are still written (`audioKept` counts these).
+export const applySettingsToAllCards = (project, settings) => {
+  const s = settings || {};
+  const engine = engineId(s.videoModel != null ? s.videoModel : s.model);
+  const want = { isPrivate: !!s.isPrivate, videoHelper: !!s.videoHelper, audioGen: !!s.audioGen,
+    audioLanguage: s.audioLanguage || "english" };
+  const allowed = MODEL_VMODES[engine] || ["i2v", "flf", "r2v"];
+  const vcap = refCap(engine, "videos");
+  const counts = { shots: 0, changed: 0, imported: 0, modeLacking: 0, videoLacking: 0, videoCap: vcap, audioKept: 0, modes: [] };
+  if (!project || !Array.isArray(project.acts)) return { project, ...counts, left: 0 };
+  let anyAct = false;
+  const acts = project.acts.map((a) => {
+    if (!a || !Array.isArray(a.cards)) return a;
+    let anyCard = false;
+    const cards = a.cards.map((c) => {
+      if (!c) return c;
+      counts.shots += 1;
+      if (c.imported) { counts.imported += 1; return c; }
+      const vm = drawerModeFor(c.mode);
+      if (allowed.indexOf(vm) < 0) {
+        counts.modeLacking += 1;
+        if (counts.modes.indexOf(vm) < 0) counts.modes.push(vm);
+        return c;
+      }
+      if (vm === "r2v" && shotVideoRefs({ c }).length > vcap) { counts.videoLacking += 1; return c; }
+      const v = selectedTakeView(c);
+      const keepAudio = !!(v && !v.settings);
+      if (keepAudio) counts.audioKept += 1;
+      const patch = {};
+      if (engineOf(c) !== engine) patch.videoModel = engine;
+      if (!!c.isPrivate !== want.isPrivate) patch.isPrivate = want.isPrivate;
+      if (!!c.videoHelper !== want.videoHelper) patch.videoHelper = want.videoHelper;
+      if (!keepAudio && !!c.audioGen !== want.audioGen) patch.audioGen = want.audioGen;
+      if (!keepAudio && (c.audioLanguage || "english") !== want.audioLanguage) patch.audioLanguage = want.audioLanguage;
+      if (!Object.keys(patch).length) return c;
+      counts.changed += 1;
+      anyCard = true;
+      return { ...c, ...patch };
+    });
+    if (!anyCard) return a;
+    anyAct = true;
+    return { ...a, cards };
+  });
+  return { project: anyAct ? { ...project, acts } : project, ...counts,
+    left: counts.imported + counts.modeLacking + counts.videoLacking };
+};
 
 // ---------- board flattening + shot-text assembly ----------
 
@@ -538,19 +700,44 @@ export const shotText = (entry, p, imgSrc) => {
 // in master-storyboard.jsx it resolves against the component's `thumbs` state; here
 // (and in tests) callers pass whatever lookup they like.
 export const shotPayload = (entry, project, imgSrc) => {
-  const c = entry.c;
-  const imgs = shotImageRefs(entry, project, imgSrc);   // already capped at 6 -- see its own comment
+  // The engine, and the mode the drawer's gating lands this shot on there (issue #90, C5):
+  // the server accepts any (mode, engine) pair, so a Multi-Reference shot on V3.2 used to be
+  // priced and sent as a referenceVideo job V3.2 has no road for. The entry is re-derived for
+  // the gated mode, so the images and the prompt citing them agree with what goes out.
+  const engine = engineOf(entry.c);
+  const e = gatedEntry(entry);
+  const c = e.c;
+  const all = shotImageRefs(e, project, imgSrc);   // already capped at 6 -- see its own comment
+  // A FIRST FRAME / FIRST & LAST JOB'S PICTURES ARE ITS FRAMES (issue #90 review). The server
+  // reads images[0] as the start frame (and images[1] as the end, on First & Last), whatever
+  // they are. shotImageRefs puts the frames first, so with every frame there the cast and refs
+  // after them are never read; but a shot SHORT of its frames had its cast pictures step up
+  // into those places -- an R2V shot of two cast portraits, moved to First & Last by a V3.2
+  // pick, priced and sent a paid job from one portrait to the other while the drawer showed an
+  // empty frame bank. So the frames alone go out when the frames are short, and when the mode
+  // was gated onto the engine (the drawer's bank for that mode is the frames, and the card
+  // prices what the drawer shows). `held.images` counts the pictures left out, for
+  // shotSendProblem's refusal.
+  const need = c.mode === "FLF" ? 2 : c.mode === "I2V" ? 1 : 0;
+  const frames = all.filter((x) => x.kind === "frame");
+  const imgs = need && (e !== entry || frames.length < need) ? frames : all;
   // PixAI's real cap: at most 3 @video refs on a reference-video generation -- the video-side
   // twin of shotImageRefs()'s own 6-image cap (see that function's comment for the precedent
   // this mirrors). Nothing currently stops a shot from accumulating more than 3 video-kind
   // c.refs entries over its editing history; capping here, at the one place that builds the
   // actual /api/loom/generate body, guarantees the real submit never exceeds it regardless of
   // which surface (batchGenerate's direct call or the drawer's own prefill) triggered it.
-  const vids = (c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source)).map((r) => r.source).slice(0, 3);
+  // The cap is the ENGINE's (refCap: 3 by default, 0 on Tsubaki), as the drawer's buildPayload
+  // has it: refs past it are HELD -- still on the card, out of the payload -- never deleted.
+  // `held.videos` counts them on a Multi-Reference shot (the one road video refs go out on; the
+  // drawer holds none in a frame mode), so the spend asks can name them and a shot with nothing
+  // else to send is refused in those words.
+  const allVids = shotVideoRefs(e).map((r) => r.source);
+  const vids = allVids.slice(0, refCap(engine, "videos"));
   // Draft mode renders every shot at the cheaper "basic" quality for blocking out an
   // animatic; approve the cut, turn Draft off, and re-generate the keepers at pro. Carried
   // on the payload so BOTH the price preview and the actual submit see the same quality.
-  return { mode: c.mode, prompt: shotText(entry, project, imgSrc), images: imgs.map((x) => x.d),
+  return { mode: c.mode, prompt: shotText(e, project, imgSrc), images: imgs.map((x) => x.d),
            video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
            generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
            // The Channel (Normal/Private) -- the SAME real field mg-generate-drawer's own
@@ -560,32 +747,130 @@ export const shotPayload = (entry, project, imgSrc) => {
            // wrongly recorded "no channel field exists in the real backend contract").
            // Absent/false = Normal, matching the drawer's own default.
            is_private: !!c.isPrivate,
+           // The shot's engine, ALWAYS stated (issue #90): a blank one reached the server as
+           // "use the default", so every Loom price and render went out on V4.0 Lite whatever
+           // the drawer showed. engineOf never yields an id the roster does not list.
+           video_model: engine,
+           // The drawer's prompt-helper switch (i2vPro.usePromptsHelper on the server).
+           prompt_helper: !!c.videoHelper,
+           // Client-only, like hasInput (never fingerprinted, never POSTed): what the shot holds
+           // that this payload leaves out -- see the two comments above.
+           held: { images: all.length - imgs.length,
+             videos: drawerModeFor(c.mode) === "r2v" ? allVids.length - vids.length : 0 },
            hasInput: (imgs.length + vids.length) > 0 };
+};
+
+// Every thumbnail id this shot's payload and prompt can resolve a picture through (issue #90,
+// G): its image cast members', its image refs', and both frames' -- a superset of what
+// shotPayload()/shotText() ask the resolver for, whatever the mode. The prefill effect keys on
+// which of these have landed (thumbs arrive after the board), so the shot's own thumbs landing
+// re-syncs the drawer and an unrelated one does not. Unique, in that order.
+export const shotThumbIds = (entry, project) => {
+  const c = (entry && entry.c) || {};
+  const ids = [];
+  const add = (x) => { const t = x && x.thumbId; if (t && ids.indexOf(t) < 0) ids.push(t); };
+  ((project && project.assets) || []).filter((as) => as && as.kind === "image" && (c.cast || []).includes(as.id)).forEach(add);
+  (c.refs || []).filter((r) => r && r.kind === "image").forEach(add);
+  add(c.openFrame);
+  add(c.closeFrame);
+  return ids;
 };
 
 // ---------- the card's render body: THE priced payload, as sent (spend review S3) ----------
 // The card's Render used to re-list the payload's fields one by one and dropped is_private:
 // a Private shot was priced and snapshotted as Private and sent on the Normal channel. The
-// body is now the priced payload object itself -- every key but the client-only `hasInput` --
-// plus the Loom's own keys, which the server pops before anything is priced or sent. A field
-// added to shotPayload later reaches the POST without anyone remembering to list it.
+// body is now the priced payload object itself -- every key but the client-only `hasInput` and
+// `held` -- plus the Loom's own keys, which the server pops before anything is priced or sent. A
+// field added to shotPayload later reaches the POST without anyone remembering to list it.
 export const shotSendBody = (payload, ids) => {
-  const { hasInput, ...sent } = payload || {};   // eslint-disable-line no-unused-vars
+  const { hasInput, held, ...sent } = payload || {};   // eslint-disable-line no-unused-vars
   const x = ids || {};
   return { ...sent, origin: "loom-shot",
     loom_target: { board_id: x.boardId, card_id: x.cardId }, submit_id: x.submitId,
     ...(x.expectFree ? { expect_free: true } : {}) };
 };
 
+// ---------- a shot its engine cannot take: refused before any price or POST (issue #90) ----------
+// The server accepts any (mode, engine) pair -- it picks a road from the mode and the image
+// count and builds it for whatever engine is named (MODEL_VMODES has no Python twin) -- so the
+// one check stands here, on the payload that would be sent. The road, as the server picks it
+// (build_shot_video_params): I2V with an image, or FLF with two, is i2vPro (the drawer's First
+// Frame / First & Last); anything else carrying a reference is referenceVideo (Multi-Reference).
+// "" = sendable. A payload with nothing to send at all is not this check's to word -- the Loom's
+// own "attach a frame or cast image first" refusal says it -- UNLESS the shot holds what it can't
+// send (shotPayload's client-only `held`): a First Frame / First & Last shot whose pictures are
+// all cast or refs (never sent in place of its frames, so the drawer's Go would refuse it too),
+// and a shot whose only input is video references its engine takes none of (Tsubaki).
+const videoCapWords = (label, cap) => label
+  + (cap === 0 ? " takes no video references" : " takes at most " + cap + " video reference" + (cap === 1 ? "" : "s"));
+export const shotSendProblem = (payload) => {
+  const p = payload || {};
+  const engine = engineId(p.video_model);
+  const label = engineLabel(engine);
+  const mode = String(p.mode || "").toUpperCase();
+  const imgs = (p.images || []).filter(Boolean).length;
+  const vids = (p.video_refs || []).filter(Boolean).length;
+  const auds = (p.audio_refs || []).filter(Boolean).length;
+  const held = p.held || {};
+  const cap = refCap(engine, "videos");
+  if ((mode === "I2V" || mode === "FLF") && !imgs && held.images > 0) {
+    return SHOT_LABEL[drawerModeFor(mode)] + (mode === "FLF" ? " needs a start and an end frame" : " needs a start frame")
+      + "; its cast and reference pictures are never sent in place of " + (mode === "FLF" ? "them" : "it") + ". Nothing was sent.";
+  }
+  if (!imgs && !vids && !auds) {
+    return held.videos > 0 ? videoCapWords(label, cap) + ", and this shot has " + held.videos + ". Nothing was sent." : "";
+  }
+  const road = mode === "I2V" && imgs ? "i2v" : mode === "FLF" && imgs >= 2 ? "flf" : "r2v";
+  const allowed = MODEL_VMODES[engine] || ["i2v", "flf", "r2v"];
+  if (allowed.indexOf(road) < 0) {
+    // A framed shot short of its frames goes out as Multi-Reference -- say why, in its own terms.
+    if (road === "r2v" && (mode === "I2V" || mode === "FLF")) {
+      const own = SHOT_LABEL[drawerModeFor(mode)];
+      return own + (mode === "FLF" ? " needs a start and an end frame" : " needs a start frame")
+        + "; without " + (mode === "FLF" ? "both" : "one") + " this shot goes out as Multi-Reference, which "
+        + label + " doesn't have. Nothing was sent.";
+    }
+    return label + " has no " + SHOT_LABEL[road] + ", so this shot can't be sent as it is. "
+      + "Pick another engine or shot type for it. Nothing was sent.";
+  }
+  // Video references reach only the referenceVideo road; an engine's cap there (refCap: 0 on
+  // Tsubaki) is refused rather than sent. A BACKSTOP only: shotPayload never builds such a
+  // payload -- it holds refs past the cap back (on the card, out of the payload, named in the
+  // spend asks: heldVideoRefsLine below), as the drawer does -- so this catches a payload built
+  // some other way.
+  if (road === "r2v" && vids > cap) {
+    return videoCapWords(label, cap) + ", and this shot has " + vids + ". Nothing was sent.";
+  }
+  return "";
+};
+
+// The words for video references a shot holds back -- past its engine's cap, every one on a
+// Tsubaki engine (issue #90 review). The drawer dims and names them ("takes no video references.
+// Still held: N"); the card's Render and Generate all have no such panel, so their spend asks
+// name them instead and a job priced and sent without them never goes out unsaid. "" for none.
+export const heldVideoRefsLine = (payload) => {
+  const p = payload || {};
+  const n = (p.held && p.held.videos) || 0;
+  if (!(n > 0)) return "";
+  const engine = engineId(p.video_model);
+  return videoCapWords(engineLabel(engine), refCap(engine, "videos")) + ": " + n
+    + (n === 1 ? " video reference on this shot is" : " video references on this shot are") + " held back, not sent and not deleted.";
+};
+
 // ---------- cost-to-finish pricing (shared by the toolbar's standing estimate and
 // batchGenerate's own price-confirm dialog) ----------
 
-// The only shotPayload fields the server's price math actually reads (verified against
-// moonglade_backup.py's price_task/_PRICE_SCALARS/_PRICE_NESTED allowlist) -- prompt
-// text, camera, lighting, notes, title never affect cost, so a fingerprint built from just
-// these fields lets a cost-estimate cache skip re-pricing on every keystroke elsewhere.
-export const PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
-export const priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
+// The identity of a priced shot payload: EVERY key but a named skip list, the drawer's own
+// rule (priceKey, gen/priceProbeCore.js) -- over-including costs one re-price, under-including
+// lets a send ride a quote for a different job. It used to be an allowlist of seven fields, and
+// the engine was not one of them: a shot switched to Tsubaki kept its V4.0 Lite fingerprint, so
+// the cost-to-finish cache never re-priced it and a batch's confirmed-price guard could not see
+// the change (issue #90). The prompt is skipped because it never prices and changes on every
+// keystroke; hasInput and held are client-only (held counts what is NOT sent, which prices
+// nothing). A field added to shotPayload later is fingerprinted without anyone remembering to
+// list it (the structural test pins that).
+export const PRICE_FP_SKIP = ["prompt", "hasInput", "held"];
+export const priceFingerprint = (payload) => priceKey(payload, PRICE_FP_SKIP);
 
 // ---- multi-ticket free cards (issue #15) ----
 // /api/price's `free` is the server's card_covers() verdict for ONE job priced alone: a

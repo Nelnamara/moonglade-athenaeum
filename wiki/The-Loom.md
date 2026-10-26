@@ -99,7 +99,7 @@ which dims behind it.
 ## Acts & shots
 
 **+ New act** adds a chapter; the dashed **+ Add shot to \<act\>** tile at the end of an act's
-cards adds a card to it. An act's header has its name (edit it in place), **↑ ↓** to move it,
+cards adds a card to it, [starting with the settings of the shot before it](#a-shots-own-settings). An act's header has its name (edit it in place), **↑ ↓** to move it,
 **⌃** to fold its cards away (**⌄** brings them back — the act stays folded when you come back
 to the board) and **✕** to delete it. Each card carries
 its code, title, mode, duration and a status badge, its [takes](#takes) with **Render** /
@@ -276,7 +276,7 @@ Press **Render** on a shot's card (**Re-render** once it has a take), or select 
 the Generate drawer's **Video** tab, and press **Generate video**. What happens:
 
 1. The shot's cast and frames upload in `@tag` order (uploads are free).
-2. The assembled shot text becomes the prompt; the mode picks the engine path.
+2. The assembled shot text becomes the prompt; the shot's own [engine and mode](#a-shots-own-settings) pick how it is sent.
 3. The card shows **wip → done** as the task runs. If a render goes quiet, the badge pauses
    and you can click it to check again.
 4. The finished mp4 downloads and is cataloged into your gallery like any other generation,
@@ -320,6 +320,51 @@ Other controls in the top bar:
   money was spent elsewhere — and named on hover. Nothing is fetched from PixAI to work it out.
 - **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
+
+### A shot's own settings
+
+The shot's **engine**, its **Channel** (Normal or Private), **Generate audio** with its language,
+and the **Video prompt helper** are kept **on the shot**, beside its type and length. Pick one in
+the Generate drawer's **Video** tab and it is saved on that shot straight away, so the estimate
+pill, **▶ Generate all**, a card's **Render** and the drawer's **Generate video** all use the
+shot's own engine, channel and helper, and the price you are shown is the price of what is sent.
+Opening the right-hand panel (or opening it again after closing it) fills the drawer from the
+selected shot at once, pictures included. You do not need to click a video-type button first.
+
+- **A shot that never had an engine picked uses V4.0 Lite**, as every shot did before engines
+  were saved per shot. The drawer shows that, not the engine of the last shot you looked at.
+  Storyboards made before this keep that behaviour until you set them.
+- **If a shot's type isn't one its engine offers** (Multi-Reference on V3.2, say), the drawer
+  shows, prices and renders the type the engine does offer, and picking that engine moves the
+  shot's type and length to what it takes, with a note saying so. A shot its engine can't send
+  as it stands (a single frame in First & Last on V3.2) is refused on its card with **Nothing
+  was sent.**
+- **A First Frame or First & Last shot sends its frames, never a cast or reference picture in
+  their place.** One with no frame of its own is refused on its card, as the drawer's
+  **Generate video** refuses it, rather than rendering from a cast portrait.
+- **Reference videos on a Tsubaki engine are held back**, as the drawer holds them: not sent and
+  not deleted, so they go out again if you switch the shot back to an engine that takes them.
+  The question before a card's **Render** and **Generate all** says so. A Multi-Reference shot
+  whose only input is reference videos can't be sent on Tsubaki and is refused on its card.
+- **New shots copy the shot before them.** **+ Add shot** starts a card with the engine, channel,
+  audio and language, helper, type and length of the nearest earlier shot, looking from the end
+  of that act and back through the acts before it, and skipping a clip you imported. The first
+  shot of a board starts with the defaults. [Sending pictures as
+  shots](#sending-pictures-from-the-gallery) copies the engine, channel, audio, language and
+  helper (not the type or length), and **Duplicate** and **Split** keep a shot's settings.
+- **Use these settings for every shot** is a small button in the drawer's ENGINE card (the Loom
+  only). It sets the drawer's engine, channel, audio and language, and prompt helper on every
+  shot in the storyboard, after one question that says what it will do and how many shots it
+  leaves as they are: clips you imported, shots whose type the new engine doesn't offer, and
+  Multi-Reference shots with more reference videos than the new engine takes. It
+  never touches a shot's type, length, frames or references, and it sends and prices nothing. The
+  estimate updates by itself.
+- The question before a paid render names the engine, and **Generate all** lists the engines
+  (with how many shots use each) when they differ. If a shot's engine, channel or helper changes
+  after you confirm a batch, that shot is refused rather than sent as something you didn't
+  approve.
+
+Not saved on the shot: the negative prompt, aspect ratio, camera move and render quality.
 
 ### Takes
 
@@ -549,7 +594,9 @@ editor): **▮ Send to The Loom** has two choices.
   order is the collection's own [manual order](Collections#manual-order) when it has one, oldest
   first otherwise (a smart collection sends its current matches). Videos are left out, up to 60
   pictures go at once (more is refused, not cut short), and the Loom asks once before adding
-  the act. **Nothing is rendered** — the shots wait for your own Render.
+  the act. **Nothing is rendered** — the shots wait for your own Render. Each new shot also
+  starts with the engine, channel, audio, language and helper of the board's last shot that
+  isn't an imported clip (see [A shot's own settings](#a-shots-own-settings)).
 
 ## On a phone
 
@@ -561,6 +608,9 @@ The phone layout carries the same work, sized for a finger:
   its clip stays in your library). Swiping never renders.
 - **Re-anchor** — a changed anchor shows as a peach underline on the scrub reel and **⚠ anchor
   changed** on the card; **Re-anchor** and **Keep** are in the shot's screen.
+- **Engine** — a shot's screen shows the shot's own engine (read-only; change it on the desktop,
+  where the [shot's own settings](#a-shots-own-settings) live), and the price preview follows
+  that engine, the channel and the helper.
 - **Music bed** — **♪ Bed** in **Review & trim** picks the file; with one on the storyboard it
   opens a sheet with the level, the fades, a different file, and remove.
 - **Cast library** — the cast sheet (👥 in a shot's screen) has a **Library** tab beside Cast &

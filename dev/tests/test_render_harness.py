@@ -656,6 +656,55 @@ def _sign_in_beats_ms():
     return int(busy.group(1)), int(hold.group(1))
 
 
+# The sign-in page's own clock, for the one test that judges how long the page holds. Installed
+# before the page loads, it stamps (performance.now(), ms) the submit click, the moment
+# .lgn-welcome enters the DOM, and the moment the page starts leaving, and keeps the stamps in
+# localStorage because the page that wrote them is gone when Python reads them (the gallery it
+# navigates to is the same origin).
+_SIGN_IN_CLOCK_KEY = "mg-sign-in-clock"
+_SIGN_IN_CLOCK_JS = (
+    "(() => {"
+    " if (!location.pathname.startsWith('/login')) return;"
+    " const rec = {};"
+    " const save = () => { try { localStorage.setItem('" + _SIGN_IN_CLOCK_KEY + "',"
+    " JSON.stringify(rec)); } catch (e) {} };"
+    " document.addEventListener('click', (e) => {"
+    "   if (!('click' in rec) && e.target.closest && e.target.closest('button[type=submit]'))"
+    "     { rec.click = performance.now(); save(); } }, true);"
+    " new MutationObserver(() => {"
+    "   if (!('welcome' in rec) && document.querySelector('.lgn-welcome'))"
+    "     { rec.welcome = performance.now(); save(); } })"
+    "   .observe(document, { childList: true, subtree: true });"
+    " window.addEventListener('beforeunload', () => {"
+    "   rec.leaving = performance.now();"
+    "   rec.welcome_still_up = !!document.querySelector('.lgn-welcome'); save(); });"
+    "})();")
+
+# How far short of a beat the page's own clock may read. The page starts a hold's timer in the
+# same task that asks React to show the beat, so the beat reaches the DOM a moment AFTER its
+# timer started: 1-2 ms in every one of 25 traced sign-ins (2026-10-19, quiet and with the CPU
+# oversubscribed twofold). A quarter of a second is two orders of magnitude over that, and still
+# far under the beats it guards.
+_SIGN_IN_CLOCK_MARGIN_MS = 250
+
+
+def _read_sign_in_clock(page):
+    """The stamps _SIGN_IN_CLOCK_JS left behind, read once the page has left /login."""
+    rec = {}
+    for _ in range(50):
+        try:
+            raw = page.evaluate("k => localStorage.getItem(k)", _SIGN_IN_CLOCK_KEY)
+        except _pw.Error:                  # the new document was still being swapped in
+            raw = None
+        rec = json.loads(raw) if raw else {}
+        if all(k in rec for k in ("click", "welcome", "leaving", "welcome_still_up")):
+            return rec
+        page.wait_for_timeout(100)
+    pytest.fail("the sign-in page left no complete clock reading (got {!r}) -- it never showed "
+                "its welcome line, never left, or the stamps did not survive the "
+                "navigation".format(rec))
+
+
 def _login(page, username=_USERNAME):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -711,10 +760,16 @@ def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
     page holds "Signing in..." for BUSY_MIN_MS, then shows the welcome line, and holds that for
     WELCOME_HOLD_MS before it moves on to the gallery.
 
-    Timed from Python, so every reading can only come out LATER than the page's own timers
-    fire (each observation lags its event); the half-second margins absorb that lag the other
-    way, and are small next to the 2.2 s and 3.4 s being guarded. The fixed wait in phase 1 is
-    the measurement itself: the claim is that nothing happens for that long.
+    The beats are judged on the PAGE's own clock (_SIGN_IN_CLOCK_JS: the click, the welcome line
+    entering the DOM, the page starting to leave), not on a stopwatch in Python. A stopwatch
+    here reads every event late by however long Python takes to hear of it -- about 0.17 s on a
+    quiet machine, and up to 0.9 s with the CPU oversubscribed (traced 2026-10-19: the page held
+    the welcome 3.41 s on its own clock in the very runs where Python first saw the line 0.69 s
+    and 0.88 s after it appeared). The old form waited a fixed 2.9 s (the hold less half a
+    second) after Python saw the line and then asserted the page had not left, so that lag ate
+    the half-second and a correct page failed it (once, in a full local run). Python's side of
+    this test now only waits for the page to finish leaving; what it asserts is what the page
+    itself recorded, to within _SIGN_IN_CLOCK_MARGIN_MS.
 
     Phase 2 proves both halves non-vacuous: the same sign-in with the shortcut moves on before
     the busy beat would even have ended, so this test can tell a held sign-in from one that
@@ -724,38 +779,43 @@ def test_the_desktop_sign_in_holds_its_welcome_before_moving_on(
     busy_ms, hold_ms = _sign_in_beats_ms()
     monkeypatch.setattr(core, "_config_path", lambda: render_server.config_path)
 
-    def _open():
+    def _open(clock=False):
         ctx = render_browser.new_context(
             viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
             device_scale_factor=1, base_url=render_server.base_url)
         ctx.set_default_timeout(10_000)
         page = ctx.new_page()
+        if clock:
+            page.add_init_script(_SIGN_IN_CLOCK_JS)
         page.goto("/login", wait_until="domcontentloaded")
         page.fill("input[name=username]", _USERNAME)
         page.fill("input[name=password]", _PASSWORD)
         return ctx, page
 
     # Phase 1: the real sign-in, untouched -- no shortened timers, no frozen motion.
-    ctx, page = _open()
+    ctx, page = _open(clock=True)
     try:
         page.click("button[type=submit]")
-        clicked = time.monotonic()
         try:
             page.wait_for_selector(".lgn-welcome")
         except _PlaywrightTimeout:
             pytest.fail("no welcome line within 10 s of signing in; the page is at {} -- it "
                         "moved on without its welcome hold, or never signed in".format(page.url))
-        busy_s = time.monotonic() - clicked
         assert "/login" in page.url, "the page moved on before its welcome line showed"
-        assert busy_s >= busy_ms / 1000 - 0.5, (
-            "the welcome line came {:.2f}s after the click; the busy beat is {} ms".format(
-                busy_s, busy_ms))
-        page.wait_for_timeout(hold_ms - 500)
-        assert "/login" in page.url and page.locator(".lgn-welcome").count() == 1, (
-            "the page moved on before its {} ms welcome hold was over".format(hold_ms))
         page.wait_for_url(lambda url: "/login" not in url, wait_until="commit")
+        clock = _read_sign_in_clock(page)
     finally:
         ctx.close()
+    busy_beat = clock["welcome"] - clock["click"]
+    hold_beat = clock["leaving"] - clock["welcome"]
+    assert busy_beat >= busy_ms - _SIGN_IN_CLOCK_MARGIN_MS, (
+        "the welcome line came {:.0f} ms after the click on the page's own clock; the busy "
+        "beat is {} ms".format(busy_beat, busy_ms))
+    assert clock["welcome_still_up"], (
+        "the welcome line was already gone from the page when it started leaving")
+    assert hold_beat >= hold_ms - _SIGN_IN_CLOCK_MARGIN_MS, (
+        "the page moved on {:.0f} ms after showing its welcome line on its own clock, before "
+        "its {} ms welcome hold was over".format(hold_beat, hold_ms))
 
     # Phase 2: the same sign-in through the shortcut every other test takes.
     ctx, page = _open()
@@ -2540,7 +2600,17 @@ def _board_with_a_long_brief():
 
 
 def _open_contests_from_the_control_tab(page, board):
-    """The owner's own route in: stand on Control, then the menu -> Contests."""
+    """The owner's own route in: stand on Control, then the menu -> Contests.
+
+    "Stand on Control" means on the Control tab as the owner sees it: its panel painted. The
+    tab's frame (`.glm-tab`) is on the page from the first frame, but ControlMobile.jsx draws
+    it as a "Loading..." placeholder with no height of its own until /api/panel/summary
+    answers, and only then the panel (its "At a glance" grid and everything below it). That
+    answer is a server read, so it lands when the server gets to it: 40-55 ms on a quiet
+    machine, 1.1-2.3 s with the CPU oversubscribed (traced 2026-10-19, 4 of 4 runs under 16
+    busy loops had the Contests detail open over a tab still saying "Loading...", 0 px of
+    scroll range under it). Waiting for the frame is waiting for something that is always
+    there; this waits for the panel's own grid."""
     _json_route(page, "**/api/contests", board)
     _json_route(page, "**/api/contest/mine",
                 {"contests": [], "total_entries": 0, "sync_running": False})
@@ -2552,6 +2622,10 @@ def _open_contests_from_the_control_tab(page, board):
     _freeze_motion(page)
     page.click('.glm-navitem:has-text("Control")')
     page.wait_for_selector(".glm-tab", timeout=10_000)
+    # The panel itself, not its placeholder: `.ctm-statgrid` exists only once the summary has
+    # landed. A wider budget than the context's, as _login's: a slow server read is not what
+    # this test is about, and a summary that never lands still fails here, loudly.
+    page.wait_for_selector(".glm-tab .ctm-statgrid", timeout=30_000)
     _settle(page)
     page.click('button[title="More"]')
     page.click('.glm-menu-item:has-text("Contests")')
@@ -2626,7 +2700,19 @@ def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under
     stays on the bottom edge of that screen; and no Control-panel node is ever inside the
     screen's rectangle. Then it walks the owner's second half -- into the entry screen, back
     out, scroll again -- because that is where he saw it, and finally proves itself by
-    putting the pre-fix CSS back in the page and watching every one of those flip."""
+    putting the pre-fix CSS back in the page and watching every one of those flip.
+
+    WHAT IT WAITS FOR BEFORE IT MEASURES (traced 2026-10-19): the Control tab's own panel, not
+    its frame. The first assertion below reads the scroll range of the tab under this screen,
+    and that range is zero until /api/panel/summary has answered and ControlMobile has swapped
+    its "Loading..." placeholder for the panel. The old open waited only for `.glm-tab`, which
+    the placeholder carries too, so the range was read before the tab had any height whenever
+    the server was slow: in a full local run (both pytest halves side by side) it read 0 and
+    failed "this test cannot see the defect it exists for"; under 16 busy loops it did so
+    in 10 of 10 runs, with the summary landing 0.6-1.9 s after the read (0 of 10 on a quiet
+    machine). The page always got there; the test measured early. The open now waits for the
+    panel's "At a glance" grid (`.ctm-statgrid`), so the precondition is read on the tab as the
+    owner sees it, and it still fails, with its own message, on a tab that has no range."""
     page = logged_in_page(**MOBILE)
     _open_contests_from_the_control_tab(page, _board_with_a_long_brief())
     page.click(".cmb-hero")
@@ -5524,7 +5610,22 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
     pictures come from "From history" in the add-images step's sources sheet, so that sheet is
     the scroller now, and the first read is made when it opens (nothing is read before). The
     120-row library is given one task per picture here, so all 120 tasks must arrive, each
-    once, across seven pages."""
+    once, across seven pages.
+
+    WHAT IT WAITS FOR (traced 2026-10-19): the grid growing, one page at a time. Each page is
+    a server read (/api/train/recent-tasks) and the next is only asked for once the last has
+    landed (the pool's cursor), so seven pages are six reads in a row after the first. The old
+    loop gave that chain 12 scrolls 150 ms apart, a budget of about two seconds. A read takes
+    6-37 ms on a quiet machine, so the whole grid is in well inside that; with the CPU
+    oversubscribed it takes 0.65-4 s, the same reads are a chain of 7-16 s, and the budget is
+    gone after two or three pages. In a full local run it ended at 90 tiles (five pages) and
+    failed "90 tiles, 90 distinct"; under 16 busy loops it failed in 10 of 10 runs (the four
+    traced ended at 18, 18, 36 and 36 tiles), and in all four the same page, scrolled the
+    same way, reached all 120 tiles 7-16 s after the old loop gave up. Nothing was skipped or
+    repeated; the loop stopped asking. It now holds the sheet at the bottom until the grid
+    has grown, and again for each page after, and it ends when all 120 are there or a page
+    fails to come for the context's 10 s -- at which point the assertion reports how far the
+    grid got, as before."""
     import sqlite3
     _fake_training(pixai, monkeypatch)
     with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
@@ -5558,12 +5659,21 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
         assert len(page1["tasks"]) == 18 and page1["next_before"], (
             "the first page is the 18 newest tasks, with a cursor for the next")
         page.wait_for_selector(".trm-tile")
-        for _ in range(12):
-            page.evaluate("() => { const b = document.querySelector('.glm-sheet.trm-sheet'); "
-                          "b.scrollTop = b.scrollHeight; }")
-            page.wait_for_timeout(150)
-            if page.locator(".trm-tile").count() >= 120:
+        # Page by page, on the page's own pace: hold the sheet at its bottom (a thumb pinned
+        # there) until the next page's tiles are in, then wait for the one after. Each wait is
+        # for progress -- the grid growing -- not for a number of milliseconds. A page that
+        # never comes ends the loop at the context's 10 s and the assertion below reports how
+        # far it got; it does not hide behind a longer sleep.
+        tiles = page.locator(".trm-tile").count()
+        while tiles < 120:
+            try:
+                page.wait_for_function(
+                    "n => { const b = document.querySelector('.glm-sheet.trm-sheet'); "
+                    "b.scrollTop = b.scrollHeight; "
+                    "return document.querySelectorAll('.trm-tile').length > n; }", arg=tiles)
+            except _PlaywrightTimeout:
                 break
+            tiles = page.locator(".trm-tile").count()
         srcs = page.evaluate(
             "() => [...document.querySelectorAll('.trm-tile img')].map(i => i.getAttribute('src'))")
         assert len(srcs) == 120 and len(set(srcs)) == 120, (
@@ -7811,6 +7921,15 @@ def _q_box(page, sel):
         const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; }""", sel)
 
 
+def _q_boxes(page, *sels):
+    """Several boxes from ONE layout: a single round trip, so the page cannot move between one
+    read and the next. Three _q_box calls are three round trips, and each is as slow as Python
+    gets to it; a layout that changes between two of them hands back rects that never existed
+    together. Use this whenever the assertion compares one box to another."""
+    return page.evaluate("""(ss) => ss.map((s) => { const e = document.querySelector(s); if (!e) return null;
+        const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; })""", list(sels))
+
+
 def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns(
         phone_q_server, render_browser, monkeypatch):
     """Q4. A phone turned sideways is 844 px wide -- past the 520 line that used to hand it to the desktop
@@ -8229,19 +8348,39 @@ def test_the_phone_lightbox_edit_pill_opens_under_the_picture_from_edit(
         phone_q_server, render_browser, monkeypatch):
     """Walk item 4 (phone): the same trigger. ✎ Edit opens the pill first in the lower panel, right
     under the picture, and ✎ again closes it; a clip's ✎ Edit keeps its note and opens nothing.
-    The phone has no Edit drawer, so its pill has no More options link. Nothing is sent."""
+    The phone has no Edit drawer, so its pill has no More options link. Nothing is sent.
+
+    WHAT IT WAITS FOR, AND HOW IT MEASURES (traced 2026-10-19): the lower panel has stopped
+    growing, and the three rects come from one layout. The panel under the picture holds a
+    placard whose sibling strip (`.lbm-placard-strip`, 49 px) arrives with the page's one
+    batched POST /api/siblings, a server read the Lightbox does not wait for. The stage is
+    whatever room that panel leaves, so when the strip lands the stage shrinks by its height
+    and the picture with it. On a quiet machine the answer is in before the picture is up;
+    with the CPU oversubscribed it landed 1.0-2.6 s after the pill opened (12 of 13 runs under
+    24 busy loops, once later than 3 s), long after the old test measured, 0.1-0.4 s after
+    the click. That alone is harmless -- the pill sits under the picture before and after --
+    but the old test read the picture, the pill and the stage in three separate round trips,
+    and in a full local run the strip landed between the first and the second: the rects it
+    reported are the picture of the layout without the strip (bottom 425.5) beside the pill
+    and the stage of the layout with it (pill top 400.5, stage bottom 384.5), to the half
+    pixel, and holding the strip back until between those reads reproduces them on demand.
+    "The pill's top is above the picture's bottom" was an answer about two layouts at once.
+    The page was never wrong. The test now waits for the strip before it measures anything, so
+    the room the stage gives up is the pill's alone, and takes the picture, pill and stage
+    rects in one evaluate."""
     ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
     try:
         _q_open(page)
         _q_tile(page, 0).click()
         page.wait_for_selector(".lbm-root .lbm-hero img")
+        page.wait_for_selector(".lbm-placard-strip")
         _settle(page)
         assert page.locator(".mgteb").count() == 0, "hidden until ✎ Edit asks for it"
         stage0 = _q_box(page, ".lbm-stage")
         page.click(".lbm-chip:has-text('✎ Edit')")
         page.wait_for_selector(".mgteb.phone .mgteb-input")
         _settle(page)
-        hero, bar, stage = _q_box(page, ".lbm-hero"), _q_box(page, ".mgteb"), _q_box(page, ".lbm-stage")
+        hero, bar, stage = _q_boxes(page, ".lbm-hero", ".mgteb", ".lbm-stage")
         assert bar["t"] >= stage["b"] - 0.5 and bar["t"] >= hero["b"], (hero, bar, stage)
         assert stage["h"] < stage0["h"], "the stage gave up the room: %r -> %r" % (stage0, stage)
         assert bar["b"] <= PHONE["height"] and bar["h"] >= 44, bar

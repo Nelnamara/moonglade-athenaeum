@@ -137,7 +137,7 @@ def test_the_branding_files_fold_into_settings_and_go(r):
 
 
 def test_every_hand_edited_value_stays_in_config_json(r):
-    hand = {"READ_ONLY": True, "USER_ID": "u1", "PERSISTED_QUERY_HASH": "h1",
+    hand = {"READ_ONLY": True, "USER_ID": "u1", "MODEL_DETAIL_HASH": "h1",
             "TASK_DETAIL_HASH": "h2", "AUTH_EPOCH_SEQ": 7}
     before = write_config(r, LIBRARY_DIR=str(r.lib), **hand)
     _prepare()

@@ -37,6 +37,11 @@
    owner-triggered reducer. Nothing is dropped and the ledger still counts it.
    ========================================================================================= */
 
+// The one import: the settings snapshot records the shot's RESOLVED engine. loom-core.js
+// imports this file too; the cycle is safe because engineOf is only ever called inside a
+// function here, never while either module loads.
+import { engineOf } from "./loom-core.js";
+
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 const str = (v) => (v == null ? "" : String(v));
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
@@ -503,7 +508,8 @@ const frameRef = (f) => {
 };
 
 /** The card's generation fields at submit time. `sentPrompt` is the composed text that
- *  was actually sent; `quality` the payload's own. */
+ *  was actually sent; `quality` the payload's own. `videoModel` is the RESOLVED engine
+ *  (engineOf: a card on "" rendered on the default, and the take says which one that was). */
 export const snapshotSettings = (card, project, sentPrompt, quality) => {
   const c = card || {};
   return scrub({
@@ -512,6 +518,7 @@ export const snapshotSettings = (card, project, sentPrompt, quality) => {
     promptOverrideText: str(c.promptOverrideText), sentPrompt: str(sentPrompt),
     camera: str(c.camera), lighting: str(c.lighting), audioCue: str(c.audioCue),
     audioGen: !!c.audioGen, audioLanguage: str(c.audioLanguage || "english"), isPrivate: !!c.isPrivate,
+    videoModel: engineOf(c), videoHelper: !!c.videoHelper,
     cast: (c.cast || []).slice(),
     refs: (c.refs || []).map((r) => ({ id: str(r.id), kind: str(r.kind), tag: str(r.tag), source: str(r.source),
       thumbId: str(r.thumbId), mediaId: str(r.mediaId) })),
@@ -521,7 +528,11 @@ export const snapshotSettings = (card, project, sentPrompt, quality) => {
 };
 
 /** "Reuse settings" for one take: its snapshot, patched back onto the card. A board edit
- *  only; the owner still presses Render. Legacy / attached takes have no snapshot. */
+ *  only; the owner still presses Render. Legacy / attached takes have no snapshot.
+ *  The engine and the helper come back only from a snapshot that RECORDED them (issue #90):
+ *  one taken before they were recorded says nothing about either, and reading its silence as
+ *  "default engine, helper off" (the `!!s.isPrivate` pattern) would quietly undo the shot's
+ *  own engine -- so a legacy snapshot leaves both as the card has them. */
 export const reuseSettingsPatch = (card, take) => {
   const s = take && take.settings;
   if (!card || !s) return card;
@@ -529,7 +540,10 @@ export const reuseSettingsPatch = (card, take) => {
     connect: s.connect || card.connect, prompt: s.prompt, promptOverride: !!s.promptOverride,
     promptOverrideText: s.promptOverrideText || "", camera: s.camera, lighting: s.lighting,
     audioCue: s.audioCue, audioGen: !!s.audioGen, audioLanguage: s.audioLanguage || "english",
-    isPrivate: !!s.isPrivate, cast: (s.cast || []).slice(),
+    isPrivate: !!s.isPrivate,
+    ...(own(s, "videoModel") ? { videoModel: str(s.videoModel) } : {}),
+    ...(own(s, "videoHelper") ? { videoHelper: !!s.videoHelper } : {}),
+    cast: (s.cast || []).slice(),
     refs: (s.refs || []).map((r) => ({ role: "", ...r })),
     openFrame: { ...(card.openFrame || {}), ...s.openFrame },
     closeFrame: { ...(card.closeFrame || {}), ...s.closeFrame } };

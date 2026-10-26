@@ -27,8 +27,9 @@ import { DETAIL_PREFIX } from "../apiRoutes.js";
    VIEWS ARE LOCAL NOW (2026-09-06). This panel's view counts used to be LIVE — twelve
    GraphQL calls fired on every open, six at a time, summed into one "VIEWS (TOP 12)"
    stat and then thrown away. PROBE_2026-09-06 found that the ad-hoc bulk artworks query
-   accepts `views` (the persisted listArtworks cannot be edited to carry it), so
-   --sync-artworks sweeps them into a catalog column and everything here is a local read.
+   accepts `views` (the metadata listing never selects it: reading a view count counts as
+   a view), so --sync-artworks sweeps them into a catalog column and everything here is a
+   local read.
    That is what pays for the three things the live design never could: a real LIFETIME
    total, a count and comparison bar on EVERY published card rather than a hardcoded
    twelve, and a Most-viewed sort. The same probe also measured that reading a view count

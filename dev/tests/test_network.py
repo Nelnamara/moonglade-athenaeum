@@ -29,20 +29,22 @@ def _make_response(mocker, status_code=200, json_body=None, text="", raises=None
 # ---------------------------------------------------------------------------
 
 class TestGql:
+    """The history feed reads its full document over the ad-hoc POST (#89), so its stubs
+    answer `post`; the saved-request GET is never made."""
     def test_returns_data_on_success(self, mock_session):
         payload = {"data": {"user": {"taskSummaries": {"edges": [], "pageInfo": {}}}}}
-        mock_session.get.return_value = _make_response(
+        mock_session.post.return_value = _make_response(
             pytest.importorskip("unittest.mock"), json_body=payload
         )
         # Re-mock properly
-        mock_session.get.return_value.status_code = 200
-        mock_session.get.return_value.json.return_value = payload
+        mock_session.post.return_value.status_code = 200
+        mock_session.post.return_value.json.return_value = payload
         result = core.gql(mock_session, {"last": 10, "userId": "u1"})
         assert result == payload["data"]
 
     def test_raises_on_401(self, mock_session, mocker):
         resp = _make_response(mocker, status_code=401, json_body={})
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="401"):
             core.gql(mock_session, {"last": 10, "userId": "u1"})
 
@@ -52,7 +54,7 @@ class TestGql:
         resp.text = "not json at all"
         resp.json.side_effect = ValueError("no json")
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         with pytest.raises(core.PixAIError, match="non-JSON"):
             core.gql(mock_session, {"last": 10, "userId": "u1"})
 
@@ -62,19 +64,24 @@ class TestGql:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
-        with pytest.raises(core.PixAIError, match="GraphQL error"):
+        mock_session.post.return_value = resp
+        with pytest.raises(core.HistoryPageRefused, match="refused the history feed") as ei:
             core.gql(mock_session, {"last": 10, "userId": "u1"})
+        assert "GraphQL error" in str(ei.value.__cause__)
 
-    def test_raises_persisted_query_not_found(self, mock_session, mocker):
+    def test_never_asks_for_the_saved_request(self, mock_session, mocker):
+        """A refusal shaped like the retired saved request's "not found" is just a refusal:
+        the GET is never made, and nothing tells the user to recapture a hash."""
         payload = {"errors": [{"message": "PersistedQueryNotFound"}]}
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
-        with pytest.raises(core.PixAIError, match="hash not recognized"):
+        mock_session.post.return_value = resp
+        with pytest.raises(core.HistoryPageRefused) as ei:
             core.gql(mock_session, {"last": 10, "userId": "u1"})
+        assert "hash" not in str(ei.value) and "Recapture" not in str(ei.value)
+        mock_session.get.assert_not_called()
 
 
 class TestPageVariablesTakesTheIdFromTheClient:
@@ -259,7 +266,7 @@ class TestQuickCount:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         result = core._quick_count(mock_session, page_size=10)
         assert result == 0
 
@@ -276,7 +283,7 @@ class TestQuickCount:
         resp.status_code = 200
         resp.json.return_value = payload
         resp.raise_for_status.return_value = None
-        mock_session.get.return_value = resp
+        mock_session.post.return_value = resp
         # edge 1 → 1 id, edge 2 → 2 ids  (m2 deduped + m3)
         result = core._quick_count(mock_session, page_size=10)
         assert result == 3
@@ -760,10 +767,9 @@ def test_extract_artwork_meta_no_extra():
 def _views_sweep(pixai, views=None):
     """Register the VIEW SWEEP --sync-artworks has made since 2026-09-06.
 
-    The sync is two passes now, not one: the persisted `listArtworks` for metadata, and an
-    ad-hoc bulk `artworks(authorId, first:N)` for view counts -- which is the only form
-    that accepts a `views` field (PROBE_2026-09-06; the persisted query's selection set is
-    a fixed hash and cannot be edited).
+    The sync is two passes now, not one: the artwork listing for metadata (which never
+    selects `views`), and an ad-hoc bulk `artworks(authorId, first:N)` for view counts
+    (PROBE_2026-09-06 found that form accepts a `views` field).
 
     Registered EXPLICITLY here rather than swallowed, because that is the whole point of
     the `pixai` fixture: an operation nobody anticipated fails by name instead of reaching
@@ -878,14 +884,11 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pi
 
 
 def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker, pixai):
-    """B15: unlike gql() (retries 4x, then RAISES), artwork_list_gql swallows a
-    RequestException/non-200/bad-JSON with NO retry and just returns None (see its
-    own docstring: 'Returns the Relay connection dict ... or None on failure'). On
-    page 1 that correctly raises; on page 2+ the pagination loop treats it EXACTLY
-    like a legitimate 'no more pages' and breaks silently -- the run then reports a
-    complete-looking total for what is actually a partial sync. FAILS before the
-    fix: run_sync_artworks's return dict has no 'fail' key at all, so res['fail']
-    raises KeyError."""
+    """B15: a page after the first that artwork_list_gql cannot read (it raises
+    ArtworkListRefused) must not be treated EXACTLY like a legitimate 'no more pages' --
+    the run would report a complete-looking total for what is actually a partial sync.
+    On page 1 the refusal ends the run with a plain error; on page 2+ the run keeps what
+    it has and reports itself incomplete through res['fail']."""
     from moonglade.gallery import save_catalog, CATALOG_FIELDS
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
@@ -894,8 +897,9 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
                                  "visibility": "PUBLIC", "isNsfw": False,
                                  "likedCount": 1, "commentCount": 0}}],
              "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
-    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode: None).
-    mocker.patch.object(core, "artwork_list_gql", side_effect=[page1, None])
+    # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode).
+    mocker.patch.object(core, "artwork_list_gql",
+                        side_effect=[page1, core.ArtworkListRefused("page 2 refused")])
     _views_sweep(pixai, {"aw1": 5})
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))

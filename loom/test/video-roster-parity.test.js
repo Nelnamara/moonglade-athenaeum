@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  MODELS, MODEL_VMODES, MODEL_MAXDUR, MODEL_CARD, MODEL_DURATIONS, MODEL_FIELDS, MODEL_REFCAPS,
+  MODELS, DEFAULT_MODEL, MODEL_VMODES, MODEL_MAXDUR, MODEL_CARD, MODEL_DURATIONS, MODEL_FIELDS, MODEL_REFCAPS,
   DURATIONS, modelMeta, snapDuration, durationAllowed, modelTakes, refCap,
   applyModelGating, applyPrefill, buildPayload,
 } from "../../gallery/src/gen/videoDrawerCore.js";
@@ -93,6 +93,11 @@ describe("roster parity: the server's VIDEO_MODELS and the drawer's tables are o
   });
   test("the default engine is still v4.0.1 on both sides", () => {
     assert.match(py, /^DEFAULT_VIDEO_MODEL = "v4\.0\.1"$/m);
+    // Issue #90: a Loom shot on "no engine chosen" prices and renders through the drawer's
+    // DEFAULT_MODEL (loom-core.js engineOf) and a blank video_model through the server's
+    // DEFAULT_VIDEO_MODEL -- one engine, so the two must be the same string, read off both.
+    const pyDefault = (py.match(/^DEFAULT_VIDEO_MODEL = "([^"]+)"$/m) || [])[1];
+    assert.equal(DEFAULT_MODEL, pyDefault);
   });
 });
 

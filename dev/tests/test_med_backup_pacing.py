@@ -160,8 +160,11 @@ class TestM07ParallelDownloadHonoursDelay:
         Control Panel's Download-workers selector (which spawns the CLI with --workers N and
         no --delay at all) stopped meaning anything.
 
-        Six images at 0.4s a slot is >= 2s of pure gate. The bound below is a twentieth of
-        that, so the paced build cannot reach it however fast the machine is.
+        Six images at 0.4s a slot is >= 2s of pure gate. The bound below is half of that, so
+        the paced build cannot reach it however fast the machine is, and an unpaced run on a
+        machine whose every core is busy (ci_local runs both suite halves side by side) has
+        room for a late thread start: the old bound of a twentieth tripped at 0.124s there on
+        2026-10-16 with no pacing in play.
         """
         starts = []
         _patch_download_layer(mocker, on_resolve=lambda mid: starts.append(time.monotonic()))
@@ -172,7 +175,7 @@ class TestM07ParallelDownloadHonoursDelay:
 
         assert len(starts) == len(mids), "every image must still be fetched exactly once"
         span = max(starts) - min(starts)
-        assert span < 0.1, (
+        assert span < 1.0, (
             "6 images spread over {:.3f}s on a DEFAULTED --delay -- the download stage is "
             "being throttled without the user asking".format(span))
 

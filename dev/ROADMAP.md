@@ -19,8 +19,8 @@ CHANGELOG and the open issues on 2026-10-08.
 
 ## Now — active
 
-- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.2 — First Light,
-  2026-10-15), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (latest: 3.20.3 — Full Scene,
+  2026-10-26), per the rule at the top of this file.
 
 ---
 

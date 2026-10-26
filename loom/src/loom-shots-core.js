@@ -26,7 +26,7 @@
    (`idFor`), never generated here.
    ========================================================================= */
 
-import { newCardShape } from "./loom-core.js";
+import { newCardShape, shotSettingsOf } from "./loom-core.js";
 
 export const SHOT_TITLE_MAX = 60;
 export const SHOT_SECONDS = 5;
@@ -67,14 +67,20 @@ export const shotsActName = (actNumber, name) => {
 };
 
 /**
- * shotsFromPictures(pictures, {actNumber, name, nonce, idFor}) -> act
+ * shotsFromPictures(pictures, {actNumber, name, nonce, idFor, inherit}) -> act
  *   pictures  [{id, prompt}] in the order they become shots
  *   idFor     (kind, index) -> a fresh id: ("act", 0) for the act, ("card", i) per shot
+ *   inherit   a card (or its settings) whose engine, Channel, helper and audio every shot
+ *             takes (issue #90: the board's last non-imported shot, inheritSourceCard). Only
+ *             those five (SHOT_SETTINGS_FIELDS) -- the mode, 5 s, title and open frame stay as
+ *             built here. Absent: the blank shape's defaults, as before.
  */
 export const shotsFromPictures = (pictures, opts = {}) => {
-  const { actNumber = 1, name = "", nonce = "", idFor } = opts;
+  const { actNumber = 1, name = "", nonce = "", idFor, inherit } = opts;
   const mk = typeof idFor === "function" ? idFor : (kind, i) => kind + "-" + i;
+  const settings = inherit ? shotSettingsOf(inherit) : {};
   const cards = (pictures || []).map((p, i) => newCardShape(mk("card", i), {
+    ...settings,
     mode: "I2V", duration: SHOT_SECONDS, status: "todo",
     title: trimTitle(p && p.prompt, i + 1),
     openFrame: { mediaId: String((p && p.id) || ""), thumbId: "", source: "", desc: "", tag: "" },

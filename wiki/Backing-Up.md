@@ -74,10 +74,10 @@ python -m moonglade --workers 8 --page-size 500 # fast full backfill
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--page-size` | `250` | tasks per API page — bigger = fewer round-trips. Keep it under about 8,000; the server errors above that |
+| `--page-size` | `250` | tasks per API page — bigger = fewer round-trips. Keep it at 2,000 or under; PixAI fails larger pages now and then (5,000 failed 2 of 4 reads) |
 | `--max` | `0` (all) | stop after N tasks — for a small test (`--max 40`). With `--backfill-phash` it caps how many rows that run processes instead |
 | `--delay` | `0.4` | seconds between API requests (politeness throttle). Always paces the page listing, the per-task metadata fetch, and single-worker downloads. The **multi-worker** download stage is paced only when you type `--delay` yourself — left alone, it downloads as fast as your connection, which is what the `--workers` guidance above assumes. Typing `--delay` throttles the whole pool to one image per that interval, so it slows a big backfill down a lot; that is the point of it. |
-| `--count-page-size` | `5000` | page size `--count` uses to tally — bigger = fewer requests, but the server errors above ~10,000 |
+| `--count-page-size` | `2000` | page size `--count` uses to tally — bigger = fewer requests, but PixAI fails larger pages now and then (5,000 failed 2 of 4 reads) |
 | `--collect-only` | off | scan and catalog without downloading any files (also forces single-worker mode) |
 | `--name-length` | `60` | max characters of the prompt used in filenames |
 | `--name-sep` | `_` | word separator in filenames (`_` or `-`) |

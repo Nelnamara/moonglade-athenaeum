@@ -4,8 +4,9 @@ from moonglade import backup as core
 
 
 def test_persisted_hashes_have_builtin_defaults():
-    # All the frontend-private ops we rely on must work without any config.json.
-    assert len(core.PERSISTED_QUERY_HASH) == 64
+    # All the frontend-private ops we rely on must work without any config.json. (The history
+    # feed has no saved hash to default since #89: it reads a full document.)
+    assert not hasattr(core, "PERSISTED_QUERY_HASH")
     assert len(core.TASK_DETAIL_HASH) == 64
     assert len(core.DELETE_TASK_HASH) == 64
     assert len(core.MODEL_DETAIL_HASH) == 64

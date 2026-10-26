@@ -187,13 +187,16 @@ exit /b 0
 :try
 rem Runs the command given (%*) and counts it only if it prints sys.executable and exits 0
 rem for a Python 3.10 or newer. The Microsoft Store "python" stub only opens the Store: it
-rem prints no interpreter path and exits nonzero, so it never counts. The path is written in
-rem the console's OEM code page, which is what "for /f" reads the file back in, so a user name
-rem with an accent in it still gives a path that exists.
+rem prints no interpreter path and exits nonzero, so it never counts. "for /f" reads the file
+rem back in the console's CURRENT code page (what chcp shows), which is not always the system
+rem OEM page: a console set to UTF-8 (65001) reads OEM-page bytes as garbage. So Python writes
+rem the path in the console's own code page (GetConsoleOutputCP), falling back to the OEM page
+rem when there is no console or Python has no codec for that page; a user name with an accent
+rem in it then still gives a path that exists.
 set "TRYEXE="
 set "TRYVER="
 call :new_probe
-%* -c "import sys; sys.stdout.reconfigure(encoding='oem'); print(sys.executable); print(sys.version.split()[0]); sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)" >"%PROBE%" 2>nul
+%* -c "import sys, ctypes, encodings; n = ctypes.windll.kernel32.GetConsoleOutputCP(); e = 'cp' + str(n); sys.stdout.reconfigure(encoding=e if n and encodings.search_function(e) else 'oem'); print(sys.executable); print(sys.version.split()[0]); sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)" >"%PROBE%" 2>nul
 set "RC=%errorlevel%"
 if exist "%PROBE%" for /f "usebackq delims=" %%L in ("%PROBE%") do if not defined TRYEXE (set "TRYEXE=%%L") else set "TRYVER=%%L"
 if defined PROBEDIR rmdir /s /q "%PROBEDIR%" >nul 2>&1

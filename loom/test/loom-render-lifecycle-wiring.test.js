@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import React from "react";
 import { loadModule, renderElement, query, one, LOOM_MOCKS } from "../test-support/render.mjs";
-import { newCardShape, flat, shotPayload as buildShotPayload, priceFingerprint } from "../src/loom-core.js";
+import { newCardShape, flat, shotPayload as buildShotPayload, priceFingerprint, shotSendProblem } from "../src/loom-core.js";
 import { patchCardByIdWith } from "../src/loom-mutations.js";
 import { attachTake, splicePatch, tookOf, cutPointOf, SENDING_RECHECK_MS } from "../src/loom-takes-core.js";
 
@@ -270,8 +270,9 @@ function hold() {
 /* ---- the recorded network ---- */
 const PAID = { body: { cost: 900, free: false } };
 const FREE = { body: { cost: 900, free: true } };
-const ASK_PAID = "No free card covers this shot — it will spend ~900 credits.\n\nGenerate anyway?";
-const ASK_UNVERIFIED = "Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?";
+// The ask names the engine the payload renders on (issue #90 K); every shot here is on the default.
+const ASK_PAID = "No free card covers this V4.0 Lite Preview shot — it will spend ~900 credits.\n\nGenerate anyway?";
+const ASK_UNVERIFIED = "Couldn't verify this V4.0 Lite Preview shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?";
 const DEFAULT_ROUTES = {
   "/api/price": () => PAID,
   "/api/loom/generate": () => ({ body: { task_id: "T1" } }),
@@ -346,7 +347,10 @@ function makeStorage({ boards = {}, active, legacy, failList = false, unreadable
 const ASSET = { id: "a1", name: "Her", kind: "image", tag: "@image1", thumbId: "", source: "", mediaId: "123456", lock: true };
 // An imported picture: its id is local to this machine, so the render route cannot send it.
 const LOCAL_ASSET = { id: "a2", name: "Imported", kind: "image", tag: "@image2", thumbId: "", source: "", mediaId: "local_0123456789ab", lock: false };
-const shot = (id, extra = {}) => newCardShape(id, { title: id.toUpperCase(), prompt: "she walks in", cast: ["a1"], duration: 5, ...extra });
+// A Multi-Reference shot of one cast picture: the shape every test here can send. (A First Frame
+// shot's picture is its opening frame; a cast picture is never sent in its place -- issue #90
+// review -- so the blank shape's I2V would be refused before anything these tests watch.)
+const shot = (id, extra = {}) => newCardShape(id, { title: id.toUpperCase(), prompt: "she walks in", mode: "R2V", cast: ["a1"], duration: 5, ...extra });
 const boardOf = (cards, extra = {}) => ({ name: "Board", target: 60, look: "", draft: false, assets: [ASSET, LOCAL_ASSET],
   acts: [{ id: "act1", name: "Act 1", collapsed: false, cards }], ...extra });
 // A send from an earlier page whose answer never came: the card keeps its lock, unclear.
@@ -468,9 +472,11 @@ describe("generateShot follows BUILD-w5-p §3.3 in order", () => {
     const [priced] = fetches("/api/price");
     const [sent] = fetches("/api/loom/generate");
     assert.match(priced.body.prompt, /she runs out/, "priced from the board, not from the click's entry");
-    const { hasInput, ...pricedPayload } = priced.body;
+    // hasInput and held are client-only: they ride the price request and never the POST.
+    const { hasInput, held, ...pricedPayload } = priced.body;
     const { origin, loom_target, submit_id, expect_free, ...sentPayload } = sent.body;
     assert.equal(hasInput, true);
+    assert.deepEqual(held, { images: 0, videos: 0 });
     assert.deepEqual(sentPayload, pricedPayload, "what was priced is what was sent, every key");
     assert.equal(sentPayload.is_private, true, "the Private channel rides the payload (spend review S3)");
     assert.deepEqual(asked(), [ASK_PAID], "the confirm describes that same payload's price");
@@ -1407,6 +1413,205 @@ describe("batchGenerate sends only what was confirmed (F12, F13, F14, §3.4)", (
       assert.ok(!sentTo().includes("c2"), why + ": nothing after it was sent");
       assert.equal(toasts("Generate all")[0].msg, line);
     }
+  });
+});
+
+/* ISSUE #90: the shot's own engine, Channel and helper through the pipeline. Before it, every
+   price, Generate all and card Render went out on V4.0 Lite whatever the drawer showed (the card
+   had no engine, the payload none, the server's default filled in). Pinned here as what each
+   path DOES: the ask names the engine, the POST carries it, a shot its engine has no road for is
+   refused before a price or a POST, the take records what was sent, and a new shot inherits. */
+describe("issue #90: each spend ask names the engine; a shot its engine can't take is refused first", () => {
+  const TSUBAKI = { videoModel: "tbkv1.0.1" };
+  const generateAll = async (loom) => {
+    const run = loom.gen.batchGenerate();
+    for (let i = 0; i < 6; i++) await loom.tick(2200);
+    await run;
+  };
+  test("the card's Render asks in the payload's engine's name -- paid, short and unverified -- and sends that engine", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, videoHelper: true })]) } });
+    assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: true, taskId: "T1" });
+    assert.deepEqual(asked(), ["No free card covers this Tsubaki Video shot — it will spend ~900 credits.\n\nGenerate anyway?"]);
+    const [priced] = fetches("/api/price");
+    const [sent] = fetches("/api/loom/generate");
+    assert.equal(priced.body.video_model, "tbkv1.0.1", "priced on the shot's engine");
+    assert.equal(sent.body.video_model, "tbkv1.0.1", "and sent on it");
+    assert.equal(sent.body.prompt_helper, true, "with the shot's prompt helper");
+    const short = () => ({ body: { cost: 900, free: false, card_template: "video-5s", card_name: "Video card", cards_held: 0, cards_needed: 1 } });
+    const s = await mountLoom(t, { boards: { b1: boardOf([shot("c1", TSUBAKI)]) }, routes: { "/api/price": short }, confirm: () => false });
+    await s.gen.generateShot(s.entry("c1"));
+    assert.match(asked()[0], /this 5s Tsubaki Video shot needs/, "the short sentence names the length and the engine");
+    const u = await mountLoom(t, { boards: { b1: boardOf([shot("c1", TSUBAKI)]) },
+      routes: { "/api/price": () => { throw new TypeError("Failed to fetch"); } }, confirm: () => false });
+    await u.gen.generateShot(u.entry("c1"));
+    assert.deepEqual(asked(), ["Couldn't verify this Tsubaki Video shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?"]);
+  });
+  test("Generate all names the one engine, or each engine with its count on a mixed board", async (t) => {
+    const one = await mountLoom(t, { boards: { b1: boardOf([shot("c1"), shot("c2")]) }, confirm: () => false });
+    await generateAll(one);
+    assert.match(asked()[0], /^Generate 2 shot\(s\)\?\n\nEngine: V4\.0 Lite Preview\n🎫 /);
+    const mixed = await mountLoom(t, { boards: { b1: boardOf([shot("c1", TSUBAKI), shot("c2"), shot("c3", TSUBAKI)]) }, confirm: () => false });
+    await generateAll(mixed);
+    assert.match(asked()[0], /^Generate 3 shot\(s\)\?\n\nEngines: 2 on Tsubaki Video, 1 on V4\.0 Lite Preview\n🎫 /,
+      "the most-used engine first");
+    assert.equal(fetches("/api/loom/generate").length, 0, "a no sends nothing");
+  });
+  test("the card's Render: a shot its engine has no road for is refused on the card before any price or POST", async (t) => {
+    // An R2V shot on V3.2 goes out as First & Last; with one frame that is Multi-Reference
+    // again, which V3.2 does not have. The server would have built it anyway. (Its cast picture
+    // is never sent as the missing end frame -- issue #90 review.)
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "R2V", videoModel: "v3.2",
+      openFrame: { thumbId: "", source: "", desc: "", tag: "", mediaId: "700000000000000001" } })]) } });
+    const why = shotSendProblem(buildShotPayload(loom.entry("c1"), loom.store.projectRef.current, () => null));
+    assert.match(why, /V3\.2 doesn't have\. Nothing was sent\.$/, "fixture: the pure rule refuses this shot");
+    assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: false, reason: "engine-refused" });
+    assert.equal(fetches("/api/price").length, 0, "not priced");
+    assert.equal(fetches("/api/loom/generate").length, 0, "not sent");
+    assert.deepEqual(asked(), [], "not asked");
+    assert.equal(allSets().length, 0, "nothing locked");
+    assert.deepEqual(loom.gen.genState.c1, { phase: "error", held: true, msg: why }, "the card says why, in the Loom's held (peach) state");
+  });
+  test("Generate all: a refused shot is left out before pricing and named in the confirm; with nothing sendable, nothing is asked", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "R2V", videoModel: "v3.2" }), shot("c2")]) } });
+    await generateAll(loom);
+    const [ask] = asked();
+    assert.match(ask, /^Generate 1 shot\(s\)\?/, "only the sendable shot is counted");
+    assert.match(ask, /\n⚠ 1 shot\(s\) can't be sent on their engine and are left out: A·01 \(each card says why\)\./);
+    assert.equal(fetches("/api/price").length, 1, "only the sendable shot was priced");
+    assert.deepEqual(fetches("/api/loom/generate").map((p) => p.body.loom_target.card_id), ["c2"]);
+    assert.equal(loom.gen.genState.c1.held, true);
+    const none = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "R2V", videoModel: "v3.2" })]) } });
+    await generateAll(none);
+    assert.deepEqual(asked(), [], "no confirm for a batch with nothing to send");
+    assert.equal(fetches("/api/price").length, 0);
+    assert.equal(toasts("Generate all")[0].msg, "Nothing was sent: A·01 can't be sent on their engine as they are (each card says why).");
+  });
+  test("the standing estimate counts a refused shot as unpriced, never 0, and never prices it", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "R2V", videoModel: "v3.2" }), shot("c2")]) } });
+    await loom.tick(700);   // the estimate's 600 ms debounce
+    await loom.settle();
+    const est = loom.gen.costEstimate;
+    assert.equal(est.unknown, 1, "the refused shot is unpriced");
+    assert.equal(est.paid, 1);
+    assert.equal(fetches("/api/price").length, 1, "only the sendable shot was priced");
+  });
+
+  /* The issue #90 review: an engine pick writes First & Last (V3.2) or First Frame (V2.7) onto a
+     Multi-Reference card, and its cast pictures used to go out as the frames -- a paid job from
+     one portrait to the other. And Tsubaki's held video refs went out unsaid. */
+  const FLF_SHORT = "First & Last needs a start and an end frame; its cast and reference pictures are never sent in place of them. Nothing was sent.";
+  const I2V_SHORT = "First Frame needs a start frame; its cast and reference pictures are never sent in place of it. Nothing was sent.";
+  const VREF = { id: "v1", kind: "video", tag: "@video1", source: "700000000000000009" };
+  const HELD = "Tsubaki Video takes no video references: 1 video reference on this shot is held back, not sent and not deleted.";
+  test("a cast-only shot an engine pick moved to First & Last / First Frame: the card's Render refuses it before any price", async (t) => {
+    for (const [o, why] of [[{ mode: "FLF", videoModel: "v3.2" }, FLF_SHORT], [{ mode: "I2V", videoModel: "v2.7" }, I2V_SHORT],
+      [{ mode: "R2V", videoModel: "v2.7" }, I2V_SHORT]]) {
+      const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", o)]) } });
+      assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: false, reason: "engine-refused" }, JSON.stringify(o));
+      assert.deepEqual(loom.gen.genState.c1, { phase: "error", held: true, msg: why });
+      assert.equal(fetches("/api/price").length + fetches("/api/loom/generate").length, 0, "not priced, not sent");
+      assert.deepEqual(asked(), []);
+    }
+    const all = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "FLF", videoModel: "v3.2" }), shot("c2")]) } });
+    await generateAll(all);
+    assert.match(asked()[0], /\n⚠ 1 shot\(s\) can't be sent on their engine and are left out: A·01/, "Generate all leaves it out the same way");
+    assert.deepEqual(fetches("/api/loom/generate").map((p) => p.body.loom_target.card_id), ["c2"]);
+  });
+  test("a Tsubaki shot's video ref is held back on the card's Render: sent without it, and the ask says so -- a free quote asks too", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, refs: [VREF] })]) } });
+    assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: true, taskId: "T1" });
+    assert.deepEqual(asked(), [`No free card covers this Tsubaki Video shot — it will spend ~900 credits.\n\n${HELD}\n\nGenerate anyway?`]);
+    const [sent] = fetches("/api/loom/generate");
+    assert.deepEqual(sent.body.video_refs, [], "held: not sent");
+    assert.ok(!("held" in sent.body), "the count is client-only");
+    assert.deepEqual(loom.card("c1").refs, [VREF], "and never deleted");
+    const free = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, refs: [VREF] })]) },
+      routes: { "/api/price": () => FREE }, confirm: () => false });
+    assert.deepEqual(await free.gen.generateShot(free.entry("c1")), { ok: false, reason: "cancelled" });
+    assert.deepEqual(asked(), [`A free card covers this Tsubaki Video shot.\n\n${HELD}\n\nGenerate anyway?`]);
+    assert.equal(fetches("/api/loom/generate").length, 0);
+  });
+  test("a Tsubaki shot whose only input is a video ref is refused in those words; Generate all names the shots it holds refs back on", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, cast: [], refs: [VREF] })]) } });
+    assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: false, reason: "engine-refused" });
+    assert.equal(loom.gen.genState.c1.msg, "Tsubaki Video takes no video references, and this shot has 1. Nothing was sent.",
+      "not \"attach a frame or cast image first\"");
+    assert.equal(fetches("/api/price").length, 0);
+    const batch = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { ...TSUBAKI, refs: [VREF] }), shot("c2")]) }, confirm: () => false });
+    await generateAll(batch);
+    assert.match(asked()[0],
+      /\n⚠ 1 shot\(s\) go out without video references their engine can't take — held back, not sent and not deleted: A·01\./);
+  });
+});
+
+describe("issue #90: the take records the engine, Channel and helper that were SENT", () => {
+  test("the card's Render: the snapshot is the payload's (engine, Channel, helper, and the mode gated onto the engine)", async (t) => {
+    const frames = { openFrame: { thumbId: "", source: "", desc: "", tag: "", mediaId: "700000000000000001" },
+      closeFrame: { thumbId: "", source: "", desc: "", tag: "", mediaId: "700000000000000002" } };
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", { mode: "R2V", videoModel: "v3.2", isPrivate: true, videoHelper: true,
+      cast: [], ...frames })]) } });
+    assert.deepEqual(await loom.gen.generateShot(loom.entry("c1")), { ok: true, taskId: "T1" });
+    const [sent] = fetches("/api/loom/generate");
+    assert.equal(sent.body.mode, "FLF", "V3.2 has no Multi-Reference: the shot went out as First & Last");
+    const s = loom.card("c1").pendingSettings;
+    assert.deepEqual([s.videoModel, s.isPrivate, s.videoHelper, s.mode], ["v3.2", true, true, "FLF"], "what was sent, not the card's R2V");
+  });
+  test("the drawer's Go: an engine picked while the spend ask is up is not recorded as the one sent", async (t) => {
+    const loom = await mountLoom(t, { confirm: () => {
+      // The owner flips the shot to V2.7 / Normal / helper off while the confirm is up.
+      loom.store.setProject((p) => patchCardByIdWith(p, "c1", (c) => ({ ...c, videoModel: "v2.7", isPrivate: false, videoHelper: false })));
+      return true;
+    } });
+    const payload = { mode: "I2V", prompt: "she walks in", negative: "", images: ["123456"], video_refs: [], audio_refs: [], duration: 5,
+      audio: false, video_model: "tbkv1.0.1", camera_movement: "unset", quality: "professional", audio_language: "english",
+      is_private: true, prompt_helper: true };
+    assert.deepEqual(await loom.gen.beginDrawerRender({ card_id: "c1", board_id: "b1", submit_id: "d1", payload }), { ok: true, expectFree: false });
+    assert.deepEqual(asked(), ["No free card covers this Tsubaki Video shot — it will spend ~900 credits.\n\nGenerate anyway?"]);
+    assert.equal(loom.card("c1").videoModel, "v2.7", "fixture: the card did change during the ask");
+    const s = loom.card("c1").pendingSettings;
+    assert.deepEqual([s.videoModel, s.isPrivate, s.videoHelper], ["tbkv1.0.1", true, true], "the snapshot is the payload the drawer sends");
+  });
+});
+
+describe("issue #90: a new shot starts on the settings of the shot before it", () => {
+  const SET = { videoModel: "tbkv1.0.1", isPrivate: true, videoHelper: true, audioGen: true, audioLanguage: "japanese", mode: "R2V", duration: 15 };
+  const borrowed = (id) => shot(id, { imported: true, status: "done", resultMid: "800000000000000001", videoModel: "v2.7", mode: "I2V" });
+  test("+ Shot: the nearest non-imported shot before it -- in this act, else an earlier one; none: the defaults", async (t) => {
+    const loom = await mountLoom(t, { boards: { b1: boardOf([], {
+      acts: [{ id: "act1", name: "Act 1", collapsed: false, cards: [shot("c1", { ...SET, prompt: "only mine", camera: "dolly in" }), borrowed("c2")] },
+        { id: "act2", name: "Act 2", collapsed: false, cards: [] }] }) } });
+    loom.muts.addCard("act1");
+    await loom.settle();
+    const act1 = loom.store.projectRef.current.acts[0].cards;
+    const added = act1[act1.length - 1];
+    assert.equal(act1.length, 3);
+    assert.deepEqual([added.videoModel, added.isPrivate, added.videoHelper, added.audioGen, added.audioLanguage, added.mode, added.duration],
+      ["tbkv1.0.1", true, true, true, "japanese", "R2V", 15], "the imported clip in between is skipped");
+    assert.deepEqual([added.prompt, added.camera, added.cast, added.title], ["", "", [], ""], "a whitelist: nothing else is copied");
+    assert.equal(loom.muts.open[added.id], true, "the new shot opens, under the same id");
+    loom.muts.addCard("act2");
+    await loom.settle();
+    const inAct2 = loom.store.projectRef.current.acts[1].cards[0];
+    assert.equal(inAct2.videoModel, "tbkv1.0.1", "an empty act takes the shot before it in an earlier act");
+    const bare = await mountLoom(t, { boards: { b1: boardOf([borrowed("c9")]) } });
+    bare.muts.addCard("act1");
+    await bare.settle();
+    const fresh = bare.store.projectRef.current.acts[0].cards[1];
+    assert.deepEqual([fresh.videoModel, fresh.isPrivate, fresh.videoHelper, fresh.mode], ["", false, false, "I2V"], "only imported before it: the defaults");
+  });
+  test("Send to The Loom as shots: the new act's shots take the board's last non-imported shot's engine, Channel, helper and audio", async (t) => {
+    const saved = globalThis.location.search;
+    globalThis.location.search = "?board=b1&shots=900000000000000011,900000000000000012&from=Stills&n=n90";
+    t.after(() => { globalThis.location.search = saved; });
+    const loom = await mountLoom(t, { boards: { b1: boardOf([shot("c1", SET), borrowed("c2")]) } });
+    await loom.settle();
+    const acts = loom.store.projectRef.current.acts;
+    assert.equal(acts.length, 2, "the shots act was added");
+    for (const c of acts[1].cards) {
+      assert.deepEqual([c.videoModel, c.isPrivate, c.videoHelper, c.audioGen, c.audioLanguage], ["tbkv1.0.1", true, true, true, "japanese"]);
+      assert.deepEqual([c.mode, c.duration], ["I2V", 5], "type and length stay as the hand-off builds them");
+    }
+    assert.equal(fetches("/api/loom/generate").length + fetches("/api/price").length, 0, "nothing priced or rendered");
   });
 });
 
