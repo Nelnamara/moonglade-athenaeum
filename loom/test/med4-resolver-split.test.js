@@ -49,7 +49,9 @@ const makeProject = (card, assets) =>
 // The composed prompt exactly as the prefill effect ships it to the drawer: same
 // shotText, same arguments the JSX site actually passes. Third argument present ->
 // thumbs-aware; absent -> the round-2 noImgSrc composition.
-const prefillSite = jsx.match(/payload\.prompt = shotText\(active, project(, imgSrc)?\);/);
+// (Issue #90: the prefill composes `sent` -- the active entry as gatedEntry() sends it, the
+// same object for every shot whose engine has its mode, which includes every fixture here.)
+const prefillSite = jsx.match(/payload\.prompt = shotText\(sent, project(, imgSrc)?\);/);
 assert.ok(prefillSite, "could not find the prefill effect's payload.prompt composition in " +
   "master-storyboard.jsx -- if it was restructured, update this pattern, don't delete the test");
 const asPrefilled = (entry, project) =>
@@ -108,11 +110,13 @@ describe("the drawer's prompt cites the drawer's own bank positions", () => {
 
 describe("every drawer-coupled shotText site composes with the live resolver", () => {
   const coupled = [
-    ["prefill effect payload.prompt", /payload\.prompt = shotText\(active, project, imgSrc\);/],
-    ["mg-prompt-commit comparator", /shotText\(a, projectRef\.current, resolve\)/],
-    ["outgoing-shot flush comparator", /shotText\(outEntry, project, imgSrc\)/],
-    ["re-sync button composition", /shotText\(\{ \.\.\.active, c: \{ \.\.\.active\.c, promptOverride: false \} \}, project, imgSrc\)/],
-    ["Generate-all flush comparator", /shotText\(a, project, imgSrc\)/],
+    // Issue #90: each site composes the entry as it is SENT (gatedEntry; `sent` in the
+    // prefill), so the prompt and every comparator cite the bank of the one mode that goes out.
+    ["prefill effect payload.prompt", /payload\.prompt = shotText\(sent, project, imgSrc\);/],
+    ["mg-prompt-commit comparator", /shotText\(gatedEntry\(a\), projectRef\.current, resolve\)/],
+    ["outgoing-shot flush comparator", /shotText\(gatedEntry\(outEntry\), project, imgSrc\)/],
+    ["re-sync button composition", /shotText\(gatedEntry\(\{ \.\.\.active, c: \{ \.\.\.active\.c, promptOverride: false \} \}\), project, imgSrc\)/],
+    ["Generate-all flush comparator", /shotText\(gatedEntry\(a\), project, imgSrc\)/],
   ];
   for (const [label, re] of coupled) {
     test(`${label} passes a resolver`, () => {

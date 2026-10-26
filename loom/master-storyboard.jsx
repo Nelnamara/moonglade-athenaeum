@@ -24,7 +24,19 @@ import {
   shotSendBody,
   // Session P, Stage B1: a new shot's default fields (newCard below wraps it with uid()).
   newCardShape,
+  // Issue #90: the shot's own engine, the mode it is sent in, the thumbs its payload resolves,
+  // the refusal for a shot its engine can't take, what a new shot inherits, and "Use these
+  // settings for every shot".
+  engineOf, engineLabel, gatedEntry, shotThumbIds, shotSendProblem,
+  inheritedShotSettings, inheritSourceCard, applySettingsToAllCards,
+  // ...and the shot's video refs at the drawer bank's size, and the words for the ones its
+  // engine can't take (held back, named in the spend asks).
+  shotVideoRefs, heldVideoRefsLine,
 } from "./src/loom-core.js";
+// The video drawer's own gating rule, roster and labels (issue #90): the host works a shot's
+// mode and duration out on an engine pick with the SAME function the drawer gates with, and
+// the confirms and the phone's engine row name things in the drawer's words. No second roster.
+import { gatedShot, MODELS, SHOT_LABEL, AUDIO_LANGS } from "../gallery/src/gen/videoDrawerCore.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
 // hooks extraction pass, 2026-07-16) -- same discipline as loom-core.js
 // (no React, no DOM, no fetch), consumed by the useProjectStore /
@@ -704,6 +716,40 @@ function fileToThumb(file, maxDim = 480, q = 0.72) {
 // the pure collection -> shots builder (loom-shots-core.js) also makes; the id stays here.
 function newCard(extra = {}) {
   return newCardShape(uid(), extra);
+}
+// "Use these settings for every shot"'s one question (issue #90 J): what is written, to how many
+// shots, and -- only when some are skipped -- how many are left and why, in the drawer's own
+// names. `r` is applySettingsToAllCards' answer for the open board.
+function applyAllQuestion(s, r) {
+  const langId = s.audioLanguage || "english";
+  const lang = (AUDIO_LANGS.find(([v]) => v === langId) || [langId, langId])[1];
+  const n = r.shots, k = r.left;
+  const why = [r.imported ? "imported" : "",
+    r.modeLacking ? "their engine has no " + r.modes.map((m) => SHOT_LABEL[m] || m).join(" or ") : "",
+    r.videoLacking ? (r.videoCap === 0 ? "their engine takes no video references"
+      : "their engine takes at most " + r.videoCap + " video references") : ""].filter(Boolean).join(", or ");
+  return "Use " + engineLabel(s.videoModel != null ? s.videoModel : s.model) + ", " + (s.isPrivate ? "Private" : "Normal")
+    + ", audio " + (s.audioGen ? "on (" + lang + ")" : "off") + ", helper " + (s.videoHelper ? "on" : "off")
+    + " for all " + n + " shot" + (n === 1 ? "" : "s") + "?"
+    + (k > 0 ? " " + k + (k === 1 ? " shot is left as it is (" : " shots are left as they are (") + why + ")." : "");
+}
+// The engine, Channel and helper a drawer render SENT (issue #90 I), for its take's settings
+// snapshot: off the payload, the card's own only where the payload is silent. An engine the
+// owner picks while the spend ask is up is on the card by then, and is not what went out.
+function sentEngineFields(payload, c) {
+  const p = payload || {}, x = c || {};
+  return { videoModel: p.video_model != null ? p.video_model : x.videoModel,
+    isPrivate: p.is_private != null ? !!p.is_private : !!x.isPrivate,
+    videoHelper: p.prompt_helper != null ? !!p.prompt_helper : !!x.videoHelper };
+}
+// The engines a batch would render on, for Generate all's confirm (issue #90 K): one engine is
+// named; a mixed board lists each with its count, the most-used first (board order on a tie).
+function batchEngineLine(payloads) {
+  const counts = new Map();
+  for (const p of payloads) { const l = engineLabel(p && p.video_model); counts.set(l, (counts.get(l) || 0) + 1); }
+  const rows = [...counts.entries()].sort((x, y) => y[1] - x[1]);
+  if (rows.length <= 1) return rows.length ? "Engine: " + rows[0][0] : "";
+  return "Engines: " + rows.map(([l, n]) => n + " on " + l).join(", ");
 }
 function seedProject() {
   return {
@@ -1697,6 +1743,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     leftCloseTimer.current = setTimeout(() => { setLeftCollapsed(true); setLeftClosing(false); }, 340);
   };
   const closeRightPanel = () => {
+    // Collapsing UNMOUNTS the Generate drawer (after the slide-out), and with it any prompt edit
+    // still inside its 300 ms commit debounce: flushed onto its shot first, by the same road a
+    // shot switch takes (issue #90, G2), so collapsing never discards typed text.
+    flushDrawerPrompt(genDrawerRef.current, lastActiveIdRef.current);
+    promptDirtyRef.current = false;
     setRightClosing(true);
     clearTimeout(rightCloseTimer.current);
     rightCloseTimer.current = setTimeout(() => { setRightCollapsed(true); setRightClosing(false); }, 340);
@@ -1924,6 +1975,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // from those. No listener here reads the selected shot for a render's outcome.
   const drawerHostRef = useRef(beginDrawerRender);
   drawerHostRef.current = beginDrawerRender;
+  // mg-apply-all-request's handler, current as of this render (set below, beside activeRef):
+  // the listener is bound once, the board it writes is whatever is open at the click.
+  const applyAllRef = useRef(() => {});
   // The target and Go gate as of this render (set below, beside activeRef): a drawer node that
   // MOUNTS later -- collapsing the right panel unmounts it -- is given both when it binds, not
   // only when the selection next changes.
@@ -1937,10 +1991,23 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // prompt: selecting shot B after hand-editing shot A leaves B's drawer showing A's stale
   // text with no warning. Found 2026-07-18 live-testing.
   const lastActiveIdRef = useRef(null);
+  // THE DRAWER REFILLS ON MOUNT (issue #90, G2). The right panel starts collapsed and its
+  // subtree -- this drawer included -- mounts only while it is open, so every open, and every
+  // reopen after a collapse, binds a FRESH drawer at its own defaults (V4.0 Lite, Normal, helper
+  // off, an empty bank). The prefill effect below had no dependency that moves when a node
+  // mounts (`tab` is already "Video" when the rail button opens the panel), so that fresh drawer
+  // showed and priced its defaults for whatever shot was selected until some unrelated field
+  // changed. bindGenDrawer bumps this once per NEW node and the effect lists it.
+  const [drawerEpoch, setDrawerEpoch] = useState(0);
   const bindGenDrawer = useCallback((el) => {
     genDrawerRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
+      // A new node has no typed text of its own: the "owner has typed since the last prefill"
+      // flag belonged to the node that went away (closeRightPanel flushed whatever it held), so
+      // the refill must compose the prompt again rather than leave the new box empty.
+      promptDirtyRef.current = false;
+      setDrawerEpoch((n) => n + 1);
       // The Loom is the drawer's host: its beforeSend runs the render latch and saves the
       // shot's lock before the drawer may POST (a refusal ends the click with no POST).
       if (el.setHost) el.setHost({ beforeSend: (req) => drawerHostRef.current(req) });
@@ -1984,6 +2051,43 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const apply = (c) => ({ ...c, audioGen, audioLanguage });
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
       });
+      // THE SHOT'S ENGINE, CHANNEL AND HELPER (issue #90). They used to live in the drawer
+      // alone, so every price, Generate all and card Render went out on V4.0 Lite whatever the
+      // drawer showed, and switching shots carried the last-clicked engine to every shot. Each
+      // fires only from the owner's own click (never from prefill or gating), so answering it
+      // with the one echo prefill below cannot loop.
+      //
+      // An engine pick can move the shot's mode and length (V3.2 has no Multi-Reference; a 10 s
+      // cap). The mode is worked out here from the CARD's own mode, never from the drawer's:
+      // the drawer may sit in a mode a prefill gated it to (an R2V shot on V3.2 shows First &
+      // Last), and trusting that would write FLF onto the R2V card the moment the owner picked
+      // an engine that HAS Multi-Reference. ONE card update; setShotMode only when the mode
+      // really moves (the same redundant-click guard as mg-mode-commit, V2V kept).
+      el.addEventListener("mg-model-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const model = String(e.detail.model || "");
+        const apply = (c) => {
+          const g = gatedShot(drawerModeFor(c.mode), e.detail.duration, model);
+          const next = { ...c, videoModel: model, duration: g.duration };
+          return g.mode === drawerModeFor(c.mode) ? next : setShotMode(next, cardModeForVmode(g.mode));
+        };
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
+      el.addEventListener("mg-channel-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const apply = (c) => ({ ...c, isPrivate: !!e.detail.isPrivate });
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
+      el.addEventListener("mg-helper-commit", (e) => {
+        const a = activeRef.current; if (!a) return;
+        const apply = (c) => ({ ...c, videoHelper: !!e.detail.videoHelper });
+        a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+      });
+      // "Use these settings for every shot" (issue #90 J, the owner's yes 2026-10-25): the
+      // drawer's engine, Channel, audio and helper onto every shot of the board, after ONE
+      // confirm that says what and how many. Cancel writes nothing; nothing is priced or sent
+      // (the estimate re-prices on its own, off the changed fingerprints).
+      el.addEventListener("mg-apply-all-request", (e) => applyAllRef.current(e.detail));
       // the 2026-07-21 audit's pinned "reference picker corruption" row, requirement 2: a
       // successful pick used to ONLY ever call e.detail.respond(), which writes into the
       // drawer's own PRIVATE _slots/_imgSlots/_vidSlots array and nothing else -- invisible
@@ -2104,7 +2208,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         // goes stale -- the exact idiom the mg-pick-request resolve above already uses.
         const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId]
           : (source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null);
-        const composed = already ? null : shotText(a, projectRef.current, resolve);
+        // gatedEntry: the prefill composes for the mode the shot is sent in (issue #90).
+        const composed = already ? null : shotText(gatedEntry(a), projectRef.current, resolve);
         if (!already && text === composed) return;
         const apply = (c) => setPromptOverride(c, text);
         a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
@@ -2154,6 +2259,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   loomTargetRef.current = projectApi.activeId
     ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
   drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
+  // "Use these settings for every shot" (issue #90 J). The counts come from the pure rule on the
+  // board as it is now, for the confirm; each changed card is then written through setCard with
+  // the SAME rule run on the card as it is when the write lands, so a take that landed between
+  // is never overwritten by a stale copy. A card the rule leaves alone is never touched, so the
+  // shot the drawer shows (it already carries these settings) stays the same object and the
+  // prefill effect has nothing to echo.
+  applyAllRef.current = (detail) => {
+    const proj = projectRef.current;
+    const r = applySettingsToAllCards(proj, detail);
+    if (!r.shots) return;
+    if (!window.confirm(applyAllQuestion(detail, r))) return;
+    proj.acts.forEach((a, ai) => (a.cards || []).forEach((c, ci) => {
+      if (r.project.acts[ai].cards[ci] === c) return;
+      setCard(a.id, c.id, (cur) => applySettingsToAllCards({ acts: [{ id: a.id, cards: [cur] }] }, detail).project.acts[0].cards[0]);
+    }));
+  };
 
   // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
   // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
@@ -2405,37 +2526,55 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // missing one. (Audio refs were never part of buildShotPayload's composition, before or
   // now -- that gap is pre-existing, not introduced here.) Continuity "extend" still adds the
   // previous shot's clip as an extra video ref, on top of whatever the shot's own refs supply.
+  //
+  // Flush a pending (not-yet-debounced) hand-edit in the drawer onto the shot it was typed for
+  // (`outId`, the shot the drawer was last filled for) -- otherwise an edit landing inside the
+  // drawer's 300ms commit debounce is silently discarded (it never gets the chance to fire its
+  // own mg-prompt-commit). Two roads take it: the effect below, before it overwrites the drawer
+  // with a newly-active shot, and closeRightPanel, before a collapse unmounts the drawer.
+  const flushDrawerPrompt = (el, outId) => {
+    if (!el || !outId || !el.flushPromptEdit) return;
+    const pending = el.flushPromptEdit();
+    if (pending == null) return;
+    const isDraft = outId === "__draft__";
+    const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
+    if (!outEntry) return;
+    const already = !!outEntry.c.promptOverride;
+    // imgSrc: drawer-COUPLED comparator -- the pending text being flushed was seeded from an
+    // imgSrc composition (payload.prompt below), so comparing it against a noImgSrc recompose
+    // froze every thumb-carrying prefilled prompt as an override. See the mg-prompt-commit
+    // handler's comment for the family. gatedEntry: composed for the mode the shot was SHOWN
+    // and sent in (issue #90), as the prefill composes it.
+    const composed = already ? null : shotText(gatedEntry(outEntry), project, imgSrc);
+    if (already || pending !== composed) {
+      const apply = (c) => setPromptOverride(c, pending);
+      isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
+    }
+  };
+  // Which of this shot's own pictures have their thumbnails yet (issue #90, G). The bulk thumb
+  // load runs after the board is shown, so a thumb-only cast picture or frame selected before it
+  // lands used to stay missing from the drawer: `thumbs` was not a dependency. Bare `thumbs`
+  // would re-fill on EVERY thumb anywhere (an upload on another shot); this key moves only when
+  // one of THIS shot's own pictures lands (shotThumbIds covers every id the payload and prompt
+  // can resolve through).
+  const shotThumbKey = shotThumbIds(active, project).map((id) => thumbs[id] ? "1" : "0").join("");
   useEffect(() => {
     const el = genDrawerRef.current;
     if (!el || tab !== "Video") return;
-    if (lastActiveIdRef.current !== active.c.id) {
-      // Flush a pending (not-yet-debounced) hand-edit on the OUTGOING shot before this
-      // effect overwrites the drawer with the newly-active shot's content -- otherwise an
-      // edit landing inside the drawer's 300ms commit debounce right as the owner switches
-      // shots is silently discarded (never gets the chance to fire its own mg-prompt-commit).
-      if (lastActiveIdRef.current) {
-        const pending = el.flushPromptEdit();
-        if (pending != null) {
-          const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
-          const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
-          if (outEntry) {
-            const already = !!outEntry.c.promptOverride;
-            // imgSrc: drawer-COUPLED comparator -- the pending text being flushed was
-            // seeded from an imgSrc composition (payload.prompt below), so comparing it
-            // against a noImgSrc recompose froze every thumb-carrying prefilled prompt
-            // as an override. See the mg-prompt-commit handler's comment for the family.
-            const composed = already ? null : shotText(outEntry, project, imgSrc);
-            if (already || pending !== composed) {
-              const apply = (c) => setPromptOverride(c, pending);
-              isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
-            }
-          }
-        }
-      }
+    // The same shot the drawer already shows (a commit's echo, a field edit) vs a different one:
+    // the echo keeps the drawer's ratio and its mode note ("V3.2 has no Multi-Reference, so the
+    // shot mode switched...") instead of wiping what the owner just did (spend review N7).
+    const sameShot = lastActiveIdRef.current === active.c.id;
+    if (!sameShot) {
+      flushDrawerPrompt(el, lastActiveIdRef.current);
       promptDirtyRef.current = false;
       lastActiveIdRef.current = active.c.id;
     }
-    const nextMode = drawerModeFor(active.c.mode);
+    // The shot as it is SENT (issue #90, C5): its own mode when its engine has it, else the one
+    // the drawer's gating lands it on there (V3.2 takes a Multi-Reference shot to First & Last),
+    // so the bank below is built for the mode the drawer will show, and priced as the card is.
+    const sent = gatedEntry(active);
+    const nextMode = drawerModeFor(sent.c.mode);
     // images/video_refs/audio_ref are ALWAYS set explicitly below, even to an empty array/
     // null, never left out of the payload -- prefill()/setRefs() treat "key omitted" as
     // "no opinion, leave whatever's there" but an explicit empty value as "clear it." A
@@ -2443,10 +2582,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // the drawer, unnoticed, ready to submit against the wrong shot. Found 2026-07-18
     // live-testing (switching from a shot with an @image1 cast ref to an empty draft kept
     // showing that same @image1 in the drawer).
+    // The engine, Channel and helper are the SHOT's (issue #90): always stated, so a shot with
+    // none chosen shows V4.0 Lite rather than whatever engine the last shot left in the drawer.
     const payload = {
       mode: nextMode, duration: active.c.duration, audio: !!active.c.audioGen,
       audio_language: active.c.audioLanguage || "english",
       quality: project.draft ? "basic" : "professional",
+      video_model: engineOf(active.c), is_private: !!active.c.isPrivate, prompt_helper: !!active.c.videoHelper,
+      same_shot: sameShot,
       images: [], video_refs: [], audio_ref: null,
     };
     if (nextMode === "i2v" && active.c.openFrame && active.c.openFrame.mediaId) {
@@ -2478,7 +2621,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     } else if (nextMode === "r2v") {
       const sp = buildShotPayload(active, project, imgSrc);
       payload.images = sp.images.map(asRef);
-      const vids = (sp.video_refs || []).map(asRef);
+      // The shot's video refs at the drawer bank's own size (3), NOT the payload's engine-capped
+      // list (none on Tsubaki): the drawer holds what its engine can't take, leaves it out of its
+      // own payload and says so ("takes no video references. Still held: N"). Handed the capped
+      // list it held nothing, and the echo that follows an engine pick wiped its note -- the
+      // refs vanished with no word anywhere (issue #90 review; the V-R5 protection).
+      const vids = shotVideoRefs(active).slice(0, 3).map((r) => asRef(r.source));
       if (active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
         vids.push({ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" });
       }
@@ -2494,12 +2642,19 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // prompt or compares against it composes with imgSrc; the comparators are at
     // mg-prompt-commit, the outgoing-shot flush above, the re-sync button and the
     // Generate-all flush. copyShot/exportAll are the deliberate standalone exceptions.
-    if (!promptDirtyRef.current) payload.prompt = shotText(active, project, imgSrc);
+    // `sent`, not `active`: composed for the mode the bank was built for (issue #90).
+    if (!promptDirtyRef.current) payload.prompt = shotText(sent, project, imgSrc);
     el.prefill(payload);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.c.id, active.c.mode, active.c.connect, active.c.duration, active.c.audioGen, active.c.audioLanguage,
       active.c.prompt, active.c.camera, active.c.lighting, active.c.transIn, active.c.transOut,
       active.c.cast, active.c.refs, project.assets,
+      // The shot's engine, Channel and helper (issue #90): a commit from the drawer causes
+      // exactly ONE echo prefill, which re-syncs the bank and mode after a mode-forcing pick.
+      active.c.videoModel, active.c.isPrivate, active.c.videoHelper,
+      // A NEW drawer node (G2: every open of the right panel) and this shot's own thumbnails
+      // landing (G) -- see drawerEpoch and shotThumbKey above.
+      drawerEpoch, shotThumbKey,
       // The FRAMES' IDENTITY fields (2026-07-27, closing-frame pass). Every branch above
       // reads c.openFrame/c.closeFrame -- i2v/flf feed them to the drawer directly, r2v
       // through buildShotPayload() -- yet no frame field was a dependency, so attaching or
@@ -3100,7 +3255,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             // imgSrc: this text goes straight INTO the drawer (prefill below), so it is
             // drawer-COUPLED and must carry the same thumbs-aware numbering the prefill
             // effect composes with -- see that effect's payload.prompt comment.
-            const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
+            const composed = shotText(gatedEntry({ ...active, c: { ...active.c, promptOverride: false } }), project, imgSrc);
             active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
             if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
           }}>&#8634; re-sync from shot</button>
@@ -3993,7 +4148,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             // by the prefill effect) -- composing without it here would freeze every
             // thumb-carrying prefilled prompt as an override the moment Generate-all is
             // clicked. See the prefill effect's payload.prompt comment for the family.
-            const composed = already ? null : shotText(a, project, imgSrc);
+            const composed = already ? null : shotText(gatedEntry(a), project, imgSrc);
             if (already || pending !== composed) {
               const patchedCard = setPromptOverride(a.c, pending);
               liveEntries = entries.map((e) => (e.c.id === a.c.id ? { ...e, c: patchedCard } : e));
@@ -5523,7 +5678,9 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
       dfLive && dfLive.c.prompt, dfLive && dfLive.c.promptOverride, dfLive && dfLive.c.promptOverrideText,
       dfLive && JSON.stringify(dfLive.c.cast), dfLive && JSON.stringify(dfLive.c.refs), project.draft, project.assets,
       dfLive && (dfLive.c.openFrame || {}).mediaId, dfLive && (dfLive.c.openFrame || {}).thumbId, dfLive && (dfLive.c.openFrame || {}).source,
-      dfLive && (dfLive.c.closeFrame || {}).mediaId, dfLive && (dfLive.c.closeFrame || {}).thumbId, dfLive && (dfLive.c.closeFrame || {}).source]);
+      dfLive && (dfLive.c.closeFrame || {}).mediaId, dfLive && (dfLive.c.closeFrame || {}).thumbId, dfLive && (dfLive.c.closeFrame || {}).source,
+      // The shot's engine, Channel and helper all ride the priced payload (issue #90).
+      dfLive && dfLive.c.videoModel, dfLive && dfLive.c.isPrivate, dfLive && dfLive.c.videoHelper]);
   // The real submit: generateShot is called EXACTLY as batchGenerate's own per-card loop
   // calls it (minus skipConfirm -- this is a single, deliberate, owner-initiated tap, not a
   // pre-confirmed batch run, so generateShot's own internal priceShot+window.confirm gate
@@ -6885,10 +7042,14 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                   row, non-interactive there too) and :411 (the capability badges). The
                   design pairs the model row with Duration -- that control already lives on
                   Shot Detail here, so no duplicate is invented alongside the label. */}
+              {/* Issue #90: the row names the SHOT's own engine (set from the desktop drawer's
+                  Engine card; engineOf reads an unset shot as the default) and that engine's
+                  own capability chips, from the drawer's roster. Read-only: the phone has no
+                  engine control in this build. */}
               <span className="lm-microlab" style={{ marginTop: 12 }}>Model</span>
-              <div className="lm-genmodelrow"><span className="lm-genmodelthumb" />PixAI Motion v2</div>
+              <div className="lm-genmodelrow"><span className="lm-genmodelthumb" />{engineLabel(engineOf(c))}</div>
               <div className="lm-gencaps">
-                {["15s", "multi-ref", "audio", "end-frame"].map((cap) => (
+                {((MODELS.find((m) => m.value === engineOf(c)) || {}).caps || []).map((cap) => (
                   <span key={cap} className="lm-gencap">{cap}</span>
                 ))}
               </div>
@@ -7926,8 +8087,10 @@ function useProjectStore(setSelShot) {
     let added = false;
     setProject((p) => {
       if (!p) return p;
+      // The new act's shots take the engine, Channel, helper and audio of the board's last
+      // non-imported shot (issue #90): "Send to The Loom as shots" lines up a whole act at once.
       const act = shotsFromPictures(pics.map((id) => ({ id, prompt: (facts[id] && facts[id].prompt) || "" })),
-        { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid() });
+        { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid(), inherit: inheritSourceCard(p, null) });
       const res = appendShotsAct(p, act);
       added = res.added;
       return res.project;
@@ -8019,9 +8182,15 @@ function useShotMutations(project, setProject) {
   // mg-result, "attach to A·0n", "Use an existing video" -- goes through landTake/attachTake
   // (loom/src/loom-takes-core.js), which append a take and move ★ and never lose a paid clip.)
 
-  const addCard = (aId) => { const c = newCard();
-    setProject((p) => appendCardToAct(p, aId, c));
-    setOpen((o) => ({ ...o, [c.id]: true })); };
+  // A new shot starts on the settings of the shot before it (issue #90, part 1 of the ask):
+  // engine, Channel, helper, audio + language, and type + length as the drawer showed them --
+  // a whitelist (inheritedShotSettings), never a copy of the card. "Before it" is the nearest
+  // non-imported shot from the end of this act, then earlier acts, read off the board the
+  // update lands on. The id is made OUTSIDE the updater so the card and its open state agree.
+  // Desktop and phone share this.
+  const addCard = (aId) => { const id = uid();
+    setProject((p) => appendCardToAct(p, aId, newCardShape(id, inheritedShotSettings(inheritSourceCard(p, aId)))));
+    setOpen((o) => ({ ...o, [id]: true })); };
   // Land an already-rendered gallery video as a REAL shot entry -- Finished Shots +
   // the existing per-card "move to..." dropdown -- instead of a Cast & Assets
   // reference. See the Footage tab's "Browse library" button (LoomV2) for the only
@@ -8601,16 +8770,27 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
   // card is gone by then).
   const askShotSpend = async (p) => {
     const pr = await priceBody(p);
+    // The ask names the engine the payload renders on (issue #90 K): a shot priced on V4.0 Lite
+    // while the owner believed it was on Tsubaki is exactly what this confirm exists to catch.
+    const shot = `${engineLabel(p.video_model)} shot`;
+    // Video refs the engine can't take (all of them on Tsubaki) are held back, as the drawer
+    // holds them; the card has no panel to say so, so this ask does -- and asks even on a free
+    // quote, the one case it otherwise stays silent (issue #90 review). The drawer's own payload
+    // carries no `held`, so its Go's ask is unchanged: its note is on screen.
+    const heldLine = heldVideoRefsLine(p);
+    const held = heldLine ? `\n\n${heldLine}` : "";
     if (pr && !pr.free && pr.cost != null) {
       // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
       // is worded as exactly what happens: no card attaches, the FULL price is charged.
       // Not-matched keeps the original sentence. See confirmSpend's note above.
       const line = priceIsShort(pr)
-        ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
-        : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
-      if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { go: false };
+        ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}${shot}`)
+        : `No free card covers this ${shot} — it will spend ~${pr.cost.toLocaleString()} credits.`;
+      if (!window.confirm(`${line}${held}\n\nGenerate anyway?`)) return { go: false };
     } else if (!pr || !pr.free) {
-      if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { go: false };
+      if (!window.confirm(`Couldn't verify this ${shot}'s cost or free-card coverage — it may spend credits.${held}\n\nGenerate anyway?`)) return { go: false };
+    } else if (heldLine) {
+      if (!window.confirm(`A free card covers this ${shot}.${held}\n\nGenerate anyway?`)) return { go: false };
     }
     const quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
     const expectFree = !!(pr && pr.free);
@@ -8671,6 +8851,15 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       const fresh = cardOn(cardId);
       const c = fresh.c;
       const p = buildShotPayload(fresh, proj, imgSrc);
+      // A shot its engine has no road for (issue #90): the server would build whatever the mode
+      // and image count name for any engine, so the refusal is here, before a price or a POST.
+      // Ahead of the no-input check: a shot whose only pictures are cast on a First & Last job,
+      // or whose only input is video refs on Tsubaki, sends nothing, and says why in those words.
+      const problem = shotSendProblem(p);
+      if (problem) {
+        holdCard(c.id, problem);
+        return { ok: false, reason: "engine-refused" };
+      }
       if (!p.hasInput) {
         // Investigated, not assumed, what "re-roll on imported footage" actually does (an
         // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
@@ -8694,7 +8883,12 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
       }
       // A batch confirmed THIS payload's price; content edited since then is not sent (F12).
       if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
-      const settings = snapshotSettings(c, proj, p.prompt, p.quality);
+      // The take records what is SENT (issue #90): the payload's mode (gated onto the engine),
+      // length, audio, engine, Channel and helper over the card's own fields, as the drawer's
+      // two snapshot builders below already do for theirs.
+      const settings = snapshotSettings({ ...c, mode: p.mode, duration: p.duration, audioGen: p.generate_audio,
+        audioLanguage: p.audio_language, videoModel: p.video_model, isPrivate: p.is_private, videoHelper: p.prompt_helper },
+        proj, p.prompt, p.quality);
       let quote = opts.quote || null;
       let expectFree = !!opts.expectFree;
       // GUARDRAIL: never spend credits silently -- askShotSpend (above) checks cost + free card
@@ -9159,7 +9353,8 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const dc = (draftCardRef && draftCardRef.current) || {};
     draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
       { ...dc, mode: payload.mode || dc.mode, duration: payload.duration != null ? payload.duration : dc.duration,
-        audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage },
+        audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage,
+        ...sentEngineFields(payload, dc) },
       projectRef.current, payload.prompt, payload.quality) };
     return { ok: true, expectFree: ask.expectFree };
   };
@@ -9197,7 +9392,8 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const settings = snapshotSettings({ ...c, mode: payload.mode || c.mode,
       duration: payload.duration != null ? payload.duration : c.duration,
       audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
-      audioLanguage: payload.audio_language || c.audioLanguage }, projectRef.current, payload.prompt, payload.quality);
+      audioLanguage: payload.audio_language || c.audioLanguage, ...sentEngineFields(payload, c) },
+      projectRef.current, payload.prompt, payload.quality);
     const quote = ask.quote;
     preLockRef.current[submitId] = c;
     patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
@@ -9591,6 +9787,23 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const board = projectRef.current ? flat(projectRef.current) : (entries || []);
     const todo = board.filter((e) => needsRender(e.c));
     if (!todo.length) return;
+    // A shot its engine has no road for (issue #90: Multi-Reference on V3.2, a First & Last
+    // short of a frame on V2.7) is refused on its own card BEFORE anything is priced and is
+    // taken out of the list in place -- every count, price and fingerprint below is of the
+    // shots that can go out. The confirm names the ones left out.
+    const refused = [];
+    for (let k = todo.length - 1; k >= 0; k--) {
+      const problem = shotSendProblem(shotPayload(todo[k]));
+      if (problem) { holdCard(todo[k].c.id, problem); refused.unshift(todo[k].code); todo.splice(k, 1); }
+    }
+    const refusedNote = refused.length
+      ? `\n⚠ ${refused.length} shot(s) can't be sent on their engine and are left out: ${refused.join(", ")} (each card says why).` : "";
+    if (!todo.length) {
+      const line = "Nothing was sent: " + refused.join(", ") + " can't be sent on their engine as they are (each card says why).";
+      if (window.Toast) window.Toast.show({ kind: "err", title: "Generate all", msg: line });
+      else window.alert(line);
+      return;
+    }
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
     // The fingerprint each shot's confirmed price is held to (review F12) is taken from the
     // same board in the same synchronous step as the payloads priced on the next line;
@@ -9628,11 +9841,19 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     // non-empty bracketed header before c.prompt is even appended, so a check against it
     // can never fire regardless of whether the shot's real prompt is blank (found in review).
     const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
+    // The engine(s) the batch renders on (issue #90 K): one named, a mixed board counted.
+    const engines = batchEngineLine(todo.map((e) => shotPayload(e)));
+    // Shots going out without video refs their engine can't take (issue #90 review): held back
+    // on the card, as the drawer holds them, and named here since no panel shows them.
+    const heldCodes = todo.filter((e) => heldVideoRefsLine(shotPayload(e))).map((e) => e.code);
+    const heldNote = heldCodes.length
+      ? `\n⚠ ${heldCodes.length} shot(s) go out without video references their engine can't take — held back, not sent and not deleted: ${heldCodes.join(", ")}.` : "";
     const msg = `Generate ${todo.length} shot(s)?\n\n` +
+      (engines ? `${engines}\n` : "") +
       `🎫 ${free} covered by free cards\n` +
       `≈ ${paid} will spend credits — about ${credits.toLocaleString()} total` +
       (unknown ? `\n⚠ ${unknown} shot(s)' cost couldn't be verified — they may also spend credits.` : ".") +
-      overflowNote +
+      overflowNote + refusedNote + heldNote +
       (emptyPromptShots.length ? `\n⚠ ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
     if (!window.confirm(msg)) { setBatching(false); return; }
     // Reset ONLY after the confirm is accepted -- resetting before it and leaving batchTally
@@ -9709,7 +9930,9 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
     const fp = priceFingerprint(payload);
     const cached = priceCache[entry.c.id];
     if (!force && cached && cached.fp === fp && !cached.loading) return;
-    if (!payload.hasInput) { setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: null, loading: false } })); return; }
+    // A shot its engine can't take (issue #90) is never priced: it counts as unpriced in the
+    // estimate (pr null), never as 0 -- the price of a job the Loom refuses to send means nothing.
+    if (!payload.hasInput || shotSendProblem(payload)) { setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: null, loading: false } })); return; }
     if (priceInFlightRef.current[entry.c.id] === fp) return;
     priceInFlightRef.current[entry.c.id] = fp;
     setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: (cached && cached.fp === fp ? cached.pr : null), loading: true } }));

@@ -105,7 +105,7 @@ function RatioPopover({ value, onPick }) {
    that table is now notify/pollCadence.js and there is exactly one gallery-side poller reading
    it. Still ONE poll loop per task -- this drawer's was REPLACED by the engine's, not joined to
    it. What stayed here is what is genuinely the drawer's: the refusal gates before any spend,
-   the wording of every status tier, and all eleven DOM events.
+   the wording of every status tier, and all fifteen DOM events.
 
    PORT SHAPE. The vanilla was an event-based CUSTOM ELEMENT driven imperatively (prefill()) by its
    hosts; this stays a DROP-IN for that contract, not a rewrite of it:
@@ -113,10 +113,13 @@ function RatioPopover({ value, onPick }) {
      directly on it and a `mode` getter (see the useImperativeHandle below) -- so bindGenDrawer's
      el.addEventListener + el.prefill, App.jsx's document-level listeners, and every createElement
      call site keep working against a real node, exactly as they did against the custom element.
-   - The 11 events stay BUBBLING, composed DOM CustomEvents dispatched off that node (emit()), NOT
+   - The 15 events stay BUBBLING, composed DOM CustomEvents dispatched off that node (emit()), NOT
      React callback props: mg-submit / mg-result / mg-error / mg-slow / mg-paused / mg-dirty /
-     mg-prompt-commit / mg-mode-commit / mg-duration-commit / mg-audio-commit / mg-pick-request
-     (the last carrying a respond() in its detail). Hosts catch them unchanged.
+     mg-prompt-commit / mg-mode-commit / mg-duration-commit / mg-audio-commit / mg-model-commit /
+     mg-channel-commit / mg-helper-commit / mg-apply-all-request / mg-pick-request (the last
+     carrying a respond() in its detail). Hosts catch them unchanged. The *-commit events and
+     mg-apply-all-request leave only from a direct user action (the userSetMode pattern), never
+     from prefill or gating, so a host that answers one with a prefill cannot loop (issue #90).
    - MUTABLE form state lives in ONE ref (`st`) with a forceUpdate tick, mirroring the vanilla's
      `this._*` fields exactly. This is deliberate over useState on the SPEND-critical prefill path:
      prefill()'s mode->slots->gating sequence reads state it just mutated, which React's batched
@@ -132,7 +135,8 @@ function RatioPopover({ value, onPick }) {
      in-flight ~210k-credit video render is not orphaned by a view closing (a host still defers
      unmount 360ms for the .mgd-closing exit; that is now animation, not spend safety).
 
-   Props: `loomCtx` (hide the drawer's own Camera/quality -- the Loom owns equivalents) and
+   Props: `loomCtx` (hide the drawer's own Camera/quality -- the Loom owns equivalents -- and
+   show the engine slab's "Use these settings for every shot", whose shots only the Loom has) and
    `dock` (below). All other host communication is through the ref's methods and the bubbling
    DOM events above.
 
@@ -375,7 +379,18 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // unchanged from what the flyout's onClick ran: set the model, gate it (applyModelGating
   // adjusts the shot mode to a supported one and clamps duration to the engine's cap), then
   // re-price. userDriven=true so a dropped shot mode explains itself (DC pickVideoModel note).
-  const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); };
+  // mg-model-commit tells the host the shot's engine (issue #90) with the duration AS GATED
+  // (clamped + snapped). No mode rides it: the host works the shot's mode out from its OWN card
+  // (gatedShot), since this drawer's mode may be one a prefill gated silently.
+  const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); emit("mg-model-commit", { model: v, duration: st.current.duration }); };
+  // "Use these settings for every shot" (loomCtx only, issue #90 J): the five settings as the
+  // form holds them, handed to the host, which asks first and writes them to the board's shots.
+  // Mode and duration are not among them. Nothing here prices, sends or changes the form.
+  const requestApplyAll = () => {
+    const c = st.current;
+    emit("mg-apply-all-request", { model: c.model, isPrivate: c.channel === "enhanced",
+      audioGen: !!c.audioGen, audioLanguage: c.audioLanguage, videoHelper: !!c.videoHelper });
+  };
   // The aspect ratio pick (Tsubaki, Multi-Reference). HELD across a mode or engine switch like
   // the other held fields; ratioForPayload sends it only where it applies. Re-prices, because
   // it rides the priced referenceVideo block.
@@ -939,6 +954,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             <span>{modelMeta(s.model)}</span>
             {modelCaps(s.model).map(([t, kind]) => <span key={t} className={"mgd-cap" + (kind ? " " + kind : "")}>{t}</span>)}
           </div>
+          {/* The Loom only: every shot keeps its own settings, and this copies the bound shot's
+              to all of them (the host asks first). The Loom panel's small text action. */}
+          {loomCtx ? (
+            <button type="button" className="mgd-applyall" onClick={requestApplyAll}
+              title="Copy this engine, the channel, audio and its language, and the prompt helper to every shot">
+              Use these settings for every shot
+            </button>
+          ) : null}
         </div>
 
         {/* MODE & CHANNEL (DC 1416-1441): Basic|Professional seg -> Normal|Private seg ->
@@ -954,7 +977,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           </div>
           <div className="mgd-seg" role="radiogroup" aria-label="Channel">
             {[["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); }}>{l}</button>
+              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); emit("mg-channel-commit", { isPrivate: v === "enhanced" }); }}>{l}</button>
             ))}
           </div>
           <div className="mgd-chancap">{CHANNEL_CAP[s.channel]}</div>
@@ -966,7 +989,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           </label>
           <label className="mgd-sw" title="Off by default — the opposite of image gen">
             <input type="checkbox" className="mgd-helper" checked={s.videoHelper}
-              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); reprice(); }} />
+              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); reprice(); emit("mg-helper-commit", { videoHelper: e.target.checked }); }} />
             <span className="mgd-swtrack"><i /></span>
             <span className="mgd-swlab">Video prompt helper</span>
           </label>

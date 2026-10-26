@@ -409,6 +409,8 @@ var LoomBundle = (() => {
       audioGen: !!c.audioGen,
       audioLanguage: str(c.audioLanguage || "english"),
       isPrivate: !!c.isPrivate,
+      videoModel: engineOf(c),
+      videoHelper: !!c.videoHelper,
       cast: (c.cast || []).slice(),
       refs: (c.refs || []).map((r) => ({
         id: str(r.id),
@@ -440,6 +442,8 @@ var LoomBundle = (() => {
       audioGen: !!s.audioGen,
       audioLanguage: s.audioLanguage || "english",
       isPrivate: !!s.isPrivate,
+      ...own(s, "videoModel") ? { videoModel: str(s.videoModel) } : {},
+      ...own(s, "videoHelper") ? { videoHelper: !!s.videoHelper } : {},
       cast: (s.cast || []).slice(),
       refs: (s.refs || []).map((r) => ({ role: "", ...r })),
       openFrame: { ...card.openFrame || {}, ...s.openFrame },
@@ -852,6 +856,324 @@ var LoomBundle = (() => {
     return parts.join(" ");
   };
 
+  // ../gallery/src/gen/priceProbeCore.js
+  var PRICE_KEY_SKIP = ["prompt", "negative", "seed"];
+  function priceKey(payload, skipKeys = PRICE_KEY_SKIP) {
+    if (!payload || typeof payload !== "object") return "";
+    const skip = skipKeys || [];
+    const keys = Object.keys(payload).filter((k) => skip.indexOf(k) === -1).sort();
+    return JSON.stringify(keys.map((k) => [k, payload[k]]));
+  }
+  function initialVerdict() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function scheduled() {
+    return { settled: false, pricedKey: null, pendingTimer: true };
+  }
+  function fired() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function settledFor(key) {
+    return { settled: true, pricedKey: key, pendingTimer: false };
+  }
+  function canSubmit(verdict, payload, skipKeys = PRICE_KEY_SKIP) {
+    return !!(verdict && verdict.settled && !verdict.pendingTimer && verdict.pricedKey != null && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  function shouldShortCircuit(verdict, payload, force, skipKeys = PRICE_KEY_SKIP) {
+    if (force) return false;
+    return !!(verdict && verdict.settled && verdict.pricedKey != null && !verdict.pendingTimer && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  var PRICE_DEBOUNCE_MS = 250;
+  var PRICE_FETCH_TIMEOUT_MS = 25e3;
+
+  // ../gallery/src/gen/videoDrawerCore.js
+  var MODELS = [
+    { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
+    { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+    // The version titles PixAI returns for these two ids (PROBE_2026-09-26 V01). tbkv1.0 prices
+    // at 2,380/s on the wire against 4,200+/s for tbkv1.0.1 -- hence its 'cheap' chip.
+    { value: "tbkv1.0.1", label: "Tsubaki Video", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+    { value: "tbkv1.0", label: "Tsubaki Video Flash", caps: ["multi-ref", "audio", "15s", "end-frame", "cheap"] },
+    { value: "v3.2", label: "V3.2", caps: ["audio", "prompt-following"] },
+    { value: "v3.0.2", label: "V3.0 Lite", caps: ["complex motion", "cheap"] },
+    { value: "v3.0", label: "V3.0 (High Consistency)", caps: ["high-consistency", "action presets", "start/end"] },
+    { value: "v3.0.1", label: "V3.0 Flash", caps: ["multi-shot", "hires", "fastest", "no card"] },
+    { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
+  ];
+  var DEFAULT_MODEL = "v4.0.1";
+  var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
+  function cardClaim(v) {
+    const c = MODEL_CARD[v];
+    return c === false ? "never card-covered" : c === null ? "card coverage checked at price time" : "V4.0 cards apply";
+  }
+  var CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
+  function modelCaps(v) {
+    const m = MODELS.find((x) => x.value === v);
+    const caps = (m ? m.caps : []).map((c) => [c, CAP_KIND[c] || ""]);
+    if (v === DEFAULT_MODEL) caps.push(["default", "hot"]);
+    return caps;
+  }
+  function modelMeta(v) {
+    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + cardClaim(v);
+  }
+  var SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
+  var MODEL_VMODES = {
+    "v4.0": ["i2v", "flf", "r2v"],
+    "v4.0.1": ["i2v", "flf", "r2v"],
+    "tbkv1.0.1": ["i2v", "flf", "r2v"],
+    "tbkv1.0": ["i2v", "flf", "r2v"],
+    "v3.2": ["i2v", "flf"],
+    "v3.0.2": ["i2v", "flf"],
+    "v3.0": ["i2v", "flf"],
+    "v3.0.1": ["i2v"],
+    "v2.7": ["i2v"]
+  };
+  var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15, "tbkv1.0": 15, "tbkv1.0.1": 15 };
+  var MODEL_DURATIONS = { "tbkv1.0": [5, 10, 15], "tbkv1.0.1": [5, 10, 15] };
+  function durationsFor(model) {
+    return MODEL_DURATIONS[model] || DURATIONS;
+  }
+  function durationAllowed(model, d) {
+    return durationsFor(model).indexOf(+d) >= 0 && +d <= (MODEL_MAXDUR[model] || 10);
+  }
+  var MODEL_FIELDS = {
+    "tbkv1.0": { negative: false, camera: false },
+    "tbkv1.0.1": { negative: false, camera: false }
+  };
+  function modelTakes(model, field) {
+    const f = MODEL_FIELDS[model];
+    return !f || f[field] !== false;
+  }
+  var MODEL_REFCAPS = {
+    "tbkv1.0": { images: 6, videos: 0, audios: 3 },
+    "tbkv1.0.1": { images: 6, videos: 0, audios: 3 }
+  };
+  var DEFAULT_REFCAPS = { images: 6, videos: 3, audios: 1 };
+  function refCap(model, kind) {
+    const c = MODEL_REFCAPS[model];
+    return c && c[kind] != null ? c[kind] : DEFAULT_REFCAPS[kind];
+  }
+  var MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
+  var MODE_PH = {
+    i2v: "Describe the motion \u2014 \u2018slow cinematic pan right, gentle waves\u2026\u2019",
+    flf: "Describe the transition from start frame to end frame\u2026",
+    r2v: "Type @image1 / @video1 / @audio1 to cite a ref \u2014 it becomes a chip \u2014 \u2018the girl from @image1 dances to @audio1\u2026\u2019"
+  };
+  var CHANNEL_CAP = {
+    normal: "Please keep creations SFW",
+    enhanced: "\u{1F451} Private \u2014 when selected, your generated works cannot be published"
+  };
+  var CAMERA_OPTS = [
+    ["unset", "Unset"],
+    ["horizontal", "Horizontal"],
+    ["pan", "Pan"],
+    ["roll", "Roll"],
+    ["tilt", "Tilt"],
+    ["vertical-pan", "Vertical pan"],
+    ["zoom", "Zoom"]
+  ];
+  var AUDIO_LANGS = [
+    ["english", "English"],
+    ["japanese", "Japanese"],
+    ["chinese", "Chinese"],
+    ["korean", "Korean"],
+    ["none", "SE only (no dialogue)"]
+  ];
+  var VIDEO_RATIOS = ["adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"];
+  var RATIO_MODELS = { "tbkv1.0": true, "tbkv1.0.1": true };
+  var ratioLabel = (r) => r === "adaptive" || !r ? "Auto" : r;
+  function ratioOffered(s) {
+    return !!(s && s.mode === "r2v" && RATIO_MODELS[s.model]);
+  }
+  function ratioForPayload(s) {
+    const r = s && s.ratio;
+    return ratioOffered(s) && r && r !== "adaptive" && VIDEO_RATIOS.indexOf(r) >= 0 ? r : "";
+  }
+  var DURATIONS = [5, 6, 10, 15];
+  function snapDuration(d, model) {
+    d = Number(d);
+    if (!isFinite(d)) return 5;
+    const set2 = model ? durationsFor(model) : DURATIONS;
+    return set2.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
+  }
+  function refItem(r) {
+    const mid = String(r.media_id || r.mid);
+    return { media_id: mid, thumb: r.thumb || "/thumbs/" + mid + ".jpg", is_nsfw: !!r.is_nsfw };
+  }
+  function primaryBank(s) {
+    return s.mode === "r2v" ? s.imgSlots : s.slots;
+  }
+  function setPrimaryBank(s, arr) {
+    if (s.mode === "r2v") s.imgSlots = arr;
+    else s.slots = arr;
+  }
+  function bankView(arr, max) {
+    const filled = [];
+    let hole = -1;
+    (arr || []).forEach((item, index) => {
+      if (item && item.media_id) filled.push({ item, index });
+      else if (hole < 0) hole = index;
+    });
+    const nextIndex = filled.length >= max ? -1 : hole >= 0 ? hole : (arr || []).length;
+    return { filled, nextIndex };
+  }
+  function heldList(s) {
+    const imgs = s.imgSlots.filter((x) => x && x.media_id).length;
+    const vids = s.vidSlots.filter((x) => x && x.media_id).length;
+    const held = [];
+    if (imgs) held.push(imgs + (imgs === 1 ? " image ref" : " image refs"));
+    if (vids) held.push(vids + (vids === 1 ? " video ref" : " video refs"));
+    if (s.audSlot && s.audSlot.media_id) held.push("the audio ref");
+    return held;
+  }
+  function heldRefsNotice(s, _m) {
+    const held = heldList(s);
+    if (!held.length) return "";
+    return "Still held for Multi-Reference: " + held.join(", ") + ". Nothing was deleted.";
+  }
+  function applyMode(s, m, userDriven) {
+    const from = s.mode;
+    s.mode = m;
+    if (m === "i2v") s.slots = [s.slots[0] || null];
+    else if (m === "flf") s.slots = [s.slots[0] || null, s.slots[1] || null];
+    else {
+      if (!s.imgSlots.length) s.imgSlots = [null];
+      if (!s.vidSlots.length) s.vidSlots = [null];
+    }
+    s.modeNote = userDriven && from === "r2v" && m !== "r2v" ? heldRefsNotice(s, m) : "";
+  }
+  var NO_VIDEO_REFS_NOTE = " takes no video references.";
+  function gatedShot(mode, duration, model) {
+    const allowed = MODEL_VMODES[model] || ["i2v", "flf", "r2v"];
+    const want = String(mode == null ? "" : mode).toLowerCase();
+    const m = allowed.indexOf(want) === -1 ? allowed[allowed.length - 1] : want;
+    let d = duration;
+    const maxDur = MODEL_MAXDUR[model] || 10;
+    if (d > maxDur) d = maxDur;
+    if (!durationAllowed(model, d)) d = snapDuration(d, model);
+    return { mode: m, duration: d };
+  }
+  function applyModelGating(s, userDriven) {
+    const g = gatedShot(s.mode, s.duration, s.model);
+    if (g.mode !== s.mode) {
+      const from = s.mode, to = g.mode;
+      applyMode(s, to, userDriven);
+      if (userDriven) {
+        const m = MODELS.find((x) => x.value === s.model);
+        const held = heldList(s);
+        s.modeNote = (m ? m.label : s.model) + " has no " + (SHOT_LABEL[from] || from) + ", so the shot mode switched to " + SHOT_LABEL[to] + "." + (held.length ? " Still held: " + held.join(", ") + ". Nothing was deleted." : "");
+      }
+    }
+    if (g.duration !== s.duration) s.duration = g.duration;
+    const heldVids = (s.vidSlots || []).filter((x) => x && x.media_id).length;
+    if (s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
+      const m = MODELS.find((x) => x.value === s.model);
+      s.modeNote = (m ? m.label : s.model) + NO_VIDEO_REFS_NOTE + " Still held: " + heldVids + (heldVids === 1 ? " video ref" : " video refs") + ". Nothing was deleted.";
+    } else if (userDriven && s.modeNote && s.modeNote.indexOf(NO_VIDEO_REFS_NOTE) >= 0) {
+      s.modeNote = "";
+    }
+  }
+  function applySetRefs(s, refs) {
+    if (!Array.isArray(refs)) return;
+    refs = refs.slice(0, 6);
+    if (refs.length > 1) applyMode(s, "r2v");
+    const slots = refs.map(refItem);
+    if (refs.length > 1) setPrimaryBank(s, slots);
+    else if (s.mode === "r2v") setPrimaryBank(s, [slots[0] || null]);
+    else s.slots[0] = slots[0] || null;
+  }
+  function applyPrefill(s, o) {
+    o = o || {};
+    const note3 = s.modeNote || "";
+    const keptNote = o.same_shot && note3.indexOf(NO_VIDEO_REFS_NOTE) < 0 ? note3 : "";
+    s.modeNote = "";
+    s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : o.same_shot ? s.ratio : "adaptive";
+    if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
+    if (o.video_model != null) s.model = o.video_model;
+    if (o.duration != null) s.duration = snapDuration(o.duration);
+    if (o.quality != null) s.quality = o.quality;
+    if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
+    if (o.audio != null) s.audioGen = !!o.audio;
+    if (o.audio_language != null) s.audioLanguage = o.audio_language;
+    if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
+    if (o.negative != null) s.negative = o.negative;
+    if (o.camera != null) s.camera = o.camera;
+    const imgList = Array.isArray(o.images) ? o.images : Array.isArray(o.refs) ? o.refs : null;
+    if (imgList && s.mode === "flf" && imgList.length <= 2) {
+      const flfSlots = imgList.map((r) => r ? refItem(r) : null);
+      s.slots = [flfSlots[0] || null, flfSlots[1] || null];
+    } else {
+      if (o.refs) applySetRefs(s, o.refs);
+      if (o.images) applySetRefs(s, o.images);
+    }
+    if (Array.isArray(o.video_refs)) s.vidSlots = o.video_refs.slice(0, 3).map(refItem);
+    if (o.audio_ref !== void 0) s.audSlot = o.audio_ref ? { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || "audio ref" } : null;
+    if (imgList && s.mode === "r2v") s.slots = [null];
+    if (keptNote) s.modeNote = keptNote;
+    applyModelGating(s);
+    return { setPrompt: o.prompt != null ? o.prompt : null };
+  }
+  function buildPayload(s, promptText2) {
+    const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
+    const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos")) : [];
+    const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
+    const ratio = ratioForPayload(s);
+    return {
+      mode: s.mode.toUpperCase(),
+      prompt: promptText2 || "",
+      // An engine without the field gets '' / 'unset' (MODEL_FIELDS); the typed text stays in
+      // the box (s.negative / s.camera untouched), it is just not sent.
+      negative: modelTakes(s.model, "negative") ? (s.negative || "").trim() : "",
+      images,
+      video_refs,
+      audio_refs,
+      duration: +s.duration,
+      audio: s.audioGen,
+      video_model: s.model,
+      camera_movement: s.mode !== "r2v" ? modelTakes(s.model, "camera") ? s.camera : "unset" : "",
+      quality: s.quality,
+      audio_language: s.audioLanguage,
+      is_private: s.channel === "enhanced",
+      // The DC's 'Video prompt helper' switch (DC 2921, off by default -- the opposite of image
+      // gen). Rides the payload -> i2vPro.usePromptsHelper on the server (I2V/FLF only; the
+      // verified referenceVideo shape has no such field), and so lives in priceKey like every
+      // other submitted field.
+      prompt_helper: !!s.videoHelper,
+      // The Tsubaki Multi-Reference aspect ratio -> referenceVideo.ratio. Only when offered and
+      // not Auto; ABSENT otherwise, so every other video payload is byte-identical to before.
+      ...ratio ? { ratio } : {}
+    };
+  }
+  function hasAnyRef(p) {
+    return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
+  }
+  function flfMissingStart(s) {
+    return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
+  }
+  function linesShown(results, { dock, loom, shot } = {}) {
+    const rs = Array.isArray(results) ? results : [];
+    if (dock) return rs.filter((l) => l && l.kind === "error");
+    if (loom) return rs.filter((l) => l && (l.shot || "") === (shot || ""));
+    return rs;
+  }
+  function friendlyGenErr(raw) {
+    const s = String(raw || "");
+    if (!s) return "generation failed";
+    let hint = "";
+    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s)) {
+      hint = "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
+    } else if (/maxLength|too long|exceeds maximum/i.test(s)) {
+      hint = "That prompt is too long for video \u2014 PixAI allows 2000 characters. Trim it and resubmit; nothing was created or charged.";
+    } else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s)) {
+      hint = "PixAI refused the SOURCE IMAGE on content grounds, not the prompt \u2014 rewriting the text will not help. Try a different frame.";
+    } else if (/moderat|content.?polic|flagged|nsfw/i.test(s) || /prohibit|sensitive|not.?allowed|violat/i.test(s) && /content|prompt|polic|guideline|term|image/i.test(s)) {
+      hint = "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not here.";
+    } else if (/inferenceProfile|i2vPro[./]mode|unknown mode/i.test(s)) {
+      hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
+    }
+    return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
+  }
+
   // src/loom-core.js
   var CONNECT = {
     new: { label: "New scene", hint: "intentional break \u2014 fresh look/place" },
@@ -917,8 +1239,132 @@ var LoomBundle = (() => {
     // see shotText() and effectivePrompt() below.
     promptOverride: false,
     promptOverrideText: "",
+    // The shot's engine, Channel and prompt helper (issue #90): the drawer's Engine card,
+    // Normal/Private and helper switch, kept per SHOT. They used to live only in the drawer, so
+    // every price, Generate all and card Render went out on the default engine whatever the
+    // drawer showed. videoModel "" means "no engine chosen" and reads as DEFAULT_MODEL through
+    // engineOf() below -- which is also how a board saved before these keys existed reads.
+    videoModel: "",
+    isPrivate: false,
+    videoHelper: false,
     ...extra
   });
+  var engineId = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    return MODELS.some((m) => m.value === s) ? s : DEFAULT_MODEL;
+  };
+  var engineOf = (c) => engineId(c && c.videoModel);
+  var engineLabel = (v) => {
+    const id = engineId(v);
+    const m = MODELS.find((x) => x.value === id);
+    return m ? m.label : id;
+  };
+  var drawerModeFor = (m) => {
+    const u = (m || "R2V").toUpperCase();
+    return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v";
+  };
+  var cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
+  var shotModeOf = (c) => {
+    const x = c || {};
+    const g = gatedShot(drawerModeFor(x.mode), x.duration, engineOf(x));
+    return g.mode === drawerModeFor(x.mode) ? x.mode || "R2V" : cardModeForVmode(g.mode);
+  };
+  var gatedEntry = (entry) => {
+    const mode = shotModeOf(entry.c);
+    return mode === entry.c.mode ? entry : { ...entry, c: { ...entry.c, mode } };
+  };
+  var shotSettingsOf = (c) => {
+    const x = c || {};
+    return {
+      videoModel: String(x.videoModel || ""),
+      isPrivate: !!x.isPrivate,
+      videoHelper: !!x.videoHelper,
+      audioGen: !!x.audioGen,
+      audioLanguage: x.audioLanguage || "english"
+    };
+  };
+  var inheritedShotSettings = (prev) => {
+    if (!prev) return {};
+    const s = shotSettingsOf(prev);
+    const g = gatedShot(drawerModeFor(prev.mode), prev.duration, engineOf(prev));
+    return {
+      videoModel: s.videoModel,
+      isPrivate: s.isPrivate,
+      videoHelper: s.videoHelper,
+      audioGen: s.audioGen,
+      audioLanguage: s.audioLanguage,
+      mode: shotModeOf(prev),
+      duration: g.duration
+    };
+  };
+  var inheritSourceCard = (project, actId) => {
+    const acts = project && project.acts || [];
+    let i = acts.findIndex((a) => a && a.id === actId);
+    if (i < 0) i = acts.length - 1;
+    for (; i >= 0; i--) {
+      const cards = acts[i] && acts[i].cards || [];
+      for (let j = cards.length - 1; j >= 0; j--) if (cards[j] && !cards[j].imported) return cards[j];
+    }
+    return null;
+  };
+  var applySettingsToAllCards = (project, settings) => {
+    const s = settings || {};
+    const engine = engineId(s.videoModel != null ? s.videoModel : s.model);
+    const want = {
+      isPrivate: !!s.isPrivate,
+      videoHelper: !!s.videoHelper,
+      audioGen: !!s.audioGen,
+      audioLanguage: s.audioLanguage || "english"
+    };
+    const allowed = MODEL_VMODES[engine] || ["i2v", "flf", "r2v"];
+    const vcap = refCap(engine, "videos");
+    const counts = { shots: 0, changed: 0, imported: 0, modeLacking: 0, videoLacking: 0, videoCap: vcap, audioKept: 0, modes: [] };
+    if (!project || !Array.isArray(project.acts)) return { project, ...counts, left: 0 };
+    let anyAct = false;
+    const acts = project.acts.map((a) => {
+      if (!a || !Array.isArray(a.cards)) return a;
+      let anyCard = false;
+      const cards = a.cards.map((c) => {
+        if (!c) return c;
+        counts.shots += 1;
+        if (c.imported) {
+          counts.imported += 1;
+          return c;
+        }
+        const vm = drawerModeFor(c.mode);
+        if (allowed.indexOf(vm) < 0) {
+          counts.modeLacking += 1;
+          if (counts.modes.indexOf(vm) < 0) counts.modes.push(vm);
+          return c;
+        }
+        if (vm === "r2v" && shotVideoRefs({ c }).length > vcap) {
+          counts.videoLacking += 1;
+          return c;
+        }
+        const v = selectedTakeView(c);
+        const keepAudio = !!(v && !v.settings);
+        if (keepAudio) counts.audioKept += 1;
+        const patch = {};
+        if (engineOf(c) !== engine) patch.videoModel = engine;
+        if (!!c.isPrivate !== want.isPrivate) patch.isPrivate = want.isPrivate;
+        if (!!c.videoHelper !== want.videoHelper) patch.videoHelper = want.videoHelper;
+        if (!keepAudio && !!c.audioGen !== want.audioGen) patch.audioGen = want.audioGen;
+        if (!keepAudio && (c.audioLanguage || "english") !== want.audioLanguage) patch.audioLanguage = want.audioLanguage;
+        if (!Object.keys(patch).length) return c;
+        counts.changed += 1;
+        anyCard = true;
+        return { ...c, ...patch };
+      });
+      if (!anyCard) return a;
+      anyAct = true;
+      return { ...a, cards };
+    });
+    return {
+      project: anyAct ? { ...project, acts } : project,
+      ...counts,
+      left: counts.imported + counts.modeLacking + counts.videoLacking
+    };
+  };
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
   var resolvedImage = (x, resolve) => x && (x.mediaId || resolve(x.thumbId, x.source)) || null;
@@ -1028,12 +1474,18 @@ var LoomBundle = (() => {
     return L.join("\n");
   };
   var shotPayload = (entry, project, imgSrc) => {
-    const c = entry.c;
-    const imgs = shotImageRefs(entry, project, imgSrc);
-    const vids = (c.refs || []).filter((r) => r.kind === "video" && isCatalogMediaId(r.source)).map((r) => r.source).slice(0, 3);
+    const engine = engineOf(entry.c);
+    const e = gatedEntry(entry);
+    const c = e.c;
+    const all = shotImageRefs(e, project, imgSrc);
+    const need = c.mode === "FLF" ? 2 : c.mode === "I2V" ? 1 : 0;
+    const frames = all.filter((x) => x.kind === "frame");
+    const imgs = need && (e !== entry || frames.length < need) ? frames : all;
+    const allVids = shotVideoRefs(e).map((r) => r.source);
+    const vids = allVids.slice(0, refCap(engine, "videos"));
     return {
       mode: c.mode,
-      prompt: shotText(entry, project, imgSrc),
+      prompt: shotText(e, project, imgSrc),
       images: imgs.map((x) => x.d),
       video_refs: vids,
       duration: c.duration,
@@ -1047,11 +1499,36 @@ var LoomBundle = (() => {
       // wrongly recorded "no channel field exists in the real backend contract").
       // Absent/false = Normal, matching the drawer's own default.
       is_private: !!c.isPrivate,
+      // The shot's engine, ALWAYS stated (issue #90): a blank one reached the server as
+      // "use the default", so every Loom price and render went out on V4.0 Lite whatever
+      // the drawer showed. engineOf never yields an id the roster does not list.
+      video_model: engine,
+      // The drawer's prompt-helper switch (i2vPro.usePromptsHelper on the server).
+      prompt_helper: !!c.videoHelper,
+      // Client-only, like hasInput (never fingerprinted, never POSTed): what the shot holds
+      // that this payload leaves out -- see the two comments above.
+      held: {
+        images: all.length - imgs.length,
+        videos: drawerModeFor(c.mode) === "r2v" ? allVids.length - vids.length : 0
+      },
       hasInput: imgs.length + vids.length > 0
     };
   };
+  var shotThumbIds = (entry, project) => {
+    const c = entry && entry.c || {};
+    const ids = [];
+    const add = (x) => {
+      const t = x && x.thumbId;
+      if (t && ids.indexOf(t) < 0) ids.push(t);
+    };
+    (project && project.assets || []).filter((as) => as && as.kind === "image" && (c.cast || []).includes(as.id)).forEach(add);
+    (c.refs || []).filter((r) => r && r.kind === "image").forEach(add);
+    add(c.openFrame);
+    add(c.closeFrame);
+    return ids;
+  };
   var shotSendBody = (payload, ids) => {
-    const { hasInput, ...sent } = payload || {};
+    const { hasInput, held, ...sent } = payload || {};
     const x = ids || {};
     return {
       ...sent,
@@ -1061,8 +1538,46 @@ var LoomBundle = (() => {
       ...x.expectFree ? { expect_free: true } : {}
     };
   };
-  var PRICE_FIELDS = ["mode", "images", "video_refs", "duration", "quality", "generate_audio", "audio_language"];
-  var priceFingerprint = (payload) => JSON.stringify(PRICE_FIELDS.map((k) => payload[k]));
+  var videoCapWords = (label, cap) => label + (cap === 0 ? " takes no video references" : " takes at most " + cap + " video reference" + (cap === 1 ? "" : "s"));
+  var shotSendProblem = (payload) => {
+    const p = payload || {};
+    const engine = engineId(p.video_model);
+    const label = engineLabel(engine);
+    const mode = String(p.mode || "").toUpperCase();
+    const imgs = (p.images || []).filter(Boolean).length;
+    const vids = (p.video_refs || []).filter(Boolean).length;
+    const auds = (p.audio_refs || []).filter(Boolean).length;
+    const held = p.held || {};
+    const cap = refCap(engine, "videos");
+    if ((mode === "I2V" || mode === "FLF") && !imgs && held.images > 0) {
+      return SHOT_LABEL[drawerModeFor(mode)] + (mode === "FLF" ? " needs a start and an end frame" : " needs a start frame") + "; its cast and reference pictures are never sent in place of " + (mode === "FLF" ? "them" : "it") + ". Nothing was sent.";
+    }
+    if (!imgs && !vids && !auds) {
+      return held.videos > 0 ? videoCapWords(label, cap) + ", and this shot has " + held.videos + ". Nothing was sent." : "";
+    }
+    const road = mode === "I2V" && imgs ? "i2v" : mode === "FLF" && imgs >= 2 ? "flf" : "r2v";
+    const allowed = MODEL_VMODES[engine] || ["i2v", "flf", "r2v"];
+    if (allowed.indexOf(road) < 0) {
+      if (road === "r2v" && (mode === "I2V" || mode === "FLF")) {
+        const own2 = SHOT_LABEL[drawerModeFor(mode)];
+        return own2 + (mode === "FLF" ? " needs a start and an end frame" : " needs a start frame") + "; without " + (mode === "FLF" ? "both" : "one") + " this shot goes out as Multi-Reference, which " + label + " doesn't have. Nothing was sent.";
+      }
+      return label + " has no " + SHOT_LABEL[road] + ", so this shot can't be sent as it is. Pick another engine or shot type for it. Nothing was sent.";
+    }
+    if (road === "r2v" && vids > cap) {
+      return videoCapWords(label, cap) + ", and this shot has " + vids + ". Nothing was sent.";
+    }
+    return "";
+  };
+  var heldVideoRefsLine = (payload) => {
+    const p = payload || {};
+    const n = p.held && p.held.videos || 0;
+    if (!(n > 0)) return "";
+    const engine = engineId(p.video_model);
+    return videoCapWords(engineLabel(engine), refCap(engine, "videos")) + ": " + n + (n === 1 ? " video reference on this shot is" : " video references on this shot are") + " held back, not sent and not deleted.";
+  };
+  var PRICE_FP_SKIP = ["prompt", "hasInput", "held"];
+  var priceFingerprint = (payload) => priceKey(payload, PRICE_FP_SKIP);
   var priceIsShort = (pr) => {
     if (!pr || pr.free) return false;
     if (pr.card_short === true) return true;
@@ -1563,7 +2078,7 @@ var LoomBundle = (() => {
     }
     return s.split(",");
   }).map((s) => s.trim()).filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
-  function friendlyGenErr(raw) {
+  function friendlyGenErr2(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
     let hint = "";
@@ -1587,7 +2102,7 @@ var LoomBundle = (() => {
       if (d.duration) out.duration = d.duration;
       return out;
     }
-    if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr(d.error || d.status || "failed") };
+    if (d.phase === "failed") return { phase: "failed", msg: friendlyGenErr2(d.error || d.status || "failed") };
     return { phase: "pending" };
   }
   function buildShotListText(project, fmt6, actLetter2, shotText2) {
@@ -2130,9 +2645,11 @@ ${"=".repeat(48)}
     return "Act " + actNumber + " \u2014 from " + (label === FROM_SELECTION ? label : "\u2756 " + label);
   };
   var shotsFromPictures = (pictures, opts = {}) => {
-    const { actNumber = 1, name = "", nonce = "", idFor } = opts;
+    const { actNumber = 1, name = "", nonce = "", idFor, inherit } = opts;
     const mk = typeof idFor === "function" ? idFor : (kind, i) => kind + "-" + i;
+    const settings = inherit ? shotSettingsOf(inherit) : {};
     const cards = (pictures || []).map((p, i) => newCardShape(mk("card", i), {
+      ...settings,
       mode: "I2V",
       duration: SHOT_SECONDS,
       status: "todo",
@@ -5442,7 +5959,7 @@ ${"=".repeat(48)}
     const word = (f) => Object.prototype.hasOwnProperty.call(ADJUSTED_WORDS, f) ? ADJUSTED_WORDS[f] : f;
     return (Array.isArray(list) ? list : []).map((a) => word(a && a.field) + " " + short(a && a.asked) + " \u2192 " + short(a && a.used)).join(", ");
   }
-  function friendlyGenErr2(raw) {
+  function friendlyGenErr3(raw) {
     const e = String(raw || "");
     const add = (hint) => e + " \u2014 " + hint;
     if (/insufficient|40300010|balance/i.test(e))
@@ -5684,312 +6201,6 @@ ${"=".repeat(48)}
   });
   var CostBadge_default = CostBadge;
 
-  // ../gallery/src/gen/priceProbeCore.js
-  var PRICE_KEY_SKIP = ["prompt", "negative", "seed"];
-  function priceKey(payload, skipKeys = PRICE_KEY_SKIP) {
-    if (!payload || typeof payload !== "object") return "";
-    const skip = skipKeys || [];
-    const keys = Object.keys(payload).filter((k) => skip.indexOf(k) === -1).sort();
-    return JSON.stringify(keys.map((k) => [k, payload[k]]));
-  }
-  function initialVerdict() {
-    return { settled: false, pricedKey: null, pendingTimer: false };
-  }
-  function scheduled() {
-    return { settled: false, pricedKey: null, pendingTimer: true };
-  }
-  function fired() {
-    return { settled: false, pricedKey: null, pendingTimer: false };
-  }
-  function settledFor(key) {
-    return { settled: true, pricedKey: key, pendingTimer: false };
-  }
-  function canSubmit(verdict, payload, skipKeys = PRICE_KEY_SKIP) {
-    return !!(verdict && verdict.settled && !verdict.pendingTimer && verdict.pricedKey != null && verdict.pricedKey === priceKey(payload, skipKeys));
-  }
-  function shouldShortCircuit(verdict, payload, force, skipKeys = PRICE_KEY_SKIP) {
-    if (force) return false;
-    return !!(verdict && verdict.settled && verdict.pricedKey != null && !verdict.pendingTimer && verdict.pricedKey === priceKey(payload, skipKeys));
-  }
-  var PRICE_DEBOUNCE_MS = 250;
-  var PRICE_FETCH_TIMEOUT_MS = 25e3;
-
-  // ../gallery/src/gen/videoDrawerCore.js
-  var MODELS = [
-    { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
-    { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
-    // The version titles PixAI returns for these two ids (PROBE_2026-09-26 V01). tbkv1.0 prices
-    // at 2,380/s on the wire against 4,200+/s for tbkv1.0.1 -- hence its 'cheap' chip.
-    { value: "tbkv1.0.1", label: "Tsubaki Video", caps: ["multi-ref", "audio", "15s", "end-frame"] },
-    { value: "tbkv1.0", label: "Tsubaki Video Flash", caps: ["multi-ref", "audio", "15s", "end-frame", "cheap"] },
-    { value: "v3.2", label: "V3.2", caps: ["audio", "prompt-following"] },
-    { value: "v3.0.2", label: "V3.0 Lite", caps: ["complex motion", "cheap"] },
-    { value: "v3.0", label: "V3.0 (High Consistency)", caps: ["high-consistency", "action presets", "start/end"] },
-    { value: "v3.0.1", label: "V3.0 Flash", caps: ["multi-shot", "hires", "fastest", "no card"] },
-    { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
-  ];
-  var DEFAULT_MODEL = "v4.0.1";
-  var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
-  function cardClaim(v) {
-    const c = MODEL_CARD[v];
-    return c === false ? "never card-covered" : c === null ? "card coverage checked at price time" : "V4.0 cards apply";
-  }
-  var CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
-  function modelCaps(v) {
-    const m = MODELS.find((x) => x.value === v);
-    const caps = (m ? m.caps : []).map((c) => [c, CAP_KIND[c] || ""]);
-    if (v === DEFAULT_MODEL) caps.push(["default", "hot"]);
-    return caps;
-  }
-  function modelMeta(v) {
-    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + cardClaim(v);
-  }
-  var SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
-  var MODEL_VMODES = {
-    "v4.0": ["i2v", "flf", "r2v"],
-    "v4.0.1": ["i2v", "flf", "r2v"],
-    "tbkv1.0.1": ["i2v", "flf", "r2v"],
-    "tbkv1.0": ["i2v", "flf", "r2v"],
-    "v3.2": ["i2v", "flf"],
-    "v3.0.2": ["i2v", "flf"],
-    "v3.0": ["i2v", "flf"],
-    "v3.0.1": ["i2v"],
-    "v2.7": ["i2v"]
-  };
-  var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15, "tbkv1.0": 15, "tbkv1.0.1": 15 };
-  var MODEL_DURATIONS = { "tbkv1.0": [5, 10, 15], "tbkv1.0.1": [5, 10, 15] };
-  function durationsFor(model) {
-    return MODEL_DURATIONS[model] || DURATIONS;
-  }
-  function durationAllowed(model, d) {
-    return durationsFor(model).indexOf(+d) >= 0 && +d <= (MODEL_MAXDUR[model] || 10);
-  }
-  var MODEL_FIELDS = {
-    "tbkv1.0": { negative: false, camera: false },
-    "tbkv1.0.1": { negative: false, camera: false }
-  };
-  function modelTakes(model, field) {
-    const f = MODEL_FIELDS[model];
-    return !f || f[field] !== false;
-  }
-  var MODEL_REFCAPS = {
-    "tbkv1.0": { images: 6, videos: 0, audios: 3 },
-    "tbkv1.0.1": { images: 6, videos: 0, audios: 3 }
-  };
-  var DEFAULT_REFCAPS = { images: 6, videos: 3, audios: 1 };
-  function refCap(model, kind) {
-    const c = MODEL_REFCAPS[model];
-    return c && c[kind] != null ? c[kind] : DEFAULT_REFCAPS[kind];
-  }
-  var MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
-  var MODE_PH = {
-    i2v: "Describe the motion \u2014 \u2018slow cinematic pan right, gentle waves\u2026\u2019",
-    flf: "Describe the transition from start frame to end frame\u2026",
-    r2v: "Type @image1 / @video1 / @audio1 to cite a ref \u2014 it becomes a chip \u2014 \u2018the girl from @image1 dances to @audio1\u2026\u2019"
-  };
-  var CHANNEL_CAP = {
-    normal: "Please keep creations SFW",
-    enhanced: "\u{1F451} Private \u2014 when selected, your generated works cannot be published"
-  };
-  var CAMERA_OPTS = [
-    ["unset", "Unset"],
-    ["horizontal", "Horizontal"],
-    ["pan", "Pan"],
-    ["roll", "Roll"],
-    ["tilt", "Tilt"],
-    ["vertical-pan", "Vertical pan"],
-    ["zoom", "Zoom"]
-  ];
-  var AUDIO_LANGS = [
-    ["english", "English"],
-    ["japanese", "Japanese"],
-    ["chinese", "Chinese"],
-    ["korean", "Korean"],
-    ["none", "SE only (no dialogue)"]
-  ];
-  var VIDEO_RATIOS = ["adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"];
-  var RATIO_MODELS = { "tbkv1.0": true, "tbkv1.0.1": true };
-  var ratioLabel = (r) => r === "adaptive" || !r ? "Auto" : r;
-  function ratioOffered(s) {
-    return !!(s && s.mode === "r2v" && RATIO_MODELS[s.model]);
-  }
-  function ratioForPayload(s) {
-    const r = s && s.ratio;
-    return ratioOffered(s) && r && r !== "adaptive" && VIDEO_RATIOS.indexOf(r) >= 0 ? r : "";
-  }
-  var DURATIONS = [5, 6, 10, 15];
-  function snapDuration(d, model) {
-    d = Number(d);
-    if (!isFinite(d)) return 5;
-    const set2 = model ? durationsFor(model) : DURATIONS;
-    return set2.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
-  }
-  function refItem(r) {
-    const mid = String(r.media_id || r.mid);
-    return { media_id: mid, thumb: r.thumb || "/thumbs/" + mid + ".jpg", is_nsfw: !!r.is_nsfw };
-  }
-  function primaryBank(s) {
-    return s.mode === "r2v" ? s.imgSlots : s.slots;
-  }
-  function setPrimaryBank(s, arr) {
-    if (s.mode === "r2v") s.imgSlots = arr;
-    else s.slots = arr;
-  }
-  function bankView(arr, max) {
-    const filled = [];
-    let hole = -1;
-    (arr || []).forEach((item, index) => {
-      if (item && item.media_id) filled.push({ item, index });
-      else if (hole < 0) hole = index;
-    });
-    const nextIndex = filled.length >= max ? -1 : hole >= 0 ? hole : (arr || []).length;
-    return { filled, nextIndex };
-  }
-  function heldList(s) {
-    const imgs = s.imgSlots.filter((x) => x && x.media_id).length;
-    const vids = s.vidSlots.filter((x) => x && x.media_id).length;
-    const held = [];
-    if (imgs) held.push(imgs + (imgs === 1 ? " image ref" : " image refs"));
-    if (vids) held.push(vids + (vids === 1 ? " video ref" : " video refs"));
-    if (s.audSlot && s.audSlot.media_id) held.push("the audio ref");
-    return held;
-  }
-  function heldRefsNotice(s, _m) {
-    const held = heldList(s);
-    if (!held.length) return "";
-    return "Still held for Multi-Reference: " + held.join(", ") + ". Nothing was deleted.";
-  }
-  function applyMode(s, m, userDriven) {
-    const from = s.mode;
-    s.mode = m;
-    if (m === "i2v") s.slots = [s.slots[0] || null];
-    else if (m === "flf") s.slots = [s.slots[0] || null, s.slots[1] || null];
-    else {
-      if (!s.imgSlots.length) s.imgSlots = [null];
-      if (!s.vidSlots.length) s.vidSlots = [null];
-    }
-    s.modeNote = userDriven && from === "r2v" && m !== "r2v" ? heldRefsNotice(s, m) : "";
-  }
-  var NO_VIDEO_REFS_NOTE = " takes no video references.";
-  function applyModelGating(s, userDriven) {
-    const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-    if (allowed.indexOf(s.mode) === -1) {
-      const from = s.mode, to = allowed[allowed.length - 1];
-      applyMode(s, to, userDriven);
-      if (userDriven) {
-        const m = MODELS.find((x) => x.value === s.model);
-        const held = heldList(s);
-        s.modeNote = (m ? m.label : s.model) + " has no " + (SHOT_LABEL[from] || from) + ", so the shot mode switched to " + SHOT_LABEL[to] + "." + (held.length ? " Still held: " + held.join(", ") + ". Nothing was deleted." : "");
-      }
-    }
-    const maxDur = MODEL_MAXDUR[s.model] || 10;
-    if (s.duration > maxDur) s.duration = maxDur;
-    if (!durationAllowed(s.model, s.duration)) s.duration = snapDuration(s.duration, s.model);
-    const heldVids = (s.vidSlots || []).filter((x) => x && x.media_id).length;
-    if (s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
-      const m = MODELS.find((x) => x.value === s.model);
-      s.modeNote = (m ? m.label : s.model) + NO_VIDEO_REFS_NOTE + " Still held: " + heldVids + (heldVids === 1 ? " video ref" : " video refs") + ". Nothing was deleted.";
-    } else if (userDriven && s.modeNote && s.modeNote.indexOf(NO_VIDEO_REFS_NOTE) >= 0) {
-      s.modeNote = "";
-    }
-  }
-  function applySetRefs(s, refs) {
-    if (!Array.isArray(refs)) return;
-    refs = refs.slice(0, 6);
-    if (refs.length > 1) applyMode(s, "r2v");
-    const slots = refs.map(refItem);
-    if (refs.length > 1) setPrimaryBank(s, slots);
-    else if (s.mode === "r2v") setPrimaryBank(s, [slots[0] || null]);
-    else s.slots[0] = slots[0] || null;
-  }
-  function applyPrefill(s, o) {
-    o = o || {};
-    s.modeNote = "";
-    s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : "adaptive";
-    if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
-    if (o.video_model != null) s.model = o.video_model;
-    if (o.duration != null) s.duration = snapDuration(o.duration);
-    if (o.quality != null) s.quality = o.quality;
-    if (o.is_private != null) s.channel = o.is_private ? "enhanced" : "normal";
-    if (o.audio != null) s.audioGen = !!o.audio;
-    if (o.audio_language != null) s.audioLanguage = o.audio_language;
-    if (o.prompt_helper != null) s.videoHelper = !!o.prompt_helper;
-    if (o.negative != null) s.negative = o.negative;
-    if (o.camera != null) s.camera = o.camera;
-    const imgList = Array.isArray(o.images) ? o.images : Array.isArray(o.refs) ? o.refs : null;
-    if (imgList && s.mode === "flf" && imgList.length <= 2) {
-      const flfSlots = imgList.map((r) => r ? refItem(r) : null);
-      s.slots = [flfSlots[0] || null, flfSlots[1] || null];
-    } else {
-      if (o.refs) applySetRefs(s, o.refs);
-      if (o.images) applySetRefs(s, o.images);
-    }
-    if (Array.isArray(o.video_refs)) s.vidSlots = o.video_refs.slice(0, 3).map(refItem);
-    if (o.audio_ref !== void 0) s.audSlot = o.audio_ref ? { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || "audio ref" } : null;
-    applyModelGating(s);
-    return { setPrompt: o.prompt != null ? o.prompt : null };
-  }
-  function buildPayload(s, promptText2) {
-    const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
-    const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos")) : [];
-    const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
-    const ratio = ratioForPayload(s);
-    return {
-      mode: s.mode.toUpperCase(),
-      prompt: promptText2 || "",
-      // An engine without the field gets '' / 'unset' (MODEL_FIELDS); the typed text stays in
-      // the box (s.negative / s.camera untouched), it is just not sent.
-      negative: modelTakes(s.model, "negative") ? (s.negative || "").trim() : "",
-      images,
-      video_refs,
-      audio_refs,
-      duration: +s.duration,
-      audio: s.audioGen,
-      video_model: s.model,
-      camera_movement: s.mode !== "r2v" ? modelTakes(s.model, "camera") ? s.camera : "unset" : "",
-      quality: s.quality,
-      audio_language: s.audioLanguage,
-      is_private: s.channel === "enhanced",
-      // The DC's 'Video prompt helper' switch (DC 2921, off by default -- the opposite of image
-      // gen). Rides the payload -> i2vPro.usePromptsHelper on the server (I2V/FLF only; the
-      // verified referenceVideo shape has no such field), and so lives in priceKey like every
-      // other submitted field.
-      prompt_helper: !!s.videoHelper,
-      // The Tsubaki Multi-Reference aspect ratio -> referenceVideo.ratio. Only when offered and
-      // not Auto; ABSENT otherwise, so every other video payload is byte-identical to before.
-      ...ratio ? { ratio } : {}
-    };
-  }
-  function hasAnyRef(p) {
-    return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
-  }
-  function flfMissingStart(s) {
-    return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
-  }
-  function linesShown(results, { dock, loom, shot } = {}) {
-    const rs = Array.isArray(results) ? results : [];
-    if (dock) return rs.filter((l) => l && l.kind === "error");
-    if (loom) return rs.filter((l) => l && (l.shot || "") === (shot || ""));
-    return rs;
-  }
-  function friendlyGenErr3(raw) {
-    const s = String(raw || "");
-    if (!s) return "generation failed";
-    let hint = "";
-    if (/insufficient|INSUFFICIENT_BALANCE|40300010/i.test(s)) {
-      hint = "Out of balance for this model \u2014 no free card matched and credits are 0. Claim your daily rewards, or pick a card-covered model.";
-    } else if (/maxLength|too long|exceeds maximum/i.test(s)) {
-      hint = "That prompt is too long for video \u2014 PixAI allows 2000 characters. Trim it and resubmit; nothing was created or charged.";
-    } else if (/image contains (sensitive|nsfw|prohibited)|NSFW_DETECTED|40300032/i.test(s)) {
-      hint = "PixAI refused the SOURCE IMAGE on content grounds, not the prompt \u2014 rewriting the text will not help. Try a different frame.";
-    } else if (/moderat|content.?polic|flagged|nsfw/i.test(s) || /prohibit|sensitive|not.?allowed|violat/i.test(s) && /content|prompt|polic|guideline|term|image/i.test(s)) {
-      hint = "PixAI's content filter blocked this generation \u2014 that's decided on PixAI's side, not here.";
-    } else if (/inferenceProfile|i2vPro[./]mode|unknown mode/i.test(s)) {
-      hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
-    }
-    return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
-  }
-
   // ../gallery/src/gen/priceRequest.js
   async function requestPrice(payload, { timeoutMs = PRICE_FETCH_TIMEOUT_MS, signal } = {}) {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -6133,7 +6344,7 @@ ${"=".repeat(48)}
     }
     if (onAnswer) onAnswer({ threw: false, status, body: d });
     if (d.error || !d.task_id) {
-      emit7({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
+      emit7({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
       return null;
     }
     const adj = adjustedText(d.adjusted);
@@ -6168,7 +6379,7 @@ ${"=".repeat(48)}
       } else if (phase === "failed") {
         emit7({
           kind: "err",
-          text: friendlyGenErr2(data2.error || data2.reason || data2.status || "failed")
+          text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
         emit7({
@@ -6581,6 +6792,17 @@ ${"=".repeat(48)}
       st.current.model = v;
       applyModelGating2(true);
       reprice();
+      emit7("mg-model-commit", { model: v, duration: st.current.duration });
+    };
+    const requestApplyAll = () => {
+      const c = st.current;
+      emit7("mg-apply-all-request", {
+        model: c.model,
+        isPrivate: c.channel === "enhanced",
+        audioGen: !!c.audioGen,
+        audioLanguage: c.audioLanguage,
+        videoHelper: !!c.videoHelper
+      });
     };
     const pickRatio = (r) => {
       if (st.current.ratio === r || VIDEO_RATIOS.indexOf(r) < 0) return;
@@ -6701,7 +6923,7 @@ ${"=".repeat(48)}
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
           emit7("mg-result", tag({ media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit }, true));
         } else if (phase === "failed") {
-          const msg = friendlyGenErr3(d.error || "task " + (d.status || "failed"));
+          const msg = friendlyGenErr(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
           emit7("mg-error", tag({ error: msg }, true));
         } else if (phase === "stalled") {
@@ -7005,7 +7227,16 @@ ${"=".repeat(48)}
         /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engdot" }),
         /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-englabel" }, m.label)
       );
-    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modelMeta(s.model)), modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "MODE & CHANNEL"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
+    })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engmeta" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, modelMeta(s.model)), modelCaps(s.model).map(([t, kind]) => /* @__PURE__ */ react_global_shim_default.createElement("span", { key: t, className: "mgd-cap" + (kind ? " " + kind : "") }, t))), loomCtx ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgd-applyall",
+        onClick: requestApplyAll,
+        title: "Copy this engine, the channel, audio and its language, and the prompt helper to every shot"
+      },
+      "Use these settings for every shot"
+    ) : null), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "120ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "MODE & CHANNEL"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg mgd-quality-wrap", role: "radiogroup", "aria-label": "Mode" }, [["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.quality === v, className: "mgd-quality" + (s.quality === v ? " on" : ""), onClick: () => {
       if (st.current.quality === v) return;
       st.current.quality = v;
       rerender();
@@ -7015,6 +7246,7 @@ ${"=".repeat(48)}
       st.current.channel = v;
       rerender();
       reprice();
+      emit7("mg-channel-commit", { isPrivate: v === "enhanced" });
     } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, CHANNEL_CAP[s.channel]), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
@@ -7038,6 +7270,7 @@ ${"=".repeat(48)}
           st.current.videoHelper = e.target.checked;
           rerender();
           reprice();
+          emit7("mg-helper-commit", { videoHelper: e.target.checked });
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Video prompt helper")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement(
@@ -13305,6 +13538,35 @@ ${"=".repeat(48)}
   function newCard(extra = {}) {
     return newCardShape(uid(), extra);
   }
+  function applyAllQuestion(s, r) {
+    const langId = s.audioLanguage || "english";
+    const lang = (AUDIO_LANGS.find(([v]) => v === langId) || [langId, langId])[1];
+    const n = r.shots, k = r.left;
+    const why = [
+      r.imported ? "imported" : "",
+      r.modeLacking ? "their engine has no " + r.modes.map((m) => SHOT_LABEL[m] || m).join(" or ") : "",
+      r.videoLacking ? r.videoCap === 0 ? "their engine takes no video references" : "their engine takes at most " + r.videoCap + " video references" : ""
+    ].filter(Boolean).join(", or ");
+    return "Use " + engineLabel(s.videoModel != null ? s.videoModel : s.model) + ", " + (s.isPrivate ? "Private" : "Normal") + ", audio " + (s.audioGen ? "on (" + lang + ")" : "off") + ", helper " + (s.videoHelper ? "on" : "off") + " for all " + n + " shot" + (n === 1 ? "" : "s") + "?" + (k > 0 ? " " + k + (k === 1 ? " shot is left as it is (" : " shots are left as they are (") + why + ")." : "");
+  }
+  function sentEngineFields(payload, c) {
+    const p = payload || {}, x = c || {};
+    return {
+      videoModel: p.video_model != null ? p.video_model : x.videoModel,
+      isPrivate: p.is_private != null ? !!p.is_private : !!x.isPrivate,
+      videoHelper: p.prompt_helper != null ? !!p.prompt_helper : !!x.videoHelper
+    };
+  }
+  function batchEngineLine(payloads) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const p of payloads) {
+      const l = engineLabel(p && p.video_model);
+      counts.set(l, (counts.get(l) || 0) + 1);
+    }
+    const rows = [...counts.entries()].sort((x, y) => y[1] - x[1]);
+    if (rows.length <= 1) return rows.length ? "Engine: " + rows[0][0] : "";
+    return "Engines: " + rows.map(([l, n]) => n + " on " + l).join(", ");
+  }
   function seedProject() {
     return {
       name: "Untitled storyboard",
@@ -14394,6 +14656,8 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }, 340);
     };
     const closeRightPanel = () => {
+      flushDrawerPrompt(genDrawerRef.current, lastActiveIdRef.current);
+      promptDirtyRef.current = false;
       setRightClosing(true);
       clearTimeout(rightCloseTimer.current);
       rightCloseTimer.current = setTimeout(() => {
@@ -14550,13 +14814,18 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const promptDirtyRef = useRef2(false);
     const drawerHostRef = useRef2(beginDrawerRender);
     drawerHostRef.current = beginDrawerRender;
+    const applyAllRef = useRef2(() => {
+    });
     const loomTargetRef = useRef2(null);
     const drawerBusyRef = useRef2(false);
     const lastActiveIdRef = useRef2(null);
+    const [drawerEpoch, setDrawerEpoch] = useState2(0);
     const bindGenDrawer = useCallback2((el) => {
       genDrawerRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
+        promptDirtyRef.current = false;
+        setDrawerEpoch((n) => n + 1);
         if (el.setHost) el.setHost({ beforeSend: (req) => drawerHostRef.current(req) });
         if (el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
         if (el.setBusy) el.setBusy(drawerBusyRef.current);
@@ -14567,7 +14836,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           const a = activeRef.current;
           if (!a) return;
           const vmode = e.detail.vmode;
-          const apply = (c) => drawerModeFor(c.mode) === vmode ? c : setShotMode(c, cardModeForVmode(vmode));
+          const apply = (c) => drawerModeFor2(c.mode) === vmode ? c : setShotMode(c, cardModeForVmode2(vmode));
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
         el.addEventListener("mg-duration-commit", (e) => {
@@ -14584,6 +14853,30 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           const apply = (c) => ({ ...c, audioGen, audioLanguage });
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
         });
+        el.addEventListener("mg-model-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const model = String(e.detail.model || "");
+          const apply = (c) => {
+            const g = gatedShot(drawerModeFor2(c.mode), e.detail.duration, model);
+            const next = { ...c, videoModel: model, duration: g.duration };
+            return g.mode === drawerModeFor2(c.mode) ? next : setShotMode(next, cardModeForVmode2(g.mode));
+          };
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-channel-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const apply = (c) => ({ ...c, isPrivate: !!e.detail.isPrivate });
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-helper-commit", (e) => {
+          const a = activeRef.current;
+          if (!a) return;
+          const apply = (c) => ({ ...c, videoHelper: !!e.detail.videoHelper });
+          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
+        });
+        el.addEventListener("mg-apply-all-request", (e) => applyAllRef.current(e.detail));
         el.addEventListener("mg-pick-request", (e) => {
           const { slot, bank, mode: reqMode } = e.detail;
           if (bank === "primary" && reqMode === "r2v") {
@@ -14647,7 +14940,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           const text = e.detail.text;
           const already = !!a.c.promptOverride;
           const resolve = (thumbId, source) => thumbId ? thumbsRef.current[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
-          const composed = already ? null : shotText(a, projectRef.current, resolve);
+          const composed = already ? null : shotText(gatedEntry(a), projectRef.current, resolve);
           if (!already && text === composed) return;
           const apply = (c) => setPromptOverride(c, text);
           a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
@@ -14682,6 +14975,16 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     activeRef.current = active;
     loomTargetRef.current = projectApi.activeId ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
     drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
+    applyAllRef.current = (detail) => {
+      const proj = projectRef.current;
+      const r = applySettingsToAllCards(proj, detail);
+      if (!r.shots) return;
+      if (!window.confirm(applyAllQuestion(detail, r))) return;
+      proj.acts.forEach((a, ai) => (a.cards || []).forEach((c, ci) => {
+        if (r.project.acts[ai].cards[ci] === c) return;
+        setCard(a.id, c.id, (cur2) => applySettingsToAllCards({ acts: [{ id: a.id, cards: [cur2] }] }, detail).project.acts[0].cards[0]);
+      }));
+    };
     const [editSub, setEditSub] = useState2("edit");
     const [fixTag, setFixTag] = useState2("face");
     const [fixBoxes, setFixBoxes] = useState2([]);
@@ -14852,11 +15155,11 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       const t = setTimeout(() => priceInto(refCostRef, { mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }), 250);
       return () => clearTimeout(t);
     }, [refMidsKey, active.c.id, active.c.refPrompt]);
-    const drawerModeFor = (m) => {
+    const drawerModeFor2 = (m) => {
       const u = (m || "R2V").toUpperCase();
       return u === "FLF" ? "flf" : u === "I2V" ? "i2v" : "r2v";
     };
-    const cardModeForVmode = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
+    const cardModeForVmode2 = (v) => v === "flf" ? "FLF" : v === "i2v" ? "I2V" : "R2V";
     const weaveSelIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const weavePrevEntry = weaveSelIdx > 0 ? entries[weaveSelIdx - 1] : null;
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
@@ -14874,35 +15177,42 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       }
       return `No picture resolved on ${code} \u2014 nothing to number`;
     };
+    const flushDrawerPrompt = (el, outId) => {
+      if (!el || !outId || !el.flushPromptEdit) return;
+      const pending3 = el.flushPromptEdit();
+      if (pending3 == null) return;
+      const isDraft = outId === "__draft__";
+      const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
+      if (!outEntry) return;
+      const already = !!outEntry.c.promptOverride;
+      const composed = already ? null : shotText(gatedEntry(outEntry), project, imgSrc);
+      if (already || pending3 !== composed) {
+        const apply = (c) => setPromptOverride(c, pending3);
+        isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
+      }
+    };
+    const shotThumbKey = shotThumbIds(active, project).map((id) => thumbs[id] ? "1" : "0").join("");
     useEffect2(() => {
       const el = genDrawerRef.current;
       if (!el || tab !== "Video") return;
-      if (lastActiveIdRef.current !== active.c.id) {
-        if (lastActiveIdRef.current) {
-          const pending3 = el.flushPromptEdit();
-          if (pending3 != null) {
-            const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
-            const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
-            if (outEntry) {
-              const already = !!outEntry.c.promptOverride;
-              const composed = already ? null : shotText(outEntry, project, imgSrc);
-              if (already || pending3 !== composed) {
-                const apply = (c) => setPromptOverride(c, pending3);
-                isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
-              }
-            }
-          }
-        }
+      const sameShot = lastActiveIdRef.current === active.c.id;
+      if (!sameShot) {
+        flushDrawerPrompt(el, lastActiveIdRef.current);
         promptDirtyRef.current = false;
         lastActiveIdRef.current = active.c.id;
       }
-      const nextMode = drawerModeFor(active.c.mode);
+      const sent = gatedEntry(active);
+      const nextMode = drawerModeFor2(sent.c.mode);
       const payload = {
         mode: nextMode,
         duration: active.c.duration,
         audio: !!active.c.audioGen,
         audio_language: active.c.audioLanguage || "english",
         quality: project.draft ? "basic" : "professional",
+        video_model: engineOf(active.c),
+        is_private: !!active.c.isPrivate,
+        prompt_helper: !!active.c.videoHelper,
+        same_shot: sameShot,
         images: [],
         video_refs: [],
         audio_ref: null
@@ -14917,13 +15227,13 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       } else if (nextMode === "r2v") {
         const sp = shotPayload(active, project, imgSrc);
         payload.images = sp.images.map(asRef);
-        const vids = (sp.video_refs || []).map(asRef);
+        const vids = shotVideoRefs(active).slice(0, 3).map((r) => asRef(r.source));
         if (active.c.connect === "extend" && weavePrevEntry && weavePrevEntry.c.resultMid) {
           vids.push({ media_id: weavePrevEntry.c.resultMid, thumb: "/thumbs/" + weavePrevEntry.c.resultMid + ".jpg" });
         }
         payload.video_refs = vids;
       }
-      if (!promptDirtyRef.current) payload.prompt = shotText(active, project, imgSrc);
+      if (!promptDirtyRef.current) payload.prompt = shotText(sent, project, imgSrc);
       el.prefill(payload);
     }, [
       active.c.id,
@@ -14940,6 +15250,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       active.c.cast,
       active.c.refs,
       project.assets,
+      // The shot's engine, Channel and helper (issue #90): a commit from the drawer causes
+      // exactly ONE echo prefill, which re-syncs the bank and mode after a mode-forcing pick.
+      active.c.videoModel,
+      active.c.isPrivate,
+      active.c.videoHelper,
+      // A NEW drawer node (G2: every open of the right panel) and this shot's own thumbnails
+      // landing (G) -- see drawerEpoch and shotThumbKey above.
+      drawerEpoch,
+      shotThumbKey,
       // The FRAMES' IDENTITY fields (2026-07-27, closing-frame pass). Every branch above
       // reads c.openFrame/c.closeFrame -- i2v/flf feed them to the drawer directly, r2v
       // through buildShotPayload() -- yet no frame field was a dependency, so attaching or
@@ -15397,7 +15716,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
         } })), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t)))))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
           promptDirtyRef.current = false;
-          const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
+          const composed = shotText(gatedEntry({ ...active, c: { ...active.c, promptOverride: false } }), project, imgSrc);
           active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
           if (genDrawerRef.current) genDrawerRef.current.prefill({ prompt: composed });
         } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
@@ -16140,7 +16459,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           if (pending3 != null && activeRef.current) {
             const a = activeRef.current;
             const already = !!a.c.promptOverride;
-            const composed = already ? null : shotText(a, project, imgSrc);
+            const composed = already ? null : shotText(gatedEntry(a), project, imgSrc);
             if (already || pending3 !== composed) {
               const patchedCard = setPromptOverride(a.c, pending3);
               liveEntries = entries.map((e) => e.c.id === a.c.id ? { ...e, c: patchedCard } : e);
@@ -17478,7 +17797,11 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       dfLive && (dfLive.c.openFrame || {}).source,
       dfLive && (dfLive.c.closeFrame || {}).mediaId,
       dfLive && (dfLive.c.closeFrame || {}).thumbId,
-      dfLive && (dfLive.c.closeFrame || {}).source
+      dfLive && (dfLive.c.closeFrame || {}).source,
+      // The shot's engine, Channel and helper all ride the priced payload (issue #90).
+      dfLive && dfLive.c.videoModel,
+      dfLive && dfLive.c.isPrivate,
+      dfLive && dfLive.c.videoHelper
     ]);
     const genSubmit = async () => {
       if (!dfLive || genSubmitting) return;
@@ -18694,7 +19017,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           placeholder: "cut, dissolve",
           onChange: (ev) => dfPatch((cc) => ({ ...cc, transOut: ev.target.value }))
         }
-      ), genPalFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lm-genrefline" }, (c.cast || []).length, " cast \xB7 ", (c.refs || []).length, " refs", !modeSendsRefs(c.mode) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), modeSendsLine(c.mode))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, showClose ? "Start / end frame" : "Start frame"), /* @__PURE__ */ React.createElement("div", { className: "lm-genframerow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.openFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.openFrame), alt: "opening frame" }) : frameGone(c.openFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "openFrame") || "\u2014"))), showClose && /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.closeFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.closeFrame), alt: "closing frame" }) : frameGone(c.closeFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "closeFrame") || "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "frames are attached on Shot Detail \u2014 this is a preview only"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "What will be sent"), /* @__PURE__ */ React.createElement("div", { className: "lm-genpreview" }, shotText(dfLive, project, imgSrc)), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Model"), /* @__PURE__ */ React.createElement("div", { className: "lm-genmodelrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-genmodelthumb" }), "PixAI Motion v2"), /* @__PURE__ */ React.createElement("div", { className: "lm-gencaps" }, ["15s", "multi-ref", "audio", "end-frame"].map((cap) => /* @__PURE__ */ React.createElement("span", { key: cap, className: "lm-gencap" }, cap))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Channel"), /* @__PURE__ */ React.createElement(
+      ), genPalFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lm-gentermpal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lm-genchip", onClick: () => dfPatch((cc) => ({ ...cc, transOut: t })) }, t))))), /* @__PURE__ */ React.createElement("div", { className: "lm-genrefline" }, (c.cast || []).length, " cast \xB7 ", (c.refs || []).length, " refs", !modeSendsRefs(c.mode) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("br", null), modeSendsLine(c.mode))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, showClose ? "Start / end frame" : "Start frame"), /* @__PURE__ */ React.createElement("div", { className: "lm-genframerow" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.openFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.openFrame), alt: "opening frame" }) : frameGone(c.openFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "openFrame") || "\u2014"))), showClose && /* @__PURE__ */ React.createElement("div", { className: "lm-genframecol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-genframe" }, frameSrc(c.closeFrame) ? /* @__PURE__ */ React.createElement("img", { src: frameSrc(c.closeFrame), alt: "closing frame" }) : frameGone(c.closeFrame, frameFix) ? FRAME_GONE_TEXT : "no frame", /* @__PURE__ */ React.createElement("span", { className: "lm-genframetag" }, positionTag(dfLive, project, imgSrc, "closeFrame") || "\u2014")))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, "frames are attached on Shot Detail \u2014 this is a preview only"), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "What will be sent"), /* @__PURE__ */ React.createElement("div", { className: "lm-genpreview" }, shotText(dfLive, project, imgSrc)), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab", style: { marginTop: 12 } }, "Model"), /* @__PURE__ */ React.createElement("div", { className: "lm-genmodelrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-genmodelthumb" }), engineLabel(engineOf(c))), /* @__PURE__ */ React.createElement("div", { className: "lm-gencaps" }, ((MODELS.find((m) => m.value === engineOf(c)) || {}).caps || []).map((cap) => /* @__PURE__ */ React.createElement("span", { key: cap, className: "lm-gencap" }, cap))), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Channel"), /* @__PURE__ */ React.createElement(
         "select",
         {
           className: "lm-gensel",
@@ -19594,7 +19917,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         if (!p) return p;
         const act = shotsFromPictures(
           pics.map((id) => ({ id, prompt: facts[id] && facts[id].prompt || "" })),
-          { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid() }
+          { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid(), inherit: inheritSourceCard(p, null) }
         );
         const res = appendShotsAct(p, act);
         added = res.added;
@@ -19704,9 +20027,9 @@ Your currently-open board is left untouched.`)) return;
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
     const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
     const addCard = (aId) => {
-      const c = newCard();
-      setProject((p) => appendCardToAct(p, aId, c));
-      setOpen2((o) => ({ ...o, [c.id]: true }));
+      const id = uid();
+      setProject((p) => appendCardToAct(p, aId, newCardShape(id, inheritedShotSettings(inheritSourceCard(p, aId)))));
+      setOpen2((o) => ({ ...o, [id]: true }));
     };
     const importFootage = (mediaId, duration) => {
       const c = newCard(importedFootagePatch(mediaId, duration));
@@ -20224,13 +20547,24 @@ Generate anyway?`);
     };
     const askShotSpend = async (p) => {
       const pr = await priceBody(p);
+      const shot = `${engineLabel(p.video_model)} shot`;
+      const heldLine = heldVideoRefsLine(p);
+      const held = heldLine ? `
+
+${heldLine}` : "";
       if (pr && !pr.free && pr.cost != null) {
-        const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
-        if (!window.confirm(`${line}
+        const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}${shot}`) : `No free card covers this ${shot} \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
+        if (!window.confirm(`${line}${held}
 
 Generate anyway?`)) return { go: false };
       } else if (!pr || !pr.free) {
-        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { go: false };
+        if (!window.confirm(`Couldn't verify this ${shot}'s cost or free-card coverage \u2014 it may spend credits.${held}
+
+Generate anyway?`)) return { go: false };
+      } else if (heldLine) {
+        if (!window.confirm(`A free card covers this ${shot}.${held}
+
+Generate anyway?`)) return { go: false };
       }
       const quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
       const expectFree = !!(pr && pr.free);
@@ -20259,6 +20593,11 @@ Generate anyway?`)) return { go: false };
         const fresh = cardOn(cardId);
         const c = fresh.c;
         const p = shotPayload(fresh, proj, imgSrc);
+        const problem = shotSendProblem(p);
+        if (problem) {
+          holdCard(c.id, problem);
+          return { ok: false, reason: "engine-refused" };
+        }
         if (!p.hasInput) {
           const msg = c.imported ? 'Imported footage \u2014 nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via "Use an existing video instead".' : "attach a frame or cast image first";
           setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
@@ -20269,7 +20608,21 @@ Generate anyway?`)) return { go: false };
           return { ok: false, reason: "imported-picture" };
         }
         if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
-        const settings = snapshotSettings(c, proj, p.prompt, p.quality);
+        const settings = snapshotSettings(
+          {
+            ...c,
+            mode: p.mode,
+            duration: p.duration,
+            audioGen: p.generate_audio,
+            audioLanguage: p.audio_language,
+            videoModel: p.video_model,
+            isPrivate: p.is_private,
+            videoHelper: p.prompt_helper
+          },
+          proj,
+          p.prompt,
+          p.quality
+        );
         let quote = opts.quote || null;
         let expectFree = !!opts.expectFree;
         if (!opts.skipConfirm) {
@@ -20343,7 +20696,7 @@ Generate anyway?`)) return { go: false };
         }
         if (cls.kind === "refused") {
           noteResolved(submitId);
-          const msg = friendlyGenErr(cls.error);
+          const msg = friendlyGenErr2(cls.error);
           if (here()) patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
           holdCard(cardId, msg);
           return { ok: false, reason: "refused" };
@@ -20418,7 +20771,7 @@ Generate anyway?`)) return { go: false };
         stopAutoRecheck(submitId);
         if (cls.kind === "refused") {
           noteResolved(submitId);
-          const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
+          const msg = cls.error ? friendlyGenErr2(cls.error) : "That render was not sent. Nothing was spent on it.";
           patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
           holdCard(cardId, msg);
           return { refused: true };
@@ -20628,7 +20981,8 @@ Generate anyway?`)) return { go: false };
           mode: payload.mode || dc.mode,
           duration: payload.duration != null ? payload.duration : dc.duration,
           audioGen: payload.audio != null ? !!payload.audio : dc.audioGen,
-          audioLanguage: payload.audio_language || dc.audioLanguage
+          audioLanguage: payload.audio_language || dc.audioLanguage,
+          ...sentEngineFields(payload, dc)
         },
         projectRef.current,
         payload.prompt,
@@ -20669,13 +21023,19 @@ Generate anyway?`)) return { go: false };
         return { refused: "The storyboard changed before this render went out. Nothing was sent." };
       }
       const c = cardOn(cardId).c;
-      const settings = snapshotSettings({
-        ...c,
-        mode: payload.mode || c.mode,
-        duration: payload.duration != null ? payload.duration : c.duration,
-        audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
-        audioLanguage: payload.audio_language || c.audioLanguage
-      }, projectRef.current, payload.prompt, payload.quality);
+      const settings = snapshotSettings(
+        {
+          ...c,
+          mode: payload.mode || c.mode,
+          duration: payload.duration != null ? payload.duration : c.duration,
+          audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
+          audioLanguage: payload.audio_language || c.audioLanguage,
+          ...sentEngineFields(payload, c)
+        },
+        projectRef.current,
+        payload.prompt,
+        payload.quality
+      );
       const quote = ask.quote;
       preLockRef.current[submitId] = c;
       patchCardNow(cardId, (cc) => beginRender(cc, {
@@ -20788,7 +21148,7 @@ Generate anyway?`)) return { go: false };
         return;
       }
       noteResolved(d.submit_id);
-      const msg = d.error || friendlyGenErr(cls.error);
+      const msg = d.error || friendlyGenErr2(cls.error);
       patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg, at: nowIso() }));
       holdCard(card.id, msg);
     }, []);
@@ -20889,7 +21249,7 @@ Generate anyway?`)) return { go: false };
         });
         const d = await r.json();
         if (d.error || !d.task_id) {
-          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
+          setGenImgState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
         }
         if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Image \xB7 " + entry.code + " \xB7 " + (c.title || "untitled"));
@@ -20918,7 +21278,7 @@ Generate anyway?`)) return { go: false };
         const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
         if (d.error || !d.task_id) {
-          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
+          setState((s) => ({ ...s, [cardId]: { phase: "error", msg: d.error ? friendlyGenErr2(d.error) : "submit failed" } }));
           return;
         }
         if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, jobLabel);
@@ -21018,6 +21378,23 @@ Generate anyway?`)) return { go: false };
       const board = projectRef.current ? flat(projectRef.current) : entries || [];
       const todo = board.filter((e) => needsRender(e.c));
       if (!todo.length) return;
+      const refused = [];
+      for (let k = todo.length - 1; k >= 0; k--) {
+        const problem = shotSendProblem(shotPayload2(todo[k]));
+        if (problem) {
+          holdCard(todo[k].c.id, problem);
+          refused.unshift(todo[k].code);
+          todo.splice(k, 1);
+        }
+      }
+      const refusedNote = refused.length ? `
+\u26A0 ${refused.length} shot(s) can't be sent on their engine and are left out: ${refused.join(", ")} (each card says why).` : "";
+      if (!todo.length) {
+        const line = "Nothing was sent: " + refused.join(", ") + " can't be sent on their engine as they are (each card says why).";
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Generate all", msg: line });
+        else window.alert(line);
+        return;
+      }
       setBatching(true);
       const fps = todo.map((e) => priceFingerprint(shotPayload2(e)));
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
@@ -21027,11 +21404,16 @@ Generate anyway?`)) return { go: false };
       const overflowNote = overflow ? `
 \u26A0 Up to ${overflow} of those priced free on their own may spend credits instead \u2014 the batch needs more tickets than you hold (${shortPools.map((pl) => `${pl.name}: ${pl.held} held, ${pl.needed} needed`).join("; ")}). Once the cards run out, no card is used and each remaining shot spends its full price` + (overflowCodes.length ? `: ${overflowCodes.join(", ")}` : "") + `.` : "";
       const emptyPromptShots = todo.filter((e) => !effectivePrompt(e.c).trim());
+      const engines = batchEngineLine(todo.map((e) => shotPayload2(e)));
+      const heldCodes = todo.filter((e) => heldVideoRefsLine(shotPayload2(e))).map((e) => e.code);
+      const heldNote = heldCodes.length ? `
+\u26A0 ${heldCodes.length} shot(s) go out without video references their engine can't take \u2014 held back, not sent and not deleted: ${heldCodes.join(", ")}.` : "";
       const msg = `Generate ${todo.length} shot(s)?
 
-\u{1F3AB} ${free} covered by free cards
+` + (engines ? `${engines}
+` : "") + `\u{1F3AB} ${free} covered by free cards
 \u2248 ${paid} will spend credits \u2014 about ${credits.toLocaleString()} total` + (unknown ? `
-\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".") + overflowNote + (emptyPromptShots.length ? `
+\u26A0 ${unknown} shot(s)' cost couldn't be verified \u2014 they may also spend credits.` : ".") + overflowNote + refusedNote + heldNote + (emptyPromptShots.length ? `
 \u26A0 ${emptyPromptShots.length} shot(s) have no prompt text yet: ${emptyPromptShots.map((e) => e.code).join(", ")}` : "");
       if (!window.confirm(msg)) {
         setBatching(false);
@@ -21103,7 +21485,7 @@ Generate anyway?`)) return { go: false };
       const fp = priceFingerprint(payload);
       const cached = priceCache[entry.c.id];
       if (!force && cached && cached.fp === fp && !cached.loading) return;
-      if (!payload.hasInput) {
+      if (!payload.hasInput || shotSendProblem(payload)) {
         setPriceCache((s) => ({ ...s, [entry.c.id]: { fp, pr: null, loading: false } }));
         return;
       }

@@ -551,7 +551,7 @@ describe("shotPayload", () => {
     assert.equal(shotPayload(flat(proj2)[0], proj2, fakeImgSrc).is_private, true);
   });
 
-  test("spend review S3: every key of the priced payload but hasInput reaches the card's POST body, unchanged", () => {
+  test("spend review S3: every key of the priced payload but hasInput and held reaches the card's POST body, unchanged", () => {
     // A Private R2V shot with a video ref, audio on and Draft on: every field non-default.
     const card = makeCard({ cast: [], isPrivate: true, audioGen: true, audioLanguage: "none",
       openFrame: { thumbId: "t", source: "", desc: "", tag: "@image1" },
@@ -562,7 +562,7 @@ describe("shotPayload", () => {
     assert.equal(p.is_private, true);
     const body = shotSendBody(p, { boardId: "b1", cardId: card.id, submitId: "s1", expectFree: false });
     for (const k of Object.keys(p)) {
-      if (k === "hasInput") { assert.equal(k in body, false, "hasInput is client-only"); continue; }
+      if (k === "hasInput" || k === "held") { assert.equal(k in body, false, k + " is client-only"); continue; }
       assert.deepEqual(body[k], p[k], k + " must reach the POST exactly as it was priced");
     }
     assert.equal(body.origin, "loom-shot");

@@ -101,12 +101,15 @@ test("confirmSpend and generateShot branch short-vs-unmatched, and still fail cl
   assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, "this"\)\s*\n\s*: `No free card covers it — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;\s*\n\s*return window\.confirm\(`\$\{label\}\\n\\n\$\{line\}\\n\\nGenerate anyway\?`\);/,
     "confirmSpend must word the short case honestly and keep the not-matched sentence otherwise");
   // askShotSpend (video; generateShot's ask and the Loom Video tab's Go's): names the shot's
-  // duration in the short sentence
-  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, `this \$\{p\.duration \? `\$\{p\.duration\}s ` : ""\}shot`\)\s*\n\s*: `No free card covers this shot — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;/,
+  // duration in the short sentence, and (issue #90 K) the engine the payload renders on in
+  // every one of its sentences -- `shot` is "<engine label> shot"
+  assert.match(src, /const shot = `\$\{engineLabel\(p\.video_model\)\} shot`;/,
+    "the shot ask must name the payload's engine");
+  assert.match(src, /const line = priceIsShort\(pr\)\s*\n\s*\? shortSpendLine\(pr, `this \$\{p\.duration \? `\$\{p\.duration\}s ` : ""\}\$\{shot\}`\)\s*\n\s*: `No free card covers this \$\{shot\} — it will spend ~\$\{pr\.cost\.toLocaleString\(\)\} credits\.`;/,
     "the shot ask must word the short case honestly and keep the not-matched sentence otherwise");
   // fail-closed shape untouched: both gates still ask on a null/unverified price
   assert.match(src, /return window\.confirm\(`\$\{label\}\\n\\nCouldn't verify the cost or free-card coverage — it may spend credits\./);
-  assert.match(src, /\} else if \(!pr \|\| !pr\.free\) \{\s*\n\s*if \(!window\.confirm\("Couldn't verify this shot's cost or free-card coverage/);
+  assert.match(src, /\} else if \(!pr \|\| !pr\.free\) \{\s*\n\s*if \(!window\.confirm\(`Couldn't verify this \$\{shot\}'s cost or free-card coverage/);
 });
 
 test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) and words the overflow before the confirm", () => {

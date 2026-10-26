@@ -16,6 +16,7 @@ import {
 import { emptyFrameFix } from "../src/loom-frames-core.js";
 import { LOOM_VIEW_KEY } from "../src/loom-url.js";
 import { FIX_COLORS, FIX_MIN_PX, FIX_MAX_BOXES, scaleBoxes } from "../../gallery/src/gen/editCore.js";
+import { MODELS } from "../../gallery/src/gen/videoDrawerCore.js";
 
 /* LOOM MOBILE, RENDERED (the phone board/reel view in loom/master-storyboard.jsx, its wiring in
    App(), and the Mobile-view switch on both sides).
@@ -1404,6 +1405,20 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     assert.equal(one(markup(h).byClass("lm-genpreview")).text, shotText(h.entry("c1"), h.props.project, imgSrcOf({})));
   });
 
+  test("the Model row names the shot's OWN engine and that engine's chips, read-only (issue #90)", () => {
+    const row = (h) => ({ name: one(markup(h).byClass("lm-genmodelrow")).text,
+      caps: markup(h).byClass("lm-gencap").map((e) => e.text) });
+    const capsOf = (v) => MODELS.find((m) => m.value === v).caps;
+    assert.deepEqual(row(gen({ board: makeBoard({ c1: { videoModel: "tbkv1.0.1" } }) })),
+      { name: "Tsubaki Video", caps: capsOf("tbkv1.0.1") });
+    assert.deepEqual(row(gen({ board: makeBoard({ c1: { videoModel: "v3.2" } }) })), { name: "V3.2", caps: capsOf("v3.2") });
+    // No engine chosen, or one the roster does not list: the default it renders and prices on.
+    assert.deepEqual(row(gen()), { name: "V4.0 Lite Preview", caps: capsOf("v4.0.1") });
+    assert.deepEqual(row(gen({ board: makeBoard({ c1: { videoModel: "no-such-engine" } }) })).name, "V4.0 Lite Preview");
+    const r = one(markup(gen()).byClass("lm-genmodelrow"));
+    assert.equal(r.byTag("select").length + r.byTag("button").length + r.byTag("input").length, 0, "no engine control on the phone");
+  });
+
   test("Generate audio shows and writes c.audioGen, with the five audio_language values the drawer uses", () => {
     const h = gen();
     const box = () => one(els(screen(h)).filter((e) => e.type === "label" && /Generate audio/.test(textOf(e)))
@@ -1459,6 +1474,23 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
     second.flush();
     t.mock.timers.tick(300);
     assert.deepEqual(asked2, [second.entry("c2")], "the selected shot, not the first one");
+  });
+
+  test("the cost line re-prices when the shot's engine, Channel or helper changes -- all three ride the priced payload (issue #90)", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const pr = { cost: 400, free: false, cards: [], note: "" };
+    const asked = [];
+    const h = gen({ props: { priceShot: (entry) => { asked.push(entry.c); return Promise.resolve(pr); } } });
+    h.flush();
+    t.mock.timers.tick(300);
+    assert.equal(asked.length, 1);
+    for (const [k, v] of [["videoModel", "tbkv1.0.1"], ["isPrivate", true], ["videoHelper", true]]) {
+      h.props.setCard("a1", "c1", (c) => ({ ...c, [k]: v }));
+      h.render(); h.flush();
+      t.mock.timers.tick(300);
+      assert.equal(asked[asked.length - 1][k], v, k + " changed: priced again, with it");
+    }
+    assert.equal(asked.length, 4);
   });
 
   // Kept as a source pin: what the submit must NOT do (a second confirm skipped, a second POST).

@@ -271,6 +271,26 @@ export function applyMode(s, m, userDriven) {
 // The held-video-refs note an engine with a video cap of 0 shows (see applyModelGating).
 const NO_VIDEO_REFS_NOTE = " takes no video references.";
 
+// Where a (mode, duration) lands on an engine: the mode it supports (the LAST supported one when
+// it lacks this one, as the DC picks it -- V3.2 from Multi-Reference lands on First & Last), and
+// the duration clamped to its cap, then snapped onto its own set. Pure, and the ONE copy of that
+// rule: applyModelGating below applies it to the drawer's state, and the Loom computes a shot's
+// mode/duration from it (issue #90, C5) so a card prices and sends what the drawer would show.
+// `mode` is a drawer vmode in any case ("R2V" reads as "r2v"); out is always lowercase. Anything
+// that is not i2v/flf (V2V, blank) is a mode no engine lists, so it lands on the engine's last
+// one -- r2v where the engine has it -- which is exactly drawerModeFor's collapse followed by
+// gating, so a raw card mode and its drawer mode give the same answer.
+export function gatedShot(mode, duration, model) {
+  const allowed = MODEL_VMODES[model] || ["i2v", "flf", "r2v"];
+  const want = String(mode == null ? "" : mode).toLowerCase();
+  const m = allowed.indexOf(want) === -1 ? allowed[allowed.length - 1] : want;
+  let d = duration;
+  const maxDur = MODEL_MAXDUR[model] || 10;
+  if (d > maxDur) d = maxDur;
+  if (!durationAllowed(model, d)) d = snapDuration(d, model);
+  return { mode: m, duration: d };
+}
+
 // Dims modes a model doesn't support (MODEL_VMODES) + switches off an invalid one; clamps
 // duration to the model's cap. `userDriven` gates the notice: a real engine pick that drops the
 // shot mode explains itself in the DC's pickVideoModel words (DC 2232-2246) -- '<engine> has no
@@ -280,9 +300,9 @@ const NO_VIDEO_REFS_NOTE = " takes no video references.";
 // applyMode only ever re-shapes the i2v/flf `slots` bank the user filled; the r2v banks are
 // never carried into it.
 export function applyModelGating(s, userDriven) {
-  const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-  if (allowed.indexOf(s.mode) === -1) {
-    const from = s.mode, to = allowed[allowed.length - 1];
+  const g = gatedShot(s.mode, s.duration, s.model);
+  if (g.mode !== s.mode) {
+    const from = s.mode, to = g.mode;
     applyMode(s, to, userDriven);
     if (userDriven) {
       const m = MODELS.find((x) => x.value === s.model);
@@ -296,12 +316,10 @@ export function applyModelGating(s, userDriven) {
   // so switching from a V4.0/15s state to a 10s-cap engine (its mode ALSO unsupported, e.g.
   // r2v->i2v) left duration:15 in the priced + submitted payload. That is a real spend-path
   // divergence (the MODEL_MAXDUR comment cites ~84,000 credits for a V2.7 15s clip).
-  const maxDur = MODEL_MAXDUR[s.model] || 10;
-  if (s.duration > maxDur) s.duration = maxDur;
   // ...and onto the engine's own duration set (6 s on a Tsubaki engine -> 5 s), for the same
   // reason: the priced + submitted payload must carry a length this engine takes. The server
-  // snaps identically, so this only keeps the quote honest about it.
-  if (!durationAllowed(s.model, s.duration)) s.duration = snapDuration(s.duration, s.model);
+  // snaps identically, so this only keeps the quote honest about it. Both are gatedShot's.
+  if (g.duration !== s.duration) s.duration = g.duration;
   // An engine that takes NO video references (Tsubaki: 0) HOLDS them -- the bank keeps every
   // pick, buildPayload leaves them out, and the note says so. Never deleted: switch back to an
   // engine that takes them and they go out again. The note is NOT userDriven-gated: a Loom shot
@@ -338,12 +356,23 @@ export function applySetRefs(s, refs) {
 // POSITIONALLY (images[0]->Start, images[1]->End; a null is a positional hole that CLEARS the
 // slot), so an unfilled End Frame is nulled rather than inheriting the previous shot's frame (the
 // wrong-shot spend bug of 2026-07-27). setRefs cannot do that -- it writes slots[0] only.
+//
+// `o.same_shot` (issue #90): the host is re-syncing the shot the drawer ALREADY shows -- the one
+// echo prefill that follows a commit from this drawer (an engine pick that moved the shot mode,
+// say). That echo must not wipe what the owner just did on it: the ratio stays (unless the
+// prefill names one) and so does the mode note ("V3.2 has no Multi-Reference, so the shot mode
+// switched..." would otherwise vanish the instant it appeared). Everything else is applied as
+// for any prefill. Without it (a different shot) both reset, as before. The no-video-refs note
+// is never kept: the gate below re-derives it from the banks this prefill leaves, so a kept copy
+// could only ever be the stale one.
 export function applyPrefill(s, o) {
   o = o || {};
+  const note = s.modeNote || "";
+  const keptNote = (o.same_shot && note.indexOf(NO_VIDEO_REFS_NOTE) < 0) ? note : "";
   s.modeNote = "";
   // A prefill is a NEW shot: its ratio is the one it names, else Auto -- the previous shot's
-  // pick never rides into it (spend review N7).
-  s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : "adaptive";
+  // pick never rides into it (spend review N7). The same shot keeps its own.
+  s.ratio = VIDEO_RATIOS.indexOf(o.ratio) >= 0 ? o.ratio : (o.same_shot ? s.ratio : "adaptive");
   if (o.mode && MODE_LBL[String(o.mode).toLowerCase()]) applyMode(s, String(o.mode).toLowerCase());
   if (o.video_model != null) s.model = o.video_model;
   if (o.duration != null) s.duration = snapDuration(o.duration);
@@ -368,6 +397,14 @@ export function applyPrefill(s, o) {
   }
   if (Array.isArray(o.video_refs)) s.vidSlots = o.video_refs.slice(0, 3).map(refItem);
   if (o.audio_ref !== undefined) s.audSlot = o.audio_ref ? { media_id: String(o.audio_ref.media_id), filename: o.audio_ref.filename || "audio ref" } : null;
+  // An explicit list that landed in the Multi-Reference bank is the whole of this shot's
+  // pictures, so the Start/End Frame bank holds NONE of them -- and must hold nothing else
+  // either. Left alone it still carries the PREVIOUS shot's frames, and the gating below, on an
+  // engine without Multi-Reference (V3.2, V2.7), switches to First & Last / First Frame and puts
+  // exactly those frames into a paid payload (issue #90, C4; measured on this module). Emptied,
+  // never filled from the r2v bank (the M27 rule): the gated drawer asks for a frame instead.
+  if (imgList && s.mode === "r2v") s.slots = [null];
+  if (keptNote) s.modeNote = keptNote;   // before the gate: a note it raises about these banks wins
   applyModelGating(s);   // gate LAST, after refs/mode settle
   return { setPrompt: (o.prompt != null) ? o.prompt : null };
 }

@@ -141,6 +141,11 @@
 .gen-drawer .mgd-engchip.sel .mgd-engdot{border-color:var(--accent,#b692e6);background:var(--accent,#b692e6);}
 .gen-drawer .mgd-englabel{flex:1 1 auto;min-width:0;font-size:11px;font-weight:700;color:var(--text,#d6d2e2);line-height:1.15;}
 .gen-drawer .mgd-engmeta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:9.5px;color:var(--overlay0,#6a6088);}
+/* "Use these settings for every shot" (the Loom only, issue #90): the Loom panel's small text
+   action (.lv-unbind, master-storyboard.jsx) -- no chrome, subtext, accent on hover --
+   right-aligned on its own line under the engine meta row (the slab is a flex column). */
+.gen-drawer .mgd-applyall{align-self:flex-end;font:700 10.5px/1 system-ui;background:none;border:0;padding:2px 0;color:var(--subtext,#9a93ab);cursor:pointer;white-space:nowrap;}
+.gen-drawer .mgd-applyall:hover{color:var(--accent,#b692e6);}
 /* Capability chips (DC 1388 row; capStyle 1877-1880 kind tiers: hot=emerald, crown=pink, plain). */
 .gen-drawer .mgd-caps{display:flex;flex-wrap:wrap;gap:4px;}
 .gen-drawer .mgd-cap{font-size:8.5px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px solid var(--surface1,#3a3460);background:color-mix(in srgb,var(--surface0) 60%,transparent);color:var(--subtext,#9a93ab);}
