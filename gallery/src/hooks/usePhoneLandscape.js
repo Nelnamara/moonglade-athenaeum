@@ -11,12 +11,36 @@ import { LANDSCAPE_QUERY, TURN_SETTLE_MS, phoneColumns } from "../lib/phoneCore.
    AND AGAIN ONCE THE TURN HAS SETTLED (owner's walk, 2026-10-03): a phone can deliver a turn's events
    while the query still answers for the old way up, and fire nothing afterwards, which left the
    sideways column count on an upright phone. Every event also reads on the next frame and at
-   TURN_SETTLE_MS; the visual viewport's resize (what a phone fires when its toolbars settle) counts. */
+   TURN_SETTLE_MS; the visual viewport's resize (what a phone fires when its toolbars settle) counts.
+
+   ?turndebug adds a live readout of the widths that matter after a turn (#75): the viewport as the
+   browser reports it, the gallery's stage, scroller and grid, and the grid's resolved tracks. It is how
+   #75 was found on a real iPhone in Chrome (the tracks, not the viewport, kept the sideways width; the
+   fix is in gallery-mobile.css). Plain DOM, no state: it only reads, and it leaves with the gallery. */
 
 function read() {
   if (typeof window === "undefined" || !window.matchMedia) return { landscape: false, cols: 2 };
   const landscape = window.matchMedia(LANDSCAPE_QUERY).matches;
   return { landscape, cols: phoneColumns(window.innerWidth, landscape) };
+}
+
+function startTurnDebug() {
+  const box = document.createElement("pre");
+  box.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;margin:0;padding:6px 8px;"
+    + "font:11px/1.35 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.78);border-radius:6px;"
+    + "pointer-events:none;white-space:pre";
+  document.body.appendChild(box);
+  const w = (sel) => { const el = document.querySelector(sel); return el ? Math.round(el.getBoundingClientRect().width) : "-"; };
+  const timer = setInterval(() => {
+    const de = document.documentElement, vv = window.visualViewport, grid = document.querySelector(".glm-grid");
+    box.textContent = [
+      "inner " + window.innerWidth + "  vv " + (vv ? Math.round(vv.width) : "-") + "  client " + de.clientWidth + "  scroll " + de.scrollWidth,
+      "stage " + w(".glm-stage") + "  body " + w(".glm-body") + "  grid " + w(".glm-grid"),
+      "cols " + (grid ? getComputedStyle(grid).gridTemplateColumns : "-"),
+      "landscape " + window.matchMedia(LANDSCAPE_QUERY).matches,
+    ].join("\n");
+  }, 300);
+  return () => { clearInterval(timer); box.remove(); };
 }
 
 export default function usePhoneLandscape() {
@@ -37,6 +61,7 @@ export default function usePhoneLandscape() {
       timers = TURN_SETTLE_MS.map((ms) => setTimeout(sync, ms));
     };
     sync();
+    const stopDebug = /[?&]turndebug\b/.test(window.location.search || "") ? startTurnDebug() : null;
     const mql = window.matchMedia(LANDSCAPE_QUERY);
     const vv = window.visualViewport;
     if (mql.addEventListener) mql.addEventListener("change", settle); else if (mql.addListener) mql.addListener(settle);
@@ -49,6 +74,7 @@ export default function usePhoneLandscape() {
       window.removeEventListener("orientationchange", settle);
       if (vv) vv.removeEventListener("resize", settle);
       if (raf) cancelAnimationFrame(raf);
+      if (stopDebug) stopDebug();
       timers.forEach(clearTimeout);
     };
   }, []);

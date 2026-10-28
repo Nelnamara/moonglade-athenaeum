@@ -59,8 +59,8 @@ def test_persisted_not_found_is_a_named_pixai_error():
     sess = _GetSession({"errors": [{"message": "PersistedQueryNotFound",
                                     "extensions": {"code": "PERSISTED_QUERY_NOT_FOUND"}}]})
     with pytest.raises(core.PersistedQueryNotRecognized) as ei:
-        core.PixAIClient(sess).persisted("getTaskById", {"id": "T1"},
-                                         sha256=core.TASK_DETAIL_HASH, retries=0)
+        core.PixAIClient(sess).persisted(core.BOOKMARKED_MODELS_OP, {"first": 1},
+                                         sha256=core.BOOKMARKED_MODELS_HASH, retries=0)
     assert isinstance(ei.value, core.PixAIError)                # every old catch site holds
     assert "hash not recognized" in str(ei.value)
 
@@ -68,8 +68,8 @@ def test_persisted_not_found_is_a_named_pixai_error():
 def test_another_graphql_error_is_not_the_named_error():
     sess = _GetSession({"errors": [{"message": "Something else"}]})
     with pytest.raises(core.PixAIError) as ei:
-        core.PixAIClient(sess).persisted("getTaskById", {"id": "T1"},
-                                         sha256=core.TASK_DETAIL_HASH, retries=0)
+        core.PixAIClient(sess).persisted(core.BOOKMARKED_MODELS_OP, {"first": 1},
+                                         sha256=core.BOOKMARKED_MODELS_HASH, retries=0)
     assert not isinstance(ei.value, core.PersistedQueryNotRecognized)
 
 

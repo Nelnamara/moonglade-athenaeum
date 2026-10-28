@@ -16,6 +16,12 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.20.4] - 2026-10-27 — Upright
+
+### Fixed
+- **A generation's details and a model's details are read with the full request, so they no longer lean on a saved copy PixAI has stopped using.** Sync's fill-in-details step, `--backfill-full-meta`, `--sync-videos`, the delete preview's live check, the Lightbox's live reads, the last read when a generation finishes, the model-name fixer and the Runs reel's reuse of a model each asked PixAI for a generation's details or a model's details with a saved request. PixAI's own site no longer sends either saved copy, and its servers were still answering them from a cache, the same cache that turns the history feed down part of the time (on October 26 the saved model request was turned down on one read and answered on the retry); when that cache stops, each of those would have failed with "recapture the hash". They now ask with the full request, as the history feed and the published-artworks list do, and `TASK_DETAIL_HASH` and `MODEL_DETAIL_HASH` in `config.json` are no longer read (#91). (2026-10-26)
+- **Chrome on iPhone: the gallery fits the screen again after you turn the phone back upright** (#75). After a turn from sideways, the two upright columns ran off the right edge until a reload or a page change. A live readout on an iPhone in Chrome showed every width right except the grid's own columns, which kept the sideways width split in two: the upright gallery's columns were allowed to grow to fit their pictures, and the pictures had just been laid out sideways. The upright columns now size from the screen alone, as the sideways ones always did. Confirmed on the owner's iPhone. Developers: `?turndebug` on the phone gallery shows the widths that matter after a turn. (2026-10-27)
+
 ## [3.20.3] - 2026-10-26 — Full Scene
 
 ### Fixed

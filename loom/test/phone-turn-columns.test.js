@@ -36,12 +36,29 @@ describe("a turn is read again once it has settled", () => {
   });
 });
 
+describe("the ?turndebug readout (#75)", () => {
+  const hook = read("hooks/usePhoneLandscape.js");
+  test("it starts only behind ?turndebug and leaves with the gallery", () => {
+    assert.match(hook, /\/\[\?&\]turndebug\\b\/\.test\(window\.location\.search \|\| ""\) \? startTurnDebug\(\) : null/);
+    assert.match(hook, /if \(stopDebug\) stopDebug\(\);/);
+    assert.match(hook, /return \(\) => \{ clearInterval\(timer\); box\.remove\(\); \};/);
+  });
+  test("it shows the grid's resolved tracks, the reading that found #75", () => {
+    assert.match(hook, /getComputedStyle\(grid\)\.gridTemplateColumns/);
+  });
+});
+
 describe("the CSS backstop", () => {
   const css = read("styles/gallery-mobile.css");
   test("outside the landscape condition the sideways grid is two shrinkable tracks", () => {
     const rule = "@media not all and " + LANDSCAPE_QUERY + " {\n"
       + "  .glm-grid.glm-grid-rows { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }";
     assert.ok(css.includes(rule), "gallery-mobile.css holds an upright phone to two shrinkable columns");
+  });
+  test("the upright grid's two tracks size from the grid, never from their tiles (#75)", () => {
+    assert.match(css, /\.glm-grid \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+    assert.doesNotMatch(css, /\.glm-grid \{[^}]*grid-template-columns: 1fr 1fr;/);
+    assert.match(css, /\.glm-col \{[^}]*min-width: 0;/);
   });
   test("the library's scroller never scrolls sideways", () => {
     assert.match(css, /\.glm-body \{[^}]*overflow-x: hidden;/);

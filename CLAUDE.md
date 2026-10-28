@@ -200,7 +200,7 @@ shipped bug.
 ## Critical constraints
 
 - **NEVER** append `Co-Authored-By: Claude` trailers to commits.
-- **NEVER** commit `config.json` — git-ignored; contains a real user credential (`PIXAI_API_KEY`). USER_ID, U3T and the hashes are optional legacy overrides, absent from a normal live file (`USER_ID` auto-resolves; the hashes ship baked-in).
+- **NEVER** commit `config.json` — git-ignored; contains a real user credential (`PIXAI_API_KEY`). USER_ID, U3T, `DELETE_TASK_HASH` and `REFRESH_TOKEN_HASH` are optional legacy overrides, absent from a normal live file (`USER_ID` auto-resolves; the two hashes ship baked-in).
 - `token.txt`, `pixai_backup/`, `*.webp` are also git-ignored.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
@@ -267,8 +267,11 @@ single-image generation.
 
 ## Recapture procedure (when PixAI changes their frontend)
 
-Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s. Step-by-step
-recapture is in `../moonglade-internal/private/RE_NOTES.md`.
+Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s. Only two saved
+operations still ride a hash you could recapture: the whole-generation delete (`deleteGenerationTask`,
+`DELETE_TASK_HASH`) and the Mirror's session renewal (`refreshToken`, `REFRESH_TOKEN_HASH`); every other
+read, task detail and model detail included (#91), sends a full document through `gql_adhoc()`.
+Step-by-step recapture is in `../moonglade-internal/private/RE_NOTES.md`.
 
 ---
 
