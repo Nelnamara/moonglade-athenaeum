@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **A generation's details and a model's details are read with the full request, so they no longer lean on a saved copy PixAI has stopped using.** Sync's fill-in-details step, `--backfill-full-meta`, `--sync-videos`, the delete preview's live check, the Lightbox's live reads, the last read when a generation finishes, the model-name fixer and the Runs reel's reuse of a model each asked PixAI for a generation's details or a model's details with a saved request. PixAI's own site no longer sends either saved copy, and its servers were still answering them from a cache, the same cache that turns the history feed down part of the time (on October 26 the saved model request was turned down on one read and answered on the retry); when that cache stops, each of those would have failed with "recapture the hash". They now ask with the full request, as the history feed and the published-artworks list do, and `TASK_DETAIL_HASH` and `MODEL_DETAIL_HASH` in `config.json` are no longer read (#91). (2026-10-26)
+
 ## [3.20.3] - 2026-10-26 — Full Scene
 
 ### Fixed

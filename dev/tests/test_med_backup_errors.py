@@ -422,6 +422,8 @@ def _reply(mocker, payload, status=200, text=""):
     `errors` array (that is why gql() reads `errors` before it looks at the status at all,
     and why CLAUDE.md has a recapture procedure for PersistedQueryNotFound). A stub that only
     ever fails by raising -- which is all the first repair's tests did -- cannot see this.
+    Since #91 the lookup is the model version DOCUMENT over the ad-hoc POST, so these answer
+    `session.post`.
     """
     r = mocker.MagicMock()
     r.status_code = status
@@ -442,9 +444,8 @@ def _catalog_with_one_row(tmp_path, vid):
 
 
 class TestM18ModelLookupFailure:
-    def test_strict_raises_while_soft_callers_still_get_the_id(self, mock_session, monkeypatch):
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        mock_session.get.side_effect = requests.RequestException("connection reset")
+    def test_strict_raises_while_soft_callers_still_get_the_id(self, mock_session):
+        mock_session.post.side_effect = requests.RequestException("connection reset")
         mid = "m18-strict-0001"
 
         with pytest.raises(core.PixAIError, match="lookup failed"):
@@ -452,12 +453,11 @@ class TestM18ModelLookupFailure:
         # every other caller only wants a label, and keeps the old fallback unchanged
         assert core.model_name_gql(mock_session, mid) == mid
 
-    def test_failure_is_not_memoised_as_a_name(self, mock_session, monkeypatch):
+    def test_failure_is_not_memoised_as_a_name(self, mock_session):
         """--sync runs the full-meta pass and --fix-models in ONE process, sharing this
         cache. Caching the id on failure laundered a blip into a 'resolved to its own id'
         verdict for the relabel step that came after it."""
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        mock_session.get.side_effect = requests.RequestException("timeout")
+        mock_session.post.side_effect = requests.RequestException("timeout")
         mid = "m18-cache-0001"
 
         assert core.model_name_gql(mock_session, mid) == mid        # soft caller goes first
@@ -465,16 +465,21 @@ class TestM18ModelLookupFailure:
         with pytest.raises(core.PixAIError):                        # the verdict survives
             core.model_name_gql(mock_session, mid, strict=True)
 
-    def test_absent_hash_is_a_real_cannot_resolve_not_a_failure(self, mock_session, monkeypatch):
-        """An unconfigured install asks nothing and falls back to the id by design; that is
-        an answer, not a failure, and strict mode must not start raising on it."""
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "")
-        mid = "m18-nohash-0001"
+    def test_an_unknown_version_is_a_real_cannot_resolve_not_a_failure(self, mock_session,
+                                                                        mocker):
+        """There is no unconfigured install any more (#91): the lookup is always asked. What
+        an unknown version id answers through the document -- `generationModelVersion: null`,
+        HTTP 200, no errors (PROBE_2026-10-26) -- is an answer, not a failure: the id comes
+        back as the label and strict mode must not start raising on it."""
+        mock_session.post.return_value = _reply(
+            mocker, {"data": {"generationModelVersion": None}})
+        mid = "m18-unknown-0001"
 
         assert core.model_name_gql(mock_session, mid, strict=True) == mid
+        assert mock_session.post.call_count == 1
+        assert _model_cache().get(mid) == mid
 
-    def test_relabel_removed_refuses_to_act_on_a_failed_lookup(self, tmp_path, monkeypatch,
-                                                               mocker):
+    def test_relabel_removed_refuses_to_act_on_a_failed_lookup(self, tmp_path, mocker):
         """THE BUG. One timeout mid-run used to write 'Unknown or removed model' over every
         row of a still-valid model, and _needs_model_fix then read those rows as resolved --
         so re-running --fix-models never repaired it. Permanent, without editing the DB."""
@@ -487,9 +492,8 @@ class TestM18ModelLookupFailure:
             {f: "" for f in CATALOG_FIELDS} | {"media_id": "m2", "filename": "b.png",
                                                "model_id": vid, "model_name": vid},
         ])
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
         session = mocker.MagicMock()
-        session.get.side_effect = requests.RequestException("503 from the API")
+        session.post.side_effect = requests.RequestException("503 from the API")
         mocker.patch.object(core, "_make_session", return_value=session)
 
         res = core.run_fix_models(SimpleNamespace(
@@ -516,7 +520,7 @@ class TestM18ModelLookupFailure:
          "a reply that never carried the field we asked about"),
     ])
     def test_a_refusal_answered_at_http_200_is_a_failure_not_a_verdict(
-            self, tmp_path, monkeypatch, mocker, payload, status, what):
+            self, tmp_path, mocker, payload, status, what):
         """THE ROUND-2 BUG, and the one with the widest blast radius.
 
         `raise_for_status()` sees nothing wrong with any of these, so the first repair --
@@ -528,9 +532,8 @@ class TestM18ModelLookupFailure:
         """
         vid = "918273645500000003"
         db = _catalog_with_one_row(tmp_path, vid)
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
         session = mocker.MagicMock()
-        session.get.return_value = _reply(mocker, payload, status)
+        session.post.return_value = _reply(mocker, payload, status)
         mocker.patch.object(core, "_make_session", return_value=session)
 
         res = core.run_fix_models(SimpleNamespace(
@@ -544,13 +547,12 @@ class TestM18ModelLookupFailure:
         assert _model_cache().get(vid) is core._MODEL_LOOKUP_FAILED
 
     def test_a_200_with_errors_is_not_laundered_through_the_cache_into_sync(
-            self, mock_session, monkeypatch, mocker):
+            self, mock_session, mocker):
         """--sync runs the full-meta pass and --fix-models in ONE process off this cache. A
         soft caller meeting the 200+errors body first must not park the id in the cache as a
         name, or the relabel step behind it gets a cache HIT and reads it as resolved."""
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
         mid = "m18-gqlerr-0001"
-        mock_session.get.return_value = _reply(
+        mock_session.post.return_value = _reply(
             mocker, {"errors": [{"message": "PersistedQueryNotFound"}]})
 
         assert core.model_name_gql(mock_session, mid) == mid     # soft caller: label only
@@ -559,7 +561,7 @@ class TestM18ModelLookupFailure:
             core.model_name_gql(mock_session, mid, strict=True)
 
     def test_relabel_removed_still_relabels_a_genuinely_removed_model(self, tmp_path,
-                                                                      monkeypatch, mocker):
+                                                                      mocker):
         """The conservative guard must not neuter the flag: PixAI ANSWERING with a null
         version really does mean the model is gone, and that still gets relabelled."""
         from moonglade.gallery import save_catalog, load_catalog, CATALOG_FIELDS
@@ -569,12 +571,11 @@ class TestM18ModelLookupFailure:
             {f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "a.png",
                                                "model_id": vid, "model_name": vid},
         ])
-        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        # A faithful PixAI 200 (via _reply) carrying generationModelVersion: null -- the seam
-        # (PixAIClient.persisted) now inspects the HTTP status, so the response has to model a
-        # real one, not a bare MagicMock whose status_code compares truthy against >= 500.
+        # A faithful PixAI 200 (via _reply) carrying generationModelVersion: null -- the ad-hoc
+        # POST inspects the HTTP status, so the response has to model a real one, not a bare
+        # MagicMock whose status_code compares truthy against >= 500.
         session = mocker.MagicMock()
-        session.get.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
+        session.post.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
         mocker.patch.object(core, "_make_session", return_value=session)
 
         res = core.run_fix_models(SimpleNamespace(

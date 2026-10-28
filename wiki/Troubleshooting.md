@@ -19,10 +19,9 @@ app and are shared by everyone, so when one breaks it breaks for all users.
   updated for everyone.
 
 Reading the pages of your history (the list **Sync now**, `--sync`, `--update` and `--count`
-walk) no longer uses a built-in identifier. Sync's later steps (filling in a picture's full
-details, model names) still do, so everything above still applies to those. "Recapture" now
-applies only to the few saved operations that remain (a picture's full details, model names,
-deleting a picture from PixAI).
+walk), a picture's full details and a model's name no longer use a built-in identifier. "Recapture"
+now applies only to the two saved operations that remain: deleting a whole generation from PixAI,
+and the Mirror to PixAI session renewal.
 
 ## "PixAI refused the history feed; nothing was changed"
 PixAI turned down the request for your history. It does this now and then, and answers the

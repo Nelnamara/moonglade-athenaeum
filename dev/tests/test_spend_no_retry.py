@@ -88,10 +88,10 @@ def gql_calls(monkeypatch):
     real_mutate = core.PixAIClient.mutate
     box = {"verb": None}
 
-    def _query(self, document, variables=None, retries=None):
+    def _query(self, document, variables=None, retries=None, timeout=120):
         box["verb"] = "query"
         try:
-            return real_query(self, document, variables, retries)
+            return real_query(self, document, variables, retries, timeout)
         finally:
             box["verb"] = None
 
@@ -102,7 +102,7 @@ def gql_calls(monkeypatch):
         finally:
             box["verb"] = None
 
-    def _recorder(self, document, variables, retries):
+    def _recorder(self, document, variables, retries, timeout=120):
         calls.append(SimpleNamespace(query=document, variables=variables,
                                      retries=retries, verb=box["verb"]))
         return _STUB_PAYLOAD

@@ -116,8 +116,8 @@ class PixAIError(Exception):
 class PersistedQueryNotRecognized(PixAIError):
     """PixAI answered a saved (hash-only) request with "not found". Still a PixAIError with
     the same message as before, so every existing catch site is unchanged. Raised by
-    `persisted()` for the saved operations that remain (task detail, model detail,
-    bookmarks); the history feed no longer rides a saved request (#89)."""
+    `persisted()` for the saved operation that still rides it (the bookmarks fallback); the
+    history feed (#89), task detail and model detail (#91) no longer ride a saved request."""
 
 
 class HistoryPageRefused(PixAIError):
@@ -893,18 +893,14 @@ def _check_read_only(action):
 
 # Persisted-query hashes are PUBLIC, non-secret identifiers of PixAI's own frontend
 # GraphQL operations (the same for every user, embedded in their JS bundle). The
-# task detail / delete operations are reached through these hashes. They change
-# only when PixAI overhauls their frontend -- captured 2026-06-28. Override any in
-# config.json if one rotates (you'll get a clear "recapture" error if it does). The
-# history feed has none any more: it is read as a full document (_HISTORY_PAGE_DOC, #89).
+# delete operation is reached through one of these hashes (the Mirror's refreshToken
+# carries its own below). They change only when PixAI overhauls their frontend --
+# captured 2026-06-28. Override one in config.json if it rotates (you'll get a clear
+# "recapture" error if it does). The history feed (#89), task detail and model detail (#91)
+# have none any more: each is read as a full document (_HISTORY_PAGE_DOC, _TASK_DETAIL_DOC,
+# _MODEL_VERSION_DOC).
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")  # auto-resolved from the API key (me{id}) if blank
-TASK_DETAIL_HASH = _cfg.get("TASK_DETAIL_HASH", "") or \
-    "2526f64c73c59fcfeff938b0f4a8b3b610f2294bc6eb6b6b281aa671ac81a08e"
-# Default to the captured getGenerationModelByVersionId hash so model-name
-# resolution works out of the box (override in config.json if it rotates).
-MODEL_DETAIL_HASH = _cfg.get("MODEL_DETAIL_HASH", "") or \
-    "0d2ab28b2991e3fd74672ffec0adf8947e599d79e0039348a7d2642e0bf8c9bc"
 # Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
 # ever touches YOUR OWN tasks, and the destructive path is independently gated by
 # explicit confirmation (typed "DELETE" in the gallery, which is the only road to this
@@ -1525,7 +1521,7 @@ def _quick_count(session, page_size=500):
 #     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
 #     after PixAI already created and CHARGED for the task pays twice.
 #   * the two roads to PixAI -- the persisted-hash GET (`persisted()`), which is
-#     how the saved operations (task detail, model detail, bookmarks) are reached,
+#     how the saved operation that remains (the bookmarks fallback) is reached,
 #     and the ad-hoc POST
 #     (`query()`/`mutate()`), which is everything the API key can ask for
 #     directly -- plus the oRPC `/v2` REST road (`rest_get()`/`rest_post()`).
@@ -1540,13 +1536,10 @@ def _quick_count(session, page_size=500):
 #
 # TRANSITION SURFACE. `get`/`post`/`headers`/`cookies` on the client delegate
 # straight to the inner requests.Session, because a handful of call sites still
-# reach for the Session themselves rather than through a verb: the persisted
-# GETs that have not moved onto `persisted()` (task_detail_gql,
-# _bookmarks_persisted, model_name_gql, resolve_model_base_id,
-# _resolve_model_preset), delete_task_gql's lone hand-rolled
-# POST, refresh_jwt's mirror POST, resolve_media and download (which are not
-# GraphQL at all -- a media object and a file body), and run_watch reading the
-# Authorization header off to hand to the WebSocket. `.session` is the escape
+# reach for the Session themselves rather than through a verb: delete_task_gql's
+# lone hand-rolled POST, refresh_jwt's mirror POST, resolve_media and download
+# (which are not GraphQL at all -- a media object and a file body), and run_watch
+# reading the Authorization header off to hand to the WebSocket. `.session` is the escape
 # hatch those will eventually stop needing; it exists for the transition, not
 # forever.
 #
@@ -1631,17 +1624,20 @@ class PixAIClient:
         return self._session.cookies
 
     # -- ad-hoc GraphQL POST -------------------------------------------------
-    def query(self, document, variables=None, retries=None):
+    def query(self, document, variables=None, retries=None, timeout=120):
         """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full document.
 
         `retries=None` (the default) means "the safe default for THIS document": **3 for a
         query, 0 for a mutation**. A retry re-POSTs on a RequestException or a 429/5xx, and
         that is only free when the operation is idempotent. An explicit integer wins, so a
-        caller can still ask for anything on purpose. Returns the `data` dict; raises
-        PixAIError on GraphQL/HTTP error."""
+        caller can still ask for anything on purpose. `timeout` is the per-ATTEMPT socket
+        timeout in seconds (120, this road's long-standing value, unless a caller says
+        otherwise): a caller under a wall-clock ceiling of its own passes the time it has left
+        -- the delete preview's live check does, through `task_detail_gql`. Returns the `data`
+        dict; raises PixAIError on GraphQL/HTTP error."""
         if retries is None:
             retries = 0 if _is_mutation_document(document) else 3
-        return self._graphql_post(document, variables, retries)
+        return self._graphql_post(document, variables, retries, timeout)
 
     def mutate(self, document, variables=None):
         """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
@@ -1652,15 +1648,16 @@ class PixAIClient:
         dev/tests/test_pixai_client.py and dev/tests/test_spend_no_retry.py."""
         return self._graphql_post(document, variables, 0)
 
-    def _graphql_post(self, document, variables, retries):
+    def _graphql_post(self, document, variables, retries, timeout=120):
         """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
         verb that called in -- this function never chooses it, which is what keeps the
-        spend rule readable in exactly two places above."""
+        spend rule readable in exactly two places above. `timeout` is each attempt's socket
+        timeout: whatever `query` was handed, and always 120 for `mutate`."""
         body = {"query": document, "variables": variables or {}}
         delay = 2.0
         for attempt in range(retries + 1):
             try:
-                r = self._session.post(API_URL, json=body, timeout=120)
+                r = self._session.post(API_URL, json=body, timeout=timeout)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException:
@@ -2717,8 +2714,29 @@ def _paid_credit_str(task):
     return "" if v is None else str(v)
 
 
+# Task detail as a full document: every field the saved request's answer carried, so every
+# reader of a task -- extract_full_meta, the delete plan, the video sync, the Fix and lineage
+# readers, --backfill-full-meta's media read -- finds what it always found. `parameters` and
+# `outputs` are JSON scalars, so everything nested in them rides whole (as _GEN_STATUS
+# proves). It needs no saved copy on PixAI's side. The one it replaced (getTaskById's hash) is
+# no longer sent by PixAI's own site, whose current document changed, and its servers were
+# answering it from a cache (#91; PROBE_2026-10-26_task-model-detail: six tasks read both
+# ways, the same answer but for __typename, which nothing reads). Named, so the fake PixAI
+# keys it by its own name and never by _GEN_STATUS's anonymous root field `task`.
+_TASK_DETAIL_DOC = (
+    "query TaskDetail($id: ID!) { task(id: $id) { id userId parameters outputs status "
+    "priority runnerId startedAt endAt createdAt updatedAt retryCount paidCredit "
+    "cancelability moderationAction { promptsModerationAction } enrolledExperiment "
+    "detectPromptHelperResult { needToEnable enableReasonCode } favoritedAt artworkId "
+    "artworkIds artworks { createdAt hidePrompts id isNsfw isSensitive visibility mediaId "
+    "title updatedAt flag { shouldBlur } } mediaId media { id type width height "
+    "urls { variant url } imageType fileUrl duration thumbnailUrl hlsUrl size "
+    "flag { shouldBlur } } stages { id } } }")
+
+
 def task_detail_gql(session, task_id, retries=3, timeout=60):
-    """GET getTaskById for one task. Returns the task dict or None on failure.
+    """Read one task back from PixAI: `_TASK_DETAIL_DOC` POSTed through `gql_adhoc`, a query.
+    Returns the task dict or None on failure.
 
     `timeout` is the per-attempt socket timeout, handed straight to the transport. A
     caller under a wall-clock ceiling passes the time it has left rather than letting a
@@ -2734,36 +2752,27 @@ def task_detail_gql(session, task_id, retries=3, timeout=60):
 
     Retrying is safe HERE specifically because this is a read-only QUERY. The rule that
     forbids a silent retry (see `gql_mutate`) is about a re-POST paying for a second
-    generation; a repeated getTaskById cannot spend, delete or change anything.
+    generation; a repeated task read cannot spend, delete or change anything.
 
     A genuine failure now says so, instead of leaving the caller to describe an outage as
-    an empty result."""
-    if not TASK_DETAIL_HASH:
-        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default (see
-        # its module-level assignment above), so this fires only if that default is
-        # stripped or someone blanks it in config.json -- not a real setup gate.
-        raise PixAIError(
-            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
-            "with a blank value in config.json. Restore it, or capture a current getTaskById "
-            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
-            "this file).")
-    # Rides the one transport seam (PixAIClient.persisted) rather than hand-building the
-    # persisted-GET params: same operationName, same TASK_DETAIL_HASH, same variables JSON,
-    # so the wire PixAI sees is byte-for-byte what it was. The 3-retry count is preserved,
-    # passed straight through -- a blip here is read downstream as a LOST GENERATION.
-    # `_client_of` accepts either a raw Session or a client. Still fails SOFT: this path must
-    # return None and never raise, so a single outage is not reported as "your images are
-    # gone" -- the seam's raise is caught here and turned back into None.
+    an empty result. That includes an answer with no `task` field in it: a body that is not
+    GraphQL at all (an edge's or a stale credential's own JSON) comes back from the ad-hoc
+    POST as {}, which answered nothing about the task."""
+    # The 3-retry count is passed straight through -- a blip here is read downstream as a
+    # LOST GENERATION -- and `timeout` reaches the socket on every attempt. Still fails SOFT:
+    # this path must return None and never raise, so a single outage is not reported as
+    # "your images are gone" -- the raise is caught here and turned back into None.
     try:
-        data = _client_of(session).persisted(
-            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries,
-            timeout=timeout)
+        data = gql_adhoc(session, _TASK_DETAIL_DOC, {"id": str(task_id)}, retries=retries,
+                         timeout=timeout)
+        if not isinstance(data, dict) or "task" not in data:
+            raise PixAIError("PixAI answered, but with no task in it")
     except (PixAIError, requests.RequestException) as e:
         print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
               "is lost -- this call only READS a task, so the generation and its credits are "
               "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
         return None
-    return (data or {}).get("task")
+    return data.get("task")
 
 
 # ---------------------------------------------------------------------------
@@ -3110,12 +3119,16 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     return plan
 
 
-def gql_adhoc(session, query, variables=None, retries=None):
+def gql_adhoc(session, query, variables=None, retries=None, timeout=120):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has
     read+write scope), so NO persisted sha256Hash capture is needed -- this is the
-    generic foundation for every read/write op, the history feed's page read (`gql`)
-    included. Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
+    generic foundation for every read/write op, the history feed's page read (`gql`),
+    task detail (`task_detail_gql`) and model detail (`_model_version_gql`) included.
+    Returns the `data` dict; raises PixAIError on GraphQL/HTTP error.
+
+    `timeout` is the per-attempt socket timeout in seconds (120 unless a caller says
+    otherwise): `task_detail_gql` hands down the delete preview's remaining budget.
 
     Mutations must be POST (Apollo blocks them over GET); this always POSTs, so it
     works for queries and mutations alike.
@@ -3136,7 +3149,7 @@ def gql_adhoc(session, query, variables=None, retries=None):
     survives under this name because seventy-odd callers still hand it a `session`
     positionally (a raw requests.Session, a PixAIClient, or a test double are all fine)
     and because the suite patches it here."""
-    return _client_of(session).query(query, variables, retries=retries)
+    return _client_of(session).query(query, variables, retries=retries, timeout=timeout)
 
 
 def gql_mutate(session, query, variables=None):
@@ -4454,9 +4467,32 @@ def run_list_models(args):
 # be written to a catalog row -- see model_name_gql's docstring.
 _MODEL_LOOKUP_FAILED = object()
 
+# Model detail as a full document: one generation model VERSION, selecting what its three
+# readers use -- `name` and `model { title }` (model_name_gql), `model { id }` (the Runs-reel
+# reuse, resolve_model_base_id) and `extra`'s sampling defaults (_resolve_model_preset;
+# `extra` is a JSON scalar, so it rides whole). It needs no saved copy on PixAI's side. The
+# one it replaced (getGenerationModelByVersionId's hash) never matched a document PixAI's
+# site sends, and its servers were answering it from a cache that refused it now and then
+# (#91; PROBE_2026-10-26_task-model-detail). An unknown version answers
+# `generationModelVersion: null` with no errors, so the removed-vs-failure line
+# model_name_gql draws (M18) survives. Named, so the fake PixAI keys it by its own name.
+_MODEL_VERSION_DOC = (
+    "query ModelVersion($id: ID!) { generationModelVersion(id: $id) { id name modelType "
+    "status extra model { id title type } } }")
+
+
+def _model_version_gql(session, model_version_id):
+    """One model version read: `_MODEL_VERSION_DOC` POSTed through `gql_adhoc`, SINGLE
+    ATTEMPT (retries=0, as every reader of it always was). Returns the raw `data` dict and
+    raises whatever `gql_adhoc` raises, so each reader keeps its own checks and its own
+    failure semantics: model_name_gql's M18 matrix, the reuse reader's '' and the preset's
+    {}."""
+    return gql_adhoc(session, _MODEL_VERSION_DOC, {"id": str(model_version_id)}, retries=0)
+
 
 def model_name_gql(session, model_version_id, _cache={}, strict=False):
-    """GET getGenerationModelByVersionId; result cached by ID (few unique models).
+    """A model version's display name ("<model title> <version name>"), read through
+    `_model_version_gql`; result cached by ID (few unique models).
 
     Returns the id itself when the name cannot be resolved, which the callers that just want
     a label are written against. That conflated two facts with very different consequences:
@@ -4481,11 +4517,11 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
     pre-checks: those exist there to drive a backoff-and-retry loop this lookup does not have,
     and every one of them ends up a failure here anyway.)
 
-    Two things it deliberately does NOT treat as a failure, because both are real "PixAI has
-    no name for this" answers: an absent MODEL_DETAIL_HASH (nothing was asked, and the
-    id-as-name fallback is the documented behaviour of an unconfigured install), and a
-    response that carries `generationModelVersion` explicitly NULL or title-less -- that is
-    the genuinely-removed model `--relabel-removed` exists for.
+    One thing it deliberately does NOT treat as a failure, because it is the real "PixAI has
+    no name for this" answer: a response that carries `generationModelVersion` explicitly
+    NULL or title-less -- that is the genuinely-removed model `--relabel-removed` exists for.
+    (An unknown version id answers exactly that through the document: null, HTTP 200, no
+    errors.)
 
     A failure is memoised as `_MODEL_LOOKUP_FAILED`, never as a name. Caching the id would
     make the failure indistinguishable from an answer for the rest of the process -- which
@@ -4503,24 +4539,18 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
                     "model {} lookup failed earlier this run; not retried".format(mid))
             return mid
         return hit
-    if not MODEL_DETAIL_HASH:
-        _cache[mid] = mid
-        return mid
     try:
-        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
-        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 keeps this
-        # SINGLE-ATTEMPT (a name lookup drives no backoff loop, exactly as before). The seam
-        # already enforces the M18 ordering this function was hardened around: it reads the
-        # `errors` array BEFORE trusting the status (a refused PixAI query is a 200 carrying
-        # `errors`), rejects a bad status, and refuses a non-GraphQL body that has no `data`
-        # key -- raising PixAIError for each, which the `except` below records as a FAILURE,
-        # never as a name. What must stay HERE is the one distinction the seam cannot draw for
-        # us: a reply whose `data` is missing the `generationModelVersion` field answered
-        # NOTHING (fail), whereas that field present but null is the genuine "model is gone"
-        # answer that --relabel-removed exists for.
-        data = _client_of(session).persisted(
-            "getGenerationModelByVersionId", {"id": mid},
-            sha256=MODEL_DETAIL_HASH, retries=0)
+        # SINGLE-ATTEMPT (`_model_version_gql` passes retries=0: a name lookup drives no
+        # backoff loop, exactly as before). The ad-hoc road already enforces the M18 ordering
+        # this function was hardened around: it reads the `errors` array BEFORE trusting the
+        # status (a refused PixAI query is a 200 carrying `errors`) and raises on a 401, a 429
+        # or a 5xx -- each of which the `except` below records as a FAILURE, never as a name.
+        # A body that is not GraphQL at all comes back from it as {}, and the field check
+        # below fails that too. What must stay HERE is the one distinction the road cannot
+        # draw for us: a reply whose `data` is missing the `generationModelVersion` field
+        # answered NOTHING (fail), whereas that field present but null is the genuine "model
+        # is gone" answer that --relabel-removed exists for.
+        data = _model_version_gql(session, mid)
         if not isinstance(data, dict) or "generationModelVersion" not in data:
             raise PixAIError("reply carried no generationModelVersion field: {}".format(
                 str(data)[:200]))
@@ -4554,28 +4584,24 @@ def resolve_model_base_id(session, model_version_id):
     empty version list (a real, verify-flagged bug: 'Model lookup failed' on every reuse
     click, old or new gens alike, since it's a catalog-wide convention).
 
-    Same GraphQL op as model_name_gql (getGenerationModelByVersionId), deliberately its OWN
-    request rather than a refactor of that function's cache: model_name_gql's failure
-    semantics are hardened against two real production incidents (see its docstring, M18),
+    Same read as model_name_gql (`_model_version_gql`), deliberately its OWN request rather
+    than a refactor of that function's cache: model_name_gql's failure semantics are
+    hardened against two real production incidents (see its docstring, M18),
     and this is a rare, one-off, user-triggered lookup (a single reuse click), not a hot
     backfill loop -- the extra request is cheap and the isolation is worth it.
 
-    Fails soft: '' on anything short of a clean answer (no hash configured, network error,
-    GraphQL error, missing/null model) -- this is a "nice to restore" path, never a reason to
-    block or mislead the caller. The caller leaves the composer's model untouched on ''
-    rather than repeating today's wrong-id failure toast for a case that isn't the user's
-    mistake."""
-    if not model_version_id or not MODEL_DETAIL_HASH:
+    Fails soft: '' on anything short of a clean answer (network error, GraphQL error,
+    missing/null model) -- this is a "nice to restore" path, never a reason to block or
+    mislead the caller. The caller leaves the composer's model untouched on '' rather than
+    repeating today's wrong-id failure toast for a case that isn't the user's mistake."""
+    if not model_version_id:
         return ""
     try:
-        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
-        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (this
-        # one-off reuse-click lookup drove no retry before). Fails SOFT to '' on anything
-        # short of a clean answer: the seam raises PixAIError on a GraphQL error / bad status
-        # / non-GraphQL body, and the `except` below turns every one of those back into ''.
-        data = _client_of(session).persisted(
-            "getGenerationModelByVersionId", {"id": str(model_version_id)},
-            sha256=MODEL_DETAIL_HASH, retries=0)
+        # retries=0 (`_model_version_gql`: this one-off reuse-click lookup drove no retry
+        # before). Fails SOFT to '' on anything short of a clean answer: the ad-hoc road
+        # raises on a GraphQL error or a bad status, a non-GraphQL body comes back as {} with
+        # no model in it, and the `except` below turns every raise back into ''.
+        data = _model_version_gql(session, model_version_id)
         mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
         return str((mv.get("model") or {}).get("id") or "")
     except Exception:                        # noqa: BLE001 -- a soft-fail restore, never fatal
@@ -4773,8 +4799,8 @@ def _with_batch_position(fm, media_id):
 
 
 def _resolve_model_preset(session, version_id, _cache={}):
-    """The model VERSION's default sampling params from getGenerationModelByVersionId's
-    `extra` -> {steps, sampler, cfg_scale}, each '' when the version exposes no default for it.
+    """The model VERSION's default sampling params from its `extra` (`_model_version_gql`)
+    -> {steps, sampler, cfg_scale}, each '' when the version exposes no default for it.
     VERSION-accurate (keyed on the exact version the gen used, so no latest-version drift), and
     cached per version id. Never raises.
 
@@ -4788,26 +4814,21 @@ def _resolve_model_preset(session, version_id, _cache={}):
     if vid in _cache:
         return _cache[vid]
     preset = {}
-    if MODEL_DETAIL_HASH:
-        try:
-            # Rides the one transport seam (PixAIClient.persisted): same operationName, same
-            # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (a
-            # single GET, as before). Never raises out: the seam's PixAIError on any refusal
-            # is caught here and the preset stays {} -- an em-dash is the honest answer when a
-            # model genuinely exposes no default for a field.
-            data = _client_of(session).persisted(
-                "getGenerationModelByVersionId", {"id": vid},
-                sha256=MODEL_DETAIL_HASH, retries=0)
-            mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
-            ex = mv.get("extra") or {}
-            steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
-            preset = {
-                "steps":     ("" if steps is None else str(steps)),
-                "sampler":   (str(sampler) if sampler else ""),
-                "cfg_scale": ("" if cfg is None else str(cfg)),
-            }
-        except Exception:
-            preset = {}
+    try:
+        # retries=0 (`_model_version_gql`: a single read, as before). Never raises out: a
+        # refusal is caught here and the preset stays {} -- an em-dash is the honest answer
+        # when a model genuinely exposes no default for a field.
+        data = _model_version_gql(session, vid)
+        mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
+        ex = mv.get("extra") or {}
+        steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
+        preset = {
+            "steps":     ("" if steps is None else str(steps)),
+            "sampler":   (str(sampler) if sampler else ""),
+            "cfg_scale": ("" if cfg is None else str(cfg)),
+        }
+    except Exception:
+        preset = {}
     _cache[vid] = preset
     return preset
 
@@ -4838,8 +4859,8 @@ def _fill_preset_defaults(session, fm, task):
 def resolve_loras(session, task):
     """Read parameters.lora ({loraVersionId: weight}) from a getTaskById task and
     return a readable "Name:0.7, Name2:0.5" string, resolving each LoRA id to a
-    name via getGenerationModelByVersionId (cached). Unresolvable ids keep the
-    number. Empty string if the task used no LoRAs."""
+    name via model_name_gql (cached). Unresolvable ids keep the number. Empty string
+    if the task used no LoRAs."""
     params = (task or {}).get("parameters") or {}
     lora = params.get("lora") or {}
     if not isinstance(lora, dict) or not lora:
@@ -5764,14 +5785,11 @@ def _make_session(token_val, resolve_user=True):
     it holds, and every primitive resolves whatever it is handed through `_client_of`), so
     the ~70 session-taking functions are unchanged. The name stays `_make_session` because
     thirty-odd call sites and a hundred-odd tests say it."""
-    global U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
-    global DELETE_TASK_HASH
+    global U3T, USER_ID, DELETE_TASK_HASH
     fresh = _load_config()
     if fresh:
         U3T = fresh.get("U3T", "") or U3T
         USER_ID = fresh.get("USER_ID", "") or USER_ID
-        TASK_DETAIL_HASH = fresh.get("TASK_DETAIL_HASH", "") or TASK_DETAIL_HASH
-        MODEL_DETAIL_HASH = fresh.get("MODEL_DETAIL_HASH", "") or MODEL_DETAIL_HASH
         DELETE_TASK_HASH = fresh.get("DELETE_TASK_HASH", "") or DELETE_TASK_HASH
     have_api_key = bool((fresh or {}).get("PIXAI_API_KEY") or _cfg.get("PIXAI_API_KEY"))
     # Persisted hashes now ship with defaults, so the API-key path needs nothing but
@@ -10298,21 +10316,10 @@ def _task_image_media(outputs):
 
 
 def _task_detail_query(session, task_id):
-    """getTaskById via the persisted hash when available, else the ad-hoc `task(id:)` query
-    (same parameters+outputs shape -- verified). Despite the name, this ad-hoc-fallback
-    resilience is NOT shared by --full-meta / --backfill-full-meta: run_backfill_full_meta
-    and run_download's --full-meta branch both call task_detail_gql directly, bypassing
-    this function entirely (run_backfill_full_meta even raises PixAIError itself when
-    TASK_DETAIL_HASH is empty -- see its own guard, unconditional). The only real caller
-    is collect_generation (the --task-id / --dump-params recovery path), which is the one
-    place that actually gets this fallback. Rewiring the two CLI callers to use it too
-    would be a real behavior change -- not done here."""
-    if TASK_DETAIL_HASH:
-        return task_detail_gql(session, task_id)
-    # paidCredit rides along so the fallback path stores the actual cost too (the
-    # field is proven safe ad-hoc -- _GEN_STATUS already selects it on every poll).
-    q = "query($id: ID!) { task(id: $id) { id status createdAt parameters outputs paidCredit } }"
-    return (gql_adhoc(session, q, {"id": str(task_id)}) or {}).get("task")
+    """The task read collect_generation (the --task-id / --dump-params recovery path) and the
+    gallery's queue estimate make: `task_detail_gql`, the full document (#91). Its narrower
+    ad-hoc fallback went with the saved request it stood in for."""
+    return task_detail_gql(session, task_id)
 
 
 def _fix_source_label(task, out):
@@ -13196,7 +13203,7 @@ def run_edit_image(args):
 def _needs_model_fix(row):
     """Return the model version-id to resolve if this row's model_name is missing
     or still a raw numeric id; else ''. Handles the case where model_name was
-    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run).
+    set to the numeric id (the model lookup failed on an earlier run).
 
     Only a NUMERIC id is ever handed to the version lookup. A video row collected before
     2026-09-26 stored the engine NAME ("tbkv1.0.1", "v4.0.1") in model_id, and this passed it
@@ -13224,8 +13231,8 @@ def _needs_model_fix(row):
 
 def run_fix_models(args):
     """Re-resolve human-readable model names for catalog rows whose model_name is
-    blank or still a numeric version-id (e.g. saved before MODEL_DETAIL_HASH was
-    configured). One API call per distinct model id (cached)."""
+    blank or still a numeric version-id (e.g. saved while the model lookup was failing).
+    One API call per distinct model id (cached)."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
@@ -16800,7 +16807,7 @@ _BACKFILL_CHECKPOINT_TASKS = 500
 
 
 def run_backfill_full_meta(args):
-    """Fill catalog rows from getTaskById + getGenerationModelByVersionId: the core
+    """Fill catalog rows from the task detail read + the model version read: the core
     prompt_full/natural_prompt/seed/steps/sampler/cfg_scale/model_id/model_name, plus
     url/width/height from the task's media object as a free side effect. steps/sampler/cfg
     also fall back to the model VERSION preset when the task recorded none (issue #18).
@@ -16817,15 +16824,6 @@ def run_backfill_full_meta(args):
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
-
-    if not TASK_DETAIL_HASH:
-        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
-        # fires only if that default is stripped or blanked in config.json.
-        raise PixAIError(
-            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
-            "with a blank value in config.json. Restore it, or capture a current getTaskById "
-            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
-            "this file).")
 
     rows = load_catalog(db_path)
     with_loras = getattr(args, "with_loras", False)
@@ -17045,12 +17043,6 @@ def run_backfill_lineage(args):
     out = Path(args.out)
     db_path = _ensure_db(out)
     session = _make_session(getattr(args, "token", None))
-
-    if not TASK_DETAIL_HASH:
-        raise PixAIError(
-            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
-            "with a blank value in config.json. Restore it, or capture a current getTaskById "
-            "sha256Hash from DevTools if the hash rotated.")
 
     rows = load_catalog(db_path)
     # A task is "done" once ANY of its rows carries a real source_media_id OR the persisted
@@ -17286,15 +17278,6 @@ def run_download(args, progress=None):
     session = _make_session(getattr(args, "token", None))
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
-
-    if use_full_meta and not TASK_DETAIL_HASH:
-        # Defensive only: TASK_DETAIL_HASH ships with a working built-in default, so this
-        # fires only if that default is stripped or blanked in config.json.
-        raise PixAIError(
-            "TASK_DETAIL_HASH is empty -- the built-in default is missing or was overridden "
-            "with a blank value in config.json. Restore it, or capture a current getTaskById "
-            "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
-            "this file).")
 
     img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -18705,8 +18688,9 @@ if __name__ == "__main__":
 
 # ===========================================================================
 # RECAPTURE (only if the site changes): re-grab a saved operation's sha256Hash
-# (task detail, model detail, delete, refreshToken, bookmarks), U3T and USER_ID from
-# Network tab -> graphql row -> Payload, and update config.json. The history feed
-# needs none: it is read as a full document (_HISTORY_PAGE_DOC).
+# (delete, refreshToken, bookmarks), U3T and USER_ID from Network tab -> graphql row ->
+# Payload, and update config.json. The history feed, task detail and model detail need
+# none: each is read as a full document (_HISTORY_PAGE_DOC, _TASK_DETAIL_DOC,
+# _MODEL_VERSION_DOC).
 # Keep your token private.
 # ===========================================================================

@@ -38,7 +38,10 @@ OPERATION NAMES. Keyed off the document: `mutation createGenerationTask(...)` is
 `createGenerationTask`. Plenty of this app's documents are anonymous (`query{ me{ id } }`,
 `mutation($id: ID!, $input: ...) { updateGenerationTask(...) }`), so an anonymous document
 is keyed by its first ROOT FIELD -- `me`, `updateGenerationTask` -- which is the name a
-reader would use for it anyway. `persisted()` is keyed by the operation name it is given.
+reader would use for it anyway. The task detail and model detail documents are NAMED
+(`TaskDetail`, `ModelVersion`) so they key by those names and never collide with the
+generation poll's anonymous `task` document (`_GEN_STATUS`). `persisted()` is keyed by the
+operation name it is given; the bookmarks fallback is what still rides it.
 """
 import re
 from types import SimpleNamespace
@@ -144,8 +147,11 @@ class FakePixAI:
         return call
 
     # -- the verbs -----------------------------------------------------------
-    def query(self, document, variables=None, retries=None):
-        return self._graphql("query", document, variables, retries)
+    def query(self, document, variables=None, retries=None, timeout=120):
+        """`timeout` mirrors the real client's signature (the per-attempt socket timeout a
+        caller under a wall-clock ceiling passes down) and is recorded on the call, so a
+        test can assert the timeout a read was given, as it does for `persisted()`."""
+        return self._graphql("query", document, variables, retries, timeout=timeout)
 
     def mutate(self, document, variables=None):
         """No `retries` parameter, exactly as on the real client. `fake.mutations(op)`
@@ -153,10 +159,10 @@ class FakePixAI:
         spend fired ONCE without inspecting a retry argument at all."""
         return self._graphql("mutate", document, variables, 0)
 
-    def _graphql(self, verb, document, variables, retries):
+    def _graphql(self, verb, document, variables, retries, **extra):
         op = operation_name(document)
         call = self._record(verb=verb, op=op, document=document, variables=variables,
-                            retries=retries)
+                            retries=retries, **extra)
         return self._resolve(op, "GraphQL operation", call)
 
     def persisted(self, op_name, variables=None, sha256=None, retries=4, timeout=60):
@@ -199,9 +205,10 @@ class FakePixAI:
             "FakePixAI has no requests.Session -- that is the point. A path that reaches "
             "for `.session` (or calls `.get`/`.post` on the client) is one of the call "
             "sites still speaking HTTP itself: resolve_media, download, delete_task_gql, "
-            "refresh_jwt. (The persisted GETs -- task_detail_gql, _bookmarks_persisted, "
-            "model_name_gql, resolve_model_base_id, _resolve_model_preset "
-            "-- ride persisted() now, so register them with fake.on(<operationName>, ...).) "
+            "refresh_jwt. (task_detail_gql and the model version reads ride query() with "
+            "named documents -- register 'TaskDetail' / 'ModelVersion' -- and "
+            "_bookmarks_persisted rides persisted(), so register it with "
+            "fake.on(<operationName>, ...).) "
             "Stub the HTTP call directly instead of routing it through the fake.")
 
     def get(self, url, **kwargs):
