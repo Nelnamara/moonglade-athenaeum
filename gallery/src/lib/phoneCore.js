@@ -581,22 +581,6 @@ export function isPhoneViewport({ width, coarse, portrait, screenW, screenH, lan
    nothing. */
 export const TURN_SETTLE_MS = [120, 400, 1000];
 
-/* CHROME ON iOS KEEPS THE OLD WIDTH (#75). Chrome for iOS can report one viewport width while the page
-   is laid out at another after a layout change, and fires nothing to correct it; a reload fixes it, and
-   so does the first scroll (a user's measurements on #75, 2026-10-27: innerWidth 783 against a 724-wide
-   page, both 724 after one scroll; Safari and Firefox on the same phone were fine). So once a turn has
-   settled, Chrome on iOS gets one scroll of a single pixel and back on the gallery's scroller -- the
-   cheapest thing that makes it re-measure. Every other browser is left alone. */
-export const TURN_NUDGE_MS = 1100;   // after the last TURN_SETTLE_MS read
-export function isChromeIOS(ua) {
-  return /\bCriOS\/\d/.test(String(ua || ""));
-}
-/* The pixel the nudge moves: up when the scroller can go up, else down (a scroller already at its top
-   cannot move up, and one at its bottom cannot move down). */
-export function nudgeTarget(scrollTop) {
-  const t = Number(scrollTop) || 0;
-  return t > 0 ? t - 1 : t + 1;
-}
 
 export function phoneColumns(width, landscape) {
   if (!landscape) return 2;
