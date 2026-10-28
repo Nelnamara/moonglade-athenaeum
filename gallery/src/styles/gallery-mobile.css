@@ -252,7 +252,11 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-selcount b { color: var(--text); }
 
 /* ---- grid (DC gridStyle/colStyle/colOffStyle/capStyle, lines 89-106 & 930-934) ---- */
-.glm-grid { padding: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-items: start; }
+/* Two tracks that can shrink, never `1fr 1fr` (#75): a `1fr` track's minimum is its content's own
+   width, so tiles laid out at the sideways width during a turn held the upright columns that wide
+   (Chrome on iOS, 2026-10-27: 403.5px tracks inside a 440px grid, which is the 832px landscape width
+   cut in two). `minmax(0, 1fr)` sizes the tracks from the grid's width alone. */
+.glm-grid { padding: 9px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; align-items: start; }
 /* An upright phone draws two columns, whatever column count the script last read (owner's walk,
    2026-10-03: the sideways count outlived a turn back upright). Outside the landscape condition
    (lib/phoneCore.js LANDSCAPE_QUERY) the sideways grid is held to two tracks that can shrink, so a
@@ -261,7 +265,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   .glm-grid.glm-grid-rows { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 }
 .glm-grid.loading { opacity: .6; }
-.glm-col { display: flex; flex-direction: column; gap: 7px; }
+.glm-col { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .glm-col-off { margin-top: 22px; }
 .glm-tile { position: relative; margin: 0; border-radius: 8px; overflow: hidden; cursor: pointer;
   background: var(--surface0); touch-action: pan-y; -webkit-touch-callout: none; user-select: none; }

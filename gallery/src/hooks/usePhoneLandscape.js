@@ -73,7 +73,7 @@ export default function usePhoneLandscape() {
       raf = requestAnimationFrame(() => { raf = 0; sync(); });
       timers.forEach(clearTimeout);
       timers = TURN_SETTLE_MS.map((ms) => setTimeout(sync, ms));
-      if (chromeIOS) timers.push(setTimeout(nudge, TURN_NUDGE_MS));
+      if (chromeIOS && debugEl) timers.push(setTimeout(nudge, TURN_NUDGE_MS));
     };
     sync();
     const mql = window.matchMedia(LANDSCAPE_QUERY);

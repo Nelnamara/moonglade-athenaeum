@@ -55,7 +55,7 @@ describe("Chrome on iOS gets a one-pixel scroll once a turn has settled (#75)", 
     assert.ok(TURN_NUDGE_MS > Math.max(...TURN_SETTLE_MS));
   });
   test("only Chrome on iOS schedules it, on the same timers the gallery lets go", () => {
-    assert.match(hook, /if \(chromeIOS\) timers\.push\(setTimeout\(nudge, TURN_NUDGE_MS\)\);/);
+    assert.match(hook, /if \(chromeIOS && debugEl\) timers\.push\(setTimeout\(nudge, TURN_NUDGE_MS\)\);/);
   });
   test("it runs only when the phone really changed way up, and puts the scroll back", () => {
     assert.match(hook, /if \(now === nudgedFor\) return;/);
@@ -70,6 +70,11 @@ describe("the CSS backstop", () => {
     const rule = "@media not all and " + LANDSCAPE_QUERY + " {\n"
       + "  .glm-grid.glm-grid-rows { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }";
     assert.ok(css.includes(rule), "gallery-mobile.css holds an upright phone to two shrinkable columns");
+  });
+  test("the upright grid's two tracks size from the grid, never from their tiles (#75)", () => {
+    assert.match(css, /\.glm-grid \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+    assert.doesNotMatch(css, /\.glm-grid \{[^}]*grid-template-columns: 1fr 1fr;/);
+    assert.match(css, /\.glm-col \{[^}]*min-width: 0;/);
   });
   test("the library's scroller never scrolls sideways", () => {
     assert.match(css, /\.glm-body \{[^}]*overflow-x: hidden;/);
