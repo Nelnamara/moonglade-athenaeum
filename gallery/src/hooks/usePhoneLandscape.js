@@ -36,10 +36,31 @@ export default function usePhoneLandscape() {
     let timers = [];
     const chromeIOS = isChromeIOS(window.navigator && window.navigator.userAgent);
     let nudgedFor = window.matchMedia(LANDSCAPE_QUERY).matches;
+    // ?turndebug: a live readout of the widths that matter, for a turn on a real phone (#75). Plain DOM,
+    // no state: it only reads, and it leaves with the gallery.
+    let debugTimer = 0, debugEl = null, nudges = 0;
+    if (/[?&]turndebug\b/.test(window.location.search || "")) {
+      debugEl = document.createElement("pre");
+      debugEl.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;margin:0;padding:6px 8px;"
+        + "font:11px/1.35 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.78);border-radius:6px;"
+        + "pointer-events:none;white-space:pre";
+      document.body.appendChild(debugEl);
+      const w = (sel) => { const el = document.querySelector(sel); return el ? Math.round(el.getBoundingClientRect().width) : "-"; };
+      debugTimer = setInterval(() => {
+        const de = document.documentElement, vv = window.visualViewport, grid = document.querySelector(".glm-grid");
+        debugEl.textContent = [
+          "inner " + window.innerWidth + "  vv " + (vv ? Math.round(vv.width) : "-") + "  client " + de.clientWidth + "  scroll " + de.scrollWidth,
+          "stage " + w(".glm-stage") + "  body " + w(".glm-body") + "  grid " + w(".glm-grid"),
+          "cols " + (grid ? getComputedStyle(grid).gridTemplateColumns : "-"),
+          "landscape " + window.matchMedia(LANDSCAPE_QUERY).matches + "  chromeIOS " + chromeIOS + "  nudges " + nudges,
+        ].join("\n");
+      }, 300);
+    }
     const nudge = () => {
       const now = window.matchMedia(LANDSCAPE_QUERY).matches;
       if (now === nudgedFor) return;          // the phone did not change way up: nothing to correct
       nudgedFor = now;
+      nudges += 1;
       document.querySelectorAll(".glm-body").forEach((el) => {
         const was = el.scrollTop;
         el.scrollTop = nudgeTarget(was);
@@ -67,6 +88,8 @@ export default function usePhoneLandscape() {
       window.removeEventListener("orientationchange", settle);
       if (vv) vv.removeEventListener("resize", settle);
       if (raf) cancelAnimationFrame(raf);
+      if (debugTimer) clearInterval(debugTimer);
+      if (debugEl) debugEl.remove();
       timers.forEach(clearTimeout);
     };
   }, []);
