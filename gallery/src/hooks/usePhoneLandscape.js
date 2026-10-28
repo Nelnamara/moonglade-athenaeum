@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LANDSCAPE_QUERY, TURN_SETTLE_MS, phoneColumns } from "../lib/phoneCore.js";
+import { LANDSCAPE_QUERY, TURN_SETTLE_MS, TURN_NUDGE_MS, phoneColumns, isChromeIOS, nudgeTarget } from "../lib/phoneCore.js";
 
 /* Is the phone held sideways, and how many columns does its gallery draw? (Session Q, Q4.)
 
@@ -11,7 +11,12 @@ import { LANDSCAPE_QUERY, TURN_SETTLE_MS, phoneColumns } from "../lib/phoneCore.
    AND AGAIN ONCE THE TURN HAS SETTLED (owner's walk, 2026-10-03): a phone can deliver a turn's events
    while the query still answers for the old way up, and fire nothing afterwards, which left the
    sideways column count on an upright phone. Every event also reads on the next frame and at
-   TURN_SETTLE_MS; the visual viewport's resize (what a phone fires when its toolbars settle) counts. */
+   TURN_SETTLE_MS; the visual viewport's resize (what a phone fires when its toolbars settle) counts.
+
+   AND, ON CHROME FOR iOS ONLY, A ONE-PIXEL SCROLL ONCE A TURN HAS SETTLED (#75): Chrome on iOS can keep
+   the sideways layout width after the phone turns back upright, and corrects itself on the first
+   scroll. At TURN_NUDGE_MS after the turn, and only when the phone really changed way up, each of the
+   gallery's scrollers moves one pixel and back on the next frame. See lib/phoneCore.js. */
 
 function read() {
   if (typeof window === "undefined" || !window.matchMedia) return { landscape: false, cols: 2 };
@@ -29,12 +34,25 @@ export default function usePhoneLandscape() {
     });
     let raf = 0;
     let timers = [];
+    const chromeIOS = isChromeIOS(window.navigator && window.navigator.userAgent);
+    let nudgedFor = window.matchMedia(LANDSCAPE_QUERY).matches;
+    const nudge = () => {
+      const now = window.matchMedia(LANDSCAPE_QUERY).matches;
+      if (now === nudgedFor) return;          // the phone did not change way up: nothing to correct
+      nudgedFor = now;
+      document.querySelectorAll(".glm-body").forEach((el) => {
+        const was = el.scrollTop;
+        el.scrollTop = nudgeTarget(was);
+        requestAnimationFrame(() => { el.scrollTop = was; });
+      });
+    };
     const settle = () => {
       sync();
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => { raf = 0; sync(); });
       timers.forEach(clearTimeout);
       timers = TURN_SETTLE_MS.map((ms) => setTimeout(sync, ms));
+      if (chromeIOS) timers.push(setTimeout(nudge, TURN_NUDGE_MS));
     };
     sync();
     const mql = window.matchMedia(LANDSCAPE_QUERY);

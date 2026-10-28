@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { LANDSCAPE_QUERY, TURN_SETTLE_MS } from "../../gallery/src/lib/phoneCore.js";
+import { LANDSCAPE_QUERY, TURN_SETTLE_MS, TURN_NUDGE_MS, isChromeIOS, nudgeTarget } from "../../gallery/src/lib/phoneCore.js";
 
 /* The owner's walk, 2026-10-03: after the phone was held sideways, the upright gallery kept the
    sideways column count -- a column hung off the right edge and the page scrolled sideways. A phone can
@@ -33,6 +33,34 @@ describe("a turn is read again once it has settled", () => {
   });
   test("and lets every timer go when the gallery goes", () => {
     assert.match(hook, /timers\.forEach\(clearTimeout\);\s*\};\s*\}, \[\]\);/);
+  });
+});
+
+describe("Chrome on iOS gets a one-pixel scroll once a turn has settled (#75)", () => {
+  const hook = read("hooks/usePhoneLandscape.js");
+  test("Chrome for iOS is told apart from every other iPhone and desktop browser", () => {
+    const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+    assert.equal(isChromeIOS(ios + " CriOS/156.0.8078.54 Mobile/15E148 Safari/604.1"), true);
+    assert.equal(isChromeIOS(ios + " Version/27.2 Mobile/15E148 Safari/604.1"), false, "Safari");
+    assert.equal(isChromeIOS(ios + " FxiOS/150.0 Mobile/15E148 Safari/605.1.15"), false, "Firefox");
+    assert.equal(isChromeIOS("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"), false, "desktop Chrome");
+    assert.equal(isChromeIOS(undefined), false);
+  });
+  test("the nudge moves one pixel the way the scroller can go", () => {
+    assert.equal(nudgeTarget(0), 1);
+    assert.equal(nudgeTarget(250), 249);
+    assert.equal(nudgeTarget("x"), 1);
+  });
+  test("it waits until after the last settle read", () => {
+    assert.ok(TURN_NUDGE_MS > Math.max(...TURN_SETTLE_MS));
+  });
+  test("only Chrome on iOS schedules it, on the same timers the gallery lets go", () => {
+    assert.match(hook, /if \(chromeIOS\) timers\.push\(setTimeout\(nudge, TURN_NUDGE_MS\)\);/);
+  });
+  test("it runs only when the phone really changed way up, and puts the scroll back", () => {
+    assert.match(hook, /if \(now === nudgedFor\) return;/);
+    assert.match(hook, /el\.scrollTop = nudgeTarget\(was\);\s*requestAnimationFrame\(\(\) => \{ el\.scrollTop = was; \}\);/);
+    assert.match(hook, /querySelectorAll\("\.glm-body"\)/);
   });
 });
 

@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **Chrome on iPhone: the gallery fits the screen again after you turn the phone back upright** (#75, to be confirmed on a real iPhone). Chrome for iOS can keep the sideways width after a turn, so the upright columns ran off the screen until a reload; it corrects itself on the first scroll (a user's measurements on #75). Once a turn settles, Chrome on iOS now gets a one-pixel scroll and back on the gallery, which you won't see. Safari and every other browser are left alone. (2026-10-27)
+
 ## [3.20.3] - 2026-10-26 — Full Scene
 
 ### Fixed
