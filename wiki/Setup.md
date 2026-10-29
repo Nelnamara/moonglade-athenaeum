@@ -58,20 +58,9 @@ Generate a key at [pixai.art → Profile → Settings → API](https://pixai.art
 membership; lifetime up to ~2 years). It's the Bearer credential for **every** call, and:
 
 - **`USER_ID` is auto-resolved** from the key (via the `me` query) — no DevTools.
-- **The persisted-query hashes ship with working defaults** — nothing to capture.
-
-### Why are there still "hashes" in the example file?
-PixAI's public API (what your key talks to) exposes generation and model search but
-**not** the private ops that list *your own* history, read a picture's full details or a
-model's name, or delete a whole generation. Your history, a picture's full details and
-model names are read with the full request, so there is nothing to capture or override
-for those. Only two operations are still identified by a persisted-query **hash**:
-deleting a whole generation from PixAI, and the Mirror to PixAI session renewal. These
-hashes are **public, not secret, and the same for everyone** — so the tool bakes the
-current ones in. You only touch them if PixAI overhauls their frontend and a default goes
-stale (you'll get a clear error — see [Troubleshooting](Troubleshooting)). Both hash
-fields in `config.json` are optional overrides; leave them blank. More detail:
-[How It Works](How-It-Works).
+- **There are no "hashes" to capture any more** — nothing the app sends depends on one. A
+  `DELETE_TASK_HASH` or `REFRESH_TOKEN_HASH` left in an old `config.json` is simply not read.
+  More detail: [How It Works](How-It-Works).
 
 > **No API key?** A legacy browser-token path still exists (leave `PIXAI_API_KEY`
 > blank, add `U3T`, supply a short-lived token via `token.txt` / `PIXAI_TOKEN` /

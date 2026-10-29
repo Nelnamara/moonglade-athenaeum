@@ -8,7 +8,7 @@ This file is committed so it is available on every machine that clones the repo.
 
 **Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `../moonglade-internal/architecture.md` for the module breakdown, function reference, and catalog schema.
 
-Built by reverse-engineering site network traffic (catalogued privately in `../moonglade-internal/private/API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `wiki/`.
+Built by reverse-engineering site network traffic (catalogued privately in `../moonglade-internal/private/API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path and the `/v2` REST routes mean no operation needs a persisted-hash capture (#92). There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `wiki/`.
 
 ---
 
@@ -163,7 +163,7 @@ come from `GET /v1/media/<mediaId>` (variant `PUBLIC`); videos expose their mp4 
 object's `fileUrl`. SSL trust store: `truststore.inject_into_ssl()` called at import if
 present — fixes corporate/antivirus HTTPS interception.
 
-> **Reverse-engineering detail (the persisted-query/hash mechanism, pagination internals,
+> **Reverse-engineering detail (the retired persisted-query/hash mechanism, pagination internals,
 > `gql_adhoc()` technique, Apollo header requirements) lives in
 > `../moonglade-internal/private/ARCHITECTURE_RE.md`**
 > — the private companion repo, not public. Read it there when you need the specifics; this section stays at
@@ -200,7 +200,7 @@ shipped bug.
 ## Critical constraints
 
 - **NEVER** append `Co-Authored-By: Claude` trailers to commits.
-- **NEVER** commit `config.json` — git-ignored; contains a real user credential (`PIXAI_API_KEY`). USER_ID, U3T, `DELETE_TASK_HASH` and `REFRESH_TOKEN_HASH` are optional legacy overrides, absent from a normal live file (`USER_ID` auto-resolves; the two hashes ship baked-in).
+- **NEVER** commit `config.json` — git-ignored; contains a real user credential (`PIXAI_API_KEY`). USER_ID and U3T are optional legacy overrides, absent from a normal live file (`USER_ID` auto-resolves).
 - `token.txt`, `pixai_backup/`, `*.webp` are also git-ignored.
 - No real credentials or user-specific values should appear in any committed file.
 - All traffic is HTTPS with verification on; do not add `verify=False` anywhere.
@@ -215,7 +215,7 @@ shipped bug.
   submits a generation, submits a fix, deletes a task, or claims a reward must call
   `_check_read_only(...)` before the network call fires — it is not optional per-path opt-in,
   it is the contract the `Trust & Safety` wiki page makes to users. See
-  `submit_generation`/`submit_fixer`/`delete_task_gql`/`claim_reward` for the pattern.
+  `submit_generation`/`submit_fixer`/`delete_task`/`claim_reward` for the pattern.
 
 ---
 
@@ -230,12 +230,12 @@ shipped bug.
 
 ## Deleting from your account
 
-**There are two delete mutations and they are NOT interchangeable.** `deleteBatchMedia`
+**There are two deletes and they are NOT interchangeable.** `deleteBatchMedia`
 (inside `updateGenerationTask`) drops ONE member of a task's `outputs.batch[]`, and PixAI
 accepts it only while the task would still have an output left afterwards. For a lone-image
 task (no `batch` key — the picture is `outputs.mediaId`) and for the LAST live member of a
 batch, PixAI answers 403 `task outputs does not include any media with mediaId`; their own
-site sends `deleteGenerationTask` for those two cases. The gallery's single-image delete sent
+site sends its whole-task delete for those two cases. The gallery's single-image delete sent
 `deleteBatchMedia` unconditionally from v2.5.0 to 2026-09-06 and had never once worked on a
 single-image generation.
 
@@ -251,13 +251,11 @@ single-image generation.
   whole-task-deleted task, so it cannot be used as an existence check.
 - **The fail-safe direction is always refuse.** A read that failed, a media id the task does
   not list, an already-deleted member, a video task: no mutation, a plain-words message.
-- `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response.)
-- Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards are what stand between you and a real delete.
-- **There is no command-line delete.** `--delete-task` (deprecated 2026-09-06) and the `--yes` that only it used are gone. The roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`: localhost-only, typed `DELETE`, `READ_ONLY` refuses before any job starts). `delete_task_gql` stays because those routes call it. A bulk delete sent with `purge_local: false` is cloud-only and leaves local rows behind for `--reconcile-deleted`.
+- The whole-task delete is `delete_task`: `POST /v2/task/{id}/delete` on the API key, through `rest_post` (#92), the route pixai.art's own task menu calls. **Single attempt** (no retry loop anywhere on that road). **`{"success": true}` is the only success** — any other 2xx, a body that is not JSON, any non-2xx or a network error raises, and the task counts as NOT deleted. The route is **idempotent** (deleting an already-deleted or missing task also succeeds), so a success is never an existence check. A task id that could leave its path segment is refused before anything is sent.
+- **There is no command-line delete.** `--delete-task` (deprecated 2026-09-06) and the `--yes` that only it used are gone. The roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`: localhost-only, typed `DELETE`, `READ_ONLY` refuses before any job starts). `delete_task` stays because those routes call it. A bulk delete sent with `purge_local: false` is cloud-only and leaves local rows behind for `--reconcile-deleted`.
 - `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
 
-> **Reverse-engineering detail (frontend handler flow, sibling mutations, hash-capture
-> method) lives in `../moonglade-internal/private/RE_NOTES.md`** — the private companion repo,
+> **Reverse-engineering detail (frontend handler flow, sibling mutations) lives in `../moonglade-internal/private/RE_NOTES.md`** — the private companion repo,
 > not public. Read it there when you need it.
 
 ## Logging (`-v` / `--verbose`, and the persistent file log)
@@ -265,13 +263,13 @@ single-image generation.
 - `set_verbose()` + `vlog()`: timestamped diagnostics (per-page fetch, per-image resolve/download timing, startup disk-scan time) to stdout. Console output is a no-op until enabled with `-v` / `--verbose`.
 - `moonglade/logs.py` is the persistent baseline: a rotating file at `local/logs/moonglade.log` beside the launcher's `serve.log` (3.19 and earlier: the library's `logs/`), always on regardless of `-v` (only the console mirror is verbose-gated). See `../moonglade-internal/architecture.md`'s module reference for the full design.
 
-## Recapture procedure (when PixAI changes their frontend)
+## When PixAI changes their site
 
-Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s. Only two saved
-operations still ride a hash you could recapture: the whole-generation delete (`deleteGenerationTask`,
-`DELETE_TASK_HASH`) and the Mirror's session renewal (`refreshToken`, `REFRESH_TOKEN_HASH`); every other
-read, task detail and model detail included (#91), sends a full document through `gql_adhoc()`.
-Step-by-step recapture is in `../moonglade-internal/private/RE_NOTES.md`.
+No operation rides a saved (hash-only) request any more (#88, #89, #91, #92): every GraphQL read
+and write sends a full document through `gql_adhoc()`/`gql_mutate()`, and the whole-task delete
+and the Mirror's session renewal (`POST /v2/auth/refresh-token`, on the Mirror's own JWT, never
+the API key) go to PixAI's `/v2` REST routes. Symptoms of a site change are now "Cannot query
+field…" on a document or a REST 4xx, and the fix is in code, not in `config.json`.
 
 ---
 
