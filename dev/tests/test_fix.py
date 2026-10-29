@@ -445,7 +445,9 @@ def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_pa
     payload = {"source": "700", "boxes": [FACE]}
     assert cli.post("/api/fix", json=payload).get_json().get("task_id") == "F1"
     r = cli.post("/api/fix", json=payload)
-    assert r.status_code == 409 and "just sent" in r.get_json()["error"]
+    msg = r.get_json()["error"]
+    assert r.status_code == 409 and "a few seconds ago" in msg
+    assert "sent" not in msg.split(";")[0], "the refusal must not claim the first one was sent"
     assert [p for p, _ in seen["posts"]] == ["/task/fixer"], "the repeat sent nothing"
     # the same boxes in a different case/order of keys are the same Fix
     r = cli.post("/api/fix", json={"source": "700", "boxes": [dict(FACE, tag="FACE")]})
@@ -456,6 +458,80 @@ def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_pa
     clock[0] += 11
     assert cli.post("/api/fix", json=payload).get_json().get("task_id") == "F1"
     assert [p for p, _ in seen["posts"]] == ["/task/fixer"] * 3
+
+
+def _failing_then_ok(monkeypatch, exc):
+    """_rest_post that raises `exc` on the first spend POST and answers a task id after."""
+    posts = []
+
+    def fake_post(s, path, body, **k):
+        posts.append(path)
+        if len(posts) == 1:
+            raise exc
+        return {"id": "F2"}
+    monkeypatch.setattr(core, "_rest_post", fake_post)
+    return posts
+
+
+def _rest_refusal(status):
+    return core.PixAIRestError("REST POST /task/fixer -> %d: refused" % status, status=status, body=None)
+
+
+@pytest.mark.parametrize("status", [400, 402, 403, 422, 429])
+def test_a_retry_after_pixais_4xx_refusal_goes_straight_through(status, tmp_path, monkeypatch):
+    """PixAI refused the first submit (insufficient balance and the like): nothing was created
+    or charged, so the repeat record is dropped and an immediate retry is not refused."""
+    cli, _ = _price_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    posts = _failing_then_ok(monkeypatch, _rest_refusal(status))
+    payload = {"source": "700", "boxes": [FACE]}
+    first = cli.post("/api/fix", json=payload).get_json()
+    assert "task_id" not in first and first["error"]
+    again = cli.post("/api/fix", json=payload)
+    assert again.status_code == 200 and again.get_json().get("task_id") == "F2"
+    assert posts == ["/task/fixer", "/task/fixer"]
+
+
+def test_a_retry_after_a_refusal_before_any_send_goes_straight_through(tmp_path, monkeypatch):
+    """The mirror refusing before the POST (nothing left the machine) drops the record too."""
+    cli, _ = _price_client(tmp_path, monkeypatch)
+    calls = []
+
+    def mirror(s):
+        calls.append(1)
+        if len(calls) == 1:
+            raise core.PixAIError("Mirror mode is on but no mirror session is available")
+        return s
+    monkeypatch.setattr(core, "_session_for_create", mirror)
+    posts = _record_posts(monkeypatch)
+    payload = {"source": "700", "boxes": [FACE]}
+    assert "task_id" not in cli.post("/api/fix", json=payload).get_json()
+    assert posts == []
+    assert cli.post("/api/fix", json=payload).get_json().get("task_id") == "F1"
+
+
+@pytest.mark.parametrize("exc", [requests.ReadTimeout("read timed out"),
+                                 requests.ConnectionError("connection reset"),
+                                 "5xx", "408", "no-id"])
+def test_a_retry_after_an_unknown_outcome_is_still_refused(exc, tmp_path, monkeypatch):
+    """A timeout, a dropped connection, a 5xx or 408 after the send, or a 2xx with no task id:
+    PixAI may have created -- and charged -- the Fix, so the immediate retry is refused."""
+    cli, _ = _price_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    if exc == "5xx":
+        exc = _rest_refusal(502)
+    elif exc == "408":
+        exc = _rest_refusal(408)
+    if exc == "no-id":
+        posts = []
+        monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: posts.append(path) or {})
+    else:
+        posts = _failing_then_ok(monkeypatch, exc)
+    payload = {"source": "700", "boxes": [FACE]}
+    assert "task_id" not in cli.post("/api/fix", json=payload).get_json()
+    again = cli.post("/api/fix", json=payload)
+    assert again.status_code == 409 and "a few seconds ago" in again.get_json()["error"]
+    assert posts == ["/task/fixer"], "the retry sent nothing"
 
 
 def test_read_only_refuses_the_fix_route_before_its_upload(tmp_path, monkeypatch):
@@ -604,9 +680,9 @@ def test_badge_and_submit_send_the_same_boxes():
     # (the ▲-collapsed dock hides the picture with display:none, and a 0-wide element
     # would submit display pixels as original pixels). Same invariant: ONE scaler, the
     # SAME element expression, in the price body and the submit body alike.
-    # Three since #93 review F1: the price body, run()'s can-it-measure guard, and the submit
-    # body -- every one the same call on the same element expression.
-    assert src.count("scaleBoxes(boxes, scaleEl())") == 3, (
+    # Four since #93 review F1/F3: the price body, run()'s can-it-measure guard, the submit
+    # body and ✦ Fix's off check -- every one the same call on the same element expression.
+    assert src.count("scaleBoxes(boxes, scaleEl())") == 4, (
         "the price body and the submit body no longer share the one scaleBoxes call each "
         "-- the badge would price a request the server never receives")
     assert "scaleBoxes(boxes, imgRef" not in src and "scaleBoxes(boxes, measured" not in src

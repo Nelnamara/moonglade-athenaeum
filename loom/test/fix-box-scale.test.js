@@ -70,8 +70,13 @@ test("a landscape picture (no letterbox) maps exactly as before, whatever the la
 test("a box is clipped to the picture: the letterbox gap and anything past an edge are not sent", () => {
   // portrait letterbox: the picture spans x 110.25 .. 267.75 of the 378-px element
   const inGap = [{ x: 20, y: 100, w: 60, h: 40, tag: "face" }];          // wholly in the left gap
-  assert.deepEqual(boxesToOriginal(inGap, S(378, 280), S(864, 1536)), [{ x: 0, y: 549, width: 0, height: 219, tag: "face" }],
-    "0 wide: the server's cleaner drops it");
+  assert.deepEqual(boxesToOriginal(inGap, S(378, 280), S(864, 1536)), [],
+    "nothing on the picture: the box is dropped, not sent 0 wide (review 2, F3)");
+  // a bar-only box beside a real one: only the real one is sent (and counted by the confirm)
+  const mixed = boxesToOriginal(inGap.concat([{ x: 169, y: 120, w: 40, h: 40, tag: "face" }]), S(378, 280), S(864, 1536));
+  assert.deepEqual(mixed, [{ x: 322, y: 658, width: 219, height: 219, tag: "face" }]);
+  // a box that rounds to nothing is dropped too
+  assert.deepEqual(boxesToOriginal([{ x: 10, y: 10, w: 0.1, h: 20, tag: "hand" }], S(400, 300), S(400, 300)), []);
   const straddle = [{ x: 90, y: 100, w: 60, h: 40, tag: "face" }];       // 20 px in the gap, 40 on the picture
   const [s] = boxesToOriginal(straddle, S(378, 280), S(864, 1536));
   assert.equal(s.x, 0);
@@ -109,4 +114,33 @@ test("every Fixer surface maps through scaleBoxes -- one formula on desktop, pho
   assert.match(sb, /\.lv-fixwrap img\{[^}]*object-fit:contain/);
   const fixTab = readFileSync(path.join(__dirname, "../../gallery/src/components/FixTab.jsx"), "utf8");
   assert.ok(fixTab.includes("naturalHeight: img.naturalHeight"), "FixTab remembers the heights too");
+});
+
+// Kept as source pins: the desktop Loom and FixTab have no render harness here; the phone's
+// identical shape is driven for real in loom-mobile-view.test.js ("the picture's load ...").
+test("a picture's load re-runs the price on every Fixer surface (review 2, F1)", () => {
+  const sb = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
+  const mobileStart = sb.indexOf("function LoomMobile({");
+  const desktop = sb.slice(sb.indexOf("function LoomV2("), mobileStart), mobile = sb.slice(mobileStart);
+  for (const [name, part] of [["desktop", desktop], ["phone", mobile]]) {
+    assert.match(part, /const \[fixImgTick, setFixImgTick\] = useState\(0\);/, name + " counts the loads");
+    assert.match(part, /, fixBoxes, fixImgTick\]\);/, name + "'s price effect depends on the load count");
+  }
+  assert.match(desktop, /const onFixImgLoad = \(\) => \{ fixPaint\(\); setFixImgTick\(\(n\) => n \+ 1\); \};/);
+  assert.match(desktop, /onLoad=\{onFixImgLoad\}/);
+  assert.match(mobile, /onLoad=\{\(\) => \{ fixPaint\(\); setFixImgTick\(\(n\) => n \+ 1\); \}\}/);
+  const fixTab = readFileSync(path.join(__dirname, "../../gallery/src/components/FixTab.jsx"), "utf8");
+  assert.match(fixTab, /onLoad=\{\(\) => \{ paint\(\); setImgTick\(\(n\) => n \+ 1\); \}\}/);
+  assert.match(fixTab, /\}, \[source, boxes, imgTick\]\);/, "FixTab's build re-runs on a load");
+  assert.match(fixTab, /\[source, boxes, imgTick, probe\.refresh\]/, "...and so does its re-price");
+});
+
+test("every Fixer surface shuts ✦ Fix when no box is on the picture, and says why (review 2, F3)", () => {
+  const sb = readFileSync(path.join(__dirname, "../master-storyboard.jsx"), "utf8");
+  assert.match(sb, /!\(scaleBoxes\(fixBoxes, fixImgRef\.current\) \|\| \[\]\)\.length/, "desktop button");
+  assert.match(sb, /fixPriceEntry && fixPriceEntry\.offPicture \? FIX_NO_BOX_ON_PICTURE/, "desktop line");
+  assert.match(sb, /!\(phoneFixBoxes\(\) \|\| \[\]\)\.length/, "phone button");
+  const fixTab = readFileSync(path.join(__dirname, "../../gallery/src/components/FixTab.jsx"), "utf8");
+  assert.match(fixTab, /\|\| !\(scaleBoxes\(boxes, scaleEl\(\)\) \|\| \[\]\)\.length;/, "FixTab button");
+  assert.match(fixTab, /scaled && !scaled\.length\) \? FIX_NO_BOX_ON_PICTURE/, "FixTab badge line");
 });

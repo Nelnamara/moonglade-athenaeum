@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCore.js";
+import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, FIX_NO_BOX_ON_PICTURE, scaleBoxes } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { ResultLines } from "./EditTab.jsx";
@@ -87,21 +87,26 @@ export default function FixTab({ visible, dock, source }) {
      that window; it no longer has to. The probe's identity gate keeps ✦ Fix unpressable until
      a verdict for THESE boxes has settled, so by the time the dialog can open, probe.response
      already holds that payload's answer -- the guarantee replaces the flush. */
+  // Counts the picture's loads (#93 review 2, F1): a build that ran before the picture could
+  // say its size re-runs once it loads (imgTick is in both deps below).
+  const [imgTick, setImgTick] = useState(0);
   const build = useCallback(() => {
     const scaled = scaleBoxes(boxes, scaleEl());
-    // no size to map through yet: nothing to price (the badge idles; ✦ Fix stays shut)
+    // no size to map through yet: nothing to price (the badge idles; ✦ Fix stays shut);
+    // boxes drawn but none on the picture: nothing to price, and the badge says why
     return {
       payload: { mode: "fix", source, boxes: scaled || [] },
-      idle: (source && boxes.length && scaled) ? null : true,
+      idle: (source && boxes.length && scaled && !scaled.length) ? FIX_NO_BOX_ON_PICTURE
+        : (source && boxes.length && scaled) ? null : true,
     };
-  }, [source, boxes]);
+  }, [source, boxes, imgTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // `enabled: visible` is the #27 cleanup and the DC's re-price-on-sub-tab-entry (2927) in one
   // seam: hidden, no timer is armed and no request is out (the badge is portaled into the
   // footer and unmounts with the tab); becoming visible again forces a re-price, because the
   // badge comes back idle whatever the settled verdict says.
   const probe = usePriceProbe({ build, costRef, enabled: visible });
 
-  useEffect(() => { probe.refresh(); }, [source, boxes, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { probe.refresh(); }, [source, boxes, imgTick, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- the canvas: draw, paint, resize ---- */
   const paint = useCallback(() => {
@@ -189,7 +194,8 @@ export default function FixTab({ visible, dock, source }) {
     if (!probe.canSubmit) { probe.refresh(); return; }
     const d = probe.response;
     const priced = d && typeof d.cost === "number" ? d.cost : null;
-    if (!scaleBoxes(boxes, scaleEl())) return;   // no size to map through: send nothing
+    // no size to map through, or no box on the picture: send nothing
+    if (!(scaleBoxes(boxes, scaleEl()) || []).length) return;
     const quote = priced == null
       ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can cover it)."
       : "This will spend " + Number(priced).toLocaleString() +
@@ -228,7 +234,9 @@ export default function FixTab({ visible, dock, source }) {
     : "Submit — this spends credits (a Fix is never card-covered)";
   // The price probe's verdict gates the button IN ADDITION to source/boxes/busy: the number
   // the confirm quotes must have been priced off the payload this click submits.
-  const goOff = !source || !boxes.length || busy || !probe.canSubmit;
+  // ...and off while no box is on the picture (an empty scale) or its size is unknown (null)
+  const goOff = !source || !boxes.length || busy || !probe.canSubmit
+    || !(scaleBoxes(boxes, scaleEl()) || []).length;
   const costLine = (
     /* no cardLabel: a Fix can never be card-covered */
     <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."
@@ -300,7 +308,7 @@ export default function FixTab({ visible, dock, source }) {
         {source ? (
           <div className="mgdock-fixwrap" ref={wrapRef}>
             <img ref={imgRef} src={"/full/" + encodeURIComponent(source)} alt=""
-              onLoad={paint} draggable={false} />
+              onLoad={() => { paint(); setImgTick((n) => n + 1); }} draggable={false} />
             <canvas ref={canvasRef}
               onPointerDown={onDown} onPointerMove={onMove}
               onPointerUp={onUp} onPointerLeave={onUp} />

@@ -144,7 +144,7 @@ import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
 import { adjustedText } from "../gallery/src/gen/genCore.js";
-import { scaleBoxes, fixPassNote } from "../gallery/src/gen/editCore.js";
+import { scaleBoxes, fixPassNote, FIX_NO_BOX_ON_PICTURE } from "../gallery/src/gen/editCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 // The in-app guide (Session I): Help, About and the what's-new sheet, and the Loom's own
@@ -2289,6 +2289,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const fixCanvasRef = useRef(null);
   const fixDragRef = useRef(null);
   const [genFixPrice, setGenFixPrice] = useState({});
+  // Counts the Fixer picture's loads (#93 review 2, F1). The <img> is new each time the Fixer
+  // sub-tab mounts, but the boxes are this component's state and survive the trip, so the
+  // price effect can run before the picture can say its size -- and only a load tells it to
+  // run again (the onLoad also re-renders ✦ Fix's can-it-measure check).
+  const [fixImgTick, setFixImgTick] = useState(0);
+  const onFixImgLoad = () => { fixPaint(); setFixImgTick((n) => n + 1); };
   useEffect(() => {
     setFixBoxes([]);
   }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
@@ -2367,10 +2373,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const id = active.c.id;
     const src = active.c.openFrame && active.c.openFrame.mediaId;
     if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
-    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     // the boxes in the picture's own pixels, through its rendered (letterboxed) rect; null
     // while the <img> cannot say its sizes -- nothing is priced, the line stays "checking…"
+    // until the picture's load (fixImgTick, a dependency) runs this again
     const boxes = scaleBoxes(fixBoxes, fixImgRef.current);
+    if (boxes && !boxes.length) { setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } })); return; }
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, offPicture: false } }));
     if (!boxes) return;
     let live = true;
     const t = setTimeout(() => {
@@ -2379,7 +2387,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
+  }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes, fixImgTick]);
   // #93: one Fix is one pass of ONE kind -- PixAI refuses face and hand boxes together --
   // so picking the other kind clears the boxes drawn (as PixAI's own Fixer does), and the
   // effect above idles the cost line for the empty set.
@@ -3604,7 +3612,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               <div className="lv-slablab">Source — {sel ? "this shot's" : "the draft's"} open frame</div>
               {src ? (
                 <div className="lv-fixwrap">
-                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={fixPaint} draggable={false} />
+                  <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source" onLoad={onFixImgLoad} draggable={false} />
                   <canvas ref={fixCanvasRef}
                     onPointerDown={fixDown} onPointerMove={fixMove} onPointerUp={fixUp} onPointerLeave={fixUp} />
                 </div>
@@ -3630,10 +3638,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                   : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "≈ " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits" + (fixNote ? " · " + fixNote : "") + " — never card-covered"
                   : !src ? "Pick a source image first."
                   : !fixBoxes.length ? "Drag at least one box to see the cost."
+                  : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE
                   : "Couldn't verify the cost — a Fix always spends credits."}
               </div>
-              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length || !scaleBoxes(fixBoxes, fixImgRef.current)}
-                onClick={() => { const scaled = scaleBoxes(fixBoxes, fixImgRef.current); if (scaled) genFix(active, scaled); }}>
+              {/* off when no box is on the picture (a null or empty scale): nothing to repair */}
+              <button className="lv-go" disabled={busyF || !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length}
+                onClick={() => { const scaled = scaleBoxes(fixBoxes, fixImgRef.current); if (scaled && scaled.length) genFix(active, scaled); }}>
                 {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
               </button>
               {gf.phase === "error" && <div className="lv-gerr">{gf.msg}</div>}
@@ -5778,6 +5788,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     const p = priceState[id];
     if (!p) return noInputMsg;
     if (p.loading) return "checking…";
+    if (p.offPicture) return FIX_NO_BOX_ON_PICTURE;   // a Fix's boxes, none of them on the picture
     const tally = p.pr ? tallyPrices([p.pr]) : null;
     // The server's pre-spend receipt (SCOPE_2026-09-26 G7), in the same words as the
     // desktop CostBadge's note line, so a phone spend is never resized in silence.
@@ -5833,6 +5844,9 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
   // scaled by the new width would repair the wrong area -- so a width change clears the
   // boxes (fixPaint) and phoneFixBoxes() refuses a mismatch outright (#96).
   const fixDrawnW = useRef(0);
+  // Counts the Fixer picture's loads, so a price effect that ran before the picture could say
+  // its size runs again once it can (#93 review 2, F1 -- the desktop's fixImgTick, same shape).
+  const [fixImgTick, setFixImgTick] = useState(0);
   useEffect(() => {
     setFixBoxes([]);
   }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
@@ -5952,11 +5966,14 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     const id = dfLive.c.id;
     const src = dfLive.c.openFrame && dfLive.c.openFrame.mediaId;
     if (!src || !fixBoxes.length) { setGenFixPrice((s) => ({ ...s, [id]: null })); return; }
-    // No stale verdict: the line says "checking…" from here until THIS set's answer lands.
-    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     // #96: the boxes in the original picture's pixels, or null while the picture cannot say
-    // its real size -- then nothing is priced and the line stays "checking…" (✦ Fix is shut).
+    // its real size -- then nothing is priced and the line stays "checking…" (✦ Fix is shut)
+    // until the picture's load (fixImgTick, a dependency) runs this again. An empty list is
+    // no box on the picture: nothing to price, and the line says so.
     const boxes = phoneFixBoxes();
+    if (boxes && !boxes.length) { setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } })); return; }
+    // No stale verdict: the line says "checking…" from here until THIS set's answer lands.
+    setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true, offPicture: false } }));
     if (!boxes) return;
     let live = true;
     const t = setTimeout(() => {
@@ -5965,7 +5982,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
+  }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes, fixImgTick]);
 
   // ---- Filter compare -- sixth and FINAL increment (2026-08-03), per the locked design's
   // own filterCompareOpen/fcStrength/fcAngle state (Loom Mobile.dc.html: search
@@ -6880,7 +6897,7 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                           original's, which phoneFixBoxes() scales by. Drawn at the canvas's CSS
                           size, so only the sharpness changes. */}
                       <img ref={fixImgRef} src={"/full/" + encodeURIComponent(src)} alt="source"
-                        draggable={false} onLoad={fixPaint} />
+                        draggable={false} onLoad={() => { fixPaint(); setFixImgTick((n) => n + 1); }} />
                       <canvas ref={fixCanvasRef}
                         onPointerDown={fixDown} onPointerMove={fixMove}
                         onPointerUp={fixUp} onPointerLeave={fixUp} />
@@ -6905,9 +6922,9 @@ function LoomMobile({ project, entries, thumbs, frameFix, genState, selShot, set
                     <span className="lm-gencosttext" title={priceTitle(genFixPrice, c.id)}>{priceLine(genFixPrice, c.id, "Drag a box over a hand or face to see the cost.")}</span>
                   </div>
                   <button type="button" className="lm-genbtn"
-                    disabled={busyF || !src || !fixBoxes.length || !phoneFixBoxes()}
+                    disabled={busyF || !src || !fixBoxes.length || !(phoneFixBoxes() || []).length}
                     title={!src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair — always spends"}
-                    onClick={() => { const scaled = phoneFixBoxes(); if (scaled) genFix(dfLive, scaled); }}>
+                    onClick={() => { const scaled = phoneFixBoxes(); if (scaled && scaled.length) genFix(dfLive, scaled); }}>
                     {busyF ? (gf.msg || "fixing…") : "✦ Fix " + fixTag}
                   </button>
                   {gf.phase === "error" && <div className="lm-gerr">{gf.msg}</div>}

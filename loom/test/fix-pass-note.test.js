@@ -56,6 +56,6 @@ test("all three Fixer surfaces clear the boxes when the kind changes (one kind p
 
 test("the desktop Loom's cost line carries the pass note between the price and 'never card-covered'", () => {
   const sb = read("../master-storyboard.jsx");
-  assert.match(sb, /import \{ scaleBoxes, fixPassNote \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
+  assert.match(sb, /import \{ scaleBoxes, fixPassNote, FIX_NO_BOX_ON_PICTURE \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
   assert.match(sb, /"≈ " \+ Number\(fixPriceEntry\.pr\.cost\)\.toLocaleString\(\) \+ " credits" \+ \(fixNote \? " · " \+ fixNote : ""\) \+ " — never card-covered"/);
 });

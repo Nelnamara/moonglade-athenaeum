@@ -15,7 +15,7 @@ import {
 } from "../src/loom-mutations.js";
 import { emptyFrameFix } from "../src/loom-frames-core.js";
 import { LOOM_VIEW_KEY } from "../src/loom-url.js";
-import { FIX_COLORS, FIX_MIN_PX, FIX_MAX_BOXES, scaleBoxes, boxesToOriginal } from "../../gallery/src/gen/editCore.js";
+import { FIX_COLORS, FIX_MIN_PX, FIX_MAX_BOXES, FIX_NO_BOX_ON_PICTURE, scaleBoxes, boxesToOriginal } from "../../gallery/src/gen/editCore.js";
 import { MODELS } from "../../gallery/src/gen/videoDrawerCore.js";
 
 /* LOOM MOBILE, RENDERED (the phone board/reel view in loom/master-storyboard.jsx, its wiring in
@@ -1294,6 +1294,55 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     assert.equal(btn(h, "✦ Fix face").props.disabled, true);
   });
 
+  test("the picture's load after that early return re-prices, and ✦ Fix comes back (review 2, F1)", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    browser.trail = [];
+    const img = fakeImg({ naturalWidth: 0, naturalHeight: 0 });
+    const h = fixer({ refs: { fixImgRef: img } });
+    h.flush();
+    drag(h, [10, 10], [60, 70]);   // the boxes are state: they survive while the <img> remounts
+    h.flush();
+    t.mock.timers.tick(1000);
+    assert.equal(h.state("fixBoxes").length, 1);
+    assert.deepEqual(fetched("/api/price"), [], "nothing priced before the picture can say its size");
+    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, "checking…");
+    assert.equal(btn(h, "✦ Fix face").props.disabled, true);
+    // the picture decodes: its load event is the only thing that changes
+    img.naturalWidth = 1600; img.naturalHeight = 1200;
+    const picture = els(one(cls(h, "lm-fixwrap"))).find((e) => e.type === "img");
+    h.fire(picture, "onLoad", event());
+    h.flush();
+    t.mock.timers.tick(250);
+    assert.deepEqual(fetched("/api/price").map((x) => x[2].boxes),
+      [[{ x: 40, y: 40, width: 200, height: 240, tag: "face" }]], "the load re-ran the price");
+    assert.equal(btn(h, "✦ Fix face").props.disabled, false, "and ✦ Fix is on again");
+  });
+
+  test("boxes with none on the picture (all on letterbox bars) price nothing, shut ✦ Fix and say why (review 2, F3)", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    browser.trail = [];
+    // a portrait picture contained in a 400 x 300 box: drawn 168.75 wide, 115.6 px in from the left
+    const img = fakeImg({ clientWidth: 400, clientHeight: 300, naturalWidth: 864, naturalHeight: 1536 });
+    const onBar = { x: 10, y: 10, w: 50, h: 50, tag: "face" };
+    const h = fixer({ refs: { fixImgRef: img } });
+    h.flush();
+    drag(h, [10, 10], [60, 60]);   // wholly on the left bar
+    h.flush();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(h.state("fixBoxes"), [onBar], "the box is drawn (and still there)");
+    assert.deepEqual(fetched("/api/price"), []);
+    assert.equal(one(markup(h).byClass("lm-gencosttext")).text, FIX_NO_BOX_ON_PICTURE);
+    const go = btn(h, "✦ Fix face");
+    assert.equal(go.props.disabled, true);
+    h.click(go);
+    assert.deepEqual(h.calls("genFix"), []);
+    // beside a box on the picture, only the real one is sent -- the confirm counts 1 area
+    const real = { x: 180, y: 100, w: 40, h: 40, tag: "face" };
+    const both = fixer({ state: { fixBoxes: [onBar, real] }, refs: { fixImgRef: img } });
+    both.click(btn(both, "✦ Fix face"));
+    assert.equal(both.calls("genFix")[0][1].length, 1);
+  });
+
   test("a Fix answer's per-pass reading rides the cost line; a failed quote never shows a number", () => {
     const line = (genFixPrice) => one(markup(fixer({ state: { genFixPrice } })).byClass("lm-gencosttext")).text;
     const pr = { cost: 4800, free: false, original_cost: 8000, fix_pass: "face", fix_boxes: 1 };
@@ -1310,7 +1359,7 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
       loomMobileSrc.indexOf("// ---- Filter compare -- sixth"));
     assert.match(priceEffect, /const boxes = phoneFixBoxes\(\);/);
     assert.match(priceEffect, /priceBody\(\{ mode: "fix", source: src, boxes \}\)/);
-    assert.match(loomMobileSrc, /const scaled = phoneFixBoxes\(\); if \(scaled\) genFix\(dfLive, scaled\);/);
+    assert.match(loomMobileSrc, /const scaled = phoneFixBoxes\(\); if \(scaled && scaled\.length\) genFix\(dfLive, scaled\);/);
     // the ONE scaleBoxes call in LoomMobile is inside phoneFixBoxes, after its turned-mid-draw check
     assert.equal((loomMobileSrc.match(/scaleBoxes\(/g) || []).length, 1);
     assert.match(loomMobileSrc, /if \(!img \|\| \(fixDrawnW\.current && img\.clientWidth !== fixDrawnW\.current\)\) return null;\r?\n\s*return scaleBoxes\(fixBoxes, img\);/);

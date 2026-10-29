@@ -187,8 +187,10 @@ export function pictureRect(shownW, shownH, naturalW, naturalH) {
 
 /* Map display boxes through a picture rect into original pixels, CLIPPED to the picture: the
    part of a box over the letterbox gap (or past the picture's edge) is not part of the
-   picture, so it is cut off rather than shifted -- a box wholly outside comes out 0-wide, and
-   the server's cleaner drops it. Unclipped, it is Math.round(v * scale) per field, as before. */
+   picture, so it is cut off rather than shifted. A box with nothing left on the picture (one
+   drawn only on the bars) is DROPPED here (#93 review 2, F3), so the confirm counts only real
+   areas and a Fix with no real box left is refused before pricing -- every surface treats an
+   empty list as "no box on the picture". Unclipped, it is Math.round(v * scale) per field. */
 function mapBoxes(boxes, rect, naturalW, naturalH) {
   const s = rect.scale;
   return boxes.map((b) => {
@@ -202,8 +204,12 @@ function mapBoxes(boxes, rect, naturalW, naturalH) {
       width: Math.max(0, Math.round(w)), height: Math.max(0, Math.round(h)),
       tag: b.tag,
     };
-  });
+  }).filter((b) => b.width > 0 && b.height > 0);
 }
+
+/* The one line every Fixer surface shows when boxes are drawn but none of them is on the
+   picture (all on the letterbox bars): nothing to price, ✦ Fix off. */
+export const FIX_NO_BOX_ON_PICTURE = "No box is on the picture — draw over the face or hand itself.";
 
 /* THE scaler (#96, #93 review F1): the shown element's size and the ORIGINAL picture's size as
    explicit arguments, so a caller can never take the scale from a thumbnail, and the letterbox

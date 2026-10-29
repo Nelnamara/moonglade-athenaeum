@@ -25012,31 +25012,57 @@ def create_app(out_dir: Path):
     # flight per shot) cannot see a second tab, a stale bundle or a hand-rolled POST. So an
     # IDENTICAL Fix -- same signed-in user, same source as sent, same cleaned boxes -- inside
     # this many seconds of the last one this app accepted is refused before any network call.
-    # Kept even when that first submit failed: a failure after the send may still have been
-    # charged, and the retry it invites is exactly a second spend. A different box, or the
-    # same one after the window, goes through.
+    # The record is KEPT when that first submit's outcome is unknown or may have been charged
+    # (it succeeded, a transport error or timeout, a 5xx after the send, no task id back):
+    # the retry it invites is exactly a second spend. It is DROPPED when the first one is known
+    # to have cost nothing -- refused before anything was sent (the mirror refusing, a body
+    # the builder refuses) or refused by PixAI with a 4xx (insufficient balance and the like:
+    # nothing created) -- so a fixed-up retry goes straight through (#93 review 2, F2).
     _FIX_REPEAT_WINDOW = 10.0
+    _FIX_REPEAT_MSG = ("The same Fix was asked for a few seconds ago; wait a moment before "
+                       "sending it again.")
     _fix_recent = {}
     _fix_recent_lock = threading.Lock()
 
     def _fix_repeat_refusal(core, p):
-        """The refusal text for a repeat of the last identical Fix, or None (and the Fix is
-        recorded). A body build_fixer_body refuses is never recorded -- it cannot spend, and
-        its own refusal is the answer the caller should see."""
+        """(refusal, key): the refusal text for a repeat of a recent identical Fix (key None),
+        or (None, key) with this Fix now recorded under `key` -- which the caller drops with
+        _fix_forget when the submit turns out to have cost nothing. A body build_fixer_body
+        refuses is never recorded (None, None): it cannot spend, and its own refusal is the
+        answer the caller should see."""
         try:
             body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
         except Exception:                  # noqa: BLE001 -- the build refuses it properly below
-            return None
+            return None, None
         key = (str(session.get("user") or ""), json.dumps(body, sort_keys=True))
         now = time.monotonic()
         with _fix_recent_lock:
             for k in [k for k, t in _fix_recent.items() if now - t >= _FIX_REPEAT_WINDOW]:
                 del _fix_recent[k]
             if key in _fix_recent:
-                return ("That exact Fix was just sent — it was not sent again. Wait a few "
-                        "seconds if you really mean to repeat it.")
+                return _FIX_REPEAT_MSG, None
             _fix_recent[key] = now
-        return None
+        return None, key
+
+    def _fix_forget(key):
+        if key is not None:
+            with _fix_recent_lock:
+                _fix_recent.pop(key, None)
+
+    def _fix_failure_cost_nothing(core, exc):
+        """True only when a failed Fix submit is KNOWN to have charged nothing. PixAI's own
+        4xx refusal (408 aside: a timeout is an unknown outcome) created no task; a plain
+        PixAIError other than "no task id returned" is one of this app's refusals, raised
+        before the POST (the mirror unavailable, READ_ONLY, a body the builder refuses).
+        A transport error, a 5xx, a missing task id or anything else: unknown -- keep."""
+        if isinstance(exc, core.PixAIRestError):
+            status = getattr(exc, "status", None) or 0
+            return 400 <= int(status) < 500 and int(status) != 408
+        if isinstance(exc, core.requests.RequestException):
+            return False
+        if isinstance(exc, core.PixAIError):
+            return not str(exc).startswith("fixer: no task id returned")
+        return False
 
     @app.route("/api/fix", methods=["POST"])
     @tier(LOGIN)
@@ -25055,21 +25081,24 @@ def create_app(out_dir: Path):
 
         One Fix at a time: an identical submit (same user, picture and boxes) inside
         _FIX_REPEAT_WINDOW seconds of the last one is refused before any network call -- a
-        double tap, or a client retry after a lost response, must not pay twice."""
+        double tap, or a client retry after a lost response, must not pay twice -- unless
+        that last one is known to have cost nothing (see _fix_failure_cost_nothing)."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             # READ_ONLY first: the submit resolver below uploads the local file (a network
             # call), so the refusal has to come before it, not only inside submit_fixer.
             core._check_read_only(core._SUBMIT_ACTIONS["fix"])
-            repeat = _fix_repeat_refusal(core, p)
+            repeat, fix_key = _fix_repeat_refusal(core, p)
             if repeat:
                 return jsonify({"error": repeat}), 409
             req = core.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:
+                _fix_forget(fix_key)
                 return jsonify({"error": "pick an image first"}), 400
             if not req.boxes:
+                _fix_forget(fix_key)
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             # The exact body submit_fixer POSTs to /v2/task/fixer, named here so the failure
             # log below has the REQUEST SHAPE to report, the same way /api/generate and
@@ -25088,6 +25117,11 @@ def create_app(out_dir: Path):
             # 2026-07-26 undiagnosable decline: it returned the redacted text to the browser,
             # friendlyGenErr() replaced it with a guess, and the real error was recorded
             # nowhere at all.
+            try:
+                if _fix_failure_cost_nothing(core, e):
+                    _fix_forget(locals().get("fix_key"))
+            except Exception:                  # noqa: BLE001 -- never mask the real failure
+                pass
             return jsonify({"error": _log_gen_failure(
                 "/api/fix", e, locals().get("fix_params"))[:300]}), 200
 
