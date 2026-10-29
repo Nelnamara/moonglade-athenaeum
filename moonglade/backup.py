@@ -11641,7 +11641,13 @@ def _profile_listing(session, params):
 def clean_fix_boxes(boxes):
     """Filter + normalize hand/face Fix boxes into what POST /v2/task/fixer accepts: tag
     'hand'|'face' (lowercased), non-negative integer origin, positive size, at most 20.
-    Anything else is dropped, so a stale or malformed client box can't reach the server.
+    Anything else is dropped, so a stale or malformed client box can't reach the server --
+    a non-finite coordinate (Infinity, NaN: Python's json reads both) included.
+
+    A box that starts above or left of the picture is CLIPPED, not shifted (#93 review F3):
+    x -40 width 100 becomes x 0 width 60, the part that is on the picture -- shifting it to
+    x 0 width 100 would repair 40 px the box never covered. The far edges are the picture's
+    to know, not this function's; the clients clip those.
 
     Called only through build_fixer_body, which both the price and the submit use: the body
     that gets PRICED has to be the body that gets SUBMITTED, or the cost badge would quote a
@@ -11652,10 +11658,14 @@ def clean_fix_boxes(boxes):
         if tag not in ("hand", "face"):
             continue
         try:
-            x, y = max(0, int(b["x"])), max(0, int(b["y"]))
+            x, y = int(b["x"]), int(b["y"])
             w, h = int(b["width"]), int(b["height"])
-        except (KeyError, TypeError, ValueError):
-            continue
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue                     # OverflowError: int(inf); ValueError: int(nan)
+        if x < 0:
+            w, x = w + x, 0
+        if y < 0:
+            h, y = h + y, 0
         if w > 0 and h > 0:
             clean.append({"x": x, "y": y, "width": w, "height": h, "tag": tag})
     return clean[:20]
@@ -11667,16 +11677,26 @@ FIX_ONE_KIND = ("A Fix repairs one kind at a time — clear the face boxes or th
 # PixAI's own Fix PRICE route. Its input is the exact body the Fix submit sends, and it
 # answers {actualPrice, originalPrice} without creating anything (measured 2026-10-28, issue
 # #93). It sits one path segment away from the SPEND route, "/task/fixer" -- so it is a
-# named constant, never assembled from that string, and the assert below fails the import
-# if an edit ever makes the two the same.
+# named constant, never assembled from that string. The check below pins the FULL path (an
+# inequality with "/task/fixer" would let "/task/fixer/" or "/task//fixer" through), and it
+# is an `if`, not an `assert`, so `python -O` cannot strip it; dev/tests/test_fix.py pins the
+# same string.
 _FIXER_PRICE_PATH = "/task/fixer/price"
-assert _FIXER_PRICE_PATH != "/task/fixer"
+if _FIXER_PRICE_PATH != "/task/fixer/price":      # pragma: no cover - an edit-time tripwire
+    raise ImportError("_FIXER_PRICE_PATH must be exactly /task/fixer/price (the Fix QUOTE route)")
 
 
 def build_fixer_body(media_id, boxes):
     """THE body of a hand/face Fix: {mediaId, boxes}, boxes cleaned by clean_fix_boxes. The
     price (price_fixer, on POST /v2/task/fixer/price) and the spend (submit_fixer, on POST
-    /v2/task/fixer) both send what this returns, so the quote is the quote of the job sent.
+    /v2/task/fixer) both send what this returns for their own inputs: the SAME boxes (the
+    same cleaner, so the same kind, count and coordinates) on the same picture. What differs
+    is the media id, deliberately: the gallery's quote names the picture by its CATALOG id
+    (/api/price runs no media resolver -- it would upload once per keystroke), while its spend
+    names it by the upload-kind id the submit's resolver gets by uploading the local file
+    first (PixAI refuses a generation OUTPUT id as an input on this path). PixAI's price does
+    not move with the picture (measured 2026-10-28: 4,800 for every source size), so the
+    number quoted is the number charged.
 
     Raises PixAIError when no box survives the cleaner, and FIX_ONE_KIND when the boxes carry
     more than one tag: since PixAI's Hand Fix / Face Fix launch (2026-10-21) its server
@@ -11707,7 +11727,7 @@ def price_fixer(session, body):
     empty or carries two kinds is refused here, before any network call."""
     try:
         sent = build_fixer_body((body or {}).get("mediaId") or "", (body or {}).get("boxes"))
-    except (PixAIError, AttributeError):
+    except (PixAIError, AttributeError, TypeError):
         return None
     if not sent["mediaId"]:
         return None
@@ -12165,6 +12185,9 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         # `boxes` with the same builder. A body the builder refuses (no usable box, or face
         # and hand together, which PixAI's server refuses) is a note with no parameters --
         # nothing to price -- and submit_fixer refuses it again, before any network call.
+        # (Within ONE request the quote and the spend share the body. The gallery builds two
+        # -- /api/price with no media resolver, /api/fix with the uploading one -- so there
+        # the boxes are identical and the media id is not: see build_fixer_body.)
         src = str(p.get("source") or "").strip()
         if src and rs.media_id is not None:
             src = str(rs.media_id(src) or src)

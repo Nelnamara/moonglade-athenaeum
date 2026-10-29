@@ -848,7 +848,15 @@ function fakeCanvas() {
   };
   return { width: 0, height: 0, ops, getContext: () => ctx, getBoundingClientRect: () => ({ left: 100, top: 50, width: 400, height: 300 }) };
 }
-const fakeImg = (extra = {}) => ({ clientWidth: 400, clientHeight: 300, naturalWidth: 1600, ...extra });
+// The phone's <img> is width:100%, height auto, so unless a test says otherwise the picture's
+// natural height has the shown aspect (no letterbox) -- the four sizes scaleBoxes reads.
+const fakeImg = (extra = {}) => {
+  const img = { clientWidth: 400, clientHeight: 300, naturalWidth: 1600, ...extra };
+  if (!("naturalHeight" in extra)) {
+    img.naturalHeight = img.clientWidth ? Math.round(img.naturalWidth * img.clientHeight / img.clientWidth) : img.naturalWidth;
+  }
+  return img;
+};
 function fixer(opts = {}) {
   const canvas = fakeCanvas();
   const h = phone({ sel: "c1", ...opts, state: fixerState(opts.state), refs: { fixCanvasRef: canvas, fixImgRef: fakeImg(), ...opts.refs } });
@@ -875,12 +883,12 @@ describe("Fixer: local, verbatim copies of FixTab.jsx's own real editCore.js con
     assert.match(src, new RegExp("const FIX_MAX_BOXES = " + FIX_MAX_BOXES + ";"));
   });
 
-  test("the boxes the Fix button sends are editCore.js's boxesToOriginal of the picture's REAL size (#96)", () => {
+  test("the boxes the Fix button sends are editCore.js's scaleBoxes over the picture's REAL size (#96)", () => {
     const boxes = [{ x: 10, y: 20, w: 30, h: 41, tag: "face" }, { x: 1, y: 2, w: 3, h: 5, tag: "face" }];
     for (const img of [fakeImg({ naturalWidth: 1000, clientWidth: 400 }), fakeImg({ naturalWidth: 1600, clientWidth: 400 })]) {
       const h = fixer({ state: { fixBoxes: boxes }, refs: { fixImgRef: img } });
       h.click(btn(h, "✦ Fix face"));
-      assert.deepEqual(h.calls("genFix")[0][1], boxesToOriginal(boxes, img.clientWidth, img.naturalWidth),
+      assert.deepEqual(h.calls("genFix")[0][1], scaleBoxes(boxes, img),
         "img " + JSON.stringify(img));
     }
     // ...which means original-image pixels, {x,y,width,height,tag}: here 2.5x, rounded.
@@ -1129,6 +1137,41 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
     assert.deepEqual(fetched("/api/fix")[0][2], { source: MID.open1, boxes });
   });
 
+  test("one Fix in flight per shot: a second tap before the first settles sends nothing (review F4)", async () => {
+    const h = app({ view: "mobile" });
+    const { genFix, entries } = viewOf(h).props;
+    const boxes = [{ x: 4, y: 8, width: 40, height: 60, tag: "face" }];
+    browser.trail = [];
+    browser.reply = (url) => (url === "/api/price" ? { cost: 4800, free: false } : { error: "refused in test" });
+    browser.answer = true;
+    const first = genFix(entries[0], boxes);
+    // from the first tap, the shot reads busy ("pricing"), which shuts ✦ Fix on both views
+    assert.equal(h.state("genFixState").c1.phase, "pricing");
+    await Promise.all([first, genFix(entries[0], boxes)]);
+    assert.equal(fetched("/api/price").length, 1, "one price");
+    assert.equal(browser.trail.filter((x) => x[0] === "confirm").length, 1, "one confirm");
+    assert.equal(fetched("/api/fix").length, 1, "a double tap confirmed once spends once");
+    // settled: the next, deliberate Fix goes through
+    await genFix(entries[0], boxes);
+    assert.equal(fetched("/api/fix").length, 2);
+  });
+
+  test("a declined confirm gives the button back: the shot's state is what it was before the tap", async () => {
+    const h = app({ view: "mobile" });
+    const { genFix, entries } = viewOf(h).props;
+    browser.trail = [];
+    browser.reply = (url) => (url === "/api/price" ? { cost: 4800, free: false } : { error: "refused in test" });
+    browser.answer = false;
+    await genFix(entries[0], [{ x: 4, y: 8, width: 40, height: 60, tag: "face" }]);
+    assert.equal(h.state("genFixState").c1, undefined);
+    assert.deepEqual(fetched("/api/fix"), []);
+  });
+
+  // Kept as a source pin: the busy gate covers the pricing phase on BOTH views' ✦ Fix.
+  test("both Loom Fixers count genFix's pricing phase as busy", () => {
+    assert.equal((src.match(/const busyF = gf\.phase === "pricing" \|\| gf\.phase === "submitting" \|\| gf\.phase === "running";/g) || []).length, 2);
+  });
+
   // Kept as a source pin: the wording is the whole contract (FixTab.jsx's own run()).
   test("the confirm wording is ported VERBATIM from FixTab.jsx's own run() -- 'ALWAYS spends' / 'never covered by a free card', never confirmSpend's generic phrasing", () => {
     const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
@@ -1195,7 +1238,7 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
   test("what is priced is what is sent: a 1536-px picture shown 360 px wide prices AND sends x 427 (#96)", (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     browser.trail = [];
-    const h = fixer({ refs: { fixImgRef: fakeImg({ clientWidth: 360, clientHeight: 203, naturalWidth: 1536 }) } });
+    const h = fixer({ refs: { fixImgRef: fakeImg({ clientWidth: 360, clientHeight: 203, naturalWidth: 1536, naturalHeight: 864 }) } });
     h.flush();
     drag(h, [100, 50], [160, 90]);
     h.flush();
@@ -1208,7 +1251,7 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     assert.deepEqual(priced[0], want, "the price transport got the original picture's pixels");
     assert.deepEqual(sent, want, "genFix got the very same boxes");
     // ...and master's bug, scaling by the 768-px thumbnail, would have said x 213: half-size, wrong place.
-    assert.equal(scaleBoxes(h.state("fixBoxes"), { clientWidth: 360, naturalWidth: 768 })[0].x, 213);
+    assert.equal(boxesToOriginal(h.state("fixBoxes"), { width: 360, height: 203 }, { width: 768, height: 432 })[0].x, 213);
   });
 
   test("a source of 768 px or less is scaled exactly as before #96 (its full picture IS the thumbnail's size)", () => {
@@ -1216,7 +1259,27 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     const img = fakeImg({ clientWidth: 350, naturalWidth: 700 });
     const h = fixer({ state: { fixBoxes: boxes, fixTag: "hand" }, refs: { fixImgRef: img } });
     h.click(btn(h, "✦ Fix hand"));
-    assert.deepEqual(h.calls("genFix")[0][1], scaleBoxes(boxes, img), "the old scaler on the same-sized thumbnail");
+    // master's arithmetic on a thumbnail of the same size: natural / shown width, rounded
+    assert.deepEqual(h.calls("genFix")[0][1], [{ x: 200, y: 100, width: 120, height: 80, tag: "hand" }],
+      "the old scaler on the same-sized thumbnail");
+  });
+
+  test("a drag past the canvas's edge is clamped to it -- the box never reaches outside the picture (review F3)", () => {
+    // with the pointer captured, moves keep arriving past the edge; the canvas is 400 x 300 at (100, 50)
+    for (const [from, to, want] of [
+      [[50, 50], [-40, 100], { x: 0, y: 200, width: 200, height: 200 }],      // off the left
+      [[300, 50], [440, 120], { x: 1200, y: 200, width: 400, height: 280 }],  // off the right
+      [[100, 250], [160, 380], { x: 400, y: 1000, width: 240, height: 200 }], // off the bottom
+      [[100, 40], [160, -30], { x: 400, y: 0, width: 240, height: 160 }],     // off the top
+    ]) {
+      const h = fixer({ refs: { fixImgRef: fakeImg({ clientWidth: 400, clientHeight: 300, naturalWidth: 1600 }) } });
+      h.flush();
+      drag(h, from, to);
+      h.click(btn(h, "✦ Fix face"));
+      const [b] = h.calls("genFix")[0][1];
+      assert.deepEqual(b, { ...want, tag: "face" }, JSON.stringify([from, to]));
+      assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.width <= 1600 && b.y + b.height <= 1200);
+    }
   });
 
   test("a picture not loaded yet prices nothing: the line stays checking… and ✦ Fix stays shut (#96)", (t) => {
@@ -1248,8 +1311,10 @@ describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/R
     assert.match(priceEffect, /const boxes = phoneFixBoxes\(\);/);
     assert.match(priceEffect, /priceBody\(\{ mode: "fix", source: src, boxes \}\)/);
     assert.match(loomMobileSrc, /const scaled = phoneFixBoxes\(\); if \(scaled\) genFix\(dfLive, scaled\);/);
-    assert.doesNotMatch(loomMobileSrc, /scaleBoxes\(|scaleFixBoxes/, "LoomMobile never scales by whichever <img> it holds");
-    assert.match(loomMobileSrc, /boxesToOriginal\(fixBoxes, cw, img && img\.naturalWidth\)/);
+    // the ONE scaleBoxes call in LoomMobile is inside phoneFixBoxes, after its turned-mid-draw check
+    assert.equal((loomMobileSrc.match(/scaleBoxes\(/g) || []).length, 1);
+    assert.match(loomMobileSrc, /if \(!img \|\| \(fixDrawnW\.current && img\.clientWidth !== fixDrawnW\.current\)\) return null;\r?\n\s*return scaleBoxes\(fixBoxes, img\);/);
+    assert.doesNotMatch(loomMobileSrc, /scaleFixBoxes/);
   });
 
   test("the preview line uses the same priceLine/priceTitle as the other tabs: the tally, its tooltip, or a hint", () => {

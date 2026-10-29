@@ -238,6 +238,38 @@ def test_fix_body_is_the_submit_body(monkeypatch):
     assert all(b["width"] > 0 and b["tag"] == "hand" for b in sent["boxes"])
 
 
+def test_a_box_off_the_top_or_left_is_clipped_not_shifted():
+    """#93 review F3: x -160 width 360 covers 0..200 of the picture. Shifting it to x 0 kept
+    the width and repaired 0..360; the part on the picture is 0..200."""
+    out = core.clean_fix_boxes([{"x": -160, "y": -10, "width": 360, "height": 210, "tag": "face"}])
+    assert out == [{"x": 0, "y": 0, "width": 200, "height": 200, "tag": "face"}]
+    # wholly off the picture: nothing left, so the box is dropped
+    assert core.clean_fix_boxes([{"x": -50, "y": 5, "width": 50, "height": 9, "tag": "hand"}]) == []
+    # an in-picture box is untouched
+    assert core.clean_fix_boxes([HAND]) == [HAND]
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+def test_a_non_finite_box_is_dropped_not_raised(bad, monkeypatch):
+    box = {"x": bad, "y": 1, "width": 5, "height": 5, "tag": "face"}
+    assert core.clean_fix_boxes([box, FACE]) == [FACE]
+    monkeypatch.setattr(core, "_rest_post", _tripwire("_rest_post"))
+    assert core.price_fixer(object(), {"mediaId": "700", "boxes": [box]}) is None
+
+
+@pytest.mark.parametrize("raw", ["Infinity", "-Infinity", "NaN"])
+def test_a_non_finite_box_on_the_routes_is_a_note_and_never_sent(raw, tmp_path, monkeypatch):
+    """Python's json reads Infinity and NaN, so a hand-rolled request can carry them."""
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    body = '{"mode":"fix","source":"700","boxes":[{"x":%s,"y":1,"width":5,"height":5,"tag":"face"}]}' % raw
+    d = cli.post("/api/price", data=body, content_type="application/json").get_json()
+    assert d["cost"] is None and "box" in d["note"]
+    f = cli.post("/api/fix", data=body, content_type="application/json").get_json()
+    assert "task_id" not in f
+    assert seen["posts"] == []
+
+
 def test_fix_body_refuses_no_usable_box():
     with pytest.raises(core.PixAIError, match="drag a box"):
         core.build_fixer_body("700", [])
@@ -282,7 +314,15 @@ def _price_client(tmp_path, monkeypatch, answer=None):
 
 
 def test_price_route_quotes_on_the_fixer_price_route(tmp_path, monkeypatch):
+    """The quote and the spend for one payload: the SAME boxes; the media id differs on
+    purpose. The picture is on disk (the normal case -- the backup IS the files), so the
+    spend's resolver uploads it and sends the upload-kind id, while the quote names the
+    catalog id (no media resolver on /api/price: it would upload once per keystroke).
+    PixAI's Fix price does not move with the picture, so the number holds."""
     cli, seen = _price_client(tmp_path, monkeypatch)
+    (tmp_path / "a_700.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    uploads = []
+    monkeypatch.setattr(core, "upload_media", lambda s, fp: uploads.append(fp) or "U-UPLOADED-1")
     payload = {"mode": "fix", "source": "700", "boxes": [FACE]}
     d = cli.post("/api/price", json=payload).get_json()
     assert d["cost"] == 4800 and d["original_cost"] == 8000
@@ -290,13 +330,17 @@ def test_price_route_quotes_on_the_fixer_price_route(tmp_path, monkeypatch):
     assert d["free"] is False
     (path, priced), = seen["posts"]
     assert path == "/task/fixer/price"
-    # ...and the body quoted is the body /api/fix sends for the same payload
+    assert uploads == [], "a quote never uploads"
     monkeypatch.setattr(core, "_session_for_create", lambda s: s)
     r = cli.post("/api/fix", json=payload).get_json()
     assert r.get("task_id") == "F1", r
     (spend_path, sent), = seen["posts"][1:]
     assert spend_path == "/task/fixer"
-    assert sent == priced == {"mediaId": "700", "boxes": [FACE]}
+    assert len(uploads) == 1, "the spend uploaded the local picture first"
+    assert sent["boxes"] == priced["boxes"] == [FACE], "the boxes quoted are the boxes sent"
+    assert priced["mediaId"] == "700", "the quote names the catalog id"
+    assert sent["mediaId"] == "U-UPLOADED-1", "the spend names the uploaded picture"
+    assert set(sent) == set(priced) == {"mediaId", "boxes"}
 
 
 def test_price_route_omits_the_list_price_unless_it_is_higher(tmp_path, monkeypatch):
@@ -387,6 +431,43 @@ def test_price_route_never_claims_a_free_card_covers_a_fix(tmp_path, monkeypatch
                                                 "tag": "hand"}]}).get_json()
     assert d["free"] is False and d["cards"] is None
     assert "card_checked" not in seen
+
+
+def test_an_identical_fix_inside_the_window_is_refused_before_any_network(tmp_path, monkeypatch):
+    """#93 review F4, the server half: a double tap (or a stale tab, or a retried POST) of the
+    same Fix is refused before the upload and the spend; a different Fix is not, and the same
+    one is accepted again once the window has passed."""
+    from moonglade import gallery as g
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    clock = [1000.0]
+    monkeypatch.setattr(g.time, "monotonic", lambda: clock[0])
+    payload = {"source": "700", "boxes": [FACE]}
+    assert cli.post("/api/fix", json=payload).get_json().get("task_id") == "F1"
+    r = cli.post("/api/fix", json=payload)
+    assert r.status_code == 409 and "just sent" in r.get_json()["error"]
+    assert [p for p, _ in seen["posts"]] == ["/task/fixer"], "the repeat sent nothing"
+    # the same boxes in a different case/order of keys are the same Fix
+    r = cli.post("/api/fix", json={"source": "700", "boxes": [dict(FACE, tag="FACE")]})
+    assert r.status_code == 409
+    # a different Fix goes through
+    assert cli.post("/api/fix", json={"source": "700", "boxes": [dict(FACE, x=9)]}).get_json().get("task_id") == "F1"
+    # ...and the first one again, once the window is over
+    clock[0] += 11
+    assert cli.post("/api/fix", json=payload).get_json().get("task_id") == "F1"
+    assert [p for p, _ in seen["posts"]] == ["/task/fixer"] * 3
+
+
+def test_read_only_refuses_the_fix_route_before_its_upload(tmp_path, monkeypatch):
+    """The spend's resolver uploads the local picture -- a network call -- so READ_ONLY must
+    refuse before build_request runs it, not only inside submit_fixer."""
+    cli, seen = _price_client(tmp_path, monkeypatch)
+    (tmp_path / "a_700.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    monkeypatch.setattr(core, "upload_media", _tripwire("upload_media"))
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    d = cli.post("/api/fix", json={"source": "700", "boxes": [FACE]}).get_json()
+    assert "READ_ONLY" in d["error"] and "task_id" not in d
+    assert seen["posts"] == []
 
 
 def test_price_route_fix_without_a_box_is_a_note_not_a_price(tmp_path, monkeypatch):
@@ -523,6 +604,9 @@ def test_badge_and_submit_send_the_same_boxes():
     # (the ▲-collapsed dock hides the picture with display:none, and a 0-wide element
     # would submit display pixels as original pixels). Same invariant: ONE scaler, the
     # SAME element expression, in the price body and the submit body alike.
-    assert src.count("scaleBoxes(boxes, scaleEl())") == 2, (
+    # Three since #93 review F1: the price body, run()'s can-it-measure guard, and the submit
+    # body -- every one the same call on the same element expression.
+    assert src.count("scaleBoxes(boxes, scaleEl())") == 3, (
         "the price body and the submit body no longer share the one scaleBoxes call each "
         "-- the badge would price a request the server never receives")
+    assert "scaleBoxes(boxes, imgRef" not in src and "scaleBoxes(boxes, measured" not in src

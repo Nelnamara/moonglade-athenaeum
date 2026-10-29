@@ -57,10 +57,11 @@ export default function FixTab({ visible, dock, source }) {
   useEffect(() => { setBoxes([]); }, [source]);
 
   /* The ▲-collapsed dock hides the settings grid with display:none (DC 1209), and a
-     hidden <img> reports clientWidth 0 -- scaleBoxes would then fall back to scale 1
-     and SUBMIT DISPLAY PIXELS AS ORIGINAL PIXELS, repairing the wrong region. So the
-     last real measurement (natural / client width, taken whenever the picture is laid
-     out) is remembered and stands in for the element while it is hidden. The dock's
+     hidden <img> reports clientWidth 0 -- scaleBoxes then has no size to map through
+     (null: nothing priced, nothing sent). So the last real measurement (the natural and
+     shown width AND height, taken whenever the picture is laid out -- the height places
+     the picture inside a letterboxed element, #93 review F1) is remembered and stands in
+     for the element while it is hidden. The dock's
      width does not change between collapsed and expanded, so the remembered scale is
      the live one. */
   const measured = useRef(null);
@@ -68,8 +69,9 @@ export default function FixTab({ visible, dock, source }) {
     const img = imgRef.current;
     // live only once the picture is both laid out AND decoded (naturalWidth 0 = not
     // loaded yet -- a scale of 0 would zero every box)
-    if (img && img.clientWidth && img.naturalWidth) {
-      measured.current = { naturalWidth: img.naturalWidth, clientWidth: img.clientWidth };
+    if (img && img.clientWidth && img.clientHeight && img.naturalWidth && img.naturalHeight) {
+      measured.current = { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+        clientWidth: img.clientWidth, clientHeight: img.clientHeight };
       return img;
     }
     return measured.current;
@@ -85,10 +87,14 @@ export default function FixTab({ visible, dock, source }) {
      that window; it no longer has to. The probe's identity gate keeps ✦ Fix unpressable until
      a verdict for THESE boxes has settled, so by the time the dialog can open, probe.response
      already holds that payload's answer -- the guarantee replaces the flush. */
-  const build = useCallback(() => ({
-    payload: { mode: "fix", source, boxes: scaleBoxes(boxes, scaleEl()) },
-    idle: (source && boxes.length) ? null : true,
-  }), [source, boxes]);
+  const build = useCallback(() => {
+    const scaled = scaleBoxes(boxes, scaleEl());
+    // no size to map through yet: nothing to price (the badge idles; ✦ Fix stays shut)
+    return {
+      payload: { mode: "fix", source, boxes: scaled || [] },
+      idle: (source && boxes.length && scaled) ? null : true,
+    };
+  }, [source, boxes]);
   // `enabled: visible` is the #27 cleanup and the DC's re-price-on-sub-tab-entry (2927) in one
   // seam: hidden, no timer is armed and no request is out (the badge is portaled into the
   // footer and unmounts with the tab); becoming visible again forces a re-price, because the
@@ -103,7 +109,9 @@ export default function FixTab({ visible, dock, source }) {
     if (!c || !img) return;
     const w = img.clientWidth, h = img.clientHeight;
     if (!w || !h) return;
-    if (img.naturalWidth) measured.current = { naturalWidth: img.naturalWidth, clientWidth: w };
+    if (img.naturalWidth && img.naturalHeight) {
+      measured.current = { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, clientWidth: w, clientHeight: h };
+    }
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, w, h);
@@ -130,9 +138,11 @@ export default function FixTab({ visible, dock, source }) {
     return () => window.removeEventListener("resize", onResize);
   }, [paint]);
 
+  // clamped to the canvas: a drag that runs past its edge ends AT the edge (#93 review F3)
   const rel = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
   };
   const onDown = (e) => {
     if (e.button !== 0 || !source) return;
@@ -179,22 +189,27 @@ export default function FixTab({ visible, dock, source }) {
     if (!probe.canSubmit) { probe.refresh(); return; }
     const d = probe.response;
     const priced = d && typeof d.cost === "number" ? d.cost : null;
+    if (!scaleBoxes(boxes, scaleEl())) return;   // no size to map through: send nothing
     const quote = priced == null
       ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can cover it)."
       : "This will spend " + Number(priced).toLocaleString() +
         " credits — a Fix is never covered by a free card.";
-    if (!window.confirm(
-      "Repair " + boxes.length + " " + tag + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
-    )) return;
+    // one Fix in flight: held from the first click, through the confirm, until it settles
     busyRef.current = true; setBusy(true);
-    const emit = openLine("Submitting…");
-    await submitTask("/api/fix",
-      { source, boxes: scaleBoxes(boxes, scaleEl()) },
-      { label: "Fixed", emit });
-    busyRef.current = false; setBusy(false);
-    // The submit DEBITED credits (a Fix always spends); the payload is byte-identical,
-    // so only a FORCED re-price gets past the short-circuit.
-    probe.refresh({ force: true });
+    try {
+      if (!window.confirm(
+        "Repair " + boxes.length + " " + tag + " area" + (boxes.length === 1 ? "" : "s") + "?\n\n" + quote
+      )) return;
+      const emit = openLine("Submitting…");
+      await submitTask("/api/fix",
+        { source, boxes: scaleBoxes(boxes, scaleEl()) },
+        { label: "Fixed", emit });
+      // The submit DEBITED credits (a Fix always spends); the payload is byte-identical,
+      // so only a FORCED re-price gets past the short-circuit.
+      probe.refresh({ force: true });
+    } finally {
+      busyRef.current = false; setBusy(false);
+    }
   };
 
   if (!visible) return null;

@@ -30,6 +30,10 @@ test("fixPassNote: the kind, then the discount when this answer's list price is 
   assert.equal(fixPassNote({ cost: 600 }), "");
   assert.equal(fixPassNote(null), "");
   assert.equal(fixPassNote(undefined), "");
+  // no real price (review F7): never "100% off" -- the pass alone
+  for (const cost of [undefined, null, 0, "n/a", NaN]) {
+    assert.equal(fixPassNote({ cost, original_cost: 8000, fix_pass: "face" }), "face pass", "cost " + String(cost));
+  }
 });
 
 test("all three Fixer surfaces clear the boxes when the kind changes (one kind per Fix)", () => {
@@ -52,6 +56,6 @@ test("all three Fixer surfaces clear the boxes when the kind changes (one kind p
 
 test("the desktop Loom's cost line carries the pass note between the price and 'never card-covered'", () => {
   const sb = read("../master-storyboard.jsx");
-  assert.match(sb, /import \{ scaleBoxes, boxesToOriginal, fixPassNote \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
+  assert.match(sb, /import \{ scaleBoxes, fixPassNote \} from "\.\.\/gallery\/src\/gen\/editCore\.js";/);
   assert.match(sb, /"≈ " \+ Number\(fixPriceEntry\.pr\.cost\)\.toLocaleString\(\) \+ " credits" \+ \(fixNote \? " · " \+ fixNote : ""\) \+ " — never card-covered"/);
 });

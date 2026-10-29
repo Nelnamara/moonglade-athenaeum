@@ -25008,21 +25008,63 @@ def create_app(out_dir: Path):
                                   "preset": (p.get("preset") if "p" in locals() else None),
                                   "media_ct": len(locals().get("media") or [])})[:300]}), 200
 
+    # One Fix at a time (#93 review F4). Every Fix spends, and the clients' own gates (one in
+    # flight per shot) cannot see a second tab, a stale bundle or a hand-rolled POST. So an
+    # IDENTICAL Fix -- same signed-in user, same source as sent, same cleaned boxes -- inside
+    # this many seconds of the last one this app accepted is refused before any network call.
+    # Kept even when that first submit failed: a failure after the send may still have been
+    # charged, and the retry it invites is exactly a second spend. A different box, or the
+    # same one after the window, goes through.
+    _FIX_REPEAT_WINDOW = 10.0
+    _fix_recent = {}
+    _fix_recent_lock = threading.Lock()
+
+    def _fix_repeat_refusal(core, p):
+        """The refusal text for a repeat of the last identical Fix, or None (and the Fix is
+        recorded). A body build_fixer_body refuses is never recorded -- it cannot spend, and
+        its own refusal is the answer the caller should see."""
+        try:
+            body = core.build_fixer_body(str(p.get("source") or "").strip(), p.get("boxes"))
+        except Exception:                  # noqa: BLE001 -- the build refuses it properly below
+            return None
+        key = (str(session.get("user") or ""), json.dumps(body, sort_keys=True))
+        now = time.monotonic()
+        with _fix_recent_lock:
+            for k in [k for k, t in _fix_recent.items() if now - t >= _FIX_REPEAT_WINDOW]:
+                del _fix_recent[k]
+            if key in _fix_recent:
+                return ("That exact Fix was just sent — it was not sent again. Wait a few "
+                        "seconds if you really mean to repeat it.")
+            _fix_recent[key] = now
+        return None
+
     @app.route("/api/fix", methods=["POST"])
     @tier(LOGIN)
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
         pixel coords. Login required; returns {task_id} for the async poller.
 
-        The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes}.
-        The request's `parameters` are that very body (core.build_fixer_body), the one
-        /api/price quotes on PixAI's Fix price route, and core.submit -> submit_fixer
-        rebuilds it with the same builder -- so the badge and the spend cannot describe
-        different boxes. Face and hand boxes together are refused before any network call
-        (PixAI's server refuses them; a Fix is one kind)."""
+        The Fix rides REST, not createGenerationTask: /v2/task/fixer takes {mediaId, boxes},
+        built by core.build_fixer_body -- the builder /api/price's quote uses too, so the
+        badge and the spend carry the SAME boxes (kind, count, coordinates). The media id is
+        the one deliberate difference: this route's resolver uploads the local file first and
+        sends the upload-kind id (PixAI refuses an output id as an input here), while the quote
+        names the catalog id (no upload per keystroke); PixAI's Fix price does not move with
+        the picture. Face and hand boxes together are refused before any network call (PixAI's
+        server refuses them; a Fix is one kind).
+
+        One Fix at a time: an identical submit (same user, picture and boxes) inside
+        _FIX_REPEAT_WINDOW seconds of the last one is refused before any network call -- a
+        double tap, or a client retry after a lost response, must not pay twice."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
+            # READ_ONLY first: the submit resolver below uploads the local file (a network
+            # call), so the refusal has to come before it, not only inside submit_fixer.
+            core._check_read_only(core._SUBMIT_ACTIONS["fix"])
+            repeat = _fix_repeat_refusal(core, p)
+            if repeat:
+                return jsonify({"error": repeat}), 409
             req = core.build_request(p, mode="fix",
                                      resolve=_submit_resolver(core, session))
             if not req.media_id:

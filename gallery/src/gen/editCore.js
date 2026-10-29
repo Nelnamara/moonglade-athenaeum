@@ -111,7 +111,8 @@ export function fixPassNote(d) {
   if (!(d && d.fix_pass)) return "";
   let s = d.fix_pass + " pass";
   const orig = Number(d.original_cost), cost = Number(d.cost);
-  if (orig > cost) {
+  // a discount needs a real price: with no cost (or 0) there is nothing to be "% off"
+  if (d.cost != null && Number.isFinite(cost) && cost > 0 && Number.isFinite(orig) && orig > cost) {
     s += " · " + Math.round((orig - cost) / orig * 100) + "% off " + Number(orig).toLocaleString();
   }
   return s;
@@ -156,36 +157,71 @@ export function editGate(s) {
   return null;
 }
 
-/* Boxes live in state as {x,y,w,h,tag} in DISPLAY pixels; the wire wants
-   {x,y,width,height,tag} in ORIGINAL-image pixels. The scale comes from the
-   rendered <img> -- naturalWidth/clientWidth -- and the server does NOT rescale,
-   so getting this wrong repairs the wrong part of the picture. */
-function mapBoxes(boxes, scale) {
-  return boxes.map((b) => ({
-    x: Math.round(b.x * scale),
-    y: Math.round(b.y * scale),
-    width: Math.round(b.w * scale),
-    height: Math.round(b.h * scale),
-    tag: b.tag,
-  }));
+/* Boxes live in state as {x,y,w,h,tag} in DISPLAY pixels -- the canvas laid over the <img>
+   element; the wire wants {x,y,width,height,tag} in ORIGINAL-image pixels, and the server
+   does NOT rescale, so getting this wrong repairs the wrong part of the picture.
+
+   THE PICTURE'S RENDERED RECT (#93 review F1). The element box is not always the picture:
+   the desktop Loom's `.lv-fixwrap img` is `max-height:280px; object-fit:contain`, so a square
+   or portrait picture is drawn LETTERBOXED inside a W x 280 box -- narrower than the element
+   and offset from its left edge. pictureRect is that contained picture's place in the
+   element: its offset and the one uniform scale (contain keeps the aspect). Where the element
+   IS the picture (the phone's `width:100%`, height auto; any landscape on the desktop) the
+   element's integer height can differ from the exact drawn height by layout rounding, so a gap
+   under one pixel is rounding, not a letterbox: the offset is 0 and the scale is
+   natural / shown width -- exactly the pre-#93 arithmetic. Null when any size is missing. */
+export function pictureRect(shownW, shownH, naturalW, naturalH) {
+  if (!(shownW > 0) || !(shownH > 0) || !(naturalW > 0) || !(naturalH > 0)) return null;
+  const sW = naturalW / shownW;
+  const drawnHByWidth = naturalH / sW;
+  if (drawnHByWidth <= shownH + 1) {
+    // width-limited: the picture fills the width; any gap is above and below
+    const top = (shownH - drawnHByWidth) / 2;
+    return { left: 0, top: top >= 1 ? top : 0, scale: sW };
+  }
+  // height-limited: the picture fills the height; the gap is left and right
+  const sH = naturalH / shownH;
+  const left = (shownW - naturalW / sH) / 2;
+  return { left: left >= 1 ? left : 0, top: 0, scale: sH };
 }
 
-/* The scaler with the picture's REAL width as an explicit argument (#96): the phone Loom
-   passes the shown width and the original's, so it can never take the scale from a
-   thumbnail. A missing width on either side is null -- a refusal, never a scale-1 guess:
+/* Map display boxes through a picture rect into original pixels, CLIPPED to the picture: the
+   part of a box over the letterbox gap (or past the picture's edge) is not part of the
+   picture, so it is cut off rather than shifted -- a box wholly outside comes out 0-wide, and
+   the server's cleaner drops it. Unclipped, it is Math.round(v * scale) per field, as before. */
+function mapBoxes(boxes, rect, naturalW, naturalH) {
+  const s = rect.scale;
+  return boxes.map((b) => {
+    let x = (b.x - rect.left) * s, y = (b.y - rect.top) * s, w = b.w * s, h = b.h * s;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > naturalW) w = naturalW - x;
+    if (y + h > naturalH) h = naturalH - y;
+    return {
+      x: Math.round(x), y: Math.round(y),
+      width: Math.max(0, Math.round(w)), height: Math.max(0, Math.round(h)),
+      tag: b.tag,
+    };
+  });
+}
+
+/* THE scaler (#96, #93 review F1): the shown element's size and the ORIGINAL picture's size as
+   explicit arguments, so a caller can never take the scale from a thumbnail, and the letterbox
+   is accounted for. A missing size on either side is null -- a refusal, never a scale-1 guess:
    the caller prices nothing and keeps ✦ Fix disabled. */
-export function boxesToOriginal(boxes, displayWidth, originalWidth) {
-  if (!displayWidth || !originalWidth) return null;
-  return mapBoxes(boxes, originalWidth / displayWidth);
+export function boxesToOriginal(boxes, shown, natural) {
+  const r = pictureRect(shown && shown.width, shown && shown.height, natural && natural.width, natural && natural.height);
+  return r ? mapBoxes(boxes, r, natural.width, natural.height) : null;
 }
 
-/* FixTab and the desktop Loom: the scale off the <img> they draw on (/full/<id>, so its
-   naturalWidth is the original's). Same arithmetic as before #96, byte for byte, scale-1
-   fallback included -- it shares only the mapping with boxesToOriginal. */
+/* Every Fixer surface's entry: the boxes over THIS <img> (/full/<id>, so naturalWidth/Height
+   are the original's), through boxesToOriginal -- one formula on the desktop Loom, the phone
+   Loom and FixTab. `imgEl` may be the element or a remembered {clientWidth, clientHeight,
+   naturalWidth, naturalHeight} measurement. Null when it cannot say all four sizes. */
 export function scaleBoxes(boxes, imgEl) {
-  const scale = imgEl && imgEl.clientWidth
-    ? (imgEl.naturalWidth / imgEl.clientWidth) : 1;
-  return mapBoxes(boxes, scale);
+  if (!imgEl) return null;
+  return boxesToOriginal(boxes, { width: imgEl.clientWidth, height: imgEl.clientHeight },
+    { width: imgEl.naturalWidth, height: imgEl.naturalHeight });
 }
 
 export const EDIT_DEFAULTS = {
