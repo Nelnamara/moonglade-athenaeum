@@ -106,7 +106,7 @@ Each is a decision only the owner can make; most carry a recommendation.
 
 - **The full mobile-surface audit against the designs.** *(owner, 2026-09-05)* About 85 phone and
   iPad-size screens checked against their design sources in batches on seeded data, then one pass on
-  the real library. Its own scope says "run on the owner's go", and it is the input for #72 and #73.
+  the real library. Its own scope says "run on the owner's go", and it is the input for #73.
   Needs the go.
 
 - **The sign-in welcome hold under reduced motion.** Today the welcome holds about 5.6 s even with
@@ -196,9 +196,8 @@ A visible change gets a design or workshop step first.
 - **Remember this device** (opt-in longer LAN session, designed as Session V): waits on the security
   review's rulings (lifetime, whether a remembered device may spend). The "Log Out signs out only this
   device" half shipped in 3.16.0.
-- **The phone and iPad layouts ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73),
-  [#72](https://github.com/Nelnamara/moonglade-athenaeum/issues/72))** wait on the mobile-surface
-  audit's defect list; **Chrome on iPhone after a turn
+- **The phone layouts ([#73](https://github.com/Nelnamara/moonglade-athenaeum/issues/73))** wait on
+  the mobile-surface audit's defect list; **Chrome on iPhone after a turn
   ([#75](https://github.com/Nelnamara/moonglade-athenaeum/issues/75))** needs a measurement on the
   device itself.
 - **Windows Explorer's Network folder** *(scoped 2026-10-02)*. Moonglade shows up for phones through
@@ -235,11 +234,14 @@ A visible change gets a design or workshop step first.
 - **Split phases 4-5.** `create_app`'s route families, then the spend path (the generation road,
   cards and price, models, deleting one image), after phases 0-3; each its own design and adversarial
   review. Then revisit where `gallery/`, `loom/`, `wiki/` and `static/` live.
-- **Does a tablet tier exist?** *(tabled until the owner plays on the iPad)* Today one hook
+- **Does a tablet tier exist?** *(tabled until the owner's iPad walk of the
+  [#72](https://github.com/Nelnamara/moonglade-athenaeum/issues/72) fixes)* Today one hook
   (`MOBILE_QUERY` 520px plus a coarse-pointer fallback) routes every tablet to the desktop build.
   Three answers: raise the breakpoint, add a real third tier, or keep the split and port touch
   affordances into the desktop components. Input: the private `QA_tablet-2026-08-23.md` poke list and
-  the #72 audit.
+  the owner's iPad walk. The #72 audit found the desktop build holds at 744 to 1366 px with small
+  wrapping fixes; what is left is feel (the sticky header's height in landscape) and touch
+  affordances (hover-only card controls).
 - **A warning-free `.local` certificate and an iPad home-screen app.** A certificate carrying the
   `.local` name, and the HTTPS path for an installed iPad app. Deferred 2026-08-25; overlaps the
   security review.

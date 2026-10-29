@@ -16,6 +16,12 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **On an iPad, the gallery's header no longer runs off the right edge.** With a PixAI account linked, the row of chips under the nav (activity, your pinned goal, followers, the inbox and gift box, credits, the claim button) can be wider than an upright iPad, so the credits, the claim button and the **?** sat past the edge, or the page shrank to fit. That row wraps onto a second line now, like the rows above it. (2026-10-28)
+- **The Generate dock's top row wraps instead of squeezing on a narrow window.** The model button, the "pick a model" line and the `{ }` toggle were crushed to a sliver at iPad widths; they keep their size and drop to a second line. (2026-10-28)
+- **In the Lightbox, the arrows stay beside a wide picture** held on an iPad upright, instead of sitting on its edges. (2026-10-28)
+- **Details keeps "MODEL . v1" on one line** beside the picture on a tablet. (2026-10-28)
+
 ## [3.20.4] - 2026-10-27 — Upright
 
 ### Fixed
