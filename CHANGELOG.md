@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **When the gallery stops, `serve.log` now says what ended it and why.** The launcher writes a line when the server starts and when it ends (the time, how long it ran and its exit code, in plain words for Stop and Restart, and as a hex status when Windows gives one), and a line if an error ends the launcher itself. The server writes its own line when it stops: Stop, Restart or an update, with the address, user and browser that asked, or the error that ended it. A crash inside the program's native code now leaves a stack in the same file. Before, a Stop, a crash after the first half minute and a process ended from outside all left nothing there, so a Stop from the Control Panel looked like the program vanishing, and a frozen computer looked the same. Each now reads differently, and `wiki/Troubleshooting.md` says how. (2026-10-28)
+
 ## [3.20.4] - 2026-10-27 — Upright
 
 ### Fixed

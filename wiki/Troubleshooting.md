@@ -86,6 +86,15 @@ of a local one. And "once per run" is literally once per *process*: on the long-
 server the paragraph appears on the console the first time and not again, so read the log
 there rather than waiting for it to repeat.
 
+## The gallery closed and I did not close it
+Read the last lines of `local\logs\serve.log` (it sits beside `moonglade.log`). Every run of the server writes a line there when it starts and one when it ends, and the server writes its own line just before it stops.
+
+- A `[server] ... stopping: Stop requested from ...` line, then `exit code 0` in the launcher's line after it: someone pressed Stop in the Control Panel. The line names the address the click came from, whether that was this computer or another device, the signed-in user and the browser.
+- `exit code 42` (restart): a Restart or an update. The launcher starts the gallery again by itself, and the next line says so.
+- `exit code 1` with no `[server]` line before it, and no `Windows fatal exception` block above it: the program was ended from outside, by Task Manager, an antivirus, a sign-out or a shutdown.
+- A `Windows fatal exception` block (for example `access violation`) with a list of what the program was doing, just above the launcher's line: a crash inside a library the gallery uses. The exit code beside it is often `1`, or a `0x...` number such as `0xC0000005`.
+- No `[launcher]` line after the last request at all: the whole computer stopped (a freeze or a power loss), so the program had no chance to write anything. Windows' Event Viewer, under Windows Logs, System, shows it (events 41, 1074 and 6006).
+
 ## After updating to 3.20: where did my files go?
 Nothing was lost. 3.20 gives every file one home, and the first time it starts it moves yours
 there by itself. [Where Things Live](Where-Things-Live) has the whole map.
