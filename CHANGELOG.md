@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **Chrome on iPhone: a phone held sideways leaves room for the island once, not twice.** Sideways, the gallery, the viewer, the record and the side panels each kept a band clear of the island on both sides, and where the browser had already kept that room itself the page lost it a second time, as dark strips down both edges. The phone now sees when the browser has already made room and does not add it again; Safari still keeps both sides clear. The What's new card no longer sits under the island, and a picture's record sideways shows the picture at its own shape instead of in a grey box. Developers: `?turndebug` now also shows the safe areas and the screen. (#73) (2026-10-28)
+
 ## [3.20.4] - 2026-10-27 — Upright
 
 ### Fixed

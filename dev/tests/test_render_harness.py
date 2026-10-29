@@ -7301,13 +7301,16 @@ def _q_json(route, payload, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None):
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None,
+            screen=None):
     """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
     collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
     unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
     monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
     opts = {"has_touch": True, "is_mobile": True} if touch else {}
     vp = viewport or PHONE
+    if screen:                            # the physical screen window.screen reports (default: the viewport)
+        opts["screen"] = {"width": screen["width"], "height": screen["height"]}
     ctx = render_browser.new_context(
         viewport={"width": vp["width"], "height": vp["height"]}, device_scale_factor=1,
         base_url=server.base_url, timezone_id="UTC", **opts)
@@ -7902,8 +7905,10 @@ def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
 # Session Q, Q4: the phone turned sideways (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 x 360"). The
 # same phone shell in both orientations -- a turn is CSS and one hook, never a remount -- with the tab
 # bar a 56 px left rail, 4 columns (3 under 700 px wide), the Lightbox picture fitting the height with
-# its actions in a right rail, and every sheet a side panel up to 380 px wide. Safe areas cannot be
-# simulated headlessly (env() resolves to 0), so those are held by the stylesheet test in loom/test.
+# its actions in a right rail, and every sheet a side panel up to 380 px wide. Safe areas resolve to 0
+# here unless a test sets them: Chromium's CDP Emulation.setSafeAreaInsetsOverride DOES work headless
+# (#73's audit; test_landscape_counts_the_side_safe_areas_once uses it), the other engines have no such
+# override. The stylesheet side of it is also held by the stylesheet test in loom/test.
 # Real-device behaviour (iOS Safari, Android, touch, notches) is NOT measured here.
 # ---------------------------------------------------------------------------
 
@@ -8243,6 +8248,92 @@ def test_landscape_feed_new_since_rule_and_saver_chip_are_all_there(
         chip, hero = _q_box(page, ".glm-saverchip"), _q_box(page, ".glm-hero")
         assert chip["t"] >= hero["t"] and chip["b"] <= hero["b"] and chip["r"] <= hero["r"], (chip, hero)
         assert page.locator(".glm-tile-tag").first.inner_text() in ("256 px", "▶ paused")
+    finally:
+        ctx.close()
+
+
+_Q_PICTURE_FIT_JS = """() => { const f = document.querySelector('.idm-frame'), i = f.querySelector('img');
+    const fb = f.getBoundingClientRect(), ib = i.getBoundingClientRect();
+    // (the frame wears a 1 px border each side, so a snug frame is the picture + 2)
+    // object-fit: contain -- the picture itself is the largest box of its own shape inside the img's box
+    const shown = Math.min(ib.width, ib.height * i.naturalWidth / i.naturalHeight);
+    return {frame: fb.width, img: ib.width, shown: shown}; }"""
+
+
+def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browser, monkeypatch):
+    """#73 (the #75 lead). A phone turned sideways keeps the island's room clear on both sides; where the
+    browser has ALREADY kept that room itself (Chrome on iPhone: a window narrower than the screen by about
+    what the insets ask for) the page must not add it again. Chromium's CDP safe-area override stands in for
+    the phone. Context A is Safari's shape (the window is the whole 852 px screen, 59 + 59 reported): the
+    rail is 56 + 59 wide, the stage pads 59 on the right, nothing is marked kept. Context B is Chrome's (a
+    734 px window in the same screen, the same insets): the page marks the sides kept, the rail is its plain
+    56 px, the stage pads nothing, the gallery is the whole 678 px left of the rail, and a side panel pads
+    13 px, not 72. Second phase proves the marker is what does it: take it off in-page and B's page is
+    A's again. The record's picture (D4) is its own shape, centred, with no grey bars beside it -- and with
+    the old stretched frame injected the bars come back."""
+    if (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower() != "chromium":
+        pytest.skip("the safe-area override is Chromium's CDP (Emulation.setSafeAreaInsetsOverride)")
+    screen = {"width": 393, "height": 852}              # what iOS reports, upright numbers, whichever way up
+
+    def insets(page):
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Emulation.setSafeAreaInsetsOverride", {"insets": {
+            "top": 0, "left": 59, "bottom": 21, "right": 59}})
+
+    def read(page):
+        return page.evaluate("""() => { const s = document.querySelector('.glm-stage');
+            const cs = getComputedStyle(s); const g = document.querySelector('.glm-body').getBoundingClientRect();
+            return {kept: document.documentElement.hasAttribute('data-mg-sides-kept'),
+                    track: parseFloat(cs.gridTemplateColumns.split(' ')[0]), padR: cs.paddingRight, body: g.width,
+                    inner: innerWidth}; }""")
+
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              viewport={"width": 852, "height": 393}, screen=screen)
+    try:
+        insets(page)
+        _q_open(page)
+        a = read(page)
+        assert a["inner"] == 852 and a["kept"] is False, a
+        assert a["track"] == 115 and a["padR"] == "59px", "Safari's shape keeps both insets: %r" % a
+        # D4 here, where both insets are in force: a portrait and a landscape picture are each their own frame
+        _q_open_details(page, 0)
+        page.wait_for_function("() => { const i = document.querySelector('.idm-frame img'); return i && i.complete && i.naturalWidth > 0; }")
+        _settle(page)
+        fit = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert abs(fit["frame"] - fit["shown"]) <= 3, "the frame is the picture's own shape: %r" % fit
+        page.add_style_tag(content=".idm-body > .idm-frame { flex: 1 1 0 !important; min-width: 0 !important;"
+                                   " margin: 0 14px 0 0 !important } .idm-frame img, .idm-frame video { width: 100% !important }")
+        _settle(page)
+        old = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert old["frame"] - old["shown"] > 100, "with the old stretched frame the grey bars are back: %r" % old
+        _q_open(page)
+        _q_open_details(page, 1)
+        page.wait_for_function("() => { const i = document.querySelector('.idm-frame img'); return i && i.complete && i.naturalWidth > 0; }")
+        _settle(page)
+        fit = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert abs(fit["frame"] - fit["shown"]) <= 3, "a wide picture fills its frame too: %r" % fit
+    finally:
+        ctx.close()
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              viewport={"width": 734, "height": 393}, screen=screen)
+    try:
+        insets(page)
+        _q_open(page)
+        b = read(page)
+        assert b["inner"] == 734 and b["kept"] is True, b
+        assert b["track"] == 56 and b["padR"] == "0px" and round(b["body"]) == 678, \
+            "the browser already kept the room: counted once, not twice: %r" % b
+        page.click(".glm-bar2 .glm-metal:has-text('Sort')")
+        page.wait_for_selector(".glm-sheet")
+        _settle(page)
+        assert page.evaluate("getComputedStyle(document.querySelector('.glm-sheet')).paddingRight") == "13px"
+        page.click(".glm-scrim", position={"x": 10, "y": 10})
+        page.wait_for_selector(".glm-sheet", state="detached")
+        # phase two: the marker is what does it
+        page.evaluate("document.documentElement.removeAttribute('data-mg-sides-kept')")
+        _settle(page)
+        again = read(page)
+        assert again["kept"] is False and again["track"] == 115 and again["padR"] == "59px", again
     finally:
         ctx.close()
 

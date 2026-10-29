@@ -1,11 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
-  LANDSCAPE_QUERY, PHONE_MAX, anchorScrollTop, isPhoneViewport, phoneColumns, pickAnchor,
+  LANDSCAPE_QUERY, PHONE_MAX, anchorScrollTop, isPhoneViewport, phoneColumns, pickAnchor, sidesKept,
 } from "../../gallery/src/lib/phoneCore.js";
 
 /* Session Q, Q4 (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 x 360"): the phone turned sideways. The
@@ -64,6 +64,48 @@ describe("Q4 the gallery's columns", () => {
   });
 });
 
+describe("sides kept (#73): the side safe areas are counted once", () => {
+  // iOS Chrome / Safari report the upright screen (393 x 852) whichever way the phone is held
+  const base = { landscape: true, screenW: 393, screenH: 852 };
+  test("Safari: the window is the whole screen, both insets stay", () => {
+    assert.equal(sidesKept({ ...base, innerW: 852, left: 59, right: 59 }), false);
+  });
+  test("Chrome that already kept its own room: a 734 window in an 852 screen, 59 + 59 asked", () => {
+    assert.equal(sidesKept({ ...base, innerW: 734, left: 59, right: 59 }), true);
+  });
+  test("an Android cutout (one side only) is never treated as kept, however narrow the window", () => {
+    assert.equal(sidesKept({ landscape: true, innerW: 804, screenW: 844, screenH: 390, left: 30, right: 0 }), false);
+    assert.equal(sidesKept({ landscape: true, innerW: 700, screenW: 844, screenH: 390, left: 0, right: 30 }), false);
+  });
+  test("upright, or not a landscape phone (iPad, desktop): never", () => {
+    assert.equal(sidesKept({ ...base, landscape: false, innerW: 734, left: 59, right: 59 }), false);
+    assert.equal(sidesKept({ landscape: false, innerW: 393, screenW: 393, screenH: 852, left: 0, right: 0 }), false);
+  });
+  test("no insets, or numbers it cannot trust: never", () => {
+    assert.equal(sidesKept({ ...base, innerW: 734, left: 0, right: 0 }), false, "a desktop window or a phone without a notch");
+    assert.equal(sidesKept({ landscape: true, innerW: 734, screenW: NaN, screenH: undefined, left: 59, right: 59 }), false);
+    assert.equal(sidesKept({ ...base, innerW: NaN, left: 59, right: 59 }), false);
+    assert.equal(sidesKept({ ...base, innerW: 0, left: 59, right: 59 }), false);
+    assert.equal(sidesKept({ ...base, left: 59, right: 59 }), false, "no window width at all");
+  });
+  test("a window wider than the screen (zoomed, or a desktop-wide layout viewport) is never kept", () => {
+    assert.equal(sidesKept({ ...base, innerW: 980, left: 59, right: 59 }), false);
+  });
+  test("iOS screen numbers work either way round", () => {
+    assert.equal(sidesKept({ landscape: true, innerW: 734, screenW: 852, screenH: 393, left: 59, right: 59 }), true);
+    assert.equal(sidesKept({ landscape: true, innerW: 734, screenW: 393, screenH: 852, left: 59, right: 59 }), true);
+  });
+  test("it asks for the room within a few px, no more", () => {
+    // 59 + 59 = 118 asked; the 4 px slack lets 114 of kept room count: a 738 window (852 - 738 = 114) does, a 739 does not
+    assert.equal(sidesKept({ ...base, innerW: 738, left: 59, right: 59 }), true);
+    assert.equal(sidesKept({ ...base, innerW: 739, left: 59, right: 59 }), false);
+  });
+  test("the two sides must agree within the slack", () => {
+    assert.equal(sidesKept({ ...base, innerW: 734, left: 59, right: 55 }), true);
+    assert.equal(sidesKept({ ...base, innerW: 734, left: 59, right: 40 }), false);
+  });
+});
+
 describe("Q4 rotation keeps your place", () => {
   const tiles = [
     { id: "a", top: -400, bottom: -100 },
@@ -102,15 +144,46 @@ describe("Q4 the stylesheet", () => {
   });
 
   test("the page's numbers: a 56 px rail of 44 px tiles, a 380 px panel", () => {
-    assert.match(css, /grid-template-columns: calc\(56px \+ env\(safe-area-inset-left\)\) minmax\(0, 1fr\)/);
+    assert.match(css, /grid-template-columns: calc\(56px \+ var\(--mg-safe-l\)\) minmax\(0, 1fr\)/);
     assert.match(css, /width: 44px; height: 44px/);
     assert.match(css, /width: min\(380px, 100%\)/);
   });
 
-  test("the safe areas are read on both sides", () => {
-    for (const side of ["left", "right", "top", "bottom"]) {
+  test("the safe areas are read on both sides, the side ones counted once (#73)", () => {
+    // top and bottom stay straight env() reads
+    for (const side of ["top", "bottom"]) {
       assert.ok(css.includes("env(safe-area-inset-" + side + ")"), side);
     }
+    // the side ones go through two variables, defined in one place each...
+    assert.ok(css.includes("--mg-safe-l: env(safe-area-inset-left)"));
+    assert.ok(css.includes("--mg-safe-r: env(safe-area-inset-right)"));
+    assert.match(css, /:root\[data-mg-sides-kept\] \{ --mg-safe-l: 0px; --mg-safe-r: 0px; \}/, "kept zeroes both");
+    assert.match(css, /@property --mg-safe-l \{ syntax: "<length>"; inherits: true; initial-value: 0px; \}/);
+    assert.match(css, /@property --mg-safe-r \{ syntax: "<length>"; inherits: true; initial-value: 0px; \}/);
+    // ...and nothing else reads them raw
+    const raw = css.replace(/--mg-safe-[lr]: env\(safe-area-inset-(left|right)\)/g, "");
+    assert.doesNotMatch(raw, /env\(safe-area-inset-(left|right)\)/, "a raw side env() would be counted twice in Chrome");
+    for (const v of ["--mg-safe-l", "--mg-safe-r"]) assert.ok(css.includes("var(" + v + ")"), v);
+  });
+
+  test("the side room slides over half a second, and not at all under reduced motion", () => {
+    assert.match(css, /:root \{ transition: --mg-safe-l \.5s ease, --mg-safe-r \.5s ease; \}/);
+    const rm = css.slice(css.indexOf("prefers-reduced-motion: reduce"));
+    assert.match(rm, /:root \{ transition: none; \}/);
+  });
+
+  test("no other phone stylesheet reads a raw side inset, and the toast keeps clear of the island", () => {
+    const dir = path.resolve(__dirname, "..", "..", "gallery", "src", "styles");
+    const sheets = readdirSync(dir).filter((f) => f.endsWith(".css") && f !== "phone-landscape.css");
+    assert.ok(sheets.includes("notify.css"));
+    for (const f of sheets) assert.doesNotMatch(readFileSync(path.join(dir, f), "utf8"), /env\(safe-area-inset-(left|right)\)/, f);
+    assert.match(rd("gallery/src/styles/notify.css"), /#mg-toasts\{[^}]*right:calc\(16px \+ var\(--mg-safe-r,0px\)\)/);
+  });
+
+  test("the record's picture is its own shape, not a stretched grey frame (#73)", () => {
+    assert.match(css, /\.idm-body > \.idm-frame \{ flex: 0 1 auto; align-self: center; width: auto; margin: 0 auto; \}/);
+    assert.match(css, /\.idm-body > \.idm-frame:not\(:has\(img, video\)\) \{ min-width: min\(240px, 100%\); \}/, "only a note-only frame keeps a floor");
+    assert.match(css, /\.idm-frame img, \.idm-frame video \{ width: auto; max-width: 100%;/);
   });
 
   test("the rail names its tabs for a screen reader, and the sheets share one panel animation", () => {

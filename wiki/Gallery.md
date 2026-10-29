@@ -536,7 +536,7 @@ one), laid out for a wide, short screen:
   buttons sit after the details and scroll with them (upright they stay pinned at the foot).
 - **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
   columns re-flow, and a picture you have open stays open. Turned back upright, the gallery is two columns
-  again and never scrolls sideways. A notch or the home bar on either side is left clear.
+  again and never scrolls sideways. A notch or the home bar on either side is left clear. If your browser already keeps that room (Chrome on iPhone), it is not added twice.
 
 A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
 wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks
