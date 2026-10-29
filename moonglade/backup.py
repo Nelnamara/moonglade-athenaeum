@@ -178,6 +178,23 @@ def _rest_error(verb, path, r):
                           status=r.status_code, body=body)
 
 
+def _is_redirect_status(r):
+    """True for a 3xx answer. `r.ok` is True for a 3xx, so a write verb asks this first.
+    Guarded on an int status, so a stand-in response without one is not mistaken for it."""
+    status = getattr(r, "status_code", None)
+    return isinstance(status, int) and not isinstance(status, bool) and 300 <= status < 400
+
+
+def _refuse_redirect(verb, path, r):
+    """A write verb's answer to a 3xx (redirects are never followed on a write, #92 review
+    F1): raise a PixAIRestError carrying the status, before anything reads the body -- the
+    write is not re-sent anywhere, and a 3xx never counts as success."""
+    if _is_redirect_status(r):
+        raise PixAIRestError("REST {} {} -> {}: PixAI redirected this request; nothing was "
+                             "re-sent.".format(verb, path, r.status_code),
+                             status=r.status_code, body=None)
+
+
 class EmptyOutputsError(PixAIError):
     """PixAI reported the task TERMINAL -- either 'done' with empty outputs, or a real
     failure (failed/error/cancelled/rejected) -- so it produced nothing and never will.
@@ -1629,7 +1646,9 @@ class PixAIClient:
         return self._graphql_post(document, variables, retries, timeout)
 
     def mutate(self, document, variables=None):
-        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
+        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always, and it
+        NEVER FOLLOWS A REDIRECT (a 307/308 would re-send the mutation to a URL the answering
+        server chose; #92 review F1) -- a 3xx raises with nothing re-sent.
 
         It takes **no `retries` argument on purpose** -- there is no correct value above 0
         for a spending path, so the knob is not offered rather than offered with a safe
@@ -1641,18 +1660,28 @@ class PixAIClient:
         """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
         verb that called in -- this function never chooses it, which is what keeps the
         spend rule readable in exactly two places above. `timeout` is each attempt's socket
-        timeout: whatever `query` was handed, and always 120 for `mutate`."""
+        timeout: whatever `query` was handed, and always 120 for `mutate`.
+
+        A MUTATION document (`_is_mutation_document`, whichever verb sent it -- `mutate`, or
+        `query` as the backstop) never follows a redirect (#92 review F1): it is sent with
+        `allow_redirects=False`, and a 3xx raises before its body is read, with nothing
+        re-sent. A query document keeps requests' default."""
         body = {"query": document, "variables": variables or {}}
+        follow_redirects = not _is_mutation_document(document)
+        send = {} if follow_redirects else {"allow_redirects": False}
         delay = 2.0
         for attempt in range(retries + 1):
             try:
-                r = self._session.post(API_URL, json=body, timeout=timeout)
+                r = self._session.post(API_URL, json=body, timeout=timeout, **send)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException:
                 if attempt == retries:
                     raise
                 time.sleep(delay); delay *= 2; continue
+            if not follow_redirects and _is_redirect_status(r):
+                raise PixAIError("HTTP {} -- PixAI redirected this request; nothing was "
+                                 "re-sent.".format(r.status_code))
             if r.status_code == 401:
                 raise PixAIError("401 Unauthorized -- API key missing/expired.")
             if r.status_code == 429 or r.status_code >= 500:
@@ -1692,19 +1721,30 @@ class PixAIClient:
     def rest_post(self, path, body=None, timeout=60):
         """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
 
-        NO retry loop, deliberately: `submit_fixer` and `claim_reward` ride this, and the
-        session mounts no urllib3 Retry adapter (requests' default HTTPAdapter is
-        max_retries=0), so both are single-attempt. Pinned by
-        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
-        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
+        NO retry loop, deliberately: `submit_fixer`, `claim_reward` and `delete_task` ride
+        this, and the session mounts no urllib3 Retry adapter (requests' default HTTPAdapter
+        is max_retries=0), so all are single-attempt. Pinned by
+        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop.
+
+        NEVER FOLLOWS A REDIRECT (#92 review F1; the same on every write verb): requests would
+        re-send a 307/308 -- body, API-key Bearer and all -- to a URL the answering server
+        chose, and turn a 301/302/303 into a GET whose answer then decides "it worked". So
+        redirects are off, and a 3xx raises (`_refuse_redirect`) before anything reads its
+        body."""
+        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout,
+                               allow_redirects=False)
+        _refuse_redirect("POST", path, r)
         if not r.ok:
             raise _rest_error("POST", path, r)
         return r.json()
 
     def rest_patch(self, path, body=None, timeout=60):
         """PATCH JSON to a /v2 oRPC REST route. Single attempt, like rest_post / rest_put:
-        its one caller (joining a LoRA to the rebate programme) cannot be undone."""
-        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout)
+        its one caller (joining a LoRA to the rebate programme) cannot be undone. Never
+        follows a redirect, like rest_post."""
+        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout,
+                                allow_redirects=False)
+        _refuse_redirect("PATCH", path, r)
         if not r.ok:
             raise _rest_error("PATCH", path, r)
         return r.json()
@@ -1715,8 +1755,11 @@ class PixAIClient:
         Single-attempt like `rest_post`, and by the same reasoning: the training routes that
         ride it (a dataset replace, a description save) change the account, and a re-send
         after a lost response can land on a task that has already moved on. Pinned alongside
-        rest_post by dev/tests/test_spend_no_retry.py."""
-        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout)
+        rest_post by dev/tests/test_spend_no_retry.py. Never follows a redirect, like
+        rest_post."""
+        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout,
+                              allow_redirects=False)
+        _refuse_redirect("PUT", path, r)
         if not r.ok:
             raise _rest_error("PUT", path, r)
         return r.json()
@@ -2940,6 +2983,13 @@ def delete_task(session, task_id):
         raise PixAIError("PixAI answered the delete of task {} with something that is not "
                          "JSON; it is treated as not deleted and its local copy "
                          "stays.".format(tid))
+    except requests.exceptions.ReadTimeout as e:
+        # The request went out and no answer came back: PixAI may or may not have deleted
+        # it. Treated as not deleted (fail-safe), and the route is idempotent, so a retry by
+        # the user is safe -- never by this function.
+        raise PixAIError("network error deleting task {}: {}. PixAI may or may not have "
+                         "deleted it; it is treated as not deleted and its local copy stays. "
+                         "Deleting it again is safe.".format(tid, e))
     except requests.RequestException as e:
         raise PixAIError("network error deleting task {}: {}".format(tid, e))
     if not (isinstance(answer, dict) and answer.get("success") is True):
@@ -6196,7 +6246,7 @@ def _fresh_pixai_token(tok, cur):
             and jwt_claims(tok).get("iss") == "pixai")
 
 
-def refresh_jwt(session, current_jwt=None, expected_sub=None):
+def refresh_jwt(session, current_jwt=None, expected_sub=None, now=None):
     """Renew the Mirror's website session and return a genuinely FRESH JWT, or None.
 
     The road (#92) is the one pixai.art itself uses: `POST /v2/auth/refresh-token`
@@ -6209,9 +6259,10 @@ def refresh_jwt(session, current_jwt=None, expected_sub=None):
     CREDENTIAL. The stored mirror JWT as Bearer, sent only when it is present and unexpired,
     and NEVER the API key: this route issues a session token for whatever bearer it is handed,
     so a `current_jwt` equal to the configured PIXAI_API_KEY is refused before anything is
-    sent. With nothing safe to send, no request is made. The header is per call, so it wins
-    over any Authorization the session carries by default. No cookie is sent (Invariant #7,
-    JWT-only).
+    sent. With nothing safe to send, no request is made. "Unexpired" is judged at `now`
+    (default: the clock), which the scheduler passes down so its own clock decides. The header
+    is per call, so it wins over any Authorization the session carries by default. No cookie
+    is sent (Invariant #7, JWT-only), and a redirect is never followed: a 3xx is `http_3xx`.
 
     FRESHNESS (the review-proven guard). Status 200, then the body's `token` (the route's
     declared output) first and the `token` response header as the fallback; the winner must be
@@ -6236,14 +6287,17 @@ def refresh_jwt(session, current_jwt=None, expected_sub=None):
     JWT-only one ("jwt")."""
     _refresh_last["reason"] = ""
     cur = str(current_jwt or "")
-    headers = _renewal_headers(cur)
+    headers = _renewal_headers(cur, now)
     if headers is None:
         _refresh_last["reason"] = "no_credential"
         return None
     try:
         _drop_cookies(session)              # JWT-only: nothing a jar holds rides this request
         try:
-            r = session.post(REST_API_BASE + MIRROR_REFRESH_PATH, headers=headers, timeout=30)
+            # Never follow a redirect (#92 review F1): requests would merge a 3xx's Set-Cookie
+            # into the next hop, sending a cookie with the JWT. A 3xx is http_3xx below.
+            r = session.post(REST_API_BASE + MIRROR_REFRESH_PATH, headers=headers, timeout=30,
+                             allow_redirects=False)
         except Exception:                                    # noqa: BLE001 -- never raises
             _refresh_last["reason"] = "network"
             return None
@@ -6520,7 +6574,7 @@ def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
         r["last_attempt_at"] = now
         road = "jwt"
         fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur,
-                            expected_sub=jwt_claims(cur).get("sub"))
+                            expected_sub=jwt_claims(cur).get("sub"), now=now)
         if fresh:
             save_mirror_state({"jwt": fresh, "minted_at": now})
             r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="",
@@ -6683,6 +6737,10 @@ def run_mirror_check(args):
     fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt,
                         expected_sub=jwt_claims(jwt).get("sub"))
     reason = _refresh_last.get("reason") or "failed"
+    # A fixed phrase per reason word. no_credential means nothing was sent, so PixAI was not
+    # asked and must not be quoted as answering.
+    why = ("no saved website session to renew (nothing was sent)"
+           if reason == "no_credential" else "PixAI answered: {}".format(reason))
     if not fresh:
         # A still-valid JWT whose renewal merely failed (a transient 5xx, a refusal) is
         # reported distinctly from a truly-dead one, and it is kept.
@@ -6690,12 +6748,12 @@ def run_mirror_check(args):
             save_mirror_state({"jwt": jwt})
             print("Mirror ({}): the stored JWT is still valid ({} days left) but PixAI did NOT "
                   "renew the session -- renewal may be temporarily unavailable. It keeps "
-                  "working until it nears expiry; re-run then. (PixAI answered: {})".format(
-                      src, before, reason))
+                  "working until it nears expiry; re-run then. ({})".format(
+                      src, before, why))
             return {"ok": True, "source": src, "renewed": False, "days_left": before,
                     "reason": reason}
         print("Mirror ({}): the JWT is expired and the session was not renewed. Re-open "
-              "pixai.art logged-in, then retry. (PixAI answered: {})".format(src, reason))
+              "pixai.art logged-in, then retry. ({})".format(src, why))
         return {"ok": False, "source": src, "renewed": False, "reason": reason}
     after = jwt_days_left(fresh)
     # The app's own renewal: stamp when it minted the token (the ring's span, #71) and record
@@ -6734,10 +6792,13 @@ def run_mirror_check(args):
 #     poll / collect_generation / GET /v1/media do NOT.
 #  7. JWT-only: no cookies are stored, sent or paired (they died ~1 h after issue and pairing
 #     them across browser profiles risked a cross-identity submit); the fresh token's `sub`
-#     must match the stored one's, and any cookie PixAI writes back is cleared off the session
+#     must match the stored one's, the renewal never follows a redirect (a 3xx's Set-Cookie
+#     would ride the next hop), and any cookie PixAI writes back is cleared off the session
 #     after the renewal. The same-session cookie read the 2026-08-17 ruling allows is not
-#     built: no installed profile's pixai.art cookies have been shown readable (current
-#     Chrome locks them with app-bound "v20" encryption; #92's B0 check has not been run).
+#     built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
+#     readable -- the running browser holds the Cookies file locked (Chrome and Edge Default;
+#     Brave not installed), and current Chrome encrypts cookie values with app-bound "v20"
+#     anyway -- so the ruling's own clause applies and the renewal is JWT-only.
 # ===========================================================================
 
 

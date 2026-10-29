@@ -81,49 +81,61 @@ class _Session:
     def __init__(self, resp=None, raise_post=False):
         self._resp, self._rp, self.last, self.posts = resp, raise_post, None, 0
 
-    def post(self, url, headers=None, timeout=None):
+    def post(self, url, headers=None, timeout=None, allow_redirects=True):
         self.posts += 1
-        self.last = {"url": url, "headers": headers}
+        self.last = {"url": url, "headers": headers, "allow_redirects": allow_redirects}
         if self._rp:
             raise ConnectionError("network down")
         return self._resp
 
 
+# Every direct refresh_jwt call below passes now=NOW: the tokens are minted off the fixed
+# clock, and "is the token we send still live" is judged at `now` (#92 review F2).
+
 def test_refresh_rides_the_rest_route_with_the_bearer():
-    """#92: POST /v2/auth/refresh-token with no body, the Bearer we hold, and nothing else."""
+    """#92: POST /v2/auth/refresh-token with no body, the Bearer we hold, nothing else, and
+    no redirect followed."""
     cur, fresh = _jwt(NOW + 2 * 86400), _jwt(NOW + 7 * 86400)
     s = _Session(_Resp(jd={"token": fresh}))
-    assert mj.refresh_jwt(s, current_jwt=cur) == fresh
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW) == fresh
     assert s.last["url"] == mj.REST_API_BASE + "/auth/refresh-token"
     assert s.last["headers"] == {"Authorization": "Bearer " + cur}
+    assert s.last["allow_redirects"] is False
 
 
 def test_refresh_falls_back_to_the_token_header():
     cur, fresh = _jwt(NOW + 2 * 86400), _jwt(NOW + 7 * 86400)
     s = _Session(_Resp(headers={"token": fresh}, jd={}))
-    assert mj.refresh_jwt(s, current_jwt=cur) == fresh
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW) == fresh
 
 
 def test_refresh_returns_none_when_nothing_usable():
     cur = _jwt(NOW + 2 * 86400)
-    assert mj.refresh_jwt(_Session(_Resp(jd={})), current_jwt=cur) is None
+
+    def _none(sess, why, **k):
+        assert mj.refresh_jwt(sess, current_jwt=k.get("cur", cur), now=NOW) is None
+        assert mj._refresh_last["reason"] == why
+
+    _none(_Session(_Resp(jd={})), "unchanged")
     # a token that isn't a real jwt is not trusted
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": "not-a-jwt"}, jd={"token": "x"})),
-                          current_jwt=cur) is None
+    _none(_Session(_Resp(headers={"token": "not-a-jwt"}, jd={"token": "x"})), "unchanged")
     # network failure -> None, never a raise (caller keeps the current jwt)
-    assert mj.refresh_jwt(_Session(raise_post=True), current_jwt=cur) is None
+    _none(_Session(raise_post=True), "network")
     # unparseable body + no header -> None
-    assert mj.refresh_jwt(_Session(_Resp(raise_json=True)), current_jwt=cur) is None
+    _none(_Session(_Resp(raise_json=True)), "unchanged")
     fresh = _jwt(NOW + 7 * 86400)
     # (review) non-200 -> None even with a fresh token
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": fresh}, jd={"token": fresh},
-                                         status_code=400)), current_jwt=cur) is None
+    _none(_Session(_Resp(headers={"token": fresh}, jd={"token": fresh}, status_code=400)),
+          "http_400")
     # (review) the gateway echoes the SAME token we sent -> not a renewal
-    assert mj.refresh_jwt(_Session(_Resp(headers={"token": cur}, jd={"token": cur})),
-                          current_jwt=cur) is None
+    _none(_Session(_Resp(headers={"token": cur}, jd={"token": cur})), "unchanged")
     # no credential -> no request at all
     s = _Session(_Resp(jd={"token": fresh}))
-    assert mj.refresh_jwt(s) is None and s.posts == 0
+    assert mj.refresh_jwt(s, now=NOW) is None and s.posts == 0
+    # a token that is live by the real clock but expired at `now` is not sent either
+    s = _Session(_Resp(jd={"token": fresh}))
+    assert mj.refresh_jwt(s, current_jwt=cur, now=NOW + 3 * 86400) is None and s.posts == 0
+    assert mj._refresh_last["reason"] == "no_credential"
 
 
 # ---- mirror session: persistence, session build, refresh, and the check command ----

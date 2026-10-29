@@ -24,6 +24,9 @@ What is pinned:
     account (`sub`) is discarded; the session's cookie jar is empty afterwards; the road is
     recorded ("jwt") and `--mirror-check` says it; an expired stored JWT is still left for
     Connect;
+  * neither road follows a redirect (review F1): a 307/308 is never re-sent to another task,
+    a 301/302/303 is never turned into a GET that decides "deleted", and a renewal 307 that
+    sets a cookie carries no cookie anywhere -- each 3xx is an error after one request;
   * no token or cookie value reaches a log record, stdout/stderr, `_refresh_last`,
     `_mirror_renewal` or a returned dict, on success or failure;
   * the bookmarks read is ad-hoc only: a refusal propagates, and no second road is tried;
@@ -35,6 +38,7 @@ socket). The JWTs are synthetic (unsigned, made here), and the API key is a plac
 written into this test's own isolated config.json.
 """
 import base64
+import http.client
 import inspect
 import json
 import logging
@@ -183,6 +187,19 @@ class TestTheDeleteFiresOnce:
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == core.REST_API_BASE + DELETE_PATH
         assert kwargs["json"] == {}
+        assert kwargs["allow_redirects"] is False
+
+    def test_a_read_timeout_says_a_second_delete_is_safe(self, no_read_only):
+        """The request went out and no answer came back: it may or may not have been
+        deleted. Treated as not deleted (the local copy stays), never re-sent by the app, and
+        the message says deleting again is safe (the route is idempotent)."""
+        s = _Recorder(requests.exceptions.ReadTimeout("Read timed out"))
+        with pytest.raises(core.PixAIError) as ei:
+            core.delete_task(core.PixAIClient(s), TID)
+        msg = str(ei.value)
+        assert "network error deleting task " + TID in msg
+        assert "may or may not have deleted it" in msg and "Deleting it again is safe" in msg
+        assert len(s.calls) == 1
 
     def test_it_rides_the_api_key_the_session_carries(self, no_read_only):
         """The delete adds no credential of its own: on the wire the Authorization is the one
@@ -375,6 +392,7 @@ class TestTheRenewalRoad:
         (verb, url, kwargs), = s.calls
         assert verb == "POST" and url == RENEW_URL
         assert "json" not in kwargs and "data" not in kwargs
+        assert kwargs["allow_redirects"] is False
         assert kwargs["headers"]["Authorization"] == "Bearer " + cur
         assert "Cookie" not in kwargs["headers"]
         assert set(kwargs["headers"]) == {"Authorization"}
@@ -617,6 +635,111 @@ class TestNoCredentialLeaks:
         tick = tick[:tick.index("\n    def ", 10)]
         assert "via %s" in tick and 'get("last_road")' in tick
         assert "load_mirror_state().get(\"jwt\")" not in tick.split("_log.info(")[1].split(")")[0]
+
+
+    def test_the_check_says_nothing_was_sent_when_there_was_no_live_token(
+            self, tmp_path, monkeypatch, capsys):
+        """An expired stored JWT and no browser token: nothing is sent, so the check must not
+        claim PixAI answered (#92 review F5)."""
+        _armed(tmp_path, monkeypatch, _jwt(-1))
+        monkeypatch.setattr(core, "read_browser_jwt", lambda *a, **k: "")
+        made = _transport(monkeypatch, _Resp(body={"token": _jwt(7)}))
+        res = core.run_mirror_check(SimpleNamespace())
+        out = capsys.readouterr().out
+        assert res["reason"] == "no_credential" and made[0].calls == []
+        assert "no saved website session to renew (nothing was sent)" in out
+        assert "PixAI answered" not in out
+
+
+# =====================================================================================
+# REDIRECTS: a write never follows one (#92 review F1; the reviewer's six probes)
+# =====================================================================================
+# A REAL requests.Session with a scripted transport adapter, so requests' own redirect and
+# cookie code runs: following a 307/308 would re-POST (body and the API-key Bearer kept, same
+# host) to a URL the answering server chose; a 301/302/303 would become a GET whose answer
+# then decides "deleted"; and a renewal 307 that sets a cookie would carry it on the next hop.
+
+def _raw(set_cookie=None):
+    """A urllib3-ish raw whose _original_response.msg carries Set-Cookie, so requests' own
+    extract_cookies_to_jar sees it exactly as it would off the wire."""
+    msg = http.client.HTTPMessage()
+    if set_cookie:
+        msg["Set-Cookie"] = set_cookie
+    return SimpleNamespace(_original_response=SimpleNamespace(msg=msg),
+                           read=lambda *a, **k: b"", close=lambda: None,
+                           release_conn=lambda: None)
+
+
+class _Script(requests.adapters.BaseAdapter):
+    """Answers each send with the next scripted (status, body, headers, set_cookie)."""
+
+    def __init__(self, *script):
+        super().__init__()
+        self.script, self.sent = list(script), []
+
+    def send(self, request, **kwargs):
+        self.sent.append(request)
+        status, body, headers, cookie = self.script[min(len(self.sent), len(self.script)) - 1]
+        r = requests.Response()
+        r.status_code = status
+        r._content = json.dumps(body).encode() if body is not None else b""
+        r._content_consumed = True
+        r.headers.update(headers or {})
+        r.raw = _raw(cookie)
+        r.url, r.request, r.encoding = request.url, request, "utf-8"
+        return r
+
+    def close(self):
+        pass
+
+
+def _api_key_session(*script):
+    s = requests.Session()
+    s.headers["Authorization"] = "Bearer " + APIKEY
+    wire = _Script(*script)
+    s.mount("https://", wire)
+    return s, wire
+
+
+@pytest.mark.parametrize("code", [307, 308])
+def test_a_307_308_never_resends_the_delete_to_another_task(no_read_only, code):
+    """One confirm for task 111 is at most one POST, and never a POST for an id the preview
+    did not name."""
+    other = core.REST_API_BASE + "/task/222/delete"
+    s, wire = _api_key_session((code, None, {"Location": other}, None),
+                               (200, {"success": True}, {}, None))
+    with pytest.raises(core.PixAIError, match=r"HTTP 30[78] deleting task 111"):
+        core.delete_task(core.PixAIClient(s), "111")
+    posts = [r for r in wire.sent if r.method == "POST"]
+    assert len(posts) == 1, [r.url for r in posts]
+    assert all(r.url.endswith("/task/111/delete") for r in wire.sent)
+
+
+@pytest.mark.parametrize("code", [301, 302, 303])
+def test_a_301_302_303_is_not_a_delete(no_read_only, code):
+    """A 3xx is not {"success": true}, and it is not turned into a GET of Location."""
+    s, wire = _api_key_session((code, None, {"Location": core.REST_API_BASE + "/elsewhere"},
+                                None),
+                               (200, {"success": True}, {}, None))
+    with pytest.raises(core.PixAIError, match=r"HTTP 30[123] deleting task 111"):
+        core.delete_task(core.PixAIClient(s), "111")
+    assert len(wire.sent) == 1
+
+
+def test_a_renewal_redirect_carries_no_cookie_and_is_not_followed():
+    """Invariant #7: no cookie is sent with the renewal, and a 3xx is a failed renewal."""
+    cur, fresh = _jwt(2), _jwt(7, salt="f")
+    s = core._mirror_session_from(cur)
+    wire = _Script((307, None, {"Location": core.REST_API_BASE + "/auth/refresh-token"},
+                    "_bsid=cookie-from-pixai; Domain=api.pixai.art; Path=/"),
+                   (200, {"token": fresh}, {}, None))
+    s.mount("https://", wire)
+    out = core.refresh_jwt(s, current_jwt=cur, expected_sub="S-main")
+    assert not any("Cookie" in r.headers for r in wire.sent), [
+        dict(r.headers).get("Cookie") for r in wire.sent]
+    assert len(wire.sent) == 1
+    assert out is None and core._refresh_last["reason"] == "http_307"
+    assert len(s.cookies) == 0
 
 
 # =====================================================================================

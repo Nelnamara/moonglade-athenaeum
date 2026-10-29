@@ -352,8 +352,8 @@ def _reply(mocker, payload, status=200, text=""):
     """A response object that answers with `payload`, the way PixAI actually answers.
 
     Note the default status: PixAI refuses a GraphQL request with HTTP **200** plus an
-    `errors` array (that is why gql() reads `errors` before it looks at the status at all,
-    and why CLAUDE.md has a recapture procedure for PersistedQueryNotFound). A stub that only
+    `errors` array (that is why gql() reads `errors` before it looks at the status at all;
+    "Cannot query field..." on a document arrives the same way). A stub that only
     ever fails by raising -- which is all the first repair's tests did -- cannot see this.
     Since #91 the lookup is the model version DOCUMENT over the ad-hoc POST, so these answer
     `session.post`.

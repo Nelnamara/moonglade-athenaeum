@@ -421,3 +421,101 @@ class TestRestSpendPathsAreSingleAttempt:
         assert src.count(".delete(") == 1
         assert "for " not in src and "while " not in src, (
             "moonglade.recipes._rest_delete grew a retry loop")
+
+
+class _Answer:
+    def __init__(self, status=200, body=None):
+        self.status_code, self._body = status, body if body is not None else {"data": {}}
+        self.text, self.headers = "", {}
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+
+class _Kw:
+    """A session stand-in recording each verb's kwargs."""
+
+    def __init__(self, status=200, body=None):
+        self.calls, self._a = [], _Answer(status, body)
+        self.headers, self.cookies = {}, requests.cookies.RequestsCookieJar()
+
+    def _rec(self, verb, url, kw):
+        self.calls.append((verb, url, kw))
+        return self._a
+
+    def post(self, url, **kw):
+        return self._rec("POST", url, kw)
+
+    def put(self, url, **kw):
+        return self._rec("PUT", url, kw)
+
+    def patch(self, url, **kw):
+        return self._rec("PATCH", url, kw)
+
+    def get(self, url, **kw):
+        return self._rec("GET", url, kw)
+
+
+class TestWritesNeverFollowRedirects:
+    """#92 review F1, decided for every write: a write verb passes allow_redirects=False and
+    a 3xx is an error with nothing re-sent. Following one would re-send a 307/308 -- body,
+    Bearer and all -- to a URL the answering server chose, and turn a 301/302/303 into a GET
+    whose answer then reads as success. Reads (rest_get, a query document) are unchanged."""
+
+    @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
+    def test_each_rest_write_verb_refuses_to_follow(self, verb):
+        s = _Kw(body={"ok": 1})
+        assert getattr(core.PixAIClient(s), verb)("/x", {}) == {"ok": 1}
+        (_v, _u, kw), = s.calls
+        assert kw["allow_redirects"] is False, verb
+
+    @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
+    @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+    def test_a_3xx_on_a_rest_write_is_an_error_after_one_call(self, verb, status):
+        s = _Kw(status=status, body={"success": True})
+        with pytest.raises(core.PixAIRestError) as ei:
+            getattr(core.PixAIClient(s), verb)("/x", {})
+        assert ei.value.status == status and "nothing was re-sent" in str(ei.value)
+        assert len(s.calls) == 1
+
+    def test_the_mutation_road_refuses_to_follow(self):
+        s = _Kw(body={"data": {"x": {"id": "1"}}})
+        core.gql_mutate(s, "mutation { x { id } }")
+        core.PixAIClient(s).query("mutation { x { id } }")      # the backstop road too
+        assert [kw["allow_redirects"] for _v, _u, kw in s.calls] == [False, False]
+
+    @pytest.mark.parametrize("status", [302, 307])
+    def test_a_3xx_on_a_mutation_is_an_error_after_one_post(self, status):
+        s = _Kw(status=status, body={"data": {"createGenerationTask": {"id": "T1"}}})
+        with pytest.raises(core.PixAIError, match="nothing was re-sent"):
+            core.gql_mutate(s, core._GEN_MUTATION, {"parameters": {}})
+        assert len(s.calls) == 1
+
+    def test_the_renewal_refuses_to_follow(self):
+        import base64
+        import json as _json
+        import time as _time
+
+        def _b(d):
+            return base64.urlsafe_b64encode(_json.dumps(d).encode()).decode().rstrip("=")
+        cur = _b({"alg": "none"}) + "." + _b({"exp": int(_time.time()) + 86400,
+                                              "iss": "pixai", "sub": "s"}) + ".x"
+        s = _Kw(status=307)
+        assert core.refresh_jwt(s, current_jwt=cur) is None
+        assert core._refresh_last["reason"] == "http_307"
+        (_v, _u, kw), = s.calls
+        assert kw["allow_redirects"] is False
+
+    def test_reads_are_unchanged(self):
+        s = _Kw(body={"data": {"me": {"id": "1"}}})
+        core.PixAIClient(s).query("query { me { id } }")
+        core.PixAIClient(s).rest_get("/claim")
+        assert ["allow_redirects" in kw for _v, _u, kw in s.calls] == [False, False]
