@@ -17,10 +17,11 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 ### Fixed
-- **On an iPad, the gallery's header no longer runs off the right edge.** With a PixAI account linked, the row of chips under the nav (activity, your pinned goal, followers, the inbox and gift box, credits, the claim button) can be wider than an upright iPad, so the credits, the claim button and the **?** sat past the edge, or the page shrank to fit. That row wraps onto a second line now, like the rows above it. (2026-10-28)
+- **On an iPad, the gallery's header no longer runs off the right edge.** With a PixAI account linked, the row of chips under the nav (activity, your pinned goal, followers, the inbox and gift box, credits, the claim button) can be wider than an upright iPad, so the credits, the claim button and the **?** sat past the edge, or the page shrank to fit. That row wraps onto a second line now, like the rows above it, and the inbox door, the gift box and the credits chip move together when it does. The same row also ran off the edge of a plain desktop window at 1280 px or narrower with the banner collapsed. (2026-10-28)
 - **The Generate dock's top row wraps instead of squeezing on a narrow window.** The model button, the "pick a model" line and the `{ }` toggle were crushed to a sliver at iPad widths; they keep their size and drop to a second line. (2026-10-28)
 - **In the Lightbox, the arrows stay beside a wide picture** held on an iPad upright, instead of sitting on its edges. (2026-10-28)
-- **Details keeps "MODEL . v1" on one line** beside the picture on a tablet. (2026-10-28)
+- **Details keeps "MODEL . v1" on one line** beside the picture on a tablet, and a model name with no spaces in it breaks instead of pushing "find more" out of the row. (2026-10-28)
+- **The inbox and gift box panels fit on a short window, and their list scrolls (#97).** The panel was sized as if it opened near the top of the screen, but it opens under the header, so on a 1280 x 800 window the last rows sat below the bottom of the screen where nothing could scroll to them. It now takes the room under the header, and the list inside it scrolls. (2026-10-28)
 
 ## [3.20.4] - 2026-10-27 — Upright
 
