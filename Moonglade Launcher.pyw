@@ -422,8 +422,10 @@ if sys.platform == "win32":
 
 first = True
 _starts = 0
-try:
-    while True:
+# The `while True:` stays at module level (the tests that read this file as a tree look for it
+# there); the last-chance handler sits inside it.
+while True:
+    try:
         _began = time.monotonic()
         _log_from = _log_size()
         proc = subprocess.Popen(cmd, env=env, cwd=here,
@@ -450,11 +452,11 @@ try:
                 pass
             _stop(_why_it_stopped(rc, _log_from))
         break                           # 0 = stop; a crash after it ran -> supervisor exits
-    _record("launcher closing: the server has ended and was not asked to restart")
-except SystemExit:
-    raise
-except BaseException:
-    # An error in the launcher itself (a failed relaunch, say) has no console under pythonw:
-    # it is written here, then raised as before.
-    _record("launcher stopped by an error:\n" + traceback.format_exc().rstrip())
-    raise
+    except SystemExit:
+        raise
+    except BaseException:
+        # An error in the launcher itself (a failed relaunch, say) has no console under
+        # pythonw: it is written here, then raised as before.
+        _record("launcher stopped by an error:\n" + traceback.format_exc().rstrip())
+        raise
+_record("launcher closing: the server has ended and was not asked to restart")

@@ -12388,8 +12388,10 @@ RESTART_EXIT_CODE = 42        # the supervisor's "relaunch me" signal (see _sche
 # the tests pin.
 def _clean_for_log(text, limit=100):
     """Text a client controls (a user name, a browser string) made safe for one log line: printable
-    ASCII only, so no newline can forge a second line, and cut to `limit`."""
-    return re.sub(r"[^\x20-\x7e]", "?", str(text or ""))[:limit]
+    ASCII only, so no newline can forge a second line, a double quote turned into a single one
+    so a value cannot close its own quotes, and cut to `limit`."""
+    return re.sub(r'[^\x20-\x7e]|"', lambda m: "'" if m.group() == '"' else "?",
+                  str(text or ""))[:limit]
 
 
 def _span_words(seconds):
@@ -12459,6 +12461,8 @@ def _install_signal_note():
         if sig is None:
             continue
         try:
+            if signal.getsignal(sig) is not signal.SIG_DFL:
+                continue                  # ignored (nohup) or handled by someone: left as it is
             signal.signal(sig, _note)
         except (ValueError, OSError):
             pass
@@ -18604,11 +18608,14 @@ def create_app(out_dir: Path):
         address, whether it is this PC, the signed-in user and the browser string. All of it is
         cleaned to one printable line first -- a client controls the user name and the browser.
         No cookie, token or header dump is read."""
-        _note_server_exit("from %s (%s), user \"%s\", browser \"%s\"" % (
-            _clean_for_log(request.remote_addr),
-            "this PC" if _is_local_request() else "another device",
-            _clean_for_log(session.get("user")),
-            _clean_for_log(request.headers.get("User-Agent"), 100)))
+        try:
+            _note_server_exit("from %s (%s), user \"%s\", browser \"%s\"" % (
+                _clean_for_log(request.remote_addr),
+                "this PC" if _is_local_request() else "another device",
+                _clean_for_log(session.get("user")),
+                _clean_for_log(request.headers.get("User-Agent"), 100)))
+        except Exception:                               # noqa: BLE001 -- a log line never gates a Stop
+            pass
 
     def _is_authorized_request():
         """THE canonical authorization gate for every network-originated request:

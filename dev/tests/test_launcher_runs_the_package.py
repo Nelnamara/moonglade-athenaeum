@@ -262,9 +262,73 @@ def test_a_crash_inside_the_first_half_minute_still_shows_the_box_and_exits_1(la
     text = _serve_log_text()
     assert "ended: exit code 1 after" in text            # recorded, as well as said in the box
     assert "launcher closing" not in text                # _stop raised before the closing line
+    assert "stopped by an error" not in text             # the box's SystemExit is not an error
     if sys.platform == "win32":
         assert len(run.boxes) == 1 and "stopped as it started (code 1)" in run.boxes[0]
         assert "[launcher] " not in run.boxes[0]         # the box shows the server's output only
+
+
+def test_the_loop_stays_at_module_level_with_its_handler_inside(launch):
+    """Other tests read the launcher as a tree and look for the top-level `while True:`."""
+    import ast
+    tree = ast.parse(LAUNCHER.read_text(encoding="utf-8"))
+    loops = [n for n in tree.body if isinstance(n, ast.While)]
+    assert len(loops) == 1
+    assert any(isinstance(n, ast.Try) for n in loops[0].body)
+
+
+class _FullDisk:
+    """A serve.log handle whose every write and flush fails: a full disk, a vanished share."""
+    name = "serve.log"
+
+    def __init__(self, exc):
+        self.exc = exc
+
+    def write(self, s):
+        raise self.exc
+
+    def flush(self):
+        raise self.exc
+
+    def fileno(self):
+        return 1
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("exc", [OSError(28, "No space left on device"),
+                                 ValueError("I/O operation on closed file."),
+                                 UnicodeEncodeError("charmap", "x", 0, 1, "nope")])
+@pytest.mark.parametrize("codes", [[42, 42, 0], [0]])
+def test_a_live_log_handle_that_fails_on_write_changes_nothing(exc, codes, launch, monkeypatch):
+    """Not the DEVNULL fallback: the handle is open and every write raises."""
+    import builtins
+    real_open = builtins.open
+
+    def fake_open(file, mode="r", *a, **k):
+        if str(file).endswith("serve.log") and "a" in mode and "b" not in mode:
+            return _FullDisk(exc)
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    run = launch(codes=list(codes))
+    assert run.exit is None and len(run.started) == len(codes)
+    assert run.sleeps.count(0.6) == codes.count(42)
+
+
+def test_a_live_log_handle_that_fails_still_shows_the_box_on_a_fast_crash(launch, monkeypatch):
+    import builtins
+    real_open = builtins.open
+
+    def fake_open(file, mode="r", *a, **k):
+        if str(file).endswith("serve.log") and "a" in mode and "b" not in mode:
+            return _FullDisk(OSError(28, "No space left on device"))
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    run = launch(codes=[1])
+    assert run.exit == 1 and len(run.started) == 1
 
 
 def test_a_start_crash_after_a_restart_is_not_relaunched(launch):

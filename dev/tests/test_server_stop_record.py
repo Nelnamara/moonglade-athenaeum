@@ -66,6 +66,8 @@ def test_clean_for_log_cannot_forge_a_line():
     assert len(g._clean_for_log("x" * 10000)) == 100
     assert len(g._clean_for_log("x" * 10000, 40)) == 40
     assert g._clean_for_log(None) == ""
+    # a quote cannot close the value it sits in
+    assert g._clean_for_log('x", browser "y') == "x', browser 'y"
     assert "\n" not in g._clean_for_log("one\ntwo\x00three\x1b[0m")
 
 
@@ -185,6 +187,7 @@ def test_signal_note_logs_then_restores_default(monkeypatch, caplog):
         registered[signum] = handler
 
     monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(signal, "getsignal", lambda s: signal.SIG_DFL)
     monkeypatch.setattr(signal, "signal", fake_signal)
     monkeypatch.setattr(g.os, "kill", lambda pid, signum: sent.append((pid, signum)))
     g._install_signal_note()
@@ -195,6 +198,29 @@ def test_signal_note_logs_then_restores_default(monkeypatch, caplog):
     assert any(r.getMessage() == "server received SIGTERM" for r in caplog.records)
     assert registered[signal.SIGTERM] == signal.SIG_DFL          # the default is back ...
     assert sent == [(g.os.getpid(), signal.SIGTERM)]              # ... and the signal re-sent once
+
+
+def test_signal_note_must_not_replace_an_ignored_signal(monkeypatch):
+    """nohup, or a parent that set SIG_IGN: a handler that ends with the default action would
+    turn 'ignored' into 'dies'."""
+    registered = {}
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(signal, "getsignal", lambda s: signal.SIG_IGN)
+    monkeypatch.setattr(signal, "signal", lambda s, h: registered.__setitem__(s, h))
+    g._install_signal_note()
+    assert registered == {}
+
+
+def test_a_raise_in_the_note_never_blocks_a_stop(tmp_path, monkeypatch, fresh_exit_record):
+    codes = []
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
+
+    def boom(why):
+        raise RuntimeError("log broke")
+
+    monkeypatch.setattr(g, "_note_server_exit", boom)
+    r = _client(tmp_path).post("/api/server/stop")
+    assert r.status_code == 200 and codes == [0]
 
 
 def test_signal_note_installs_nothing_on_windows(monkeypatch):
