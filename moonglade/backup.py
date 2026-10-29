@@ -113,13 +113,6 @@ class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
 
 
-class PersistedQueryNotRecognized(PixAIError):
-    """PixAI answered a saved (hash-only) request with "not found". Still a PixAIError with
-    the same message as before, so every existing catch site is unchanged. Raised by
-    `persisted()` for the saved operation that still rides it (the bookmarks fallback); the
-    history feed (#89), task detail and model detail (#91) no longer ride a saved request."""
-
-
 class HistoryPageRefused(PixAIError):
     """PixAI answered a page of the history feed with a GraphQL error: any refusal of the full
     document, or its passing "Internal server error" that a wait and a smaller page did not
@@ -183,6 +176,23 @@ def _rest_error(verb, path, r):
         body = None
     return PixAIRestError("REST {} {} -> {}: {}".format(verb, path, r.status_code, r.text[:300]),
                           status=r.status_code, body=body)
+
+
+def _is_redirect_status(r):
+    """True for a 3xx answer. `r.ok` is True for a 3xx, so a write verb asks this first.
+    Guarded on an int status, so a stand-in response without one is not mistaken for it."""
+    status = getattr(r, "status_code", None)
+    return isinstance(status, int) and not isinstance(status, bool) and 300 <= status < 400
+
+
+def _refuse_redirect(verb, path, r):
+    """A write verb's answer to a 3xx (redirects are never followed on a write, #92 review
+    F1): raise a PixAIRestError carrying the status, before anything reads the body -- the
+    write is not re-sent anywhere, and a 3xx never counts as success."""
+    if _is_redirect_status(r):
+        raise PixAIRestError("REST {} {} -> {}: PixAI redirected this request; nothing was "
+                             "re-sent.".format(verb, path, r.status_code),
+                             status=r.status_code, body=None)
 
 
 class EmptyOutputsError(PixAIError):
@@ -261,14 +271,13 @@ API_URL = "https://api.pixai.art/graphql"
 REST_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/v2"
 
 # ===========================================================================
-# CAPTURED FROM YOUR BROWSER -- loaded from config.json (see config.example.json)
-# Update config.json when the site changes (see RECAPTURE at the bottom).
+# Site identifiers and the optional legacy overrides loaded from config.json (see
+# config.example.json). When PixAI changes their site, the fix is in code, not in config.json.
 # ===========================================================================
 # The history feed's operation name. Its saved request retired (#89: the feed is read as a
 # full document, _HISTORY_PAGE_DOC); the name survives as the x-apollo-operation-name value
 # the sessions send for Apollo's CSRF check, which needs one present, not a matching one.
 OPERATION_NAME = "listUserTaskSummaries"
-CLIENT_LIBRARY = {"name": "@apollo/client", "version": "4.1.4"}
 
 
 def _config_path():
@@ -853,7 +862,7 @@ def _check_read_only(action):
     network call. Raising here, unconditionally, is what makes READ_ONLY override
     --confirm/--apply rather than just changing their default.
 
-    Eight call sites, not four: submit_generation, submit_fixer, delete_task_gql and
+    Eight call sites, not four: submit_generation, submit_fixer, delete_task and
     claim_reward are the choke points the WEB app's generate/edit/fix/delete/claim
     routes all funnel through -- but the CLI's run_generate, run_generate_video,
     run_reference_video and run_edit_image each build their OWN createGenerationTask
@@ -891,32 +900,30 @@ def _check_read_only(action):
             "Remove it (or set it to false) to allow this.".format(action))
 
 
-# Persisted-query hashes are PUBLIC, non-secret identifiers of PixAI's own frontend
-# GraphQL operations (the same for every user, embedded in their JS bundle). The
-# delete operation is reached through one of these hashes (the Mirror's refreshToken
-# carries its own below). They change only when PixAI overhauls their frontend --
-# captured 2026-06-28. Override one in config.json if it rotates (you'll get a clear
-# "recapture" error if it does). The history feed (#89), task detail and model detail (#91)
-# have none any more: each is read as a full document (_HISTORY_PAGE_DOC, _TASK_DETAIL_DOC,
-# _MODEL_VERSION_DOC).
+# No operation rides a saved (hash-only) request any more: the history feed (#89), task
+# detail and model detail (#91) are read as full documents (_HISTORY_PAGE_DOC,
+# _TASK_DETAIL_DOC, _MODEL_VERSION_DOC), and the whole-generation delete and the Mirror's
+# session renewal go to PixAI's /v2 REST routes, exactly as pixai.art sends them (#92). A
+# DELETE_TASK_HASH or REFRESH_TOKEN_HASH left in an old config.json is simply not read.
 U3T = _cfg.get("U3T", "")
 USER_ID = _cfg.get("USER_ID", "")  # auto-resolved from the API key (me{id}) if blank
-# Deletion mutation (deleteGenerationTask). Also a public persisted hash. It only
-# ever touches YOUR OWN tasks, and the destructive path is independently gated by
-# explicit confirmation (typed "DELETE" in the gallery, which is the only road to this
-# mutation), so the default is safe; override in config.json if it rotates.
-DELETE_TASK_HASH = _cfg.get("DELETE_TASK_HASH", "") or \
-    "9f0c8dd3edfe712a4479d700df0b33faebbbc28c7d2310589ea192e1a35d6ee4"
-DELETE_OPERATION = "deleteGenerationTask"
-# Website-mirror JWT (the Control Panel "Mirror to PixAI" toggle). refreshToken is a
-# no-arg persisted mutation; the fresh JWT comes back in the `token` RESPONSE header
-# (server sends access-control-expose-headers: token,...). Confirmed from a live
-# getMyInfo capture 2026-08-14. The mirror helpers live just after _make_session below.
-# Public hash; override in config.json if it rotates.
-REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
-    "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
+# The whole-generation delete (#92): POST /v2/task/{id}/delete on the API key, the route
+# pixai.art's own task menu calls (task.deleteTask). It only ever touches YOUR OWN tasks,
+# and the destructive path is independently gated by explicit confirmation (the preview
+# then confirm, and the typed "DELETE" in the gallery, which are the only roads to it).
+# A task id is digits in practice; the rule is the narrowest that still cannot leave the
+# path segment (no "/", "?", "#", "%", "." or space).
+_TASK_ID_RE = re.compile(r"^[0-9A-Za-z_-]{1,64}$")
+TASK_DELETE_PATH = "/task/{}/delete"
+# The Mirror renews its website session the way pixai.art does: POST /v2/auth/refresh-token, no body
+# (the GET recorded on 2026-08-17 answers 404 today). PixAI's contract (09-26 bundle): "Requires an
+# existing session (bearer token or session cookie). The token is returned in the body and also written
+# to the `token` response header and the session cookie." Credentials: the mirror JWT as Bearer, and
+# nothing else -- never the API key, never a cookie (MIRROR-SUBMIT INVARIANTS #7, below).
+# The mirror helpers live just after _make_session below.
+MIRROR_REFRESH_PATH = "/auth/refresh-token"
 # A renewal mints a token that expires 7 days after the renewal (PROBE 2026-10-02: the site's
-# own renewal and the app's refreshToken alike; the ~27 days measured in August no longer
+# own renewal and the app's old GraphQL renewal alike; the ~27 days measured in August no longer
 # holds). Renew once fewer than this many days are left -- measured in the token's real
 # seconds, not floored whole days -- which leaves the background tick (mirror_renew_tick) three
 # days of retries before a failing renewal could let the token lapse (#71).
@@ -934,8 +941,7 @@ LOCALSTORAGE_JWT_KEY = b"https://api.pixai.art:token"
 # The mirror must file generations as the WEB client so PixAI applies the website's content
 # policy, not the stricter mobile-app (Apple-compliance) one. Confirmed 2026-08-15: the same
 # account + prompt succeeds on pixai.art (task 2045416767743558052) but 403s "against PixAI's
-# policy" through the mirror. clientLibrary already matches the web app (@apollo/client); the
-# remaining tell is the HTTP identity -- our non-browser User-Agent and missing Origin/Referer.
+# policy" through the mirror. The tell is the HTTP identity -- our non-browser User-Agent and missing Origin/Referer.
 # So the mirror session presents a desktop-browser identity. A stable modern Chrome UA is
 # enough: PixAI classifies the client FAMILY (browser vs app), not the version.
 MIRROR_WEB_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1520,11 +1526,10 @@ def _quick_count(session, page_size=500):
 #     call site that reaches past `mutate()`. A lost RESPONSE is
 #     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
 #     after PixAI already created and CHARGED for the task pays twice.
-#   * the two roads to PixAI -- the persisted-hash GET (`persisted()`), which is
-#     how the saved operation that remains (the bookmarks fallback) is reached,
-#     and the ad-hoc POST
-#     (`query()`/`mutate()`), which is everything the API key can ask for
-#     directly -- plus the oRPC `/v2` REST road (`rest_get()`/`rest_post()`).
+#   * the two roads to PixAI -- the ad-hoc GraphQL POST (`query()`/`mutate()`),
+#     which sends a full document and is everything the API key can ask for over
+#     GraphQL, and the oRPC `/v2` REST road (`rest_get()`/`rest_post()`/`rest_put()`/
+#     `rest_patch()`). No saved (hash-only) request remains (#88, #89, #91, #92).
 #   * WHICH credential a create rides (`for_create()`): the browser-JWT mirror
 #     session when the Mirror toggle is on, the API key otherwise, and a refusal
 #     rather than a silent fall-back to the key when the mirror is unavailable.
@@ -1536,8 +1541,9 @@ def _quick_count(session, page_size=500):
 #
 # TRANSITION SURFACE. `get`/`post`/`headers`/`cookies` on the client delegate
 # straight to the inner requests.Session, because a handful of call sites still
-# reach for the Session themselves rather than through a verb: delete_task_gql's
-# lone hand-rolled POST, refresh_jwt's mirror POST, resolve_media and download
+# reach for the Session themselves rather than through a verb: refresh_jwt's
+# mirror POST (which must not ride rest_post: _rest_error would carry r.text, and the
+# renewal's body is the token), resolve_media and download
 # (which are not GraphQL at all -- a media object and a file body), and run_watch
 # reading the Authorization header off to hand to the WebSocket. `.session` is the escape
 # hatch those will eventually stop needing; it exists for the transition, not
@@ -1565,14 +1571,14 @@ def _is_mutation_document(query):
 class PixAIClient:
     """The transport seam: everything this app asks PixAI, asked here.
 
-    Seven verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`, `rest_put`,
-    `rest_patch`), one credential
+    Six verbs (`query`, `mutate`, `rest_get`, `rest_post`, `rest_put`, `rest_patch`), one
+    credential
     choice (`for_create`), and the underlying requests.Session on `.session` for the call
     sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
     resolved account id.
 
     The class holds no PixAI knowledge that the module does not already own -- endpoints,
-    hashes and the Apollo headers stay module-level -- so a client can be built around ANY
+    documents and the Apollo headers stay module-level -- so a client can be built around ANY
     session (a hand-built one, a test double) without that session inheriting the config
     cache."""
 
@@ -1640,7 +1646,9 @@ class PixAIClient:
         return self._graphql_post(document, variables, retries, timeout)
 
     def mutate(self, document, variables=None):
-        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
+        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always, and it
+        NEVER FOLLOWS A REDIRECT (a 307/308 would re-send the mutation to a URL the answering
+        server chose; #92 review F1) -- a 3xx raises with nothing re-sent.
 
         It takes **no `retries` argument on purpose** -- there is no correct value above 0
         for a spending path, so the knob is not offered rather than offered with a safe
@@ -1652,18 +1660,28 @@ class PixAIClient:
         """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
         verb that called in -- this function never chooses it, which is what keeps the
         spend rule readable in exactly two places above. `timeout` is each attempt's socket
-        timeout: whatever `query` was handed, and always 120 for `mutate`."""
+        timeout: whatever `query` was handed, and always 120 for `mutate`.
+
+        A MUTATION document (`_is_mutation_document`, whichever verb sent it -- `mutate`, or
+        `query` as the backstop) never follows a redirect (#92 review F1): it is sent with
+        `allow_redirects=False`, and a 3xx raises before its body is read, with nothing
+        re-sent. A query document keeps requests' default."""
         body = {"query": document, "variables": variables or {}}
+        follow_redirects = not _is_mutation_document(document)
+        send = {} if follow_redirects else {"allow_redirects": False}
         delay = 2.0
         for attempt in range(retries + 1):
             try:
-                r = self._session.post(API_URL, json=body, timeout=timeout)
+                r = self._session.post(API_URL, json=body, timeout=timeout, **send)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException:
                 if attempt == retries:
                     raise
                 time.sleep(delay); delay *= 2; continue
+            if not follow_redirects and _is_redirect_status(r):
+                raise PixAIError("HTTP {} -- PixAI redirected this request; nothing was "
+                                 "re-sent.".format(r.status_code))
             if r.status_code == 401:
                 raise PixAIError("401 Unauthorized -- API key missing/expired.")
             if r.status_code == 429 or r.status_code >= 500:
@@ -1690,83 +1708,6 @@ class PixAIClient:
             return data.get("data") or {}
         raise RuntimeError("unreachable")
 
-    # -- persisted-hash GET --------------------------------------------------
-    def persisted(self, op_name, variables=None, sha256=None, retries=4, timeout=60):
-        """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
-        params their frontend sends. Every captured op rides here by passing its OWN
-        `sha256=`; none is resolved from `op_name` any more (the history feed, the one that
-        used to be, reads its full document through `gql` since #89). `timeout` is the
-        per-ATTEMPT socket timeout in seconds (60, this road's long-standing value, unless a caller says
-        otherwise): a caller working against a wall-clock ceiling of its own -- the
-        delete preview's live check is the one today -- passes the time it has left, so a
-        stalled connection cannot outlive the budget it was started under. Returns the `data` dict; raises
-        PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
-        bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
-        credential or an edge refusal answered in its own JSON)."""
-        sha = sha256
-        if not sha:
-            raise PixAIError(
-                "no persisted hash is known for operation {!r} -- pass sha256=... or add "
-                "it to config.json (see RECAPTURE at the bottom of moonglade/backup.py)."
-                .format(op_name))
-        params = {
-            "operation": op_name,
-            "u3t": U3T,
-            "operationName": op_name,
-            "variables": json.dumps(variables or {}, separators=(",", ":")),
-            "extensions": json.dumps(
-                {"clientLibrary": CLIENT_LIBRARY,
-                 "persistedQuery": {"version": 1, "sha256Hash": sha}},
-                separators=(",", ":")),
-        }
-        delay = 2.0
-        for attempt in range(retries + 1):
-            try:
-                _t = time.monotonic()
-                r = self._session.get(API_URL, params=params, timeout=timeout)
-            except requests.exceptions.SSLError:
-                raise PixAIError(_ssl_help())
-            except requests.RequestException as e:
-                if attempt == retries:
-                    raise
-                print("  network error ({}); retrying in {:.0f}s".format(e, delay))
-                time.sleep(delay); delay *= 2; continue
-
-            if r.status_code == 401:
-                raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
-            if r.status_code == 429 or r.status_code >= 500:
-                if attempt == retries:
-                    r.raise_for_status()
-                print("  HTTP {}; backing off {:.0f}s".format(r.status_code, delay))
-                time.sleep(delay); delay *= 2; continue
-
-            try:
-                data = r.json()
-            except ValueError:
-                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
-                    r.status_code, r.text[:800]))
-            if data.get("errors"):
-                if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                    raise PersistedQueryNotRecognized(
-                        "Persisted-query hash not recognized. Recapture the hash "
-                        "(see RECAPTURE at the bottom of this file).")
-                print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
-                print(json.dumps(data["errors"], indent=2)[:3000])
-                raise PixAIError("GraphQL error (see log above).")
-            if r.status_code >= 400:
-                print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
-                raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
-            if not isinstance(data, dict) or "data" not in data:
-                raise PixAIError(
-                    "HTTP {} returned a non-GraphQL body (no 'data' key), so the request "
-                    "failed rather than answering -- a stale/absent credential or an edge "
-                    "refusal is the usual cause:\n{}".format(
-                        r.status_code, (r.text or "")[:300]))
-            vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
-                op_name, r.status_code, len(r.content), time.monotonic() - _t))
-            return data["data"]
-        raise RuntimeError("unreachable")
-
     # -- the oRPC /v2 REST road ----------------------------------------------
     def rest_get(self, path, params=None, timeout=30):
         """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
@@ -1780,19 +1721,30 @@ class PixAIClient:
     def rest_post(self, path, body=None, timeout=60):
         """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
 
-        NO retry loop, deliberately: `submit_fixer` and `claim_reward` ride this, and the
-        session mounts no urllib3 Retry adapter (requests' default HTTPAdapter is
-        max_retries=0), so both are single-attempt. Pinned by
-        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
-        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
+        NO retry loop, deliberately: `submit_fixer`, `claim_reward` and `delete_task` ride
+        this, and the session mounts no urllib3 Retry adapter (requests' default HTTPAdapter
+        is max_retries=0), so all are single-attempt. Pinned by
+        dev/tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop.
+
+        NEVER FOLLOWS A REDIRECT (#92 review F1; the same on every write verb): requests would
+        re-send a 307/308 -- body, API-key Bearer and all -- to a URL the answering server
+        chose, and turn a 301/302/303 into a GET whose answer then decides "it worked". So
+        redirects are off, and a 3xx raises (`_refuse_redirect`) before anything reads its
+        body."""
+        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout,
+                               allow_redirects=False)
+        _refuse_redirect("POST", path, r)
         if not r.ok:
             raise _rest_error("POST", path, r)
         return r.json()
 
     def rest_patch(self, path, body=None, timeout=60):
         """PATCH JSON to a /v2 oRPC REST route. Single attempt, like rest_post / rest_put:
-        its one caller (joining a LoRA to the rebate programme) cannot be undone."""
-        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout)
+        its one caller (joining a LoRA to the rebate programme) cannot be undone. Never
+        follows a redirect, like rest_post."""
+        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout,
+                                allow_redirects=False)
+        _refuse_redirect("PATCH", path, r)
         if not r.ok:
             raise _rest_error("PATCH", path, r)
         return r.json()
@@ -1803,8 +1755,11 @@ class PixAIClient:
         Single-attempt like `rest_post`, and by the same reasoning: the training routes that
         ride it (a dataset replace, a description save) change the account, and a re-send
         after a lost response can land on a task that has already moved on. Pinned alongside
-        rest_post by dev/tests/test_spend_no_retry.py."""
-        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout)
+        rest_post by dev/tests/test_spend_no_retry.py. Never follows a redirect, like
+        rest_post."""
+        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout,
+                              allow_redirects=False)
+        _refuse_redirect("PUT", path, r)
         if not r.ok:
             raise _rest_error("PUT", path, r)
         return r.json()
@@ -1815,7 +1770,7 @@ class PixAIClient:
         to PixAI' toggle is on (so the generation lands in the pixai.art web library),
         this same client otherwise. Refuses (raises) rather than falling back to the API
         key when the mirror is armed but unavailable. Callers must have already passed
-        `_check_read_only` -- building the mirror session may make a refreshToken call."""
+        `_check_read_only` -- building the mirror session may make a renewal call."""
         chosen = _session_for_create(self)
         if chosen is self:
             return self
@@ -2778,12 +2733,13 @@ def task_detail_gql(session, task_id, retries=3, timeout=60):
 # ---------------------------------------------------------------------------
 # DELETING ONE IMAGE -- read the task, then pick the mutation PixAI will accept
 #
-# There are two delete mutations and they are not interchangeable:
+# There are two deletes and they are not interchangeable:
 #
 #   deleteBatchMedia (inside updateGenerationTask)  drops ONE member out of a task's
 #       outputs.batch[]. PixAI accepts it only while the task would still have an output
 #       left afterwards.
-#   deleteGenerationTask                            removes the whole generation record.
+#   POST /v2/task/{id}/delete (delete_task)         removes the whole generation record.
+#       (Until #92 this was the saved GraphQL request the site no longer sends.)
 #
 # From v2.5.0 until 2026-09-06 the gallery's single-image "Delete from PixAI" sent the
 # first one every time. For a task that made ONE image (no `batch` key -- the picture is
@@ -2868,8 +2824,8 @@ def route_image_delete(task, media_id):
                   so the task keeps an output and PixAI accepts deleteBatchMedia.
       whole-task  the image is the last live member of its batch, or the task has no batch
                   and this image IS its output. Either way the delete would leave the task
-                  with nothing, which is the case PixAI's own site sends
-                  deleteGenerationTask for.
+                  with nothing, which is the case PixAI's own site sends its whole-task
+                  delete (task.deleteTask) for.
     """
     mid = str(media_id or "").strip()
     if not mid:
@@ -2935,16 +2891,16 @@ mutation($id: ID!, $input: UpdateGenerationTaskInput!) {
 def delete_batch_media_gql(session, task_id, media_id):
     """Delete ONE image out of a task's batch, leaving the task and its siblings alone.
 
-    The finer-grained counterpart to `delete_task_gql`, which is task-level: deleting any
+    The finer-grained counterpart to `delete_task`, which is task-level: deleting any
     one image there takes the whole batch with it. DELETES from your PixAI account and is
     irreversible on their side.
 
     Signature discovered by validation-error probing (nothing executed): the mutation is
     `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` and the delete rides
     in as `{deleteBatchMedia: {mediaId}}`. It goes over the ad-hoc POST path (`gql_mutate`),
-    so unlike `delete_task_gql` it needs NO persisted hash and cannot break when one rotates.
+    so it needs NO saved hash and cannot break when one rotates.
 
-    Two properties copied deliberately from `delete_task_gql`, because both are safety
+    Two properties shared deliberately with `delete_task`, because both are safety
     rather than style:
       - `_check_read_only` fires BEFORE the network call. READ_ONLY is a promise the Trust
         & Safety page makes about every account-mutating path; a new destructive path that
@@ -2961,68 +2917,86 @@ def delete_batch_media_gql(session, task_id, media_id):
     # gql_mutate is the SINGLE-ATTEMPT promise above, made real: it hard-codes retries=0,
     # where a re-POST on a RequestException or a 429/5xx could re-fire a destructive
     # mutation against a batch that has already changed underneath it (a read timeout can
-    # arrive AFTER PixAI processed the delete). delete_task_gql avoids this by hand-rolling
-    # its own single session.post; this is the same guarantee through the shared helper.
+    # arrive AFTER PixAI processed the delete). delete_task gets the same guarantee from
+    # rest_post, which has no retry loop either.
     return gql_mutate(session, _DELETE_BATCH_MEDIA_MUT,
                       {"id": task_id, "input": {"deleteBatchMedia": {"mediaId": media_id}}})
 
 
-def delete_task_gql(session, task_id):
-    """Replay the deleteGenerationTask persisted mutation for ONE task id.
+def delete_task(session, task_id):
+    """Delete ONE whole generation (task) from your PixAI account: `POST /v2/task/{id}/delete`.
 
-    DELETES the generation from your PixAI account -- irreversible. This is a void
-    mutation: on SUCCESS the server returns null (data.deleteGenerationTask == None),
-    so the meaningful signal is the ABSENCE of an error, not the payload. Raises
-    PixAIError with a clear message on any failure. Deliberately single-attempt (NO
-    retry/backoff loop) so a flaky network can never cause a delete to fire twice.
-    """
-    _check_read_only("delete a task from your PixAI account")
-    # Defensive only: DELETE_TASK_HASH ships with a working built-in default, so this
-    # can fire solely if that default is stripped or the hash rotates and someone blanks
-    # it. It is NOT a setup gate -- the gallery's typed "DELETE" confirm and READ_ONLY are
-    # what stand between a caller and a real delete.
-    if not DELETE_TASK_HASH:
+    DELETES the generation from your PixAI account -- irreversible. This is the route
+    pixai.art's own task menu calls (`task.deleteTask({id})` through its oRPC client; route
+    table `"deleteTask": {"method": "POST", "path": "/task/{id}/delete"}`), sent the way that
+    client sends it: the id in the path, the rest of the input (`{}`) as the JSON body, the
+    API key as the Bearer like every other /v2 route this app uses (#92). PixAI's 09-26
+    contract describes it: "Soft-deletes a task owned by the current user: the task stops
+    being listed, its linked artwork is deleted, and a task that has not finished is
+    cancelled first." Its declared output is `{"success": true}`; its declared errors are 401
+    "Authentication required" and 403 "Not authorized".
+
+    SUCCESS IS EXACTLY `{"success": true}`. Anything else -- a 2xx without that, a body that
+    is not JSON, any non-2xx, a network error -- raises PixAIError, and a caller treats the
+    task as NOT deleted (its local copy stays). Refuse rather than guess.
+
+    IDEMPOTENT, so success proves nothing about existence. The same contract says
+    "Idempotent -- deleting a task that is already deleted, or one that does not exist, also
+    succeeds." A `True` here means only "PixAI holds no live copy now"; it does not prove the
+    task existed, and no caller may treat it as an existence check (none does: the bulk
+    path's keep-set comes from its own task read, not from this answer).
+
+    The task id must look like a PixAI task id (`_TASK_ID_RE`: letters, digits, `_`, `-`,
+    1-64 characters) or nothing is sent, so an id can never step out of its path segment
+    into another route.
+
+    READ_ONLY is checked FIRST, before the id check and before anything is sent. SINGLE
+    ATTEMPT: exactly one POST through `rest_post`, which has no retry loop (and the session
+    mounts no urllib3 Retry adapter), so a flaky network can never fire a delete twice.
+    Pinned by dev/tests/test_spend_no_retry.py and dev/tests/test_rest_delete_and_renewal.py.
+    Returns True on success."""
+    _check_read_only("delete a task from your PixAI account")      # FIRST, before anything
+    tid = str(task_id or "").strip()
+    if not _TASK_ID_RE.match(tid):
         raise PixAIError(
-            "DELETE_TASK_HASH is empty -- the built-in default is missing or was overridden "
-            "with a blank value in config.json. Restore it, or capture a current "
-            "deleteGenerationTask sha256Hash from DevTools (Network -> graphql -> a delete "
-            "request -> Payload -> extensions.persistedQuery.sha256Hash) if the hash rotated.")
-    # Mutations are POST (Apollo blocks them over GET). Mirror the site's params.
-    params = {"operation": DELETE_OPERATION, "u3t": U3T}
-    body = {
-        "operationName": DELETE_OPERATION,
-        "variables": {"taskId": str(task_id)},
-        "extensions": {"clientLibrary": CLIENT_LIBRARY,
-                       "persistedQuery": {"version": 1, "sha256Hash": DELETE_TASK_HASH}},
-    }
+            "refusing to delete task {!r}: not a PixAI task id. Nothing was sent.".format(tid))
     _t = time.monotonic()
     try:
-        r = session.post(API_URL, params=params, json=body, timeout=60)
+        answer = _client_of(session).rest_post(TASK_DELETE_PATH.format(tid), {})
     except requests.exceptions.SSLError:
         raise PixAIError(_ssl_help())
+    except PixAIRestError as e:
+        if e.status == 401:
+            raise PixAIError("401 Unauthorized -- PixAI refused the API key; task {} was not "
+                             "deleted.".format(tid))
+        if e.status == 403:
+            raise PixAIError("PixAI says task {} is not yours to delete (403); nothing was "
+                             "deleted.".format(tid))
+        raise PixAIError("HTTP {} deleting task {}: {}".format(e.status, tid, str(e)[:400]))
+    except ValueError as e:
+        # A 2xx that is not JSON: rest_post's r.json() raised. Caught BEFORE RequestException,
+        # because requests' JSONDecodeError is both. A ValueError that requests raised before
+        # sending anything (a malformed URL) is a RequestException too and is not an answer.
+        if isinstance(e, requests.RequestException) and not isinstance(
+                e, getattr(requests.exceptions, "JSONDecodeError", ())):
+            raise PixAIError("network error deleting task {}: {}".format(tid, e))
+        raise PixAIError("PixAI answered the delete of task {} with something that is not "
+                         "JSON; it is treated as not deleted and its local copy "
+                         "stays.".format(tid))
+    except requests.exceptions.ReadTimeout as e:
+        # The request went out and no answer came back: PixAI may or may not have deleted
+        # it. Treated as not deleted (fail-safe), and the route is idempotent, so a retry by
+        # the user is safe -- never by this function.
+        raise PixAIError("network error deleting task {}: {}. PixAI may or may not have "
+                         "deleted it; it is treated as not deleted and its local copy stays. "
+                         "Deleting it again is safe.".format(tid, e))
     except requests.RequestException as e:
-        raise PixAIError("network error deleting task {}: {}".format(task_id, e))
-
-    if r.status_code == 401:
-        raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
-    try:
-        data = r.json()
-    except ValueError:
-        raise PixAIError("HTTP {} non-JSON response deleting task {}:\n{}".format(
-            r.status_code, task_id, r.text[:500]))
-    if data.get("errors"):
-        msg = json.dumps(data["errors"])
-        if "PersistedQueryNotFound" in msg:
-            raise PixAIError("deleteGenerationTask hash not recognized -- recapture "
-                             "DELETE_TASK_HASH into config.json (see RECAPTURE).")
-        raise PixAIError("GraphQL error deleting task {}: {}".format(task_id, msg[:600]))
-    if r.status_code >= 400:
-        raise PixAIError("HTTP {} deleting task {}:\n{}".format(
-            r.status_code, task_id, json.dumps(data)[:600]))
-    result = (data.get("data") or {}).get(DELETE_OPERATION)
-    vlog("deleteGenerationTask {} -> {} in {:.2f}s".format(
-        task_id, result, time.monotonic() - _t))
-    return result
+        raise PixAIError("network error deleting task {}: {}".format(tid, e))
+    if not (isinstance(answer, dict) and answer.get("success") is True):
+        raise PixAIError("PixAI answered the delete of task {} without confirming it; it is "
+                         "treated as not deleted and its local copy stays.".format(tid))
+    vlog("task delete {} -> ok in {:.2f}s".format(tid, time.monotonic() - _t))
+    return True
 
 
 #: What one routed image delete decided and did. `plan` is the branch that FIRED --
@@ -3115,7 +3089,7 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
     if plan.plan == "per-image":
         delete_batch_media_gql(session, task_id, media_id)
     else:
-        delete_task_gql(session, task_id)
+        delete_task(session, task_id)
     return plan
 
 
@@ -3170,8 +3144,8 @@ def gql_mutate(session, query, variables=None):
     PixAI holding a created, CHARGED task while the client believes nothing happened -- so
     the retry submits a second generation and pays for it twice. The same reasoning made
     `delete_batch_media_gql` single-attempt (there the damage is a second irreversible
-    delete against a batch that already changed underneath it) and keeps `delete_task_gql`
-    hand-rolling its own lone `session.post`.
+    delete against a batch that already changed underneath it) and keeps `delete_task` on
+    `rest_post`'s one POST, which has no retry loop.
 
     A 429 alone WOULD be safe to re-send (rate-limited means the request was refused, not
     processed), but 429 and 5xx share one branch in the retry loop and a 5xx is genuinely
@@ -3309,8 +3283,7 @@ def _row_should_blur(node):
     added the preference while both GraphQL documents still asked only for `isNsfw`, so every
     real Market/Bookmarks row took branch 2 and the behaviour was byte-for-byte what the
     finding described (M02 round 2, 2026-07-27). `_model_conn_query` now asks for the field;
-    branch 2 is the honest fallback for the row shapes that genuinely cannot carry it -- the
-    persisted bookmark document (PixAI's own fragment, ours to send, not to edit) and, if
+    branch 2 is the honest fallback for the row shapes that genuinely cannot carry it -- if
     their schema turns out not to expose the field at all, the degraded Market/Bookmarks
     projection that helper falls back to.
 
@@ -3868,13 +3841,6 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
             "next_cursor": (page_info.get("endCursor") or "") if has_more else ""}
 
 
-# Derived offline from PixAI's own bundle and validated against three hashes seen on real
-# requests (../moonglade-internal/tools/harvest_api_surface.py). Only the FALLBACK needs it --
-# the ad-hoc path below
-# carries its own document, so a rotated hash cannot break the primary route.
-BOOKMARKED_MODELS_OP = "listMyBookmarkedGenerationModels"
-BOOKMARKED_MODELS_HASH = "2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9"
-
 def _bookmark_node_fields(blur=""):
     """The bookmark node projection -- the same leaves the Market document asks for, so both
     tabs produce identical rows. `blur` is the viewer-scoped flag, spliced in (or not) by
@@ -3895,11 +3861,10 @@ def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None
     "reachable ONLY through the persisted-query path". It does not follow -- the name was never a
     field, and `me` is plainly reachable ad-hoc (resolve_user_id uses `query{ me{ id } }`).
 
-    So this tries AD-HOC first with our own projection, and falls back to the persisted GET with
-    the derived hash only if that is refused. Two reasons for that order: the ad-hoc document
-    cannot rot when PixAI redeploys, and it lets us request exactly the fields a row needs instead
-    of their much larger fragment. `_last_path` records which route served, so a caller (or a
-    test) can tell without guessing.
+    So this reads AD-HOC with our own projection, and only that: the document cannot rot when
+    PixAI redeploys, and it asks for exactly the fields a row needs. A refusal raises PixAIError
+    (#92 retired the saved-request fallback, which rode the same key and the same `me`, so it
+    could only ever succeed from a cache PixAI is retiring).
 
     The field accepts the same filters MARKET does -- keyword, modelTypes, loraBaseModelTypes,
     loraBaseModelIds -- plus full before/after/first/last paging, so the bookmark tab is not a
@@ -3937,19 +3902,11 @@ def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None
                 + "){ totalCount pageInfo{ hasNextPage endCursor } edges { node { "
                 + _bookmark_node_fields(blur) + " } } } } }")
 
-    conn, path = None, ""
-    try:
-        # Through _model_conn_query, not gql_adhoc directly: a refusal of the blur leaf must
-        # be answered by re-asking ad-hoc without it, NOT by silently demoting the whole tab
-        # to the persisted hash -- that route sends PixAI's own fragment, which cannot be
-        # narrowed to the fields a row needs and rots when they redeploy.
-        data = _model_conn_query(session, _q, variables) or {}
-        conn = ((data.get("me") or {}).get("bookmarkedGenerationModels")) or {}
-        path = "adhoc"
-    except PixAIError as e:
-        vlog("bookmarks: ad-hoc refused ({}); trying the persisted hash".format(e))
-        conn = _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, int(limit))
-        path = "persisted"
+    # Through _model_conn_query, not gql_adhoc directly: a refusal of the blur leaf is answered
+    # by re-asking without it. Any other refusal propagates as the PixAIError it is (#92): the
+    # route and the cached walk both report it, so the tab shows an error, not an empty list.
+    data = _model_conn_query(session, _q, variables) or {}
+    conn = ((data.get("me") or {}).get("bookmarkedGenerationModels")) or {}
 
     out = []
     for e in conn.get("edges") or []:
@@ -3968,42 +3925,7 @@ def model_bookmarks_gql(session, keyword="", usage="MODEL", limit=24, after=None
     has_more = bool(page_info.get("hasNextPage"))
     return {"results": out, "has_more": has_more,
             "next_cursor": (page_info.get("endCursor") or "") if has_more else "",
-            "total": conn.get("totalCount"), "_path": path}
-
-
-def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
-    """Fallback: the same query over the persisted-GET path, using the derived hash.
-
-    Their document names its variables differently from our ad-hoc one, so the payload is rebuilt
-    rather than reusing `variables` -- passing `n`/`mt`/`lb` to a document expecting
-    `first`/`modelTypes`/`loraBaseModelTypes` would fail for a reason that looks like a
-    permissions problem and would send the next person down the wrong path entirely."""
-    v = {"first": limit}
-    if kw:
-        v["keyword"] = kw
-    if after:
-        v["after"] = after
-    if want_lora:
-        v["modelTypes"] = ["ANY_LORA"]
-    if want_lora and lbt in LORA_BASE_MODEL_TYPES:
-        v["loraBaseModelTypes"] = [lbt]
-    # Rides the one transport seam (PixAIClient.persisted) instead of hand-building the
-    # persisted-GET params: same operationName, same BOOKMARKED_MODELS_HASH, same variables
-    # JSON, so the wire is byte-for-byte what it was (U3T is empty by default, where the old
-    # `U3T or ""` and the seam's `U3T` encode identically). Single attempt, as before -- no
-    # retry.
-    #
-    # The M03 guarantee now lives in the seam. It used to live here: a refusal answered with
-    # perfectly valid but non-GraphQL JSON -- a plain {"statusCode":401,...} from the edge,
-    # with no "errors" array -- once fell straight through the `or {}` tail, and the user saw
-    # an EMPTY Bookmarks tab for a request that never ran (M03, 2026-07-27). persisted now
-    # makes that impossible for EVERY persisted GET: it reads `errors` before status (so a
-    # rotated hash still gets its recapture hint), and refuses a body with no "data" key with
-    # a PixAIError rather than laundering it into an empty result. So a refusal RAISES here
-    # too -- it is simply the seam raising now, not this function.
-    data = _client_of(session).persisted(
-        BOOKMARKED_MODELS_OP, v, sha256=BOOKMARKED_MODELS_HASH, retries=0)
-    return ((data or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
+            "total": conn.get("totalCount")}
 
 
 def workflow_catalog(session, first=80):
@@ -4506,7 +4428,7 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
     failed. What counts as a failure is decided the way `gql()` decides it, and for the same
     reason: **PixAI answers a refused GraphQL request with HTTP 200 and an `errors` array**.
     `raise_for_status()` is blind to that shape, so an exception-only guard closed the
-    network half of this bug and left the half that hurts more -- a rotated persisted hash or
+    network half of this bug and left the half that hurts more -- a refused document or
     an auth failure surfaced as a resolver error refuses EVERY id in the run, so one
     `--fix-models --relabel-removed` would stamp "Unknown or removed model" over the model
     provenance of the whole catalog at once (M18 round 2, 2026-07-27). So this mirrors the one
@@ -5777,7 +5699,7 @@ def _make_session(token_val, resolve_user=True):
 
     The app's ONE entry to PixAI: it re-reads config.json at call time (so the GUI works
     even when the module was imported before the working directory was set correctly),
-    refreshes the persisted-hash globals from it, builds the API-key requests.Session, and
+    refreshes the legacy U3T/USER_ID overrides from it, builds the API-key requests.Session, and
     resolves USER_ID over the network when it is not pinned.
 
     It returns a `PixAIClient`, not the bare Session -- the client IS accepted everywhere a
@@ -5785,14 +5707,13 @@ def _make_session(token_val, resolve_user=True):
     it holds, and every primitive resolves whatever it is handed through `_client_of`), so
     the ~70 session-taking functions are unchanged. The name stays `_make_session` because
     thirty-odd call sites and a hundred-odd tests say it."""
-    global U3T, USER_ID, DELETE_TASK_HASH
+    global U3T, USER_ID
     fresh = _load_config()
     if fresh:
         U3T = fresh.get("U3T", "") or U3T
         USER_ID = fresh.get("USER_ID", "") or USER_ID
-        DELETE_TASK_HASH = fresh.get("DELETE_TASK_HASH", "") or DELETE_TASK_HASH
     have_api_key = bool((fresh or {}).get("PIXAI_API_KEY") or _cfg.get("PIXAI_API_KEY"))
-    # Persisted hashes now ship with defaults, so the API-key path needs nothing but
+    # No saved request needs a hash any more (#92), so the API-key path needs nothing but
     # the key (USER_ID is auto-resolved below). The legacy browser-JWT path still
     # wants a U3T alongside its short-lived token.
     if not have_api_key and not U3T:
@@ -5842,18 +5763,19 @@ def _make_session(token_val, resolve_user=True):
 #   - The session rides short cookies on .pixai.art that the server rolls forward
 #     on every response: _bsid (~30m) + _udt (~60m; _udt IS the u3t value) + .sig
 #     pairs (cache-control:no-store, vary:Origin,Authorization).
-#   - The JWT rides as Authorization: Bearer (~27d); a FRESH jwt is returned in the
-#     `token` response header (access-control-expose-headers: token,...).
-#   - refreshToken is a no-arg persisted mutation (REFRESH_TOKEN_HASH).
+#   - The JWT rides as Authorization: Bearer (7 days since 2026-10-02).
+#   - Renewal is POST /v2/auth/refresh-token with no body (MIRROR_REFRESH_PATH, #92), the
+#     route pixai.art itself calls: the fresh token comes back in the response body and in
+#     the `token` response header.
 # So: read the live JWT from the local browser's localStorage ONCE (read_browser_jwt), then
-# refreshToken rolls it -- zero paste. A one-time paste field is the break-glass fallback
+# the renewal rolls it -- zero paste. A one-time paste field is the break-glass fallback
 # only.
 #
 # SAFETY: only touched when the mirror toggle is ON (pure API-key mode never calls
 # these). The credential never leaves this machine and is never printed, logged, or
 # committed (same rule as PIXAI_API_KEY); diagnostics report only non-secret
 # derivatives (expiry date, days-left, ok/None). The live "read the real browser +
-# first refreshToken" step self-verifies at runtime on the owner's machine.
+# first renewal" step self-verifies at runtime on the owner's machine.
 # ===========================================================================
 def _b64url_decode(seg):
     """Decode one base64url JWT segment, tolerant of missing padding."""
@@ -5893,7 +5815,7 @@ def jwt_days_left(token, now=None):
 
 def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAYS_LEFT):
     """True when the JWT is missing, unparseable, expired, or has `threshold_days` or fewer
-    left -- i.e. the renewal should call refreshToken. Measured on the token's real seconds
+    left -- i.e. the Mirror should renew its session. Measured on the token's real seconds
     left (exp - now), not on jwt_days_left's floored whole days: the floor made the old 5-day
     rule renew with up to 6 days left. Pure; the scheduler's decision."""
     exp = jwt_expiry(token)
@@ -5910,7 +5832,8 @@ def mirror_needs_refresh(token, now=None, threshold_days=MIRROR_REFRESH_WHEN_DAY
 # localStorage's on-disk store (Local Storage/leveldb) is NOT app-bound-encrypted -- so we
 # read the JWT straight out of it. That's the whole reason "Connect" can work on a current
 # Chrome without a paste. The Bearer JWT alone authenticates the mirror (create rides
-# Authorization: Bearer; refreshToken renews off the Bearer), so no cookie is needed.
+# Authorization: Bearer; the renewal, POST /v2/auth/refresh-token, renews off the Bearer),
+# so no cookie is needed.
 #
 # We parse leveldb properly (a minimal pure-Python reader -- no C dep, no third-party
 # library). A raw byte-scan is NOT enough: an established profile compacts its writes into
@@ -6283,64 +6206,139 @@ def read_browser_jwt(browsers=("chrome", "edge", "brave")):
     return best
 
 
-def refresh_jwt(session, current_jwt=None):
-    """Call the no-arg refreshToken mutation and return a genuinely FRESH JWT, or None.
+def _is_api_key(token):
+    """True when `token` is the configured PIXAI_API_KEY (the import-time snapshot or the live
+    file). Compared in memory only; the key is never logged, returned or kept."""
+    if not token:
+        return False
+    try:
+        live = (_load_config() or {}).get("PIXAI_API_KEY")
+    except Exception:                              # noqa: BLE001 -- an unreadable file is "no key"
+        live = None
+    for key in (_cfg.get("PIXAI_API_KEY"), live):
+        if isinstance(key, str) and key.strip() and token == key.strip():
+            return True
+    return False
 
-    `session` is a JWT-authed requests.Session (from _mirror_session_from). The new jwt
-    arrives in the `token` response header; the mutation's scalar return is the fallback
-    shape. Renews our own token only -- it does not spend. Returns None (never raises) on any
-    error, so the caller keeps the current jwt until it truly expires.
 
-    Guards against a FALSE "renewed" (review): the gateway rolls the SAME token back in the
-    `token` header on ordinary authenticated responses, and a GraphQL error (e.g.
-    PersistedQueryNotFound after a hash rotation) still answers HTTP 200 carrying that echo.
-    So a renewal requires status 200, NO `errors` array, and a token that DIFFERS from the
-    one we sent -- an unchanged token is not a renewal.
+def _renewal_headers(cur, now=None):
+    """The credential headers for ONE renewal POST, or None when there is nothing safe to send.
 
-    Why it returned None lands in `_refresh_last["reason"]` (network | http_<code> |
-    graphql_error | unchanged) for the Control Panel's "couldn't renew" line (#71). The reason
-    is a fixed word, never a header, body or token. A side channel rather than a second return
-    value, so every caller and every test fake keeps the one-value contract."""
+    JWT-only (Invariant #7): `Authorization: Bearer <cur>` when `cur` is present, unexpired
+    and not the API key; otherwise None (the caller sends nothing). A per-call dict, so the
+    credential never lands on a session's defaults and always wins over them. A same-session
+    cookie road, if it is ever built (the 2026-08-17 ruling's read_browser_session), would add
+    its `Cookie` header HERE and only here -- see refresh_jwt."""
+    now = time.time() if now is None else now
+    if not cur or _is_api_key(cur):
+        return None
+    exp = jwt_expiry(cur)
+    if exp is None or exp - now <= 0:
+        return None                                   # an expired Bearer cannot renew itself
+    return {"Authorization": "Bearer " + cur}
+
+
+def _fresh_pixai_token(tok, cur):
+    """A token that counts as a renewal: a str that differs from the one sent, has a parseable
+    `exp`, and was issued by PixAI (`iss == "pixai"`). The gateway rolls the SAME token back on
+    ordinary authenticated responses, so an unchanged token is not a renewal."""
+    return (isinstance(tok, str) and tok and tok != cur and jwt_expiry(tok) is not None
+            and jwt_claims(tok).get("iss") == "pixai")
+
+
+def refresh_jwt(session, current_jwt=None, expected_sub=None, now=None):
+    """Renew the Mirror's website session and return a genuinely FRESH JWT, or None.
+
+    The road (#92) is the one pixai.art itself uses: `POST /v2/auth/refresh-token`
+    (MIRROR_REFRESH_PATH) with NO body. PixAI's contract: "Requires an existing session (bearer
+    token or session cookie). The token is returned in the body and also written to the
+    `token` response header and the session cookie." It replaces the saved GraphQL renewal the
+    site stopped sending. Renews our own token only -- it does not spend. Returns None (never
+    raises) on any failure, so the caller keeps the current jwt until it truly expires.
+
+    CREDENTIAL. The stored mirror JWT as Bearer, sent only when it is present and unexpired,
+    and NEVER the API key: this route issues a session token for whatever bearer it is handed,
+    so a `current_jwt` equal to the configured PIXAI_API_KEY is refused before anything is
+    sent. With nothing safe to send, no request is made. "Unexpired" is judged at `now`
+    (default: the clock), which the scheduler passes down so its own clock decides. The header
+    is per call, so it wins over any Authorization the session carries by default. No cookie
+    is sent (Invariant #7, JWT-only), and a redirect is never followed: a 3xx is `http_3xx`.
+
+    FRESHNESS (the review-proven guard). Status 200, then the body's `token` (the route's
+    declared output) first and the `token` response header as the fallback; the winner must be
+    a str that differs from the one sent, with a parseable `exp` and `iss == "pixai"`. When
+    `expected_sub` is given, the fresh token's `sub` must equal it, or it is discarded: a
+    renewal can never switch the Mirror to another account.
+
+    CLEANUP. `session`'s cookie jar is emptied before the POST (so nothing it held rides the
+    request) and again in `finally`, on success and failure alike, so whatever PixAI writes
+    back (its session cookie among them) is held by no session.
+
+    Why it returned None lands in `_refresh_last["reason"]`: network | http_<code> | unchanged |
+    no_credential | identity_mismatch, for the Control Panel's "couldn't renew" line (#71). A
+    fixed word, never a header, body, cookie or token; nothing here logs. A side channel rather
+    than a second return value, so every caller and every test fake keeps the one-value
+    contract.
+
+    Where a same-session cookie road would slot in (the 2026-08-17 ruling; not built, see
+    Invariant #7): a `cookies=` dict read with the JWT from ONE browser profile, turned into a
+    `Cookie` header by _renewal_headers for this one request, with the Bearer dropped when that
+    profile's JWT has lapsed; _mirror_try_renew would pick that road ("session") before the
+    JWT-only one ("jwt")."""
     _refresh_last["reason"] = ""
-    headers = {
-        "Content-Type": "application/json",
-        "apollo-require-preflight": "true",
-        "x-apollo-operation-name": "refreshToken",
-    }
-    if current_jwt:
-        headers["Authorization"] = "Bearer " + current_jwt
-    body = {
-        "operationName": "refreshToken",
-        "variables": {},
-        "extensions": {
-            "clientLibrary": CLIENT_LIBRARY,
-            "persistedQuery": {"version": 1, "sha256Hash": REFRESH_TOKEN_HASH},
-        },
-    }
-    try:
-        r = session.post(API_URL, json=body, headers=headers, timeout=30)
-    except Exception:
-        _refresh_last["reason"] = "network"
-        return None
-    if r.status_code != 200:
-        _refresh_last["reason"] = "http_{}".format(r.status_code)
+    cur = str(current_jwt or "")
+    headers = _renewal_headers(cur, now)
+    if headers is None:
+        _refresh_last["reason"] = "no_credential"
         return None
     try:
-        payload = r.json() or {}
-    except Exception:
-        payload = {}
-    if payload.get("errors"):
-        _refresh_last["reason"] = "graphql_error"
-        return None                        # error response -> its echoed token is NOT fresh
-    cur = current_jwt or ""
-    tok = r.headers.get("token")
-    if tok and tok != cur and jwt_expiry(tok):
-        return tok
-    val = (payload.get("data") or {}).get("refreshToken")
-    if isinstance(val, str) and val != cur and jwt_expiry(val):
-        return val
-    _refresh_last["reason"] = "unchanged"
-    return None
+        _drop_cookies(session)              # JWT-only: nothing a jar holds rides this request
+        try:
+            # Never follow a redirect (#92 review F1): requests would merge a 3xx's Set-Cookie
+            # into the next hop, sending a cookie with the JWT. A 3xx is http_3xx below.
+            r = session.post(REST_API_BASE + MIRROR_REFRESH_PATH, headers=headers, timeout=30,
+                             allow_redirects=False)
+        except Exception:                                    # noqa: BLE001 -- never raises
+            _refresh_last["reason"] = "network"
+            return None
+        if r.status_code != 200:
+            _refresh_last["reason"] = "http_{}".format(r.status_code)
+            return None
+        try:
+            payload = r.json()
+        except Exception:                                    # noqa: BLE001 -- not JSON
+            payload = None
+        body_tok = payload.get("token") if isinstance(payload, dict) else None
+        try:
+            header_tok = r.headers.get("token")
+        except Exception:                                    # noqa: BLE001
+            header_tok = None
+        fresh = None
+        if _fresh_pixai_token(body_tok, cur):
+            fresh = body_tok
+        elif _fresh_pixai_token(header_tok, cur):
+            fresh = header_tok
+        if fresh is None:
+            _refresh_last["reason"] = "unchanged"
+            return None
+        got_sub = jwt_claims(fresh).get("sub")
+        if expected_sub is not None and (got_sub is None or str(got_sub) != str(expected_sub)):
+            _refresh_last["reason"] = "identity_mismatch"
+            return None
+        return fresh
+    finally:
+        _drop_cookies(session)              # what PixAI wrote back is held by no session
+        headers = None
+
+
+def _drop_cookies(session):
+    """Empty `session`'s cookie jar (getattr-guarded; never raises)."""
+    jar = getattr(session, "cookies", None)
+    if jar is not None:
+        try:
+            jar.clear()
+        except Exception:                                    # noqa: BLE001
+            pass
 
 
 _refresh_last = {"reason": ""}
@@ -6348,7 +6346,7 @@ _refresh_last = {"reason": ""}
 
 # --- Mirror session state: a dedicated git-ignored store (NOT config.json) --------
 # Single-flight lock: serializes the refresh->persist critical section so two threads can't
-# both fire refreshToken and race their writes. The SLOW work (the leveldb/localStorage
+# both fire the renewal and race their writes. The SLOW work (the leveldb/localStorage
 # browser read and the no-network fast path) runs OUTSIDE the lock so a Connect can't block
 # every Generate -- an earlier version held the lock across a ~12 s scan plus a 30 s POST
 # (adversarial review 2026-08-15). The gallery serves threaded=True.
@@ -6362,7 +6360,9 @@ _mirror_lock = threading.Lock()
 #                      "couldn't renew" only while THAT token is still the stored one and due;
 #   last_ok_at         the last successful renewal; none again within MIRROR_RENEW_FLOOR_S, so
 #                      a token PixAI mints already inside the cushion can never loop;
-#   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence.
+#   last_attempt_at, last_reason   for the status line; tick_at   the tick's own cadence;
+#   last_road          which road the last successful renewal rode, a fixed word: "jwt" (the
+#                      Bearer-only renewal, the only road built) -- "" until one succeeds (#92).
 # Module state: dev/tests/conftest.py resets it around every test (_mirror_renewal_reset).
 _MIRROR_REFRESH_COOLDOWN = 600      # the first backoff step after a failed renewal (seconds)
 MIRROR_RENEW_BACKOFF_CAP_S = 7200   # the longest step: a failing renewal retries every 2 h
@@ -6375,7 +6375,7 @@ def _mirror_renewal_reset():
     """Back to "never tried": no failures, no backoff, no recent success, tick due now."""
     _mirror_renewal.clear()
     _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=None,
-                           last_attempt_at=None, last_reason="", tick_at=None)
+                           last_attempt_at=None, last_reason="", tick_at=None, last_road="")
 
 
 _mirror_renewal_reset()
@@ -6466,7 +6466,7 @@ def _jwt_usable(jwt):
 
 def _mirror_session_from(jwt):
     """A requests.Session authed as the browser JWT (Bearer) and presenting the WEB client
-    identity -- used for BOTH the refreshToken probe and the mirrored create. Built directly,
+    identity -- used for BOTH the renewal and the mirrored create. Built directly,
     NOT via _make_session, so it never enforces the API-key/U3T precondition the mirror
     doesn't need and never resolves USER_ID over the browser token (review). JWT-only, no
     cookies. The web identity makes PixAI apply the website content policy, not the stricter
@@ -6546,11 +6546,16 @@ def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
     renewed | failed | not_due | read_only | backoff | floor | no_session.
 
     Runs entirely inside _mirror_lock and re-reads the stored token there, so two renewals
-    racing (the tick and a Connect, or two creates) make ONE refreshToken call: the second sees
+    racing (the tick and a Connect, or two creates) make ONE renewal call: the second sees
     the fresh token and finds nothing due. READ_ONLY is re-checked here, immediately before the
     POST, because it can flip between a caller's own check and this lock. A failure backs off
     (see _mirror_renewal) unless this is a press of Connect, which always tries once; and no
-    renewal follows a successful one within MIRROR_RENEW_FLOOR_S."""
+    renewal follows a successful one within MIRROR_RENEW_FLOOR_S.
+
+    The renewal is JWT-only (road "jwt", #92): refresh_jwt on a fresh Bearer session of the
+    stored token, with the stored token's `sub` as the identity the fresh one must carry. A
+    same-session cookie road (road "session"), if it is ever built, would be tried here first,
+    from a browser read made by the caller OUTSIDE this lock, and fall through to this one."""
     now = time.time() if now is None else now
     r = _mirror_renewal
     with _mirror_lock:
@@ -6567,10 +6572,13 @@ def _mirror_try_renew(*, user_initiated=False, fallback="", now=None):
         if r["last_ok_at"] is not None and now - r["last_ok_at"] < MIRROR_RENEW_FLOOR_S:
             return cur, "floor"
         r["last_attempt_at"] = now
-        fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur)
+        road = "jwt"
+        fresh = refresh_jwt(_mirror_session_from(cur), current_jwt=cur,
+                            expected_sub=jwt_claims(cur).get("sub"), now=now)
         if fresh:
             save_mirror_state({"jwt": fresh, "minted_at": now})
-            r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="")
+            r.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=now, last_reason="",
+                     last_road=road)
             return fresh, "renewed"
         fails = (r["fails"] if r["failed_exp"] == exp else 0) + 1
         r.update(fails=fails, failed_exp=exp,
@@ -6610,7 +6618,7 @@ def make_mirror_session(bootstrap_from_browser=False, user_initiated=False):
                     cur = bj
                 jwt = cur
     # Roll the JWT forward when inside the refresh cushion -- but never under READ_ONLY
-    # (refreshToken is account-mutating; _mirror_try_renew checks again inside its lock).
+    # (the renewal is account-mutating; _mirror_try_renew checks again inside its lock).
     if jwt and mirror_needs_refresh(jwt) and not (READ_ONLY or _read_only_now()):
         jwt, _outcome = _mirror_try_renew(user_initiated=user_initiated, fallback=jwt)
     if not _jwt_usable(jwt):
@@ -6625,7 +6633,7 @@ def mirror_renew_tick(now=None):
 
     Returns what it did: cadence | mirror_off | read_only | no_session | expired | fresh |
     backoff | floor | not_due | renewed | failed. Everything before the renewal is offline (two
-    small file reads); the renewal itself is _mirror_try_renew, one refreshToken at most. An
+    small file reads); the renewal itself is _mirror_try_renew, one renewal POST at most. An
     expired token is left for Connect -- the tick does not try it. Never raises, never logs or
     returns the token."""
     now = time.time() if now is None else now
@@ -6686,7 +6694,7 @@ def _session_for_create(api_session):
     is unavailable, refuse and spend nothing (F5).
 
     Callers must have already passed _check_read_only, since make_mirror_session may make a
-    refreshToken network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
+    renewal network call (review F12). free-card (/v2/kaisuuken/check) still runs on the
     API-key session at the call site -- only the create rides the JWT."""
     if not mirror_enabled():
         return api_session
@@ -6702,13 +6710,15 @@ def _session_for_create(api_session):
 def run_mirror_check(args):
     """--mirror-check: prove the zero-paste mirror loop WITHOUT ever printing the token.
     Tries the stored session; if none, reads the pixai.art session from a local browser;
-    calls refreshToken to confirm renewal; reports only days-left + ok/fail and persists
-    the fresh session. This is the owner's step-0 verification -- it renews our own token
-    and spends nothing. If it can't read a browser (e.g. run headless/sandboxed), it says
-    so plainly rather than guessing. Refused under READ_ONLY (refreshToken is account-mutating)."""
+    renews it once (POST /v2/auth/refresh-token, the JWT-only road) to confirm renewal; reports
+    only days-left, the road, ok/fail and the fixed reason word, and persists the fresh session.
+    This is the owner's step-0 verification -- it renews our own token and spends nothing. If it
+    can't read a browser (e.g. run headless/sandboxed), it says so plainly rather than guessing.
+    Refused under READ_ONLY (renewing the session changes your account)."""
     if READ_ONLY or _read_only_now():
-        print("Mirror: READ_ONLY is set in config.json -- refusing to refresh the mirror "
-              "token (refreshToken is an account-mutating call). Clear READ_ONLY to run this.")
+        print("Mirror: READ_ONLY is set in config.json -- refusing to renew the mirror "
+              "session (renewing the session changes your account). Clear READ_ONLY to run "
+              "this.")
         return {"ok": False, "source": "read_only"}
     jwt = load_mirror_state().get("jwt") or ""
     src = "stored"
@@ -6723,31 +6733,40 @@ def run_mirror_check(args):
               "logged in to pixai.art?). Open pixai.art logged-in, then retry.")
         return {"ok": False, "source": "none"}
     before = jwt_days_left(jwt)
-    fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt)
+    road = "jwt"
+    fresh = refresh_jwt(_mirror_session_from(jwt), current_jwt=jwt,
+                        expected_sub=jwt_claims(jwt).get("sub"))
+    reason = _refresh_last.get("reason") or "failed"
+    # A fixed phrase per reason word. no_credential means nothing was sent, so PixAI was not
+    # asked and must not be quoted as answering.
+    why = ("no saved website session to renew (nothing was sent)"
+           if reason == "no_credential" else "PixAI answered: {}".format(reason))
     if not fresh:
-        # A still-valid JWT whose refresh merely failed (rotated hash, transient 5xx) is
-        # reported distinctly from a truly-dead one, and its jar is NOT wiped.
+        # A still-valid JWT whose renewal merely failed (a transient 5xx, a refusal) is
+        # reported distinctly from a truly-dead one, and it is kept.
         if _jwt_usable(jwt):
             save_mirror_state({"jwt": jwt})
-            print("Mirror ({}): the stored JWT is still valid ({} days left) but refreshToken "
-                  "did NOT return a fresh token -- renewal may be temporarily unavailable "
-                  "(a PixAI hash rotation or a transient error). It keeps working until it "
-                  "nears expiry; re-run then.".format(src, before))
-            return {"ok": True, "source": src, "renewed": False, "days_left": before}
-        print("Mirror ({}): the JWT is expired and refreshToken did not renew it. Re-open "
-              "pixai.art logged-in, then retry.".format(src))
-        return {"ok": False, "source": src, "renewed": False}
+            print("Mirror ({}): the stored JWT is still valid ({} days left) but PixAI did NOT "
+                  "renew the session -- renewal may be temporarily unavailable. It keeps "
+                  "working until it nears expiry; re-run then. ({})".format(
+                      src, before, why))
+            return {"ok": True, "source": src, "renewed": False, "days_left": before,
+                    "reason": reason}
+        print("Mirror ({}): the JWT is expired and the session was not renewed. Re-open "
+              "pixai.art logged-in, then retry. ({})".format(src, why))
+        return {"ok": False, "source": src, "renewed": False, "reason": reason}
     after = jwt_days_left(fresh)
     # The app's own renewal: stamp when it minted the token (the ring's span, #71) and record
-    # the success, so the background tick's 6 h floor counts it.
+    # the success and its road, so the background tick's 6 h floor counts it.
     minted = time.time()
     saved = save_mirror_state({"jwt": fresh, "minted_at": minted})
     _mirror_renewal.update(fails=0, next_try=0.0, failed_exp=None, last_ok_at=minted,
-                           last_reason="")
-    print("Mirror OK (source: {}). refreshToken renewed the JWT -> {} days left{}. {}".format(
-        src, after, "" if before is None else " (was {})".format(before),
-        "Stored." if saved else "WARNING: could not persist mirror_session.json."))
-    return {"ok": True, "source": src, "renewed": True, "days_left": after}
+                           last_reason="", last_road=road)
+    print("Mirror OK (source: {}, renewed via {}). PixAI renewed the session -> {} days "
+          "left{}. {}".format(
+              src, road, after, "" if before is None else " (was {})".format(before),
+              "Stored." if saved else "WARNING: could not persist mirror_session.json."))
+    return {"ok": True, "source": src, "renewed": True, "days_left": after, "road": road}
 
 
 # ===========================================================================
@@ -6757,18 +6776,29 @@ def run_mirror_check(args):
 #     swapped ONLY at the _session_for_create choke, and every credit-spending create routes
 #     through it (image/edit/video/reference-video via submit_generation, AND the /v2 fixer).
 #  2. No gql_adhoc for spend: createGenerationTask goes through gql_mutate (retries=0).
-#  3. READ_ONLY fires before any mirror network call: refreshToken (make_mirror_session,
-#     run_mirror_check, /api/mirror/connect, mirror_renew_tick -- and again inside
-#     _mirror_try_renew's lock) and the create (submit_generation/submit_fixer).
+#  3. READ_ONLY fires before any mirror network call: the renewal (POST
+#     /v2/auth/refresh-token: make_mirror_session, run_mirror_check, /api/mirror/connect,
+#     mirror_renew_tick -- and again inside _mirror_try_renew's lock) and the create
+#     (submit_generation/submit_fixer).
 #  4. No credential emission: the JWT is never printed/logged/returned; diagnostics report
-#     only days-left + ok/None; the credential travels only in a POST body/Authorization.
+#     only days-left + ok/None + a fixed reason word; the credential travels only in a POST
+#     body/Authorization. The renewal's response body carries the fresh token and is read
+#     for that only -- never logged, never put in a message. The renewal never carries the
+#     API key (refresh_jwt refuses one before sending anything).
 #  5. No silent API-key fallback: make_mirror_session decides refuse-vs-allow OFFLINE from a
 #     usable-JWT check and returns None on failure; _session_for_create raises rather than
 #     using the API key when the mirror is ON.
 #  6. Collect stays on the API-key session: only the create POST rides the mirror JWT;
 #     poll / collect_generation / GET /v1/media do NOT.
-#  7. JWT-only: no cookies are stored or paired (they died ~1 h after issue and pairing them
-#     across browser profiles risked a cross-identity submit).
+#  7. JWT-only: no cookies are stored, sent or paired (they died ~1 h after issue and pairing
+#     them across browser profiles risked a cross-identity submit); the fresh token's `sub`
+#     must match the stored one's, the renewal never follows a redirect (a 3xx's Set-Cookie
+#     would ride the next hop), and any cookie PixAI writes back is cleared off the session
+#     after the renewal. The same-session cookie read the 2026-08-17 ruling allows is not
+#     built: #92's B0 check (2026-10-28) found no installed profile's pixai.art cookies
+#     readable -- the running browser holds the Cookies file locked (Chrome and Edge Default;
+#     Brave not installed), and current Chrome encrypts cookie values with app-bound "v20"
+#     anyway -- so the ruling's own clause applies and the renewal is JWT-only.
 # ===========================================================================
 
 
@@ -14484,8 +14514,8 @@ def update_artwork(session, artwork_id, media_id=None, title=None, description=N
 def delete_artwork(session, artwork_id):
     """Unpublish/delete one artwork from your PixAI account (`deleteArtwork`).
     IRREVERSIBLE on their side; your local files and catalog row are untouched.
-    Single attempt (gql_mutate) so a flaky network can never delete twice. Like
-    deleteGenerationTask, success is the ABSENCE of an error, not the payload."""
+    Single attempt (gql_mutate) so a flaky network can never delete twice. A void
+    mutation: success is the ABSENCE of an error, not the payload."""
     _check_read_only("delete an artwork from your PixAI account")
     gql_mutate(session, _DELETE_ARTWORK, {"id": str(artwork_id)})
     return True
@@ -15153,7 +15183,7 @@ def contest_enter(session, slug, artwork_id):
     This is account-visible in the strongest sense: it puts the artwork into a PUBLIC
     contest under the owner's name, where everyone can see it, and the contract exposes no
     un-enter route. So it is gated by `_check_read_only` before the network call fires,
-    exactly like submit_generation / submit_fixer / delete_task_gql / claim_reward, and it
+    exactly like submit_generation / submit_fixer / delete_task / claim_reward, and it
     rides the single-attempt `_rest_post` with NO retry loop of its own -- a re-POST after
     a lost response would submit a second entry.
 
@@ -18707,12 +18737,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# ===========================================================================
-# RECAPTURE (only if the site changes): re-grab a saved operation's sha256Hash
-# (delete, refreshToken, bookmarks), U3T and USER_ID from Network tab -> graphql row ->
-# Payload, and update config.json. The history feed, task detail and model detail need
-# none: each is read as a full document (_HISTORY_PAGE_DOC, _TASK_DETAIL_DOC,
-# _MODEL_VERSION_DOC).
-# Keep your token private.
-# ===========================================================================

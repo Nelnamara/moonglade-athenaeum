@@ -1,17 +1,20 @@
-"""Tests for the task-level delete mutation (delete_task_gql), and that the command line
-no longer has a delete of its own.
+"""Tests for the task-level delete (delete_task: POST /v2/task/{id}/delete, #92), and that the
+command line no longer has a delete of its own.
 
-These never hit the network: the GraphQL call is mocked. The point is to lock in the SAFETY
-guards (the READ_ONLY refusal, single attempt, no retry) so they can't regress.
+These never hit the network: the session is mocked. The point is to lock in the SAFETY
+guards (the READ_ONLY refusal, single attempt, no retry, only {"success": true} counts) so
+they can't regress. The full refuse matrix is in test_rest_delete_and_renewal.py.
 """
 import pytest
+import requests
 
 from moonglade import backup as core
 
 
-def _post_response(mocker, status_code=200, json_body=None, text="", ssl_error=False):
+def _post_response(mocker, status_code=200, json_body=None, text=""):
     resp = mocker.MagicMock()
     resp.status_code = status_code
+    resp.ok = status_code < 400
     resp.text = text
     if json_body is not None:
         resp.json.return_value = json_body
@@ -21,64 +24,46 @@ def _post_response(mocker, status_code=200, json_body=None, text="", ssl_error=F
 
 
 # ---------------------------------------------------------------------------
-# delete_task_gql()
+# delete_task()
 # ---------------------------------------------------------------------------
 
-class TestDeleteTaskGql:
-    def test_success_returns_payload(self, mock_session, mocker, monkeypatch):
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        mock_session.post.return_value = _post_response(
-            mocker, json_body={"data": {"deleteGenerationTask": True}})
-        assert core.delete_task_gql(mock_session, "123") is True
+class TestDeleteTask:
+    def test_success_returns_true_after_one_post(self, mock_session, mocker):
+        mock_session.post.return_value = _post_response(mocker, json_body={"success": True})
+        assert core.delete_task(mock_session, "123") is True
         mock_session.post.assert_called_once()  # single attempt, no retry loop
-
-    def test_missing_hash_raises_before_any_call(self, mock_session, monkeypatch):
-        """Defensive only -- the hash ships with a working default, so this guard can fire
-        solely if that default is stripped or blanked in config.json. It is NOT a setup
-        gate (the gallery's typed DELETE and READ_ONLY are); the message must not claim
-        otherwise."""
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "")
-        with pytest.raises(core.PixAIError, match="DELETE_TASK_HASH is empty"):
-            core.delete_task_gql(mock_session, "123")
-        mock_session.post.assert_not_called()
-
-    def test_delete_hash_has_a_working_default(self):
-        """The real gates are the gallery's typed DELETE and READ_ONLY. Docs claimed for
-        months that a missing hash was a setup gate that stopped deletion from firing -- it
-        never was."""
-        assert core.DELETE_TASK_HASH and len(core.DELETE_TASK_HASH) == 64
-
-    def test_persisted_query_not_found(self, mock_session, mocker, monkeypatch):
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        mock_session.post.return_value = _post_response(
-            mocker, json_body={"errors": [{"message": "PersistedQueryNotFound"}]})
-        with pytest.raises(core.PixAIError, match="hash not recognized"):
-            core.delete_task_gql(mock_session, "123")
-
-    def test_graphql_error_raises(self, mock_session, mocker, monkeypatch):
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        mock_session.post.return_value = _post_response(
-            mocker, json_body={"errors": [{"message": "not your task"}]})
-        with pytest.raises(core.PixAIError, match="GraphQL error deleting task"):
-            core.delete_task_gql(mock_session, "123")
-
-    def test_401_raises(self, mock_session, mocker, monkeypatch):
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        mock_session.post.return_value = _post_response(
-            mocker, status_code=401, json_body={})
-        with pytest.raises(core.PixAIError, match="401"):
-            core.delete_task_gql(mock_session, "123")
-
-    def test_uses_post_not_get(self, mock_session, mocker, monkeypatch):
-        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        mock_session.post.return_value = _post_response(
-            mocker, json_body={"data": {"deleteGenerationTask": True}})
-        core.delete_task_gql(mock_session, "123")
-        mock_session.post.assert_called_once()
         mock_session.get.assert_not_called()
-        # taskId is carried in the JSON body variables.
-        _, kwargs = mock_session.post.call_args
-        assert kwargs["json"]["variables"] == {"taskId": "123"}
+
+    def test_the_wire_is_the_rest_route_with_an_empty_body(self, mock_session, mocker):
+        mock_session.post.return_value = _post_response(mocker, json_body={"success": True})
+        core.delete_task(mock_session, "123")
+        args, kwargs = mock_session.post.call_args
+        assert args[0] == core.REST_API_BASE + "/task/123/delete"
+        assert kwargs["json"] == {}
+        assert "params" not in kwargs                    # no GraphQL operation/u3t params
+
+    def test_a_success_false_is_not_a_delete(self, mock_session, mocker):
+        mock_session.post.return_value = _post_response(mocker, json_body={"success": False})
+        with pytest.raises(core.PixAIError, match="not deleted"):
+            core.delete_task(mock_session, "123")
+        mock_session.post.assert_called_once()
+
+    def test_401_raises(self, mock_session, mocker):
+        mock_session.post.return_value = _post_response(mocker, status_code=401, json_body={})
+        with pytest.raises(core.PixAIError, match="401"):
+            core.delete_task(mock_session, "123")
+        mock_session.post.assert_called_once()
+
+    def test_a_network_error_is_one_attempt(self, mock_session):
+        mock_session.post.side_effect = requests.ConnectionError("boom")
+        with pytest.raises(core.PixAIError, match="network error deleting task 123"):
+            core.delete_task(mock_session, "123")
+        mock_session.post.assert_called_once()
+
+    def test_a_bad_id_sends_nothing(self, mock_session):
+        with pytest.raises(core.PixAIError, match="not a PixAI task id"):
+            core.delete_task(mock_session, "../graphql")
+        mock_session.post.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +85,7 @@ class TestNoCommandLineDelete:
         import sys
         monkeypatch.setattr(core, "_make_session",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
-        monkeypatch.setattr(core, "delete_task_gql",
+        monkeypatch.setattr(core, "delete_task",
                             lambda *a, **k: pytest.fail("a delete was sent"))
         monkeypatch.setattr(sys, "argv", ["prog", *argv])
         with pytest.raises(SystemExit) as exc:

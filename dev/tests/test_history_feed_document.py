@@ -515,10 +515,7 @@ def test_a_count_that_meets_an_answer_with_no_page_exits_with_the_sentence(
 def test_the_retired_saved_request_leaves_nothing_behind():
     assert not hasattr(core, "PERSISTED_QUERY_HASH")
     assert not hasattr(core, "history_page")
-    persisted = inspect.getsource(core.PixAIClient.persisted)
-    assert "OPERATION_NAME" not in persisted and "PERSISTED_QUERY_HASH" not in persisted
-    with pytest.raises(core.PixAIError, match="no persisted hash"):
-        core.PixAIClient(object()).persisted(core.OPERATION_NAME, {})
+    assert not hasattr(core.PixAIClient, "persisted")   # the whole saved-request road (#92)
     assert "PERSISTED_QUERY_HASH" not in (REPO / "config.example.json").read_text(
         encoding="utf-8")
     live_docs = [REPO / "README.md", REPO / "CLAUDE.md", REPO / "CONTRIBUTING.md",

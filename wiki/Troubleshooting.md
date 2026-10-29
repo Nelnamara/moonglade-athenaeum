@@ -7,26 +7,23 @@ progress, why a step was skipped, and (for `--faststart-videos`) ffmpeg's own me
 it refuses a file. It's the first thing to reach for when a run does something you don't
 expect.
 
-## "PersistedQueryNotFound" / "Cannot query field … on type Query"
-A built-in identifier went stale after a PixAI frontend update. These ship with the
-app and are shared by everyone, so when one breaks it breaks for all users.
+## "Cannot query field … on type Query"
+PixAI changed their site and a request the app sends no longer matches it. The requests ship
+with the app and are the same for everyone, so when one breaks it breaks for all users.
 
 - **First, update to the latest release** — open the **Control Panel** and click the gold
   version stamp in its sidebar footer if one is offered, then **View the update ›** in the
-  About card that opens (`git pull` by hand otherwise). Refreshed defaults usually land there
-  quickly.
-- If it's still broken on the latest version, **open an issue** so the default can be
-  updated for everyone.
+  About card that opens (`git pull` by hand otherwise). Fixes usually land there quickly.
+- If it's still broken on the latest version, **open an issue** so it can be fixed for
+  everyone.
 
-Reading the pages of your history (the list **Sync now**, `--sync`, `--update` and `--count`
-walk), a picture's full details and a model's name no longer use a built-in identifier. "Recapture"
-now applies only to the two saved operations that remain: deleting a whole generation from PixAI,
-and the Mirror to PixAI session renewal.
+Nothing the app sends rides a saved identifier any more, so "PersistedQueryNotFound" can no
+longer come from it, and there is nothing in `config.json` to recapture or override.
 
 ## "PixAI refused the history feed; nothing was changed"
 PixAI turned down the request for your history. It does this now and then, and answers the
 same request a minute later. Nothing was changed. Wait a minute and run it again
-(**Sync now**, or the same command). There is no identifier to update or recapture for this one.
+(**Sync now**, or the same command). There is nothing to update or recapture for this one.
 
 ## "401 Unauthorized"
 Your `PIXAI_API_KEY` is missing, mistyped, or expired. Regenerate at

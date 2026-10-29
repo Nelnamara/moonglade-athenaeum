@@ -7,8 +7,7 @@ saved request left to miss, and a failed read is one plain "catch-up after ... f
 that is not coverage.
 
 Nothing here touches the network: the feed is answered by a FakePixAI (keyed by the
-document's first root field) and every collect is stubbed. The saved operations that remain
-(task detail and the rest) still raise the named persisted-query error, pinned below."""
+document's first root field) and every collect is stubbed. No saved operation remains (#92)."""
 import inspect
 import logging
 import time
@@ -32,7 +31,7 @@ def _feed(*nodes):
         "edges": [{"node": n} for n in nodes]}}}
 
 
-# ---- the transport: the remaining saved operations still name their refusal -------------
+# ---- the transport: a refusal of the document is a plain error ---------------------------
 class _Resp:
     status_code = 200
     content = b"{}"
@@ -45,37 +44,9 @@ class _Resp:
         return self._body
 
 
-class _GetSession:
-    def __init__(self, body):
-        self.body = body
-        self.calls = 0
-
-    def get(self, *a, **k):
-        self.calls += 1
-        return _Resp(self.body)
-
-
-def test_persisted_not_found_is_a_named_pixai_error():
-    sess = _GetSession({"errors": [{"message": "PersistedQueryNotFound",
-                                    "extensions": {"code": "PERSISTED_QUERY_NOT_FOUND"}}]})
-    with pytest.raises(core.PersistedQueryNotRecognized) as ei:
-        core.PixAIClient(sess).persisted(core.BOOKMARKED_MODELS_OP, {"first": 1},
-                                         sha256=core.BOOKMARKED_MODELS_HASH, retries=0)
-    assert isinstance(ei.value, core.PixAIError)                # every old catch site holds
-    assert "hash not recognized" in str(ei.value)
-
-
-def test_another_graphql_error_is_not_the_named_error():
-    sess = _GetSession({"errors": [{"message": "Something else"}]})
-    with pytest.raises(core.PixAIError) as ei:
-        core.PixAIClient(sess).persisted(core.BOOKMARKED_MODELS_OP, {"first": 1},
-                                         sha256=core.BOOKMARKED_MODELS_HASH, retries=0)
-    assert not isinstance(ei.value, core.PersistedQueryNotRecognized)
-
-
 def test_gql_adhoc_raises_a_plain_error_for_a_graphql_refusal():
     """Pins what `gql` reads a refusal off: a GraphQL error answer to the full document is a
-    plain PixAIError carrying PixAI's list, never the named persisted-query error."""
+    plain PixAIError carrying PixAI's list (the named saved-request error is gone, #92)."""
     class _PostSession:
         def post(self, *a, **k):
             return _Resp({"errors": [{"message": REFUSED_DOC}]})

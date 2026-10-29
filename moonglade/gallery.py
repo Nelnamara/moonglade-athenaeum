@@ -11210,7 +11210,7 @@ def quarantine_duplicate_file(out_dir, thumb_dir, db_path, media_id, rel_path, g
     through this function under any argument.
 
     _check_read_only() fires FIRST, before any path is even resolved -- the same
-    position submit_generation/submit_fixer/delete_task_gql/claim_reward give it
+    position submit_generation/submit_fixer/delete_task/claim_reward give it
     (moonglade/backup.py's own contract for every account/filesystem mutation
     this app makes). READ_ONLY in config.json refuses this the same way it
     refuses those.
@@ -14749,8 +14749,9 @@ def create_app(out_dir: Path):
             _log = _logging.getLogger(__name__)
             if out == "renewed":
                 left = _core.jwt_days_left(_core.load_mirror_state().get("jwt") or "")
-                _log.info("mirror: renewed the PixAI web session in the background "
-                          "(%s days left)", left)
+                _log.info("mirror: renewed the PixAI web session in the background via %s "
+                          "(%s days left)", _core._mirror_renewal.get("last_road") or "jwt",
+                          left)
             elif out == "failed" and _mirror_renew_seen["last"] != "failed":
                 _log.warning("mirror: couldn't renew the PixAI web session (%s); retrying "
                              "with backoff", _core._mirror_renewal.get("last_reason") or "failed")
@@ -17286,7 +17287,7 @@ def create_app(out_dir: Path):
         save one fallback: when the live read carried no artworkIds at all, whether the
         generation is published comes from the catalog's artwork_id over the task's whole
         membership (SCOPE_2026-09-26 E5). Only the whole-task branch says anything about
-        published artwork: that branch sends deleteGenerationTask, the delete PixAI's
+        published artwork: that branch sends the whole-task delete, the delete PixAI's
         contract says takes the linked artwork with it. What a one-image deleteBatchMedia
         does to an artwork is unknown, so the per-image branch makes no claim."""
         if plan.plan == "per-image":
@@ -17919,7 +17920,7 @@ def create_app(out_dir: Path):
                     keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
                             if purge_local else set())
                     try:
-                        core.delete_task_gql(session, tid)      # cloud delete (irreversible)
+                        core.delete_task(session, tid)          # cloud delete (irreversible)
                         deleted += 1
                     except Exception:                            # noqa: BLE001
                         failed += 1
@@ -17981,9 +17982,9 @@ def create_app(out_dir: Path):
         delete_targets selection so /api/delete-preview keeps describing
         exactly what this route then does, and the same off-thread worker via
         _start_bulk_delete -- which routes every cloud delete through
-        core.delete_task_gql, the single-attempt _check_read_only'd choke point the
-        page route uses, never gql_adhoc. The page route stays until classic's
-        demolition.
+        core.delete_task (POST /v2/task/{id}/delete on the API key), the single-attempt
+        _check_read_only'd choke point the page route uses, never gql_adhoc. The page
+        route stays until classic's demolition.
 
         Body: {task_ids: [...]} OR {media_ids: [...]} (task_ids win when both are
         sent -- they are already the unit the delete operates on), plus optional
@@ -17992,7 +17993,7 @@ def create_app(out_dir: Path):
         --delete-task command used to do, and imports are then left alone entirely).
 
         _check_read_only fires HERE, before the job even starts, on top of the one
-        inside delete_task_gql: failing fast with one readable refusal beats
+        inside delete_task: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
         from moonglade import backup as core   # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
@@ -20009,7 +20010,7 @@ def create_app(out_dir: Path):
         click, not the exempt spend-path class /api/generate etc. sit in.
 
         READ_ONLY in config.json refuses this exactly like submit_generation/
-        submit_fixer/delete_task_gql/claim_reward -- see
+        submit_fixer/delete_task/claim_reward -- see
         quarantine_duplicate_file().
 
         ARCHIVE-ONLY MEMBERS GO WITH THE REST (#66; the owner's ruling on the 2026-10-03
@@ -23084,12 +23085,12 @@ def create_app(out_dir: Path):
     @tier(LOGIN)
     def api_mirror_connect():
         """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
-        machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
+        machine's browser, renew the JWT, store it. Reports only ok +
         days-left -- NEVER the token (review F13). No credential crosses the network: the
         server reads its own local browser store. LOGIN tier."""
         from moonglade import backup as core
         try:
-            core._check_read_only("connect the PixAI mirror")   # refreshToken is account-mutating
+            core._check_read_only("connect the PixAI mirror")   # the renewal is account-mutating
             # A press (#71): re-read the browser even for a usable stored token, keep the
             # later-expiring of the two, and try a due renewal even inside a failure backoff.
             s = core.make_mirror_session(bootstrap_from_browser=True, user_initiated=True)

@@ -40,8 +40,8 @@ OPERATION NAMES. Keyed off the document: `mutation createGenerationTask(...)` is
 is keyed by its first ROOT FIELD -- `me`, `updateGenerationTask` -- which is the name a
 reader would use for it anyway. The task detail and model detail documents are NAMED
 (`TaskDetail`, `ModelVersion`) so they key by those names and never collide with the
-generation poll's anonymous `task` document (`_GEN_STATUS`). `persisted()` is keyed by the
-operation name it is given; the bookmarks fallback is what still rides it.
+generation poll's anonymous `task` document (`_GEN_STATUS`). There is no saved-request
+verb: no operation rides a hash any more (#92).
 """
 import re
 from types import SimpleNamespace
@@ -85,7 +85,7 @@ class FakePixAI:
     """A PixAI transport adapter that answers from a registry and records every call.
 
     Interface-compatible with `moonglade_backup.PixAIClient`: `query`, `mutate`,
-    `persisted`, `rest_get`, `rest_post`, `rest_put`, `rest_patch`, `for_create`, plus
+    `rest_get`, `rest_post`, `rest_put`, `rest_patch`, `for_create`, plus
     `user_id` / `auth_kind`. A PUT or PATCH is registered under "PUT <path>" / "PATCH <path>",
     so it can never be answered by the GET or POST registered for the same path.
     `mutate` takes no `retries` argument here EITHER -- the rule has to hold on both
@@ -150,7 +150,7 @@ class FakePixAI:
     def query(self, document, variables=None, retries=None, timeout=120):
         """`timeout` mirrors the real client's signature (the per-attempt socket timeout a
         caller under a wall-clock ceiling passes down) and is recorded on the call, so a
-        test can assert the timeout a read was given, as it does for `persisted()`."""
+        test can assert the timeout a read was given."""
         return self._graphql("query", document, variables, retries, timeout=timeout)
 
     def mutate(self, document, variables=None):
@@ -164,16 +164,6 @@ class FakePixAI:
         call = self._record(verb=verb, op=op, document=document, variables=variables,
                             retries=retries, **extra)
         return self._resolve(op, "GraphQL operation", call)
-
-    def persisted(self, op_name, variables=None, sha256=None, retries=4, timeout=60):
-        """Keyed by `op_name`, the whole point of the seam-level road: a test registers a
-        canned answer with `fake.on(op_name, ...)` and it is returned here, or refuses by name
-        if nobody did. `timeout` mirrors the real client's signature (a caller under a
-        wall-clock ceiling passes it) and is recorded on the call so a test can assert the
-        timeout the read was given, exactly as it does on the wire."""
-        call = self._record(verb="persisted", op=op_name, variables=variables,
-                            retries=retries, timeout=timeout)
-        return self._resolve(op_name, "persisted operation", call)
 
     def rest_get(self, path, params=None, timeout=30):
         call = self._record(verb="rest_get", op=path, path=path, params=params)
@@ -204,11 +194,10 @@ class FakePixAI:
         raise UnregisteredOperation(
             "FakePixAI has no requests.Session -- that is the point. A path that reaches "
             "for `.session` (or calls `.get`/`.post` on the client) is one of the call "
-            "sites still speaking HTTP itself: resolve_media, download, delete_task_gql, "
-            "refresh_jwt. (task_detail_gql and the model version reads ride query() with "
-            "named documents -- register 'TaskDetail' / 'ModelVersion' -- and "
-            "_bookmarks_persisted rides persisted(), so register it with "
-            "fake.on(<operationName>, ...).) "
+            "sites still speaking HTTP itself: resolve_media, download, refresh_jwt. "
+            "(task_detail_gql and the model version reads ride query() with named "
+            "documents -- register 'TaskDetail' / 'ModelVersion' -- and delete_task rides "
+            "rest_post(), so register '/task/<id>/delete'.) "
             "Stub the HTTP call directly instead of routing it through the fake.")
 
     def get(self, url, **kwargs):

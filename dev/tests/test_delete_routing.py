@@ -4,8 +4,8 @@ The gallery's single-image "Delete from PixAI" always sent `deleteBatchMedia`. P
 that mutation ONLY for an image that is one of several still-live members of a task's
 `outputs.batch[]`. For a task that made a single image (no `batch` key at all -- the picture
 is `outputs.mediaId`), and for the LAST live member of a batch, PixAI answers 403 "task
-outputs does not include any media with mediaId"; their own site sends `deleteGenerationTask`
-for those two cases instead. Wrong since v2.5.0, and not a change on their side.
+outputs does not include any media with mediaId"; their own site sends its whole-task delete
+(`POST /v2/task/{id}/delete` since #92) for those two cases instead. Wrong since v2.5.0, and not a change on their side.
 
 `route_image_delete` is the decision on its own: a task record in, a plan out, no session, no
 network, nothing deleted. Every row below is one shape the live read can come back as. The
@@ -215,15 +215,15 @@ def test_it_never_reads_updated_at():
 
 class _Double:
     """Stands in for the PixAI client on both roads a delete can take: `query` answers the
-    task detail read (the full document, #91), `mutate` takes the per-image mutation, `post`
-    takes the whole-task one (which hand-rolls its own request). Every call is recorded, so
-    "nothing was sent" is checkable rather than assumed."""
+    task detail read (the full document, #91), `mutate` takes the per-image mutation,
+    `rest_post` takes the whole-task one (POST /v2/task/{id}/delete, #92). Every call is
+    recorded, so "nothing was sent" is checkable rather than assumed."""
 
     _is_pixai_client = True
 
     def __init__(self, task):
         self.task = task
-        self.reads, self.mutations, self.posts = [], [], []
+        self.reads, self.mutations, self.rest_posts = [], [], []
 
     def query(self, document, variables=None, retries=None, timeout=120):
         self.reads.append((operation_name(document), dict(variables or {})))
@@ -233,21 +233,12 @@ class _Double:
         self.mutations.append((document, dict(variables or {})))
         return {"updateGenerationTask": {"id": "TASK-BATCH"}}
 
-    def post(self, url, params=None, json=None, timeout=None, **kw):
-        self.posts.append(dict(json or {}))
-
-        class _Resp:
-            status_code = 200
-            text = "{}"
-
-            @staticmethod
-            def json():
-                return {"data": {"deleteGenerationTask": None}}
-
-        return _Resp()
+    def rest_post(self, path, body=None, timeout=60):
+        self.rest_posts.append((path, body))
+        return {"success": True}
 
     def sent(self):
-        return len(self.mutations) + len(self.posts)
+        return len(self.mutations) + len(self.rest_posts)
 
 
 def test_the_plan_reads_the_live_task_and_sends_nothing():
@@ -297,21 +288,21 @@ def test_the_per_image_branch_sends_delete_batch_media(monkeypatch):
     dbl = _Double(_batch_task(False, False, False))
     plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1")
     assert plan.plan == "per-image"
-    assert len(dbl.mutations) == 1 and not dbl.posts
+    assert len(dbl.mutations) == 1 and not dbl.rest_posts
     doc, variables = dbl.mutations[0]
     assert "updateGenerationTask" in doc
     assert variables["input"] == {"deleteBatchMedia": {"mediaId": "m1"}}
 
 
-def test_the_whole_task_branch_sends_delete_generation_task(monkeypatch):
+def test_the_whole_task_branch_sends_the_task_delete(monkeypatch):
     """The case that was broken: a task that made one image. The old code sent
     deleteBatchMedia here and PixAI answered 403."""
     monkeypatch.setattr(core, "READ_ONLY", False)
     dbl = _Double(_lone_task())
     plan = core.delete_image_routed(dbl, "TASK-LONE", "solo1")
     assert plan.plan == "whole-task"
-    assert len(dbl.posts) == 1 and not dbl.mutations, "the per-image mutation fired anyway"
-    assert dbl.posts[0]["variables"] == {"taskId": "TASK-LONE"}
+    assert not dbl.mutations, "the per-image mutation fired anyway"
+    assert dbl.rest_posts == [("/task/TASK-LONE/delete", {})]
 
 
 def test_a_stale_confirmed_plan_is_refused(monkeypatch):

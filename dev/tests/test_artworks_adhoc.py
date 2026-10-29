@@ -424,8 +424,7 @@ def test_a_failed_later_page_marks_the_sync_incomplete_and_says_why(pixai, tmp_p
 def test_the_retired_saved_request_leaves_nothing_behind():
     assert not hasattr(core, "ARTWORK_LIST_HASH")
     assert not hasattr(core, "CLIENT_LIBRARY_ARTWORK")
-    params = inspect.signature(core.PixAIClient.persisted).parameters
-    assert "client_library" not in params and "headers" not in params
+    assert not hasattr(core.PixAIClient, "persisted")   # the saved-request road itself (#92)
     assert "ARTWORK_LIST_HASH" not in (REPO / "config.example.json").read_text(encoding="utf-8")
     live_docs = [REPO / "README.md", REPO / "CLAUDE.md", REPO / "CONTRIBUTING.md",
                  *sorted((REPO / "wiki").glob("*.md"))]

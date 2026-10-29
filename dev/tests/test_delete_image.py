@@ -177,7 +177,7 @@ def _nothing_deletes(monkeypatch):
     """Both delete mutations wired to fail the test if either one is reached."""
     monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
         "the per-image mutation fired"))
-    monkeypatch.setattr(core, "delete_task_gql", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr(core, "delete_task", lambda *a, **k: pytest.fail(
         "the whole-task mutation fired"))
 
 
@@ -248,7 +248,7 @@ def test_the_whole_task_branch_keeps_what_pixai_already_deleted(tmp_path, monkey
     # PixAI's copy of this task: `a` was deleted earlier, `c` is the one image still there,
     # and `b` is a local row PixAI's copy no longer lists at all.
     _reads(monkeypatch, _live_task(("a", True), ("c", False)))
-    monkeypatch.setattr(core, "delete_task_gql",
+    monkeypatch.setattr(core, "delete_task",
                         lambda s, tid: fired.update(task=tid))
     monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on the last live image of a batch"))
@@ -282,7 +282,7 @@ def test_every_image_pixai_already_deleted_is_kept_back_not_just_one(tmp_path, m
     monkeypatch.setattr(core, "_make_session", _session_stub)
     # PixAI kept `c` only; `a` and `b` were both deleted from its website earlier.
     _reads(monkeypatch, _live_task(("a", True), ("b", True), ("c", False)))
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(core, "delete_task", lambda s, tid: fired.update(task=tid))
     for f in ("a.png", "b.png", "c.png"):
         (tmp_path / f).write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -350,7 +350,7 @@ def test_a_whole_task_delete_says_so_on_its_row(tmp_path, monkeypatch):
     warns about before the click has to be the fact the tracker records after it."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _lone_task("b"))
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
+    monkeypatch.setattr(core, "delete_task", lambda s, tid: None)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
 
@@ -422,7 +422,7 @@ def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     fired = {}
     monkeypatch.setattr(core, "_make_session", _session_stub)
     _reads(monkeypatch, _lone_task("b"))
-    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(core, "delete_task", lambda s, tid: fired.update(task=tid))
     monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
         "the per-image mutation fired on a task with no batch -- PixAI answers 403"))
     (tmp_path / "b.png").write_bytes(b"x")
@@ -575,7 +575,7 @@ def test_the_cloud_delete_is_single_attempt(monkeypatch):
     timeout can arrive AFTER PixAI has already processed the delete, so a retry re-fires a
     destructive mutation against a batch that has already changed underneath it.
 
-    delete_task_gql gets this right by hand-rolling its own single session.post; this proves
+    delete_task gets this right through rest_post's single POST (no retry loop); this proves
     the finer-grained one gets it right through the shared helper instead of by accident.
     """
     import requests
@@ -631,7 +631,7 @@ def test_the_cloud_delete_is_withheld_from_a_lan_session(tmp_path):
 
 
 # ---- published artwork in the per-image dialog (SCOPE_2026-09-26 E5) ----------------------
-# Only the WHOLE-TASK branch speaks about it: that branch sends deleteGenerationTask, which
+# Only the WHOLE-TASK branch speaks about it: that branch sends the task delete, which
 # PixAI's contract says also deletes the task's linked artwork. What a one-image
 # deleteBatchMedia does to an artwork is unknown, so that branch says nothing.
 

@@ -26,20 +26,16 @@ tool can and can't do to your account — plus a `READ_ONLY` config flag that re
 every spend/delete path outright — see **[Trust & Safety](Trust-and-Safety)**.
 
 **Do I really only need an API key?**
-Yes. `USER_ID` auto-resolves from the key and the persisted-query hashes ship as
-defaults. See [Setup](Setup) and [How It Works](How-It-Works).
+Yes. `USER_ID` auto-resolves from the key, and nothing else needs capturing. See
+[Setup](Setup) and [How It Works](How-It-Works).
 
-**Why are there "hashes" if I don't need to set them?**
-They're public identifiers of PixAI's own frontend queries (not secrets), baked in so
-you don't capture anything. Reading your history, a picture's full details and a model's
-name don't use one any more: Sync reads the full request. If PixAI turns the history feed
-down you see "PixAI refused the history feed; nothing was changed -- try again in a
-minute." Wait a minute and run it again. If it turns down a picture's details you see a
-"could not read task ... back from PixAI" line, and a model it does not answer for keeps
-its number as its label; a later Sync fills both in. For the few saved operations that
-remain, if PixAI overhauls their frontend and one goes stale, you don't recapture it
-yourself — see [Troubleshooting](Troubleshooting): update to the latest release, or open
-an issue so the shared default gets refreshed for everyone.
+**What if PixAI turns a read down?**
+If PixAI turns the history feed down you see "PixAI refused the history feed; nothing was
+changed -- try again in a minute." Wait a minute and run it again. If it turns down a
+picture's details you see a "could not read task ... back from PixAI" line, and a model it
+does not answer for keeps its number as its label; a later Sync fills both in. If PixAI
+overhauls their site and something stops working, see [Troubleshooting](Troubleshooting):
+update to the latest release, or open an issue.
 
 **Where do my files and credentials go?**
 Everything is local. `config.json`, `token.txt`, and `pixai_backup/` are git-ignored.

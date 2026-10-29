@@ -44,6 +44,9 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # delete mutations after reading the live task, so it is an
                # account-mutating path in its own right.
                "delete_image_routed",
+               # The whole-task delete (#92): POST /v2/task/{id}/delete through rest_post.
+               # Not GraphQL at all now, so it must never grow a gql_adhoc call either.
+               "delete_task",
                # LoRA training: spends real credits once the free-training quota is
                # gone, and a re-POST would start a SECOND training (2026-08-06).
                "submit_training",
@@ -310,8 +313,8 @@ class TestSpendingPathsAreSingleAttempt:
         _assert_single_attempt(gql_calls, core._UPSERT_ARTWORK)
 
     def test_delete_artwork(self, mock_session, gql_calls):
-        """Like deleteGenerationTask: success is the ABSENCE of an error, and a retry could
-        delete something already gone."""
+        """A void mutation: success is the ABSENCE of an error, and a retry could delete
+        something already gone."""
         core.delete_artwork(mock_session, "art1")
         _assert_single_attempt(gql_calls, core._DELETE_ARTWORK)
 
@@ -356,29 +359,38 @@ class TestRestSpendPathsAreSingleAttempt:
         assert posts == ["/task/fixer"]
 
     def test_the_routed_image_delete_has_no_retry_loop(self):
-        """The per-image delete's WHOLE-TASK branch calls delete_task_gql, which hand-rolls
-        one session.post rather than riding gql_mutate -- so the no-retry rule cannot be
-        inherited from the helper there. Read as structure, the same way _rest_post is
-        above: neither the router nor the function it calls may put a loop around the post.
+        """The per-image delete's WHOLE-TASK branch calls delete_task, which makes one
+        rest_post (POST /v2/task/{id}/delete, #92) rather than riding gql_mutate -- so the
+        no-retry rule cannot be inherited from the helper there. Read as structure, the same
+        way _rest_post is below: neither the router nor the function it calls may put a loop
+        around the post, and delete_task sends exactly one.
 
         Parsed rather than string-scanned, so prose in the docstrings ("for it", "wait for")
         cannot make this pass or fail by accident."""
         for fn, name in ((core.delete_image_routed, "delete_image_routed"),
-                         (core.delete_task_gql, "delete_task_gql")):
+                         (core.delete_task, "delete_task")):
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
             loops = [n for n in ast.walk(tree)
                      if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
             assert not loops, (
-                "{} grew a loop around a destructive delete -- a re-sent deleteGeneration"
-                "Task can fire again against a task that already changed".format(name))
-        # A comprehension or generator expression is a loop too: it can wrap the delete
-        # call without any For/While statement. Checked on the router only -- it is the
-        # function that picks the branch and must fire exactly one of them.
-        routed = ast.parse(textwrap.dedent(inspect.getsource(core.delete_image_routed)))
-        comps = [n for n in ast.walk(routed)
-                 if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))]
-        assert not comps, (
-            "delete_image_routed grew a loop around a destructive delete -- it must fire once")
+                "{} grew a loop around a destructive delete -- a re-sent task delete "
+                "can fire again against a task that already changed".format(name))
+            # A comprehension or generator expression is a loop too: it can wrap the delete
+            # call without any For/While statement.
+            comps = [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                       ast.GeneratorExp))]
+            assert not comps, (
+                "{} grew a loop around a destructive delete -- it must fire once".format(name))
+        # ONE send in delete_task: a single rest_post call, and no raw session verb at all.
+        # (`answer.get("success")` reads the parsed reply; it is not a send.)
+        tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_task)))
+        sends = [n.func.attr for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr in ("rest_post", "post", "get", "put", "patch", "delete",
+                                     "request", "mutate", "query")
+                 and not (isinstance(n.func.value, ast.Name) and n.func.value.id == "answer")]
+        assert sends == ["rest_post"], sends
 
     def test_rest_post_has_no_retry_loop(self):
         """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line
@@ -409,3 +421,101 @@ class TestRestSpendPathsAreSingleAttempt:
         assert src.count(".delete(") == 1
         assert "for " not in src and "while " not in src, (
             "moonglade.recipes._rest_delete grew a retry loop")
+
+
+class _Answer:
+    def __init__(self, status=200, body=None):
+        self.status_code, self._body = status, body if body is not None else {"data": {}}
+        self.text, self.headers = "", {}
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+
+class _Kw:
+    """A session stand-in recording each verb's kwargs."""
+
+    def __init__(self, status=200, body=None):
+        self.calls, self._a = [], _Answer(status, body)
+        self.headers, self.cookies = {}, requests.cookies.RequestsCookieJar()
+
+    def _rec(self, verb, url, kw):
+        self.calls.append((verb, url, kw))
+        return self._a
+
+    def post(self, url, **kw):
+        return self._rec("POST", url, kw)
+
+    def put(self, url, **kw):
+        return self._rec("PUT", url, kw)
+
+    def patch(self, url, **kw):
+        return self._rec("PATCH", url, kw)
+
+    def get(self, url, **kw):
+        return self._rec("GET", url, kw)
+
+
+class TestWritesNeverFollowRedirects:
+    """#92 review F1, decided for every write: a write verb passes allow_redirects=False and
+    a 3xx is an error with nothing re-sent. Following one would re-send a 307/308 -- body,
+    Bearer and all -- to a URL the answering server chose, and turn a 301/302/303 into a GET
+    whose answer then reads as success. Reads (rest_get, a query document) are unchanged."""
+
+    @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
+    def test_each_rest_write_verb_refuses_to_follow(self, verb):
+        s = _Kw(body={"ok": 1})
+        assert getattr(core.PixAIClient(s), verb)("/x", {}) == {"ok": 1}
+        (_v, _u, kw), = s.calls
+        assert kw["allow_redirects"] is False, verb
+
+    @pytest.mark.parametrize("verb", ["rest_post", "rest_put", "rest_patch"])
+    @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+    def test_a_3xx_on_a_rest_write_is_an_error_after_one_call(self, verb, status):
+        s = _Kw(status=status, body={"success": True})
+        with pytest.raises(core.PixAIRestError) as ei:
+            getattr(core.PixAIClient(s), verb)("/x", {})
+        assert ei.value.status == status and "nothing was re-sent" in str(ei.value)
+        assert len(s.calls) == 1
+
+    def test_the_mutation_road_refuses_to_follow(self):
+        s = _Kw(body={"data": {"x": {"id": "1"}}})
+        core.gql_mutate(s, "mutation { x { id } }")
+        core.PixAIClient(s).query("mutation { x { id } }")      # the backstop road too
+        assert [kw["allow_redirects"] for _v, _u, kw in s.calls] == [False, False]
+
+    @pytest.mark.parametrize("status", [302, 307])
+    def test_a_3xx_on_a_mutation_is_an_error_after_one_post(self, status):
+        s = _Kw(status=status, body={"data": {"createGenerationTask": {"id": "T1"}}})
+        with pytest.raises(core.PixAIError, match="nothing was re-sent"):
+            core.gql_mutate(s, core._GEN_MUTATION, {"parameters": {}})
+        assert len(s.calls) == 1
+
+    def test_the_renewal_refuses_to_follow(self):
+        import base64
+        import json as _json
+        import time as _time
+
+        def _b(d):
+            return base64.urlsafe_b64encode(_json.dumps(d).encode()).decode().rstrip("=")
+        cur = _b({"alg": "none"}) + "." + _b({"exp": int(_time.time()) + 86400,
+                                              "iss": "pixai", "sub": "s"}) + ".x"
+        s = _Kw(status=307)
+        assert core.refresh_jwt(s, current_jwt=cur) is None
+        assert core._refresh_last["reason"] == "http_307"
+        (_v, _u, kw), = s.calls
+        assert kw["allow_redirects"] is False
+
+    def test_reads_are_unchanged(self):
+        s = _Kw(body={"data": {"me": {"id": "1"}}})
+        core.PixAIClient(s).query("query { me { id } }")
+        core.PixAIClient(s).rest_get("/claim")
+        assert ["allow_redirects" in kw for _v, _u, kw in s.calls] == [False, False]
