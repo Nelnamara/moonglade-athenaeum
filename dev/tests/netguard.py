@@ -44,9 +44,13 @@ def is_loopback_host(host):
     if host in _LOOPBACK_NAMES or host.endswith(".localhost"):
         return True
     try:
-        return ipaddress.ip_address(host.split("%")[0]).is_loopback
+        addr = ipaddress.ip_address(host.split("%")[0])
     except ValueError:
         return False
+    # ::ffff:127.0.0.1 is 127.0.0.1 spelled for a dual-stack socket; Python before 3.13 does not
+    # call it loopback itself.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return (mapped or addr).is_loopback
 
 
 def callers(limit=6):

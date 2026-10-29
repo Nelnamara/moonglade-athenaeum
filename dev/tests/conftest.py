@@ -96,8 +96,11 @@ def _net_record(kind, target):
     if _NET_STATE["allowed"]:
         return False
     frames = _netguard.callers()
+    # Who was running when it happened: a background thread's attempt is charged to whichever
+    # phase reports next, and without this the test that gets the blame looks guilty.
+    running = os.environ.get("PYTEST_CURRENT_TEST", "(no test running)")
     with _NET_LOCK:
-        _NET_ATTEMPTS.append((kind, target, frames))
+        _NET_ATTEMPTS.append((kind, target, frames, running, _threading.current_thread().name))
     return True
 
 
@@ -109,6 +112,7 @@ def _net_child_setup(config):
     and a log file (one per pytest process, so each xdist worker reads only its own children)."""
     if _NET_STATE["dir"] is not None:
         return
+    _net_clear_stale()
     folder = Path(_tempfile.mkdtemp(prefix="mg-netguard-"))
     _netguard.child_site(folder / "site")
     _NET_STATE["dir"] = folder
@@ -116,6 +120,19 @@ def _net_child_setup(config):
     os.environ[_netguard.LOG_ENV] = str(_NET_STATE["log"])
     old = os.environ.get("PYTHONPATH")
     os.environ["PYTHONPATH"] = str(folder / "site") + (os.pathsep + old if old else "")
+
+
+def _net_clear_stale(older_than=6 * 3600):
+    """Remove the temp folders of earlier runs that were killed before pytest_unconfigure ran.
+    Only ones old enough that no live run can still be using them."""
+    import shutil
+    import time
+    try:
+        for old in Path(_tempfile.gettempdir()).glob("mg-netguard-*"):
+            if time.time() - old.stat().st_mtime > older_than:
+                shutil.rmtree(old, ignore_errors=True)
+    except OSError:
+        pass
 
 
 def _net_child_teardown():
@@ -144,19 +161,21 @@ def _net_take_children():
     for line in fresh.splitlines():
         kind, _, target = line.partition("\t")
         if kind:
-            out.append((kind, target, ["(a Python process the test started)"]))
+            out.append((kind, target, ["(a Python process the test started)"],
+                        os.environ.get("PYTEST_CURRENT_TEST", "(no test running)"),
+                        "child process"))
     return out
 
 
 def _net_message(attempts):
     seen, lines = set(), []
-    for kind, target, frames in attempts:
+    for kind, target, frames, running, thread in attempts:
         key = (kind, str(target), tuple(frames[-2:]))
         if key in seen:
             continue
         seen.add(key)
-        lines.append("  %s %s\n      asked by %s" % (kind, target,
-                                                      " <- ".join(reversed(frames[-4:])) or "?"))
+        lines.append("  %s %s\n      asked by %s\n      made while %s was running, in thread %s"
+                     % (kind, target, " <- ".join(reversed(frames[-4:])) or "?", running, thread))
     return ("the test opened a connection that leaves this machine (#98). Stub the call in "
             "the test's fixture; a test that is truly about the network is marked "
             "@pytest.mark.network.\n" + "\n".join(lines))
@@ -181,8 +200,12 @@ def pytest_runtest_makereport(item, call):
         taken, _NET_ATTEMPTS[:] = list(_NET_ATTEMPTS), []
     taken += _net_take_children()
     if taken and not _NET_STATE["allowed"]:
+        message = _net_message(taken)
+        if report.failed and report.longrepr:
+            # A real failure keeps its text: the network message goes after it, both visible.
+            message = "%s\n\n%s\n%s" % (report.longrepr, "-" * 60, message)
         report.outcome = "failed"
-        report.longrepr = _net_message(taken)
+        report.longrepr = message
 
 
 _NOT_FIRST_PARTY = frozenset({"tests", "node_modules", ".git", "__pycache__"})

@@ -243,8 +243,9 @@ class OfflinePixAI(FakePixAI):
     harness -- where an unstubbed page load would otherwise reach api.pixai.art with a made-up
     key (#98). The app's fail-soft paths already answer an unreachable PixAI (the header chip
     shows no credits, the stats show no coverage), so nothing a test asserts moves. Unlike
-    FakePixAI it never asks for a registration, and it does not raise the AssertionError a
-    forgotten one is -- the app would not catch that. Calls are still recorded."""
+    FakePixAI it never asks for a registration, and its verbs, `get` and `post` do not raise the
+    AssertionError a forgotten one is -- the app would not catch that. Calls are still recorded.
+    (`.session` is inherited and still raises it: nothing the harness serves reads it.)"""
 
     def _resolve(self, key, kind, call):
         from moonglade import backup as core

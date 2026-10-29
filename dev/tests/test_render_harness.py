@@ -467,29 +467,33 @@ def _is_confirmed_entry(body):
         return True
 
 
-@pytest.fixture(autouse=True)
-def _harness_stays_offline(monkeypatch):
-    """The gallery these tests serve is the real app, signed in with a made-up key, and a page
-    load or a Panel open reaches remote services on its own (#98). Each is put back to the
-    answer an OFFLINE machine already gives it, so nothing the tests assert changes and nothing
-    leaves the machine (dev/tests/conftest.py's network guard fails a test that tries):
+def _put_the_outside_world_offline(mp):
+    """Put every remote service the real app reaches from a page load or a Panel open back to the
+    answer an OFFLINE machine already gives it, on the MonkeyPatch `mp`, so nothing the tests
+    assert changes and nothing leaves the machine (#98; dev/tests/conftest.py's network guard
+    fails a test that tries):
 
       * /api/account and /api/stats (every page boot, for the header chip and the backed-up
         percent), and anything else that asks PixAI for the account -> a PixAI that is unreachable
-        (fake_pixai.OfflinePixAI), which the fail-soft paths already answer. Unstubbed they
-        reached api.pixai.art and, on the refusal, retried three times with backoff.
+        (fake_pixai.OfflinePixAI), which the fail-soft paths already answer. `core.USER_ID` is
+        pinned so `resolve_user_id` never fires. Unstubbed they reached api.pixai.art and, on the
+        refusal, retried with backoff.
       * /api/update/check (the Control Panel opening) -> fetch_releases raises, which
         check_for_update answers as `behind: false` with the reason attached. Unstubbed it
         reached api.github.com.
+      * /api/bonjour/status -> no LAN route (bonjour.lan_ip answers None).
       * /api/similar (the viewer's More-like-this) -> a sidecar that is not built. Unstubbed it
         made pixeltable build its CLIP index and ask huggingface.co for the model. The tests that
         are about Similar stand in their own module (_fake_similar_module) after this one.
-
-    Function-scoped on purpose: a module-scoped server fixture is set up before it, but these are
-    looked up by the routes at call time, so the server needs nothing from it."""
+      * the three direct HTTP roads that do not ride a session: PixAI's public config, the
+        public banner GET and the two DELETEs -> they raise PixAIError, as conftest's own
+        per-test stubs do."""
     from types import SimpleNamespace
 
+    from moonglade import bonjour as _bonjour
     from moonglade import gallery as _gallery
+    from moonglade import inbox as _inbox
+    from moonglade import recipes as _recipes
     from tests.fake_pixai import OfflinePixAI
 
     def _no_release_list(*a, **k):
@@ -498,10 +502,38 @@ def _harness_stays_offline(monkeypatch):
     def _no_index(*a, **k):
         raise RuntimeError("the similarity index is not built in tests (#98)")
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: OfflinePixAI())
-    monkeypatch.setattr(_gallery, "fetch_releases", _no_release_list)
-    stub_code_module(monkeypatch, "similar", SimpleNamespace(similar=_no_index, count=_no_index))
+    def _blocked(*a, **k):
+        raise core.PixAIError("PixAI is unreachable in tests (offline, #98)")
 
+    mp.setattr(core, "_make_session", lambda *a, **k: OfflinePixAI())
+    mp.setattr(core, "USER_ID", "0", raising=False)
+    mp.setattr(core, "_config_get", _blocked)
+    mp.setattr(_inbox, "_public_get", _blocked)
+    mp.setattr(_inbox, "_rest_delete", _blocked, raising=False)
+    mp.setattr(_recipes, "_rest_delete", _blocked, raising=False)
+    mp.setattr(_gallery, "fetch_releases", _no_release_list)
+    mp.setattr(_bonjour, "lan_ip", lambda: None)
+    stub_code_module(mp, "similar", SimpleNamespace(similar=_no_index, count=_no_index))
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _harness_servers_stay_offline():
+    """The offline answers above for the module's WHOLE life. The servers here are module-scoped
+    and Chromium can still have a request in flight into one when a test ends, in the gap
+    between one test's teardown (its function-scoped patches undone) and the next one's setup:
+    that request would run the real path, and `resolve_user_id`'s retries would then fail the
+    next three or four tests (#98 review, seen at -n 2 / -n 4)."""
+    with pytest.MonkeyPatch.context() as mp:
+        _put_the_outside_world_offline(mp)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _harness_stays_offline(monkeypatch):
+    """The same answers per test, so a test that stands in its own `_make_session`, `similar` or
+    `account_info` (patching after this) is put back to the offline answer, not the real one,
+    when it ends -- and so conftest's per-test stubs, which these replace, cannot undo them."""
+    _put_the_outside_world_offline(monkeypatch)
 
 @pytest.fixture(autouse=True)
 def no_confirmed_contest_entry(render_browser):

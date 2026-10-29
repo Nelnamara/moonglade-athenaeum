@@ -47,6 +47,12 @@ def test_loopback_is_never_refused():
     assert _drain() == []
 
 
+def test_an_ipv4_mapped_loopback_is_loopback_on_every_python():
+    # ::ffff:127.0.0.1 is 127.0.0.1 on a dual-stack socket; ipaddress calls it loopback only from 3.13
+    assert netguard.is_loopback_host("::ffff:127.0.0.1")
+    assert not netguard.is_loopback_host("::ffff:192.0.2.1")
+
+
 def test_a_remote_address_or_name_is_not_loopback():
     for host in (REMOTE_IP, "8.8.8.8", "2001:db8::1", "api.pixai.art", "example.com"):
         assert not netguard.is_loopback_host(host), host
@@ -61,7 +67,7 @@ def test_a_remote_connect_is_refused_and_recorded_with_who_asked():
     finally:
         s.close()
     taken = _drain()
-    assert [(k, t) for k, t, _ in taken] == [("connect", (REMOTE_IP, 443)),
+    assert [(k, t) for k, t, *_ in taken] == [("connect", (REMOTE_IP, 443)),
                                               ("connect_ex", (REMOTE_IP, 443))]
     assert "dev/tests/test_network_guard.py" in " ".join(taken[0][2]), taken[0][2]
 
@@ -69,12 +75,16 @@ def test_a_remote_connect_is_refused_and_recorded_with_who_asked():
 def test_a_remote_lookup_is_refused_and_recorded():
     with pytest.raises(socket.gaierror, match="#98"):
         socket.getaddrinfo("api.pixai.art", 443)
-    assert [(k, t) for k, t, _ in _drain()] == [("lookup", "api.pixai.art")]
+    assert [(k, t) for k, t, *_ in _drain()] == [("lookup", "api.pixai.art")]
 
 
 def test_the_failure_names_the_address_and_the_caller():
-    message = suite._net_message([("connect", (REMOTE_IP, 443), ["moonglade/x.py:1 f"])])
+    message = suite._net_message([("connect", (REMOTE_IP, 443), ["moonglade/x.py:1 f"],
+                                  "test_x.py::test_y (call)", "Thread-9")])
     assert REMOTE_IP in message and "moonglade/x.py:1 f" in message and "#98" in message
+    # ...and who was running, and on which thread, so a background thread's attempt does not
+    # blame the innocent test that happened to report next
+    assert "test_x.py::test_y (call)" in message and "Thread-9" in message
 
 
 _NESTED = textwrap.dedent('''
@@ -97,6 +107,14 @@ _NESTED = textwrap.dedent('''
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
 
 
+    def test_a_real_failure_keeps_its_text_beside_the_network_message():
+        try:
+            socket.getaddrinfo("api.pixai.art", 443)
+        except OSError:
+            pass
+        assert 1 == 2, "REAL-ASSERTION-MESSAGE"
+
+
     @pytest.mark.network
     def test_a_marked_test_is_left_alone():
         socket.getaddrinfo("%(ip)s", 443)          # numeric: no lookup is sent anywhere
@@ -113,8 +131,9 @@ _NESTED = textwrap.dedent('''
 
 def test_a_recorded_attempt_fails_the_test_that_made_it(tmp_path):
     """The whole path in a session of its own: this suite's conftest loaded as a plugin over four
-    small tests. Two are refused and reported FAILED (one swallowed the error as the app does,
-    one started a Python that looked a name up); the marked one and the loopback one pass."""
+    small tests. Three are refused and reported FAILED (one swallowed the error as the app does,
+    one started a Python that looked a name up, one also had a real assertion failure, whose text
+    must stay beside the network message); the marked one and the loopback one pass."""
     (tmp_path / "test_nested.py").write_text(_NESTED, encoding="utf-8")
     env = dict(os.environ)
     env.pop(netguard.LOG_ENV, None)
@@ -130,7 +149,10 @@ def test_a_recorded_attempt_fails_the_test_that_made_it(tmp_path):
     out = r.stdout.decode("utf-8", "replace")
     assert "FAILED test_nested.py::test_a_swallowed_remote_connect_still_fails" in out, out
     assert "FAILED test_nested.py::test_a_python_the_test_started_still_fails" in out, out
+    assert "FAILED test_nested.py::test_a_real_failure_keeps_its_text_beside_the_network_message" in out, out
+    assert "REAL-ASSERTION-MESSAGE" in out and "api.pixai.art" in out, out       # both, not one
+    assert "made while" in out and "test_a_python_the_test_started_still_fails" in out, out
     assert "PASSED test_nested.py::test_a_marked_test_is_left_alone" in out, out
     assert "PASSED test_nested.py::test_loopback_is_left_alone" in out, out
     assert REMOTE_IP in out and "api.pixai.art" in out, out        # the message names them
-    assert "2 failed, 2 passed" in out, out
+    assert "3 failed, 2 passed" in out, out
