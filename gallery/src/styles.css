@@ -440,6 +440,9 @@ button:disabled { cursor: default; }
 .p-kicker { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
   color: var(--lavender, var(--accent)); opacity: 0; display: flex; align-items: center; gap: 8px; }
 .p-kicker-series { font-family: ui-monospace, Menlo, monospace; color: var(--overlay0); letter-spacing: .04em; }
+/* beside the picture on a tablet the record column is narrow: "MODEL . v1" and the find-more
+   button keep their size and the model name is what gives (#72) */
+.p-kicker-series, .p-kicker .gd-mini { flex: none; white-space: nowrap; }
 /* The field is a quoted PROMPT EXCERPT (~40 chars, gen/headline.js); the 3-line clamp is a
    ceiling only, so a hand-typed title can never blow the layout out. */
 .p-title { margin: 0; font: italic 400 30px/1.2 var(--serif); letter-spacing: -.01em;

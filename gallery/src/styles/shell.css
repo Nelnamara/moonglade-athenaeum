@@ -234,7 +234,9 @@
    width, beside the separator bar and the grid it filters. The bar itself may wrap as well
    (librarybar.css), which is what still holds at the 521px phone line. Above 1180 the band is
    the hero as drawn, and a bar that ever runs short of room there wraps rather than sliding
-   under the buttons. */
+   under the buttons. The separator bar's right cluster (.mgx-sepright) wraps too: on a linked
+   account it is wider than an upright iPad (1175px with a pinned goal and a claim waiting),
+   and as one unbreakable row it ran the credits chip, the claim button and the ? off the edge. */
 @media (max-width: 1180px) {
   .mgx-bottom { flex-direction: column-reverse; align-items: stretch; gap: 10px; }
   .mgx-bnrright { flex-direction: row; flex-wrap: wrap; justify-content: flex-end;
@@ -296,7 +298,8 @@
   background: linear-gradient(180deg, rgba(18, 14, 42, .72) 0%, rgba(10, 8, 24, .86) 100%); }
 .mgx-sepleft { position: relative; display: flex; align-items: center; flex-wrap: wrap;
   gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
-.mgx-sepright { position: relative; display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; }
+.mgx-sepright { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end;
+  align-items: center; gap: 8px 12px; flex: 0 1 auto; max-width: 100%; margin-left: auto; }
 
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
