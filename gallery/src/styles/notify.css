@@ -270,7 +270,7 @@
 .at-copy.copied{color:var(--emerald);}
 
 /* ---- Toasts: small, corner-stacked, reusable ---- */
-#mg-toasts{position:fixed;right:16px;top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
+#mg-toasts{position:fixed;right:calc(16px + var(--mg-safe-r,0px));top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
 .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}
 .mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}
 .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}

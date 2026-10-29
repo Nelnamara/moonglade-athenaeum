@@ -7453,13 +7453,16 @@ def _q_json(route, payload, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None):
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None,
+            screen=None):
     """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
     collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
     unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
     monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
     opts = {"has_touch": True, "is_mobile": True} if touch else {}
     vp = viewport or PHONE
+    if screen:                            # the physical screen window.screen reports (default: the viewport)
+        opts["screen"] = {"width": screen["width"], "height": screen["height"]}
     ctx = render_browser.new_context(
         viewport={"width": vp["width"], "height": vp["height"]}, device_scale_factor=1,
         base_url=server.base_url, timezone_id="UTC", **opts)
@@ -8054,8 +8057,10 @@ def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
 # Session Q, Q4: the phone turned sideways (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 x 360"). The
 # same phone shell in both orientations -- a turn is CSS and one hook, never a remount -- with the tab
 # bar a 56 px left rail, 4 columns (3 under 700 px wide), the Lightbox picture fitting the height with
-# its actions in a right rail, and every sheet a side panel up to 380 px wide. Safe areas cannot be
-# simulated headlessly (env() resolves to 0), so those are held by the stylesheet test in loom/test.
+# its actions in a right rail, and every sheet a side panel up to 380 px wide. Safe areas resolve to 0
+# here unless a test sets them: Chromium's CDP Emulation.setSafeAreaInsetsOverride DOES work headless
+# (#73's audit; test_landscape_counts_the_side_safe_areas_once uses it), the other engines have no such
+# override. The stylesheet side of it is also held by the stylesheet test in loom/test.
 # Real-device behaviour (iOS Safari, Android, touch, notches) is NOT measured here.
 # ---------------------------------------------------------------------------
 
@@ -8082,11 +8087,29 @@ def _q_boxes(page, *sels):
         const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; })""", list(sels))
 
 
+def _q_lanes(page):
+    """The sideways gallery's stacked columns, left to right: each lane's left edge and its tiles' tops and
+    bottoms, top to bottom (#73)."""
+    return page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows > .glm-col')].map((c) => ({
+        left: Math.round(c.getBoundingClientRect().left),
+        tiles: [...c.querySelectorAll('.glm-tile')].map((t) => { const b = t.getBoundingClientRect();
+            return {t: b.top, b: b.bottom, mid: t.getAttribute('data-mid')}; })}))""")
+
+
+def _q_assert_lanes_stack(lanes):
+    """Within every lane each tile starts within 7 px of the one above it (the page's 6 px gap): no holes."""
+    for ln in lanes:
+        assert len(ln["tiles"]) >= 2, ln
+        for above, below in zip(ln["tiles"], ln["tiles"][1:]):
+            gap = below["t"] - above["b"]
+            assert -0.5 <= gap <= 7, "a stacked column has no holes (gap %.1f): %r" % (gap, ln)
+
+
 def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns(
         phone_q_server, render_browser, monkeypatch):
     """Q4. A phone turned sideways is 844 px wide -- past the 520 line that used to hand it to the desktop
     build. It stays the phone shell: the tab bar is a 56 px rail on the left (44 px icon tiles, no labels),
-    the hero folds to one bar, and the gallery shows 4 columns of aligned rows, 3 on a 640 px phone."""
+    the hero folds to one bar, and the gallery shows 4 stacked columns (each its own stack, no holes -- the owner's pick of 2026-10-28, #73), 3 on a 640 px phone."""
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
     try:
         _q_open(page)
@@ -8103,12 +8126,11 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
         assert page.evaluate("""() => [...document.querySelector('.glm-stage').children]
             .filter((c) => getComputedStyle(c).position === 'static' || getComputedStyle(c).position === 'relative')
             .map((c) => c.className.split(' ')[0])""") == ["glm-hero", "glm-body", "glm-nav"]
-        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 8)
-            .map((t) => Math.round(t.getBoundingClientRect().left))""")
-        assert len(set(lefts)) == 4 and lefts[:4] == sorted(lefts[:4]) and lefts[:4] == lefts[4:8], lefts
-        tops = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 4)
-            .map((t) => Math.round(t.getBoundingClientRect().top))""")
-        assert len(set(tops)) == 1, "the first row is aligned: %r" % tops
+        lanes = _q_lanes(page)
+        lefts = [ln["left"] for ln in lanes]
+        assert len(lanes) == 4 and len(set(lefts)) == 4 and lefts == sorted(lefts), lefts
+        assert len({round(ln["tiles"][0]["t"]) for ln in lanes}) == 1, "the first tile of every lane shares one top: %r" % lanes
+        _q_assert_lanes_stack(lanes)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "no sideways page scroll"
         # phase two: drop the landscape rules in-page and the rail is a bottom bar spanning the width again
         page.evaluate("""() => { for (const sh of [...document.styleSheets]) { try { for (let i = sh.cssRules.length - 1; i >= 0; i--) {
@@ -8120,9 +8142,10 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch, vp=LAND_SMALL)
     try:
         _q_open(page)
-        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 6)
-            .map((t) => Math.round(t.getBoundingClientRect().left))""")
-        assert len(set(lefts)) == 3, "3 columns under 700 px wide: %r" % lefts
+        lanes = _q_lanes(page)
+        lefts = [ln["left"] for ln in lanes]
+        assert len(lanes) == 3 and len(set(lefts)) == 3 and lefts == sorted(lefts), "3 columns under 700 px wide: %r" % lefts
+        _q_assert_lanes_stack(lanes)
     finally:
         ctx.close()
 
@@ -8395,6 +8418,149 @@ def test_landscape_feed_new_since_rule_and_saver_chip_are_all_there(
         chip, hero = _q_box(page, ".glm-saverchip"), _q_box(page, ".glm-hero")
         assert chip["t"] >= hero["t"] and chip["b"] <= hero["b"] and chip["r"] <= hero["r"], (chip, hero)
         assert page.locator(".glm-tile-tag").first.inner_text() in ("256 px", "▶ paused")
+    finally:
+        ctx.close()
+
+
+_Q_PICTURE_FIT_JS = """() => { const f = document.querySelector('.idm-frame'), i = f.querySelector('img');
+    const fb = f.getBoundingClientRect(), ib = i.getBoundingClientRect();
+    // (the frame wears a 1 px border each side, so a snug frame is the picture + 2)
+    // object-fit: contain -- the picture itself is the largest box of its own shape inside the img's box
+    const shown = Math.min(ib.width, ib.height * i.naturalWidth / i.naturalHeight);
+    return {frame: fb.width, img: ib.width, shown: shown}; }"""
+
+
+def test_landscape_counts_the_side_safe_areas_once(phone_q_server, render_browser, monkeypatch):
+    """#73 (the #75 lead). A phone turned sideways keeps the island's room clear on both sides; where the
+    browser has ALREADY kept that room itself (Chrome on iPhone: a window narrower than the screen by about
+    what the insets ask for) the page must not add it again. Chromium's CDP safe-area override stands in for
+    the phone. Context A is Safari's shape (the window is the whole 852 px screen, 59 + 59 reported): the
+    rail is 56 + 59 wide, the stage pads 59 on the right, nothing is marked kept. Context B is Chrome's (a
+    734 px window in the same screen, the same insets): the page marks the sides kept, the rail is its plain
+    56 px, the stage pads nothing, the gallery is the whole 678 px left of the rail, and a side panel pads
+    13 px, not 72. Second phase proves the marker is what does it: take it off in-page and B's page is
+    A's again. The record's picture (D4) is its own shape, centred, with no grey bars beside it -- and with
+    the old stretched frame injected the bars come back."""
+    if (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower() != "chromium":
+        pytest.skip("the safe-area override is Chromium's CDP (Emulation.setSafeAreaInsetsOverride)")
+    screen = {"width": 393, "height": 852}              # what iOS reports, upright numbers, whichever way up
+
+    def insets(page):
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Emulation.setSafeAreaInsetsOverride", {"insets": {
+            "top": 0, "left": 59, "bottom": 21, "right": 59}})
+
+    def read(page):
+        return page.evaluate("""() => { const s = document.querySelector('.glm-stage');
+            const cs = getComputedStyle(s); const g = document.querySelector('.glm-body').getBoundingClientRect();
+            return {kept: document.documentElement.hasAttribute('data-mg-sides-kept'),
+                    track: parseFloat(cs.gridTemplateColumns.split(' ')[0]), padR: cs.paddingRight, body: g.width,
+                    inner: innerWidth}; }""")
+
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              viewport={"width": 852, "height": 393}, screen=screen)
+    try:
+        insets(page)
+        _q_open(page)
+        a = read(page)
+        assert a["inner"] == 852 and a["kept"] is False, a
+        assert a["track"] == 115 and a["padR"] == "59px", "Safari's shape keeps both insets: %r" % a
+        # D4 here, where both insets are in force: a portrait and a landscape picture are each their own frame
+        _q_open_details(page, 0)
+        page.wait_for_function("() => { const i = document.querySelector('.idm-frame img'); return i && i.complete && i.naturalWidth > 0; }")
+        _settle(page)
+        fit = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert abs(fit["frame"] - fit["shown"]) <= 3, "the frame is the picture's own shape: %r" % fit
+        page.add_style_tag(content=".idm-body > .idm-frame { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important;"
+                                   " aspect-ratio: auto !important; margin: 0 14px 0 0 !important }"
+                                   " .idm-frame img, .idm-frame video { position: static !important; inset: auto !important;"
+                                   " width: 100% !important; height: auto !important; object-fit: contain !important;"
+                                   " max-height: calc(100dvh - 91px) !important }")
+        _settle(page)
+        old = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert old["frame"] - old["shown"] > 100, "with the old stretched frame the grey bars are back: %r" % old
+        _q_open(page)
+        _q_open_details(page, 1)
+        page.wait_for_function("() => { const i = document.querySelector('.idm-frame img'); return i && i.complete && i.naturalWidth > 0; }")
+        _settle(page)
+        fit = page.evaluate(_Q_PICTURE_FIT_JS)
+        assert abs(fit["frame"] - fit["shown"]) <= 3, "a wide picture fills its frame too: %r" % fit
+        frame, rec = _q_boxes(page, ".idm-frame", ".idm-rec")
+        assert rec["l"] - frame["r"] >= 12, "a wide picture keeps its gutter beside the panel: %r %r" % (frame, rec)
+    finally:
+        ctx.close()
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              viewport={"width": 734, "height": 393}, screen=screen)
+    try:
+        insets(page)
+        _q_open(page)
+        b = read(page)
+        assert b["inner"] == 734 and b["kept"] is True, b
+        assert not page.evaluate("document.documentElement.hasAttribute('data-mg-slide')"), \
+            "the turn itself does not slide, only a late correction does"
+        assert b["track"] == 56 and b["padR"] == "0px" and round(b["body"]) == 678, \
+            "the browser already kept the room: counted once, not twice: %r" % b
+        page.click(".glm-bar2 .glm-metal:has-text('Sort')")
+        page.wait_for_selector(".glm-sheet")
+        _settle(page)
+        assert page.evaluate("getComputedStyle(document.querySelector('.glm-sheet')).paddingRight") == "13px"
+        page.click(".glm-scrim", position={"x": 10, "y": 10})
+        page.wait_for_selector(".glm-sheet", state="detached")
+        # phase two: the marker is what does it
+        page.evaluate("document.documentElement.removeAttribute('data-mg-sides-kept')")
+        _settle(page)
+        again = read(page)
+        assert again["kept"] is False and again["track"] == 115 and again["padR"] == "59px", again
+        # a late re-read that finds the room kept while the phone is already sideways is a correction: it slides
+        page.evaluate("window.dispatchEvent(new Event('resize'))")
+        page.wait_for_function("() => document.documentElement.hasAttribute('data-mg-sides-kept')")
+        assert page.evaluate("document.documentElement.hasAttribute('data-mg-slide')"), "the correction slides"
+        page.wait_for_function("() => !document.documentElement.hasAttribute('data-mg-slide')", timeout=3000)
+    finally:
+        ctx.close()
+
+
+def test_landscape_record_fills_the_same_frame_with_a_data_saver_thumbnail(
+        phone_q_server, render_browser, monkeypatch):
+    """#73 review. Under Data saver the record shows the 256 px thumbnail behind 'Tap to load full size'.
+    Sideways the frame is the picture's own shape, as big as the room allows, and the thumbnail fills it
+    -- the same box the full picture will -- instead of sitting at its natural size (about a third of the
+    room) with the pill clipped. A long size label wraps inside the frame rather than being cut. Runs on
+    every engine (no CDP)."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.evaluate("localStorage.setItem('mg_phone_saver', 'always')")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".glm-tile")
+        _settle(page)
+        sizes = {}
+        for idx in (0, 1):                                 # a portrait and a wide picture
+            _q_tile(page, idx).click()
+            page.wait_for_selector(".lbm-root")
+            page.click(".lbm-chip:has-text('Details')")
+            page.wait_for_selector(".idm-remixrow")
+            page.wait_for_function("() => { const i = document.querySelector('.idm-frame img');"
+                                   " return i && i.complete && i.naturalWidth > 0; }")
+            page.wait_for_selector(".idm-frame .lbm-tapfull")
+            _settle(page)
+            got = page.evaluate("""() => { const f = document.querySelector('.idm-frame'), i = f.querySelector('img'),
+                b = f.querySelector('.lbm-tapfull'); b.textContent = '\\u25D0 Tap to load full size \\u00b7 12.3 MB (a long label)';
+                const fb = f.getBoundingClientRect(), ib = i.getBoundingClientRect(), bb = b.getBoundingClientRect();
+                return {frame: [fb.width, fb.height], img: [ib.width, ib.height], natural: i.naturalWidth,
+                        shown: Math.min(ib.width, ib.height * i.naturalWidth / i.naturalHeight),
+                        pillInside: bb.left >= fb.left - 0.5 && bb.right <= fb.right + 0.5 && bb.top >= fb.top - 0.5 && bb.bottom <= fb.bottom + 0.5}; }""")
+            assert got["natural"] <= 300, "it is the small saver thumbnail: %r" % got
+            assert abs(got["frame"][0] - got["shown"]) <= 3, "the thumbnail fills the frame, no bars: %r" % got
+            assert got["frame"][1] >= 280 or got["frame"][0] >= 280, "and the frame is as big as the room allows: %r" % got
+            assert got["pillInside"], "the pill is inside the frame, not clipped: %r" % got
+            sizes[idx] = got["frame"]
+            page.evaluate("document.querySelector('.idm-topbar button, .idm-topbar a').click()")
+            page.wait_for_selector(".idm-root", state="detached")
+            if page.locator(".lbm-root").count():
+                page.keyboard.press("Escape")
+                page.wait_for_selector(".lbm-root", state="detached")
+        assert sizes[0][1] > 250 and sizes[1][0] > 250, sizes
     finally:
         ctx.close()
 
