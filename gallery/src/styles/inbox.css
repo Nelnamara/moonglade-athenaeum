@@ -32,7 +32,13 @@
 @keyframes ibIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes ibOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px); } }
 .ib-panel { position: absolute; top: calc(100% + 10px); right: 0; z-index: 300; width: 380px;
-  max-width: calc(100vw - 28px); max-height: calc(100dvh - 96px); box-sizing: border-box;
+  max-width: calc(100vw - 28px); box-sizing: border-box;
+  /* It opens 10px under the header's cluster, so the room it has is the screen less the header
+     (App publishes the header's height as --mgx-chrome-h) less ~15px, never "about 86px from the
+     top" as this was sized: that cut the last rows off below the screen on a short window (#97).
+     81px + 15px is the old 96px for a host that has no such header (the Loom). The floor keeps a
+     panel on a screen shorter than its header usable. The list inside scrolls. */
+  max-height: max(180px, calc(100dvh - var(--mgx-chrome-h, 81px) - 15px));
   display: flex; flex-direction: column; gap: 7px; padding: 14px; border-radius: 16px;
   border: 1px solid var(--surface1); background: var(--base); box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
   font-family: var(--font-system, system-ui, sans-serif); color: var(--text); text-align: left;

@@ -441,8 +441,10 @@ button:disabled { cursor: default; }
   color: var(--lavender, var(--accent)); opacity: 0; display: flex; align-items: center; gap: 8px; }
 .p-kicker-series { font-family: ui-monospace, Menlo, monospace; color: var(--overlay0); letter-spacing: .04em; }
 /* beside the picture on a tablet the record column is narrow: "MODEL . v1" and the find-more
-   button keep their size and the model name is what gives (#72) */
+   button keep their size and the model name is what gives (#72). A name with no spaces in it
+   (the longest word is the text's least width) breaks anywhere instead of pushing the button out. */
 .p-kicker-series, .p-kicker .gd-mini { flex: none; white-space: nowrap; }
+.p-kicker { overflow-wrap: anywhere; }
 /* The field is a quoted PROMPT EXCERPT (~40 chars, gen/headline.js); the 3-line clamp is a
    ceiling only, so a hand-typed title can never blow the layout out. */
 .p-title { margin: 0; font: italic 400 30px/1.2 var(--serif); letter-spacing: -.01em;

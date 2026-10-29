@@ -300,6 +300,10 @@
   gap: 8px 20px; flex: 1 1 auto; min-width: 0; }
 .mgx-sepright { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end;
   align-items: center; gap: 8px 12px; flex: 0 1 auto; max-width: 100%; margin-left: auto; }
+/* the inbox door, the gift door and the credits chip, one item of that row so they wrap together
+   (SeparatorBar.jsx). 12px less .ib-wrap's -4px margin is the handoff's 8px: twins 8px apart and
+   the last door 8px before the credits chip. Static, so the inbox panel still anchors to the row. */
+.mgx-doors { display: flex; align-items: center; gap: 12px; flex: none; }
 
 /* ---- glyph-spine nav pills ---- */
 .mgx-navspine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
