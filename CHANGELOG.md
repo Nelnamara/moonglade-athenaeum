@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **A contest that requires particular recipes now says so, with a link to each one, instead of "0 required models" (#94).** PixAI added a "required recipes" rule beside required models and LoRAs (3 of the 150 newest contests on October 26); both contest pages read any rule that was not a LoRA rule as a model rule. The Models row now has a line for a recipe rule with links to the recipes on pixai.art, and a rule kind the app has not seen before is shown by its own name with no links rather than counted as models. The Contests board also now says so, under the list, when PixAI's board is longer than the 1,000 newest contests this app reads; until now it cut the oldest silently and only the log noted it. (2026-10-28)
+
 ## [3.20.4] - 2026-10-27 — Upright
 
 ### Fixed

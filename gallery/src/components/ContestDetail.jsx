@@ -3,6 +3,7 @@ import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { parseMarkdownLite } from "../lib/markdownLite.js";
+import { ruleLine } from "../lib/contestRules.js";
 import "../styles/myart-contests.css";
 
 /* THE DETAIL — Contest Surface v2.dc.html B1-B4, §8.1: an IN-MODAL expansion that
@@ -242,7 +243,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
         )}
 
         {/* ---- REQUIREMENTS. Every row answers a question you would otherwise have to
-             leave the app to ask. The MODELS row shows required model/LoRA IDS, not
+             leave the app to ask. The MODELS row shows required model, LoRA and recipe IDS, not
              names: nothing in this client resolves a model id to its title (
              /api/model-version answers version metadata, /api/model-search answers a
              query string -- neither is an id→name lookup), and inventing one would be a
@@ -268,21 +269,21 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
                   <><span className="mgct-ok">✓</span>no model or LoRA restrictions</>
                 ) : (
                   rules.map((r, i) => {
-                    const lora = r.type === "required_lora_ids";
-                    const ids = (lora ? r.lora_ids : r.model_ids) || [];
-                    const kind = lora ? "LoRA" : "model";
+                    const { kind, ids, href } = ruleLine(r);
                     return (
                       <span className="mgct-reqrule" key={i}>
                         <span className="mgct-reqnote">
                           {ids.length} required {kind}{ids.length === 1 ? "" : "s"}
                         </span>
-                        {ids.map((id) => (
+                        {ids.map((id) => (href(id) ? (
                           <a className="mgct-idlink" key={String(id)}
-                            href={"https://pixai.art/model/" + encodeURIComponent(String(id))}
+                            href={href(id)}
                             target="_blank" rel="noopener noreferrer">
                             {String(id)} <span className="a">↗</span>
                           </a>
-                        ))}
+                        ) : (
+                          <span className="mgct-idlink" key={String(id)}>{String(id)}</span>
+                        )))}
                       </span>
                     );
                   })

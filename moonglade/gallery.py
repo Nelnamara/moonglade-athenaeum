@@ -8049,10 +8049,19 @@ def contest_board(core, session, force=False):
         ent = _contests_cache.get("board")
         if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
             return ent["rows"]
-    rows = core.list_contests(session, active_only=False)
+    meta = {}
+    rows = core.list_contests(session, active_only=False, meta=meta)
     with _contests_cache_lock:
-        _contests_cache["board"] = {"at": time.time(), "rows": rows}
+        _contests_cache["board"] = {"at": time.time(), "rows": rows, "meta": meta}
     return rows
+
+
+def contest_board_meta():
+    """How the memoized board's walk ended (list_contests' `meta`: truncated, limit,
+    total_count ...), or {} when nothing is cached. A copy, so a caller cannot edit the memo."""
+    with _contests_cache_lock:
+        ent = _contests_cache.get("board")
+        return dict((ent or {}).get("meta") or {})
 
 # How long a completed sweep counts as recent enough to skip. The spec asked for this
 # and it never got built: opening the Contests overlay fired a full sweep EVERY time --
@@ -20471,9 +20480,17 @@ def create_app(out_dir: Path):
         # Both variants come off the ONE snapshot -- `active` is the server's own
         # runtimeStatus flag, the same thing list_contests(active_only=True) filters on.
         contests = rows if show_all else [c for c in rows if c.get("active")]
+        # Whether the board was longer than the ceiling the reader walks to (the screens say
+        # so under the list; until now only a log line did).
+        bm = contest_board_meta()
+        board = {"truncated": bool(bm.get("truncated"))}
+        if board["truncated"]:
+            board["limit"] = int(bm.get("limit") or 0)
+            board["total_count"] = int(bm.get("total_count") or 0)
         return jsonify({"contests": contests,
                         "official": sum(1 for c in contests if c["type"] == "official"),
-                        "community": sum(1 for c in contests if c["type"] != "official")})
+                        "community": sum(1 for c in contests if c["type"] != "official"),
+                        "board": board})
 
     @app.route("/api/contest/<slug>/artworks")
     @tier(LOGIN)

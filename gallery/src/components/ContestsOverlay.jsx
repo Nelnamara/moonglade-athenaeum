@@ -10,6 +10,7 @@ import ContestPicker from "./ContestPicker.jsx";
 import ContestConfirm from "./ContestConfirm.jsx";
 import ContestRecordWin from "./ContestRecordWin.jsx";
 import { defaultContestId } from "../lib/contestWinCore.js";
+import { ceilingNotice } from "../lib/contestRules.js";
 
 /* Contests overlay — ported from the Frontend Gallery DC's ovContests slab
    (lines ~601-645): one official contest, a grid of community ones. Real
@@ -262,6 +263,9 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                   <a className="mgct-discord" href="https://discord.gg/cRtTuq5Z4"
                     target="_blank" rel="noopener noreferrer">official PixAI Discord</a>.
                 </div>
+              )}
+              {ceilingNotice(d && d.board, fmt) && (
+                <div className="mgct-footer">{ceilingNotice(d && d.board, fmt)}</div>
               )}
             </>
           )}

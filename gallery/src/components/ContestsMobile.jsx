@@ -6,6 +6,7 @@ import ContestRecordWin from "./ContestRecordWin.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import useSheet from "../hooks/useSheet.js";
 import { bestWin, defaultContestId, rowStatus, tierLabel } from "../lib/contestWinCore.js";
+import { ceilingNotice } from "../lib/contestRules.js";
 import "../styles/myart-contests.css";
 import "../styles/overlays.css";
 import "../styles/contest-mobile.css";
@@ -242,6 +243,9 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
               <a href="https://discord.gg/cRtTuq5Z4" target="_blank" rel="noopener noreferrer">
                 official PixAI Discord</a>.
             </div>
+          )}
+          {ceilingNotice(d && d.board, fmt) && (
+            <div className="cmb-foot">{ceilingNotice(d && d.board, fmt)}</div>
           )}
         </>
       )}
