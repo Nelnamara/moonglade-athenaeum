@@ -234,3 +234,26 @@ class FakePixAI:
         the seam, with no retry argument anywhere in the assertion."""
         return len([c for c in self.calls
                     if c.verb == "mutate" and (key is None or c.op == key)])
+
+class OfflinePixAI(FakePixAI):
+    """A PixAI that cannot be reached: every verb raises the `PixAIError` the real client ends
+    in when the network is down, instantly (the real road retries with backoff first).
+
+    For a test that serves the real app but whose assertions are not about PixAI -- the render
+    harness -- where an unstubbed page load would otherwise reach api.pixai.art with a made-up
+    key (#98). The app's fail-soft paths already answer an unreachable PixAI (the header chip
+    shows no credits, the stats show no coverage), so nothing a test asserts moves. Unlike
+    FakePixAI it never asks for a registration, and it does not raise the AssertionError a
+    forgotten one is -- the app would not catch that. Calls are still recorded."""
+
+    def _resolve(self, key, kind, call):
+        from moonglade import backup as core
+        raise core.PixAIError("PixAI is unreachable in tests (offline): {} {!r}".format(kind, key))
+
+    def get(self, url, **kwargs):
+        import requests
+        raise requests.ConnectionError("offline in tests: GET {!r}".format(url))
+
+    def post(self, url, **kwargs):
+        import requests
+        raise requests.ConnectionError("offline in tests: POST {!r}".format(url))

@@ -468,6 +468,42 @@ def _is_confirmed_entry(body):
 
 
 @pytest.fixture(autouse=True)
+def _harness_stays_offline(monkeypatch):
+    """The gallery these tests serve is the real app, signed in with a made-up key, and a page
+    load or a Panel open reaches remote services on its own (#98). Each is put back to the
+    answer an OFFLINE machine already gives it, so nothing the tests assert changes and nothing
+    leaves the machine (dev/tests/conftest.py's network guard fails a test that tries):
+
+      * /api/account and /api/stats (every page boot, for the header chip and the backed-up
+        percent), and anything else that asks PixAI for the account -> a PixAI that is unreachable
+        (fake_pixai.OfflinePixAI), which the fail-soft paths already answer. Unstubbed they
+        reached api.pixai.art and, on the refusal, retried three times with backoff.
+      * /api/update/check (the Control Panel opening) -> fetch_releases raises, which
+        check_for_update answers as `behind: false` with the reason attached. Unstubbed it
+        reached api.github.com.
+      * /api/similar (the viewer's More-like-this) -> a sidecar that is not built. Unstubbed it
+        made pixeltable build its CLIP index and ask huggingface.co for the model. The tests that
+        are about Similar stand in their own module (_fake_similar_module) after this one.
+
+    Function-scoped on purpose: a module-scoped server fixture is set up before it, but these are
+    looked up by the routes at call time, so the server needs nothing from it."""
+    from types import SimpleNamespace
+
+    from moonglade import gallery as _gallery
+    from tests.fake_pixai import OfflinePixAI
+
+    def _no_release_list(*a, **k):
+        raise OSError("offline in tests (#98)")
+
+    def _no_index(*a, **k):
+        raise RuntimeError("the similarity index is not built in tests (#98)")
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: OfflinePixAI())
+    monkeypatch.setattr(_gallery, "fetch_releases", _no_release_list)
+    stub_code_module(monkeypatch, "similar", SimpleNamespace(similar=_no_index, count=_no_index))
+
+
+@pytest.fixture(autouse=True)
 def no_confirmed_contest_entry(render_browser):
     """MODULE-WIDE BACKSTOP: no test in this file may submit a CONFIRMED contest entry.
 

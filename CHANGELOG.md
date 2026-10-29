@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+### Fixed
+- **The test run no longer opens a connection that leaves the machine (#98).** The browser-driven render harness serves the real gallery with a made-up key, and each page boot asked api.pixai.art for the account (and, on the refusal, retried it three times), the Control Panel's update check asked api.github.com, the LAN-address lookup opened a UDP socket toward 8.8.8.8, a viewer's More-like-this made pixeltable ask huggingface.co for the CLIP model, and the setup-file test's failing `pip` asked pypi.org about a package that does not exist. The harness now stands an unreachable PixAI, an offline release list and an unbuilt similarity index in front of those, `lan_ip` answers "no LAN" in every test (its own test drives it against a stand-in socket), and the pip test runs with `PIP_NO_INDEX`. `dev/tests/conftest.py` carries a suite-wide guard (`dev/tests/netguard.py`) that refuses any non-loopback connect or lookup, in every thread (the harness's server included), in each xdist worker and in the Python processes a test starts, and fails the test that made one, naming the address and the code that asked; a test truly about the network marks itself `@pytest.mark.network` (none does).
+
 ## [3.20.4] - 2026-10-27 — Upright
 
 ### Fixed
