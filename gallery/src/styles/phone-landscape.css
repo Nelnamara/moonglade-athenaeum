@@ -86,7 +86,7 @@
     .glm-hero-stats > span:not(.glm-saverchip) { display: none; }
   }
 
-  /* ---- the gallery: 4 columns of tiles laid straight into a grid (page: 6 px gaps, 12 px in) ---- */
+  /* ---- the gallery: 4 stacked columns (page: 6 px gaps, 12 px in) ---- */
   .glm-grid.glm-grid-rows { gap: 6px; padding: 12px 12px 12px 12px; align-items: start; }
   .glm-grid-rows .glm-tile { border-radius: 7px; }
   /* The search bar stops being sticky: on a 390 px screen the hero and a pinned bar would hold a third of

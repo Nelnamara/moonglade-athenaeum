@@ -7935,11 +7935,29 @@ def _q_boxes(page, *sels):
         const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; })""", list(sels))
 
 
+def _q_lanes(page):
+    """The sideways gallery's stacked columns, left to right: each lane's left edge and its tiles' tops and
+    bottoms, top to bottom (#73)."""
+    return page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows > .glm-col')].map((c) => ({
+        left: Math.round(c.getBoundingClientRect().left),
+        tiles: [...c.querySelectorAll('.glm-tile')].map((t) => { const b = t.getBoundingClientRect();
+            return {t: b.top, b: b.bottom, mid: t.getAttribute('data-mid')}; })}))""")
+
+
+def _q_assert_lanes_stack(lanes):
+    """Within every lane each tile starts within 7 px of the one above it (the page's 6 px gap): no holes."""
+    for ln in lanes:
+        assert len(ln["tiles"]) >= 2, ln
+        for above, below in zip(ln["tiles"], ln["tiles"][1:]):
+            gap = below["t"] - above["b"]
+            assert -0.5 <= gap <= 7, "a stacked column has no holes (gap %.1f): %r" % (gap, ln)
+
+
 def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns(
         phone_q_server, render_browser, monkeypatch):
     """Q4. A phone turned sideways is 844 px wide -- past the 520 line that used to hand it to the desktop
     build. It stays the phone shell: the tab bar is a 56 px rail on the left (44 px icon tiles, no labels),
-    the hero folds to one bar, and the gallery shows 4 columns of aligned rows, 3 on a 640 px phone."""
+    the hero folds to one bar, and the gallery shows 4 stacked columns (each its own stack, no holes -- the owner's pick of 2026-10-28, #73), 3 on a 640 px phone."""
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
     try:
         _q_open(page)
@@ -7956,12 +7974,11 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
         assert page.evaluate("""() => [...document.querySelector('.glm-stage').children]
             .filter((c) => getComputedStyle(c).position === 'static' || getComputedStyle(c).position === 'relative')
             .map((c) => c.className.split(' ')[0])""") == ["glm-hero", "glm-body", "glm-nav"]
-        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 8)
-            .map((t) => Math.round(t.getBoundingClientRect().left))""")
-        assert len(set(lefts)) == 4 and lefts[:4] == sorted(lefts[:4]) and lefts[:4] == lefts[4:8], lefts
-        tops = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 4)
-            .map((t) => Math.round(t.getBoundingClientRect().top))""")
-        assert len(set(tops)) == 1, "the first row is aligned: %r" % tops
+        lanes = _q_lanes(page)
+        lefts = [ln["left"] for ln in lanes]
+        assert len(lanes) == 4 and len(set(lefts)) == 4 and lefts == sorted(lefts), lefts
+        assert len({round(ln["tiles"][0]["t"]) for ln in lanes}) == 1, "the first tile of every lane shares one top: %r" % lanes
+        _q_assert_lanes_stack(lanes)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "no sideways page scroll"
         # phase two: drop the landscape rules in-page and the rail is a bottom bar spanning the width again
         page.evaluate("""() => { for (const sh of [...document.styleSheets]) { try { for (let i = sh.cssRules.length - 1; i >= 0; i--) {
@@ -7973,9 +7990,10 @@ def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns
     ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch, vp=LAND_SMALL)
     try:
         _q_open(page)
-        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 6)
-            .map((t) => Math.round(t.getBoundingClientRect().left))""")
-        assert len(set(lefts)) == 3, "3 columns under 700 px wide: %r" % lefts
+        lanes = _q_lanes(page)
+        lefts = [ln["left"] for ln in lanes]
+        assert len(lanes) == 3 and len(set(lefts)) == 3 and lefts == sorted(lefts), "3 columns under 700 px wide: %r" % lefts
+        _q_assert_lanes_stack(lanes)
     finally:
         ctx.close()
 

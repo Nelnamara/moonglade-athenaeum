@@ -524,7 +524,7 @@ one), laid out for a wide, short screen:
   tinted. The banner at the top folds to a single bar (name, your counts, the **◐ Saver** chip when Data
   saver is on, credits and the icon buttons), and the search bar scrolls away with the list so the
   pictures get the height.
-- **The gallery shows 4 columns** (3 on a screen under 700 px wide), each row lined up. **Feed** stays one
+- **The gallery shows 4 columns** (3 on a screen under 700 px wide), each column stacked like the upright two. **Feed** stays one
   picture per row, but no picture is drawn taller than the screen. The **N new since** line, **↑ Newest**
   and pull to refresh work exactly as upright.
 - **In the viewer the picture fits the height** and the actions — Edit, To Video, Similar, Upscale, Enter

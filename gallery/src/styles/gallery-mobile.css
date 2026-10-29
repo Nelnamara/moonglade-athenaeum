@@ -267,6 +267,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-grid.loading { opacity: .6; }
 .glm-col { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .glm-col-off { margin-top: 22px; }
+.glm-grid-rows > .glm-col { gap: 6px; }   /* sideways (#73): the page's 6 px, columns stack like upright */
 .glm-tile { position: relative; margin: 0; border-radius: 8px; overflow: hidden; cursor: pointer;
   background: var(--surface0); touch-action: pan-y; -webkit-touch-callout: none; user-select: none; }
 .glm-tile.pressing { animation: glmPress .48s ease forwards; }
