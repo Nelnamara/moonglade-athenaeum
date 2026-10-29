@@ -35,7 +35,7 @@ QUICK START
   python -m moonglade --max 40           # small test first
 """
 
-__version__ = "3.20.4"
+__version__ = "3.20.5"
 
 import argparse
 import base64
