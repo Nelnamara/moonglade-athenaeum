@@ -6269,7 +6269,7 @@ body.mg-moment-up > #root {
 }
 #mg-toasts {
   position: fixed;
-  right: 16px;
+  right: calc(16px + var(--mg-safe-r,0px));
   top: 64px;
   z-index: 511;
   display: flex;

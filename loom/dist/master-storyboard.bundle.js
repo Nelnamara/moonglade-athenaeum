@@ -5992,6 +5992,120 @@ ${"=".repeat(48)}
     return { state: "error", note: "", msg: "", raw: d };
   }
 
+  // ../gallery/src/gen/editCore.js
+  var EDIT_PRICE_KEY_SKIP = PRICE_KEY_SKIP.concat(["instruction"]);
+  var EDIT_ASPECT_AUTO = "auto";
+  var EDIT_CAPS = {
+    "edit-v4": {
+      label: "PixAI Edit (v4.0)",
+      max_refs: 10,
+      resolutions: ["1K", "2K", "4K"],
+      qualities: [],
+      aspects: [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
+      def: { resolution: "1K", quality: "", aspect: EDIT_ASPECT_AUTO },
+      new_until: "2026-10-28"
+    },
+    "edit-pro": {
+      label: "Edit Pro",
+      max_refs: 4,
+      resolutions: ["1K", "2K"],
+      qualities: ["low", "medium", "high"],
+      aspects: ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
+      def: { resolution: "1K", quality: "medium", aspect: "3:5" }
+    },
+    /* PixAI Edit Pro V2.0 (#67, PROBE_2026-10-02_site): a new version of Edit Pro, its own
+       version record (2061589941358465024, extra.chatEditing) -- ten inputs, 1K/2K,
+       low/medium/high, eleven aspects (v1.0's minus 1:3 / 3:1), default 3:5. Labelled as PixAI
+       labels it, right after v1.0, with the "new" tag PixAI gives it for 30 days. v1.0 stays the
+       card's default. */
+    "edit-pro-v2": {
+      label: "Edit Pro (v2.0)",
+      max_refs: 10,
+      resolutions: ["1K", "2K"],
+      qualities: ["low", "medium", "high"],
+      aspects: ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "3:5", "5:3"],
+      def: { resolution: "1K", quality: "medium", aspect: "3:5" },
+      new_until: "2026-11-01"
+    },
+    "reference-pro": {
+      label: "Reference Pro",
+      max_refs: 10,
+      resolutions: ["2K", "4K"],
+      qualities: [],
+      aspects: [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
+      def: { resolution: "2K", quality: "", aspect: EDIT_ASPECT_AUTO }
+    }
+  };
+  var DEFAULT_EDIT_MODEL = "edit-pro";
+  var EDIT_ASPECT_LABELS = { [EDIT_ASPECT_AUTO]: "Auto" };
+  function fixPassNote(d) {
+    if (!(d && d.fix_pass)) return "";
+    let s = d.fix_pass + " pass";
+    const orig = Number(d.original_cost), cost = Number(d.cost);
+    if (d.cost != null && Number.isFinite(cost) && cost > 0 && Number.isFinite(orig) && orig > cost) {
+      s += " \xB7 " + Math.round((orig - cost) / orig * 100) + "% off " + Number(orig).toLocaleString();
+    }
+    return s;
+  }
+  function pictureRect(shownW, shownH, naturalW, naturalH) {
+    if (!(shownW > 0) || !(shownH > 0) || !(naturalW > 0) || !(naturalH > 0)) return null;
+    const sW = naturalW / shownW;
+    const drawnHByWidth = naturalH / sW;
+    if (drawnHByWidth <= shownH + 1) {
+      const top = (shownH - drawnHByWidth) / 2;
+      return { left: 0, top: top >= 1 ? top : 0, scale: sW };
+    }
+    const sH = naturalH / shownH;
+    const left = (shownW - naturalW / sH) / 2;
+    return { left: left >= 1 ? left : 0, top: 0, scale: sH };
+  }
+  function mapBoxes(boxes, rect, naturalW, naturalH) {
+    const s = rect.scale;
+    return boxes.map((b) => {
+      let x = (b.x - rect.left) * s, y = (b.y - rect.top) * s, w = b.w * s, h = b.h * s;
+      if (x < 0) {
+        w += x;
+        x = 0;
+      }
+      if (y < 0) {
+        h += y;
+        y = 0;
+      }
+      if (x + w > naturalW) w = naturalW - x;
+      if (y + h > naturalH) h = naturalH - y;
+      return {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(0, Math.round(w)),
+        height: Math.max(0, Math.round(h)),
+        tag: b.tag
+      };
+    }).filter((b) => b.width > 0 && b.height > 0);
+  }
+  var FIX_NO_BOX_ON_PICTURE = "No box is on the picture \u2014 draw over the face or hand itself.";
+  function boxesToOriginal(boxes, shown, natural) {
+    const r = pictureRect(shown && shown.width, shown && shown.height, natural && natural.width, natural && natural.height);
+    return r ? mapBoxes(boxes, r, natural.width, natural.height) : null;
+  }
+  function scaleBoxes(boxes, imgEl) {
+    if (!imgEl) return null;
+    return boxesToOriginal(
+      boxes,
+      { width: imgEl.clientWidth, height: imgEl.clientHeight },
+      { width: imgEl.naturalWidth, height: imgEl.naturalHeight }
+    );
+  }
+  var EDIT_DEFAULTS = {
+    model: DEFAULT_EDIT_MODEL,
+    source: "",
+    refs: [],
+    instruction: "",
+    preset: "",
+    resolution: EDIT_CAPS[DEFAULT_EDIT_MODEL].def.resolution,
+    quality: EDIT_CAPS[DEFAULT_EDIT_MODEL].def.quality,
+    aspect: EDIT_CAPS[DEFAULT_EDIT_MODEL].def.aspect
+  };
+
   // ../gallery/src/components/CostBadge.jsx
   function fmt3(n) {
     return Number(n).toLocaleString();
@@ -6075,6 +6189,7 @@ ${"=".repeat(48)}
     if (state2 === "paid" && d.profile && Number(d.profile_extra) > 0) {
       brk.push("profile " + d.profile + " +" + fmt3(d.profile_extra));
     }
+    if (state2 === "paid" && fixPassNote(d)) brk.push(fixPassNote(d));
     const adj = [brk.join(" \xB7 "), adj0].filter(Boolean).join(" \xB7 ");
     if (adj) tip = (tip ? tip + " " : "") + adj + ".";
     const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
@@ -13405,16 +13520,6 @@ ${"=".repeat(48)}
   };
   var FIX_MIN_PX = 6;
   var FIX_MAX_BOXES = 20;
-  var scaleFixBoxes = (boxes, imgEl) => {
-    const scale = imgEl && imgEl.clientWidth ? imgEl.naturalWidth / imgEl.clientWidth : 1;
-    return boxes.map((b) => ({
-      x: Math.round(b.x * scale),
-      y: Math.round(b.y * scale),
-      width: Math.round(b.w * scale),
-      height: Math.round(b.h * scale),
-      tag: b.tag
-    }));
-  };
   var uid = () => Math.random().toString(36).slice(2, 9);
   var fmt5 = (s) => {
     s = Math.max(0, Math.round(s || 0));
@@ -14992,6 +15097,11 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const fixCanvasRef = useRef2(null);
     const fixDragRef = useRef2(null);
     const [genFixPrice, setGenFixPrice] = useState2({});
+    const [fixImgTick, setFixImgTick] = useState2(0);
+    const onFixImgLoad = () => {
+      fixPaint();
+      setFixImgTick((n) => n + 1);
+    };
     useEffect2(() => {
       setFixBoxes([]);
     }, [active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId]);
@@ -15027,7 +15137,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     }, [fixPaint]);
     const fixRel = (e) => {
       const r = fixCanvasRef.current.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
+      return {
+        x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+        y: Math.min(Math.max(e.clientY - r.top, 0), r.height)
+      };
     };
     const fixDown = (e) => {
       if (e.button !== 0 || !(active && active.c.openFrame && active.c.openFrame.mediaId)) return;
@@ -15075,10 +15188,16 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         setGenFixPrice((s) => ({ ...s, [id]: null }));
         return;
       }
-      setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      const boxes = scaleBoxes(fixBoxes, fixImgRef.current);
+      if (boxes && !boxes.length) {
+        setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } }));
+        return;
+      }
+      setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true, offPicture: false } }));
+      if (!boxes) return;
       let live = true;
       const t = setTimeout(() => {
-        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
         });
       }, 250);
@@ -15086,7 +15205,13 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         live = false;
         clearTimeout(t);
       };
-    }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes]);
+    }, [tab, editSub, active && active.c.id, active && active.c.openFrame && active.c.openFrame.mediaId, fixBoxes, fixImgTick]);
+    const pickFixKind = (k) => {
+      if (k !== fixTag) {
+        setFixTag(k);
+        setFixBoxes([]);
+      }
+    };
     const AF = artFilters_default;
     const [fcOpen, setFcOpen] = useState2(false);
     const [fcActive, setFcActive] = useState2(null);
@@ -15984,8 +16109,9 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         const busyE = ge.phase === "submitting" || ge.phase === "running";
         const src = active.c.openFrame && active.c.openFrame.mediaId;
         const gf = genFixState[active.c.id] || {};
-        const busyF = gf.phase === "submitting" || gf.phase === "running";
+        const busyF = gf.phase === "pricing" || gf.phase === "submitting" || gf.phase === "running";
         const fixPriceEntry = genFixPrice[active.c.id];
+        const fixNote = fixPriceEntry && fixPriceEntry.pr ? fixPassNote(fixPriceEntry.pr) : "";
         tabBody = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { marginBottom: 9 } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "edit" ? " on" : ""), onClick: () => setEditSub("edit") }, "Edit"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "fixer" ? " on" : ""), onClick: () => setEditSub("fixer") }, "Fixer"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (editSub === "enhance" ? " on" : ""), onClick: () => setEditSub("enhance") }, "Enhance")), editSub === "edit" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("img", { className: "lv-editsrc", src: "/thumbs/" + src + ".jpg", alt: "source" }) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab prompt" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Edit instruction"), /* @__PURE__ */ React.createElement(
           "textarea",
           {
@@ -15994,7 +16120,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
             onChange: (ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))
           }
-        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
+        )), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: onFixImgLoad, draggable: false }), /* @__PURE__ */ React.createElement(
           "canvas",
           {
             ref: fixCanvasRef,
@@ -16003,12 +16129,15 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             onPointerUp: fixUp,
             onPointerLeave: fixUp
           }
-        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { flex: "1 1 auto" } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag !== "hand" ? " on" : ""), onClick: () => setFixTag("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag === "hand" ? " on" : ""), onClick: () => setFixTag("hand") }, "Hand")), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : ""))), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first.")), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixPriceEntry && fixPriceEntry.loading ? "checking\u2026" : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "\u2248 " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits \u2014 never card-covered" : !src ? "Pick a source image first." : !fixBoxes.length ? "Drag at least one box to see the cost." : "Couldn't verify the cost \u2014 a Fix always spends credits."), /* @__PURE__ */ React.createElement(
+        )) : /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No open-frame image yet \u2014 ", sel ? /* @__PURE__ */ React.createElement(React.Fragment, null, "route one from the ", /* @__PURE__ */ React.createElement("b", null, "Image"), " tab, or ") : null, "pick it into the open frame above.")), /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, src && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-fixhint" }, "Drag a box over the hand or face on the source."), /* @__PURE__ */ React.createElement("div", { className: "lv-slabrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-segtrack", style: { flex: "1 1 auto" } }, /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag !== "hand" ? " on" : ""), onClick: () => pickFixKind("face") }, "Face"), /* @__PURE__ */ React.createElement("span", { className: "lv-segbtn" + (fixTag === "hand" ? " on" : ""), onClick: () => pickFixKind("hand") }, "Hand")), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", disabled: !fixBoxes.length, onClick: () => setFixBoxes([]) }, "Clear", fixBoxes.length ? " " + fixBoxes.length : ""))), /* @__PURE__ */ React.createElement("div", { className: "lv-fixwarn" }, "A fix can't be card-covered \u2014 it always spends, and always asks first.")), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "4px 2px" } }, fixPriceEntry && fixPriceEntry.loading ? "checking\u2026" : fixPriceEntry && fixPriceEntry.pr && typeof fixPriceEntry.pr.cost === "number" ? "\u2248 " + Number(fixPriceEntry.pr.cost).toLocaleString() + " credits" + (fixNote ? " \xB7 " + fixNote : "") + " \u2014 never card-covered" : !src ? "Pick a source image first." : !fixBoxes.length ? "Drag at least one box to see the cost." : fixPriceEntry && fixPriceEntry.offPicture ? FIX_NO_BOX_ON_PICTURE : "Couldn't verify the cost \u2014 a Fix always spends credits."), /* @__PURE__ */ React.createElement(
           "button",
           {
             className: "lv-go",
-            disabled: busyF || !src || !fixBoxes.length,
-            onClick: () => genFix(active, scaleFixBoxes(fixBoxes, fixImgRef.current))
+            disabled: busyF || !src || !fixBoxes.length || !(scaleBoxes(fixBoxes, fixImgRef.current) || []).length,
+            onClick: () => {
+              const scaled = scaleBoxes(fixBoxes, fixImgRef.current);
+              if (scaled && scaled.length) genFix(active, scaled);
+            }
           },
           busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
         ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genFixState, setGenFixState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, routeTarget || active, "cast", active.c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement("div", { className: "lv-slab" }, /* @__PURE__ */ React.createElement("div", { className: "lv-slablab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { className: "lv-openfilters", onClick: openFilterCompare }, "\u25D0 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { padding: "0 2px" } }, "Gradient overlays, not AI \u2014 applied right in the browser: ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--text)" } }, "no credits, no request, works offline"), ".")));
@@ -17059,7 +17188,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
    .gd-fixwrap: an <img> in normal flow (sets the wrapper's real rendered height) with a
    same-sized <canvas> absolutely positioned on top, so canvas pixel coordinates and the
    image's own displayed pixels are the SAME coordinate space -- exactly what
-   scaleFixBoxes() needs to convert them to original-image pixels afterward. .lm-fixhint/
+   the box scaler (editCore's scaleBoxes, via phoneFixBoxes()) needs to convert them to original-image pixels afterward. .lm-fixhint/
    .lm-fixwarn colors/sizes are copied verbatim from the locked design's own real
    fixHintStyle/fixWarnStyle strings (Loom Mobile.dc.html's data-dc-script), not
    re-guessed. Face/Hand tag chips reuse .lm-modechips/.lm-modechip (the same chip visual
@@ -17887,9 +18016,11 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
       const p = priceState[id];
       if (!p) return noInputMsg;
       if (p.loading) return "checking\u2026";
+      if (p.offPicture) return FIX_NO_BOX_ON_PICTURE;
       const tally = p.pr ? tallyPrices([p.pr]) : null;
       const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
-      return (tally ? formatCostEstimate(tally) : "\u2014") + (adj ? " \xB7 Adjusted before sending: " + adj : "");
+      const fixNote = p.pr && typeof p.pr.cost === "number" ? fixPassNote(p.pr) : "";
+      return (tally ? formatCostEstimate(tally) : "\u2014") + (fixNote ? " \xB7 " + fixNote : "") + (adj ? " \xB7 Adjusted before sending: " + adj : "");
     };
     const priceTitle = (priceState, id) => {
       const p = priceState[id];
@@ -17904,14 +18035,31 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const fixCanvasRef = useRef2(null);
     const fixDragRef = useRef2(null);
     const [genFixPrice, setGenFixPrice] = useState2({});
+    const fixDrawnW = useRef2(0);
+    const [fixImgTick, setFixImgTick] = useState2(0);
     useEffect2(() => {
       setFixBoxes([]);
     }, [dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId]);
+    const phoneFixBoxes = () => {
+      const img = fixImgRef.current;
+      if (!img || fixDrawnW.current && img.clientWidth !== fixDrawnW.current) return null;
+      return scaleBoxes(fixBoxes, img);
+    };
+    const pickFixKind = (k) => {
+      if (k !== fixTag) {
+        setFixTag(k);
+        setFixBoxes([]);
+      }
+    };
     const fixPaint = useCallback2(() => {
       const cvs = fixCanvasRef.current, img = fixImgRef.current;
       if (!cvs || !img) return;
       const w = img.clientWidth, h = img.clientHeight;
       if (!w || !h) return;
+      if (fixBoxes.length && fixDrawnW.current && fixDrawnW.current !== w) {
+        fixDrawnW.current = 0;
+        setFixBoxes([]);
+      }
       if (cvs.width !== w || cvs.height !== h) {
         cvs.width = w;
         cvs.height = h;
@@ -17939,7 +18087,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     }, [fixPaint]);
     const fixRel = (e) => {
       const r = fixCanvasRef.current.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
+      return {
+        x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+        y: Math.min(Math.max(e.clientY - r.top, 0), r.height)
+      };
     };
     const fixDown = (e) => {
       if (e.button !== 0 || !(dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId)) return;
@@ -17978,6 +18129,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             });
           }
         } else {
+          fixDrawnW.current = fixImgRef.current && fixImgRef.current.clientWidth || 0;
           setFixBoxes((old) => old.concat([{ x: d.x, y: d.y, w: d.w, h: d.h, tag: fixTag }]));
         }
       }
@@ -17991,10 +18143,16 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         setGenFixPrice((s) => ({ ...s, [id]: null }));
         return;
       }
-      setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
+      const boxes = phoneFixBoxes();
+      if (boxes && !boxes.length) {
+        setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null, offPicture: true } }));
+        return;
+      }
+      setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true, offPicture: false } }));
+      if (!boxes) return;
       let live = true;
       const t = setTimeout(() => {
-        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
         });
       }, 250);
@@ -18002,7 +18160,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         live = false;
         clearTimeout(t);
       };
-    }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes]);
+    }, [genOpen, genTab, editSub, dfLive && dfLive.c.id, dfLive && dfLive.c.openFrame && dfLive.c.openFrame.mediaId, fixBoxes, fixImgTick]);
     const [fcOpen, setFcOpen] = useState2(false);
     const [fcActive, setFcActive] = useState2(null);
     const [fcStrength, setFcStrength] = useState2(1);
@@ -18830,7 +18988,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
         const busyE = ge.phase === "submitting" || ge.phase === "running";
         const src = c.openFrame && c.openFrame.mediaId;
         const gf = genFixState[c.id] || {};
-        const busyF = gf.phase === "submitting" || gf.phase === "running";
+        const busyF = gf.phase === "pricing" || gf.phase === "submitting" || gf.phase === "running";
         return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-tabsrow", style: { marginBottom: 10 } }, /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -18867,10 +19025,13 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           "img",
           {
             ref: fixImgRef,
-            src: "/thumbs/" + src + ".jpg",
+            src: "/full/" + encodeURIComponent(src),
             alt: "source",
             draggable: false,
-            onLoad: fixPaint
+            onLoad: () => {
+              fixPaint();
+              setFixImgTick((n) => n + 1);
+            }
           }
         ), /* @__PURE__ */ React.createElement(
           "canvas",
@@ -18888,7 +19049,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             key: t,
             className: "lm-modechip" + (fixTag === t ? " on" : ""),
             style: fixTag === t ? { borderColor: FIX_COLORS[t], color: FIX_COLORS[t] } : null,
-            onClick: () => setFixTag(t)
+            onClick: () => pickFixKind(t)
           },
           t === "face" ? "Face" : "Hand"
         ))), fixBoxes.length > 0 && /* @__PURE__ */ React.createElement(
@@ -18908,9 +19069,12 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
           {
             type: "button",
             className: "lm-genbtn",
-            disabled: busyF || !src || !fixBoxes.length,
+            disabled: busyF || !src || !fixBoxes.length || !(phoneFixBoxes() || []).length,
             title: !src ? "This shot has no open-frame image yet" : !fixBoxes.length ? "Drag at least one box" : "Submit the repair \u2014 always spends",
-            onClick: () => genFix(dfLive, scaleFixBoxes(fixBoxes, fixImgRef.current))
+            onClick: () => {
+              const scaled = phoneFixBoxes();
+              if (scaled && scaled.length) genFix(dfLive, scaled);
+            }
           },
           busyF ? gf.msg || "fixing\u2026" : "\u2726 Fix " + fixTag
         ), gf.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lm-gerr" }, gf.msg), gf.mid && /* @__PURE__ */ React.createElement("div", { className: "lm-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gf.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lm-route" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "open" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "open", c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "close" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "close", c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-routebtn" + (gf.routed === "cast" ? " on" : ""), onClick: () => routeGen(genFixState, setGenFixState, dfLive, "cast", c.id) }, "cast")), gf.routed && /* @__PURE__ */ React.createElement("div", { className: "lm-ok2" }, "\u2713 sent to ", gf.routed))), editSub === "enhance" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Art filters \xB7 free, no generation"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-openfiltersbtn", onClick: openFilterCompare }, "\u25C9 Open filters"), /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 8 } }, "Gradient overlays, not AI \u2014 applied right in the browser: no credits, no request, works offline.")));
@@ -21347,6 +21511,7 @@ Generate anyway?`)) return { go: false };
         "Reference \xD7" + refs.length + " \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
       );
     };
+    const fixInFlight = useRef2(/* @__PURE__ */ new Set());
     const genFix = async (entry, scaledBoxes) => {
       const c = entry.c;
       const src = c.openFrame && c.openFrame.mediaId;
@@ -21358,21 +21523,40 @@ Generate anyway?`)) return { go: false };
         setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } }));
         return;
       }
-      const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
-      const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
-      const quote = priced == null ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)." : "This will spend " + Number(priced).toLocaleString() + " credits \u2014 a Fix is never covered by a free card.";
-      if (!window.confirm(
-        "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
-      )) return;
-      runGen(
-        setGenFixState,
-        c.id,
-        "/api/fix",
-        { source: src, boxes: scaledBoxes },
-        null,
-        "",
-        "Fix \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
-      );
+      if (fixInFlight.current.has(c.id)) return;
+      fixInFlight.current.add(c.id);
+      const prior = genFixState[c.id];
+      const restore = () => setGenFixState((s) => {
+        const n = { ...s };
+        if (prior === void 0) delete n[c.id];
+        else n[c.id] = prior;
+        return n;
+      });
+      setGenFixState((s) => ({ ...s, [c.id]: { phase: "pricing", msg: "checking the price\u2026" } }));
+      try {
+        const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
+        const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
+        const quote = priced == null ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)." : "This will spend " + Number(priced).toLocaleString() + " credits \u2014 a Fix is never covered by a free card.";
+        if (!window.confirm(
+          "Repair " + scaledBoxes.length + " " + scaledBoxes[0].tag + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
+        )) {
+          restore();
+          return;
+        }
+        await runGen(
+          setGenFixState,
+          c.id,
+          "/api/fix",
+          { source: src, boxes: scaledBoxes },
+          null,
+          "",
+          "Fix \xB7 " + entry.code + " \xB7 " + (c.title || "untitled")
+        );
+      } catch (e) {
+        restore();
+      } finally {
+        fixInFlight.current.delete(c.id);
+      }
     };
     const batchGenerate = async (entries) => {
       const board = projectRef.current ? flat(projectRef.current) : entries || [];
